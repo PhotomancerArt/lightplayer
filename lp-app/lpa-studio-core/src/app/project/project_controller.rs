@@ -238,7 +238,10 @@ impl ProjectController {
         let mut edits: Vec<UiPendingEdit> = join
             .entries()
             .into_iter()
-            .map(|entry| self.ui_pending_edit(&entry))
+            .map(|entry| {
+                let old_value = join.base_display(entry.address).map(str::to_string);
+                self.ui_pending_edit(&entry, old_value)
+            })
             .collect();
         edits.extend(self.stale_pending_edits());
         edits.extend(
@@ -278,8 +281,17 @@ impl ProjectController {
         };
         UiPendingEdit {
             node_label,
+            // Asset artifacts are not def artifacts, so they reverse-map to
+            // no node; the row lists at the project level (no node popover
+            // claims it). When a mapped node exists, use its path.
+            node_path: entry
+                .node
+                .map(ToString::to_string)
+                .unwrap_or_else(|| entry.artifact.file_path().as_str().to_string()),
             slot_path_display: entry.artifact.file_path().as_str().to_string(),
             kind: UiPendingEditKind::AssetBody { detail },
+            // Whole-file replace: no meaningful saved-value display.
+            old_value: None,
             phase,
             revert: Some(UiAction::from_op(
                 ControllerId::new(Self::NODE_ID),
@@ -292,8 +304,14 @@ impl ProjectController {
 
     /// Project one join entry into its change-list DTO. The phase derives
     /// from the entry's own [`DirtySummary`] classification — the same value
-    /// the counts sum — so list and counts cannot drift.
-    fn ui_pending_edit(&self, entry: &SlotEditEntry<'_>) -> UiPendingEdit {
+    /// the counts sum — so list and counts cannot drift. `old_value` is the
+    /// join's base display for the entry's address
+    /// ([`SlotEditJoin::base_display`]), threaded by the caller.
+    fn ui_pending_edit(
+        &self,
+        entry: &SlotEditEntry<'_>,
+        old_value: Option<String>,
+    ) -> UiPendingEdit {
         let node_label = self
             .node(&entry.address.node)
             .map(|node| node.label().to_string())
@@ -328,8 +346,10 @@ impl ProjectController {
         };
         UiPendingEdit {
             node_label,
+            node_path: entry.address.node.to_string(),
             slot_path_display: slot_path_display(entry.address),
             kind,
+            old_value,
             phase,
             revert: Some(UiAction::from_op(
                 ControllerId::new(Self::NODE_ID),
@@ -354,8 +374,10 @@ impl ProjectController {
             .filter(|(artifact, _, _)| !nodes_by_artifact.contains_key(artifact))
             .map(|(artifact, path, op)| UiPendingEdit {
                 node_label: artifact.file_path().as_str().to_string(),
+                node_path: artifact.file_path().as_str().to_string(),
                 slot_path_display: path.to_string(),
                 kind: acked_edit_kind(op),
+                old_value: sync.base_value_at(artifact, path).map(str::to_string),
                 phase: UiPendingEditPhase::Persisted,
                 revert: None,
             })
@@ -376,6 +398,7 @@ impl ProjectController {
         let nodes_by_artifact = self.nodes_by_def_artifact();
         let mut overlay = BTreeMap::new();
         let mut assets: BTreeMap<AssetEditKey, AssetEditState<'_>> = BTreeMap::new();
+        let mut base_values = BTreeMap::new();
         if let Some(sync) = &self.sync {
             for (artifact, path, op) in sync.overlay_slot_edits() {
                 // Unmapped (stale) artifacts have no slot address; they stay
@@ -384,10 +407,15 @@ impl ProjectController {
                     continue;
                 };
                 for node in nodes {
-                    overlay.insert(
-                        ProjectSlotAddress::new(node.clone(), ProjectSlotRoot::def(), path.clone()),
-                        op.clone(),
-                    );
+                    let address =
+                        ProjectSlotAddress::new(node.clone(), ProjectSlotRoot::def(), path.clone());
+                    // The mirror's base-value map rides the same reverse
+                    // mapping, so every annotated overlay entry carries its
+                    // saved value into the join (old-value display).
+                    if let Some(display) = sync.base_value_at(artifact, path) {
+                        base_values.insert(address.clone(), display.to_string());
+                    }
+                    overlay.insert(address, op.clone());
                 }
             }
             for (artifact, body) in sync.overlay_asset_edits() {
@@ -407,7 +435,9 @@ impl ProjectController {
             .chain(overlay.keys())
             .map(|address| (address.clone(), self.resolve_edit_persistence(address)))
             .collect();
-        SlotEditJoin::new(&self.edit_buffer, overlay, persistence).with_assets(assets)
+        SlotEditJoin::new(&self.edit_buffer, overlay, persistence)
+            .with_assets(assets)
+            .with_base_values(base_values)
     }
 
     /// Classify the persistence governing an edit entry's path through the
@@ -529,10 +559,11 @@ impl ProjectController {
                 .collect(),
             ProjectState::ConnectingRunningProject { .. }
             | ProjectState::LoadingDemoProject { .. } => Vec::new(),
-            ProjectState::Ready { .. } => vec![
-                self.action(ProjectOp::RefreshProject),
-                self.action(ProjectOp::DisconnectProject),
-            ],
+            // Sidebar tidy (P6, approved item 6): a ready project offers no
+            // pane-level buttons — `RefreshProject` / `DisconnectProject`
+            // remain as ops (sync recovery, internal refreshes) without a
+            // dedicated strip. Recovery states above keep their actions.
+            ProjectState::Ready { .. } => Vec::new(),
         }
     }
 
@@ -548,9 +579,12 @@ impl ProjectController {
 
     /// Project the synced controller tree into the project editor shell DTO.
     ///
-    /// The project-level [`DirtySummary`] is the merge of the root node
-    /// summaries the DTO walks just computed (node panes and tree items) —
-    /// no dedicated aggregation pass.
+    /// Flat-root workspace (P6): a tree root never renders as a workspace
+    /// card — its child panes are the top-level `nodes` entries, and the
+    /// root's own config slot rows ride `root_slots` into the project pane's
+    /// detail popup ("Project settings"). The project-level [`DirtySummary`]
+    /// therefore walks the controllers (root included) rather than summing
+    /// the card headers, so root-slot edits (a project rename) still count.
     pub fn editor_view(
         &self,
         project_id: &str,
@@ -558,15 +592,31 @@ impl ProjectController {
         inventory: &ProjectInventorySummary,
     ) -> ProjectEditorView {
         let summary = self.sync_summary().unwrap_or_default();
-        let nodes = self.ui_nodes();
-        // Node headers carry every node-mapped edit (slots and assets); asset
-        // edits whose artifact maps to no node are added on top so they still
-        // count toward Save (see `dirty_summary`).
-        let dirty = nodes
+        let product_preview =
+            |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
+        let asset_editor =
+            |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
+        let edits = self.slot_edit_join();
+        let nodes = self
+            .root_nodes
             .iter()
-            .map(|node| node.header.dirty)
+            .flat_map(NodeController::children)
+            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits, &asset_editor))
+            .collect::<Vec<_>>();
+        // Node dirty covers slot + node-mapped asset edits across the subtree;
+        // asset edits whose artifact maps to no node (a shader's `.glsl`) are
+        // added on top so they still count toward Save (see `dirty_summary`).
+        let dirty = self
+            .root_nodes
+            .iter()
+            .map(|node| node.dirty_summary(&edits))
             .sum::<DirtySummary>()
-            + self.slot_edit_join().unmapped_asset_dirty_summary();
+            + edits.unmapped_asset_dirty_summary();
+        let root_slots = self
+            .root_nodes
+            .first()
+            .map(|root| root.ui_config_slots(&edits))
+            .unwrap_or_default();
         ProjectEditorView::new(
             project_id,
             handle_id,
@@ -576,6 +626,7 @@ impl ProjectController {
             nodes,
         )
         .with_project_name(self.project_name(project_id))
+        .with_root_slots(root_slots)
         .with_dirty(dirty)
         .with_pending_edits(self.pending_edits())
         .with_header_actions(project_header_actions(&dirty))
@@ -895,12 +946,20 @@ impl ProjectController {
 
     fn node_tree_view(&self) -> ProjectNodeTreeView {
         let edits = self.slot_edit_join();
+        // Flat-root: the project root is the project pane, not a tree row —
+        // its children are the tree's top-level items, matching the workspace
+        // (which renders `root_nodes.flat_map(children)` as the top panes).
         ProjectNodeTreeView::new(
             self.root_nodes
                 .iter()
+                .flat_map(NodeController::children)
                 .map(|node| self.node_tree_item(node, &edits))
                 .collect(),
-            self.root_nodes.iter().map(count_nodes).sum(),
+            self.root_nodes
+                .iter()
+                .flat_map(NodeController::children)
+                .map(count_nodes)
+                .sum(),
         )
     }
 
@@ -1103,7 +1162,7 @@ impl ProjectController {
         }
         let read = server.project_overlay_read(handle_id).await?;
         self.sync_mut()?
-            .apply_overlay_read(read.overlay, read.revision);
+            .apply_overlay_read(read.overlay, read.base_values, read.revision);
         Ok(read.logs)
     }
 
@@ -1250,7 +1309,7 @@ impl ProjectController {
         let read = server.project_overlay_read(handle_id).await?;
         logs.extend(read.logs);
         self.sync_mut()?
-            .apply_overlay_read(read.overlay, read.revision);
+            .apply_overlay_read(read.overlay, read.base_values, read.revision);
         // The commit rewrote persisted artifacts, so every cached base body
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
@@ -1536,7 +1595,7 @@ impl ProjectController {
                             // value, so the entry keeps shadowing until the
                             // next project read is applied
                             // (`apply_project_view` releases it).
-                            MutationEffect::NormalizedToRemoval { changed: true } => {
+                            MutationEffect::NormalizedToRemoval { changed: true, .. } => {
                                 if let Some(edit) = self.edit_buffer.get_mut(address) {
                                     edit.phase = PendingEditPhase::AwaitingRefresh;
                                 }
@@ -2298,23 +2357,15 @@ mod tests {
     }
 
     #[test]
-    fn ready_project_offers_refresh_and_disconnect_actions() {
+    fn ready_project_offers_no_pane_actions() {
+        // Sidebar tidy (P6): the ready project pane carries no
+        // Refresh/Disconnect buttons — the ops remain dispatchable, the
+        // strip is gone. Recovery states keep their actions (see the
+        // NotLoaded / Failed / SelectingLoadedProject tests).
         let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
 
-        let actions = project.actions(true);
-
-        assert_eq!(actions.len(), 2);
-        assert_eq!(
-            actions[0].op_as::<ProjectOp>(),
-            Some(&ProjectOp::RefreshProject)
-        );
-        assert_eq!(actions[0].meta().priority, ActionPriority::Secondary);
-        assert_eq!(
-            actions[1].op_as::<ProjectOp>(),
-            Some(&ProjectOp::DisconnectProject)
-        );
-        assert_eq!(actions[1].meta().priority, ActionPriority::Tertiary);
+        assert!(project.actions(true).is_empty());
     }
 
     #[test]
@@ -2745,13 +2796,16 @@ mod tests {
         // never the literal project id or the word "project".
         assert_eq!(view.project_name, "Demo");
         assert_eq!(view.handle_id, 7);
-        assert_eq!(view.tree.total_count, 3);
-        assert_eq!(view.tree.roots[0].label, "Demo");
-        assert_eq!(view.tree.roots[0].children[1].label, "Orbit");
-        assert_eq!(view.nodes.len(), 1);
-        assert_eq!(view.nodes[0].header.title, "Demo");
+        // Flat-root: the tree omits the project root too — its children are
+        // the tree's top-level items, matching the workspace cards.
+        assert_eq!(view.tree.total_count, 2);
+        assert_eq!(view.tree.roots[0].label, "Clock");
+        assert_eq!(view.tree.roots[1].label, "Orbit");
+        assert_eq!(view.nodes.len(), 2);
+        assert_eq!(view.nodes[0].header.title, "Clock");
+        assert_eq!(view.nodes[1].header.title, "Orbit");
 
-        let target = ProjectEditorTarget::parse(&view.tree.roots[0].children[1].action.node_id())
+        let target = ProjectEditorTarget::parse(&view.tree.roots[1].action.node_id())
             .expect("tree action should be typed");
         assert_eq!(
             target,
@@ -3669,6 +3723,23 @@ mod tests {
         )
     }
 
+    fn overlay_read_response_with_bases(
+        id: u64,
+        overlay: ProjectOverlay,
+        revision: i64,
+        base_values: Vec<(ArtifactLocation, SlotPath, String)>,
+    ) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::ReadOverlay {
+                    response: WireOverlayReadResponse::new(overlay, Revision::new(revision))
+                        .with_base_values(base_values),
+                },
+            },
+        )
+    }
+
     fn error_response(id: u64, error: &str) -> WireServerMessage {
         WireServerMessage::new(
             id,
@@ -3808,7 +3879,7 @@ mod tests {
                         edit: SlotEdit::assign_value(overlay_slot_path(), LpValue::F32(0.5)),
                     },
                 },
-                lpc_model::MutationEffect::OverlayChanged { changed: true },
+                lpc_model::MutationEffect::overlay_changed(true),
             )],
             Revision::new(5),
         );
@@ -3825,6 +3896,32 @@ mod tests {
         assert_eq!(
             sync.overlay_edit_at(&overlay_artifact(), &overlay_slot_path()),
             Some(&SlotEditOp::AssignValue(LpValue::F32(0.5)))
+        );
+    }
+
+    #[test]
+    fn reconnect_overlay_read_restores_base_values() {
+        // A fresh overlay read (reconnect / foreign-edit fetch) carries the
+        // base-value list beside the overlay; applying it restores the "old
+        // value" map without any per-edit acks.
+        let (mut project, mut client, sent) = ready_project_with_scripted_client(vec![
+            runtime_read_response(1, 10, 5),
+            overlay_read_response_with_bases(
+                2,
+                overlay_with_rate_edit(),
+                5,
+                vec![(overlay_artifact(), overlay_slot_path(), "1.0".to_string())],
+            ),
+        ]);
+
+        block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert_eq!(sent_kinds(&sent), vec!["project_read", "overlay_read"]);
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.base_value_at(&overlay_artifact(), &overlay_slot_path()),
+            Some("1.0"),
+            "the fetched overlay restores its base displays"
         );
     }
 
@@ -3956,7 +4053,7 @@ mod tests {
     fn accepted(id: u64) -> MutationCmdResult {
         MutationCmdResult::accepted(
             MutationCmdId::new(id),
-            MutationEffect::OverlayChanged { changed: true },
+            MutationEffect::overlay_changed(true),
         )
     }
 
@@ -3972,6 +4069,74 @@ mod tests {
             panic!("expected value body");
         };
         &value.display
+    }
+
+    #[test]
+    fn own_annotated_edit_installs_base_value_with_no_fetch() {
+        // The client's own edit: the mutation ack's base-display annotation
+        // lands in the mirror's parallel map directly — no overlay read is
+        // ever issued for it.
+        let (mut project, mut client, sent) =
+            editable_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::accepted(
+                    MutationCmdId::new(1),
+                    MutationEffect::overlay_changed(true).with_base_display(Some("0.75".into())),
+                )],
+                3,
+            )]);
+
+        block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::SetValue {
+                address: brightness_address(),
+                value: LpValue::F32(0.9),
+            },
+        ))
+        .unwrap();
+
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.base_value_at(&edit_artifact(), &SlotPath::parse("brightness").unwrap()),
+            Some("0.75"),
+            "own edit's old value is available from the ack alone"
+        );
+        assert!(
+            !sent_kinds(&sent).contains(&"overlay_read"),
+            "no overlay fetch accompanies the client's own edit"
+        );
+
+        // The annotation threads through the join into both display DTOs:
+        // the change list's old value and the slot row's own old value.
+        let pending = project.pending_edits();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].old_value.as_deref(), Some("0.75"));
+        let nodes = project.ui_nodes();
+        let brightness = config_slot(&nodes, "Brightness");
+        assert_eq!(brightness.old_value.as_deref(), Some("0.75"));
+    }
+
+    #[test]
+    fn unannotated_edits_degrade_to_no_old_value() {
+        // An ack without a base display (base absent at the path) leaves the
+        // change list and the slot row without an old value.
+        let (mut project, mut client, _sent) =
+            editable_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 3)]);
+
+        block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::SetValue {
+                address: brightness_address(),
+                value: LpValue::F32(0.9),
+            },
+        ))
+        .unwrap();
+
+        let pending = project.pending_edits();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].old_value, None);
+        let nodes = project.ui_nodes();
+        assert_eq!(config_slot(&nodes, "Brightness").old_value, None);
     }
 
     #[test]
@@ -4049,7 +4214,7 @@ mod tests {
                 1,
                 vec![MutationCmdResult::accepted(
                     MutationCmdId::new(1),
-                    MutationEffect::NormalizedToRemoval { changed: true },
+                    MutationEffect::normalized_to_removal(true),
                 )],
                 4,
             )]);
@@ -4123,7 +4288,7 @@ mod tests {
                 1,
                 vec![MutationCmdResult::accepted(
                     MutationCmdId::new(1),
-                    MutationEffect::NormalizedToRemoval { changed: false },
+                    MutationEffect::normalized_to_removal(false),
                 )],
                 3,
             )]);
@@ -4327,7 +4492,7 @@ mod tests {
                         ),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )],
             Revision::new(3),
         );
@@ -4533,7 +4698,7 @@ mod tests {
                         edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )],
             Revision::new(3),
         );
@@ -4629,7 +4794,7 @@ mod tests {
                         edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )],
             Revision::new(3),
         );
@@ -4661,20 +4826,17 @@ mod tests {
                     MutationCmdId::new(1),
                     MutationEffect::Materialized {
                         edits: vec![
-                            lpc_model::StoredSlotEdit::Put {
-                                edit: SlotEdit::ensure_present(
-                                    SlotPath::parse("entries[c]").unwrap(),
-                                ),
-                            },
-                            lpc_model::StoredSlotEdit::Put {
-                                edit: SlotEdit::assign_value(
-                                    SlotPath::parse("entries[c]").unwrap(),
-                                    LpValue::F32(0.25),
-                                ),
-                            },
-                            lpc_model::StoredSlotEdit::Put {
-                                edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
-                            },
+                            lpc_model::StoredSlotEdit::put(SlotEdit::ensure_present(
+                                SlotPath::parse("entries[c]").unwrap(),
+                            )),
+                            lpc_model::StoredSlotEdit::put(SlotEdit::assign_value(
+                                SlotPath::parse("entries[c]").unwrap(),
+                                LpValue::F32(0.25),
+                            )),
+                            lpc_model::StoredSlotEdit::put_with_base_display(
+                                SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
+                                Some("0.25".to_string()),
+                            ),
                         ],
                         changed: true,
                     },
@@ -4831,7 +4993,7 @@ mod tests {
                         edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )],
             Revision::new(3),
         );
@@ -4870,9 +5032,22 @@ mod tests {
             "the rowless removal counts exactly once"
         );
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
-        assert_eq!(editor.dirty, expected);
-        assert_eq!(editor.nodes[0].header.dirty, expected);
-        assert_eq!(editor.tree.roots[0].dirty, expected);
+        assert_eq!(
+            editor.dirty, expected,
+            "root-own edits count without a card"
+        );
+        // Flat-root workspace: the childless root renders no card; its rows
+        // (map dirty included) ride `root_slots` into the project popup.
+        assert!(editor.nodes.is_empty());
+        let entries = editor
+            .root_slots
+            .iter()
+            .find(|slot| slot.label == "Entries")
+            .expect("root settings carry the map row");
+        assert_eq!(entries.state.dirty, UiNodeDirtyState::Dirty);
+        // Flat-root: a childless root has no tree rows; its own dirt shows on
+        // the project pane (editor.dirty + root_slots above), not the tree.
+        assert!(editor.tree.roots.is_empty());
     }
 
     #[test]
@@ -4890,7 +5065,7 @@ mod tests {
                         ),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )],
             Revision::new(3),
         );
@@ -4948,7 +5123,7 @@ mod tests {
                 1,
                 vec![MutationCmdResult::accepted(
                     MutationCmdId::new(1),
-                    MutationEffect::NormalizedToRemoval { changed: true },
+                    MutationEffect::normalized_to_removal(true),
                 )],
                 4,
             )]);
@@ -5045,7 +5220,7 @@ mod tests {
                             edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
                         },
                     },
-                    MutationEffect::OverlayChanged { changed: true },
+                    MutationEffect::overlay_changed(true),
                 ),
                 (
                     MutationCmd {
@@ -5058,7 +5233,7 @@ mod tests {
                             ),
                         },
                     },
-                    MutationEffect::OverlayChanged { changed: true },
+                    MutationEffect::overlay_changed(true),
                 ),
             ],
             Revision::new(3),
@@ -5120,9 +5295,13 @@ mod tests {
                 reason: "entries[c] does not resolve".to_string()
             }
         );
-        // Every entry is node-labeled and carries a revert at its address.
+        // Every entry is node-labeled, carries the node's stable address
+        // string (the node detail popup filters on it), and carries a revert
+        // at its address.
+        let node_path = structural_address("entries[a]").node.to_string();
         for edit in &editor.pending_edits {
             assert_eq!(edit.node_label, "Orbit");
+            assert_eq!(edit.node_path, node_path);
             let revert = edit.revert.as_ref().expect("mapped entries carry revert");
             assert!(revert.is_for_node(ProjectController::NODE_ID));
         }
@@ -5150,7 +5329,7 @@ mod tests {
                             ),
                         },
                     },
-                    MutationEffect::OverlayChanged { changed: true },
+                    MutationEffect::overlay_changed(true),
                 ),
                 (
                     MutationCmd {
@@ -5163,7 +5342,7 @@ mod tests {
                             ),
                         },
                     },
-                    MutationEffect::OverlayChanged { changed: true },
+                    MutationEffect::overlay_changed(true),
                 ),
             ],
             Revision::new(3),
@@ -5213,7 +5392,7 @@ mod tests {
                         ),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )],
             Revision::new(3),
         );
@@ -5227,6 +5406,7 @@ mod tests {
         assert_eq!(editor.pending_edits.len(), 1);
         let stale = &editor.pending_edits[0];
         assert_eq!(stale.node_label, "/retired.shader.json");
+        assert_eq!(stale.node_path, "/retired.shader.json");
         assert_eq!(stale.slot_path_display, "brightness");
         assert_eq!(
             stale.kind,
@@ -5265,7 +5445,7 @@ mod tests {
                             ),
                         },
                     },
-                    MutationEffect::OverlayChanged { changed: true },
+                    MutationEffect::overlay_changed(true),
                 ),
                 (
                     MutationCmd {
@@ -5278,7 +5458,7 @@ mod tests {
                             ),
                         },
                     },
-                    MutationEffect::OverlayChanged { changed: true },
+                    MutationEffect::overlay_changed(true),
                 ),
             ],
             Revision::new(3),
@@ -5358,7 +5538,7 @@ mod tests {
                         ),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )],
             Revision::new(3),
         );
@@ -5421,7 +5601,10 @@ mod tests {
                         edit: AssetBodyOverlay::ReplaceBody(body.to_vec()),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::OverlayChanged {
+                    changed: true,
+                    base_display: None,
+                },
             )],
             Revision::new(3),
         );
@@ -5501,8 +5684,10 @@ mod tests {
         };
         assert_eq!(project.dirty_summary(), expected);
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
-        assert_eq!(editor.nodes[0].header.dirty, expected);
-        assert_eq!(editor.tree.roots[0].dirty, expected);
+        // The fixture's single node is the project root (flat-root hoists it
+        // out of `nodes`/`tree` into `root_slots`), so its dirty surfaces
+        // through the project total and the pending-edit row rather than a
+        // node/tree item.
         assert_eq!(editor.dirty, expected);
         assert_eq!(editor.pending_edits.len(), 1);
         assert_eq!(
@@ -6001,11 +6186,15 @@ mod tests {
         );
 
         let editor = project.editor_view("demo", 1, &ProjectInventorySummary::default());
-        let root_item = &editor.tree.roots[0];
-        assert_eq!(root_item.dirty, one_persisted);
-        assert_eq!(root_item.children[0].dirty, one_persisted);
-        assert_eq!(root_item.children[0].children[0].dirty, one_persisted);
-        assert!(root_item.children[1].dirty.is_clean());
+        // Flat-root: the tree's top-level items are the project root's
+        // children (the root is the project pane, not a tree row).
+        let roots = &editor.tree.roots;
+        assert_eq!(roots[0].dirty, one_persisted, "group bubbles the edit");
+        assert_eq!(
+            roots[0].children[0].dirty, one_persisted,
+            "grandchild carries its own edit"
+        );
+        assert!(roots[1].dirty.is_clean(), "sibling branch stays clean");
         assert_eq!(editor.dirty, one_persisted);
         assert_eq!(project.dirty_summary(), one_persisted);
     }
@@ -6035,8 +6224,17 @@ mod tests {
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         assert_eq!(editor.dirty, expected);
         assert!(!editor.dirty.is_clean(), "failed edits need attention");
-        assert_eq!(editor.nodes[0].header.dirty, expected);
-        assert_eq!(editor.tree.roots[0].dirty, expected);
+        // Flat-root workspace: the childless root renders no card; its
+        // failed row rides `root_slots`.
+        assert!(editor.nodes.is_empty());
+        let brightness = editor
+            .root_slots
+            .iter()
+            .find(|slot| slot.label == "Brightness")
+            .expect("root settings carry the brightness row");
+        assert_eq!(brightness.state.dirty, UiNodeDirtyState::Error);
+        // Flat-root: root-own dirt is on the project pane, not the tree.
+        assert!(editor.tree.roots.is_empty());
         assert!(
             editor.header_actions.is_empty(),
             "failed edits alone do not surface Save/Revert"
@@ -6050,8 +6248,18 @@ mod tests {
         assert!(project.dirty_summary().is_clean());
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         assert!(editor.dirty.is_clean());
-        assert!(editor.nodes[0].header.dirty.is_clean());
-        assert!(editor.tree.roots[0].dirty.is_clean());
+        // Flat-root workspace: the childless root has no card, but its rows
+        // ride `root_slots` (clean here).
+        assert!(editor.nodes.is_empty());
+        assert!(!editor.root_slots.is_empty());
+        assert!(
+            editor
+                .root_slots
+                .iter()
+                .all(|slot| slot.state.dirty == UiNodeDirtyState::Clean)
+        );
+        // Flat-root: a childless root contributes no tree rows.
+        assert!(editor.tree.roots.is_empty());
         assert!(editor.header_actions.is_empty());
     }
 
@@ -6110,8 +6318,11 @@ mod tests {
     }
 
     /// Regression parity: the project-level summary surfaced on the editor
-    /// DTO equals the standalone walk and the sums of the per-node DTO
-    /// summaries (node headers and tree roots) — one aggregation everywhere.
+    /// DTO equals the standalone walk and the tree-root DTO sum — one
+    /// aggregation everywhere. The workspace cards exclude the root (flat
+    /// root), so the card sum covers only non-root edits: here both edits
+    /// are root-own, the card list is empty, and `editor.dirty` still counts
+    /// them.
     #[test]
     fn editor_view_dirty_agrees_with_walk_and_dto_sums() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
@@ -6129,12 +6340,15 @@ mod tests {
             transient: 1,
             failed: 0,
         };
-        let header_sum: DirtySummary = editor.nodes.iter().map(|node| node.header.dirty).sum();
+        // editor.dirty, the standalone walk, and dirty_summary agree — one
+        // aggregation over everything. The tree (like the cards) excludes the
+        // root, so with both edits root-own the tree contributes nothing;
+        // dirty_grandchild_bubbles covers the tree-carries-non-root-dirt case.
         let tree_sum: DirtySummary = editor.tree.roots.iter().map(|root| root.dirty).sum();
         assert_eq!(editor.dirty, expected);
         assert_eq!(project.dirty_summary(), expected);
-        assert_eq!(header_sum, expected);
-        assert_eq!(tree_sum, expected);
+        assert!(tree_sum.is_clean(), "root-own edits are not tree rows");
+        assert!(editor.nodes.is_empty(), "root-own edits have no card");
     }
 
     /// Root (1) → group (2) + clock sibling (4), group → leaf shader (3).

@@ -167,7 +167,7 @@ pub(crate) fn live_chrome() -> Element {
 
 #[story(
     label = "Live Detail Popup",
-    description = "The detail popup for a touched live control: edit state sections plus the Reset affordance."
+    description = "The detail popup for a touched live control: the edited section hosts the Reset button; no saved value is known for a transient control, so no Was row (degraded state)."
 )]
 pub(crate) fn live_detail_popup() -> Element {
     rsx! {
@@ -192,7 +192,7 @@ pub(crate) fn live_detail_popup() -> Element {
 
 #[story(
     label = "Unsaved Detail Popup",
-    description = "The detail popup for an unsaved persisted edit: edited section plus the Revert affordance."
+    description = "The detail popup for an unsaved persisted edit: the edited section shows the saved value it replaces (Was …) and hosts the Revert button — no floating popup footer."
 )]
 pub(crate) fn unsaved_detail_popup() -> Element {
     rsx! {
@@ -209,6 +209,7 @@ pub(crate) fn unsaved_detail_popup() -> Element {
                 )
                     .with_address(story_slot_address("color_order"))
                     .with_edit_entry_address(story_slot_address("color_order"))
+                    .with_old_value("rgb")
                     .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
                 depth: 0,
                 index: 0,
@@ -221,7 +222,7 @@ pub(crate) fn unsaved_detail_popup() -> Element {
 
 #[story(
     label = "Unsaved Chrome",
-    description = "A touched persisted slot: amber tint plus the inline Revert icon — no text chip; the detail popup keeps its Revert footer."
+    description = "A touched persisted slot: amber tint plus the inline Revert icon — no text chip; the detail popup's Revert lives inside its edited section."
 )]
 pub(crate) fn unsaved_chrome() -> Element {
     rsx! {
@@ -536,6 +537,112 @@ pub(crate) fn rejected_edit() -> Element {
     }
 }
 
+/// A `Dim2u`-shaped struct value wearing the `Dimensions` editor hint.
+fn dim2u_value(width: u32, height: u32) -> UiSlotValue {
+    UiSlotValue::struct_value(
+        Some("Dim2u".to_string()),
+        vec![
+            ("width".to_string(), UiSlotValue::u32(width)),
+            ("height".to_string(), UiSlotValue::u32(height)),
+        ],
+    )
+    .with_editor(UiSlotEditorHint::Dimensions)
+}
+
+fn affine2d_value(matrix: [[f32; 3]; 3]) -> UiSlotValue {
+    UiSlotValue::mat3x3(matrix).with_editor(UiSlotEditorHint::Affine2d)
+}
+
+#[story(
+    label = "Special Editor Rows",
+    description = "Clean wired rows for the M4 special editors: Dimensions (width × height), Affine2d (six-parameter grid), and the drag-to-edit XY pad with its raw-input affordance."
+)]
+pub(crate) fn special_editor_rows() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("render_size", "Render size", dim2u_value(32, 18))
+                    .with_address(story_slot_address("render_size"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "transform",
+                    "Transform",
+                    affine2d_value([[1.0, 0.25, 12.0], [-0.5, 2.0, -8.0], [0.0, 0.0, 1.0]]),
+                )
+                    .with_address(story_slot_address("transform"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "origin",
+                    "Origin",
+                    UiSlotValue::vec2([0.42, 0.58]).with_editor(UiSlotEditorHint::Xy),
+                )
+                    .with_address(story_slot_address("origin"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 2,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Special Editor States",
+    description = "Dirty and invalid chrome on the M4 special editors: unsaved Dimensions and XY pad edits, and an Affine2d validation failure."
+)]
+pub(crate) fn special_editor_states() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("render_size", "Render size", dim2u_value(64, 18))
+                    .with_address(story_slot_address("render_size"))
+                    .with_edit_entry_address(story_slot_address("render_size"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "transform",
+                    "Transform",
+                    affine2d_value([[0.0, 0.0, 12.0], [0.0, 0.0, -8.0], [0.0, 0.0, 1.0]]),
+                )
+                    .with_address(story_slot_address("transform"))
+                    .with_state(
+                        UiSlotFieldState::editable().with_invalid("transform must be invertible"),
+                    ),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "origin",
+                    "Origin",
+                    UiSlotValue::vec2([0.9, 0.1]).with_editor(UiSlotEditorHint::Xy),
+                )
+                    .with_address(story_slot_address("origin"))
+                    .with_edit_entry_address(story_slot_address("origin"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+                depth: 0,
+                index: 2,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
 #[story(description = "A row with no direct value or binding.")]
 pub(crate) fn unset_value() -> Element {
     rsx! {
@@ -550,7 +657,7 @@ pub(crate) fn unset_value() -> Element {
 }
 
 #[story(
-    description = "An included optional scalar renders as a normal value with an enable toggle."
+    description = "An included optional scalar renders its value editor in the stable-width presence cell with a trash clear affordance in the gesture slot (inert here: no edit wiring)."
 )]
 pub(crate) fn optional_scalar_included() -> Element {
     rsx! {
@@ -564,7 +671,7 @@ pub(crate) fn optional_scalar_included() -> Element {
 }
 
 #[story(
-    description = "An excluded optional scalar renders as an unset value with the enable toggle off."
+    description = "An excluded optional scalar renders the dashed `not set` chip in the same stable-width presence cell with a plus set affordance (inert here: no edit wiring)."
 )]
 pub(crate) fn optional_scalar_excluded() -> Element {
     rsx! {
@@ -649,7 +756,7 @@ fn string_map_slot(entries: &[(&str, f32)]) -> UiConfigSlot {
 
 #[story(
     label = "Map Add Immediate",
-    description = "A numeric map's closed add affordances: + adds immediately at the first free index (gap-filling: effective keys 0 and 2 suggest 1), # opens the optional key override."
+    description = "A numeric map's closed add affordances: the plus icon button adds immediately at the first free index (gap-filling: effective keys 0 and 2 suggest 1), the compact `at key…` text button opens the optional key override."
 )]
 pub(crate) fn map_add_immediate() -> Element {
     rsx! {
@@ -776,10 +883,10 @@ pub(crate) fn map_move_rejected_occupied() -> Element {
 }
 
 #[story(
-    label = "Option Toggle On And Off",
-    description = "Wired some/none toggles at the trailing (right-anchored) edge of the value area — a fixed-width track with no state text, so toggling never reflows the row: on dispatches EnsurePresent at the interior some path, off dispatches RemoveValue at the option path; the last row's non-toggleable switch renders muted and inert."
+    label = "Option Set And Clear",
+    description = "Wired option-presence gestures in the trailing (right-anchored) gesture slot — one fixed-square icon button in every state, so setting or clearing never reflows the row: the unset row's plus dispatches EnsurePresent at the interior some path, the set row's trash dispatches RemoveValue at the option path; the last row's non-toggleable gesture renders muted and inert."
 )]
-pub(crate) fn option_toggle_on_off() -> Element {
+pub(crate) fn option_set_and_clear() -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
             ConfigSlotRow {

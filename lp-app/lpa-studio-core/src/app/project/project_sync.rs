@@ -28,6 +28,13 @@ pub struct ProjectSync {
     issue: Option<UiIssue>,
     /// Client mirror of the server's pending-edit overlay.
     overlay: ProjectOverlay,
+    /// Base (saved) value display strings for the overlay's pending slot-edit
+    /// paths — a parallel map beside the overlay, keyed exactly like its
+    /// entries. Populated wholesale by [`Self::apply_overlay_read`] and per
+    /// effect annotation by [`Self::apply_acked_edits`]; entries drop when
+    /// their overlay entries drop, so the map never outlives the edits it
+    /// describes. Paths without an entry render as "not set".
+    base_values: BTreeMap<(ArtifactLocation, SlotPath), String>,
     /// Revision at which `overlay` was last known to match the server
     /// (`Revision` zero means "never mirrored / no overlay mutation ever").
     overlay_revision: Revision,
@@ -41,6 +48,7 @@ impl ProjectSync {
             product_previews: BTreeMap::new(),
             issue: None,
             overlay: ProjectOverlay::new(),
+            base_values: BTreeMap::new(),
             overlay_revision: Revision::default(),
         }
     }
@@ -111,10 +119,16 @@ impl ProjectSync {
         artifact: &ArtifactLocation,
         path: &SlotPath,
     ) -> Option<&SlotEditOp> {
-        match self.overlay.artifact(artifact)? {
-            ArtifactOverlay::Slot { overlay } => overlay.edits.get(path),
-            ArtifactOverlay::Asset { .. } => None,
-        }
+        overlay_edit_at(&self.overlay, artifact, path)
+    }
+
+    /// Base (saved) value display string for the pending edit at `path` in
+    /// `artifact`, if the server derived one (`None`: no pending edit there,
+    /// or the target is absent in the base — render "not set").
+    pub fn base_value_at(&self, artifact: &ArtifactLocation, path: &SlotPath) -> Option<&str> {
+        self.base_values
+            .get(&(artifact.clone(), path.clone()))
+            .map(String::as_str)
     }
 
     /// Iterate every mirrored pending slot edit as `(artifact, path, op)`.
@@ -158,10 +172,22 @@ impl ProjectSync {
             .is_some_and(|runtime| runtime.project.overlay_changed_at != self.overlay_revision)
     }
 
-    /// Replace the overlay mirror with a freshly fetched server overlay and
-    /// stamp the revision the server reported for it.
-    pub fn apply_overlay_read(&mut self, overlay: ProjectOverlay, revision: Revision) {
+    /// Replace the overlay mirror — and its parallel base-value map — with a
+    /// freshly fetched server overlay and stamp the revision the server
+    /// reported for it. The replacement is wholesale on both structures: a
+    /// path the response does not annotate has no base value (absent in
+    /// base), so stale map entries must not survive the read.
+    pub fn apply_overlay_read(
+        &mut self,
+        overlay: ProjectOverlay,
+        base_values: Vec<(ArtifactLocation, SlotPath, String)>,
+        revision: Revision,
+    ) {
         self.overlay = overlay;
+        self.base_values = base_values
+            .into_iter()
+            .map(|(artifact, path, display)| ((artifact, path), display))
+            .collect();
         self.overlay_revision = revision;
     }
 
@@ -183,6 +209,12 @@ impl ProjectSync {
     /// states the mirror never saw; that is fine — the next pull's
     /// `overlay_changed_at` comparison self-corrects with a full fetch once
     /// the revision moves past our stamp.
+    /// Base-value annotations ride the same effects: a stored `Put` carrying
+    /// `base_display` installs (or, when `None`, clears) the parallel map
+    /// entry at its path, and after the replay the map is pruned to paths the
+    /// overlay still holds — removals and normalizations (including
+    /// canonicalization side effects like descendants cleared under a stored
+    /// `Remove`) drop their base values with their entries.
     pub fn apply_acked_edits(
         &mut self,
         batch: &[(MutationCmd, MutationEffect)],
@@ -192,8 +224,28 @@ impl ProjectSync {
             for mutation in effective_mutations(command, effect) {
                 self.overlay.apply_mutation(mutation);
             }
+            for (artifact, path, base_display) in effect_base_annotations(command, effect) {
+                match base_display {
+                    Some(display) => {
+                        self.base_values.insert((artifact, path), display);
+                    }
+                    None => {
+                        self.base_values.remove(&(artifact, path));
+                    }
+                }
+            }
         }
+        self.prune_base_values();
         self.overlay_revision = overlay_revision;
+    }
+
+    /// Drop base-value entries whose overlay entries no longer exist, so the
+    /// parallel map tracks the overlay exactly even through canonicalization
+    /// side effects the ack does not spell out per path.
+    fn prune_base_values(&mut self) {
+        let overlay = &self.overlay;
+        self.base_values
+            .retain(|(artifact, path), _| overlay_edit_at(overlay, artifact, path).is_some());
     }
 
     /// Latest cached preview state for a produced product.
@@ -439,7 +491,7 @@ fn effective_mutations(command: &MutationCmd, effect: &MutationEffect) -> Vec<Mu
         ) => edits
             .iter()
             .map(|stored| match stored {
-                StoredSlotEdit::Put { edit } => MutationOp::PutSlotEdit {
+                StoredSlotEdit::Put { edit, .. } => MutationOp::PutSlotEdit {
                     artifact: artifact.clone(),
                     edit: edit.clone(),
                 },
@@ -450,6 +502,50 @@ fn effective_mutations(command: &MutationCmd, effect: &MutationEffect) -> Vec<Mu
             })
             .collect(),
         _ => vec![command.mutation.clone()],
+    }
+}
+
+/// The base-value map updates an acked command's effect prescribes, as
+/// `(artifact, path, annotation)` — one entry per stored `Put`, mirroring
+/// [`effective_mutations`]'s replay. `Some` installs the base display at the
+/// path, `None` clears any stale entry (the overlay entry exists but its base
+/// target does not, so the old value reads "not set"). Effects that only drop
+/// overlay entries prescribe nothing here: the post-replay prune removes
+/// their map entries alongside.
+fn effect_base_annotations(
+    command: &MutationCmd,
+    effect: &MutationEffect,
+) -> Vec<(ArtifactLocation, SlotPath, Option<String>)> {
+    match (effect, &command.mutation) {
+        (
+            MutationEffect::OverlayChanged { base_display, .. },
+            MutationOp::PutSlotEdit { artifact, edit },
+        ) => vec![(artifact.clone(), edit.path.clone(), base_display.clone())],
+        (
+            MutationEffect::Materialized { edits, .. },
+            MutationOp::MoveSlotEntry { artifact, .. } | MutationOp::PutSlotEdit { artifact, .. },
+        ) => edits
+            .iter()
+            .filter_map(|stored| match stored {
+                StoredSlotEdit::Put { edit, base_display } => {
+                    Some((artifact.clone(), edit.path.clone(), base_display.clone()))
+                }
+                StoredSlotEdit::Removed { .. } => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Pending slot edit at `path` in `artifact` inside `overlay`, if any.
+fn overlay_edit_at<'a>(
+    overlay: &'a ProjectOverlay,
+    artifact: &ArtifactLocation,
+    path: &SlotPath,
+) -> Option<&'a SlotEditOp> {
+    match overlay.artifact(artifact)? {
+        ArtifactOverlay::Slot { overlay } => overlay.edits.get(path),
+        ArtifactOverlay::Asset { .. } => None,
     }
 }
 
@@ -942,7 +1038,7 @@ mod tests {
                     ),
                 },
             },
-            MutationEffect::OverlayChanged { changed: true },
+            MutationEffect::overlay_changed(true),
         )
     }
 
@@ -955,7 +1051,20 @@ mod tests {
                     path: overlay_test_path(),
                 },
             },
-            MutationEffect::OverlayChanged { changed: true },
+            MutationEffect::overlay_changed(true),
+        )
+    }
+
+    /// [`put_cmd`] whose ack effect carries a base-display annotation.
+    fn put_cmd_with_base(
+        id: u64,
+        value: f32,
+        base_display: Option<&str>,
+    ) -> (MutationCmd, MutationEffect) {
+        let (command, effect) = put_cmd(id, value);
+        (
+            command,
+            effect.with_base_display(base_display.map(str::to_string)),
         )
     }
 
@@ -1007,7 +1116,7 @@ mod tests {
             overlay_test_artifact(),
             lpc_model::SlotEdit::assign_value(overlay_test_path(), lpc_model::LpValue::F32(1.0)),
         );
-        sync.apply_overlay_read(overlay, Revision::new(4));
+        sync.apply_overlay_read(overlay, Vec::new(), Revision::new(4));
         assert!(!sync.overlay_fetch_needed());
         assert_eq!(sync.overlay_slot_edits().count(), 1, "dirty but quiet");
     }
@@ -1033,7 +1142,7 @@ mod tests {
             overlay_test_artifact(),
             lpc_model::SlotEdit::ensure_present(other_path.clone()),
         );
-        sync.apply_overlay_read(replacement, Revision::new(7));
+        sync.apply_overlay_read(replacement, Vec::new(), Revision::new(7));
 
         assert_eq!(sync.overlay_revision(), Revision::new(7));
         assert_eq!(
@@ -1081,10 +1190,7 @@ mod tests {
 
         let (put_back, _) = put_cmd(2, 1.0);
         sync.apply_acked_edits(
-            &[(
-                put_back,
-                MutationEffect::NormalizedToRemoval { changed: true },
-            )],
+            &[(put_back, MutationEffect::normalized_to_removal(true))],
             Revision::new(4),
         );
 
@@ -1097,10 +1203,7 @@ mod tests {
         // The no-op flavor (no prior entry) leaves the mirror clean too.
         let (noop_put, _) = put_cmd(3, 1.0);
         sync.apply_acked_edits(
-            &[(
-                noop_put,
-                MutationEffect::NormalizedToRemoval { changed: false },
-            )],
+            &[(noop_put, MutationEffect::normalized_to_removal(false))],
             Revision::new(4),
         );
         assert!(sync.overlay().is_empty());
@@ -1131,7 +1234,7 @@ mod tests {
                         ),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )],
             Revision::new(3),
         );
@@ -1146,20 +1249,14 @@ mod tests {
         };
         let effect = MutationEffect::Materialized {
             edits: vec![
-                lpc_model::StoredSlotEdit::Put {
-                    edit: lpc_model::SlotEdit::ensure_present(to.clone()),
-                },
-                lpc_model::StoredSlotEdit::Put {
-                    edit: lpc_model::SlotEdit::assign_value(
-                        to.child(lpc_model::SlotName::parse("PointList").unwrap())
-                            .child(lpc_model::SlotName::parse("first_channel").unwrap()),
-                        lpc_model::LpValue::U32(5),
-                    ),
-                },
-                lpc_model::StoredSlotEdit::Removed { path: from.clone() },
-                lpc_model::StoredSlotEdit::Removed {
-                    path: stale.clone(),
-                },
+                lpc_model::StoredSlotEdit::put(lpc_model::SlotEdit::ensure_present(to.clone())),
+                lpc_model::StoredSlotEdit::put(lpc_model::SlotEdit::assign_value(
+                    to.child(lpc_model::SlotName::parse("PointList").unwrap())
+                        .child(lpc_model::SlotName::parse("first_channel").unwrap()),
+                    lpc_model::LpValue::U32(5),
+                )),
+                lpc_model::StoredSlotEdit::removed(from.clone()),
+                lpc_model::StoredSlotEdit::removed(stale.clone()),
             ],
             changed: true,
         };
@@ -1200,7 +1297,10 @@ mod tests {
                         edit: body.clone(),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::OverlayChanged {
+                    changed: true,
+                    base_display: None,
+                },
             )],
             Revision::new(3),
         );
@@ -1225,7 +1325,10 @@ mod tests {
                         artifact: artifact.clone(),
                     },
                 },
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::OverlayChanged {
+                    changed: true,
+                    base_display: None,
+                },
             )],
             Revision::new(4),
         );
@@ -1247,5 +1350,174 @@ mod tests {
 
         assert!(!sync.overlay_fetch_needed());
         assert_eq!(sync.overlay_slot_edits().count(), 1);
+    }
+
+    #[test]
+    fn annotated_ack_installs_the_base_value_and_revert_drops_it() {
+        let mut sync = ProjectSync::new();
+
+        sync.apply_acked_edits(&[put_cmd_with_base(1, 2.0, Some("1.0"))], Revision::new(3));
+
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &overlay_test_path()),
+            Some("1.0"),
+            "the client's own ack carries the old value with no fetch"
+        );
+
+        sync.apply_acked_edits(&[remove_cmd(2)], Revision::new(4));
+
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &overlay_test_path()),
+            None,
+            "the base value drops with its overlay entry"
+        );
+        assert!(sync.overlay().is_empty());
+    }
+
+    #[test]
+    fn normalized_ack_drops_the_base_value_with_the_entry() {
+        let mut sync = ProjectSync::new();
+        sync.apply_acked_edits(&[put_cmd_with_base(1, 2.0, Some("1.0"))], Revision::new(3));
+
+        let (put_back, _) = put_cmd(2, 1.0);
+        sync.apply_acked_edits(
+            &[(
+                put_back,
+                MutationEffect::normalized_to_removal(true).with_base_display(Some("1.0".into())),
+            )],
+            Revision::new(4),
+        );
+
+        assert!(sync.overlay().is_empty());
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &overlay_test_path()),
+            None,
+            "a normalized removal leaves no base value behind"
+        );
+    }
+
+    #[test]
+    fn unannotated_ack_degrades_the_base_value_to_none() {
+        // An overlay entry can exist without a derivable base (base-absent
+        // target, or a server that annotated nothing): re-acking the path
+        // without an annotation must clear any stale base value rather than
+        // let an outdated string linger beside the fresh edit.
+        let mut sync = ProjectSync::new();
+        sync.apply_acked_edits(&[put_cmd_with_base(1, 2.0, Some("1.0"))], Revision::new(3));
+        assert!(
+            sync.base_value_at(&overlay_test_artifact(), &overlay_test_path())
+                .is_some()
+        );
+
+        sync.apply_acked_edits(&[put_cmd(2, 3.0)], Revision::new(4));
+
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_test_artifact(), &overlay_test_path()),
+            Some(&SlotEditOp::AssignValue(lpc_model::LpValue::F32(3.0))),
+            "the overlay entry itself survives"
+        );
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &overlay_test_path()),
+            None,
+            "entries without annotations degrade to None"
+        );
+    }
+
+    #[test]
+    fn overlay_read_replaces_the_base_value_map_wholesale() {
+        let mut sync = ProjectSync::new();
+        sync.apply_acked_edits(&[put_cmd_with_base(1, 2.0, Some("1.0"))], Revision::new(3));
+
+        let mut replacement = ProjectOverlay::new();
+        let other_path = SlotPath::parse("controls.hue").unwrap();
+        replacement.put_slot_edit(
+            overlay_test_artifact(),
+            lpc_model::SlotEdit::assign_value(other_path.clone(), lpc_model::LpValue::F32(0.5)),
+        );
+        sync.apply_overlay_read(
+            replacement,
+            vec![(overlay_test_artifact(), other_path.clone(), "0.25".into())],
+            Revision::new(7),
+        );
+
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &overlay_test_path()),
+            None,
+            "stale base values do not survive the wholesale read"
+        );
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &other_path),
+            Some("0.25"),
+            "reconnect/foreign-edit reads restore the bases they carry"
+        );
+    }
+
+    #[test]
+    fn materialized_ack_updates_base_values_per_stored_edit() {
+        // A move's ack annotates its stored puts individually; Removed
+        // entries drop their base values, including stranded descendants the
+        // canonicalization cleared.
+        let mut sync = ProjectSync::new();
+        let map = SlotPath::parse("mapping.PathPoints.paths").unwrap();
+        let from = map.child_key(lpc_model::SlotMapKey::U32(0));
+        let to = map.child_key(lpc_model::SlotMapKey::U32(1));
+        let stale = SlotPath::parse("mapping.PathPoints.paths[0].PointList.first_channel").unwrap();
+        sync.apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: lpc_model::MutationCmdId::new(1),
+                    mutation: lpc_model::MutationOp::PutSlotEdit {
+                        artifact: overlay_test_artifact(),
+                        edit: lpc_model::SlotEdit::assign_value(
+                            stale.clone(),
+                            lpc_model::LpValue::U32(5),
+                        ),
+                    },
+                },
+                MutationEffect::overlay_changed(true).with_base_display(Some("7".into())),
+            )],
+            Revision::new(3),
+        );
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &stale),
+            Some("7")
+        );
+
+        let command = MutationCmd {
+            id: lpc_model::MutationCmdId::new(2),
+            mutation: lpc_model::MutationOp::MoveSlotEntry {
+                artifact: overlay_test_artifact(),
+                from: from.clone(),
+                to: to.clone(),
+            },
+        };
+        let effect = MutationEffect::Materialized {
+            edits: vec![
+                lpc_model::StoredSlotEdit::put(lpc_model::SlotEdit::ensure_present(to.clone())),
+                lpc_model::StoredSlotEdit::put_with_base_display(
+                    lpc_model::SlotEdit::remove(from.clone()),
+                    Some("{\"kind\":\"RingArray\"}".into()),
+                ),
+                lpc_model::StoredSlotEdit::removed(stale.clone()),
+            ],
+            changed: true,
+        };
+        sync.apply_acked_edits(&[(command, effect)], Revision::new(4));
+
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &to),
+            None,
+            "base-absent move target has no old value"
+        );
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &from),
+            Some("{\"kind\":\"RingArray\"}"),
+            "the stored remove of the base-present source keeps its base display"
+        );
+        assert_eq!(
+            sync.base_value_at(&overlay_test_artifact(), &stale),
+            None,
+            "stranded descendants drop their base values with their entries"
+        );
     }
 }

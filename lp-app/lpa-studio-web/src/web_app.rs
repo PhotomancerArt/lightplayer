@@ -22,6 +22,8 @@ use core::time::Duration;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
+use crate::app::layout::LocalStoreBanner;
+use crate::local_store::{self, LocalStoreStatus};
 use crate::studio_url;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
@@ -74,6 +76,24 @@ pub fn App() -> Element {
         }
     });
 
+    // Mount the local project store: request durability, take the library
+    // lock, load OPFS into memory, start the flusher. The simulator never
+    // sees this store (D19/D20 — the sim is an ephemeral place). Spawned
+    // from use_hook so it runs exactly once per app instance (a use_future
+    // here restarts with the render loop and would mount repeatedly).
+    let mut store_status = use_signal(|| LocalStoreStatus::Initializing);
+    use_hook(move || {
+        local_store::request_persist();
+        spawn(async move {
+            store_status.set(local_store::init_local_store().await);
+        });
+    });
+    let on_store_retry = move |_| {
+        spawn(async move {
+            store_status.set(local_store::init_local_store().await);
+        });
+    };
+
     let startup_intent = use_hook(studio_url::read_connection_intent);
     let startup_bridge = bridge.clone();
     let _startup_task = use_future(move || {
@@ -107,12 +127,26 @@ pub fn App() -> Element {
     // actions; the actor applies them synchronously and never coalesces them.
     let console_bridge = bridge.clone();
     let on_console = move |command: ConsoleCommand| {
+        // The display threshold doubles as the *capture* floor: raise or lower
+        // the global `log::` max level to match, so `debug!`/`trace!` producers
+        // short-circuit inside the macro when hidden instead of formatting and
+        // queuing output the console would only drop. Reveal below the current
+        // floor is therefore forward-only, by design.
+        if let ConsoleCommand::SetMinLevel(level) = command {
+            log::set_max_level(capture_level_for(level));
+        }
         console_bridge.tx.send(StudioCommand::Console(command));
     };
 
     rsx! {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
+        div { class: "tw:mx-auto tw:w-[min(1520px,100%)] tw:px-7 tw:pt-4 tw:max-[880px]:px-[18px]",
+            LocalStoreBanner {
+                status: store_status.read().clone(),
+                on_retry: on_store_retry,
+            }
+        }
         StudioShell {
             view: view.read().clone(),
             running: false,
@@ -147,14 +181,29 @@ fn now_secs() -> f64 {
 /// spawns, so `log::` macros anywhere on the wasm side are captured and later
 /// drained into the console ring by the actor.
 ///
-/// `Debug` is the runtime max (bumping to `Trace` is a cheap follow-up; this
-/// avoids paying for hot-path `trace!` in dependencies) — the console pane's
-/// filter is the *display* gate. An already-installed logger is tolerated
-/// with a JS-console warning, never a panic.
+/// The initial max level matches the console filter's default threshold
+/// (`Info`): the display threshold is also the *capture* floor, so producers
+/// below it never format or queue output. `on_console` keeps the two in sync
+/// as the user moves the filter. An already-installed logger is tolerated with
+/// a JS-console warning, never a panic.
 fn install_log_sink() {
     match log::set_logger(&STUDIO_LOG_SINK) {
-        Ok(()) => log::set_max_level(log::LevelFilter::Debug),
+        // `Info` mirrors `LogFilter::default().min_level` in core.
+        Ok(()) => log::set_max_level(capture_level_for(UiLogLevel::Info)),
         Err(_) => console_warn("studio log sink not installed: a global logger is already set"),
+    }
+}
+
+/// Map the console's display threshold to the global `log::` max level that
+/// gates producers. The floor is inclusive: a `min_level` of `Info` captures
+/// `Info` and above, dropping `Debug`/`Trace` at the macro.
+fn capture_level_for(min_level: UiLogLevel) -> log::LevelFilter {
+    match min_level {
+        UiLogLevel::Trace => log::LevelFilter::Trace,
+        UiLogLevel::Debug => log::LevelFilter::Debug,
+        UiLogLevel::Info => log::LevelFilter::Info,
+        UiLogLevel::Warn => log::LevelFilter::Warn,
+        UiLogLevel::Error => log::LevelFilter::Error,
     }
 }
 

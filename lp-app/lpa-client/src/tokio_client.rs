@@ -163,6 +163,9 @@ impl TokioLpClient {
                         events.push(event);
                     }
                 }
+                ResponseDisposition::StaleAbandoned { response_id } => {
+                    events.push(ClientEvent::StaleResponseDropped { response_id });
+                }
                 ResponseDisposition::Uncorrelated {
                     response_id,
                     expected_id,
@@ -519,6 +522,11 @@ impl TokioLpClient {
                     log::warn!(
                         "Received non-correlated message (id: {response_id}, expected: {expected_id})"
                     );
+                }
+                ClientEvent::StaleResponseDropped { response_id } => {
+                    // Expected discard of a response for a request this client
+                    // abandoned (cancelled/timed-out pull); not a warning.
+                    log::debug!("Dropped stale response for abandoned request {response_id}");
                 }
                 _ => {}
             }

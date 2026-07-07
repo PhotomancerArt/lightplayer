@@ -73,7 +73,7 @@ mod tests {
         let response = WireOverlayMutationResponse::new(
             MutationCmdBatchResult::new(vec![MutationCmdResult::accepted(
                 MutationCmdId::new(1),
-                MutationEffect::OverlayChanged { changed: true },
+                MutationEffect::overlay_changed(true),
             )]),
             Revision::new(11),
         );
@@ -85,6 +85,40 @@ mod tests {
         assert_eq!(decoded.overlay_revision, Revision::new(11));
         assert!(json.contains("overlay_changed"));
         assert!(json.contains("overlay_revision"));
+        assert!(
+            !json.contains("base_display"),
+            "unannotated effects add nothing to the wire: {json}"
+        );
+    }
+
+    #[test]
+    fn base_display_annotation_round_trips_and_stays_optional() {
+        // The base-value annotation is skip-if-none on every effect surface:
+        // annotated effects round-trip it, unannotated effects (a firmware
+        // server that derived nothing) keep the wire form unchanged.
+        let response = WireOverlayMutationResponse::new(
+            MutationCmdBatchResult::new(vec![
+                MutationCmdResult::accepted(
+                    MutationCmdId::new(1),
+                    MutationEffect::overlay_changed(true).with_base_display(Some("1.0".into())),
+                ),
+                MutationCmdResult::accepted(
+                    MutationCmdId::new(2),
+                    MutationEffect::overlay_changed(true),
+                ),
+            ]),
+            Revision::new(11),
+        );
+
+        let json = serde_json::to_string(&response).unwrap();
+        let decoded: WireOverlayMutationResponse = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, response);
+        assert_eq!(
+            json.matches("base_display").count(),
+            1,
+            "only the annotated command serializes the field: {json}"
+        );
     }
 
     #[test]
@@ -96,11 +130,12 @@ mod tests {
             MutationCmdBatchResult::new(vec![
                 MutationCmdResult::accepted(
                     MutationCmdId::new(1),
-                    MutationEffect::NormalizedToRemoval { changed: true },
+                    MutationEffect::normalized_to_removal(true)
+                        .with_base_display(Some("1.0".into())),
                 ),
                 MutationCmdResult::accepted(
                     MutationCmdId::new(2),
-                    MutationEffect::NormalizedToRemoval { changed: false },
+                    MutationEffect::normalized_to_removal(false),
                 ),
             ]),
             Revision::new(12),
@@ -111,6 +146,7 @@ mod tests {
 
         assert_eq!(decoded, response);
         assert!(json.contains("normalized_to_removal"));
+        assert_eq!(json.matches("base_display").count(), 1, "{json}");
     }
 
     #[test]
@@ -144,18 +180,18 @@ mod tests {
                 MutationCmdId::new(1),
                 MutationEffect::Materialized {
                     edits: vec![
-                        StoredSlotEdit::Put {
-                            edit: SlotEdit::ensure_present(SlotPath::parse("paths[1]").unwrap()),
-                        },
-                        StoredSlotEdit::Put {
-                            edit: SlotEdit::assign_value(
-                                SlotPath::parse("paths[1].PointList.first_channel").unwrap(),
-                                LpValue::U32(5),
-                            ),
-                        },
-                        StoredSlotEdit::Removed {
-                            path: SlotPath::parse("paths[0]").unwrap(),
-                        },
+                        StoredSlotEdit::put(SlotEdit::ensure_present(
+                            SlotPath::parse("paths[1]").unwrap(),
+                        )),
+                        StoredSlotEdit::put(SlotEdit::assign_value(
+                            SlotPath::parse("paths[1].PointList.first_channel").unwrap(),
+                            LpValue::U32(5),
+                        )),
+                        StoredSlotEdit::put_with_base_display(
+                            SlotEdit::remove(SlotPath::parse("paths[2]").unwrap()),
+                            Some("{\"kind\":\"RingArray\"}".into()),
+                        ),
+                        StoredSlotEdit::removed(SlotPath::parse("paths[0]").unwrap()),
                     ],
                     changed: true,
                 },
@@ -170,6 +206,11 @@ mod tests {
         assert!(json.contains("materialized"));
         assert!(json.contains("put"));
         assert!(json.contains("removed"));
+        assert_eq!(
+            json.matches("base_display").count(),
+            1,
+            "per-edit annotations are skip-if-none: {json}"
+        );
     }
 
     #[test]

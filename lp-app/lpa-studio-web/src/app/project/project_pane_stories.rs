@@ -11,10 +11,10 @@ use lpa_studio_core::{
 use lpa_studio_web_story_macros::story;
 
 use crate::app::project::ProjectPane;
-use crate::app::story_fixtures::{project_editor_fixture, project_ready_actions};
+use crate::app::story_fixtures::project_editor_fixture;
 
 #[story(
-    description = "Clean project: the project name as title, 'Project' kind label, no chips and no action icons, quiet 'i' detail trigger (the status word lives in the popup); node tree as the pane body with pane actions at its foot."
+    description = "Clean project: the project name as title, 'Project' kind label, no chips and no action icons, quiet 'i' detail trigger (the status word lives in the popup); the node tree is the whole pane body — no 'Node tree' heading and no Refresh/Disconnect strip (P6 sidebar tidy)."
 )]
 pub(crate) fn unchanged() -> Element {
     rsx! {
@@ -93,7 +93,10 @@ pub(crate) fn detail_popup() -> Element {
                 actions: true,
                 initially_open: true,
                 pending_edits: vec![
-                    assign_edit("Orbit shader", "brightness", "0.85", UiPendingEditPhase::Persisted),
+                    with_old_value(
+                        assign_edit("Orbit shader", "brightness", "0.85", UiPendingEditPhase::Persisted),
+                        "0.5",
+                    ),
                     pending_edit(
                         "Sunrise palette",
                         "mapping.PathPoints.paths[0]",
@@ -108,7 +111,7 @@ pub(crate) fn detail_popup() -> Element {
 }
 
 #[story(
-    description = "A mixed change list in the save panel: value assigns, a structural add and remove, a live control, and a failed entry with its reason in the error-tinted section — every row with its own revert."
+    description = "A mixed change list in the save panel: value assigns (old → new where the saved value is known), a structural add and remove (the remove with its replaced value), a live control, and a failed entry with its reason in the error-tinted section — every row with its own revert."
 )]
 pub(crate) fn change_list() -> Element {
     rsx! {
@@ -123,18 +126,24 @@ pub(crate) fn change_list() -> Element {
                 actions: true,
                 initially_open: true,
                 pending_edits: vec![
-                    assign_edit("Orbit shader", "brightness", "0.85", UiPendingEditPhase::Persisted),
+                    with_old_value(
+                        assign_edit("Orbit shader", "brightness", "0.85", UiPendingEditPhase::Persisted),
+                        "0.5",
+                    ),
                     pending_edit(
                         "Sunrise palette",
                         "mapping.PathPoints.paths[0]",
                         UiPendingEditKind::Added,
                         UiPendingEditPhase::Persisted,
                     ),
-                    pending_edit(
-                        "Sunrise palette",
-                        "entries[stripe]",
-                        UiPendingEditKind::Removed,
-                        UiPendingEditPhase::Persisted,
+                    with_old_value(
+                        pending_edit(
+                            "Sunrise palette",
+                            "entries[stripe]",
+                            UiPendingEditKind::Removed,
+                            UiPendingEditPhase::Persisted,
+                        ),
+                        "{\"shader\":\"stripe.glsl\",\"duration\":2.0}",
                     ),
                     assign_edit("Orbit shader", "controls.rate", "2.0", UiPendingEditPhase::Live),
                     pending_edit(
@@ -223,7 +232,6 @@ fn StoryPane(
             ProjectPane {
                 view,
                 status: UiStatus::good("Ready"),
-                pane_actions: project_ready_actions(),
                 on_action: move |_| {},
                 initially_open,
             }
@@ -260,16 +268,26 @@ fn pending_edit(
         ProjectSlotRoot::def(),
         SlotPath::parse(path).expect("valid story slot path"),
     );
+    let node_path = address.node.to_string();
     UiPendingEdit {
         node_label: node_label.to_string(),
+        node_path,
         slot_path_display: path.to_string(),
         kind,
+        old_value: None,
         phase,
         revert: Some(UiAction::from_op(
             ControllerId::new(ProjectController::NODE_ID),
             SlotEditOp::Revert { address },
         )),
     }
+}
+
+/// Attach the saved (base) value an entry replaces, as the mirror's
+/// base-value map would.
+fn with_old_value(mut edit: UiPendingEdit, old_value: &str) -> UiPendingEdit {
+    edit.old_value = Some(old_value.to_string());
+    edit
 }
 
 fn assign_edit(

@@ -7,10 +7,14 @@ use lpa_studio_core::{
 };
 
 use crate::app::node::slot_edit_actions::slot_revert_action;
+use crate::app::node::slot_option_presence::{
+    OptionPresenceWidth, option_presence_child_slot, option_presence_chip,
+};
 use crate::app::node::{
     AssetEditor, EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton,
-    OptionToggleField, SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor,
-    primary_affordance, slot_row_class,
+    OptionPresenceActionButton, OptionPresenceCell, OptionPresenceCheckbox, OptionPresenceStyle,
+    SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance,
+    slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -46,6 +50,11 @@ pub fn ConfigSlotRow(
     /// Open this map entry row's key input on first render (stories).
     #[props(default = false)]
     initially_key_editing: bool,
+    /// Option-presence rendering style: [`OptionPresenceStyle::PresenceInRow`]
+    /// is the live default (P5); stories select the non-default candidates
+    /// for the P7 review comparison.
+    #[props(default)]
+    option_presence: OptionPresenceStyle,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let child_record = match &slot.body {
@@ -97,6 +106,23 @@ pub fn ConfigSlotRow(
             on_action: on_action?,
         })
     });
+    // Option rows render as presence (P5, the live default): the value cell
+    // is the stable-width presence cell and the trailing gesture slot holds
+    // the set/clear affordance. The reservation tier follows the body's
+    // value-kind width class.
+    let presence = slot.optionality;
+    let presence_chip = presence
+        .and_then(|optionality| option_presence_chip(option_presence, optionality.included));
+    let presence_width = OptionPresenceWidth::for_body(&slot.body);
+    // Candidate B: the interior value renders as a child row when set.
+    let presence_child = match presence {
+        Some(optionality)
+            if option_presence == OptionPresenceStyle::ChildRow && optionality.included =>
+        {
+            Some(option_presence_child_slot(&slot, body_address.clone()))
+        }
+        _ => None,
+    };
 
     rsx! {
         div { class: "tw:grid tw:min-w-0",
@@ -139,25 +165,47 @@ pub fn ConfigSlotRow(
                     if let Some(revert) = row_revert {
                         SlotRowRevertButton { revert }
                     }
-                    SlotBodyPreview {
-                        body: slot.body.clone(),
-                        state: slot.state.clone(),
-                        expanded: expanded(),
-                        address: body_address,
-                        composite: slot.composite.clone(),
-                        initially_adding,
-                        on_action,
-                    }
-                    // The some/none toggle renders at the TRAILING edge of
-                    // the end-aligned value area (the SlotRowRevertButton
-                    // stability rule, mirrored): the toggle is right-anchored
-                    // and fixed-width, so the value body appearing or
-                    // disappearing on a toggle grows leftward and the toggle
-                    // itself never jumps.
-                    if let Some(optionality) = slot.optionality {
-                        OptionToggleField {
-                            optionality,
-                            address: slot.address.clone(),
+                    if let Some(optionality) = presence {
+                        // Option-ness as presence (P5 live default): the
+                        // value cell is the stable-width presence cell
+                        // (editor or chip, one reserved footprint), and the
+                        // trailing gesture slot holds the fixed-square
+                        // set/clear affordance — both ends jump-free by
+                        // construction.
+                        OptionPresenceCell {
+                            chip: presence_chip,
+                            width: presence_width,
+                            SlotBodyPreview {
+                                body: slot.body.clone(),
+                                state: slot.state.clone(),
+                                expanded: expanded(),
+                                address: body_address.clone(),
+                                composite: slot.composite.clone(),
+                                initially_adding,
+                                on_action,
+                            }
+                        }
+                        if option_presence == OptionPresenceStyle::CheckboxSquare {
+                            OptionPresenceCheckbox {
+                                optionality,
+                                address: slot.address.clone(),
+                                on_action,
+                            }
+                        } else {
+                            OptionPresenceActionButton {
+                                optionality,
+                                address: slot.address.clone(),
+                                on_action,
+                            }
+                        }
+                    } else {
+                        SlotBodyPreview {
+                            body: slot.body.clone(),
+                            state: slot.state.clone(),
+                            expanded: expanded(),
+                            address: body_address,
+                            composite: slot.composite.clone(),
+                            initially_adding,
                             on_action,
                         }
                     }
@@ -170,6 +218,14 @@ pub fn ConfigSlotRow(
                     aspects,
                     initially_open,
                     revert: slot_detail_revert(chrome, slot.edit_entry_address.clone(), on_action),
+                }
+            }
+            if let Some(child) = presence_child {
+                // Candidate B's interior value row (rhymes with map
+                // entries): always visible while set — presence, not
+                // expansion, controls it.
+                div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:border-t tw:border-border-muted",
+                    ConfigSlotRow { slot: child, depth: depth + 1, index: 0, on_action }
                 }
             }
             if expanded() {

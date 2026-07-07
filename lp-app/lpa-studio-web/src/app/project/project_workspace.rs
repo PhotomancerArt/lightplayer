@@ -10,6 +10,7 @@ use crate::app::node::NodePane;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiAction>) -> Element {
     let nodes = view.nodes;
+    let pending_edits = view.pending_edits;
 
     rsx! {
         section { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",
@@ -24,6 +25,7 @@ pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiA
                         key: "{node.node_id}",
                         view: node,
                         on_action,
+                        pending_edits: pending_edits.clone(),
                     }
                 }
             }

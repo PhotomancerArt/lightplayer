@@ -1,11 +1,13 @@
 //! Overlay revision surfaces on the wire: mutation/read/commit responses carry
 //! the overlay's `changed_at`, and every project read's runtime status reports
-//! it (mutate → read → observe bump).
+//! it (mutate → read → observe bump). Base-value display annotations ride the
+//! same surfaces (mutation-ack effects and the read's parallel list).
 
 extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -59,6 +61,41 @@ fn mutation_and_read_responses_carry_overlay_revision() {
         "overlay read response carries the overlay revision"
     );
     assert!(!read.overlay.is_empty(), "overlay holds the pending edit");
+}
+
+#[test]
+fn mutation_ack_and_overlay_read_carry_base_value_displays() {
+    let (mut server, project_path) = server_with_clock_project("overlay-base-values");
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    server.advance_frame(16).expect("tick");
+
+    let project = project_mut(&mut server, handle);
+    let response = project
+        .mutate_overlay(rate_mutation(1, 3.0))
+        .expect("mutate overlay");
+
+    // The ack effect annotates the edit with the base (saved) value display.
+    let effect = match &response.result.results[0].status {
+        lpc_model::MutationCmdStatus::Accepted { effect } => effect,
+        status => panic!("expected accepted mutation, got {status:?}"),
+    };
+    assert_eq!(
+        effect,
+        &lpc_model::MutationEffect::overlay_changed(true).with_base_display(Some("1.0".into())),
+        "own-edit acks carry the old value with no follow-up fetch"
+    );
+
+    // A fresh overlay read (reconnect path) restores the same annotation.
+    let read = project.read_overlay();
+    assert_eq!(
+        read.base_values,
+        vec![(
+            ArtifactLocation::file("/clock.json"),
+            SlotPath::parse("controls.rate").expect("rate path"),
+            "1.0".to_string(),
+        )],
+        "overlay reads carry base displays for every resolvable pending path"
+    );
 }
 
 #[test]

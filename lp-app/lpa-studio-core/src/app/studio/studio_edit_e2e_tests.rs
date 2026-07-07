@@ -29,7 +29,7 @@ use lpfs::LpFsMemory;
 use crate::{
     ControllerId, ProjectController, ProjectOp, SlotEditOp, StudioActor, StudioCommand,
     StudioController, StudioServerClient, UiAction, UiConfigSlot, UiConfigSlotBody,
-    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiStudioView, UiViewContent,
+    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiSlotEditorHint, UiStudioView, UiViewContent,
 };
 
 #[test]
@@ -53,6 +53,27 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    // Flat-root workspace over the real wire: the project root renders no
+    // card (the clock and fixture panes are the top-level entries) and the
+    // root's own slots ride `root_slots` with the `read_only_persisted`
+    // policy on `format`/`nodes` intact; `name` stays editable.
+    let editor = project_editor(&snapshot);
+    assert_eq!(editor.nodes.len(), 2, "two child panes, no root card");
+    let root_slot = |path: &str| {
+        editor
+            .root_slots
+            .iter()
+            .find(|slot| {
+                slot.address
+                    .as_ref()
+                    .is_some_and(|address| address.path.to_string() == path)
+            })
+            .unwrap_or_else(|| panic!("root settings should carry {path}"))
+    };
+    assert!(!root_slot("format").state.editable);
+    assert!(!root_slot("nodes").state.editable);
+    assert!(root_slot("name").state.editable);
 
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
@@ -727,6 +748,130 @@ fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
     );
 }
 
+#[test]
+fn special_editor_values_round_trip_save_and_revert() {
+    // M4 special editors: the fixture's `render_size` (Dim2u, `Dimensions`
+    // hint) and `transform` (Affine2d, wire `Mat3x3`, `Affine2d` hint) reach
+    // the DTO with their specialized editor hints, and whole-value writes
+    // composed exactly the way the editors compose them (struct name and
+    // field order preserved; the inactive Mat3x3 row fixed to [0, 0, 1])
+    // round-trip through save and revert.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let render_size = find_slot(&snapshot, "render_size");
+    assert_eq!(
+        slot_editor_hint(render_size),
+        &UiSlotEditorHint::Dimensions,
+        "render_size carries the Dimensions editor hint"
+    );
+    let render_size_address = render_size
+        .address
+        .clone()
+        .expect("render_size slot carries an address");
+    let transform = find_slot(&snapshot, "transform");
+    assert_eq!(
+        slot_editor_hint(transform),
+        &UiSlotEditorHint::Affine2d,
+        "transform carries the Affine2d editor hint"
+    );
+    let transform_address = transform
+        .address
+        .clone()
+        .expect("transform slot carries an address");
+
+    // Whole-value writes as the editors dispatch them.
+    handle.tx.send(set_value_action(
+        render_size_address.clone(),
+        LpValue::Struct {
+            name: Some("Dim2u".to_string()),
+            fields: vec![
+                ("width".to_string(), LpValue::U32(12)),
+                ("height".to_string(), LpValue::U32(10)),
+            ],
+        },
+    ));
+    handle.tx.send(set_value_action(
+        transform_address,
+        LpValue::Mat3x3([[1.0, 0.0, 4.5], [0.0, 1.0, -2.0], [0.0, 0.0, 1.0]]),
+    ));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("edits emit a snapshot");
+
+    let render_size = find_slot(&snapshot, "render_size");
+    assert_eq!(render_size.state.dirty, UiNodeDirtyState::Dirty);
+    assert!(!render_size.state.live, "render_size is a persisted slot");
+    let transform = find_slot(&snapshot, "transform");
+    assert_eq!(transform.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(editor_dirty(&snapshot), (2, 0));
+
+    // Save: both persisted edits materialize into fixture.json.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("save + refresh emit a snapshot");
+
+    let fixture_json = read_project_file(&server, "fixture.json");
+    assert!(
+        fixture_json.contains("\"width\":12"),
+        "fixture.json gained the dimensions edit: {fixture_json}"
+    );
+    assert!(
+        fixture_json.contains("\"transform\":[[1,0,4.5],[0,1,-2],[0,0,1]]"),
+        "fixture.json gained the affine transform edit: {fixture_json}"
+    );
+    let render_size = find_slot(&snapshot, "render_size");
+    assert_eq!(render_size.state.dirty, UiNodeDirtyState::Clean);
+    assert!(slot_value_display(render_size).contains("12"));
+    let transform = find_slot(&snapshot, "transform");
+    assert_eq!(transform.state.dirty, UiNodeDirtyState::Clean);
+    assert!(slot_value_display(transform).contains("4.5"));
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+
+    // Revert: a fresh edit on top of the saved values is discarded and the
+    // gated refresh restores the saved (committed) values.
+    handle.tx.send(set_value_action(
+        render_size_address,
+        LpValue::Struct {
+            name: Some("Dim2u".to_string()),
+            fields: vec![
+                ("width".to_string(), LpValue::U32(20)),
+                ("height".to_string(), LpValue::U32(10)),
+            ],
+        },
+    ));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RevertAllEdits));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("revert emits a snapshot");
+
+    let render_size = find_slot(&snapshot, "render_size");
+    assert_eq!(render_size.state.dirty, UiNodeDirtyState::Clean);
+    assert!(
+        slot_value_display(render_size).contains("12"),
+        "revert restores the saved dimensions, not the fresh edit: {}",
+        slot_value_display(render_size)
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+}
+
 // --- Harness ---------------------------------------------------------------
 
 #[test]
@@ -1222,15 +1367,19 @@ fn count_overlay_reads(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
         .count()
 }
 
-fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
-    let editor = view
-        .panes
+/// The project editor DTO from a studio snapshot.
+fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
+    view.panes
         .iter()
         .find_map(|pane| match &pane.body {
-            UiViewContent::ProjectEditor(editor) => Some(editor),
+            UiViewContent::ProjectEditor(editor) => Some(&**editor),
             _ => None,
         })
-        .expect("project editor pane");
+        .expect("project editor pane")
+}
+
+fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
+    let editor = project_editor(view);
     (editor.dirty.persisted, editor.dirty.transient)
 }
 
@@ -1240,15 +1389,11 @@ fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
 }
 
 /// Like [`find_slot`], but `None` when no row carries the address path.
+///
+/// Walks the workspace cards (the root's child panes under the flat-root
+/// model) and, for root-own slots, the project popup's `root_slots` rows.
 fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigSlot> {
-    let editor = view
-        .panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane");
+    let editor = project_editor(view);
 
     fn in_slots<'a>(slots: &'a [UiConfigSlot], path: &str) -> Option<&'a UiConfigSlot> {
         for slot in slots {
@@ -1283,15 +1428,19 @@ fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigS
         })
     }
 
-    editor.nodes.iter().find_map(|node| {
-        node.tabs
-            .iter()
-            .find_map(|tab| match &tab.body {
-                UiNodeTabBody::Sections(sections) => in_sections(sections, path),
-                _ => None,
-            })
-            .or_else(|| in_children(&node.children, path))
-    })
+    editor
+        .nodes
+        .iter()
+        .find_map(|node| {
+            node.tabs
+                .iter()
+                .find_map(|tab| match &tab.body {
+                    UiNodeTabBody::Sections(sections) => in_sections(sections, path),
+                    _ => None,
+                })
+                .or_else(|| in_children(&node.children, path))
+        })
+        .or_else(|| in_slots(&editor.root_slots, path))
 }
 
 fn slot_value_display(slot: &UiConfigSlot) -> &str {
@@ -1299,6 +1448,13 @@ fn slot_value_display(slot: &UiConfigSlot) -> &str {
         panic!("expected a value body for {}", slot.label);
     };
     &value.display
+}
+
+fn slot_editor_hint(slot: &UiConfigSlot) -> &UiSlotEditorHint {
+    let UiConfigSlotBody::Value(value) = &slot.body else {
+        panic!("expected a value body for {}", slot.label);
+    };
+    &value.editor
 }
 
 /// `ClientIo` that pumps each client message through the in-process server's

@@ -370,6 +370,28 @@ impl NodeController {
         sections
     }
 
+    /// Config and asset rows for this node's **own** slots (children
+    /// excluded), in section order (config, then assets). Feeds the project
+    /// popup's settings section for the workspace root, whose card the
+    /// flat-root workspace no longer renders.
+    pub(in crate::app::project) fn ui_config_slots(
+        &self,
+        edits: &SlotEditJoin<'_>,
+    ) -> Vec<UiConfigSlot> {
+        let mut config_slots = Vec::new();
+        let mut asset_slots = Vec::new();
+        for slot in &self.slots {
+            match slot.address().root {
+                ProjectSlotRoot::State => {}
+                ProjectSlotRoot::Def | ProjectSlotRoot::Other(_) => {
+                    slot.collect_config(edits, &mut config_slots, &mut asset_slots);
+                }
+            }
+        }
+        config_slots.extend(asset_slots);
+        config_slots
+    }
+
     fn ui_children_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,

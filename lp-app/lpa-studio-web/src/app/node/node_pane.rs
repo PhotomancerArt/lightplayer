@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord,
+    DirtySummary, UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
 };
 
 use crate::app::affordance::affordance_pane_tone;
@@ -8,7 +8,7 @@ use crate::app::layout::{PaneChrome, PaneCollapse, StudioPane};
 use crate::app::node::{
     NodeChildren, NodeDetailPopover, ProducedProducts, ProducedValues, SlotRecordEditor,
 };
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{StudioIcon, node_kind_icon};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -27,6 +27,11 @@ pub enum NodeDirtyTint {
 pub fn NodePane(
     view: UiNodeView,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// The editor-level pending-edit list, threaded to every pane's detail
+    /// popover (which filters it to its own node) and down through nested
+    /// child panes.
+    #[props(default)]
+    pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
@@ -48,6 +53,7 @@ pub fn NodePane(
     let tabs = view.tabs.clone();
     let focused = view.focused;
     let select_action = view.action.clone();
+    let select_kind = view.header.kind.clone();
     let focus_action = view.action.clone();
     let issues = view.issues.clone();
     let header_actions = view.header_actions.clone();
@@ -67,6 +73,7 @@ pub fn NodePane(
                             NodeSelectButton {
                                 action,
                                 focused,
+                                kind: select_kind,
                                 on_action,
                             }
                         }
@@ -85,7 +92,11 @@ pub fn NodePane(
                         }
                     },
                     detail: rsx! {
-                        NodeDetailPopover { header }
+                        NodeDetailPopover {
+                            header,
+                            pending_edits: pending_edits.clone(),
+                            on_action,
+                        }
                     },
                     body: rsx! {
                         if !issues.is_empty() {
@@ -104,6 +115,7 @@ pub fn NodePane(
                                             first: index == 0,
                                             focus_action: focus_action.clone(),
                                             on_action,
+                                            pending_edits: pending_edits.clone(),
                                             dirty_tint,
                                         }
                                     }
@@ -128,6 +140,7 @@ pub fn NodePane(
                 NodeChildren {
                     items: view.children.clone(),
                     on_action,
+                    pending_edits,
                     dirty_tint,
                 }
             }
@@ -146,18 +159,19 @@ pub fn NodePane(
 fn NodeSelectButton(
     action: UiAction,
     focused: bool,
+    /// The node's kind label — its glyph doubles as the select control.
+    kind: String,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let (class, icon, label) = if focused {
+    let icon = node_kind_icon(&kind);
+    let (class, label) = if focused {
         (
             "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-selection-border tw:bg-transparent tw:p-0 tw:text-strong-foreground",
-            StudioIconName::NodeSelected,
             "Node is selected; probes follow this node",
         )
     } else {
         (
             "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-accent-border tw:hover:text-accent",
-            StudioIconName::NodeSelect,
             "Select this node so probes follow it",
         )
     };
@@ -190,6 +204,10 @@ pub fn NodeSection(
     #[props(default = false)] first: bool,
     #[props(default)] focus_action: Option<UiAction>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// The editor-level pending-edit list, threaded through extracted child
+    /// sections into their nested panes' detail popovers.
+    #[props(default)]
+    pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
 ) -> Element {
     match section {
@@ -221,7 +239,12 @@ pub fn NodeSection(
         },
         UiNodeSection::Children(children) => rsx! {
             section { class: section_class("tw:bg-card tw:px-4 tw:py-4", first),
-                NodeChildren { items: children, on_action, dirty_tint }
+                NodeChildren {
+                    items: children,
+                    on_action,
+                    pending_edits,
+                    dirty_tint,
+                }
             }
         },
     }

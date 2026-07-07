@@ -1,6 +1,6 @@
 use crate::{
-    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAffordance, UiMetric, UiNodeView,
-    UiPaneAction, UiPendingEdit, UiStatusKind,
+    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAffordance, UiConfigSlot, UiMetric,
+    UiNodeView, UiPaneAction, UiPendingEdit, UiStatusKind,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -14,7 +14,14 @@ pub struct ProjectEditorView {
     pub sync: ProjectSyncSummary,
     pub stats: Vec<UiMetric>,
     pub tree: ProjectNodeTreeView,
+    /// Workspace node cards. Flat-root model (P6): the tree root itself is
+    /// never a card — its child panes are the top-level entries, and the
+    /// root's own slots live in [`Self::root_slots`].
     pub nodes: Vec<UiNodeView>,
+    /// The workspace root's own config slot rows (`name` / `format` /
+    /// `nodes` for a project root), rendered as the "Project settings"
+    /// section of the project pane's detail popup.
+    pub root_slots: Vec<UiConfigSlot>,
     /// Project-level aggregate of the per-node dirty summaries (persisted /
     /// transient / failed) driving the save affordances; derived from the
     /// same edit-state join as the per-field dirty affordances.
@@ -52,6 +59,7 @@ impl ProjectEditorView {
             stats,
             tree,
             nodes,
+            root_slots: Vec::new(),
             dirty: DirtySummary::clean(),
             pending_edits: Vec::new(),
             header_actions: Vec::new(),
@@ -62,6 +70,13 @@ impl ProjectEditorView {
     /// Attach the human-readable project name (pane title).
     pub fn with_project_name(mut self, project_name: impl Into<String>) -> Self {
         self.project_name = project_name.into();
+        self
+    }
+
+    /// Attach the workspace root's own config slot rows (project popup's
+    /// settings section).
+    pub fn with_root_slots(mut self, root_slots: Vec<UiConfigSlot>) -> Self {
+        self.root_slots = root_slots;
         self
     }
 

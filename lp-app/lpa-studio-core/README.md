@@ -254,7 +254,14 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   renders `ProjectEditorView.pending_edits`: one `UiPendingEdit` per edit
   entry (node label, slot path, op/value display string, phase
   persisted/live/failed, per-entry revert action), built from the same join
-  enumeration the counts sum — list and counts cannot drift.
+  enumeration the counts sum — list and counts cannot drift. Each
+  `UiPendingEdit` also carries `old_value` (the saved base as a display
+  string) so popups and the panel render `old → new`; base values are
+  server-derived and mirrored beside the overlay (`ProjectSync::
+  base_value_at`, pruned to the overlay's paths). The project root's own
+  slots ride `ProjectEditorView.root_slots` (rendered in the project pane,
+  not as a workspace card); `format`/`nodes` are `read_only_persisted`,
+  `name` stays writable.
 
 **Asset bodies** (ADR D8) extend the same model to whole files
 (`project/asset/`): `AssetEditOp::{ApplyBody, Revert}` stage

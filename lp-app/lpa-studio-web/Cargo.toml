@@ -23,7 +23,23 @@ lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 serde = { version = "1", features = ["derive"] }
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Document", "Element", "Event", "EventTarget", "History", "HtmlElement", "Location", "Window"] }
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Element",
+    "Event",
+    "EventTarget",
+    "History",
+    "HtmlElement",
+    "Location",
+    "Navigator",
+    "PointerEvent",
+    "StorageManager",
+    "Window",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+lpa-fs-opfs = { path = "../lpa-fs-opfs" }
+wasm-bindgen-futures = "0.4"
 
 [build-dependencies]
 syn = { version = "2.0", features = ["full", "parsing"] }

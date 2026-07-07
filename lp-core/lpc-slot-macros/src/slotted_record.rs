@@ -72,7 +72,7 @@ pub(crate) fn derive_record(
             access_arms.push(quote! {
                 #index => Some(#access),
             });
-            if selected_policy.is_none_or(|policy| !attr::policy_is_read_only(policy))
+            if selected_policy.is_none_or(|policy| !attr::policy_is_read_only_transient(policy))
                 && let Some(mut_access) =
                     attr::field_mut_access_tokens(&field_attr.shape, &field_ty, &field_ident)
             {

@@ -117,13 +117,32 @@ pub enum MutationCmdStatus {
 pub enum MutationEffect {
     /// The mutation was applied as sent; `changed` reports whether it changed
     /// canonical overlay state.
-    OverlayChanged { changed: bool },
+    OverlayChanged {
+        changed: bool,
+        /// Display string of the base (saved) value at the edit's path, when
+        /// the server derived one (leaf values formatted, composite subtrees
+        /// as capped compact JSON, `None` when the target is absent in the
+        /// base). Rides the ack so clients can show "old value" for their own
+        /// pending edits without a follow-up overlay read. Omitted from the
+        /// wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_display: Option<String>,
+    },
     /// A `PutSlotEdit` that was a no-op against the base artifact (assigning
     /// the base value, ensuring a base-present target, or removing a
     /// base-absent one) was normalized to removing the overlay entry at its
     /// path; `changed` reports whether an entry existed to remove (`false`:
     /// the command was a complete no-op).
-    NormalizedToRemoval { changed: bool },
+    NormalizedToRemoval {
+        changed: bool,
+        /// Display string of the base value the edit normalized back to (see
+        /// [`MutationEffect::OverlayChanged::base_display`]). The overlay
+        /// entry is gone, but the annotation lets a client label the
+        /// stale-view window ("reverted to X"). Omitted from the wire when
+        /// `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_display: Option<String>,
+    },
     /// The mutation materialized into several per-path overlay changes:
     /// either a multi-edit mutation (`MoveSlotEntry`) synthesized into
     /// per-path edits, or a structural `Remove` that normalized away and
@@ -140,6 +159,41 @@ pub enum MutationEffect {
     },
 }
 
+impl MutationEffect {
+    /// `OverlayChanged` without a base-value annotation.
+    pub fn overlay_changed(changed: bool) -> Self {
+        Self::OverlayChanged {
+            changed,
+            base_display: None,
+        }
+    }
+
+    /// `NormalizedToRemoval` without a base-value annotation.
+    pub fn normalized_to_removal(changed: bool) -> Self {
+        Self::NormalizedToRemoval {
+            changed,
+            base_display: None,
+        }
+    }
+
+    /// Attach a base-value display annotation to an `OverlayChanged` or
+    /// `NormalizedToRemoval` effect; `Materialized` is unchanged (its
+    /// annotations live per stored edit).
+    pub fn with_base_display(self, annotation: Option<String>) -> Self {
+        match self {
+            Self::OverlayChanged { changed, .. } => Self::OverlayChanged {
+                changed,
+                base_display: annotation,
+            },
+            Self::NormalizedToRemoval { changed, .. } => Self::NormalizedToRemoval {
+                changed,
+                base_display: annotation,
+            },
+            materialized @ Self::Materialized { .. } => materialized,
+        }
+    }
+}
+
 /// One stored overlay change from a materialized mutation.
 ///
 /// Produced by the move materialization and by a normalized structural
@@ -153,9 +207,38 @@ pub enum MutationEffect {
 #[serde(rename_all = "snake_case")]
 pub enum StoredSlotEdit {
     /// `edit` was stored in the artifact's slot overlay.
-    Put { edit: SlotEdit },
+    Put {
+        edit: SlotEdit,
+        /// Display string of the base (saved) value at the edit's path (see
+        /// [`MutationEffect::OverlayChanged::base_display`]). `Removed`
+        /// entries carry no annotation: they drop their overlay entry, so a
+        /// base value would have nothing pending to describe. Omitted from
+        /// the wire when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_display: Option<String>,
+    },
     /// The overlay entry at `path` (if any) was removed.
     Removed { path: SlotPath },
+}
+
+impl StoredSlotEdit {
+    /// A stored `Put` without a base-value annotation.
+    pub fn put(edit: SlotEdit) -> Self {
+        Self::Put {
+            edit,
+            base_display: None,
+        }
+    }
+
+    /// A stored `Put` carrying the base-value display annotation.
+    pub fn put_with_base_display(edit: SlotEdit, base_display: Option<String>) -> Self {
+        Self::Put { edit, base_display }
+    }
+
+    /// A removal of the overlay entry at `path`.
+    pub fn removed(path: SlotPath) -> Self {
+        Self::Removed { path }
+    }
 }
 
 /// Stable reason for a rejected overlay mutation command.

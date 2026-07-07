@@ -285,5 +285,5 @@ pub use dynamic_slot_reader::{
 };
 pub use dynamic_slot_writer::{
     SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_json_pretty,
-    write_slot_data_json_value,
+    write_slot_data_json_value, write_slot_subtree_json,
 };
