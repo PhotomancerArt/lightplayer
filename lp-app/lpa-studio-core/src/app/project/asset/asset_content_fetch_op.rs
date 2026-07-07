@@ -10,7 +10,7 @@ use crate::{
 
 /// Resolve (and cache) the effective editor content for `artifact` —
 /// dispatched by the editor tab when its view carries no resolved content
-/// yet (`UiAssetEditorTab::content == None`).
+/// yet (`UiAssetEditor::content == None`).
 ///
 /// Routed like [`crate::AssetEditOp`] against `ProjectController::NODE_ID`;
 /// the controller runs `ProjectController::asset_content`, which fetches the

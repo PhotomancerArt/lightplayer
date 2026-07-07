@@ -9,9 +9,9 @@ use crate::{
     ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
     ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
     ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction,
-    UiAssetEditorTab, UiConfigSlotBody, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab,
-    UiNodeTabBody, UiNodeView, UiPaneAction, UiProductPreview, UiProductRef,
-    UiProductTrackingState, UiSlotAsset, UiStatus,
+    UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeHeader, UiNodeSection,
+    UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview, UiProductRef, UiProductTrackingState,
+    UiSlotAsset, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -170,15 +170,17 @@ impl NodeController {
     /// (each carrying its subtree summary), and the header summary merges the
     /// node's own slot summaries with the children's — no second traversal.
     ///
-    /// `asset_editor` resolves the node's editable text asset (if any) into
-    /// the editor-tab DTO; like `product_preview` it closes over project
-    /// state the node walk has no access to (def artifacts, edit buffer,
-    /// content caches).
+    /// `asset_editor` resolves an asset slot's source into inline editor data
+    /// (`UiSlotAsset::inline_editor`); like `product_preview` it closes over
+    /// project state the node walk has no access to (def artifacts, edit
+    /// buffer, content caches). It runs for every asset slot the node
+    /// produces — nested ones included — so an editor appears wherever an
+    /// editable asset does.
     pub(in crate::app::project) fn ui_node_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
-        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditorTab>,
+        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
     ) -> UiNodeView {
         let children = self.ui_children_with_product_previews(product_preview, edits, asset_editor);
         let dirty = self.own_slots_dirty_summary(edits)
@@ -194,13 +196,9 @@ impl NodeController {
         .with_status(self.ui_status())
         .with_dirty(dirty);
 
-        let sections = self.ui_sections_with_product_previews(product_preview, edits);
-        let editor = editor_tab_asset(&sections).and_then(|asset| asset_editor(self, asset));
-        let mut tabs = vec![UiNodeTab::main(sections)];
-        if let Some(editor) = editor {
-            tabs.push(UiNodeTab::new("editor", UiNodeTabBody::AssetEditor(editor)));
-        }
-        let mut view = UiNodeView::new(header, tabs)
+        let mut sections = self.ui_sections_with_product_previews(product_preview, edits);
+        self.embed_asset_editors(&mut sections, asset_editor);
+        let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
             .with_header_actions(node_header_actions(&self.address, &dirty))
             .with_children(children);
@@ -376,7 +374,7 @@ impl NodeController {
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
-        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditorTab>,
+        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -391,8 +389,7 @@ impl NodeController {
                 view.focused = child.state.focused;
                 view.action = Some(node_focus_action(child));
                 view.sections = child.ui_sections_with_product_previews(product_preview, edits);
-                view.editor =
-                    editor_tab_asset(&view.sections).and_then(|asset| asset_editor(child, asset));
+                child.embed_asset_editors(&mut view.sections, asset_editor);
                 view.children =
                     child.ui_children_with_product_previews(product_preview, edits, asset_editor);
                 view.dirty = child.own_slots_dirty_summary(edits)
@@ -445,6 +442,52 @@ impl NodeController {
             ProjectProductSubscriptionIntent::Unsubscribed => UiProductTrackingState::Paused,
         }
     }
+
+    /// Fill inline editor data into every editable asset slot in `sections`,
+    /// nested slots included, so an editor appears wherever an editable asset
+    /// does. The resolver keys on this node (for the def artifact and status)
+    /// plus the asset; inline-content assets keep their read-only body (they
+    /// are values, not file references, so there is no artifact to edit).
+    fn embed_asset_editors(
+        &self,
+        sections: &mut [UiNodeSection],
+        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
+    ) {
+        let resolve = |asset: &UiSlotAsset| asset_editor(self, asset);
+        for section in sections {
+            match section {
+                UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => {
+                    embed_asset_editors_in_slots(slots, &resolve);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Recursively set `inline_editor` on every file-backed, editor-supporting
+/// asset slot (descending into record fields for nested assets).
+fn embed_asset_editors_in_slots(
+    slots: &mut [UiConfigSlot],
+    resolve: &impl Fn(&UiSlotAsset) -> Option<UiAssetEditor>,
+) {
+    for slot in slots {
+        match &mut slot.body {
+            UiConfigSlotBody::Asset(asset) => {
+                if asset.inline_editor.is_none()
+                    && asset.editor.supports_editor()
+                    && asset.content.is_none()
+                    && let Some(editor) = resolve(asset)
+                {
+                    asset.inline_editor = Some(editor);
+                }
+            }
+            UiConfigSlotBody::Record(record) => {
+                embed_asset_editors_in_slots(&mut record.fields, resolve);
+            }
+            UiConfigSlotBody::Empty | UiConfigSlotBody::Value(_) => {}
+        }
+    }
 }
 
 /// Contextual node-header actions (pane grammar actions slot, M3 UX gate
@@ -471,27 +514,6 @@ fn node_focus_action(node: &NodeController) -> UiAction {
     )
     .with_label(format!("Focus {}", node.label()))
     .with_summary(format!("Focus node {}.", node.address()))
-}
-
-/// The node's editor-tab candidate: the first asset slot row whose kind
-/// passes the editor-tab gate and whose source is a file reference (inline
-/// assets carry their content on the row and have no artifact to edit).
-/// Scanning the just-built sections keeps the tab keyed to exactly what the
-/// asset rows show.
-fn editor_tab_asset(sections: &[UiNodeSection]) -> Option<&UiSlotAsset> {
-    sections.iter().find_map(|section| {
-        let UiNodeSection::AssetSlots(slots) = section else {
-            return None;
-        };
-        slots.iter().find_map(|slot| match &slot.body {
-            UiConfigSlotBody::Asset(asset)
-                if asset.editor.supports_editor_tab() && asset.content.is_none() =>
-            {
-                Some(asset)
-            }
-            _ => None,
-        })
-    })
 }
 
 enum RootSlotApply<'a> {

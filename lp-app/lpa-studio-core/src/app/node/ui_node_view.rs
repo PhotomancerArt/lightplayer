@@ -66,7 +66,7 @@ impl UiNodeView {
     pub fn has_sections(&self) -> bool {
         self.tabs.iter().any(|tab| match &tab.body {
             UiNodeTabBody::Sections(sections) => sections.iter().any(|section| !section.is_empty()),
-            UiNodeTabBody::Text { .. } | UiNodeTabBody::AssetEditor(_) => false,
+            UiNodeTabBody::Text { .. } => false,
         })
     }
 

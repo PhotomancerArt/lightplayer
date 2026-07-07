@@ -17,7 +17,7 @@ use crate::{
     ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
     StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
-    UiAssetContentBody, UiAssetEditorTab, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
     UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
     UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiSlotAsset, UiStatus,
     UiViewContent, UxUpdateSink,
@@ -127,7 +127,7 @@ impl ProjectController {
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
-            |node: &NodeController, asset: &UiSlotAsset| self.asset_editor_tab(node, asset);
+            |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
         let edits = self.slot_edit_join();
         self.root_nodes
             .iter()
@@ -144,11 +144,7 @@ impl ProjectController {
     /// exactly like the server resolves def asset references
     /// (`lpc_model::resolve_artifact_specifier`), so Apply targets the same
     /// artifact the engine reads.
-    fn asset_editor_tab(
-        &self,
-        node: &NodeController,
-        asset: &UiSlotAsset,
-    ) -> Option<UiAssetEditorTab> {
+    fn asset_editor(&self, node: &NodeController, asset: &UiSlotAsset) -> Option<UiAssetEditor> {
         let def_artifact = self.def_artifacts.get(&node.target().node_id)?;
         let path = resolve_artifact_specifier(
             def_artifact.file_path().as_path(),
@@ -173,7 +169,7 @@ impl ProjectController {
             }
             _ => None,
         };
-        Some(UiAssetEditorTab {
+        Some(UiAssetEditor {
             content: self.asset_content_cached(&artifact),
             artifact,
             kind: asset.editor,
@@ -5830,44 +5826,63 @@ mod tests {
         (project, client, sent)
     }
 
-    fn editor_tab(node: &crate::UiNodeView) -> Option<&crate::UiAssetEditorTab> {
+    /// Find the inline editor embedded on the first editable asset slot in a
+    /// node's sections (recursing records for nested assets) — the inline
+    /// replacement for the old node-pane editor tab.
+    fn node_asset_editor(node: &crate::UiNodeView) -> Option<&crate::UiAssetEditor> {
         node.tabs.iter().find_map(|tab| match &tab.body {
-            UiNodeTabBody::AssetEditor(editor) => Some(editor),
+            UiNodeTabBody::Sections(sections) => find_asset_editor(sections),
+            _ => None,
+        })
+    }
+
+    fn find_asset_editor(sections: &[crate::UiNodeSection]) -> Option<&crate::UiAssetEditor> {
+        fn in_slots(slots: &[crate::UiConfigSlot]) -> Option<&crate::UiAssetEditor> {
+            slots.iter().find_map(|slot| match &slot.body {
+                crate::UiConfigSlotBody::Asset(asset) => asset.inline_editor.as_ref(),
+                crate::UiConfigSlotBody::Record(record) => in_slots(&record.fields),
+                _ => None,
+            })
+        }
+        sections.iter().find_map(|section| match section {
+            crate::UiNodeSection::AssetSlots(slots) | crate::UiNodeSection::ConfigSlots(slots) => {
+                in_slots(slots)
+            }
             _ => None,
         })
     }
 
     #[test]
-    fn editor_tab_projects_file_backed_glsl_assets() {
+    fn inline_editor_projects_file_backed_glsl_assets() {
         let (mut project, mut client, _sent) =
             glsl_editor_project(vec![fs_read_response(1, "/shader.glsl", b"base body")]);
 
-        // Before any fetch: the tab exists with the resolved artifact and no
-        // content (the web dispatches the fetch op when it sees `None`).
+        // Before any fetch: the asset slot carries an inline editor with the
+        // resolved artifact and no content (the web dispatches the fetch op
+        // when it sees `None`). The node keeps its single main tab.
         let nodes = project.ui_nodes();
-        assert_eq!(nodes[0].tabs.len(), 2);
-        assert_eq!(nodes[0].tabs[1].label, "editor");
-        let tab = editor_tab(&nodes[0]).expect("editor tab present");
-        assert_eq!(tab.artifact, glsl_artifact());
-        assert_eq!(tab.kind, UiAssetEditorKind::Glsl);
-        assert_eq!(tab.source, "shader.glsl");
-        assert_eq!(tab.content, None);
-        assert!(!tab.in_flight);
-        assert_eq!(tab.failure, None);
+        assert_eq!(nodes[0].tabs.len(), 1);
+        let editor = node_asset_editor(&nodes[0]).expect("inline editor present");
+        assert_eq!(editor.artifact, glsl_artifact());
+        assert_eq!(editor.kind, UiAssetEditorKind::Glsl);
+        assert_eq!(editor.source, "shader.glsl");
+        assert_eq!(editor.content, None);
+        assert!(!editor.in_flight);
+        assert_eq!(editor.failure, None);
 
         // The fetch caches the base body; the next projection embeds it
         // clean, without further IO.
         block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
         let nodes = project.ui_nodes();
-        let content = editor_tab(&nodes[0])
-            .and_then(|tab| tab.content.as_ref())
+        let content = node_asset_editor(&nodes[0])
+            .and_then(|editor| editor.content.as_ref())
             .expect("content resolved");
         assert_eq!(content.text(), Some("base body"));
         assert!(!content.dirty);
     }
 
     #[test]
-    fn editor_tab_reflects_overlay_content_and_failed_applies() {
+    fn inline_editor_reflects_overlay_content_and_failed_applies() {
         let (mut project, mut client, _sent) = glsl_editor_project(vec![mutation_response(
             1,
             vec![MutationCmdResult::rejected(
@@ -5884,29 +5899,29 @@ mod tests {
         // Applied (dirty): the overlay body is the effective content and the
         // revision stamps the mirror generation (the editor's resync marker).
         let nodes = project.ui_nodes();
-        let tab = editor_tab(&nodes[0]).expect("editor tab present");
-        let content = tab.content.as_ref().expect("overlay content resolves");
+        let editor = node_asset_editor(&nodes[0]).expect("inline editor present");
+        let content = editor.content.as_ref().expect("overlay content resolves");
         assert_eq!(content.text(), Some("live body"));
         assert!(content.dirty);
         assert_eq!(content.revision, 3);
-        assert_eq!(tab.failure, None);
+        assert_eq!(editor.failure, None);
 
-        // A rejected apply parks Failed: the tab carries the reason and the
+        // A rejected apply parks Failed: the editor carries the reason and the
         // parked bytes stay visible as content (rubber-band protection).
         block_on_ready(project.apply_asset_body(&mut client, glsl_artifact(), b"broken".to_vec()))
             .unwrap();
         let nodes = project.ui_nodes();
-        let tab = editor_tab(&nodes[0]).expect("editor tab present");
-        assert_eq!(tab.failure.as_deref(), Some("artifact is not editable"));
-        assert!(!tab.in_flight);
+        let editor = node_asset_editor(&nodes[0]).expect("inline editor present");
+        assert_eq!(editor.failure.as_deref(), Some("artifact is not editable"));
+        assert!(!editor.in_flight);
         assert_eq!(
-            tab.content.as_ref().and_then(|content| content.text()),
+            editor.content.as_ref().and_then(|content| content.text()),
             Some("broken")
         );
     }
 
     #[test]
-    fn editor_tab_projects_on_child_nodes() {
+    fn inline_editor_projects_on_child_nodes() {
         let (mut project, _client, _sent) = ready_project_with_scripted_client(Vec::new());
         let mut view = tree_view();
         install_asset_source_slot(&mut view, 3, Revision::new(2));
@@ -5915,34 +5930,33 @@ mod tests {
 
         let nodes = project.ui_nodes();
         let shader_child = &nodes[0].children[1];
-        let tab = shader_child.editor.as_ref().expect("child editor tab");
-        assert_eq!(tab.artifact, glsl_artifact());
+        let editor = find_asset_editor(&shader_child.sections).expect("child inline editor");
+        assert_eq!(editor.artifact, glsl_artifact());
         assert!(
-            nodes[0].children[0].editor.is_none(),
+            find_asset_editor(&nodes[0].children[0].sections).is_none(),
             "the clock child has no editable asset"
         );
     }
 
     #[test]
-    fn inline_and_artifactless_assets_get_no_editor_tab() {
+    fn inline_and_artifactless_assets_get_no_inline_editor() {
         // Inline GLSL (content on the row): no artifact to edit.
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
         project.apply_project_view(&view).unwrap();
-        assert_eq!(
-            project.ui_nodes()[0].tabs.len(),
-            1,
-            "inline assets keep the single main tab"
+        assert!(
+            node_asset_editor(&project.ui_nodes()[0]).is_none(),
+            "inline assets carry no artifact editor"
         );
 
         // File-referencing asset without a known def artifact: unresolvable,
-        // so the read-only row stays and no editor tab is offered.
+        // so the read-only row stays and no editor is offered.
         let (mut project, _client, _sent) = ready_project_with_scripted_client(Vec::new());
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_asset_source_slot(&mut view, 1, Revision::new(2));
         project.apply_project_view(&view).unwrap();
-        assert_eq!(project.ui_nodes()[0].tabs.len(), 1);
+        assert!(node_asset_editor(&project.ui_nodes()[0]).is_none());
     }
 
     // --- Dirty summary aggregation + header action contract tests -----------

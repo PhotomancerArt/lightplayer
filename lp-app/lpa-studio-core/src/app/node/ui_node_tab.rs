@@ -1,6 +1,6 @@
 //! Tabs for node pane bodies.
 
-use crate::{UiAssetEditorTab, UiNodeSection};
+use crate::UiNodeSection;
 
 /// A node pane tab.
 #[derive(Clone, Debug, PartialEq)]
@@ -38,8 +38,6 @@ pub enum UiNodeTabBody {
         /// Text body.
         body: String,
     },
-    /// Code editor over the node's editable text asset (the "editor" tab).
-    AssetEditor(UiAssetEditorTab),
 }
 
 impl UiNodeTabBody {
@@ -48,9 +46,6 @@ impl UiNodeTabBody {
         match self {
             Self::Sections(sections) => sections.iter().all(UiNodeSection::is_empty),
             Self::Text { body, .. } => body.is_empty(),
-            // The editor tab always renders (a loading or read-only
-            // presentation when content is unresolved).
-            Self::AssetEditor(_) => false,
         }
     }
 }

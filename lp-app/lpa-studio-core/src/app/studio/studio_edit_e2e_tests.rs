@@ -937,9 +937,10 @@ const ASSET_SHADER_V1: &str =
 const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
 const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
 
-/// Find the shader node's asset editor tab anywhere in the editor DTO tree
-/// (root node tabs or child-node projections).
-fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditorTab {
+/// Find the shader node's inline asset editor anywhere in the editor DTO
+/// tree: it rides `UiSlotAsset::inline_editor` on the node's (or a child
+/// node's) asset slot sections.
+fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
     let editor = view
         .panes
         .iter()
@@ -949,13 +950,23 @@ fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditorTab {
         })
         .expect("project editor pane");
 
-    fn in_children(children: &[crate::UiNodeChild]) -> Option<crate::UiAssetEditorTab> {
-        children.iter().find_map(|child| {
-            child
-                .editor
-                .clone()
-                .or_else(|| in_children(&child.children))
+    fn in_slots(slots: &[crate::UiConfigSlot]) -> Option<crate::UiAssetEditor> {
+        slots.iter().find_map(|slot| match &slot.body {
+            crate::UiConfigSlotBody::Asset(asset) => asset.inline_editor.clone(),
+            crate::UiConfigSlotBody::Record(record) => in_slots(&record.fields),
+            _ => None,
         })
+    }
+    fn in_sections(sections: &[UiNodeSection]) -> Option<crate::UiAssetEditor> {
+        sections.iter().find_map(|section| match section {
+            UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => in_slots(slots),
+            _ => None,
+        })
+    }
+    fn in_children(children: &[crate::UiNodeChild]) -> Option<crate::UiAssetEditor> {
+        children
+            .iter()
+            .find_map(|child| in_sections(&child.sections).or_else(|| in_children(&child.children)))
     }
 
     editor
@@ -965,12 +976,12 @@ fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditorTab {
             node.tabs
                 .iter()
                 .find_map(|tab| match &tab.body {
-                    UiNodeTabBody::AssetEditor(editor) => Some(editor.clone()),
+                    UiNodeTabBody::Sections(sections) => in_sections(sections),
                     _ => None,
                 })
                 .or_else(|| in_children(&node.children))
         })
-        .expect("shader node exposes an asset editor tab")
+        .expect("shader node exposes an inline asset editor")
 }
 
 fn asset_e2e_server() -> LpServer {

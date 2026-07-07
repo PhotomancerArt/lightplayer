@@ -8,9 +8,9 @@ use lpa_studio_core::{
 
 use crate::app::node::slot_edit_actions::slot_revert_action;
 use crate::app::node::{
-    EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton, OptionToggleField,
-    SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance,
-    slot_row_class,
+    AssetEditor, EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton,
+    OptionToggleField, SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor,
+    primary_affordance, slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -183,7 +183,7 @@ pub fn ConfigSlotRow(
                     }
                 }
                 if let Some(asset) = child_asset {
-                    AssetSlotEditor { asset }
+                    AssetSlotEditor { asset, on_action }
                 }
             }
         }
@@ -338,41 +338,26 @@ fn summary_label(count: usize, singular: &str, plural: &str) -> String {
     }
 }
 
+/// An asset slot's expanded body. File-backed editable assets render the
+/// inline [`AssetEditor`] (edit in place, output stays visible); inline,
+/// binary, or unresolvable assets keep the read-only presentation.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AssetSlotEditor(asset: lpa_studio_core::UiSlotAsset) -> Element {
-    // Minimal "open in editor" affordance: file-backed assets of an
-    // editor-tab kind get a button focusing the pane's Editor tab (through
-    // the NodePane-provided context — absent in isolated stories, where the
-    // row stays read-only). The row itself is not the editor.
-    let editor_control = (asset.editor.supports_editor_tab() && asset.content.is_none())
-        .then(try_consume_context::<crate::app::node::NodePaneActiveTab>)
-        .flatten();
+fn AssetSlotEditor(
+    asset: lpa_studio_core::UiSlotAsset,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    if let Some(editor) = asset.inline_editor.clone() {
+        return rsx! {
+            AssetEditor { editor, on_action }
+        };
+    }
 
     rsx! {
         div { class: "tw:border-t tw:border-border-muted tw:bg-page tw:px-2 tw:py-2",
             div { class: "tw:mb-1.5 tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2",
                 code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:text-subtle-foreground", "{asset.source}" }
-                div { class: "tw:flex tw:flex-none tw:items-center tw:gap-2",
-                    if let Some(control) = editor_control {
-                        button {
-                            class: "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-xs tw:text-muted-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-accent",
-                            r#type: "button",
-                            title: "Open this asset in the node's editor tab",
-                            onclick: move |event| {
-                                event.stop_propagation();
-                                let mut active = control.0;
-                                active.set(crate::app::node::NodePaneTab::Editor);
-                            },
-                            StudioIcon {
-                                name: StudioIconName::Edited,
-                                size: 12,
-                            }
-                            "Open in editor"
-                        }
-                    }
-                    span { class: "tw:flex-none tw:text-xs tw:font-bold tw:text-subtle-foreground", "{asset.editor_label()}" }
-                }
+                span { class: "tw:flex-none tw:text-xs tw:font-bold tw:text-subtle-foreground", "{asset.editor_label()}" }
             }
             if let Some(detail) = asset.detail.as_ref() {
                 p { class: "tw:m-0 tw:mb-1.5 tw:text-xs tw:text-subtle-foreground tw:break-words", "{detail}" }

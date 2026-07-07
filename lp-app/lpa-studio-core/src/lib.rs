@@ -19,7 +19,7 @@ pub use app::link::{
     SharedLinkRegistry, UiIssue,
 };
 pub use app::node::{
-    UiAssetEditorKind, UiAssetEditorTab, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody,
+    UiAssetEditor, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody,
     UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader,
     UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings,
     UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame,
