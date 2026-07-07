@@ -297,10 +297,11 @@ the component owns its DOM subtree (Dioxus never diffs inside the
 container), the `doc` prop is the external truth reconciled against the
 editor's modified state, callbacks route through signals into the Dioxus
 runtime, and the container carries `data-story-wait` until CodeMirror has
-initialized so story PNG capture waits for it. The node pane's editor tab
-(`src/app/node/asset_editor_tab.rs`) builds on it; its editor-local
-text/modified state deliberately lives in `NodePane` so the header Apply
-action can carry both.
+initialized so story PNG capture waits for it. The inline asset editor
+(`src/app/node/asset_editor.rs`) builds on it, rendered in place inside the
+asset slot row (`AssetSlotEditor` in `config_slot_row.rs`) so the output
+stays visible beside it; its text/modified state is component-local (the
+inline Apply button sits right there, so nothing is hoisted to the pane).
 
 ## Boundary
 

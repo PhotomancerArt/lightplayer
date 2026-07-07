@@ -329,6 +329,13 @@ edits are persisted-class (no transient bucket); a `.glsl` artifact that
 maps to no synced node still counts into the project dirty summary
 (`SlotEditJoin::unmapped_asset_dirty_summary`), since it must enable Save.
 
+The editor renders **inline in the asset slot row** (`UiAssetEditor` on
+`UiSlotAsset.inline_editor`, resolved per editable asset slot in the node
+walk), not as a node-pane tab: the output stays visible beside it, and any
+editable asset anywhere in the slot tree gets an editor for free (the shape
+the M3 SVG mapping work wants). An earlier node-pane-tab rendering was
+replaced (checkpoint tag `checkpoint/asset-editor-tab`).
+
 Four deliberate points:
 
 - **Unapplied editor text is client-local — the one exception to D1.** Text
