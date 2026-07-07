@@ -94,6 +94,19 @@ impl ProjectController {
         self.sync.as_ref().map(ProjectSync::summary)
     }
 
+    /// Latest binding-graph snapshot, when a consumer subscribes.
+    pub fn binding_graph(&self) -> Option<&lpc_wire::WireBindingGraph> {
+        self.sync.as_ref()?.binding_graph()
+    }
+
+    /// Toggle the binding-graph probe on project reads (bus pane visible,
+    /// binding detail open, …).
+    pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
+        if let Some(sync) = self.sync.as_mut() {
+            sync.set_binding_graph_subscribed(subscribed);
+        }
+    }
+
     /// Root node controllers in project tree order.
     pub fn root_nodes(&self) -> &[NodeController] {
         &self.root_nodes

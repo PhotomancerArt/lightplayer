@@ -3177,6 +3177,71 @@ mod tests {
     }
 
     #[test]
+    fn fyeah_sign_binding_graph_reports_full_topology() {
+        let fs = examples_fyeah_sign_fs();
+        let fs: &dyn LpFs = &fs;
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
+        let hardware = Rc::new(HardwareSystem::with_virtual_drivers(registry));
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let radio_service: Rc<dyn RadioService> = hardware.clone();
+        let mut services = EngineServices::new(TreePath::parse("/fyeah_sign.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        services.set_radio_service(Some(radio_service));
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign example");
+        let fixture = rt
+            .tree()
+            .lookup_sibling(rt.tree().root(), NodeName::parse("fixture").unwrap())
+            .expect("fixture");
+        let clock = rt
+            .tree()
+            .lookup_sibling(rt.tree().root(), NodeName::parse("clock").unwrap())
+            .expect("clock");
+
+        let (engine, project_registry) = rt.read_parts();
+        let result = engine.read_project_binding_graph_probe(
+            project_registry,
+            lpc_wire::BindingGraphProbeRequest {
+                include_values: false,
+            },
+        );
+
+        let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+            panic!("expected binding graph");
+        };
+        let channel = |name: &str| {
+            graph
+                .channels
+                .iter()
+                .find(|channel| channel.name == name)
+                .unwrap_or_else(|| panic!("channel {name} missing"))
+        };
+
+        // Two writers on trigger (button + radio), two readers (playlist +
+        // radio bridge).
+        assert!(channel("trigger").providers.len() >= 2);
+        assert!(channel("trigger").consumers.len() >= 2);
+
+        // The fixture consumes visual.out through its implicit runtime
+        // `input` slot — no def field exists, the binding index still knows.
+        let visual_consumers = &channel("visual.out").consumers;
+        assert!(visual_consumers.iter().any(|index| {
+            let binding = &graph.bindings[*index as usize];
+            binding.node == fixture
+                && binding.slot == Some(SlotPath::parse("input").expect("path"))
+                && binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && binding.origin == lpc_wire::WireBindingOrigin::Authored
+        }));
+
+        // Clock publishes time.seconds via the default (loader helper)
+        // binding — visible and tagged as default origin.
+        let time_providers = &channel("time.seconds").providers;
+        assert!(time_providers.iter().any(|index| {
+            let binding = &graph.bindings[*index as usize];
+            binding.node == clock && binding.origin == lpc_wire::WireBindingOrigin::Default
+        }));
+    }
+
+    #[test]
     fn fyeah_button_example_ticks_without_radio_trigger_cycle() {
         let fs = examples_fyeah_button_fs();
         let fs: &dyn LpFs = &fs;

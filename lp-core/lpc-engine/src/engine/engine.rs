@@ -8,10 +8,10 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lp_collection::VecSet;
 use lpc_model::{
-    ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision, SlotAccess,
-    SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment, SlotSemantics,
-    SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision, advance_revision,
-    current_revision, lookup_slot_data_and_shape,
+    ChannelName, ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision,
+    SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment,
+    SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision,
+    advance_revision, current_revision, lookup_slot_data_and_shape,
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
@@ -485,6 +485,44 @@ impl Engine {
             frame_time_seconds: time_s,
         };
         host.render_node_control(product, request, target)
+    }
+
+    /// Resolve a bus channel's current value on demand, outside the tick.
+    ///
+    /// Reuses the current frame's resolver cache so probe reads see the same
+    /// values the last tick produced (values already demanded this frame are
+    /// free; undemanded channels resolve fresh, like render probes do).
+    pub(crate) fn resolve_bus_channel_value(
+        &mut self,
+        registry: &ProjectRegistry,
+        channel: &ChannelName,
+    ) -> Result<Production, SessionResolveError> {
+        let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
+        let mut session = EngineSession::new(
+            self.revision,
+            &mut resolver,
+            ResolveTrace::new(ResolveLogLevel::Off),
+        );
+        let mut producers_ticked = VecSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
+        let radio_service = self.services.radio_service();
+        let mut host = EngineResolveHost {
+            tree: &mut self.tree,
+            registry,
+            producers_ticked: &mut producers_ticked,
+            runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
+            graphics: self.graphics.clone(),
+            time_provider,
+            button_service,
+            radio_service,
+            frame_time_seconds: time_s,
+        };
+        let result = session.resolve(&mut host, QueryKey::Bus(channel.clone()));
+        self.resolver = resolver;
+        result
     }
 
     pub(crate) fn render_control_product_probe(

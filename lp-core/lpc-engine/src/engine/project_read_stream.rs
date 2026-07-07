@@ -243,8 +243,9 @@ impl<'a> EngineProjectReadSource<'a> {
                 self.engine
                     .read_project_control_product_probe(self.registry, request),
             ),
-            ProjectProbeRequest::ExplainSlot(request) => ProjectProbeResult::ExplainSlot(
-                self.engine.read_project_explain_slot_probe(request),
+            ProjectProbeRequest::BindingGraph(request) => ProjectProbeResult::BindingGraph(
+                self.engine
+                    .read_project_binding_graph_probe(self.registry, request),
             ),
         };
         stream_probe_result(index, result, sink).await
@@ -997,18 +998,16 @@ mod tests {
         h
     }
 
-    /// A full debug read plus an optional explain-slot probe, at the given
+    /// A full debug read plus an optional binding-graph probe, at the given
     /// `since`.
     fn full_debug_with_probe(
         since: Option<Revision>,
         probe_node: Option<lpc_model::NodeId>,
     ) -> ProjectReadRequest {
         let probes = match probe_node {
-            Some(node) => vec![lpc_wire::ProjectProbeRequest::ExplainSlot(
-                lpc_wire::ExplainSlotProbeRequest {
-                    node,
-                    slot: lpc_model::SlotPath::parse("in").expect("slot path"),
-                    include_trace: false,
+            Some(_) => vec![lpc_wire::ProjectProbeRequest::BindingGraph(
+                lpc_wire::BindingGraphProbeRequest {
+                    include_values: false,
                 },
             )],
             None => Vec::new(),
