@@ -329,8 +329,17 @@
   .tw\:w-px {
     width: 1px;
   }
+  .tw\:max-w-32 {
+    max-width: calc(var(--tw-spacing) * 32);
+  }
   .tw\:max-w-40 {
     max-width: calc(var(--tw-spacing) * 40);
+  }
+  .tw\:max-w-44 {
+    max-width: calc(var(--tw-spacing) * 44);
+  }
+  .tw\:max-w-72 {
+    max-width: calc(var(--tw-spacing) * 72);
   }
   .tw\:max-w-\[320px\] {
     max-width: 320px;
@@ -358,6 +367,9 @@
   }
   .tw\:min-w-\[58px\] {
     min-width: 58px;
+  }
+  .tw\:flex-1 {
+    flex: 1;
   }
   .tw\:flex-none {
     flex: none;
@@ -1018,6 +1030,9 @@
   }
   .tw\:text-\[1\.04rem\] {
     font-size: 1.04rem;
+  }
+  .tw\:text-\[9px\] {
+    font-size: 9px;
   }
   .tw\:text-\[10px\] {
     font-size: 10px;

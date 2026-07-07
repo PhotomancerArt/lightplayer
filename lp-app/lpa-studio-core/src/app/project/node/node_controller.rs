@@ -8,9 +8,9 @@ use crate::app::project::slot::SlotEditJoin;
 use crate::{
     ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
     ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction, UiNodeChild,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview,
-    UiProductRef, UiProductTrackingState, UiStatus,
+    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction, UiConfigSlot,
+    UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction,
+    UiProductPreview, UiProductRef, UiProductTrackingState, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -160,7 +160,7 @@ impl NodeController {
 
     /// Project this controller and its slot controllers into the node-pane DTO.
     pub fn ui_node(&self) -> UiNodeView {
-        self.ui_node_with_product_previews(&|_| None, &SlotEditJoin::empty())
+        self.ui_node_with_product_previews(&|_| None, &SlotEditJoin::empty(), &|_| Vec::new())
     }
 
     /// Project this controller into a node-pane DTO with product preview state.
@@ -172,8 +172,9 @@ impl NodeController {
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
     ) -> UiNodeView {
-        let children = self.ui_children_with_product_previews(product_preview, edits);
+        let children = self.ui_children_with_product_previews(product_preview, edits, extra_config);
         let dirty = self.own_slots_dirty_summary(edits)
             + children
                 .iter()
@@ -189,9 +190,11 @@ impl NodeController {
 
         let mut view = UiNodeView::new(
             header,
-            vec![UiNodeTab::main(
-                self.ui_sections_with_product_previews(product_preview, edits),
-            )],
+            vec![UiNodeTab::main(self.ui_sections_with_product_previews(
+                product_preview,
+                edits,
+                extra_config,
+            ))],
         )
         .with_node_id(self.address.to_string())
         .with_header_actions(node_header_actions(&self.address, &dirty))
@@ -201,6 +204,12 @@ impl NodeController {
         view.collapsed = self.state.collapsed;
         view.issues = self.issues.clone();
         view
+    }
+
+    /// True when any of this node's slot roots carries a top-level field
+    /// named `name` (used to detect wiring with no backing row).
+    pub(in crate::app::project) fn has_slot_root_field(&self, name: &str) -> bool {
+        self.slots.iter().any(|slot| slot.has_root_field(name))
     }
 
     /// Find a descendant node controller by stable address.
@@ -331,6 +340,7 @@ impl NodeController {
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
     ) -> Vec<UiNodeSection> {
         let mut products = Vec::new();
         let mut produced_values = Vec::new();
@@ -347,6 +357,9 @@ impl NodeController {
                 }
             }
         }
+        // Binding-derived rows: wiring on slots with no backing row —
+        // implicit runtime consumed slots like `fixture.input` (roadmap M3).
+        config_slots.extend(extra_config(self.target.node_id));
 
         let mut sections = Vec::new();
         if !products.is_empty() {
@@ -384,6 +397,7 @@ impl NodeController {
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -397,8 +411,10 @@ impl NodeController {
                 view.summary = child.status.detail.clone();
                 view.focused = child.state.focused;
                 view.action = Some(node_focus_action(child));
-                view.sections = child.ui_sections_with_product_previews(product_preview, edits);
-                view.children = child.ui_children_with_product_previews(product_preview, edits);
+                view.sections =
+                    child.ui_sections_with_product_previews(product_preview, edits, extra_config);
+                view.children =
+                    child.ui_children_with_product_previews(product_preview, edits, extra_config);
                 view.dirty = child.own_slots_dirty_summary(edits)
                     + view
                         .children

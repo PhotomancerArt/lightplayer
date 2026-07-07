@@ -227,6 +227,13 @@ impl SlotController {
         }
     }
 
+    /// True when this root has a top-level field child named `name`.
+    pub(in crate::app::project) fn has_root_field(&self, name: &str) -> bool {
+        self.children
+            .iter()
+            .any(|child| child.root_field_name() == Some(name))
+    }
+
     /// This slot's field name when it is a root-level field (`def.time`).
     fn root_field_name(&self) -> Option<&str> {
         match self.address.path.segments() {

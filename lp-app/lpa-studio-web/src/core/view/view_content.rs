@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiViewContent};
 
-use crate::app::ProjectPane;
+use crate::app::{BusPaneBody, ProjectPane};
 use crate::core::{ActivityView, IssueView, MetricGrid, ProgressBar, StepsView};
 
 #[component]
@@ -42,6 +42,12 @@ pub fn ViewContent(
             ProjectPane {
                 view: *editor,
                 running,
+                on_action,
+            }
+        },
+        UiViewContent::Bus(bus) => rsx! {
+            BusPaneBody {
+                view: *bus,
                 on_action,
             }
         },

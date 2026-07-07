@@ -287,6 +287,12 @@ impl ProjectSync {
         self.binding_graph.as_ref()
     }
 
+    /// Inject a binding-graph snapshot directly (test fixture path).
+    #[cfg(test)]
+    pub(crate) fn set_binding_graph_for_test(&mut self, graph: WireBindingGraph) {
+        self.binding_graph = Some(graph);
+    }
+
     /// Toggle the binding-graph probe on project reads. Unsubscribing drops
     /// the cached snapshot so stale topology never renders.
     pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {

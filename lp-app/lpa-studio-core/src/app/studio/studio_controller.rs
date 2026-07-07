@@ -16,8 +16,8 @@ use crate::{
     ConnectedLink, Controller, ControllerContext, DeviceController, DeviceOp, LinkOpenOutcome,
     NodeRevertOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
     ProjectRefreshOutcome, ProjectState, ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction,
-    UiActions, UiActivityView, UiError, UiLogEntry, UiLogLevel, UiNotice, UiResult, UiStatus,
-    UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    UiActions, UiActivityView, UiError, UiLogEntry, UiLogLevel, UiNotice, UiPaneView, UiResult,
+    UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
@@ -77,12 +77,35 @@ impl StudioController {
         let panes = if self.project_is_loaded() {
             vec![
                 self.project.view(self.device.has_lightplayer_state()),
+                self.bus_pane(),
                 device_view,
             ]
         } else {
             vec![device_view]
         };
         UiStudioView::new(panes, self.logs.to_vec())
+    }
+
+    /// The bus pane: a derived view over the binding-graph snapshot.
+    ///
+    /// Temporary placement (roadmap M3): rides the main column under the
+    /// Project pane; the pane's final home is an open UX question.
+    fn bus_pane(&self) -> UiPaneView {
+        let (status, view) = match self.project.ui_bus_view() {
+            Some(view) if !view.channels.is_empty() => (
+                UiStatus::good(format!("{} channels", view.channels.len())),
+                view,
+            ),
+            Some(view) => (UiStatus::neutral("No channels"), view),
+            None => (UiStatus::working("Reading"), crate::UiBusView::empty()),
+        };
+        UiPaneView::new(
+            "bus",
+            "Bus",
+            status,
+            UiViewContent::Bus(Box::new(view)),
+            Vec::new(),
+        )
     }
 
     /// The current project revision, or `None` before any sync.
@@ -1062,6 +1085,12 @@ fn body_actions(body: &UiViewContent) -> Vec<UiAction> {
             .iter()
             .flat_map(project_tree_item_actions)
             .collect(),
+        UiViewContent::Bus(bus) => bus
+            .channels
+            .iter()
+            .flat_map(|channel| channel.writers.iter().chain(&channel.readers))
+            .filter_map(|site| site.focus.clone())
+            .collect(),
     }
 }
 
@@ -1310,9 +1339,10 @@ mod tests {
         let view = studio.view();
         let actions = view_actions(&view);
 
-        assert_eq!(view.panes.len(), 2);
+        assert_eq!(view.panes.len(), 3);
         assert_eq!(view.panes[0].node_id.as_str(), ProjectController::NODE_ID);
-        assert_eq!(view.panes[1].node_id.as_str(), DeviceController::NODE_ID);
+        assert_eq!(view.panes[1].node_id.as_str(), "bus");
+        assert_eq!(view.panes[2].node_id.as_str(), DeviceController::NODE_ID);
         assert_eq!(
             device_section_ids(&view),
             vec![

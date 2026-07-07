@@ -99,6 +99,57 @@ impl ProjectController {
         self.sync.as_ref()?.binding_graph()
     }
 
+    /// Project the binding-graph snapshot into the bus pane view.
+    ///
+    /// `None` before the first snapshot arrives; the pane shows its loading/
+    /// empty state. Node labels and focus actions come from the same node
+    /// controllers the project pane renders, so clicking a site lands on
+    /// exactly that node (D7 linked navigation).
+    pub fn ui_bus_view(&self) -> Option<crate::UiBusView> {
+        let graph = self.binding_graph()?;
+        let site = |index: &u32| -> Option<crate::UiBusSiteView> {
+            let binding = graph.bindings.get(*index as usize)?;
+            let node = self.node_by_runtime_id(binding.node);
+            Some(crate::UiBusSiteView {
+                node_label: node
+                    .map(|node| node.label().to_string())
+                    .unwrap_or_else(|| format!("node {}", binding.node.0)),
+                slot: binding.slot.as_ref().map(|slot| format!("{slot}")),
+                default_origin: binding.origin == lpc_wire::WireBindingOrigin::Default,
+                focus: node.map(node_focus_action),
+            })
+        };
+        let channels = graph
+            .channels
+            .iter()
+            .map(|channel| crate::UiBusChannelView {
+                name: channel.name.clone(),
+                kind: channel.kind.map(|kind| format!("{kind:?}")),
+                value: channel
+                    .value
+                    .as_ref()
+                    .and_then(|value| value.value.as_ref())
+                    .map(format_lp_value),
+                value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
+                primary_visual: channel.name == "visual.out",
+                writers: channel.providers.iter().filter_map(site).collect(),
+                readers: channel.consumers.iter().filter_map(site).collect(),
+            })
+            .collect();
+        Some(crate::UiBusView { channels })
+    }
+
+    /// Find the node controller currently carrying a runtime node id.
+    fn node_by_runtime_id(&self, id: lpc_model::NodeId) -> Option<&NodeController> {
+        fn walk(node: &NodeController, id: lpc_model::NodeId) -> Option<&NodeController> {
+            if node.target().node_id == id {
+                return Some(node);
+            }
+            node.children().iter().find_map(|child| walk(child, id))
+        }
+        self.root_nodes.iter().find_map(|node| walk(node, id))
+    }
+
     /// Toggle the binding-graph probe on project reads (bus pane visible,
     /// binding detail open, …).
     pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
@@ -117,10 +168,77 @@ impl ProjectController {
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let edits = self.slot_edit_join();
+        let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         self.root_nodes
             .iter()
-            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits))
+            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits, &extra_config))
             .collect()
+    }
+
+    /// Read-only rows for wiring with no backing slot row: effective
+    /// bindings (binding-graph snapshot) anchored to slots the node's roots
+    /// do not carry — implicit runtime consumed slots like `fixture.input`.
+    /// A node's visible surface is its authored slots, its runtime state
+    /// slots, and what it is wired to (roadmap M3).
+    fn binding_derived_config_slots(&self, node_id: NodeId) -> Vec<crate::UiConfigSlot> {
+        let Some(graph) = self.binding_graph() else {
+            return Vec::new();
+        };
+        let Some(node) = self.node_by_runtime_id(node_id) else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        for binding in graph
+            .bindings
+            .iter()
+            .filter(|binding| binding.node == node_id)
+        {
+            let Some(slot) = binding.slot.as_ref() else {
+                continue;
+            };
+            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+                continue;
+            };
+            let name = name.as_str();
+            if node.has_slot_root_field(name) {
+                continue;
+            }
+            let endpoint = self.ui_binding_endpoint(&binding.endpoint);
+            let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
+                .with_description("Runtime slot wired by binding; it has no authored value here.")
+                .with_state(crate::UiSlotFieldState::readonly());
+            row = match binding.direction {
+                lpc_wire::WireBindingDirection::Consumes => {
+                    row.with_source(crate::UiSlotSourceState::Bound(endpoint))
+                }
+                lpc_wire::WireBindingDirection::Publishes => row.with_publish(endpoint),
+            };
+            rows.push(row);
+        }
+        rows
+    }
+
+    /// Display endpoint for a wire binding endpoint, resolving node labels
+    /// from the controllers when the endpoint names another node.
+    fn ui_binding_endpoint(
+        &self,
+        endpoint: &lpc_wire::WireBindingEndpoint,
+    ) -> crate::UiBindingEndpoint {
+        match endpoint {
+            lpc_wire::WireBindingEndpoint::Bus { channel } => {
+                crate::UiBindingEndpoint::new(format!("bus#{channel}"))
+            }
+            lpc_wire::WireBindingEndpoint::NodeSlot { node, slot } => {
+                let label = self
+                    .node_by_runtime_id(*node)
+                    .map(|node| node.label().to_string())
+                    .unwrap_or_else(|| format!("node {}", node.0));
+                crate::UiBindingEndpoint::new(format!("{label}#{slot}"))
+            }
+            lpc_wire::WireBindingEndpoint::Literal { value } => {
+                crate::UiBindingEndpoint::new(format_lp_value(value)).with_detail("literal value")
+            }
+        }
     }
 
     /// Project-level aggregate [`DirtySummary`], derived per node from the
@@ -488,7 +606,12 @@ impl ProjectController {
             handle_id,
             inventory,
         };
-        self.sync = Some(ProjectSync::new());
+        // The bus pane ships with every loaded project, so its probe rides
+        // along from the first read (unsubscribing stays available for
+        // consumers without the pane).
+        let mut sync = ProjectSync::new();
+        sync.set_binding_graph_subscribed(true);
+        self.sync = Some(sync);
         self.root_nodes.clear();
     }
 
@@ -1574,6 +1697,15 @@ fn count_nodes(node: &NodeController) -> usize {
     1 + node.children().iter().map(count_nodes).sum::<usize>()
 }
 
+/// Humanize a slot field name for display (`entry_time` → `Entry time`).
+fn human_field_label(name: &str) -> String {
+    let mut label = name.replace('_', " ");
+    if let Some(first) = label.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    label
+}
+
 fn node_focus_action(node: &NodeController) -> UiAction {
     UiAction::from_op(
         ProjectEditorTarget::addressed_node(node.target().clone()).node_id(),
@@ -2453,6 +2585,129 @@ mod tests {
     }
 
     #[test]
+    fn ui_bus_view_projects_channels_with_labels_and_focus() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![
+                lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("input").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Consumes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        channel: "visual.out".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Authored,
+                    priority: 0,
+                    kind: lpc_model::Kind::Color,
+                },
+                lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("output").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Publishes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        channel: "visual.out".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Default,
+                    priority: -1000,
+                    kind: lpc_model::Kind::Color,
+                },
+            ],
+            channels: vec![lpc_wire::WireBusChannel {
+                name: "visual.out".to_string(),
+                kind: Some(lpc_model::Kind::Color),
+                providers: vec![1],
+                consumers: vec![0],
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::F32(0.5)),
+                    error: None,
+                }),
+            }],
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+
+        let bus = project.ui_bus_view().expect("bus view");
+        assert_eq!(bus.channels.len(), 1);
+        let channel = &bus.channels[0];
+        assert_eq!(channel.name, "visual.out");
+        assert!(channel.primary_visual);
+        assert_eq!(channel.value.as_deref(), Some("0.5"));
+        assert_eq!(channel.writers.len(), 1);
+        assert_eq!(channel.readers.len(), 1);
+        assert!(channel.writers[0].default_origin);
+        assert!(!channel.readers[0].default_origin);
+        assert_eq!(channel.readers[0].slot.as_deref(), Some("input"));
+        // Sites resolve to the node controller's label and carry a focus
+        // action (D7 linked navigation).
+        assert_eq!(channel.readers[0].node_label, "Orbit");
+        assert!(channel.readers[0].focus.is_some());
+    }
+
+    #[test]
+    fn binding_derived_rows_surface_wiring_without_backing_slots() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let binding = |slot: &str,
+                       direction: lpc_wire::WireBindingDirection|
+         -> lpc_wire::WireEffectiveBinding {
+            lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse(slot).unwrap()),
+                direction,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: "visual.out".to_string(),
+                },
+                origin: lpc_wire::WireBindingOrigin::Authored,
+                priority: 0,
+                kind: lpc_model::Kind::Color,
+            }
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: vec![
+                    // No backing row: an implicit runtime consumed slot.
+                    binding("wired_in", lpc_wire::WireBindingDirection::Consumes),
+                    // Backing row exists: must not synthesize a duplicate.
+                    binding("brightness", lpc_wire::WireBindingDirection::Consumes),
+                ],
+                channels: Vec::new(),
+            });
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let labels: Vec<&str> = config.iter().map(|slot| slot.label.as_str()).collect();
+        assert_eq!(labels, vec!["Input", "Brightness", "Wired in"]);
+
+        let wired = config.last().unwrap();
+        assert!(!wired.state.editable);
+        let UiSlotSourceState::Bound(endpoint) = &wired.source else {
+            panic!("expected wired row to be bound, got {:?}", wired.source);
+        };
+        assert_eq!(endpoint.label, "bus#visual.out");
+    }
+
+    #[test]
     fn binding_removal_clears_bound_state_on_refresh() {
         let node = node_address("/demo.project/orbit.shader");
         let time = ProjectSlotAddress::new(
@@ -2539,14 +2794,19 @@ mod tests {
             .refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
         assert_eq!(
             request.probes,
-            vec![ProjectProbeRequest::RenderProduct(
-                RenderProductProbeRequest {
+            vec![
+                ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
                     product,
                     width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
                     height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
-                },
-            )]
+                }),
+                // The bus pane's binding-graph probe rides along on every
+                // loaded-project read.
+                ProjectProbeRequest::BindingGraph(lpc_wire::BindingGraphProbeRequest {
+                    include_values: true,
+                }),
+            ]
         );
         project
             .sync_mut()

@@ -12,6 +12,7 @@ pub mod controller;
 pub mod core;
 
 pub use self::core::status::UiStatusKind;
+pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{DeviceController, DeviceOp, DeviceSnapshot};
 pub use app::link::{
     ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkController, LinkManagementOutcome,
