@@ -2,8 +2,8 @@
 
 use crate::{
     ProjectSlotAddress, UiBindingEndpoint, UiNodeDirtyState, UiSlotAffordance, UiSlotAspect,
-    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotFieldState, UiSlotRecord, UiSlotShape,
-    UiSlotShapeField, UiSlotSourceState, UiSlotValue,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotFieldState,
+    UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotValue,
 };
 
 /// The renderable body of a config slot row.
@@ -54,6 +54,23 @@ pub struct UiConfigSlot {
     /// Stable slot address for dispatching edits (`SlotEditOp`) from field
     /// components. `None` for synthetic rows not backed by a project slot.
     pub address: Option<ProjectSlotAddress>,
+    /// Address of this row's **own** pending/overlay edit entry, when one
+    /// exists. The row-level Revert/Reset affordance targets exactly this
+    /// address; a composite row that is only prefix-dirty (edits strictly
+    /// under it) carries `None` and offers no row revert — per-entry revert
+    /// for those lives in the save panel. For a present option row (whose
+    /// interior value renders inline) this may be the interior `.some`
+    /// address, and for an enum row (whose variant-switch entry is stored at
+    /// the variant child path) the entry-carrying variant child address,
+    /// rather than [`Self::address`].
+    pub edit_entry_address: Option<ProjectSlotAddress>,
+    /// Display string of the saved (base) value this row's **own** edit entry
+    /// replaces (the entry at [`Self::edit_entry_address`]), from the overlay
+    /// mirror's base-value map. Feeds the detail popup's edited section
+    /// ("Was …"). `None` when the row is clean, the base holds nothing at
+    /// the entry's path, or the mirror has no annotation yet (buffered
+    /// edits) — the popup degrades to the state row alone.
+    pub old_value: Option<String>,
     /// Human-readable field label.
     pub label: String,
     /// Optional explanatory copy for info popovers and docs.
@@ -62,6 +79,8 @@ pub struct UiConfigSlot {
     pub detail: Option<String>,
     /// Optional inclusion state when this row represents an `OptionSlot`.
     pub optionality: Option<UiSlotOptionality>,
+    /// Structural gesture facts when this row is a map or enum composite.
+    pub composite: Option<UiSlotComposite>,
     /// Whether the visible value is direct, bound, or unset.
     pub source: UiSlotSourceState,
     /// Value or record body for the row.
@@ -108,10 +127,13 @@ impl UiConfigSlot {
         Self {
             key: key.into(),
             address: None,
+            edit_entry_address: None,
+            old_value: None,
             label: label.into(),
             description: None,
             detail: None,
             optionality: None,
+            composite: None,
             source: UiSlotSourceState::Direct,
             body,
             state: UiSlotFieldState::editable(),
@@ -123,6 +145,19 @@ impl UiConfigSlot {
     /// Attach the stable slot address edits should target.
     pub fn with_address(mut self, address: ProjectSlotAddress) -> Self {
         self.address = Some(address);
+        self
+    }
+
+    /// Attach the address of the row's own edit entry (the row-level
+    /// Revert/Reset target).
+    pub fn with_edit_entry_address(mut self, address: ProjectSlotAddress) -> Self {
+        self.edit_entry_address = Some(address);
+        self
+    }
+
+    /// Attach the saved (base) value display the row's own edit replaces.
+    pub fn with_old_value(mut self, old_value: impl Into<String>) -> Self {
+        self.old_value = Some(old_value.into());
         self
     }
 
@@ -141,6 +176,12 @@ impl UiConfigSlot {
     /// Set optional inclusion metadata.
     pub fn with_optionality(mut self, optionality: UiSlotOptionality) -> Self {
         self.optionality = Some(optionality);
+        self
+    }
+
+    /// Set structural gesture facts for a map or enum composite row.
+    pub fn with_composite(mut self, composite: UiSlotComposite) -> Self {
+        self.composite = Some(composite);
         self
     }
 
@@ -200,7 +241,7 @@ fn default_aspects(slot: &UiConfigSlot) -> Vec<UiSlotAspect> {
     }
     aspects.extend([
         validation_aspect(slot),
-        edit_state_aspect(&slot.state),
+        edit_state_aspect(&slot.state, slot.old_value.as_deref()),
         binding_aspect(&slot.source),
     ]);
     aspects
@@ -235,10 +276,16 @@ fn validation_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
     aspect
 }
 
-fn edit_state_aspect(state: &UiSlotFieldState) -> UiSlotAspect {
-    match state.dirty {
-        UiNodeDirtyState::Clean => UiSlotAspect::new(UiSlotAspectKind::EditState, "Edit state")
-            .with_row(UiSlotAspectRow::new("No changes", "")),
+/// The edit-state popup section. Touched states additionally carry the saved
+/// (base) value the edit replaces as a "Was" row when the mirror knows it —
+/// the old-value half of the edited treatment (the in-section revert is the
+/// web side's).
+fn edit_state_aspect(state: &UiSlotFieldState, old_value: Option<&str>) -> UiSlotAspect {
+    let aspect = match state.dirty {
+        UiNodeDirtyState::Clean => {
+            return UiSlotAspect::new(UiSlotAspectKind::EditState, "Edit state")
+                .with_row(UiSlotAspectRow::new("No changes", ""));
+        }
         UiNodeDirtyState::Dirty => UiSlotAspect::new(UiSlotAspectKind::EditState, "Edit state")
             .with_row(UiSlotAspectRow::new("Edited", "Pending local change."))
             .with_affordance(UiSlotAffordance::Edited),
@@ -251,6 +298,10 @@ fn edit_state_aspect(state: &UiSlotFieldState) -> UiSlotAspect {
                 "The edited value is still preserved.",
             ))
             .with_affordance(UiSlotAffordance::Error),
+    };
+    match old_value {
+        Some(old_value) => aspect.with_row(UiSlotAspectRow::new("Was", old_value)),
+        None => aspect,
     }
 }
 
@@ -376,6 +427,45 @@ mod tests {
             );
 
         assert_eq!(slot.primary_affordance(), UiSlotAffordance::Invalid);
+    }
+
+    #[test]
+    fn edited_slot_with_old_value_carries_a_was_row() {
+        let slot = UiConfigSlot::value("fade", "Fade", UiSlotValue::f32(0.9))
+            .with_old_value("0.5")
+            .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty));
+
+        let aspects = slot.visible_aspects();
+        let edit_state = aspects
+            .iter()
+            .find(|aspect| aspect.kind == crate::UiSlotAspectKind::EditState)
+            .expect("edit state aspect");
+        let was = edit_state
+            .rows
+            .iter()
+            .find(|row| row.label == "Was")
+            .expect("edited slot with an old value carries a Was row");
+        assert_eq!(was.value, "0.5");
+    }
+
+    #[test]
+    fn edited_slot_without_old_value_degrades_to_the_state_row() {
+        let dirty = UiConfigSlot::value("fade", "Fade", UiSlotValue::f32(0.9))
+            .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty));
+        let clean =
+            UiConfigSlot::value("fade", "Fade", UiSlotValue::f32(0.9)).with_old_value("0.5");
+
+        for slot in [dirty, clean] {
+            let aspects = slot.visible_aspects();
+            let edit_state = aspects
+                .iter()
+                .find(|aspect| aspect.kind == crate::UiSlotAspectKind::EditState)
+                .expect("edit state aspect");
+            assert!(
+                edit_state.rows.iter().all(|row| row.label != "Was"),
+                "no Was row without both a touched state and an old value"
+            );
+        }
     }
 
     #[test]

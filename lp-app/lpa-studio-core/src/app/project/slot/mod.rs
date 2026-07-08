@@ -12,9 +12,12 @@ pub mod slot_controller;
 pub mod slot_edit_join;
 pub mod slot_edit_op;
 
-pub use pending_edit::{PendingEdit, PendingEditPhase};
+pub use pending_edit::{PendingEdit, PendingEditOp, PendingEditPhase};
 pub use project_slot_address::ProjectSlotAddress;
 pub use project_slot_root::ProjectSlotRoot;
 pub use slot_controller::{SlotController, SlotControllerState, SlotKind};
-pub(in crate::app::project) use slot_edit_join::SlotEditJoin;
+pub(in crate::app::project) use slot_edit_join::{
+    AssetEditEntry, AssetEditKey, AssetEditState, PrefixEditState, SlotEditEntry,
+    SlotEditEntrySource, SlotEditJoin,
+};
 pub use slot_edit_op::SlotEditOp;

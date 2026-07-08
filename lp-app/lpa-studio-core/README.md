@@ -189,13 +189,32 @@ Slot editing state is core-owned end to end; UI field components are
 stateless views that dispatch ops and render DTOs. The model (recorded in
 `docs/adr/2026-07-04-studio-editing-model.md`) has four pieces:
 
-- **Ops.** `SlotEditOp { SetValue, Revert }` target one `ProjectSlotAddress`
-  (carried on the op — no per-slot controller ids); `ProjectOp::SaveOverlay`
-  commits the overlay and `ProjectOp::RevertAllEdits` clears it. All are
-  `ActionClass::Foreground` on the 6 s editor quiet-gap deadline. The actor
-  coalesces consecutive queued `SetValue`s per address latest-wins
-  (`push_action_coalesced`), so `oninput` floods collapse to one mutation;
-  any other action is a barrier.
+- **Ops.** `SlotEditOp { SetValue, EnsurePresent, RemoveValue, MoveEntry,
+  Revert }`
+  target one `ProjectSlotAddress` (carried on the op — no per-slot controller
+  ids); `NodeRevertOp { node }` batch-reverts every edit entry under a node's
+  subtree (the controller expands it into one `RemoveSlotEdit`-per-entry
+  mutation batch — one wire round-trip, one snapshot);
+  `ProjectOp::SaveOverlay` commits the overlay and
+  `ProjectOp::RevertAllEdits` clears it. All are `ActionClass::Foreground` on
+  the 6 s editor quiet-gap deadline. The actor coalesces consecutive queued
+  `SetValue`s per address latest-wins (`push_action_coalesced`), so `oninput`
+  floods collapse to one mutation; any other action — including the
+  structural gestures — is a barrier and never coalesces. Composite gestures
+  ARE the wire ops: map add / option on / enum variant switch dispatch
+  `EnsurePresent`, map entry remove / option off dispatch `RemoveValue`, and
+  the server constructs all defaults. `MoveEntry { address(map), from_key,
+  to_key }` re-keys one map entry: it sends `MutationOp::MoveSlotEntry`
+  (keys are path segments, so this is its own mutation, not a value edit),
+  stages at the map's own address, and the ack's
+  `MutationEffect::Materialized` lists the per-path edits the server stored
+  (ensure target + diverged-leaf assigns + source remove), which the mirror
+  replays verbatim; an occupied target rejects with `target_occupied`.
+  `UiConfigSlot.composite`
+  (`UiSlotComposite::{Map, Enum}`) carries the map key domain + the
+  gap-filling first-free suggested key (numeric maps add there immediately;
+  the key input is an override) and the declared enum variant idents (raw,
+  verbatim) that the gesture affordances render from.
 - **Edit buffer.** `ProjectController` holds a path-keyed buffer of
   `PendingEdit`s (`slot/pending_edit.rs`, state machine documented on the
   type). A buffered value shadows the synced value in DTOs from field input
@@ -219,13 +238,50 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   aggregated slot → node → project during the DTO build: node headers,
   child entries, sidebar tree items, and `ProjectEditorView.dirty` all carry
   it, and the project header's contextual Save/Revert actions surface as
-  controller-produced `UiPaneAction`s on `ProjectEditorView.header_actions`.
+  controller-produced `UiPaneAction`s on `ProjectEditorView.header_actions`;
+  dirty node headers likewise carry the subtree batch revert
+  (`NodeRevertOp`) on `UiNodeView.header_actions` / `UiNodeChild.header_actions`.
   Each hierarchy DTO also projects status + dirty into its one chrome
   `UiAffordance` (`project/ui_affordance.rs`, priority merge
   Error > Unsaved > Live > Busy > Info) — the glyph/tone every detail
   trigger and tree-row indicator renders.
   `UiConfigSlot` carries its `ProjectSlotAddress` so fields can dispatch
-  edits without extra lookup.
+  edits without extra lookup, plus `edit_entry_address` — the row's **own**
+  edit entry when one exists (the row-level Revert/Reset target; a
+  prefix-only-dirty composite carries none; a present option row also owns
+  its interior `.some` entry, and an enum row owns a variant-child entry —
+  the variant-switch gesture's storage path). The project popup's save panel
+  renders `ProjectEditorView.pending_edits`: one `UiPendingEdit` per edit
+  entry (node label, slot path, op/value display string, phase
+  persisted/live/failed, per-entry revert action), built from the same join
+  enumeration the counts sum — list and counts cannot drift. Each
+  `UiPendingEdit` also carries `old_value` (the saved base as a display
+  string) so popups and the panel render `old → new`; base values are
+  server-derived and mirrored beside the overlay (`ProjectSync::
+  base_value_at`, pruned to the overlay's paths). The project root's own
+  slots ride `ProjectEditorView.root_slots` (rendered in the project pane,
+  not as a workspace card); `format`/`nodes` are `read_only_persisted`,
+  `name` stays writable.
+
+**Asset bodies** (ADR D8) extend the same model to whole files
+(`project/asset/`): `AssetEditOp::{ApplyBody, Revert}` stage
+`SetArtifactBody` / `ClearArtifact` mutations through an artifact-keyed
+sibling buffer with the identical ack lifecycle, joined into the same dirty
+summaries and save-panel rows (`UiPendingEditKind::AssetBody`; a `.glsl`
+that maps to no synced node still counts via
+`unmapped_asset_dirty_summary`). `ApplyBody` enforces the client-side
+`MAX_ASSET_BODY_BYTES` (10 KB) guard under the 16 KB wire frame budget.
+Effective editor content resolves buffer → overlay mirror → cached base
+body (`asset_content`, fetched via `StudioFsRead` on demand and invalidated
+by save/revert); the per-slot editor DTO is `UiAssetEditor`, embedded on
+`UiSlotAsset.inline_editor` for every editable asset slot in the node walk
+(`embed_asset_editors`, recursing records for nested assets), so an editor
+appears inline wherever an editable asset does. `apply_action(text)` is the
+Apply mutation; the current text and modified flag are the one deliberately
+editor-local piece of state (the web component owns them — see the ADR).
+Compile-error status text parses best-effort into `UiShaderError`
+(message + optional `line:col` from the rustc-style marker) for the
+editor's error strip and gutter.
 
 Project attach behavior is core-owned:
 

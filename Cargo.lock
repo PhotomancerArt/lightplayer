@@ -5399,6 +5399,7 @@ dependencies = [
 name = "lpc-registry"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "lp-collection 1.0.0",
  "lpc-model",
  "lpc-wire",

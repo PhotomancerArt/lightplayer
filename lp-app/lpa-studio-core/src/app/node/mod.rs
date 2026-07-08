@@ -12,6 +12,7 @@
 //! browser-local state. Those belong to the project controller tree and the web
 //! component tree respectively.
 
+mod ui_asset_editor;
 mod ui_config_slot;
 mod ui_node_binding;
 mod ui_node_child;
@@ -24,6 +25,7 @@ mod ui_produced_product;
 mod ui_produced_value;
 mod ui_slot_aspect;
 mod ui_slot_asset;
+mod ui_slot_composite;
 mod ui_slot_editor_hint;
 mod ui_slot_field_state;
 mod ui_slot_record;
@@ -32,6 +34,7 @@ mod ui_slot_source_state;
 mod ui_slot_unit;
 mod ui_slot_value;
 
+pub use ui_asset_editor::UiAssetEditor;
 pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody, UiSlotOptionality};
 pub use ui_node_binding::{UiBindingEndpoint, UiProducedBinding, UiProducedBindings};
 pub use ui_node_child::UiNodeChild;
@@ -47,6 +50,9 @@ pub use ui_produced_product::{
 pub use ui_produced_value::UiProducedValue;
 pub use ui_slot_aspect::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 pub use ui_slot_asset::{UiAssetEditorKind, UiSlotAsset};
+pub use ui_slot_composite::{
+    UiSlotComposite, UiSlotEnumComposite, UiSlotMapComposite, UiSlotMapKeyKind,
+};
 pub use ui_slot_editor_hint::{UiSlotEditorHint, UiSlotOption};
 pub use ui_slot_field_state::UiSlotFieldState;
 pub use ui_slot_record::UiSlotRecord;

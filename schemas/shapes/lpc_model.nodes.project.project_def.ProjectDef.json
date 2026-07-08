@@ -3,6 +3,9 @@
     "fields": [
       {
         "name": "format",
+        "policy": {
+          "writable": false
+        },
         "shape": {
           "option": {
             "meta": {},
@@ -57,6 +60,9 @@
       },
       {
         "name": "nodes",
+        "policy": {
+          "writable": false
+        },
         "shape": {
           "map": {
             "key": "string",

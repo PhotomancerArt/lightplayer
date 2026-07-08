@@ -12,6 +12,7 @@ mod slot_value_codec;
 mod slot_writer;
 mod syntax;
 
+pub use custom_slot_codec::snapshot_custom_slot_data;
 pub use json_syntax_source::JsonSyntaxSource;
 pub use slot_reader::{ArrayReader, ObjectReader, PropReader, SlotReader, ValueReader};
 pub use slot_value_codec::{read_lp_value, write_lp_value, write_untyped_lp_value};
@@ -284,5 +285,5 @@ pub use dynamic_slot_reader::{
 };
 pub use dynamic_slot_writer::{
     SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_json_pretty,
-    write_slot_data_json_value,
+    write_slot_data_json_value, write_slot_subtree_json,
 };

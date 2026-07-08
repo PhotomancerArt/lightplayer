@@ -22,8 +22,15 @@ pub enum ClientEvent {
     },
     /// Firmware/server log line carried by the protocol.
     Log { level: LogLevel, message: String },
-    /// A response id arrived while another request id was expected.
+    /// A genuinely unexpected response id arrived: never issued/abandoned by
+    /// this session (from the future, or a duplicate delivery). Consumers
+    /// should surface this as a warning.
     UncorrelatedResponse { response_id: u64, expected_id: u64 },
+    /// A late response for a request this client itself abandoned (cancelled
+    /// or timed-out pull) arrived and was discarded. This is the designed
+    /// stale-drop — expected under edit-op preemption during input floods —
+    /// so consumers should keep it quiet (at most debug level).
+    StaleResponseDropped { response_id: u64 },
 }
 
 impl ClientEvent {

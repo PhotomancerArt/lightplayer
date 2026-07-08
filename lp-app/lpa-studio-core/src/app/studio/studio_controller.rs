@@ -15,11 +15,12 @@ use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
-    ConnectedLink, Controller, ControllerContext, DeviceController, DeviceOp, LinkOpenOutcome,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView,
-    UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus,
-    UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    AssetContentFetchOp, AssetEditOp, ConnectedLink, Controller, ControllerContext,
+    DeviceController, DeviceOp, LinkOpenOutcome, NodeRevertOp, ProjectConnectResult,
+    ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState,
+    ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
+    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView,
+    UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
@@ -306,11 +307,24 @@ impl StudioController {
             return self.execute_device_op(op, updates).await;
         }
         if node_id == project_node_id {
-            // Slot edits target the project node too (the op carries the full
-            // slot address), so route by op type before the ProjectOp downcast.
+            // Slot edits and node-level reverts target the project node too
+            // (the op carries the full slot/node address), so route by op
+            // type before the ProjectOp downcast.
             if action.op_as::<SlotEditOp>().is_some() {
                 let op = action.into_op::<SlotEditOp>()?;
                 return self.execute_slot_edit_op(op).await;
+            }
+            if action.op_as::<AssetEditOp>().is_some() {
+                let op = action.into_op::<AssetEditOp>()?;
+                return self.execute_asset_edit_op(op).await;
+            }
+            if action.op_as::<AssetContentFetchOp>().is_some() {
+                let op = action.into_op::<AssetContentFetchOp>()?;
+                return self.execute_asset_content_fetch(op).await;
+            }
+            if action.op_as::<NodeRevertOp>().is_some() {
+                let op = action.into_op::<NodeRevertOp>()?;
+                return self.execute_node_revert_op(op).await;
             }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
@@ -423,6 +437,34 @@ impl StudioController {
         let run = {
             let server = self.device.server.client_mut()?;
             self.project.apply_slot_edit(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_asset_edit_op(&mut self, op: AssetEditOp) -> UiResult {
+        let run = {
+            let server = self.device.server.client_mut()?;
+            self.project.apply_asset_edit(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Resolve (and cache) an asset's effective editor content so the next
+    /// emitted view embeds it. Quiet on success — the refreshed view is the
+    /// outcome; server log lines join the ring like any edit run's.
+    async fn execute_asset_content_fetch(&mut self, op: AssetContentFetchOp) -> UiResult {
+        let run = {
+            let server = self.device.server.client_mut()?;
+            self.project.asset_content(server, &op.artifact).await?
+        };
+        self.record_logs(run.logs);
+        Ok(UiNotices::new())
+    }
+
+    async fn execute_node_revert_op(&mut self, op: NodeRevertOp) -> UiResult {
+        let run = {
+            let server = self.device.server.client_mut()?;
+            self.project.revert_node_edits(server, &op.node).await
         };
         self.record_project_edit_run(run)
     }
@@ -1597,9 +1639,12 @@ mod tests {
 
         let actions = view_actions(&studio.view());
 
-        assert!(actions.iter().any(|action| matches!(
+        // Sidebar tidy (P6): a ready project pane renders no
+        // Refresh/Disconnect buttons — the ops stay dispatchable, but no
+        // pane offers them. Device management recovery stays visible.
+        assert!(!actions.iter().any(|action| matches!(
             action.op_as::<ProjectOp>(),
-            Some(ProjectOp::DisconnectProject)
+            Some(ProjectOp::DisconnectProject | ProjectOp::RefreshProject)
         )));
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
@@ -1822,7 +1867,7 @@ mod tests {
 
     #[test]
     fn device_log_level_is_absent_while_disconnected() {
-        let mut studio = StudioController::new(|| 0.0);
+        let studio = StudioController::new(|| 0.0);
         assert_eq!(studio.view().console.device_log_level, None);
     }
 

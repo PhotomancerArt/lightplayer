@@ -11,7 +11,7 @@ use lpa_client::{
 use lpa_link::{LinkConnection, LinkConnectionKind};
 use lpc_model::{
     ArtifactLocation, CommitResult, MutationCmdBatch, MutationCmdBatchResult, NodeId,
-    ProjectOverlay, Revision,
+    ProjectOverlay, Revision, SlotPath,
 };
 use lpc_wire::{
     ProjectReadEvent, ProjectReadRequest, WireOverlayMutationRequest, WireProjectHandle,
@@ -78,13 +78,28 @@ impl StudioServerClient {
             .project_inventory_read(handle)
             .await
             .map_err(map_client_error)?;
+        // The demo's display identity (`DEMO_PROJECT_ID`) is not its server
+        // filesystem path — resolve the real path by handle so server-root
+        // file reads (asset editor base bodies) can target it.
+        let loaded = self
+            .client
+            .project_list_loaded()
+            .await
+            .map_err(map_client_error)?;
+        let fs_root = loaded
+            .value
+            .iter()
+            .find(|project| project.handle == handle)
+            .map(|project| project.path.clone());
         let mut logs = map_client_events(deploy.events);
         logs.extend(map_client_events(inventory.events));
+        logs.extend(map_client_events(loaded.events));
         logs.extend(self.take_pending_logs());
 
         Ok(LoadedDemoProject {
             project_id: DEMO_PROJECT_ID.to_string(),
             handle_id: handle.id(),
+            fs_root,
             inventory: ProjectInventorySummary::from(&inventory.value),
             node_def_artifacts: node_def_artifacts(&inventory.value),
             logs,
@@ -237,6 +252,10 @@ pub struct PulledFiles {
 pub struct LoadedDemoProject {
     pub project_id: String,
     pub handle_id: u32,
+    /// The project's server filesystem root (from the loaded-projects list;
+    /// `None` if the deployed handle was unexpectedly absent from it).
+    /// Server-root file reads (asset base bodies) resolve against this.
+    pub fs_root: Option<lpc_model::LpPathBuf>,
     pub inventory: ProjectInventorySummary,
     /// Runtime node id → containing def artifact, from the connect-time
     /// inventory read. Wire mutations target `(ArtifactLocation, SlotPath)`,
@@ -253,6 +272,9 @@ pub struct LoadedProjectCatalog {
 pub struct LoadedRunningProject {
     pub project_id: String,
     pub handle_id: u32,
+    /// The project's server filesystem root. Catalog choices are built from
+    /// the wire `LoadedProject.path`, so the connect id doubles as the path.
+    pub fs_root: lpc_model::LpPathBuf,
     pub inventory: ProjectInventorySummary,
     /// Runtime node id → containing def artifact (see
     /// [`LoadedDemoProject::node_def_artifacts`]).
@@ -269,6 +291,9 @@ pub struct StudioProjectRead {
 pub struct StudioOverlayRead {
     pub overlay: ProjectOverlay,
     pub revision: Revision,
+    /// Base (saved) value display strings for the overlay's pending paths
+    /// (the wire's parallel list; paths absent in base are omitted).
+    pub base_values: Vec<(ArtifactLocation, SlotPath, String)>,
     pub logs: Vec<UiLogDraft>,
 }
 
@@ -284,6 +309,12 @@ pub struct StudioOverlayMutation {
 pub struct StudioOverlayCommit {
     pub result: CommitResult,
     pub overlay_revision: Revision,
+    pub logs: Vec<UiLogDraft>,
+}
+
+/// A file body read through the server filesystem (`FsRequest::Read`).
+pub struct StudioFsRead {
+    pub data: Vec<u8>,
     pub logs: Vec<UiLogDraft>,
 }
 
@@ -334,6 +365,7 @@ impl StudioServerClient {
             .borrow_mut()
             .extend(map_client_events(inventory.events));
         Ok(LoadedRunningProject {
+            fs_root: lpc_model::LpPathBuf::from(choice.project_id.as_str()),
             project_id: choice.project_id,
             handle_id: choice.handle_id,
             inventory: ProjectInventorySummary::from(&inventory.value),
@@ -375,6 +407,7 @@ impl StudioServerClient {
         Ok(StudioOverlayRead {
             overlay: read.value.overlay,
             revision: read.value.revision,
+            base_values: read.value.base_values,
             logs,
         })
     }
@@ -399,6 +432,19 @@ impl StudioServerClient {
         Ok(StudioOverlayMutation {
             result: response.value.result,
             overlay_revision: response.value.overlay_revision,
+            logs,
+        })
+    }
+
+    /// Read a file body through the server filesystem (`FsRequest::Read`) —
+    /// the base-body fetch for asset editor content
+    /// (`ProjectController::asset_content`).
+    pub async fn fs_read(&mut self, path: &lpc_model::LpPath) -> Result<StudioFsRead, UiError> {
+        let read = self.client.fs_read(path).await.map_err(map_client_error)?;
+        let mut logs = map_client_events(read.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioFsRead {
+            data: read.value,
             logs,
         })
     }
@@ -551,8 +597,14 @@ fn connection_protocol(kind: &LinkConnectionKind) -> String {
 /// all (P3 ingestion hygiene; the user decision was full removal, not a
 /// Trace demotion). Heartbeats reporting a recovery condition — safe mode or
 /// a non-green recovery level — still surface as Warn/Error entries, and
-/// server log lines and uncorrelated-response warnings pass through
-/// unchanged.
+/// server log lines pass through unchanged.
+///
+/// Response-correlation events split by intent: a stale drop (late response
+/// for a request the client itself abandoned — routine when edit-op
+/// preemption cancels a pull mid-stream during an input flood) is a
+/// debug-level note, while a genuinely uncorrelated id (never issued or
+/// abandoned by this session: from the future, or a duplicate delivery)
+/// remains a warning.
 fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
     events
         .into_iter()
@@ -595,6 +647,11 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
                 UiLogLevel::Warn,
                 UiLogOrigin::Server,
                 format!("uncorrelated response {response_id}; expected {expected_id}"),
+            )),
+            ClientEvent::StaleResponseDropped { response_id } => Some(UiLogDraft::new(
+                UiLogLevel::Debug,
+                UiLogOrigin::Server,
+                format!("dropped stale response {response_id} for a request abandoned by client"),
             )),
         })
         .collect()
@@ -723,6 +780,8 @@ mod tests {
 
     #[test]
     fn server_logs_and_uncorrelated_responses_still_map() {
+        // A genuinely unknown response id (never issued or abandoned by the
+        // session) is a real protocol anomaly and keeps its warning.
         let events = vec![
             ClientEvent::Log {
                 level: lpc_wire::server::api::LogLevel::Warn,
@@ -741,6 +800,23 @@ mod tests {
         assert_eq!(logs[0].message, "flash almost full");
         assert_eq!(logs[1].level, UiLogLevel::Warn);
         assert_eq!(logs[1].message, "uncorrelated response 9; expected 7");
+    }
+
+    #[test]
+    fn stale_drops_for_client_abandoned_requests_are_debug_not_warn() {
+        // A late response for a request the client itself cancelled/superseded
+        // (edit-op preemption during a drag flood) is the designed stale-drop:
+        // it must not fill the console with warnings.
+        let events = vec![ClientEvent::StaleResponseDropped { response_id: 5 }];
+
+        let logs = map_client_events(events);
+
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, UiLogLevel::Debug);
+        assert_eq!(
+            logs[0].message,
+            "dropped stale response 5 for a request abandoned by client"
+        );
     }
 
     fn heartbeat_event(recovery: Option<RecoveryStatus>) -> ClientEvent {

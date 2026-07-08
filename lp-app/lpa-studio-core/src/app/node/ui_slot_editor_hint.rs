@@ -48,6 +48,10 @@ pub enum UiSlotEditorHint {
     Dropdown(Vec<UiSlotOption>),
     /// Render a two-dimensional value with an XY affordance.
     Xy,
+    /// Render a width × height pair as one compact dimensions control.
+    Dimensions,
+    /// Render a 2D affine transform (wire `Mat3x3`, six active params).
+    Affine2d,
 }
 
 impl UiSlotEditorHint {

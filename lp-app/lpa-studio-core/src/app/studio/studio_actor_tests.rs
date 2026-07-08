@@ -650,6 +650,24 @@ fn revert_action(path: &str) -> StudioCommand {
     ))
 }
 
+fn ensure_present_action(path: &str) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::SlotEditOp::EnsurePresent {
+            address: slot_address(path),
+        },
+    ))
+}
+
+fn remove_value_action(path: &str) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::SlotEditOp::RemoveValue {
+            address: slot_address(path),
+        },
+    ))
+}
+
 fn planned_slot_ops(plan: &CommandPlan) -> Vec<(String, Option<f32>)> {
     plan.actions
         .iter()
@@ -661,6 +679,15 @@ fn planned_slot_ops(plan: &CommandPlan) -> Vec<(String, Option<f32>)> {
                     _ => None,
                 },
             ),
+            Some(crate::SlotEditOp::EnsurePresent { address }) => {
+                (format!("ensure:{}", address.path), None)
+            }
+            Some(crate::SlotEditOp::RemoveValue { address }) => {
+                (format!("remove:{}", address.path), None)
+            }
+            Some(crate::SlotEditOp::MoveEntry { address, .. }) => {
+                (format!("move:{}", address.path), None)
+            }
             Some(crate::SlotEditOp::Revert { address }) => {
                 (format!("revert:{}", address.path), None)
             }
@@ -719,6 +746,50 @@ fn revert_between_set_values_is_a_coalescing_barrier() {
         ],
         "nothing coalesces across a Revert"
     );
+}
+
+#[test]
+fn structural_ops_never_coalesce_even_for_one_address() {
+    let plan = CommandPlan::from_batch(vec![
+        ensure_present_action("mapping.PathPoints.paths[0]"),
+        ensure_present_action("mapping.PathPoints.paths[0]"),
+        remove_value_action("mapping.PathPoints.paths[0]"),
+        remove_value_action("mapping.PathPoints.paths[0]"),
+    ]);
+
+    assert_eq!(
+        planned_slot_ops(&plan),
+        vec![
+            ("ensure:mapping.PathPoints.paths[0]".to_string(), None),
+            ("ensure:mapping.PathPoints.paths[0]".to_string(), None),
+            ("remove:mapping.PathPoints.paths[0]".to_string(), None),
+            ("remove:mapping.PathPoints.paths[0]".to_string(), None),
+        ],
+        "structural gestures are dispatched one mutation each, in order"
+    );
+}
+
+#[test]
+fn structural_ops_are_coalescing_barriers_for_set_values() {
+    for barrier in [
+        ensure_present_action("controls.rate"),
+        remove_value_action("controls.rate"),
+    ] {
+        let plan = CommandPlan::from_batch(vec![
+            set_value_action("controls.rate", 1.0),
+            barrier,
+            set_value_action("controls.rate", 2.0),
+        ]);
+
+        assert_eq!(
+            plan.actions.len(),
+            3,
+            "nothing coalesces across a structural gesture"
+        );
+        let ops = planned_slot_ops(&plan);
+        assert_eq!(ops[0], ("controls.rate".to_string(), Some(1.0)));
+        assert_eq!(ops[2], ("controls.rate".to_string(), Some(2.0)));
+    }
 }
 
 #[test]

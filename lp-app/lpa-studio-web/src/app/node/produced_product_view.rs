@@ -9,30 +9,31 @@ use lpa_studio_core::{
     UiProductTrackingState,
 };
 
-use crate::app::node::SlotDetailButton;
+use crate::app::node::{SlotPane, SlotPaneTreatment};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProducedProductView(
     product: UiProducedProduct,
-    #[props(default = false)] separated: bool,
     #[props(default = false)] initially_open: bool,
     #[props(default)] focus_action: Option<UiAction>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let class = if separated {
-        format!(
-            "{} tw:border-t tw:border-border-muted",
-            product_view_class(product.kind)
-        )
-    } else {
-        product_view_class(product.kind).to_string()
-    };
-    let label = product_label(product.kind);
     let aspects = product.visible_aspects();
+    // Visual and control previews are width-capped hero media: the pane hugs
+    // them (`fit`) and they bleed to the pane edges (`flush`) so the pane is the
+    // only frame. Empty/other placeholders have no intrinsic size and keep the
+    // padded, full-width treatment.
+    let media = matches!(product.kind, UiProductKind::Visual | UiProductKind::Control);
 
     rsx! {
-        article { class,
+        SlotPane {
+            title: product.name.clone(),
+            aspects,
+            initially_open,
+            treatment: SlotPaneTreatment::Neutral,
+            fit: media,
+            flush: media,
             ProductPreview {
                 kind: product.kind,
                 preview: product.preview.clone(),
@@ -40,24 +41,6 @@ pub fn ProducedProductView(
                 frame: product.frame,
                 focus_action,
                 on_action,
-            }
-            footer { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-2 tw:gap-y-1 tw:text-xs tw:text-muted-foreground",
-                strong { class: "tw:min-w-0 tw:text-sm tw:text-strong-foreground tw:break-words", "{product.name}" }
-                span { "{label}" }
-                if let Some(detail) = preview_detail(&product.preview, product.tracking) {
-                    span { "{detail}" }
-                }
-                if let Some(detail) = tracking_detail(product.tracking) {
-                    span { "{detail}" }
-                }
-                if let Some(detail) = product.detail.as_ref() {
-                    span { "{detail}" }
-                }
-                SlotDetailButton {
-                    label: product.name.clone(),
-                    aspects,
-                    initially_open,
-                }
             }
         }
     }
@@ -313,58 +296,6 @@ enum ProductMessageTone {
 struct ProductOverlayCopy {
     title: &'static str,
     detail: &'static str,
-}
-
-fn product_view_class(kind: UiProductKind) -> &'static str {
-    match kind {
-        UiProductKind::Empty => {
-            "tw:grid tw:min-h-32 tw:min-w-0 tw:content-between tw:gap-3 tw:bg-card-muted tw:p-3"
-        }
-        UiProductKind::Visual => {
-            "tw:grid tw:min-h-32 tw:min-w-0 tw:content-between tw:gap-3 tw:bg-[color-mix(in_oklab,var(--color-accent-bg)_60%,var(--color-card))] tw:p-3"
-        }
-        UiProductKind::Control => {
-            "tw:grid tw:min-h-32 tw:min-w-0 tw:content-between tw:gap-3 tw:bg-[color-mix(in_oklab,var(--color-status-good-bg)_55%,var(--color-card))] tw:p-3"
-        }
-        UiProductKind::Other => {
-            "tw:grid tw:min-h-32 tw:min-w-0 tw:content-between tw:gap-3 tw:bg-card-muted tw:p-3"
-        }
-    }
-}
-
-fn product_label(kind: UiProductKind) -> &'static str {
-    match kind {
-        UiProductKind::Empty => "empty product",
-        UiProductKind::Visual => "visual product",
-        UiProductKind::Control => "control product",
-        UiProductKind::Other => "product",
-    }
-}
-
-fn preview_detail(preview: &UiProductPreview, tracking: UiProductTrackingState) -> Option<String> {
-    match preview {
-        UiProductPreview::VisualSrgb8 { width, height, .. } => Some(format!("{width} x {height}")),
-        UiProductPreview::ControlNative(preview) => Some(format!(
-            "{} x {} samples",
-            preview.extent.rows, preview.extent.samples_per_row
-        )),
-        UiProductPreview::Pending if tracking == UiProductTrackingState::Tracking => {
-            Some("preview pending".to_string())
-        }
-        UiProductPreview::Pending => None,
-        UiProductPreview::MetadataOnly => Some("metadata only".to_string()),
-        UiProductPreview::Empty
-        | UiProductPreview::Unsupported { .. }
-        | UiProductPreview::Error { .. } => None,
-    }
-}
-
-fn tracking_detail(tracking: UiProductTrackingState) -> Option<&'static str> {
-    match tracking {
-        UiProductTrackingState::Untracked => Some("not tracked"),
-        UiProductTrackingState::Paused => Some("paused"),
-        UiProductTrackingState::Tracking => None,
-    }
 }
 
 fn product_tracking_overlay(

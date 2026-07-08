@@ -1,6 +1,6 @@
 //! Child nodes extracted from config slots.
 
-use crate::{DirtySummary, UiAction, UiAffordance, UiNodeSection, UiStatus};
+use crate::{DirtySummary, UiAction, UiAffordance, UiNodeSection, UiPaneAction, UiStatus};
 
 /// A child node rendered outside its parent node pane.
 #[derive(Clone, Debug, PartialEq)]
@@ -21,13 +21,18 @@ pub struct UiNodeChild {
     pub focused: bool,
     /// Action that focuses this child node as the current Studio selection.
     pub action: Option<UiAction>,
-    /// Compact body sections for expanded child display.
+    /// Compact body sections for expanded child display (asset slots carry
+    /// their own inline editor data on [`crate::UiSlotAsset::inline_editor`]).
     pub sections: Vec<UiNodeSection>,
     /// Nested child nodes extracted below this child.
     pub children: Vec<UiNodeChild>,
     /// Aggregate dirty-edit summary for this child's subtree (own slots plus
     /// nested children), matching the per-field affordances.
     pub dirty: DirtySummary,
+    /// Contextual header actions for the nested pane this child becomes:
+    /// controller-produced, currently the node-subtree batch revert while
+    /// [`Self::dirty`] announces pending edits.
+    pub header_actions: Vec<UiPaneAction>,
 }
 
 impl UiNodeChild {
@@ -49,6 +54,7 @@ impl UiNodeChild {
             sections: Vec::new(),
             children: Vec::new(),
             dirty: DirtySummary::clean(),
+            header_actions: Vec::new(),
         }
     }
 

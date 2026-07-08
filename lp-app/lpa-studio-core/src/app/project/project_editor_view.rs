@@ -1,6 +1,6 @@
 use crate::{
-    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAffordance, UiMetric, UiNodeView,
-    UiPaneAction, UiStatusKind,
+    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAffordance, UiConfigSlot, UiMetric,
+    UiNodeView, UiPaneAction, UiPendingEdit, UiStatusKind,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -14,11 +14,24 @@ pub struct ProjectEditorView {
     pub sync: ProjectSyncSummary,
     pub stats: Vec<UiMetric>,
     pub tree: ProjectNodeTreeView,
+    /// Workspace node cards. Flat-root model (P6): the tree root itself is
+    /// never a card — its child panes are the top-level entries, and the
+    /// root's own slots live in [`Self::root_slots`].
     pub nodes: Vec<UiNodeView>,
+    /// The workspace root's own config slot rows (`name` / `format` /
+    /// `nodes` for a project root), rendered as the "Project settings"
+    /// section of the project pane's detail popup.
+    pub root_slots: Vec<UiConfigSlot>,
     /// Project-level aggregate of the per-node dirty summaries (persisted /
     /// transient / failed) driving the save affordances; derived from the
     /// same edit-state join as the per-field dirty affordances.
     pub dirty: DirtySummary,
+    /// The save panel's labeled change list: one entry per pending edit,
+    /// built from the same edit-state join as [`Self::dirty`], so the list
+    /// length per phase equals the summary's bucket counts by construction.
+    /// Stable order: by node address, then slot path (stale artifact-labeled
+    /// entries appended last).
+    pub pending_edits: Vec<UiPendingEdit>,
     /// Contextual project-header actions (Save / Revert to saved) produced
     /// controller-side; empty unless persisted edits are pending.
     pub header_actions: Vec<UiPaneAction>,
@@ -46,7 +59,9 @@ impl ProjectEditorView {
             stats,
             tree,
             nodes,
+            root_slots: Vec::new(),
             dirty: DirtySummary::clean(),
+            pending_edits: Vec::new(),
             header_actions: Vec::new(),
             edits_in_flight: 0,
         }
@@ -58,9 +73,22 @@ impl ProjectEditorView {
         self
     }
 
+    /// Attach the workspace root's own config slot rows (project popup's
+    /// settings section).
+    pub fn with_root_slots(mut self, root_slots: Vec<UiConfigSlot>) -> Self {
+        self.root_slots = root_slots;
+        self
+    }
+
     /// Attach the project-level aggregate dirty summary.
     pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    /// Attach the save panel's labeled change list.
+    pub fn with_pending_edits(mut self, pending_edits: Vec<UiPendingEdit>) -> Self {
+        self.pending_edits = pending_edits;
         self
     }
 

@@ -2,7 +2,7 @@
 
 use core::any::Any;
 
-use lpc_model::LpValue;
+use lpc_model::{LpValue, SlotMapKey};
 
 use crate::{
     ActionClass, ActionMeta, ActionPriority, ControllerOp, PROJECT_EDITOR_ACTION_DEADLINE,
@@ -14,7 +14,13 @@ use crate::{
 /// Field components dispatch these as `UiAction`s against
 /// `ProjectController::NODE_ID`; the op carries the full slot address, so no
 /// per-slot controller id is needed. The studio actor coalesces queued
-/// `SetValue`s per address (latest wins) to absorb `oninput` floods.
+/// `SetValue`s per address (latest wins) to absorb `oninput` floods; every
+/// other variant — `Revert` and the structural gestures — never coalesces
+/// and acts as a coalescing barrier.
+///
+/// The structural gestures mirror the wire vocabulary (M3 decision D1): the
+/// client never composes composite values, it sends `EnsurePresent`/`Remove`
+/// and lets the server construct defaults.
 ///
 /// Note this is the Studio *controller op*; the wire-level pending-edit
 /// operation of the same name lives in `lpc_model::SlotEditOp`.
@@ -25,6 +31,27 @@ pub enum SlotEditOp {
         address: ProjectSlotAddress,
         value: LpValue,
     },
+    /// Structural gesture: ensure the slot at `address` exists in the
+    /// effective def (map entry add, option on, enum variant switch), with
+    /// server-constructed defaults.
+    EnsurePresent { address: ProjectSlotAddress },
+    /// Structural gesture: remove the slot at `address` from the effective
+    /// def (map entry remove, option off). Distinct from [`Self::Revert`],
+    /// which removes the *overlay entry* at the address instead.
+    RemoveValue { address: ProjectSlotAddress },
+    /// Structural gesture: move the entry at `from_key` of the **map** slot
+    /// at `address` to `to_key`. Keys are path segments, so this is its own
+    /// wire mutation (`MutationOp::MoveSlotEntry`), not a value edit; the
+    /// server materializes it into per-path overlay edits and the ack
+    /// (`MutationEffect::Materialized`) lists what was stored. Rejected when
+    /// `to_key` is already present in the effective def
+    /// (`target_occupied`) or `from_key` is absent.
+    MoveEntry {
+        /// Address of the map slot whose entry is being re-keyed.
+        address: ProjectSlotAddress,
+        from_key: SlotMapKey,
+        to_key: SlotMapKey,
+    },
     /// Discard the pending edit for the slot at `address`, locally and on
     /// the server overlay.
     Revert { address: ProjectSlotAddress },
@@ -34,7 +61,11 @@ impl SlotEditOp {
     /// The slot address this edit targets.
     pub fn address(&self) -> &ProjectSlotAddress {
         match self {
-            Self::SetValue { address, .. } | Self::Revert { address } => address,
+            Self::SetValue { address, .. }
+            | Self::EnsurePresent { address }
+            | Self::RemoveValue { address }
+            | Self::MoveEntry { address, .. }
+            | Self::Revert { address } => address,
         }
     }
 }
@@ -45,6 +76,21 @@ impl ControllerOp for SlotEditOp {
             Self::SetValue { .. } => ActionMeta::new(
                 "Set value",
                 "Stage a new value for this slot as a pending edit.",
+                ActionPriority::Primary,
+            ),
+            Self::EnsurePresent { .. } => ActionMeta::new(
+                "Add",
+                "Create or activate this slot with server defaults as a pending edit.",
+                ActionPriority::Primary,
+            ),
+            Self::RemoveValue { .. } => ActionMeta::new(
+                "Remove",
+                "Remove this slot from the effective definition as a pending edit.",
+                ActionPriority::Primary,
+            ),
+            Self::MoveEntry { .. } => ActionMeta::new(
+                "Move entry",
+                "Move this map entry to a new key as a pending edit.",
                 ActionPriority::Primary,
             ),
             Self::Revert { .. } => ActionMeta::new(
@@ -102,6 +148,17 @@ mod tests {
             SlotEditOp::SetValue {
                 address: test_address(),
                 value: LpValue::F32(2.0),
+            },
+            SlotEditOp::EnsurePresent {
+                address: test_address(),
+            },
+            SlotEditOp::RemoveValue {
+                address: test_address(),
+            },
+            SlotEditOp::MoveEntry {
+                address: test_address(),
+                from_key: SlotMapKey::U32(0),
+                to_key: SlotMapKey::U32(1),
             },
             SlotEditOp::Revert {
                 address: test_address(),

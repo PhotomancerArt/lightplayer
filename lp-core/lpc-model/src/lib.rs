@@ -128,6 +128,7 @@ pub use project::overlay::{
 pub use project::overlay_mutation::{
     MutationCmd, MutationCmdBatch, MutationCmdBatchResult, MutationCmdId, MutationCmdResult,
     MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, MutationRejectionReason,
+    StoredSlotEdit,
 };
 pub use project::{
     ChangeSummary, CommitResult, LocationSeg, MutationBatchResults, MutationResult,

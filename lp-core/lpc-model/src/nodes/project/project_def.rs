@@ -19,6 +19,10 @@ pub const PROJECT_FORMAT_VERSION: u32 = 1;
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
     /// Authored format version; see [`PROJECT_FORMAT_VERSION`].
+    ///
+    /// Read-only through mutations: only the loader format gate and the
+    /// (future) offline upgrader own this value.
+    #[slot(policy = "read_only_persisted")]
     pub format: OptionSlot<ValueSlot<u32>>,
     /// Stable project identity (`prj_…`, base-62), minted by the library
     /// when a project enters it. Travels with the files: parity checks,
@@ -26,6 +30,11 @@ pub struct ProjectDef {
     pub uid: OptionSlot<ValueSlot<String>>,
     pub name: OptionSlot<ValueSlot<String>>,
     /// Named child node positions owned by this project.
+    ///
+    /// Read-only through mutations: node create/remove will arrive as
+    /// dedicated project operations (Studio authoring M2), never as raw
+    /// slot edits under this map.
+    #[slot(policy = "read_only_persisted")]
     pub nodes: MapSlot<String, NodeInvocationSlot>,
 }
 
@@ -134,6 +143,25 @@ mod tests {
         }"#;
         let err = NodeDef::read_json(&registry(), json).unwrap_err();
         assert!(err.to_string().contains("def"), "{err}");
+    }
+
+    #[test]
+    fn project_def_format_and_nodes_are_read_only_persisted_name_writable() {
+        use crate::{SlotPolicy, SlotShape, StaticSlotShape};
+
+        let SlotShape::Record { fields, .. } = crate::ProjectDef::slot_shape() else {
+            panic!("project def shape must be a record");
+        };
+        let policy = |name: &str| {
+            fields
+                .iter()
+                .find(|field| field.name.as_str() == name)
+                .unwrap_or_else(|| panic!("{name} field"))
+                .policy
+        };
+        assert_eq!(policy("format"), SlotPolicy::read_only_persisted());
+        assert_eq!(policy("nodes"), SlotPolicy::read_only_persisted());
+        assert_eq!(policy("name"), SlotPolicy::writable_persisted());
     }
 
     fn registry() -> SlotShapeRegistry {

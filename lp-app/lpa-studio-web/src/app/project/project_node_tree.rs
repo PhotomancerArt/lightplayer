@@ -14,7 +14,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{DirtySummary, ProjectNodeStatusView, ProjectNodeTreeItem, UiAction};
 
 use crate::app::affordance::{affordance_indicator_class, affordance_trigger_style};
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{StudioIcon, node_kind_icon};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -57,7 +57,11 @@ fn ProjectNodeTreeItemView(
     let dirty = item.dirty;
     let class = tree_item_row_class(focused, dirty);
     let title = tree_item_title(&item.kind, &item.status, dirty);
-    let indent = depth * 14;
+    let kind_icon = node_kind_icon(&item.kind);
+    // Base left padding (matches the row's px-2) that the depth indent adds
+    // to — without the base, a depth-0 row's inline padding-left overrides
+    // px-2 to 0 and the icon hugs the card edge.
+    let indent = 10 + depth * 14;
     let label = item.label;
 
     rsx! {
@@ -71,7 +75,7 @@ fn ProjectNodeTreeItemView(
                 onclick: move |_| on_action.call(action.clone()),
                 span { class: "tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:text-subtle-foreground",
                     StudioIcon {
-                        name: StudioIconName::NodeTreeItem,
+                        name: kind_icon,
                         size: 14,
                     }
                 }

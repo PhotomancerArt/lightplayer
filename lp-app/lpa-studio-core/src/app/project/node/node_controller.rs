@@ -6,10 +6,12 @@ use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::app::project::slot::SlotEditJoin;
 use crate::{
-    DirtySummary, ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
-    UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiProductPreview,
-    UiProductRef, UiProductTrackingState, UiStatus,
+    ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
+    ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
+    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction,
+    UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeHeader, UiNodeSection,
+    UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview, UiProductRef, UiProductTrackingState,
+    UiSlotAsset, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -159,7 +161,7 @@ impl NodeController {
 
     /// Project this controller and its slot controllers into the node-pane DTO.
     pub fn ui_node(&self) -> UiNodeView {
-        self.ui_node_with_product_previews(&|_| None, &SlotEditJoin::empty())
+        self.ui_node_with_product_previews(&|_| None, &SlotEditJoin::empty(), &|_, _| None)
     }
 
     /// Project this controller into a node-pane DTO with product preview state.
@@ -167,12 +169,20 @@ impl NodeController {
     /// The dirty aggregation rides the same walk: child DTOs are built first
     /// (each carrying its subtree summary), and the header summary merges the
     /// node's own slot summaries with the children's — no second traversal.
+    ///
+    /// `asset_editor` resolves an asset slot's source into inline editor data
+    /// (`UiSlotAsset::inline_editor`); like `product_preview` it closes over
+    /// project state the node walk has no access to (def artifacts, edit
+    /// buffer, content caches). It runs for every asset slot the node
+    /// produces — nested ones included — so an editor appears wherever an
+    /// editable asset does.
     pub(in crate::app::project) fn ui_node_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
     ) -> UiNodeView {
-        let children = self.ui_children_with_product_previews(product_preview, edits);
+        let children = self.ui_children_with_product_previews(product_preview, edits, asset_editor);
         let dirty = self.own_slots_dirty_summary(edits)
             + children
                 .iter()
@@ -186,14 +196,12 @@ impl NodeController {
         .with_status(self.ui_status())
         .with_dirty(dirty);
 
-        let mut view = UiNodeView::new(
-            header,
-            vec![UiNodeTab::main(
-                self.ui_sections_with_product_previews(product_preview, edits),
-            )],
-        )
-        .with_node_id(self.address.to_string())
-        .with_children(children);
+        let mut sections = self.ui_sections_with_product_previews(product_preview, edits);
+        self.embed_asset_editors(&mut sections, asset_editor);
+        let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
+            .with_node_id(self.address.to_string())
+            .with_header_actions(node_header_actions(&self.address, &dirty))
+            .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
         view.collapsed = self.state.collapsed;
@@ -362,10 +370,33 @@ impl NodeController {
         sections
     }
 
+    /// Config and asset rows for this node's **own** slots (children
+    /// excluded), in section order (config, then assets). Feeds the project
+    /// popup's settings section for the workspace root, whose card the
+    /// flat-root workspace no longer renders.
+    pub(in crate::app::project) fn ui_config_slots(
+        &self,
+        edits: &SlotEditJoin<'_>,
+    ) -> Vec<UiConfigSlot> {
+        let mut config_slots = Vec::new();
+        let mut asset_slots = Vec::new();
+        for slot in &self.slots {
+            match slot.address().root {
+                ProjectSlotRoot::State => {}
+                ProjectSlotRoot::Def | ProjectSlotRoot::Other(_) => {
+                    slot.collect_config(edits, &mut config_slots, &mut asset_slots);
+                }
+            }
+        }
+        config_slots.extend(asset_slots);
+        config_slots
+    }
+
     fn ui_children_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -380,21 +411,24 @@ impl NodeController {
                 view.focused = child.state.focused;
                 view.action = Some(node_focus_action(child));
                 view.sections = child.ui_sections_with_product_previews(product_preview, edits);
-                view.children = child.ui_children_with_product_previews(product_preview, edits);
+                child.embed_asset_editors(&mut view.sections, asset_editor);
+                view.children =
+                    child.ui_children_with_product_previews(product_preview, edits, asset_editor);
                 view.dirty = child.own_slots_dirty_summary(edits)
                     + view
                         .children
                         .iter()
                         .map(|nested| nested.dirty)
                         .sum::<DirtySummary>();
+                view.header_actions = node_header_actions(&child.address, &view.dirty);
                 view
             })
             .collect()
     }
 
-    /// Aggregate dirty-edit summary for this node's subtree: own slots plus
-    /// every descendant node, per-slot classification shared with the DTO
-    /// build ([`SlotController::dirty_summary`]).
+    /// Aggregate dirty-edit summary for this node's subtree: own edits plus
+    /// every descendant node's, counted by the join's single per-entry rule
+    /// (`SlotEditJoin::dirty_summary_for_node`).
     pub(in crate::app::project) fn dirty_summary(&self, edits: &SlotEditJoin<'_>) -> DirtySummary {
         let mut summary = self.own_slots_dirty_summary(edits);
         for child in &self.children {
@@ -403,17 +437,17 @@ impl NodeController {
         summary
     }
 
-    /// Aggregate dirty-edit summary for the slots this node owns directly
-    /// (children excluded). Callers merging bottom-up (DTO and tree-item
-    /// walks) combine this with already-computed child summaries.
+    /// Aggregate dirty-edit summary for the edits addressed to this node
+    /// (child nodes excluded). Counted per **edit entry**, not per slot row
+    /// (`SlotEditJoin::dirty_summary_for_node`), so edits at paths with no
+    /// surviving row — removed map entries — still count exactly once.
+    /// Callers merging bottom-up (DTO and tree-item walks) combine this with
+    /// already-computed child summaries.
     pub(in crate::app::project) fn own_slots_dirty_summary(
         &self,
         edits: &SlotEditJoin<'_>,
     ) -> DirtySummary {
-        self.slots
-            .iter()
-            .map(|slot| slot.dirty_summary(edits))
-            .sum()
+        edits.dirty_summary_for_node(&self.address)
     }
 
     fn ui_status(&self) -> UiStatus {
@@ -430,6 +464,69 @@ impl NodeController {
             ProjectProductSubscriptionIntent::Unsubscribed => UiProductTrackingState::Paused,
         }
     }
+
+    /// Fill inline editor data into every editable asset slot in `sections`,
+    /// nested slots included, so an editor appears wherever an editable asset
+    /// does. The resolver keys on this node (for the def artifact and status)
+    /// plus the asset; inline-content assets keep their read-only body (they
+    /// are values, not file references, so there is no artifact to edit).
+    fn embed_asset_editors(
+        &self,
+        sections: &mut [UiNodeSection],
+        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
+    ) {
+        let resolve = |asset: &UiSlotAsset| asset_editor(self, asset);
+        for section in sections {
+            match section {
+                UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => {
+                    embed_asset_editors_in_slots(slots, &resolve);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Recursively set `inline_editor` on every file-backed, editor-supporting
+/// asset slot (descending into record fields for nested assets).
+fn embed_asset_editors_in_slots(
+    slots: &mut [UiConfigSlot],
+    resolve: &impl Fn(&UiSlotAsset) -> Option<UiAssetEditor>,
+) {
+    for slot in slots {
+        match &mut slot.body {
+            UiConfigSlotBody::Asset(asset) => {
+                if asset.inline_editor.is_none()
+                    && asset.editor.supports_editor()
+                    && asset.content.is_none()
+                    && let Some(editor) = resolve(asset)
+                {
+                    asset.inline_editor = Some(editor);
+                }
+            }
+            UiConfigSlotBody::Record(record) => {
+                embed_asset_editors_in_slots(&mut record.fields, resolve);
+            }
+            UiConfigSlotBody::Empty | UiConfigSlotBody::Value(_) => {}
+        }
+    }
+}
+
+/// Contextual node-header actions (pane grammar actions slot, M3 UX gate
+/// feedback): the subtree batch revert ([`NodeRevertOp`]) with the same
+/// "revert" icon token as the project header's Revert-to-saved, present only
+/// while the header's subtree [`DirtySummary`] announces pending edits.
+fn node_header_actions(node: &ProjectNodeAddress, dirty: &DirtySummary) -> Vec<UiPaneAction> {
+    if dirty.is_clean() {
+        return Vec::new();
+    }
+    vec![UiPaneAction::new(
+        "revert",
+        UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            NodeRevertOp { node: node.clone() },
+        ),
+    )]
 }
 
 fn node_focus_action(node: &NodeController) -> UiAction {
@@ -574,7 +671,8 @@ fn root_name_sort_key(name: &str) -> (u8, &str) {
     }
 }
 
-fn root_slot_key(node_id: NodeId, root_name: &str) -> String {
+/// Key of a node's slot root in the mirror's `root_shapes`/`roots` maps.
+pub(in crate::app::project) fn root_slot_key(node_id: NodeId, root_name: &str) -> String {
     format!("node.{node_id}.{root_name}")
 }
 

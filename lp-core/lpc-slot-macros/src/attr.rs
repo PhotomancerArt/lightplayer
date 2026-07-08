@@ -419,11 +419,15 @@ pub(crate) fn field_policy_tokens(policy: SlotPolicyAttr) -> TokenStream {
     }
 }
 
-pub(crate) fn policy_is_read_only(policy: SlotPolicyAttr) -> bool {
-    matches!(
-        policy,
-        SlotPolicyAttr::ReadOnlyPersisted | SlotPolicyAttr::ReadOnlyTransient
-    )
+/// Whether a field with this policy omits its dynamic mut-access arm.
+///
+/// Only read-only **transient** fields (produced state) drop mut access: they
+/// are never authored, so nothing legitimate writes them dynamically. A
+/// read-only **persisted** field is still authored JSON — the dynamic reader
+/// must be able to deserialize it — and its write protection is mutate-time
+/// policy enforcement (`resolve_slot_policy`), not a codec-level hole.
+pub(crate) fn policy_is_read_only_transient(policy: SlotPolicyAttr) -> bool {
+    matches!(policy, SlotPolicyAttr::ReadOnlyTransient)
 }
 
 fn slot_attrs(attrs: &[Attribute]) -> impl Iterator<Item = &Attribute> {

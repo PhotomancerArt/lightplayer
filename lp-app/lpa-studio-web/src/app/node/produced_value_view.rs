@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiProducedValue, UiSlotUnit};
 
-use crate::app::node::{SlotDetailButton, SlotUnitDisplay, SlotUnitDisplayMode};
+use crate::app::node::{SlotPane, SlotPaneTreatment, SlotUnitDisplay, SlotUnitDisplayMode};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -17,26 +17,20 @@ pub fn ProducedValueView(
     let reading_class = produced_value_reading_class(unit.is_some());
 
     rsx! {
-        div { class: "ux-produced-value-card",
-            dd { class: "tw:m-0 tw:min-w-0 tw:leading-none",
-                span { class: "{reading_class}",
-                    strong { class: "ux-produced-value-number", "{display_value}" }
-                    if let Some(unit) = unit {
-                        span { class: "ux-produced-value-unit",
-                            SlotUnitDisplay {
-                                unit,
-                                mode: SlotUnitDisplayMode::Short,
-                            }
+        SlotPane {
+            title: value.label.clone(),
+            aspects,
+            initially_open,
+            treatment: SlotPaneTreatment::Neutral,
+            span { class: "{reading_class}",
+                strong { class: "ux-produced-value-number", "{display_value}" }
+                if let Some(unit) = unit {
+                    span { class: "ux-produced-value-unit",
+                        SlotUnitDisplay {
+                            unit,
+                            mode: SlotUnitDisplayMode::Short,
                         }
                     }
-                }
-            }
-            dt { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-1.5 tw:text-xs tw:font-semibold tw:leading-tight tw:text-subtle-foreground",
-                span { class: "tw:min-w-0 tw:break-words", "{value.label}" }
-                SlotDetailButton {
-                    label: value.label.clone(),
-                    aspects,
-                    initially_open,
                 }
             }
         }
