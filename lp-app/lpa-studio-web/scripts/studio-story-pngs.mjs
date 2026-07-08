@@ -7,10 +7,12 @@ import {
   readFile,
   rename,
   rm,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -32,6 +34,12 @@ const mode = parseMode(process.argv.slice(2));
 const port = process.env.STUDIO_STORY_PNGS_PORT ?? String(await findFreePort());
 const requestedCaptureConcurrency = parseCaptureConcurrency();
 const captureTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_TIMEOUT_MS", 10_000);
+// Hard ceiling on any single Chrome DevTools call, so a wedged renderer fails
+// fast (and gets retried) instead of blocking the run indefinitely.
+const cdpCallTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CDP_TIMEOUT_MS", 30_000);
+// Marker file (inside the capture dir) recording the build a partial capture
+// belongs to, so a re-run can resume it only when the build is unchanged.
+const CAPTURE_BUILD_FILE = ".capture-build";
 // Captures of the same build still differ in a few pixels from anti-aliasing and
 // sub-pixel text layout jitter (high per-channel delta, but only along glyph edges).
 // So `check` counts pixels whose per-channel delta exceeds a significance threshold
@@ -73,7 +81,7 @@ class CdpConnection {
     });
   }
 
-  send(method, params = {}, sessionId = undefined) {
+  send(method, params = {}, sessionId = undefined, timeoutMs = cdpCallTimeoutMs) {
     const id = this.nextId;
     this.nextId += 1;
     const message = { id, method, params };
@@ -82,7 +90,26 @@ class CdpConnection {
     }
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      // A wedged renderer can make Runtime.evaluate never respond, which would
+      // otherwise hang the whole run forever (the ready-state loop's own timeout
+      // never gets to re-check). Bounding every call turns that into a failed
+      // capture the worker can retry on a fresh page.
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) {
+          reject(new Error(`CDP ${method} timed out after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
+      timer.unref?.();
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       this.ws.send(JSON.stringify(message));
     });
   }
@@ -123,8 +150,25 @@ if (!chrome) {
   process.exit(1);
 }
 
-await rm(captureDir, { recursive: true, force: true });
-await mkdir(captureDir, { recursive: true });
+// Resume support: fingerprint the built app (the wasm bytes → identical render
+// output) and stash it in the capture dir. A re-run against the *same* build
+// keeps whatever was already captured and only fills in the rest; any change to
+// the build invalidates the cache and starts clean. This makes a killed or
+// wedged run cheap to finish instead of redoing all ~660 captures.
+const buildFingerprint = await computeBuildFingerprint();
+const resuming = buildFingerprint !== null && (await readCaptureBuildId(captureDir)) === buildFingerprint;
+if (resuming) {
+  await mkdir(captureDir, { recursive: true });
+  console.log(
+    `Resuming capture for unchanged build ${buildFingerprint.slice(0, 12)} — already-captured viewports are skipped.`,
+  );
+} else {
+  await rm(captureDir, { recursive: true, force: true });
+  await mkdir(captureDir, { recursive: true });
+  if (buildFingerprint !== null) {
+    await writeFile(path.join(captureDir, CAPTURE_BUILD_FILE), buildFingerprint);
+  }
+}
 
 const server = spawn("python3", ["-m", "http.server", port, "--bind", "127.0.0.1"], {
   cwd: publicDir,
@@ -188,6 +232,50 @@ function findFreePort() {
   });
 }
 
+// Fingerprint the built artifact so resume only reuses captures from the exact
+// same build. dx content-hashes the bundle filenames into index.html and emits
+// the app wasm as assets/<name>-<hash>.wasm, so hashing both pins the rendered
+// output. Returns null when nothing is found, which disables resume (a clean
+// capture every time).
+async function computeBuildFingerprint() {
+  const hash = createHash("sha256");
+  let found = false;
+  try {
+    hash.update(await readFile(path.join(publicDir, "index.html")));
+    found = true;
+  } catch {
+    // No index.html — fall through to the wasm.
+  }
+  try {
+    const assetsDir = path.join(publicDir, "assets");
+    for (const name of (await readdir(assetsDir)).sort()) {
+      if (name.endsWith(".wasm")) {
+        hash.update(await readFile(path.join(assetsDir, name)));
+        found = true;
+      }
+    }
+  } catch {
+    // No assets dir — the index.html hash alone still fingerprints the build.
+  }
+  return found ? hash.digest("hex") : null;
+}
+
+async function readCaptureBuildId(dir) {
+  try {
+    return (await readFile(path.join(dir, CAPTURE_BUILD_FILE), "utf8")).trim();
+  } catch {
+    return null;
+  }
+}
+
+async function isNonEmptyFile(filePath) {
+  try {
+    return (await stat(filePath)).size > 0;
+  } catch {
+    return false;
+  }
+}
+
 function outputDirForMode(currentMode) {
   if (currentMode === "baselines") {
     return baselineDirFromEnv();
@@ -215,7 +303,10 @@ function baselineDirFromEnv() {
 }
 
 function parseCaptureConcurrency() {
-  return parsePositiveIntegerEnv("STUDIO_STORY_PNGS_CONCURRENCY", 1);
+  // Each worker drives its own Chrome page; captures are independent, so this
+  // scales the (dominant) capture phase near-linearly. Kept modest by default to
+  // bound memory on CI runners; override with STUDIO_STORY_PNGS_CONCURRENCY.
+  return parsePositiveIntegerEnv("STUDIO_STORY_PNGS_CONCURRENCY", 4);
 }
 
 function parseRatioEnv(name, defaultValue) {
@@ -304,13 +395,23 @@ async function captureStoryWorker({
 
     const target = targets[targetIndex];
     const file = path.join(directory, storyFileName(target.storyId, target.viewport));
-    await browser.capture(
-      pageIndex,
-      storyPngUrl(target.storyId, target.viewport),
-      target.storyId,
-      target.viewport,
-      file,
-    );
+    // Resume: a viewport already captured for this build is kept as-is.
+    if (resuming && (await isNonEmptyFile(file))) {
+      files[targetIndex] = file;
+      continue;
+    }
+    const url = storyPngUrl(target.storyId, target.viewport);
+    try {
+      await browser.capture(pageIndex, url, target.storyId, target.viewport, file);
+    } catch (error) {
+      // A wedged or crashed renderer poisons its page; swap in a fresh one and
+      // retry the target once before letting the failure propagate.
+      console.warn(
+        `retrying ${target.storyId} (${target.viewport.id}) on a fresh page: ${error.message}`,
+      );
+      await browser.recycle(pageIndex);
+      await browser.capture(pageIndex, url, target.storyId, target.viewport, file);
+    }
     console.log(`wrote ${path.relative(repoRoot, file)}`);
     files[targetIndex] = file;
   }
@@ -343,6 +444,17 @@ async function launchCaptureBrowser(pageCount) {
   return {
     async capture(pageIndex, url, storyId, viewport, file) {
       await pages[pageIndex].capture(url, storyId, viewport, file);
+    },
+
+    // Replace a poisoned page (wedged/crashed renderer) with a fresh target so
+    // one bad story can't take down the rest of the run.
+    async recycle(pageIndex) {
+      try {
+        await pages[pageIndex].close();
+      } catch {
+        // The old target may already be gone; a fresh one is all we need.
+      }
+      pages[pageIndex] = await createCapturePage(cdp);
     },
 
     async close() {
@@ -418,6 +530,10 @@ async function createCapturePage(cdp) {
         sessionId,
       );
       await writeFile(file, Buffer.from(data, "base64"));
+    },
+
+    async close() {
+      await cdp.send("Target.closeTarget", { targetId });
     },
   };
 }
