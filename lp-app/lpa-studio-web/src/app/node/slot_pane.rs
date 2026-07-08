@@ -44,20 +44,24 @@ pub fn SlotPane(
     /// Detail aspects surfaced through the header detail button.
     aspects: Vec<UiSlotAspect>,
     /// Open the detail popup on first render (story/testing affordance).
-    #[props(default = false)] initially_open: bool,
+    #[props(default = false)]
+    initially_open: bool,
     /// Status treatment for the frame chrome.
-    #[props(default)] treatment: SlotPaneTreatment,
+    #[props(default)]
+    treatment: SlotPaneTreatment,
     /// Shrink the pane to hug its content instead of filling the available
     /// width. Use for values with an intrinsic size (e.g. a capped product
     /// preview) so the pane matches the product rather than framing it in dead
     /// space; leave off for values that should stretch (a produced-value grid).
-    #[props(default = false)] fit: bool,
+    #[props(default = false)]
+    fit: bool,
     /// Render the body flush to the pane edges (no padding) so hero media —
     /// e.g. a product preview — bleeds to the frame under the title bar
     /// instead of nesting a second bordered box inside a padded one. The pane's
     /// rounding + `overflow-hidden` clip the media. Leave off for text/number
     /// values that want breathing room.
-    #[props(default = false)] flush: bool,
+    #[props(default = false)]
+    flush: bool,
     /// The value display rendered, centered, in the pane body.
     children: Element,
 ) -> Element {
@@ -100,7 +104,9 @@ fn slot_pane_frame_class(treatment: SlotPaneTreatment, fit: bool) -> String {
         SlotPaneTreatment::Saving => "tw:border-status-working-border",
         SlotPaneTreatment::Invalid | SlotPaneTreatment::Error => "tw:border-status-error-border",
     };
-    format!("tw:grid {width} tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border {border} tw:bg-card-subtle")
+    format!(
+        "tw:grid {width} tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border {border} tw:bg-card-subtle"
+    )
 }
 
 fn slot_pane_header_class(treatment: SlotPaneTreatment) -> &'static str {
