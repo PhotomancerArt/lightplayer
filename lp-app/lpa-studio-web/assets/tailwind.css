@@ -296,6 +296,9 @@
   .tw\:max-h-60 {
     max-height: calc(var(--tw-spacing) * 60);
   }
+  .tw\:max-h-72 {
+    max-height: calc(var(--tw-spacing) * 72);
+  }
   .tw\:max-h-80 {
     max-height: calc(var(--tw-spacing) * 80);
   }
@@ -1310,6 +1313,9 @@
   }
   .tw\:whitespace-nowrap {
     white-space: nowrap;
+  }
+  .tw\:whitespace-pre-wrap {
+    white-space: pre-wrap;
   }
   .tw\:text-accent {
     color: var(--tw-color-accent);

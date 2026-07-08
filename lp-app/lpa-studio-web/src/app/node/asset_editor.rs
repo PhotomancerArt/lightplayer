@@ -4,22 +4,28 @@
 //!
 //! Renders `UiAssetEditor` (content resolution, in-flight and failure
 //! projections are all controller-produced). The component owns two pieces
-//! of local state — both **editor-local by design** (editing-model ADR D8:
+//! of local state — both **editor-local by design** (editing-model ADR D9:
 //! unapplied text never enters core state):
 //!
 //! - `text` mirrors the current editor text (via the editor's `on_change`),
 //!   so the inline Apply button can carry it as the op payload;
 //! - `modified` mirrors the editor's modified-vs-doc flag and drives the
-//!   "Modified" chip plus Apply enablement.
+//!   "Modified" state plus Apply enablement.
 //!
-//! (A third, `reveal_line`, is pure transient plumbing for the error strip's
+//! (A third, `reveal_line`, is pure transient plumbing for the error's
 //! click-to-scroll gesture.)
+//!
+//! **No reflow.** All transient state (modified / applying / compile error /
+//! apply failure / unsaved) is absorbed by a single **fixed-height status
+//! bar** above a fixed editor — the compile error is a *state of the bar*,
+//! not a strip inserted above the editor. The editor never changes size or
+//! position. See `../../../Planning/lp2025/2026-07-07-glsl-editor-ux/`.
 //!
 //! Resync flows need no logic here: the `doc` prop is the controller's
 //! effective content, and the [`CodeEditor`] reconciliation rules do the
 //! rest (external doc wins while unmodified; a doc that catches up with the
 //! user's text clears the modified state — that is how an Apply ack clears
-//! the chip). While a revert/save transiently drops the resolved content
+//! the state). While a revert/save transiently drops the resolved content
 //! (`content == None` until the re-fetch lands), the last resolved text
 //! keeps the editor mounted so unapplied user text is never destroyed.
 
@@ -31,7 +37,10 @@ use lpa_studio_core::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::base::{CodeEditor, CodeEditorDiagnostic, CodeEditorLanguage};
+use crate::base::{
+    CodeEditor, CodeEditorDiagnostic, CodeEditorLanguage, DetailPopover, DetailSection,
+    IconMenuTone, StudioIconName,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -76,11 +85,11 @@ pub fn AssetEditor(
     let doc = last_doc.borrow().clone();
     let language = editor_language(editor.kind);
 
-    // Compile-error presentation (QC5). Suppressed while an apply is in
-    // flight — the old error refers to the body being replaced. Positions
-    // refer to the last *applied* text and are never remapped while the
-    // user types (the Modified chip is the honesty signal); clearing happens
-    // view-side the moment the node status leaves its error state.
+    // Compile-error presentation. Suppressed while an apply is in flight —
+    // the old error refers to the body being replaced. Positions refer to
+    // the last *applied* text and are never remapped while the user types
+    // (the Modified state is the honesty signal); clearing happens view-side
+    // the moment the node status leaves its error state.
     let shader_error = (!editor.in_flight)
         .then_some(editor.shader_error.as_ref())
         .flatten()
@@ -101,6 +110,17 @@ pub fn AssetEditor(
     }
 
     let editable = editor.editable();
+    // The overlay carries an applied-but-unsaved edit (distinct from
+    // unapplied editor text): drives the amber "Unsaved" bar state.
+    let dirty = editor.content.as_ref().is_some_and(|content| content.dirty);
+    let bar_state = EditorBarState::compute(
+        editor.failure.clone(),
+        editor.in_flight,
+        shader_error.clone(),
+        modified(),
+        dirty,
+    );
+
     let apply_disabled = !(editable && modified());
     // Apply gate shared by the button and the editor's Cmd/Ctrl+Enter path:
     // only unapplied changes on editable content are worth a mutation. Both
@@ -117,26 +137,25 @@ pub fn AssetEditor(
     };
 
     rsx! {
-        section { class: "tw:grid tw:min-w-0 tw:border-t tw:border-border-muted tw:bg-page",
-            div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:px-3 tw:py-1.5",
-                div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-                    code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:text-subtle-foreground", "{editor.source}" }
-                    span { class: "tw:flex-none tw:text-xs tw:font-bold tw:text-subtle-foreground", "{editor.kind.editor_label()}" }
+        section { class: "tw:grid tw:min-w-0 tw:border-t tw:border-border-muted",
+            // Fixed-height status bar: absorbs every transient state so the
+            // editor below never moves. `h-8` + `overflow-hidden` guarantee a
+            // constant height regardless of content.
+            div { class: bar_class(bar_state.tone()),
+                div { class: "tw:flex tw:min-w-0 tw:flex-1 tw:items-center tw:gap-2",
+                    EditorBarStatus {
+                        state: bar_state.clone(),
+                        source: editor.source.clone(),
+                        kind_label: editor.kind.editor_label(),
+                        on_reveal: move |line| reveal_line.set(Some(line)),
+                    }
                 }
                 div { class: "tw:flex tw:flex-none tw:items-center tw:gap-1.5",
-                    if modified() {
-                        span {
-                            class: chip_class(ChipTone::Neutral),
-                            title: "The editor has changes that have not been applied yet",
-                            "Modified"
-                        }
+                    if let EditorBarState::CompileError { error } = &bar_state {
+                        FullErrorPopover { raw: error.raw.clone() }
                     }
-                    if editor.in_flight {
-                        span {
-                            class: chip_class(ChipTone::Working),
-                            title: "The applied body is awaiting the server acknowledgement",
-                            "Applying…"
-                        }
+                    if let EditorBarState::ApplyFailed { reason } = &bar_state {
+                        FullErrorPopover { raw: reason.clone() }
                     }
                     if editable {
                         button {
@@ -155,17 +174,6 @@ pub fn AssetEditor(
                             "Apply"
                         }
                     }
-                }
-            }
-            if let Some(reason) = editor.failure.as_ref() {
-                p { class: "tw:m-0 tw:border-t tw:border-status-error-border tw:bg-status-error-bg tw:px-3 tw:py-1.5 tw:text-xs tw:leading-snug tw:text-status-error-foreground tw:break-words",
-                    "Apply failed: {reason}"
-                }
-            }
-            if let Some(error) = shader_error.as_ref() {
-                ShaderErrorStrip {
-                    error: error.clone(),
-                    on_reveal: move |line| reveal_line.set(Some(line)),
                 }
             }
             match (&editor.content.as_ref().map(|content| &content.body), &doc) {
@@ -196,28 +204,89 @@ pub fn AssetEditor(
     }
 }
 
-/// Read-only placeholder body for the non-editable states (binary body,
-/// deleted body, content still loading).
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AssetEditorNote(note: String) -> Element {
-    rsx! {
-        p { class: "tw:m-0 tw:px-3 tw:py-4 tw:text-sm tw:text-subtle-foreground", "{note}" }
+/// The one status the bar shows, computed from the editor's projections plus
+/// the editor-local `modified` flag. Exactly one state at a time, in
+/// attention-first priority (see [`Self::compute`]); the tone and the left
+/// zone content both derive from it, so the fixed-height bar never grows.
+#[derive(Clone, Debug, PartialEq)]
+enum EditorBarState {
+    /// The last apply was rejected (server rejection or the client size
+    /// guard); carries the reason. Highest priority.
+    ApplyFailed { reason: String },
+    /// An applied body is awaiting its server acknowledgement.
+    Applying,
+    /// The applied body failed to compile; carries the parsed error.
+    CompileError { error: UiShaderError },
+    /// The editor has unapplied local changes.
+    Modified,
+    /// An applied edit is not yet written to the project file.
+    Unsaved,
+    /// Clean and compiling: identity only.
+    Clean,
+}
+
+impl EditorBarState {
+    /// Attention-first priority: a failed apply outranks an in-flight one
+    /// outranks a compile error outranks unapplied text outranks an unsaved
+    /// edit outranks clean. `shader_error` is expected already suppressed
+    /// while in flight (the caller does that).
+    fn compute(
+        failure: Option<String>,
+        in_flight: bool,
+        shader_error: Option<UiShaderError>,
+        modified: bool,
+        dirty: bool,
+    ) -> Self {
+        if let Some(reason) = failure {
+            Self::ApplyFailed { reason }
+        } else if in_flight {
+            Self::Applying
+        } else if let Some(error) = shader_error {
+            Self::CompileError { error }
+        } else if modified {
+            Self::Modified
+        } else if dirty {
+            Self::Unsaved
+        } else {
+            Self::Clean
+        }
+    }
+
+    /// Bar background/border tone for the state.
+    fn tone(&self) -> BarTone {
+        match self {
+            Self::ApplyFailed { .. } | Self::CompileError { .. } => BarTone::Error,
+            Self::Applying => BarTone::Working,
+            // Unapplied editor text is deliberately neutral (D9): not the
+            // unsaved-yellow / live-blue family.
+            Self::Modified => BarTone::Neutral,
+            // An applied-but-unsaved edit IS the unsaved (amber) state.
+            Self::Unsaved => BarTone::Unsaved,
+            Self::Clean => BarTone::Plain,
+        }
     }
 }
 
-/// Compile-error strip: the parsed message plus, when located, a clickable
-/// `line:col` that scrolls the editor there. The full original error text
-/// rides the tooltip.
+/// Left-zone content of the status bar for one state. Identity (source +
+/// kind) shows in the calm states; a compile/apply error takes the zone over
+/// (QD-A) with the message truncated to one line and, when located, a
+/// clickable `line:col` that reveals the editor line.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ShaderErrorStrip(error: UiShaderError, on_reveal: EventHandler<u32>) -> Element {
-    rsx! {
-        div {
-            class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2 tw:border-t tw:border-status-error-border tw:bg-status-error-bg tw:px-3 tw:py-1.5 tw:text-xs tw:leading-snug tw:text-status-error-foreground",
-            title: "{error.raw}",
+fn EditorBarStatus(
+    state: EditorBarState,
+    source: String,
+    kind_label: &'static str,
+    on_reveal: EventHandler<u32>,
+) -> Element {
+    match state {
+        EditorBarState::ApplyFailed { reason } => rsx! {
+            span { class: "tw:flex-none tw:font-bold", "Apply failed" }
+            span { class: "tw:min-w-0 tw:truncate", title: "{reason}", "{reason}" }
+        },
+        EditorBarState::CompileError { error } => rsx! {
             span { class: "tw:flex-none tw:font-bold", "Compile error" }
-            span { class: "tw:min-w-0 tw:break-words", "{error.message}" }
+            span { class: "tw:min-w-0 tw:truncate", title: "{error.raw}", "{error.message}" }
             if let Some((line, col)) = error.line_col {
                 button {
                     class: "tw:flex-none tw:cursor-pointer tw:border-0 tw:bg-transparent tw:p-0 tw:font-mono tw:font-bold tw:text-status-error-foreground tw:underline",
@@ -227,7 +296,62 @@ fn ShaderErrorStrip(error: UiShaderError, on_reveal: EventHandler<u32>) -> Eleme
                     "{line}:{col}"
                 }
             }
+        },
+        EditorBarState::Applying => rsx! {
+            EditorBarIdentity { source, kind_label }
+            span { class: "tw:flex-none tw:font-bold", "Applying…" }
+        },
+        EditorBarState::Modified => rsx! {
+            EditorBarIdentity { source, kind_label }
+            span { class: "tw:flex-none tw:font-bold", "Modified" }
+        },
+        EditorBarState::Unsaved => rsx! {
+            EditorBarIdentity { source, kind_label }
+            span { class: "tw:flex-none tw:font-bold", "Unsaved" }
+        },
+        EditorBarState::Clean => rsx! {
+            EditorBarIdentity { source, kind_label }
+        },
+    }
+}
+
+/// Source path + kind label — the calm-state identity of the bar's left zone.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn EditorBarIdentity(source: String, kind_label: &'static str) -> Element {
+    rsx! {
+        code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:text-subtle-foreground", "{source}" }
+        span { class: "tw:flex-none tw:text-xs tw:font-bold tw:text-subtle-foreground", "{kind_label}" }
+    }
+}
+
+/// The detail-popup trigger that opens the full (multi-line) error text —
+/// the fixed-height bar only shows a truncated line (QD-A).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn FullErrorPopover(raw: String) -> Element {
+    rsx! {
+        DetailPopover {
+            icon: StudioIconName::StatusError,
+            label: "Show the full error".to_string(),
+            title: "Full error".to_string(),
+            tone: IconMenuTone::Error,
+            DetailSection {
+                pre { class: "tw:m-0 tw:max-h-72 tw:overflow-auto tw:whitespace-pre-wrap tw:break-words tw:font-mono tw:text-xs tw:leading-snug tw:text-status-error-foreground",
+                    "{raw}"
+                }
+            }
         }
+    }
+}
+
+/// Read-only placeholder body for the non-editable states (binary body,
+/// deleted body, content still loading).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn AssetEditorNote(note: String) -> Element {
+    rsx! {
+        p { class: "tw:m-0 tw:px-3 tw:py-4 tw:text-sm tw:text-subtle-foreground", "{note}" }
     }
 }
 
@@ -260,29 +384,48 @@ fn apply_button_class(disabled: bool) -> &'static str {
     }
 }
 
-/// Tones for the editor-local chips. Deliberately NOT the unsaved (yellow)
-/// or live (blue) families: unapplied editor text is neither — it exists
-/// only in this editor until applied.
+/// Tone of the fixed-height status bar. Neutral (unapplied text) and Unsaved
+/// (amber, applied-but-uncommitted) are deliberately distinct — one is
+/// editor-local, the other counts toward Save (D9 color language).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ChipTone {
+enum BarTone {
+    Plain,
     Neutral,
     Working,
+    Unsaved,
+    Error,
 }
 
-fn chip_class(tone: ChipTone) -> &'static str {
-    match tone {
-        ChipTone::Neutral => {
-            "tw:shrink-0 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:leading-none tw:text-status-neutral-foreground"
+/// Fixed-height bar shell for a tone. `h-8` + `overflow-hidden` are the
+/// no-reflow guarantee: the bar is one line tall in every state.
+fn bar_class(tone: BarTone) -> String {
+    let tone_class = match tone {
+        BarTone::Plain => "tw:bg-card-subtle tw:text-subtle-foreground",
+        BarTone::Neutral => {
+            "tw:bg-status-neutral-bg tw:text-status-neutral-foreground tw:border-status-neutral-border"
         }
-        ChipTone::Working => {
-            "tw:shrink-0 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-working-border tw:bg-status-working-bg tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:leading-none tw:text-status-working-foreground"
+        BarTone::Working => {
+            "tw:bg-status-working-bg tw:text-status-working-foreground tw:border-status-working-border"
         }
-    }
+        BarTone::Unsaved => {
+            "tw:bg-status-warning-bg tw:text-status-warning-foreground tw:border-status-warning-border"
+        }
+        BarTone::Error => {
+            "tw:bg-status-error-bg tw:text-status-error-foreground tw:border-status-error-border"
+        }
+    };
+    format!(
+        "tw:flex tw:h-8 tw:min-w-0 tw:items-center tw:gap-2 tw:overflow-hidden tw:px-3 tw:text-xs tw:leading-none {tone_class}"
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn err() -> UiShaderError {
+        UiShaderError::parse("shader compile: parse: error: bad\n --> <shader>:4:7")
+    }
 
     #[test]
     fn editor_language_maps_kinds_onto_editor_modes() {
@@ -302,9 +445,8 @@ mod tests {
 
     #[test]
     fn located_errors_become_one_editor_diagnostic() {
-        let located = UiShaderError::parse("shader compile: parse: error: bad\n --> <shader>:4:7");
         assert_eq!(
-            shader_error_diagnostics(&located),
+            shader_error_diagnostics(&err()),
             vec![CodeEditorDiagnostic {
                 line: 4,
                 col: 7,
@@ -317,10 +459,45 @@ mod tests {
     }
 
     #[test]
-    fn editor_local_chips_use_neutral_and_working_families_only() {
+    fn bar_state_priority_is_attention_first() {
+        // failure › applying › compile-error › modified › unsaved › clean.
+        assert!(matches!(
+            EditorBarState::compute(Some("too big".into()), true, Some(err()), true, true),
+            EditorBarState::ApplyFailed { .. }
+        ));
+        assert_eq!(
+            EditorBarState::compute(None, true, Some(err()), true, true),
+            EditorBarState::Applying
+        );
+        assert!(matches!(
+            EditorBarState::compute(None, false, Some(err()), true, true),
+            EditorBarState::CompileError { .. }
+        ));
+        assert_eq!(
+            EditorBarState::compute(None, false, None, true, true),
+            EditorBarState::Modified
+        );
+        assert_eq!(
+            EditorBarState::compute(None, false, None, false, true),
+            EditorBarState::Unsaved
+        );
+        assert_eq!(
+            EditorBarState::compute(None, false, None, false, false),
+            EditorBarState::Clean
+        );
+    }
+
+    #[test]
+    fn tones_keep_unapplied_neutral_and_unsaved_amber() {
         // The one deliberate divergence from the dirty color language:
-        // unapplied text is not unsaved (yellow) and not live (blue).
-        assert!(chip_class(ChipTone::Neutral).contains("status-neutral"));
-        assert!(chip_class(ChipTone::Working).contains("status-working"));
+        // unapplied editor text is neutral, not the unsaved-amber family.
+        assert_eq!(EditorBarState::Modified.tone(), BarTone::Neutral);
+        assert_eq!(EditorBarState::Unsaved.tone(), BarTone::Unsaved);
+        assert_eq!(EditorBarState::Applying.tone(), BarTone::Working);
+        assert_eq!(EditorBarState::Clean.tone(), BarTone::Plain);
+        assert!(bar_class(BarTone::Unsaved).contains("status-warning"));
+        assert!(bar_class(BarTone::Neutral).contains("status-neutral"));
+        // Fixed height is the no-reflow guarantee.
+        assert!(bar_class(BarTone::Plain).contains("tw:h-8"));
     }
 }
