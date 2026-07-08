@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
@@ -25,7 +26,10 @@ const publicDir = path.resolve(
 );
 const storyRoot = path.join(repoRoot, "lp-app/lpa-studio-web");
 const mode = parseMode(process.argv.slice(2));
-const port = process.env.STUDIO_STORY_PNGS_PORT ?? "2822";
+// Default to an OS-assigned free port so parallel runs (multiple agents, each in
+// its own git worktree — which isolates files but NOT ports) never fight over a
+// fixed port. Set STUDIO_STORY_PNGS_PORT to pin one (e.g. for debugging).
+const port = process.env.STUDIO_STORY_PNGS_PORT ?? String(await findFreePort());
 const requestedCaptureConcurrency = parseCaptureConcurrency();
 const captureTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_TIMEOUT_MS", 10_000);
 // Captures of the same build still differ in a few pixels from anti-aliasing and
@@ -167,6 +171,21 @@ function parseMode(args) {
   }
   console.error("Usage: studio-story-pngs.mjs [pngs|baselines|check]");
   process.exit(2);
+}
+
+// Ask the OS for a free TCP port by binding to 0, then release it and hand the
+// number back to the static server. The window between close and re-bind is
+// sub-millisecond, so a clash is astronomically less likely than the old fixed
+// port; if it ever does, the server fails fast and the run can be retried.
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port: assigned } = probe.address();
+      probe.close((closeError) => (closeError ? reject(closeError) : resolve(assigned)));
+    });
+  });
 }
 
 function outputDirForMode(currentMode) {
