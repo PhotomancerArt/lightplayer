@@ -324,7 +324,24 @@ fn produced_product_info_aspect(product: &UiProducedProduct) -> UiSlotAspect {
         shape_row = shape_row.with_detail(detail.clone());
     }
 
-    UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
+    let mut aspect = UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
         .with_row(UiSlotAspectRow::new("Name", product.name.clone()))
-        .with_row(shape_row)
+        .with_row(shape_row);
+    if let Some(size) = product_preview_size(&product.preview) {
+        aspect = aspect.with_row(UiSlotAspectRow::new("Size", size));
+    }
+    aspect
+}
+
+/// Human-readable extent for a product preview, surfaced in the detail popup so
+/// the product face can stay clean.
+fn product_preview_size(preview: &UiProductPreview) -> Option<String> {
+    match preview {
+        UiProductPreview::VisualSrgb8 { width, height, .. } => Some(format!("{width} × {height}")),
+        UiProductPreview::ControlNative(preview) => Some(format!(
+            "{} × {} samples",
+            preview.extent.rows, preview.extent.samples_per_row
+        )),
+        _ => None,
+    }
 }
