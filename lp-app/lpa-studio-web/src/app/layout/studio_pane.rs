@@ -44,6 +44,11 @@ pub fn StudioPane(
     primary: Option<Element>,
     /// Pane title.
     title: String,
+    /// Optional action dispatched when the title is activated. When set, the
+    /// title becomes a hoverable selection control (e.g. a node pane whose name
+    /// selects the node) instead of static text.
+    #[props(default)]
+    title_action: Option<UiAction>,
     /// Optional kind/subtype text after the title.
     #[props(default)]
     kind: Option<String>,
@@ -81,8 +86,22 @@ pub fn StudioPane(
                     if let Some(primary) = primary {
                         {primary}
                     }
-                    h3 { class: "tw:m-0 tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[1.04rem] tw:font-bold tw:leading-tight tw:text-strong-foreground",
-                        "{title}"
+                    if let Some(action) = title_action {
+                        button {
+                            class: "tw:m-0 tw:-mx-1 tw:min-w-0 tw:flex-1 tw:truncate tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-0.5 tw:text-left tw:text-[1.04rem] tw:font-bold tw:leading-tight tw:text-strong-foreground tw:transition-colors tw:hover:bg-card-subtle/70",
+                            r#type: "button",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                if let Some(handler) = on_action {
+                                    handler.call(action.clone());
+                                }
+                            },
+                            "{title}"
+                        }
+                    } else {
+                        h3 { class: "tw:m-0 tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[1.04rem] tw:font-bold tw:leading-tight tw:text-strong-foreground",
+                            "{title}"
+                        }
                     }
                     if let Some(kind) = kind {
                         span { class: "tw:shrink-0 tw:text-xs tw:font-bold tw:text-subtle-foreground", "{kind}" }

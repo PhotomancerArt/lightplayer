@@ -412,9 +412,9 @@ studio-web-build: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar release
-    echo "Building lpa-studio-web with dx for wasm32 release..."
+    echo "Building lpa-studio-web with dx for wasm32 release (stories bundled for the in-app design library)..."
     rm -rf target/dx/lpa-studio-web/release/web/public
-    dx build --web -p lpa-studio-web --release --debug-symbols false
+    dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
     just studio-web-copy-sidecars release target/dx/lpa-studio-web/release/web/public true
     echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (index.html, assets/, pkg/, firmware/)"
 

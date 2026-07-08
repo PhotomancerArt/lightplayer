@@ -12,7 +12,7 @@
 //! [`VersionBadge`] wrapper owns the fetches and drives that component.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{GitBranch, GitPullRequest};
+use dioxus_icons::lucide::{GitBranch, GitPullRequest, LibraryBig};
 
 use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
 
@@ -186,6 +186,26 @@ pub fn VersionDetails(info: Option<VersionInfo>, changelog: Vec<ChangelogEntry>)
 fn VersionFooter(repo: String) -> Element {
     rsx! {
         footer { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:border-t tw:border-border-subtle tw:pt-2.5",
+            // Shown only when the story book is compiled into this build; the
+            // link switches the app into the full-screen design library.
+            if cfg!(feature = "stories") {
+                a {
+                    class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-accent",
+                    href: "#/stories",
+                    onclick: move |event| {
+                        // App() only checks the story-book hash at mount, so
+                        // set the hash and reload to enter it.
+                        event.prevent_default();
+                        if let Some(window) = web_sys::window() {
+                            let location = window.location();
+                            let _ = location.set_hash("/stories");
+                            let _ = location.reload();
+                        }
+                    },
+                    LibraryBig { size: 13 }
+                    span { "Design library" }
+                }
+            }
             a {
                 class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-accent",
                 href: "{repo_url(&repo)}",

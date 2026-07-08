@@ -156,6 +156,15 @@ pub fn ConfigSlotRow(
                                 on_action: handler,
                                 initially_editing: initially_key_editing,
                             }
+                        } else if has_children {
+                            button {
+                                class: "tw:block tw:min-w-0 tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-left",
+                                style: "appearance: none; -webkit-appearance: none; border: 0; background: transparent; cursor: pointer;",
+                                r#type: "button",
+                                aria_label: if expanded() { "Collapse slot" } else { "Expand slot" },
+                                onclick: move |_| expanded.set(!expanded()),
+                                strong { class: "tw:block tw:min-w-0 tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
+                            }
                         } else {
                             strong { class: "tw:block tw:min-w-0 tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
                         }

@@ -79,6 +79,7 @@ pub fn NodePane(
                         }
                     },
                     title,
+                    title_action: focus_action.clone(),
                     chrome,
                     actions: header_actions,
                     on_action,

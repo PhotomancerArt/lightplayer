@@ -11,12 +11,11 @@ pub fn ProducedProducts(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-0",
-            for (index, product) in products.into_iter().enumerate() {
+        div { class: "tw:grid tw:min-w-0 tw:justify-items-center tw:gap-2 tw:p-2",
+            for product in products.into_iter() {
                 ProducedProductView {
                     key: "{product.name}",
                     product,
-                    separated: index > 0,
                     focus_action: focus_action.clone(),
                     on_action,
                 }
