@@ -995,18 +995,6 @@ label:has(> input:not(:disabled)) {
         rgba(8, 12, 14, 0.46);
 }
 
-.ux-produced-value-card {
-    display: grid;
-    min-height: 80px;
-    min-width: 0;
-    align-content: space-between;
-    gap: var(--studio-space-2);
-    padding: var(--studio-space-2);
-    border: 1px solid var(--studio-color-border-subtle);
-    border-radius: var(--studio-radius-sm);
-    background: var(--studio-color-surface-muted);
-}
-
 .ux-produced-value-reading {
     display: inline-grid;
     position: relative;
