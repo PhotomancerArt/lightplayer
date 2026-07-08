@@ -115,7 +115,7 @@ pub fn import_zip(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpfs::{LpFs, LpFsMemory};
+    use lpfs::LpFsMemory;
     use std::cell::RefCell;
     use std::rc::Rc;
 

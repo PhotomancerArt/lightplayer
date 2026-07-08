@@ -4,7 +4,6 @@
 //! and future agents should share when they deploy a project through a running
 //! `lp-server`.
 
-use lpc_model::AsLpPathBuf;
 use lpc_wire::{ClientRequest, FsRequest, WireProjectHandle, WireServerMsgBody};
 
 use crate::client_error::{ClientError, ClientResult};
@@ -30,13 +29,6 @@ impl ProjectDeployFile {
 
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
-    }
-
-    fn into_write_request(self, project_id: &str) -> ClientRequest {
-        ClientRequest::Filesystem(FsRequest::Write {
-            path: project_file_path(project_id, &self.relative_path).as_path_buf(),
-            data: self.bytes,
-        })
     }
 }
 
