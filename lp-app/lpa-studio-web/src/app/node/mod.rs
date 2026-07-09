@@ -1,5 +1,8 @@
 //! Studio node UI components and colocated node UI stories.
 
+mod asset_editor;
+#[cfg(feature = "stories")]
+pub(crate) mod asset_editor_stories;
 mod binding_chip;
 mod config_slot_row;
 #[cfg(feature = "stories")]
@@ -30,6 +33,7 @@ mod slot_matrix_field;
 mod slot_option_presence;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_option_presence_stories;
+mod slot_pane;
 mod slot_raw_input_popover;
 mod slot_record_editor;
 #[cfg(feature = "stories")]
@@ -45,6 +49,7 @@ mod slot_value_editor;
 pub(crate) mod slot_value_editor_stories;
 mod slot_vector_fields;
 
+pub use asset_editor::AssetEditor;
 pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
 pub use node_children::NodeChildren;
@@ -71,6 +76,7 @@ pub use slot_matrix_field::MatrixSlotField;
 pub use slot_option_presence::{
     OptionPresenceActionButton, OptionPresenceCell, OptionPresenceCheckbox, OptionPresenceStyle,
 };
+pub use slot_pane::{SlotPane, SlotPaneTreatment};
 pub use slot_raw_input_popover::SlotRawInputPopover;
 pub use slot_record_editor::SlotRecordEditor;
 pub(crate) use slot_shape_display::{

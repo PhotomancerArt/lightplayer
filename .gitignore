@@ -19,6 +19,10 @@ foo
 /.cargo
 publish
 vendor
+# The committed CodeMirror bundle is a build artifact by philosophy but a
+# tracked file by design (offline builds, no npm): un-ignore it.
+!lp-app/lpa-studio-web/public/vendor/
+!lp-app/lpa-studio-web/public/vendor/**
 *.coredump
 *.smt2
 *.cwasm

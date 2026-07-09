@@ -11,10 +11,10 @@ use crate::app::node::slot_option_presence::{
     OptionPresenceWidth, option_presence_child_slot, option_presence_chip,
 };
 use crate::app::node::{
-    BindingChip, BindingChipDirection, EnumVariantField, MapAddEntry, MapEntryKeyField,
-    MapEntryRemoveButton, OptionPresenceActionButton, OptionPresenceCell, OptionPresenceCheckbox,
-    OptionPresenceStyle, SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor,
-    primary_affordance, slot_row_class,
+    AssetEditor, BindingChip, BindingChipDirection, EnumVariantField, MapAddEntry,
+    MapEntryKeyField, MapEntryRemoveButton, OptionPresenceActionButton, OptionPresenceCell,
+    OptionPresenceCheckbox, OptionPresenceStyle, SlotDetailButton, SlotDetailRevert,
+    SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -156,6 +156,15 @@ pub fn ConfigSlotRow(
                                 on_action: handler,
                                 initially_editing: initially_key_editing,
                             }
+                        } else if has_children {
+                            button {
+                                class: "tw:block tw:min-w-0 tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-left",
+                                style: "appearance: none; -webkit-appearance: none; border: 0; background: transparent; cursor: pointer;",
+                                r#type: "button",
+                                aria_label: if expanded() { "Collapse slot" } else { "Expand slot" },
+                                onclick: move |_| expanded.set(!expanded()),
+                                strong { class: "tw:block tw:min-w-0 tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
+                            }
                         } else {
                             strong { class: "tw:block tw:min-w-0 tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
                         }
@@ -251,7 +260,7 @@ pub fn ConfigSlotRow(
                     }
                 }
                 if let Some(asset) = child_asset {
-                    AssetSlotEditor { asset }
+                    AssetSlotEditor { asset, on_action }
                 }
             }
         }
@@ -406,9 +415,21 @@ fn summary_label(count: usize, singular: &str, plural: &str) -> String {
     }
 }
 
+/// An asset slot's expanded body. File-backed editable assets render the
+/// inline [`AssetEditor`] (edit in place, output stays visible); inline,
+/// binary, or unresolvable assets keep the read-only presentation.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AssetSlotEditor(asset: lpa_studio_core::UiSlotAsset) -> Element {
+fn AssetSlotEditor(
+    asset: lpa_studio_core::UiSlotAsset,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    if let Some(editor) = asset.inline_editor.clone() {
+        return rsx! {
+            AssetEditor { editor, on_action }
+        };
+    }
+
     rsx! {
         div { class: "tw:border-t tw:border-border-muted tw:bg-page tw:px-2 tw:py-2",
             div { class: "tw:mb-1.5 tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2",

@@ -2,9 +2,9 @@
 
 pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
 pub use lpc_model::{
-    ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, LpValue, Revision, SlotMapKey,
-    SlotPath, SlotPathSegment,
+    ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
+    ControlLayout2d, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, LpValue,
+    Revision, SlotMapKey, SlotPath, SlotPathSegment,
 };
 
 pub mod app;
@@ -20,30 +20,33 @@ pub use app::link::{
     SharedLinkRegistry, UiIssue,
 };
 pub use app::node::{
-    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
-    UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab,
-    UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
-    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductTrackingState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
-    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
-    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
+    UiAssetEditor, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody,
+    UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader,
+    UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings,
+    UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame,
+    UiProductRef, UiProductTrackingState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
+    UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite,
+    UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality,
+    UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue,
+    UiSlotValueKind,
 };
 pub use app::project::{
-    DirtySummary, LoadedProjectChoice, NodeController, NodeControllerState, NodeRevertOp,
-    PendingEdit, PendingEditOp, PendingEditPhase, ProjectConnectResult, ProjectController,
-    ProjectEditRun, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
+    NodeController, NodeControllerState, NodeRevertOp, PendingAssetEdit, PendingEdit,
+    PendingEditOp, PendingEditPhase, ProjectAssetContentRun, ProjectConnectResult,
+    ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
     ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
     ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
-    SlotEditOp, SlotKind, UiAffordance, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    SlotEditOp, SlotKind, UiAffordance, UiAssetContent, UiAssetContentBody, UiPendingEdit,
+    UiPendingEditKind, UiPendingEditPhase, UiShaderError,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
-    ServerSnapshot, ServerState, StudioOverlayCommit, StudioOverlayMutation, StudioOverlayRead,
-    StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+    ServerSnapshot, ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation,
+    StudioOverlayRead, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
     ConsoleCommand, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing,

@@ -127,6 +127,14 @@ pub fn App() -> Element {
     // actions; the actor applies them synchronously and never coalesces them.
     let console_bridge = bridge.clone();
     let on_console = move |command: ConsoleCommand| {
+        // The display threshold doubles as the *capture* floor: raise or lower
+        // the global `log::` max level to match, so `debug!`/`trace!` producers
+        // short-circuit inside the macro when hidden instead of formatting and
+        // queuing output the console would only drop. Reveal below the current
+        // floor is therefore forward-only, by design.
+        if let ConsoleCommand::SetMinLevel(level) = command {
+            log::set_max_level(capture_level_for(level));
+        }
         console_bridge.tx.send(StudioCommand::Console(command));
     };
 
@@ -173,14 +181,29 @@ fn now_secs() -> f64 {
 /// spawns, so `log::` macros anywhere on the wasm side are captured and later
 /// drained into the console ring by the actor.
 ///
-/// `Debug` is the runtime max (bumping to `Trace` is a cheap follow-up; this
-/// avoids paying for hot-path `trace!` in dependencies) — the console pane's
-/// filter is the *display* gate. An already-installed logger is tolerated
-/// with a JS-console warning, never a panic.
+/// The initial max level matches the console filter's default threshold
+/// (`Info`): the display threshold is also the *capture* floor, so producers
+/// below it never format or queue output. `on_console` keeps the two in sync
+/// as the user moves the filter. An already-installed logger is tolerated with
+/// a JS-console warning, never a panic.
 fn install_log_sink() {
     match log::set_logger(&STUDIO_LOG_SINK) {
-        Ok(()) => log::set_max_level(log::LevelFilter::Debug),
+        // `Info` mirrors `LogFilter::default().min_level` in core.
+        Ok(()) => log::set_max_level(capture_level_for(UiLogLevel::Info)),
         Err(_) => console_warn("studio log sink not installed: a global logger is already set"),
+    }
+}
+
+/// Map the console's display threshold to the global `log::` max level that
+/// gates producers. The floor is inclusive: a `min_level` of `Info` captures
+/// `Info` and above, dropping `Debug`/`Trace` at the macro.
+fn capture_level_for(min_level: UiLogLevel) -> log::LevelFilter {
+    match min_level {
+        UiLogLevel::Trace => log::LevelFilter::Trace,
+        UiLogLevel::Debug => log::LevelFilter::Debug,
+        UiLogLevel::Info => log::LevelFilter::Info,
+        UiLogLevel::Warn => log::LevelFilter::Warn,
+        UiLogLevel::Error => log::LevelFilter::Error,
     }
 }
 

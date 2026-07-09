@@ -19,6 +19,7 @@ pub use project_slot_root::ProjectSlotRoot;
 pub use slot_binding_fact::{SlotBindingFact, SlotBindingFactKind};
 pub use slot_controller::{SlotController, SlotControllerState, SlotKind};
 pub(in crate::app::project) use slot_edit_join::{
-    PrefixEditState, SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
+    AssetEditEntry, AssetEditKey, AssetEditState, PrefixEditState, SlotEditEntry,
+    SlotEditEntrySource, SlotEditJoin,
 };
 pub use slot_edit_op::SlotEditOp;

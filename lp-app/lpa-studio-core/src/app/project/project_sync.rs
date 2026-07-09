@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use lpc_model::{
-    ArtifactLocation, ArtifactOverlay, ControlDisplayLayout, MutationCmd, MutationEffect,
-    MutationOp, ProjectOverlay, Revision, SlotEditOp, SlotPath, StoredSlotEdit,
+    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, ControlDisplayLayout, MutationCmd,
+    MutationEffect, MutationOp, ProjectOverlay, Revision, SlotEditOp, SlotPath, StoredSlotEdit,
 };
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
@@ -159,6 +159,22 @@ impl ProjectSync {
                     .iter()
                     .map(move |(path, op)| (artifact, path, op))
             })
+    }
+
+    /// Iterate every mirrored pending asset body edit as `(artifact, body)`
+    /// — the `ArtifactOverlay::Asset` complement of
+    /// [`Self::overlay_slot_edits`].
+    pub fn overlay_asset_edits(
+        &self,
+    ) -> impl Iterator<Item = (&ArtifactLocation, &AssetBodyOverlay)> + '_ {
+        self.overlay
+            .iter()
+            .filter_map(|(artifact, overlay)| overlay.as_body().map(|body| (artifact, body)))
+    }
+
+    /// Mirrored pending asset body edit for `artifact`, if any.
+    pub fn overlay_asset_edit_at(&self, artifact: &ArtifactLocation) -> Option<&AssetBodyOverlay> {
+        self.overlay.artifact(artifact)?.as_body()
     }
 
     /// True when the last applied runtime status reports an overlay revision
@@ -1383,6 +1399,64 @@ mod tests {
             "stranded descendant edits are cleared by the ack's Removed entries"
         );
         assert_eq!(sync.overlay_slot_edits().count(), 2, "ensure + leaf assign");
+        assert_eq!(sync.overlay_revision(), Revision::new(4));
+    }
+
+    #[test]
+    fn acked_asset_body_and_clear_round_trip_through_mirror() {
+        // A SetArtifactBody ack applies as sent (no normalization exists for
+        // whole-artifact ops); ClearArtifact removes the entry again.
+        let mut sync = ProjectSync::new();
+        let artifact = lpc_model::ArtifactLocation::file("/shader.glsl");
+        let body = AssetBodyOverlay::ReplaceBody(b"void main() {}".to_vec());
+
+        sync.apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: lpc_model::MutationCmdId::new(1),
+                    mutation: lpc_model::MutationOp::SetArtifactBody {
+                        artifact: artifact.clone(),
+                        edit: body.clone(),
+                    },
+                },
+                MutationEffect::OverlayChanged {
+                    changed: true,
+                    base_display: None,
+                },
+            )],
+            Revision::new(3),
+        );
+
+        assert_eq!(sync.overlay_asset_edit_at(&artifact), Some(&body));
+        assert_eq!(
+            sync.overlay_asset_edits().collect::<Vec<_>>(),
+            vec![(&artifact, &body)]
+        );
+        assert_eq!(
+            sync.overlay_slot_edits().count(),
+            0,
+            "asset entries never leak into the slot iterator"
+        );
+        assert_eq!(sync.overlay_revision(), Revision::new(3));
+
+        sync.apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: lpc_model::MutationCmdId::new(2),
+                    mutation: lpc_model::MutationOp::ClearArtifact {
+                        artifact: artifact.clone(),
+                    },
+                },
+                MutationEffect::OverlayChanged {
+                    changed: true,
+                    base_display: None,
+                },
+            )],
+            Revision::new(4),
+        );
+
+        assert_eq!(sync.overlay_asset_edit_at(&artifact), None);
+        assert!(sync.overlay().is_empty());
         assert_eq!(sync.overlay_revision(), Revision::new(4));
     }
 

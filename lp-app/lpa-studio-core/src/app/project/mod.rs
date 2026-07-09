@@ -21,6 +21,7 @@
 //! read requests, response application, and `ProjectView`. It does not own
 //! Studio controller state.
 
+pub mod asset;
 pub mod demo_project;
 pub mod dirty_summary;
 pub mod loaded_project_choice;
@@ -46,6 +47,10 @@ pub mod slot;
 pub mod ui_affordance;
 pub mod ui_pending_edit;
 
+pub use asset::{
+    AssetContentFetchOp, AssetEditOp, MAX_ASSET_BODY_BYTES, PendingAssetEdit, UiAssetContent,
+    UiAssetContentBody, UiShaderError,
+};
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
@@ -53,7 +58,9 @@ pub use node::{
     ProjectProductSubscriptionIntent,
 };
 pub use project_connect_result::ProjectConnectResult;
-pub use project_controller::{ProjectController, ProjectEditRun, ProjectRefreshOutcome};
+pub use project_controller::{
+    ProjectAssetContentRun, ProjectController, ProjectEditRun, ProjectRefreshOutcome,
+};
 pub use project_editor_op::ProjectEditorOp;
 pub use project_editor_target::ProjectEditorTarget;
 pub use project_editor_view::ProjectEditorView;

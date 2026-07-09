@@ -65,6 +65,8 @@ pub(crate) fn bucket_section_tint(bucket: PendingEditBucket, count: usize) -> De
 /// `old → new` (degrading to `set → new` when no old value is known);
 /// structural gestures keep their verb and append the replaced value as one
 /// dense `(was …)` token where the base held something. Rows stay one line.
+/// Asset-body edits are whole-file replaces, so they read `body → {size}`
+/// with no old value.
 fn kind_display(kind: &UiPendingEditKind, old_value: Option<&str>) -> String {
     match (kind, old_value) {
         (UiPendingEditKind::Assign { value_display }, Some(old_value)) => {
@@ -78,6 +80,7 @@ fn kind_display(kind: &UiPendingEditKind, old_value: Option<&str>) -> String {
         (UiPendingEditKind::Removed, Some(old_value)) => format!("removed (was {old_value})"),
         (UiPendingEditKind::Removed, None) => "removed".to_string(),
         (UiPendingEditKind::Moved { from, to }, _) => format!("key {from} \u{2192} {to}"),
+        (UiPendingEditKind::AssetBody { detail }, _) => format!("body \u{2192} {detail}"),
     }
 }
 
