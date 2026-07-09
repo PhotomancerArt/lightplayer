@@ -142,6 +142,12 @@ impl LibraryStore {
         Self { fs, random }
     }
 
+    /// The store root — packages, history, and the device registry all live
+    /// under it. Sibling layers (device registry, home gallery) build here.
+    pub fn fs_handle(&self) -> Rc<RefCell<dyn LpFs>> {
+        Rc::clone(&self.fs)
+    }
+
     pub fn list(&self) -> Result<Vec<PackageSummary>, LibraryError> {
         let mut summaries = Vec::new();
         for slug in self.package_slugs()? {

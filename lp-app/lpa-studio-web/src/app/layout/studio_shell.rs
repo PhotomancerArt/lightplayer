@@ -4,7 +4,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::layout::VersionBadge;
-use crate::app::{ProjectNodeWorkspace, RuntimeLog};
+use crate::app::{HomeGallery, ProjectNodeWorkspace, RuntimeLog};
 use crate::core::PaneView;
 
 #[component]
@@ -12,10 +12,35 @@ use crate::core::PaneView;
 pub fn StudioShell(
     view: UiStudioView,
     running: bool,
+    /// Fixed clock for home-gallery stories; `None` uses the platform clock.
+    #[props(default)]
+    now_secs: Option<f64>,
     on_action: EventHandler<UiAction>,
     on_console: EventHandler<ConsoleCommand>,
 ) -> Element {
-    let UiStudioView { panes, console } = view;
+    let UiStudioView {
+        panes,
+        console,
+        home,
+    } = view;
+
+    if let Some(home) = home {
+        return rsx! {
+            main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
+                header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
+                    div {
+                        p { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "LightPlayer Studio" }
+                    }
+                    VersionBadge {}
+                }
+                div { class: "tw:grid tw:gap-7",
+                    HomeGallery { home: *home, now_secs, on_action }
+                    RuntimeLog { console, on_console }
+                }
+            }
+        };
+    }
+
     let PaneGroups { main, device } = group_panes(panes);
     let project_editor = project_editor_view(&main);
     let layout_class = if project_editor.is_some() {

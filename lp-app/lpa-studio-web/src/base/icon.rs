@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus, Clock,
-    Cpu, Droplet, Eraser, Eye, FlaskConical, Folder, Funnel, Image, Info, Lightbulb, Link2,
-    Link2Off, ListMusic, Locate, LocateFixed, MousePointerClick, Pencil, Play, Plus, Radio, Save,
-    Settings, Sparkles, SquareArrowRight, Trash2, TriangleAlert, Undo2, Usb, X, Zap,
+    Cpu, Droplet, Ellipsis, Eraser, Eye, FlaskConical, Folder, Funnel, Image, Info, Lightbulb,
+    Link2, Link2Off, ListMusic, Locate, LocateFixed, MousePointerClick, Pencil, Play, Plus, Radio,
+    Save, Settings, Sparkles, SquareArrowRight, Trash2, TriangleAlert, Undo2, Usb, X, Zap,
 };
 
 #[component]
@@ -61,6 +61,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Add => rsx! { Plus { size } },
         StudioIconName::Remove => rsx! { Trash2 { size } },
         StudioIconName::Cancel => rsx! { X { size } },
+        StudioIconName::More => rsx! { Ellipsis { size } },
     }
 }
 
@@ -119,6 +120,8 @@ pub enum StudioIconName {
     /// X: dismiss/cancel affordances (the map add-entry key input's cancel
     /// gesture) — distinct from [`Self::Remove`], which destroys a value.
     Cancel,
+    /// Ellipsis: the gallery card menu trigger.
+    More,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable

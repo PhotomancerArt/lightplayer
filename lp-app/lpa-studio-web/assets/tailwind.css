@@ -12,6 +12,7 @@
     --tw-color-amber-200: oklch(92.4% 0.12 95.746);
     --tw-color-amber-500: oklch(76.9% 0.188 70.08);
     --tw-color-amber-600: oklch(66.6% 0.179 58.318);
+    --tw-color-white: #fff;
     --tw-spacing: 0.25rem;
     --tw-container-xl: 36rem;
     --tw-container-2xl: 42rem;
@@ -25,6 +26,8 @@
     --tw-text-lg--line-height: calc(1.75 / 1.125);
     --tw-text-xl: 1.25rem;
     --tw-text-xl--line-height: calc(1.75 / 1.25);
+    --tw-text-2xl: 1.5rem;
+    --tw-text-2xl--line-height: calc(2 / 1.5);
     --tw-font-weight-normal: 400;
     --tw-font-weight-medium: 500;
     --tw-font-weight-semibold: 600;
@@ -39,6 +42,7 @@
     --tw-radius-md: var(--studio-radius-md);
     --tw-default-transition-duration: 150ms;
     --tw-default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    --tw-color-background: var(--studio-color-bg);
     --tw-color-card: var(--studio-color-surface);
     --tw-color-card-subtle: var(--studio-color-surface-subtle);
     --tw-color-card-muted: var(--studio-color-surface-muted);
@@ -124,6 +128,9 @@
   }
   .tw\:left-2 {
     left: calc(var(--tw-spacing) * 2);
+  }
+  .tw\:z-10 {
+    z-index: 10;
   }
   .tw\:z-\[70\] {
     z-index: 70;
@@ -239,6 +246,9 @@
   .tw\:h-14 {
     height: calc(var(--tw-spacing) * 14);
   }
+  .tw\:h-24 {
+    height: calc(var(--tw-spacing) * 24);
+  }
   .tw\:h-56 {
     height: calc(var(--tw-spacing) * 56);
   }
@@ -286,6 +296,9 @@
   }
   .tw\:min-h-9 {
     min-height: calc(var(--tw-spacing) * 9);
+  }
+  .tw\:min-h-24 {
+    min-height: calc(var(--tw-spacing) * 24);
   }
   .tw\:min-h-44 {
     min-height: calc(var(--tw-spacing) * 44);
@@ -469,6 +482,9 @@
   .tw\:cursor-pointer {
     cursor: pointer;
   }
+  .tw\:cursor-wait {
+    cursor: wait;
+  }
   .tw\:list-none {
     list-style-type: none;
   }
@@ -534,6 +550,9 @@
   }
   .tw\:grid-cols-\[minmax\(220px\,280px\)_minmax\(0\,1fr\)_minmax\(300px\,360px\)\] {
     grid-template-columns: minmax(220px,280px) minmax(0,1fr) minmax(300px,360px);
+  }
+  .tw\:grid-cols-\[repeat\(auto-fill\,minmax\(200px\,1fr\)\)\] {
+    grid-template-columns: repeat(auto-fill,minmax(200px,1fr));
   }
   .tw\:grid-cols-\[repeat\(auto-fit\,minmax\(130px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fit,minmax(130px,1fr));
@@ -618,6 +637,9 @@
   }
   .tw\:gap-5 {
     gap: calc(var(--tw-spacing) * 5);
+  }
+  .tw\:gap-7 {
+    gap: calc(var(--tw-spacing) * 7);
   }
   .tw\:gap-\[18px\] {
     gap: 18px;
@@ -706,6 +728,10 @@
   .tw\:border-0 {
     border-style: var(--tw-border-style);
     border-width: 0px;
+  }
+  .tw\:border-2 {
+    border-style: var(--tw-border-style);
+    border-width: 2px;
   }
   .tw\:border-4 {
     border-style: var(--tw-border-style);
@@ -844,8 +870,17 @@
       background-color: color-mix(in oklab, var(--tw-color-amber-500) 10%, transparent);
     }
   }
+  .tw\:bg-background\/80 {
+    background-color: var(--tw-color-background);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--tw-color-background) 80%, transparent);
+    }
+  }
   .tw\:bg-border-muted {
     background-color: var(--tw-color-border-muted);
+  }
+  .tw\:bg-border-strong {
+    background-color: var(--tw-color-border-strong);
   }
   .tw\:bg-card {
     background-color: var(--tw-color-card);
@@ -873,6 +908,9 @@
   }
   .tw\:bg-status-good-bg {
     background-color: var(--tw-color-status-good-bg);
+  }
+  .tw\:bg-status-good-foreground {
+    background-color: var(--tw-color-status-good-foreground);
   }
   .tw\:bg-status-live-bg {
     background-color: var(--tw-color-status-live-bg);
@@ -1126,6 +1164,10 @@
   .tw\:font-mono {
     font-family: var(--tw-font-mono);
   }
+  .tw\:text-2xl {
+    font-size: var(--tw-text-2xl);
+    line-height: var(--tw-leading, var(--tw-text-2xl--line-height));
+  }
   .tw\:text-base {
     font-size: var(--tw-text-base);
     line-height: var(--tw-leading, var(--tw-text-base--line-height));
@@ -1282,6 +1324,18 @@
   .tw\:text-subtle-foreground {
     color: var(--tw-color-subtle-foreground);
   }
+  .tw\:text-white\/20 {
+    color: var(--tw-color-white);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--tw-color-white) 20%, transparent);
+    }
+  }
+  .tw\:text-white\/40 {
+    color: var(--tw-color-white);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--tw-color-white) 40%, transparent);
+    }
+  }
   .tw\:lowercase {
     text-transform: lowercase;
   }
@@ -1310,6 +1364,9 @@
   .tw\:opacity-50 {
     opacity: 50%;
   }
+  .tw\:opacity-70 {
+    opacity: 70%;
+  }
   .tw\:opacity-100 {
     opacity: 100%;
   }
@@ -1324,6 +1381,11 @@
   }
   .tw\:transition-colors {
     transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+    transition-timing-function: var(--tw-ease, var(--tw-default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--tw-default-transition-duration));
+  }
+  .tw\:transition-opacity {
+    transition-property: opacity;
     transition-timing-function: var(--tw-ease, var(--tw-default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--tw-default-transition-duration));
   }
@@ -1444,6 +1506,13 @@
       padding-bottom: calc(var(--tw-spacing) * 0);
     }
   }
+  .tw\:hover\:border-accent {
+    &:hover {
+      @media (hover: hover) {
+        border-color: var(--tw-color-accent);
+      }
+    }
+  }
   .tw\:hover\:border-accent-border {
     &:hover {
       @media (hover: hover) {
@@ -1558,6 +1627,23 @@
       }
     }
   }
+  .tw\:hover\:bg-status-error-bg {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-status-error-bg);
+      }
+    }
+  }
+  .tw\:hover\:bg-white\/5 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-white);
+        @supports (color: color-mix(in lab, red, red)) {
+          background-color: color-mix(in oklab, var(--tw-color-white) 5%, transparent);
+        }
+      }
+    }
+  }
   .tw\:hover\:text-accent {
     &:hover {
       @media (hover: hover) {
@@ -1597,6 +1683,13 @@
     &:hover {
       @media (hover: hover) {
         text-decoration-line: underline;
+      }
+    }
+  }
+  .tw\:hover\:opacity-100 {
+    &:hover {
+      @media (hover: hover) {
+        opacity: 100%;
       }
     }
   }

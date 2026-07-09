@@ -342,7 +342,7 @@ impl DeviceController {
             )))
             .with_actions(actions),
             ProjectState::ConnectingRunningProject { progress }
-            | ProjectState::LoadingDemoProject { progress } => UiStepView::new(
+            | ProjectState::OpeningProject { progress } => UiStepView::new(
                 Self::SECTION_OPEN_PROJECT,
                 "Open project",
                 UiStepState::Active,

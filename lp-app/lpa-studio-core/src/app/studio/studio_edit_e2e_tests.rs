@@ -186,6 +186,71 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
 }
 
 #[test]
+fn home_open_package_pushes_the_library_head_end_to_end() {
+    use crate::app::library::{LibraryStore, PackageProvenance};
+    use crate::{HOME_NODE_ID, HomeOp};
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+
+    // a library with one package holding the same node graph the harness
+    // uses; install mints the uid into the manifest
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [7u8; 16]),
+    );
+    let summary = store
+        .install_package(
+            "Porch sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .expect("install library package");
+    controller.attach_library(store.clone());
+
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            uid: summary.uid.to_string(),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("open emits a snapshot");
+
+    // the open replaced the running project with the library head: home is
+    // gone, the editor shows, and the runtime's manifest carries the
+    // package's minted uid (the push is hash-verified inside the open)
+    assert!(snapshot.home.is_none(), "an open project leaves home");
+    let editor = project_editor(&snapshot);
+    assert_eq!(editor.nodes.len(), 2, "clock and fixture panes");
+    let pushed_manifest = {
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file("/projects/studio/project.json".as_path())
+            .expect("pushed manifest exists in the runtime");
+        String::from_utf8(bytes).expect("utf8 manifest")
+    };
+    assert!(
+        pushed_manifest.contains(&summary.uid.to_string()),
+        "the runtime holds the library copy (uid pushed): {pushed_manifest}"
+    );
+}
+
+#[test]
 fn per_slot_transient_reset_reverts_value_through_gated_refresh() {
     // The per-slot Reset affordance on a transient control (the clock `rate`
     // slider): SetValue then `SlotEditOp::Revert` must bring the DTO back to
@@ -1232,7 +1297,21 @@ fn edit_e2e_server() -> LpServer {
         graphics,
     );
 
-    let files: &[(&str, &str)] = &[
+    for (name, body) in edit_e2e_files() {
+        server
+            .base_fs_mut()
+            .write_file(format!("{PROJECT_DIR}/{name}").as_path(), body.as_bytes())
+            .expect("write project file");
+    }
+    server
+        .load_project(PROJECT_DIR.as_path())
+        .expect("load edit-e2e project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
+fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
+    &[
         (
             "project.json",
             r#"{
@@ -1265,18 +1344,7 @@ fn edit_e2e_server() -> LpServer {
   }
 }"#,
         ),
-    ];
-    for (name, body) in files {
-        server
-            .base_fs_mut()
-            .write_file(format!("{PROJECT_DIR}/{name}").as_path(), body.as_bytes())
-            .expect("write project file");
-    }
-    server
-        .load_project(PROJECT_DIR.as_path())
-        .expect("load edit-e2e project");
-    server.advance_frame(16).expect("tick");
-    server
+    ]
 }
 
 fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {

@@ -12,11 +12,23 @@ pub struct UiStudioView {
     /// The console slice: filtered log entries plus the filter state that
     /// produced them.
     pub console: UiConsoleView,
+    /// The home gallery, when the shell should render it instead of the
+    /// pane layout (no project open, no device flow engaged — M4).
+    pub home: Option<Box<crate::app::home::UiHomeView>>,
 }
 
 impl UiStudioView {
     pub fn new(panes: Vec<UiPaneView>, console: UiConsoleView) -> Self {
-        Self { panes, console }
+        Self {
+            panes,
+            console,
+            home: None,
+        }
+    }
+
+    pub fn with_home(mut self, home: Option<crate::app::home::UiHomeView>) -> Self {
+        self.home = home.map(Box::new);
+        self
     }
 
     /// An empty view with no panes and an empty default-filtered console. The
@@ -71,6 +83,12 @@ impl UiStudioView {
 
     pub fn render_text(&self) -> String {
         let mut output = String::new();
+        if let Some(home) = &self.home {
+            for line in home.render_text_lines() {
+                let _ = writeln!(output, "{line}");
+            }
+            output.push('\n');
+        }
         for pane in &self.panes {
             let _ = writeln!(output, "{}", pane.title);
             let _ = writeln!(output, "  node: {}", pane.node_id);

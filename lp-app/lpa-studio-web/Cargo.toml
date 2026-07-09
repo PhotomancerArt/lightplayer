@@ -24,17 +24,21 @@ lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optiona
 serde = { version = "1", features = ["derive"] }
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
+    "Blob",
+    "BlobPropertyBag",
     "Crypto",
     "Document",
     "Element",
     "Event",
     "EventTarget",
     "History",
+    "HtmlAnchorElement",
     "HtmlElement",
     "Location",
     "Navigator",
     "PointerEvent",
     "StorageManager",
+    "Url",
     "Window",
 ] }
 

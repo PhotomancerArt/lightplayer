@@ -85,11 +85,11 @@ pub fn App() -> Element {
         });
     };
 
-    // Startup ordering matters: the library must attach before the connect
-    // action runs, or the demo would load through the legacy (storeless)
-    // path on first paint. The store mount is awaited here; the sim still
-    // starts (without persistence) if the store is unavailable.
-    let startup_intent = use_hook(studio_url::read_connection_intent);
+    // Startup ordering matters: the library must attach before the startup
+    // action runs, or opens would go through the legacy (storeless) path on
+    // first paint. The store mount is awaited here; the sim still starts
+    // (without persistence) if the store is unavailable.
+    let startup_action = use_hook(studio_url::read_startup_action);
     let startup_bridge = bridge.clone();
     use_hook(move || {
         let startup_bridge = startup_bridge.clone();
@@ -105,7 +105,7 @@ pub fn App() -> Element {
                 }
             }
             store_status.set(status);
-            if let Some(action) = startup_intent.and_then(|intent| intent.startup_action()) {
+            if let Some(action) = startup_action {
                 startup_bridge.tx.send(StudioCommand::Action(action));
             }
         });

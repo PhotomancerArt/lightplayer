@@ -9,6 +9,8 @@ use lpa_link::{
     LinkProviderKind,
 };
 
+use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
+use crate::app::library::LibraryStore;
 use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
@@ -16,7 +18,7 @@ use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectedLink, Controller, ControllerContext,
-    DeviceController, DeviceOp, LinkOpenOutcome, NodeRevertOp, ProjectConnectResult,
+    DeviceController, DeviceOp, LinkOpenOutcome, LinkState, NodeRevertOp, ProjectConnectResult,
     ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState,
     ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
     UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView,
@@ -50,6 +52,32 @@ pub struct StudioController {
     /// a dispatched action, focus change, or log — so the next gate emits even
     /// though the project revision did not move.
     dirty: bool,
+    /// The attached library, also held by the project flows; the home
+    /// gallery's ops and view build against this clone (M4).
+    home_library: Option<LibraryStore>,
+    /// A home-card open in flight: keeps the gallery on screen (card busy)
+    /// while the simulator opens, and tells the connect flow which package
+    /// to push instead of probing running projects.
+    pending_open: Option<PendingOpen>,
+}
+
+/// What a home card asked to open.
+#[derive(Clone, Debug)]
+enum PendingOpen {
+    /// A library package, by `prj_…` uid string.
+    Package(String),
+    /// An embedded example, by id (seeded into the library on first open).
+    Example(String),
+}
+
+impl PendingOpen {
+    /// The card key the gallery marks busy.
+    fn card_key(&self) -> &str {
+        match self {
+            PendingOpen::Package(uid) => uid,
+            PendingOpen::Example(id) => id,
+        }
+    }
 }
 
 impl StudioController {
@@ -70,6 +98,8 @@ impl StudioController {
             applied_revision: None,
             // The first view is always new to the UI, so start dirty.
             dirty: true,
+            home_library: None,
+            pending_open: None,
         }
     }
 
@@ -123,6 +153,9 @@ impl StudioController {
     }
 
     pub fn view(&self) -> UiStudioView {
+        if let Some(home) = self.home_view() {
+            return UiStudioView::new(Vec::new(), self.console_view()).with_home(Some(home));
+        }
         let project_snapshot = self.project.snapshot();
         let project_actions = self.project.actions(self.device.has_lightplayer_state());
         let device_view = self.device.view(&project_snapshot.state, project_actions);
@@ -135,6 +168,28 @@ impl StudioController {
             vec![device_view]
         };
         UiStudioView::new(panes, self.console_view())
+    }
+
+    /// The home gallery, when the shell should show it: no project open and
+    /// either the link is idle or a home-card open is in flight. Any engaged
+    /// device flow (connect endpoint, flashing, a sim without a project)
+    /// falls back to the classic pane layout — the M4 transitional bridge to
+    /// the pre-gallery connect/flash flows.
+    fn home_view(&self) -> Option<UiHomeView> {
+        if self.project_is_loaded() {
+            return None;
+        }
+        let opening = self.pending_open.as_ref();
+        let issue = match self.device.link.state() {
+            LinkState::SelectingProvider { issue, .. } => issue.clone(),
+            _ if opening.is_none() => return None,
+            _ => None,
+        };
+        Some(home_view_builder::build_home_view(
+            self.home_library.as_ref(),
+            opening.map(|pending| pending.card_key().to_string()),
+            issue,
+        ))
     }
 
     /// The console slice of the view: ring entries passing the display
@@ -214,6 +269,7 @@ impl StudioController {
     /// save-as-pull — roadmap M3). Shares the controller's stamping clock.
     pub fn attach_library(&mut self, store: crate::app::library::LibraryStore) {
         let clock = std::rc::Rc::clone(&self.now_secs);
+        self.home_library = Some(store.clone());
         self.project.set_library(store, clock);
     }
 
@@ -302,6 +358,10 @@ impl StudioController {
         let device_node_id = self.device.node_id();
         let project_node_id = self.project.node_id();
 
+        if node_id.as_str() == HOME_NODE_ID {
+            let op = action.into_op::<HomeOp>()?;
+            return self.execute_home_op(op, updates).await;
+        }
         if node_id == device_node_id {
             let op = action.into_op::<DeviceOp>()?;
             return self.execute_device_op(op, updates).await;
@@ -403,6 +463,198 @@ impl StudioController {
                     .connect_endpoint(provider_id, endpoint_id)
                     .await?;
                 self.attach_connected_link(connected, updates).await
+            }
+        }
+    }
+
+    async fn execute_home_op(&mut self, op: HomeOp, updates: UxUpdateSink) -> UiResult {
+        match op {
+            HomeOp::OpenPackage { uid } => {
+                self.open_from_home(PendingOpen::Package(uid), updates)
+                    .await
+            }
+            HomeOp::OpenExample { id } => {
+                self.open_from_home(PendingOpen::Example(id), updates).await
+            }
+            HomeOp::NewProject => {
+                let store = self.home_store()?;
+                let now = (self.now_secs)();
+                let names: Vec<String> = store
+                    .list()
+                    .map_err(home_library_error)?
+                    .into_iter()
+                    .map(|summary| summary.name)
+                    .collect();
+                let name = unique_project_name("New Project", &names);
+                let template = crate::app::home::embedded_example(
+                    crate::app::project::demo_project::DEMO_PROJECT_ID,
+                )
+                .expect("the basic template is embedded");
+                let summary = store
+                    .install_files_with_fresh_uid(
+                        &name,
+                        &template.files(),
+                        crate::app::library::PackageProvenance::Created,
+                        now,
+                    )
+                    .map_err(home_library_error)?;
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info(format!("Created {}", summary.name))))
+            }
+            HomeOp::RenamePackage { uid, name } => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(UiError::UnsupportedAction(
+                        "a project name cannot be empty".to_string(),
+                    ));
+                }
+                let store = self.home_store()?;
+                store
+                    .rename(parse_project_uid(&uid)?, name)
+                    .map_err(home_library_error)?;
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Renamed to {name}"))))
+            }
+            HomeOp::DuplicatePackage { uid } => {
+                let store = self.home_store()?;
+                let now = (self.now_secs)();
+                let uid = parse_project_uid(&uid)?;
+                let source_name = store
+                    .list()
+                    .map_err(home_library_error)?
+                    .into_iter()
+                    .find_map(|summary| (summary.uid == uid).then_some(summary.name))
+                    .ok_or_else(|| {
+                        UiError::UnsupportedAction("project not found in the library".to_string())
+                    })?;
+                let copy = store
+                    .duplicate(uid, &format!("{source_name} copy"), now)
+                    .map_err(home_library_error)?;
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info(format!("Duplicated as {}", copy.name))))
+            }
+            HomeOp::DeletePackage { uid } => {
+                let store = self.home_store()?;
+                store
+                    .delete(parse_project_uid(&uid)?)
+                    .map_err(home_library_error)?;
+                Ok(UiNotices::new().with_notice(UiNotice::info("Project deleted")))
+            }
+            HomeOp::ImportZip { file_name, bytes } => {
+                let store = self.home_store()?;
+                let now = (self.now_secs)();
+                let summary =
+                    crate::app::library::import_zip(&store, &bytes.0, now).map_err(|error| {
+                        UiError::UnsupportedAction(format!("could not import {file_name}: {error}"))
+                    })?;
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info(format!("Imported {}", summary.name))))
+            }
+        }
+    }
+
+    /// The attached library for home ops, or the error the gallery surfaces
+    /// when the local store never mounted.
+    fn home_store(&self) -> Result<LibraryStore, UiError> {
+        self.home_library.clone().ok_or_else(|| {
+            UiError::MissingSession("the local project library is unavailable".to_string())
+        })
+    }
+
+    /// Open a home card: push the package's head to the simulator, starting
+    /// the simulator first when nothing is connected (D13: a library card
+    /// opens in the sim; the sim is invisible infrastructure).
+    async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
+        self.home_store()?;
+        // a connected hardware device is M5's push flow, not an open
+        if let Some(connection) = self.device.link.active_connection() {
+            if !should_auto_load_demo_project(&connection) {
+                return Err(UiError::UnsupportedAction(
+                    "Pushing to a connected device lands with the provision dialog (M5); \
+                     disconnect the device to open this project in the simulator"
+                        .to_string(),
+                ));
+            }
+        }
+        self.pending_open = Some(pending);
+        let result = self.open_from_home_inner(updates).await;
+        self.pending_open = None;
+        result
+    }
+
+    async fn open_from_home_inner(&mut self, updates: UxUpdateSink) -> UiResult {
+        // already attached to the simulator: replace-and-load directly
+        if self.device.has_lightplayer_state() {
+            return self.open_pending_package(updates).await;
+        }
+        // an open sim link without a server session reconnects first;
+        // otherwise start the simulator — both paths run the pending open
+        // inside `connect_server_connection`
+        if self.device.link.active_connection().is_some() {
+            return self.connect_server_from_link(updates).await;
+        }
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_CONNECT_DEVICE),
+            "Starting simulator",
+            "Opening",
+            "Starting the simulator runtime",
+        );
+        match self
+            .device
+            .link
+            .open_provider(LinkProviderKind::BrowserWorker)
+            .await?
+        {
+            LinkOpenOutcome::Connected(connected) => {
+                self.attach_connected_link(connected, updates).await
+            }
+            LinkOpenOutcome::Opened => Err(UiError::MissingSession(
+                "the simulator opened without connecting".to_string(),
+            )),
+            LinkOpenOutcome::Cancelled { message } => {
+                Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+            }
+        }
+    }
+
+    /// Push the pending package to the connected runtime and load it.
+    async fn open_pending_package(&mut self, updates: UxUpdateSink) -> UiResult {
+        let pending = self
+            .pending_open
+            .clone()
+            .ok_or_else(|| UiError::MissingSession("no pending package to open".to_string()))?;
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_OPEN_PROJECT),
+            "Opening project",
+            "Opening",
+            "Pushing the project to the simulator",
+        );
+        let result = {
+            let server = self.device.server.client_mut()?;
+            match &pending {
+                PendingOpen::Package(uid) => self.project.open_library_package(server, uid).await,
+                PendingOpen::Example(id) => self.project.open_example_package(server, id).await,
+            }
+        };
+        match result {
+            Ok(logs) => {
+                self.record_logs(logs);
+                let sync = self.sync_project_after_attach(updates).await?;
+                Ok(UiNotices::new().with_notice(project_sync_notice(
+                    sync.synced,
+                    "Project opened",
+                    "Project opened; project sync needs attention",
+                )))
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Error,
+                    UiLogOrigin::Studio,
+                    error.to_string(),
+                ));
+                self.project.fail(error.to_string());
+                Err(error)
             }
         }
     }
@@ -562,6 +814,14 @@ impl StudioController {
                 let mut outcome =
                     UiNotices::new().with_notice(UiNotice::info("Server protocol connected"));
                 updates.emit(UxUpdate::View(self.view()));
+                // a home-card open skips the running-project probe: opening
+                // is a push of the library head regardless of what runs
+                // (D19); the sim-only guard lives in `open_from_home`
+                if self.pending_open.is_some() && should_auto_load_demo_project(connection) {
+                    let open_outcome = self.open_pending_package(updates).await?;
+                    outcome.notices.extend(open_outcome.notices);
+                    return Ok(outcome);
+                }
                 emit_activity(
                     &updates,
                     device_section_target(DeviceController::SECTION_OPEN_PROJECT),
@@ -1132,6 +1392,30 @@ fn should_auto_load_demo_project(connection: &LinkConnection) -> bool {
     matches!(connection.kind, LinkConnectionKind::BrowserWorker { .. })
 }
 
+fn parse_project_uid(uid: &str) -> Result<lpc_history::PrefixedUid, UiError> {
+    uid.parse()
+        .map_err(|e| UiError::UnsupportedAction(format!("invalid project uid: {e}")))
+}
+
+fn home_library_error(error: crate::app::library::LibraryError) -> UiError {
+    UiError::MissingSession(format!("library: {error}"))
+}
+
+/// "New Project", "New Project 2", … — the first name not already taken.
+fn unique_project_name(base: &str, taken: &[String]) -> String {
+    if !taken.iter().any(|name| name == base) {
+        return base.to_string();
+    }
+    let mut counter = 2;
+    loop {
+        let candidate = format!("{base} {counter}");
+        if !taken.iter().any(|name| name == &candidate) {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
 fn emit_activity(
     updates: &UxUpdateSink,
     target: UxActivityTarget,
@@ -1409,14 +1693,96 @@ mod tests {
     }
 
     #[test]
-    fn initial_view_exposes_device_pane() {
+    fn initial_view_shows_the_home_gallery() {
         let studio = StudioController::new(|| 0.0);
 
         let view = studio.view();
 
-        assert_eq!(view.panes.len(), 1);
-        assert_eq!(view.panes[0].node_id.as_str(), DeviceController::NODE_ID);
-        assert_eq!(device_section_ids(&view), vec!["select-connection"]);
+        let home = view.home.expect("an idle studio shows home");
+        assert!(view.panes.is_empty(), "home replaces the pane layout");
+        assert!(!home.library_available, "no store attached on host");
+        assert!(!home.examples.is_empty(), "examples always show");
+    }
+
+    #[test]
+    fn home_ops_create_rename_duplicate_import_and_delete_library_packages() {
+        use crate::app::library::{LibraryStore, export_package};
+        use crate::{HOME_NODE_ID, HomeOp, ZipBytes};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let counter = Rc::new(RefCell::new(0u8));
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(move || {
+                *counter.borrow_mut() += 1;
+                [*counter.borrow(); 16]
+            }),
+        );
+        studio.attach_library(store.clone());
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        // create twice: names stay unique
+        block_on_ready(studio.dispatch(home_action(HomeOp::NewProject))).unwrap();
+        block_on_ready(studio.dispatch(home_action(HomeOp::NewProject))).unwrap();
+        let home = studio.view().home.expect("home with library");
+        assert!(home.library_available);
+        let names: Vec<&str> = home.projects.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"New Project") && names.contains(&"New Project 2"));
+        let uid = home
+            .projects
+            .iter()
+            .find(|card| card.name == "New Project")
+            .unwrap()
+            .uid
+            .clone();
+
+        // rename, then duplicate the renamed package
+        block_on_ready(studio.dispatch(home_action(HomeOp::RenamePackage {
+            uid: uid.clone(),
+            name: "Porch".to_string(),
+        })))
+        .unwrap();
+        block_on_ready(studio.dispatch(home_action(HomeOp::DuplicatePackage { uid: uid.clone() })))
+            .unwrap();
+        let home = studio.view().home.unwrap();
+        let copy = home
+            .projects
+            .iter()
+            .find(|card| card.name == "Porch copy")
+            .expect("duplicate landed");
+        assert_eq!(copy.provenance.as_deref(), Some("Forked from Porch"));
+
+        // export the copy's bytes, delete it, and import it back
+        let zip = {
+            let handle = store.open(copy.uid.parse().unwrap()).unwrap();
+            export_package(&handle).unwrap()
+        };
+        block_on_ready(studio.dispatch(home_action(HomeOp::DeletePackage {
+            uid: copy.uid.clone(),
+        })))
+        .unwrap();
+        assert!(
+            !studio
+                .view()
+                .home
+                .unwrap()
+                .projects
+                .iter()
+                .any(|card| card.name == "Porch copy")
+        );
+        block_on_ready(studio.dispatch(home_action(HomeOp::ImportZip {
+            file_name: "porch-copy.zip".to_string(),
+            bytes: ZipBytes(zip),
+        })))
+        .unwrap();
+        let home = studio.view().home.unwrap();
+        let imported = home
+            .projects
+            .iter()
+            .find(|card| card.name == "Porch copy")
+            .expect("import landed");
+        assert_eq!(imported.provenance.as_deref(), Some("Imported from zip"));
     }
 
     #[test]
@@ -2057,8 +2423,17 @@ mod tests {
                 _ => None,
             })
             .expect("dispatch should emit a final view");
-        assert_eq!(last_view.panes[0].status.kind, UiStatusKind::Error);
-        assert_eq!(last_view.panes[0].status.label, "Needs attention");
+        // the failed connect lands back on provider selection, which is home
+        // under M4 — the issue rides the gallery instead of a pane status
+        let home = last_view
+            .home
+            .expect("provider selection with an issue shows home");
+        assert!(
+            home.issue
+                .expect("the connect failure surfaces on home")
+                .message
+                .contains("Failed to open serial port.")
+        );
     }
 
     #[test]

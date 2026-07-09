@@ -6,6 +6,7 @@
 
 pub(crate) mod affordance;
 pub mod device;
+pub mod home;
 pub mod layout;
 pub mod node;
 pub mod project;
@@ -13,6 +14,7 @@ pub mod project;
 pub(crate) mod story_fixtures;
 
 pub use device::RuntimeLog;
+pub use home::HomeGallery;
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;
 pub use project::{ProjectNodeWorkspace, ProjectPane};

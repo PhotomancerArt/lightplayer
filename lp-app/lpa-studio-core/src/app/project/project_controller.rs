@@ -589,8 +589,9 @@ impl ProjectController {
                     ))
                 })
                 .collect(),
-            ProjectState::ConnectingRunningProject { .. }
-            | ProjectState::LoadingDemoProject { .. } => Vec::new(),
+            ProjectState::ConnectingRunningProject { .. } | ProjectState::OpeningProject { .. } => {
+                Vec::new()
+            }
             // Sidebar tidy (P6, approved item 6): a ready project offers no
             // pane-level buttons — `RefreshProject` / `DisconnectProject`
             // remain as ops (sync recovery, internal refreshes) without a
@@ -690,10 +691,10 @@ impl ProjectController {
         self.state = ProjectState::SelectingLoadedProject { projects };
     }
 
-    pub fn mark_loading_demo(&mut self) {
+    pub fn mark_opening_project(&mut self) {
         self.clear_loaded_project_state();
-        self.state = ProjectState::LoadingDemoProject {
-            progress: ProgressState::new("Loading demo project"),
+        self.state = ProjectState::OpeningProject {
+            progress: ProgressState::new("Opening project"),
         };
     }
 
@@ -755,10 +756,12 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        self.mark_loading_demo();
         if self.library.is_some() {
-            return self.open_seeded_demo_from_library(server).await;
+            return self
+                .open_example_package(server, crate::app::project::demo_project::DEMO_PROJECT_ID)
+                .await;
         }
+        self.mark_opening_project();
         // legacy path (host tests, storeless platforms): deploy the bundled
         // files directly — no persistence
         let loaded = server.load_demo_project().await?;
@@ -768,44 +771,77 @@ impl ProjectController {
         Ok(loaded.logs)
     }
 
-    /// Load-as-push (D19): seed the demo into the library once, then open
-    /// the library copy by replacing the sim's project with the library
-    /// head. A page refresh re-pushes the head — it never reseeds.
-    async fn open_seeded_demo_from_library(
+    /// Load-as-push (D19): open a library package by uid — push its head to
+    /// the runtime, replacing whatever project is loaded. A page refresh
+    /// re-pushes the head.
+    pub(crate) async fn open_library_package(
         &mut self,
         server: &mut StudioServerClient,
+        uid: &str,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        use crate::app::library::PackageProvenance;
-        use crate::app::project::demo_project::{DEMO_PROJECT_ID, demo_project_deploy_files};
+        self.mark_opening_project();
+        let uid = uid
+            .parse()
+            .map_err(|e| UiError::UnsupportedAction(format!("invalid project uid: {e}")))?;
+        self.open_installed_package(server, uid).await
+    }
 
-        let context = self.library.as_mut().expect("checked by caller");
+    /// Open an example: seed it into the library once (found by provenance
+    /// on every later open — it never reseeds), then open the copy.
+    pub(crate) async fn open_example_package(
+        &mut self,
+        server: &mut StudioServerClient,
+        id: &str,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        self.mark_opening_project();
+        let summary = self.ensure_example_seeded(id)?;
+        self.open_installed_package(server, summary.uid).await
+    }
+
+    /// Seed-once: the library package seeded from example `id`, installing
+    /// the embedded files on first open.
+    fn ensure_example_seeded(
+        &mut self,
+        id: &str,
+    ) -> Result<crate::app::library::PackageSummary, UiError> {
+        use crate::app::library::PackageProvenance;
+
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
         let now = (context.now_secs)();
-        let summary = match context
+        if let Some(existing) = context
             .store
-            .find_seeded_from(DEMO_PROJECT_ID)
+            .find_seeded_from(id)
             .map_err(library_ui_error)?
         {
-            Some(existing) => existing,
-            None => {
-                let files: Vec<(String, Vec<u8>)> = demo_project_deploy_files()
-                    .iter()
-                    .map(|f| (f.relative_path().to_string(), f.bytes().to_vec()))
-                    .collect();
-                context
-                    .store
-                    .install_package(
-                        "Basic",
-                        &files,
-                        PackageProvenance::SeededFrom {
-                            source: DEMO_PROJECT_ID.to_string(),
-                        },
-                        now,
-                    )
-                    .map_err(library_ui_error)?
-            }
-        };
+            return Ok(existing);
+        }
+        let example = crate::app::home::embedded_example(id)
+            .ok_or_else(|| UiError::UnsupportedAction(format!("unknown example {id}")))?;
+        context
+            .store
+            .install_package(
+                example.name,
+                &example.files(),
+                PackageProvenance::SeededFrom {
+                    source: id.to_string(),
+                },
+                now,
+            )
+            .map_err(library_ui_error)
+    }
 
-        let handle = context.store.open(summary.uid).map_err(library_ui_error)?;
+    async fn open_installed_package(
+        &mut self,
+        server: &mut StudioServerClient,
+        uid: lpc_history::PrefixedUid,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
+        let handle = context.store.open(uid).map_err(library_ui_error)?;
+        let name =
+            crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())
+                .map_err(library_ui_error)?
+                .name
+                .unwrap_or_else(|| handle.slug.clone());
         let files = handle.read_all_files().map_err(library_ui_error)?;
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
 
@@ -814,7 +850,7 @@ impl ProjectController {
             handle,
             last_synced: loaded.synced_version,
         });
-        self.mark_ready(summary.name, loaded.handle_id, loaded.inventory);
+        self.mark_ready(name, loaded.handle_id, loaded.inventory);
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
     }
@@ -1067,7 +1103,7 @@ impl ProjectController {
                 projects.len()
             )),
             ProjectState::ConnectingRunningProject { progress }
-            | ProjectState::LoadingDemoProject { progress } => {
+            | ProjectState::OpeningProject { progress } => {
                 UiViewContent::Progress(progress.clone().into())
             }
             ProjectState::Ready {
@@ -2344,7 +2380,7 @@ fn project_status(state: &ProjectState, sync: Option<&ProjectSync>) -> UiStatus 
         ProjectState::NotLoaded => UiStatus::neutral("Not loaded"),
         ProjectState::SelectingLoadedProject { .. } => UiStatus::neutral("Choose project"),
         ProjectState::ConnectingRunningProject { .. } => UiStatus::working("Connecting"),
-        ProjectState::LoadingDemoProject { .. } => UiStatus::working("Loading"),
+        ProjectState::OpeningProject { .. } => UiStatus::working("Loading"),
         ProjectState::Ready { .. } if sync.is_some_and(ProjectSync::is_syncing) => {
             UiStatus::working("Syncing")
         }
@@ -2425,6 +2461,10 @@ fn format_bytes(bytes: u64) -> String {
 
 fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
     UiError::MissingSession(format!("library: {e}"))
+}
+
+fn no_library_error() -> UiError {
+    UiError::MissingSession("no local library is attached".to_string())
 }
 
 #[cfg(test)]
