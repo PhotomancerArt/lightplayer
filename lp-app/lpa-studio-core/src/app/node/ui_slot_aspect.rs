@@ -1,6 +1,7 @@
 //! Stable popup sections and summary affordances for config slots.
 
 use super::{ui_slot_shape::UiSlotShape, ui_slot_unit::UiSlotUnit};
+use crate::UiAction;
 
 /// Compact row-level summary emitted by a slot aspect.
 ///
@@ -87,6 +88,10 @@ pub struct UiSlotAspectRow {
     pub shape: Option<UiSlotShape>,
     /// Typed unit metadata for rich renderers.
     pub unit: Option<UiSlotUnit>,
+    /// Optional action dispatched when the row's value is clicked — rows
+    /// that name another place (a bound node, a channel site) navigate
+    /// there (roadmap D11: no dead ends).
+    pub action: Option<UiAction>,
 }
 
 impl UiSlotAspectRow {
@@ -98,6 +103,7 @@ impl UiSlotAspectRow {
             detail: None,
             shape: None,
             unit: None,
+            action: None,
         }
     }
 
@@ -111,6 +117,7 @@ impl UiSlotAspectRow {
             detail,
             shape: Some(shape),
             unit: None,
+            action: None,
         }
     }
 
@@ -122,6 +129,7 @@ impl UiSlotAspectRow {
             detail: Some(unit.short.clone()),
             shape: None,
             unit: Some(unit),
+            action: None,
         }
     }
 
@@ -136,6 +144,12 @@ impl UiSlotAspectRow {
         self.value = shape.summary_label();
         self.detail = shape.summary_detail();
         self.shape = Some(shape);
+        self
+    }
+
+    /// Attach a click action to the row's value (navigation affordance).
+    pub fn with_action(mut self, action: UiAction) -> Self {
+        self.action = Some(action);
         self
     }
 

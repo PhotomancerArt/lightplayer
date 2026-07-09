@@ -39,6 +39,10 @@ pub fn SlotDetailButton(
     aspects: Vec<UiSlotAspect>,
     #[props(default = false)] initially_open: bool,
     #[props(default = None)] revert: Option<SlotDetailRevert>,
+    /// Dispatch conduit for aspect rows that carry actions (navigation
+    /// affordances — roadmap D11). Rows render as plain text without it.
+    #[props(default = None)]
+    on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let affordance = primary_affordance(&aspects);
     let style = slot_affordance_style(affordance);
@@ -61,6 +65,7 @@ pub fn SlotDetailButton(
                         revert: (aspect.kind == UiSlotAspectKind::EditState)
                             .then(|| revert.clone())
                             .flatten(),
+                        on_action,
                         aspect,
                     }
                 }
@@ -138,6 +143,7 @@ pub(crate) fn primary_affordance(aspects: &[UiSlotAspect]) -> UiSlotAffordance {
 fn SlotDetailSection(
     aspect: UiSlotAspect,
     #[props(default = None)] revert: Option<SlotDetailRevert>,
+    #[props(default = None)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let summary = aspect_summary(&aspect);
     let section_class = detail_popover_section_class(aspect_section_tint(summary.highlight));
@@ -182,7 +188,7 @@ fn SlotDetailSection(
             } else if !details.is_empty() {
                 div { class: "tw:grid tw:gap-0.5 tw:pl-[18px] tw:pt-0.5",
                     for row in details {
-                        SlotDetailRow { row }
+                        SlotDetailRow { row, on_action }
                     }
                 }
             }
@@ -361,6 +367,19 @@ fn edit_state_summary(aspect: &UiSlotAspect) -> AspectSummary {
 }
 
 fn binding_summary(aspect: &UiSlotAspect) -> AspectSummary {
+    // The bus channel's wiring aspect is a *list* section (writers →
+    // readers), not the single-endpoint binding summary: keep its title and
+    // rows as-is instead of hoisting the first row into the header.
+    if is_wiring_aspect(aspect) {
+        return AspectSummary {
+            title: aspect.title.clone(),
+            code: None,
+            title_is_code: false,
+            icon: StudioIconName::BoundValue,
+            tone: AspectTone::Bound,
+            highlight: Some(UiSlotAffordance::Bound),
+        };
+    }
     match aspect.affordance {
         Some(UiSlotAffordance::Bound) => AspectSummary {
             title: binding_title(aspect),
@@ -398,6 +417,10 @@ fn binding_title(aspect: &UiSlotAspect) -> String {
     }
 }
 
+fn is_wiring_aspect(aspect: &UiSlotAspect) -> bool {
+    aspect.kind == UiSlotAspectKind::Binding && aspect.title.eq_ignore_ascii_case("Wiring")
+}
+
 fn first_row_label_is(aspect: &UiSlotAspect, label: &str) -> bool {
     aspect
         .rows
@@ -410,7 +433,8 @@ fn aspect_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> {
         return Vec::new();
     }
     let value_is_header_code = aspect.kind == UiSlotAspectKind::Binding
-        && aspect.affordance == Some(UiSlotAffordance::Bound);
+        && aspect.affordance == Some(UiSlotAffordance::Bound)
+        && !is_wiring_aspect(aspect);
 
     aspect
         .rows
@@ -503,13 +527,30 @@ fn SlotInfoRow(row: UiSlotAspectRow) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotDetailRow(row: UiSlotAspectRow) -> Element {
+fn SlotDetailRow(
+    row: UiSlotAspectRow,
+    #[props(default = None)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let action = row.action.clone().zip(on_action);
     rsx! {
         p { class: "tw:m-0 tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-1.5 tw:text-xs tw:leading-snug",
             if !row.label.is_empty() {
                 span { class: "tw:font-bold tw:text-subtle-foreground", "{row.label}:" }
             }
-            if !row.value.is_empty() {
+            if let Some((action, on_action)) = action {
+                // Navigation affordance: the row's value is a clickable chip
+                // in the shared bound-site language (D11: no dead ends).
+                button {
+                    class: "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:leading-none tw:text-status-bound-foreground tw:transition-colors tw:hover:border-status-bound-foreground",
+                    r#type: "button",
+                    title: "Click to focus",
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        on_action.call(action.clone());
+                    },
+                    span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-semibold", "{row.value}" }
+                }
+            } else if !row.value.is_empty() {
                 span { class: "tw:text-muted-foreground tw:break-words", "{row.value}" }
             }
             if let Some(detail) = row.detail {

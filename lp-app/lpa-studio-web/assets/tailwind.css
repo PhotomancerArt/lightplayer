@@ -311,6 +311,9 @@
   .tw\:min-h-\[46px\] {
     min-height: 46px;
   }
+  .tw\:min-h-\[460px\] {
+    min-height: 460px;
+  }
   .tw\:min-h-\[480px\] {
     min-height: 480px;
   }
@@ -403,9 +406,6 @@
   }
   .tw\:max-w-40 {
     max-width: calc(var(--tw-spacing) * 40);
-  }
-  .tw\:max-w-44 {
-    max-width: calc(var(--tw-spacing) * 44);
   }
   .tw\:max-w-72 {
     max-width: calc(var(--tw-spacing) * 72);

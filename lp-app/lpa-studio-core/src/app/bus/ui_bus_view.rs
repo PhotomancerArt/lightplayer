@@ -100,12 +100,14 @@ fn site_row(label: &str, site: &UiBusSiteView) -> UiSlotAspectRow {
         Some(slot) => format!("{} .{slot}", site.node_label),
         None => site.node_label.clone(),
     };
-    let row = UiSlotAspectRow::new(label, value);
+    let mut row = UiSlotAspectRow::new(label, value);
     if site.default_origin {
-        row.with_detail("default binding")
-    } else {
-        row
+        row = row.with_detail("default binding");
     }
+    if let Some(focus) = &site.focus {
+        row = row.with_action(focus.clone());
+    }
+    row
 }
 
 /// One writer/reader site on a channel — always a navigation affordance:
@@ -181,6 +183,27 @@ mod tests {
             .unwrap();
         assert_eq!(reader.value, "Playlist .trigger");
         assert_eq!(reader.detail.as_deref(), Some("default binding"));
+    }
+
+    #[test]
+    fn sites_with_focus_carry_clickable_actions() {
+        let mut ch = channel();
+        ch.writers[0].focus = Some(crate::UiAction::from_op(
+            crate::ControllerId::new("test.project"),
+            crate::ProjectEditorOp::Focus,
+        ));
+        let aspects = ch.visible_aspects();
+        let rows = &aspects[1].rows;
+        let focused = rows
+            .iter()
+            .find(|row| row.value.starts_with("Button"))
+            .unwrap();
+        assert!(focused.action.is_some());
+        let unfocused = rows
+            .iter()
+            .find(|row| row.value.starts_with("Radio"))
+            .unwrap();
+        assert!(unfocused.action.is_none());
     }
 
     #[test]

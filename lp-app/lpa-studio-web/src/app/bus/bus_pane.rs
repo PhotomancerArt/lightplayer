@@ -1,17 +1,16 @@
-//! Bus pane body: one [`SlotPane`] per channel, with linked writer/reader
-//! sites.
+//! Bus pane body: one [`SlotPane`] per channel.
 //!
 //! Each channel wears the shared slot-pane language (roadmap D10 — one
 //! binding treatment everywhere): violet `Bound` frame, channel name in the
-//! title bar with kind/PRIMARY badges, the live value as the centered hero,
-//! and the wiring row beneath it. Every site is a navigation affordance —
-//! clicking dispatches the node's focus action so the user lands on the node
-//! in the Project pane (D7: the UI feels linked, no path hunting; D11: no
-//! dead ends). Merge semantics for multi-writer channels live in the detail
-//! popup (`UiBusChannelView::visible_aspects`).
+//! title bar with kind/PRIMARY badges, and the live value as the centered
+//! hero. The main display stays tight — just the values; the wiring
+//! (writers → readers, merge semantics, default origins) lives in the
+//! detail popup (`UiBusChannelView::visible_aspects`), where every site row
+//! is a clickable focus affordance (D7: the UI feels linked; D11: no dead
+//! ends).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiBusChannelView, UiBusSiteView, UiBusView};
+use lpa_studio_core::{UiAction, UiBusChannelView, UiBusView};
 
 use crate::app::node::{SlotPane, SlotPaneTreatment};
 
@@ -43,7 +42,11 @@ pub fn BusPaneBody(view: UiBusView, on_action: EventHandler<UiAction>) -> Elemen
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BusChannelPane(channel: UiBusChannelView, on_action: EventHandler<UiAction>) -> Element {
+pub(crate) fn BusChannelPane(
+    channel: UiBusChannelView,
+    on_action: EventHandler<UiAction>,
+    #[props(default = false)] initially_open: bool,
+) -> Element {
     let aspects = channel.visible_aspects();
     let UiBusChannelView {
         name,
@@ -51,15 +54,16 @@ fn BusChannelPane(channel: UiBusChannelView, on_action: EventHandler<UiAction>) 
         value,
         value_error,
         primary_visual,
-        writers,
-        readers,
+        ..
     } = channel;
 
     rsx! {
         SlotPane {
             title: name,
             aspects,
+            initially_open,
             treatment: SlotPaneTreatment::Bound,
+            on_action,
             badges: rsx! {
                 if primary_visual {
                     span {
@@ -82,72 +86,6 @@ fn BusChannelPane(channel: UiBusChannelView, on_action: EventHandler<UiAction>) 
                 }
             } else {
                 span { class: "tw:text-xs tw:text-subtle-foreground", "\u{2014}" }
-            }
-            div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:justify-center tw:gap-1",
-                if writers.is_empty() {
-                    span { class: "tw:text-[11px] tw:text-subtle-foreground", "no writer" }
-                }
-                for site in writers {
-                    BusSiteChip { site, on_action }
-                }
-                span { class: "tw:flex-none tw:text-[11px] tw:font-bold tw:text-subtle-foreground", "\u{2192}" }
-                if readers.is_empty() {
-                    span { class: "tw:text-[11px] tw:text-subtle-foreground", "no readers" }
-                }
-                for site in readers {
-                    BusSiteChip { site, on_action }
-                }
-            }
-        }
-    }
-}
-
-/// One clickable writer/reader site: node label (+ slot), violet outline,
-/// dispatching the node's focus action.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BusSiteChip(site: UiBusSiteView, on_action: EventHandler<UiAction>) -> Element {
-    let UiBusSiteView {
-        node_label,
-        slot,
-        default_origin,
-        focus,
-    } = site;
-    let slot_suffix = slot.map(|slot| format!(".{slot}"));
-    let mut tooltip = match &slot_suffix {
-        Some(suffix) => format!("{node_label}{suffix}"),
-        None => node_label.clone(),
-    };
-    if default_origin {
-        tooltip.push_str(" — default binding");
-    }
-    if focus.is_some() {
-        tooltip.push_str(" (click to focus)");
-    }
-    let class = "tw:inline-flex tw:min-w-0 tw:max-w-44 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:leading-none tw:text-status-bound-foreground tw:transition-colors tw:hover:border-status-bound-foreground";
-
-    rsx! {
-        button {
-            class,
-            r#type: "button",
-            title: tooltip,
-            disabled: focus.is_none(),
-            onclick: move |event| {
-                event.stop_propagation();
-                if let Some(focus) = focus.clone() {
-                    on_action.call(focus);
-                }
-            },
-            span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-semibold", "{node_label}" }
-            if let Some(suffix) = slot_suffix {
-                code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[10px] tw:text-muted-foreground", "{suffix}" }
-            }
-            if default_origin {
-                span {
-                    class: "tw:flex-none tw:text-[9px] tw:font-bold tw:uppercase tw:text-subtle-foreground",
-                    title: "Materialized from default binding policy",
-                    "def"
-                }
             }
         }
     }

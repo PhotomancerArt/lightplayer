@@ -13,7 +13,7 @@
 //! [`PaneFrame`]: crate::app::PaneFrame
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiSlotAspect;
+use lpa_studio_core::{UiAction, UiSlotAspect};
 
 use crate::app::node::SlotDetailButton;
 
@@ -67,6 +67,10 @@ pub fn SlotPane(
     /// uses so badges read the same everywhere.
     #[props(default)]
     badges: Option<Element>,
+    /// Dispatch conduit for detail-popup rows that carry actions (D11
+    /// navigation affordances); plain informational panes omit it.
+    #[props(default)]
+    on_action: Option<EventHandler<UiAction>>,
     /// The value display rendered, centered, in the pane body.
     children: Element,
 ) -> Element {
@@ -90,6 +94,7 @@ pub fn SlotPane(
                     label: title.clone(),
                     aspects,
                     initially_open,
+                    on_action,
                 }
             }
             div { class: body_class,

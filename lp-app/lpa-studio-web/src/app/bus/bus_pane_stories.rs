@@ -1,17 +1,22 @@
 //! Stories for the bus pane body.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiBusChannelView, UiBusSiteView, UiBusView};
+use lpa_studio_core::{
+    ControllerId, ProjectEditorOp, UiAction, UiBusChannelView, UiBusSiteView, UiBusView,
+};
 use lpa_studio_web_story_macros::story;
 
-use crate::app::bus::BusPaneBody;
+use crate::app::bus::{BusPaneBody, bus_pane::BusChannelPane};
 
 fn site(label: &str, slot: Option<&str>, default_origin: bool) -> UiBusSiteView {
     UiBusSiteView {
         node_label: label.to_string(),
         slot: slot.map(str::to_string),
         default_origin,
-        focus: None,
+        focus: Some(UiAction::from_op(
+            ControllerId::new("story.project"),
+            ProjectEditorOp::Focus,
+        )),
     }
 }
 
@@ -76,6 +81,23 @@ pub(crate) fn fyeah_sign() -> Element {
             BusPaneBody {
                 view: fyeah_bus_view(),
                 on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Channel Detail",
+    description = "The channel detail popup: info section plus wiring — every writer/reader is a clickable focus chip, multi-writer channels spell out merge semantics, default-origin sites are marked."
+)]
+pub(crate) fn channel_detail() -> Element {
+    let channel = fyeah_bus_view().channels.remove(1);
+    rsx! {
+        div { class: "tw:flex tw:min-h-[460px] tw:max-w-72 tw:flex-col",
+            BusChannelPane {
+                channel,
+                on_action: |_| {},
+                initially_open: true,
             }
         }
     }
