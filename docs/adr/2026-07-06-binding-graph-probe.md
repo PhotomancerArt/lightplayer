@@ -7,6 +7,12 @@
   deleted in the same change)
 - **Superseded by:** None
 
+
+> **Note (2026-07-08):** binding-ref syntax has since changed to
+> `bus:<channel>` / `node:<path>#<slot>` and `time.seconds` was renamed
+> `time` — see ADR `2026-07-08-binding-ref-syntax-and-channel-naming`.
+> Examples below use the older syntax.
+
 ## Context
 
 Nothing bus-shaped existed on the wire: clients could not enumerate

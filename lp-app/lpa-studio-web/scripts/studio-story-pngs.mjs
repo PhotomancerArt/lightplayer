@@ -616,7 +616,10 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
     })()
   `;
   const started = Date.now();
-  while (Date.now() - started < 10_000) {
+  // Generous cap: readiness polls every 50ms so fast stories pay nothing,
+  // but heavy popover-measurement stories (release WASM, loaded machine)
+  // routinely blow a 10s cap and used to kill whole baseline runs.
+  while (Date.now() - started < 30_000) {
     const ready = await evaluate(cdp, sessionId, expression);
     if (ready) {
       return;
