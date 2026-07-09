@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+lps-builtins = { path = "../lps-builtins", features = ["std"] }
 lps-shared = { path = "../lps-shared" }
 lp-collection = { workspace = true }
 lps-diagnostics = { path = "../lps-diagnostics", features = ["std"] }
@@ -32,6 +33,9 @@ walkdir = "2"
 num_cpus = "1"
 glob = { workspace = true }
 glsl = { git = "https://github.com/light-player/glsl-parser.git", branch = "feature/spans", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+libm = "0.2"
 
 [[test]]
 name = "filetests"
