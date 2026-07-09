@@ -114,6 +114,9 @@ pub struct WasmModule {
 /// Metadata for an exported WASM function.
 #[derive(Debug, Clone)]
 pub struct WasmExport {
+    /// WASM export name. Equals the GLSL function name unless the function is
+    /// overloaded, in which case a signature suffix disambiguates it
+    /// (e.g. `pick(vec3)`) — WASM export names must be unique.
     pub name: String,
     pub params: Vec<WasmValType>,
     pub results: Vec<WasmValType>,
