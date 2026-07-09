@@ -1,14 +1,19 @@
-//! Bus pane body: channels with linked writer/reader sites.
+//! Bus pane body: one [`SlotPane`] per channel, with linked writer/reader
+//! sites.
 //!
-//! Every site is a navigation affordance — clicking dispatches the node's
-//! focus action so the user lands on the node in the Project pane (roadmap
-//! D7: the UI feels linked, no path hunting). Binding state wears the
-//! violet status-bound family.
+//! Each channel wears the shared slot-pane language (roadmap D10 — one
+//! binding treatment everywhere): violet `Bound` frame, channel name in the
+//! title bar with kind/PRIMARY badges, the live value as the centered hero,
+//! and the wiring row beneath it. Every site is a navigation affordance —
+//! clicking dispatches the node's focus action so the user lands on the node
+//! in the Project pane (D7: the UI feels linked, no path hunting; D11: no
+//! dead ends). Merge semantics for multi-writer channels live in the detail
+//! popup (`UiBusChannelView::visible_aspects`).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiBusChannelView, UiBusSiteView, UiBusView};
 
-use crate::base::{StudioIcon, StudioIconName};
+use crate::app::node::{SlotPane, SlotPaneTreatment};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -30,7 +35,7 @@ pub fn BusPaneBody(view: UiBusView, on_action: EventHandler<UiAction>) -> Elemen
     rsx! {
         div { class: "tw:grid tw:gap-2",
             for channel in view.channels {
-                BusChannelRow { channel, on_action }
+                BusChannelPane { channel, on_action }
             }
         }
     }
@@ -38,7 +43,8 @@ pub fn BusPaneBody(view: UiBusView, on_action: EventHandler<UiAction>) -> Elemen
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BusChannelRow(channel: UiBusChannelView, on_action: EventHandler<UiAction>) -> Element {
+fn BusChannelPane(channel: UiBusChannelView, on_action: EventHandler<UiAction>) -> Element {
+    let aspects = channel.visible_aspects();
     let UiBusChannelView {
         name,
         kind,
@@ -48,46 +54,36 @@ fn BusChannelRow(channel: UiBusChannelView, on_action: EventHandler<UiAction>) -
         writers,
         readers,
     } = channel;
-    let row_class = if primary_visual {
-        "tw:grid tw:gap-1 tw:rounded-xs tw:border-l-2 tw:border-status-bound-foreground tw:bg-status-bound-bg tw:px-2 tw:py-1.5"
-    } else {
-        "tw:grid tw:gap-1 tw:rounded-xs tw:border-l-2 tw:border-status-bound-border tw:bg-transparent tw:px-2 tw:py-1.5"
-    };
-    let title = if primary_visual {
-        format!("bus:{name} — the project's primary visual output")
-    } else {
-        format!("bus:{name}")
-    };
 
     rsx! {
-        div { class: row_class,
-            div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-1.5",
-                span { class: "tw:flex-none tw:text-status-bound-foreground",
-                    StudioIcon {
-                        name: StudioIconName::BoundValue,
-                        size: 12,
+        SlotPane {
+            title: name,
+            aspects,
+            treatment: SlotPaneTreatment::Bound,
+            badges: rsx! {
+                if primary_visual {
+                    span {
+                        class: "tw:flex-none tw:rounded-xs tw:bg-status-bound-bg tw:px-1 tw:text-[9px] tw:font-bold tw:uppercase tw:leading-snug tw:text-status-bound-foreground",
+                        title: "The project's primary visual output",
+                        "primary"
                     }
-                }
-                code {
-                    class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-sm tw:font-bold tw:text-strong-foreground",
-                    title,
-                    "{name}"
                 }
                 if let Some(kind) = kind {
                     span { class: "tw:flex-none tw:text-[10px] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{kind}" }
                 }
-                span { class: "tw:min-w-0 tw:flex-1" }
-                if let Some(value) = value {
-                    code { class: "tw:flex-none tw:font-mono tw:text-xs tw:text-muted-foreground", "{value}" }
-                } else if let Some(error) = value_error {
-                    span {
-                        class: "tw:flex-none tw:max-w-32 tw:truncate tw:text-xs tw:text-status-error-foreground",
-                        title: "{error}",
-                        "unresolved"
-                    }
+            },
+            if let Some(value) = value {
+                code { class: "tw:min-w-0 tw:break-all tw:text-center tw:font-mono tw:text-sm tw:font-bold tw:text-strong-foreground", "{value}" }
+            } else if let Some(error) = value_error {
+                span {
+                    class: "tw:min-w-0 tw:truncate tw:text-xs tw:text-status-error-foreground",
+                    title: "{error}",
+                    "unresolved"
                 }
+            } else {
+                span { class: "tw:text-xs tw:text-subtle-foreground", "\u{2014}" }
             }
-            div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-1",
+            div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:justify-center tw:gap-1",
                 if writers.is_empty() {
                     span { class: "tw:text-[11px] tw:text-subtle-foreground", "no writer" }
                 }

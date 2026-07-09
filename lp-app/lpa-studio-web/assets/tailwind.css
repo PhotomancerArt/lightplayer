@@ -401,9 +401,6 @@
   .tw\:max-w-2xl {
     max-width: var(--tw-container-2xl);
   }
-  .tw\:max-w-32 {
-    max-width: calc(var(--tw-spacing) * 32);
-  }
   .tw\:max-w-40 {
     max-width: calc(var(--tw-spacing) * 40);
   }
@@ -1248,6 +1245,9 @@
   }
   .tw\:break-words {
     overflow-wrap: break-word;
+  }
+  .tw\:break-all {
+    word-break: break-all;
   }
   .tw\:text-ellipsis {
     text-overflow: ellipsis;

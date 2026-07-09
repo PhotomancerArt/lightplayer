@@ -62,6 +62,11 @@ pub fn SlotPane(
     /// values that want breathing room.
     #[props(default = false)]
     flush: bool,
+    /// Optional small annotations rendered beside the title (kind tags,
+    /// PRIMARY/DEF badges) — the shared title-bar extra every binding surface
+    /// uses so badges read the same everywhere.
+    #[props(default)]
+    badges: Option<Element>,
     /// The value display rendered, centered, in the pane body.
     children: Element,
 ) -> Element {
@@ -73,8 +78,13 @@ pub fn SlotPane(
     rsx! {
         section { class: slot_pane_frame_class(treatment, fit),
             header { class: slot_pane_header_class(treatment),
-                strong { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
-                    "{title}"
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-1.5",
+                    strong { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
+                        "{title}"
+                    }
+                    if let Some(badges) = badges {
+                        {badges}
+                    }
                 }
                 SlotDetailButton {
                     label: title.clone(),
