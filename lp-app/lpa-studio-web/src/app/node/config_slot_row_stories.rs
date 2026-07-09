@@ -55,7 +55,7 @@ pub(crate) fn bound_value() -> Element {
                 UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
             )
             .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-                "bus#time.seconds",
+                "bus:time",
             ))),
             depth: 0,
             index: 0,
@@ -72,7 +72,7 @@ pub(crate) fn published_value() -> Element {
                 "Output",
                 UiSlotValue::f32(1.0),
             )
-            .with_publish(UiBindingEndpoint::new("bus#visual.out")),
+            .with_publish(UiBindingEndpoint::new("bus:visual.out")),
             depth: 0,
             index: 0,
         }
@@ -85,7 +85,7 @@ pub(crate) fn published_popup() -> Element {
         div { class: "tw:min-h-56",
             ConfigSlotRow {
                 slot: UiConfigSlot::value("output", "Output", UiSlotValue::f32(1.0))
-                    .with_publish(UiBindingEndpoint::new("bus#visual.out")),
+                    .with_publish(UiBindingEndpoint::new("bus:visual.out")),
                 depth: 0,
                 index: 0,
                 initially_open: true,
@@ -105,7 +105,7 @@ pub(crate) fn info_popup() -> Element {
                     UiSlotValue::f32(0.35).with_unit(UiSlotUnit::seconds()),
                 )
                 .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-                    "bus#time.seconds",
+                    "bus:time",
                 ))),
                 depth: 0,
                 index: 0,

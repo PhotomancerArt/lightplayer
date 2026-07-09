@@ -21,7 +21,7 @@ fn fyeah_bus_view() -> UiBusView {
     UiBusView {
         channels: vec![
             UiBusChannelView {
-                name: "time.seconds".to_string(),
+                name: "time".to_string(),
                 kind: Some("Instant".to_string()),
                 value: Some("3.333".to_string()),
                 value_error: None,

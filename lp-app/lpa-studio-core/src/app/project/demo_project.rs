@@ -13,7 +13,7 @@ pub struct DemoProjectFile {
 /// The Studio demo project — `examples/fyeah-sign`.
 ///
 /// Chosen over the minimal `examples/basic` so the demo exercises the full
-/// bus: a clock (time), a button + radio bridge (both writing `bus#trigger`),
+/// bus: a clock (time), a button + radio bridge (both writing `bus:trigger`),
 /// and a playlist switching between idle and blast visuals. The button/radio
 /// are virtual in the browser sim, so nothing physically fires, but every
 /// binding registers — the bus pane shows the real topology.

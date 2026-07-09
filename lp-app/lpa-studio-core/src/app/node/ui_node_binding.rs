@@ -5,7 +5,7 @@ use crate::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 /// A human-readable binding endpoint shown in node binding popovers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiBindingEndpoint {
-    /// Compact label for the endpoint, such as `bus#time.seconds`.
+    /// Compact label for the endpoint, such as `bus:time`.
     pub label: String,
     /// Optional detail, usually the owning node or slot path.
     pub detail: Option<String>,

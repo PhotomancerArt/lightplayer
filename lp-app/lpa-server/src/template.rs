@@ -95,10 +95,10 @@ const FIXTURE_NODE_JSON: &[u8] = br#"{
   },
   "bindings": {
     "input": {
-      "source": "bus#visual.out"
+      "source": "bus:visual.out"
     },
     "output": {
-      "target": "bus#control.out"
+      "target": "bus:control.out"
     }
   },
   "sampling": "direct",

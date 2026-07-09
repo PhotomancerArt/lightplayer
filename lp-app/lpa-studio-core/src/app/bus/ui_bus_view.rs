@@ -21,7 +21,7 @@ impl UiBusView {
 /// One bus channel row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiBusChannelView {
-    /// Channel name (`time.seconds`, `trigger`, `visual.out`, …).
+    /// Channel name (`time`, `trigger`, `visual.out`, …).
     pub name: String,
     /// Established semantic kind label, when known.
     pub kind: Option<String>,

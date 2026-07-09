@@ -77,7 +77,7 @@ fn real_source_defs_sync_as_slot_roots() {
             &shape_registry,
             "bindings[output].target.some",
         ),
-        LpValue::String(String::from("bus#visual.out")),
+        LpValue::String(String::from("bus:visual.out")),
     );
     assert_value(
         select(
@@ -95,7 +95,7 @@ fn real_source_defs_sync_as_slot_roots() {
   "render_order": 0,
   "source": { "path": "shader.glsl" },
   "bindings": {
-    "output": { "target": "bus#visual.out" }
+    "output": { "target": "bus:visual.out" }
   },
   "consumed": {
     "speed": {

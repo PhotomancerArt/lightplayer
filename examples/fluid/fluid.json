@@ -2,10 +2,10 @@
   "kind": "Fluid",
   "bindings": {
     "emitters": {
-      "source": "bus#fluid.emitters"
+      "source": "bus:fluid.emitters"
     },
     "output": {
-      "target": "bus#visual.out"
+      "target": "bus:visual.out"
     }
   },
   "size": {

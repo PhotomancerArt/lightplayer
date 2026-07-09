@@ -1433,7 +1433,7 @@ fn register_clock_default_time_binding(
                     node: current.id,
                     slot: SlotPath::parse("seconds").expect("clock seconds slot path"),
                 },
-                target: BindingTarget::BusChannel(ChannelName(String::from("time.seconds"))),
+                target: BindingTarget::BusChannel(ChannelName(String::from("time"))),
                 priority: BindingPriority::default_fallback(),
                 kind: Kind::Instant,
                 owner: current.id,
@@ -1466,7 +1466,7 @@ fn add_visual_default_time_binding(
     engine
         .add_binding(
             BindingDraft {
-                source: BindingSource::BusChannel(ChannelName(String::from("time.seconds"))),
+                source: BindingSource::BusChannel(ChannelName(String::from("time"))),
                 target: BindingTarget::ConsumedSlot {
                     node: current.id,
                     slot: SlotPath::parse("time").expect("visual shader time slot path"),
@@ -1498,7 +1498,7 @@ fn register_fluid_default_time_binding(
     engine
         .add_binding(
             BindingDraft {
-                source: BindingSource::BusChannel(ChannelName(String::from("time.seconds"))),
+                source: BindingSource::BusChannel(ChannelName(String::from("time"))),
                 target: BindingTarget::ConsumedSlot {
                     node: current.id,
                     slot: SlotPath::parse("time").expect("fluid time slot path"),
@@ -1523,7 +1523,7 @@ fn has_default_time_bus(projected_nodes: &[ProjectedNode]) -> bool {
 }
 
 fn is_time_seconds_bus_target(target: &AuthoredBindingRef) -> bool {
-    matches!(target, AuthoredBindingRef::Bus(bus) if bus.slot().to_string() == "time.seconds")
+    matches!(target, AuthoredBindingRef::Bus(bus) if bus.channel().0.clone() == "time")
 }
 
 fn binding_source_endpoint(
@@ -1550,7 +1550,7 @@ fn binding_ref_source(
             reason: String::from("binding source cannot be unset"),
         }),
         AuthoredBindingRef::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
-            bus.slot().to_string(),
+            bus.channel().0.clone(),
         ))),
         AuthoredBindingRef::Node(node_slot) => {
             let node =
@@ -1574,7 +1574,7 @@ fn binding_target_endpoint(
             reason: String::from("binding target cannot be unset"),
         }),
         AuthoredBindingRef::Bus(bus) => Ok(BindingTarget::BusChannel(ChannelName(
-            bus.slot().to_string(),
+            bus.channel().0.clone(),
         ))),
         AuthoredBindingRef::Node(node_slot) => {
             let node =
@@ -1661,10 +1661,10 @@ mod tests {
   "sampling": "direct",
   "bindings": {
     "input": {
-      "source": "bus#visual.out"
+      "source": "bus:visual.out"
     },
     "output": {
-      "target": "bus#control.out"
+      "target": "bus:control.out"
     }
   },
   "mapping": {
@@ -1770,7 +1770,7 @@ mod tests {
   "default_fade": 0.35,
   "bindings": {
     "trigger": {
-      "source": "bus#trigger"
+      "source": "bus:trigger"
     }
   },
   "entries": {
@@ -1815,7 +1815,7 @@ mod tests {
   },
   "bindings": {
     "time": {
-      "source": "..#entry_time"
+      "source": "node:..#entry_time"
     }
   },
   "consumed": {
@@ -1881,7 +1881,7 @@ mod tests {
   "stable_ms": 1,
   "bindings": {
     "down": {
-      "target": "bus#trigger"
+      "target": "bus:trigger"
     }
   }
 }
@@ -1896,10 +1896,10 @@ mod tests {
   "default_fade": 0.35,
   "bindings": {
     "time": {
-      "source": "bus#time.seconds"
+      "source": "bus:time"
     },
     "trigger": {
-      "source": "bus#trigger"
+      "source": "bus:trigger"
     }
   },
   "entries": {
@@ -2097,7 +2097,7 @@ mod tests {
         rt.tick(1000).expect("first tick");
         let first = rt
             .resolve_with_engine_host(
-                QueryKey::Bus(ChannelName(String::from("time.seconds"))),
+                QueryKey::Bus(ChannelName(String::from("time"))),
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
@@ -2124,7 +2124,7 @@ mod tests {
         rt.tick(1000).expect("second tick");
         let second = rt
             .resolve_with_engine_host(
-                QueryKey::Bus(ChannelName(String::from("time.seconds"))),
+                QueryKey::Bus(ChannelName(String::from("time"))),
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
@@ -2262,10 +2262,10 @@ mod tests {
   ],
   "bindings": {
     "input": {
-      "source": "..texture#output"
+      "source": "node:../texture#output"
     },
     "output": {
-      "target": "bus#control.out"
+      "target": "bus:control.out"
     }
   },
   "mapping": {
@@ -2450,10 +2450,10 @@ mod tests {
   "default_fade": 0.35,
   "bindings": {
     "time": {
-      "source": "bus#time.seconds"
+      "source": "bus:time"
     },
     "trigger": {
-      "source": "bus#trigger"
+      "source": "bus:trigger"
     }
   },
   "entries": {
@@ -2503,10 +2503,10 @@ mod tests {
   "default_fade": 0.35,
   "bindings": {
     "time": {
-      "source": "bus#time.seconds"
+      "source": "bus:time"
     },
     "trigger": {
-      "source": "bus#trigger"
+      "source": "bus:trigger"
     }
   },
   "entries": {
@@ -2645,10 +2645,10 @@ mod tests {
   ],
   "bindings": {
     "input": {
-      "source": "..missing#output"
+      "source": "node:../missing#output"
     },
     "output": {
-      "target": "bus#control.out"
+      "target": "bus:control.out"
     }
   },
   "mapping": {
@@ -2687,14 +2687,14 @@ mod tests {
             matches!(
                 err,
                 ProjectLoadError::InvalidProjectReference { ref reason, .. }
-                    if reason.contains("unknown binding source node ref `..missing`")
+                    if reason.contains("unknown binding source node ref `../missing`")
             ),
             "expected missing binding source ref, got {err:?}"
         );
     }
 
     #[test]
-    fn slash_node_ref_projects_error_node() {
+    fn schemeless_node_ref_projects_error_node() {
         let fs = flat_project();
         fs.write_file(
             "/fixture.json".as_path(),
@@ -2726,7 +2726,7 @@ mod tests {
       "source": "/texture#output"
     },
     "output": {
-      "target": "bus#control.out"
+      "target": "bus:control.out"
     }
   },
   "mapping": {
@@ -2759,7 +2759,7 @@ mod tests {
         let services = EngineServices::new(root_path);
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load project");
 
-        assert_node_for_def_error(&rt, "/fixture.json", "node locations use dot syntax");
+        assert_node_for_def_error(&rt, "/fixture.json", "must start with `bus:` or `node:`");
     }
 
     #[test]
@@ -3234,7 +3234,7 @@ mod tests {
 
         // Clock publishes time.seconds via the default (loader helper)
         // binding — visible and tagged as default origin.
-        let time_providers = &channel("time.seconds").providers;
+        let time_providers = &channel("time").providers;
         assert!(time_providers.iter().any(|index| {
             let binding = &graph.bindings[*index as usize];
             binding.node == clock && binding.origin == lpc_wire::WireBindingOrigin::Default
@@ -3361,7 +3361,7 @@ mod tests {
   "stable_ms": 1,
   "bindings": {
     "down": {
-      "target": "bus#trigger"
+      "target": "bus:trigger"
     }
   }
 }
@@ -3378,10 +3378,10 @@ mod tests {
   "repeat_count": 2,
   "bindings": {
     "input": {
-      "source": "bus#trigger"
+      "source": "bus:trigger"
     },
     "output": {
-      "target": "bus#trigger"
+      "target": "bus:trigger"
     }
   }
 }
@@ -3663,7 +3663,7 @@ mod tests {
   },
   "bindings": {
     "input": {
-      "source": "bus#visual.out"
+      "source": "bus:visual.out"
     }
   }
 }
@@ -3681,7 +3681,7 @@ mod tests {
   "render_order": 0,
   "bindings": {
     "output": {
-      "target": "bus#visual.out"
+      "target": "bus:visual.out"
     }
   }
 }
@@ -3701,7 +3701,7 @@ mod tests {
   "endpoint": "ws281x:rmt:D10",
   "bindings": {
     "input": {
-      "source": "bus#control.out"
+      "source": "bus:control.out"
     }
   }
 }
@@ -3735,10 +3735,10 @@ mod tests {
   ],
   "bindings": {
     "input": {
-      "source": "bus#visual.out"
+      "source": "bus:visual.out"
     },
     "output": {
-      "target": "bus#control.out"
+      "target": "bus:control.out"
     }
   },
   "mapping": {

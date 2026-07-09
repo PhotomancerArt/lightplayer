@@ -278,7 +278,7 @@ pub(crate) fn playlist_header() -> UiNodeHeader {
 pub(crate) fn produced_products_fixture() -> Vec<UiProducedProduct> {
     vec![
         visual_preview_product("output").with_binding_routes(
-            Some("bus#visual.out"),
+            Some("bus:visual.out"),
             &[],
             &["Fixture.visual"],
             Some("rev 104"),
@@ -301,7 +301,7 @@ pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
             .with_preview(UiProductPreview::Pending)
             .with_tracking(UiProductTrackingState::Tracking),
         visual_preview_product("output").with_binding_routes(
-            Some("bus#visual.out"),
+            Some("bus:visual.out"),
             &[],
             &["Fixture.visual"],
             Some("rev 104"),
@@ -428,7 +428,7 @@ pub(crate) fn produced_value_variants_fixture() -> Vec<UiProducedValue> {
         UiProducedValue::new("Entry time", "3.33").with_unit(UiSlotUnit::seconds()),
         UiProducedValue::new("FPS", "447").with_unit(UiSlotUnit::hertz()),
         UiProducedValue::new("Peers", "2").with_binding_routes(
-            Some("bus#radio.peer_count"),
+            Some("bus:radio.peer_count"),
             &[],
             &["debug.Peers"],
             None,
@@ -443,9 +443,7 @@ pub(crate) fn config_slots_fixture() -> Vec<UiConfigSlot> {
             "Time",
             UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
         )
-        .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-            "bus#time.seconds",
-        ))),
+        .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time"))),
         UiConfigSlot::value("idle_entry", "Idle entry", UiSlotValue::u32(1)),
         UiConfigSlot::value(
             "default_fade",
@@ -459,7 +457,7 @@ pub(crate) fn config_slots_fixture() -> Vec<UiConfigSlot> {
             vec![
                 UiConfigSlot::value("blast_trigger", "Blast trigger", UiSlotValue::bool(false))
                     .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-                        "bus#trigger",
+                        "bus:trigger",
                     )))
                     .with_detail("optional trigger"),
             ],
@@ -520,7 +518,7 @@ pub(crate) fn children_fixture() -> Vec<UiNodeChild> {
                     "../playlist#entry_time",
                 ))),
                 UiConfigSlot::value("trigger", "Trigger", UiSlotValue::bool(false)).with_source(
-                    UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#trigger")),
+                    UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:trigger")),
                 ),
                 UiConfigSlot::value("shader", "Shader", UiSlotValue::string("blast.glsl")),
             ]),
@@ -551,7 +549,7 @@ pub(crate) fn config_record_fixture() -> UiSlotRecord {
             UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
         )
         .with_source(UiSlotSourceState::Bound(
-            UiBindingEndpoint::new("bus#time.seconds").with_detail("global clock"),
+            UiBindingEndpoint::new("bus:time").with_detail("global clock"),
         )),
         UiConfigSlot::record(
             "transform",
@@ -578,9 +576,7 @@ pub(crate) fn config_row_states_fixture() -> Vec<UiConfigSlot> {
             "Bound value",
             UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
         )
-        .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-            "bus#time.seconds",
-        ))),
+        .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time"))),
         UiConfigSlot::value("dirty", "Edited value", UiSlotValue::string("idle.glsl"))
             .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
         UiConfigSlot::value("invalid", "Invalid value", UiSlotValue::f32(-1.0))

@@ -258,7 +258,7 @@ impl ProjectController {
     ) -> crate::UiBindingEndpoint {
         match endpoint {
             lpc_wire::WireBindingEndpoint::Bus { channel } => {
-                crate::UiBindingEndpoint::new(format!("bus#{channel}"))
+                crate::UiBindingEndpoint::new(format!("bus:{channel}"))
             }
             lpc_wire::WireBindingEndpoint::NodeSlot { node, slot } => {
                 let label = self
@@ -3088,14 +3088,14 @@ mod tests {
         let UiSlotSourceState::Bound(endpoint) = &config[0].source else {
             panic!("expected time slot to be bound, got {:?}", config[0].source);
         };
-        assert_eq!(endpoint.label, "bus#time.seconds");
+        assert_eq!(endpoint.label, "bus:time");
         let binding_aspect = config[0]
             .visible_aspects()
             .into_iter()
             .find(|aspect| aspect.kind == crate::UiSlotAspectKind::Binding)
             .expect("binding aspect");
         assert_eq!(binding_aspect.rows[0].label, "Bound");
-        assert_eq!(binding_aspect.rows[0].value, "bus#time.seconds");
+        assert_eq!(binding_aspect.rows[0].value, "bus:time");
 
         // Produced slot with an authored target binding publishes to the bus.
         let produced = section_produced_values(sections);
@@ -3107,7 +3107,7 @@ mod tests {
             .bus_target
             .as_ref()
             .expect("seconds should publish to the bus");
-        assert_eq!(bus_target.label, "bus#time.seconds");
+        assert_eq!(bus_target.label, "bus:time");
     }
 
     #[test]
@@ -3230,7 +3230,7 @@ mod tests {
         let UiSlotSourceState::Bound(endpoint) = &wired.source else {
             panic!("expected wired row to be bound, got {:?}", wired.source);
         };
-        assert_eq!(endpoint.label, "bus#visual.out");
+        assert_eq!(endpoint.label, "bus:visual.out");
     }
 
     #[test]
@@ -3847,11 +3847,11 @@ mod tests {
         if with_bindings {
             bindings.entries.insert(
                 SlotMapKey::String("time".to_string()),
-                binding_entry(Some("bus#time.seconds"), None),
+                binding_entry(Some("bus:time"), None),
             );
             bindings.entries.insert(
                 SlotMapKey::String("seconds".to_string()),
-                binding_entry(None, Some("bus#time.seconds")),
+                binding_entry(None, Some("bus:time")),
             );
         }
 

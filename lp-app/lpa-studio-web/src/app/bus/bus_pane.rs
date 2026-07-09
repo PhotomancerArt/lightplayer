@@ -20,7 +20,7 @@ pub fn BusPaneBody(view: UiBusView, on_action: EventHandler<UiAction>) -> Elemen
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
                     "The bus is the project's patch bay: nodes publish and consume "
                     "values on named channels. Bind a slot to "
-                    code { class: "tw:font-mono", "bus#…" }
+                    code { class: "tw:font-mono", "bus:…" }
                     " and the channel appears here."
                 }
             }
@@ -54,9 +54,9 @@ fn BusChannelRow(channel: UiBusChannelView, on_action: EventHandler<UiAction>) -
         "tw:grid tw:gap-1 tw:rounded-xs tw:border-l-2 tw:border-status-bound-border tw:bg-transparent tw:px-2 tw:py-1.5"
     };
     let title = if primary_visual {
-        format!("bus#{name} — the project's primary visual output")
+        format!("bus:{name} — the project's primary visual output")
     } else {
-        format!("bus#{name}")
+        format!("bus:{name}")
     };
 
     rsx! {

@@ -159,7 +159,7 @@ fn resource_ref_slot_schema() -> Value {
 /// (`[A-Za-z_][A-Za-z0-9_]*`). The pattern mirrors the parser exactly.
 fn relative_node_ref_schema() -> Value {
     json!({
-        "description": "Relative node reference, e.g. \".\", \"..\", \"..texture\", \".child.grandchild\".",
+        "description": "Relative node reference, e.g. \".\", \"..\", \"../texture\", \"child/grandchild\".",
         "type": "string",
         "pattern": "^\\.\\.?([A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*)?$",
     })
@@ -355,8 +355,8 @@ mod tests {
             &[
                 r#"".""#,
                 r#""..""#,
-                r#""..texture""#,
-                r#"".child.grandchild""#,
+                r#""../texture""#,
+                r#""child/grandchild""#,
             ],
             &[
                 // Absolute names must be spelled relative.

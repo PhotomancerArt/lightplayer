@@ -2,7 +2,7 @@
   "kind": "Button",
   "bindings": {
     "down": {
-      "target": "bus#trigger"
+      "target": "bus:trigger"
     }
   },
   "endpoint": "button:gpio:D9",

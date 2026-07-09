@@ -73,7 +73,7 @@ mod tests {
             }),
             transform: Affine2dSlot::new(Affine2d::identity()),
             color_order: ColorOrderSlot::new(ColorOrderValue::Grb),
-            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..texture").unwrap()),
+            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("../texture").unwrap()),
             resource: ResourceRefSlot::new(ResourceRef::runtime_buffer(RuntimeBufferId::new(4))),
         };
 
@@ -81,7 +81,7 @@ mod tests {
         assert!(authored.contains("\"ratio\": 0.75"));
         assert!(authored.contains("\"asset\": \"shader.glsl\""));
         assert!(authored.contains("\"color_order\": \"grb\""));
-        assert!(authored.contains("\"texture_loc\": \"..texture\""));
+        assert!(authored.contains("\"texture_loc\": \"../texture\""));
 
         let decoded: SemanticSlots = serde_json::from_str(&authored).unwrap();
 

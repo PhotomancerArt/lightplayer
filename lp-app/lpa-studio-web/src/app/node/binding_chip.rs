@@ -16,7 +16,7 @@ pub enum BindingChipDirection {
 
 /// Small accent chip naming the bound endpoint inline on a row.
 ///
-/// The full endpoint (with the `bus#` prefix) lives in the tooltip and the
+/// The full endpoint (with the `bus:` prefix) lives in the tooltip and the
 /// detail popover; the chip shows the compact channel name so bound rows
 /// read at a glance without dominating the row (M1 review gate may adjust).
 #[component]
@@ -24,7 +24,7 @@ pub enum BindingChipDirection {
 pub fn BindingChip(endpoint: UiBindingEndpoint, direction: BindingChipDirection) -> Element {
     let compact = endpoint
         .label
-        .strip_prefix("bus#")
+        .strip_prefix("bus:")
         .unwrap_or(&endpoint.label)
         .to_string();
     let verb = match direction {

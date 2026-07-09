@@ -6,10 +6,10 @@
   },
   "bindings": {
     "input": {
-      "source": "bus#visual.out"
+      "source": "bus:visual.out"
     },
     "output": {
-      "target": "bus#control.out"
+      "target": "bus:control.out"
     }
   },
   "sampling": "texture_area",

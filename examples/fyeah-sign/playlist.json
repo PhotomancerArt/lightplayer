@@ -2,10 +2,10 @@
   "kind": "Playlist",
   "bindings": {
     "time": {
-      "source": "bus#time.seconds"
+      "source": "bus:time"
     },
     "trigger": {
-      "source": "bus#trigger"
+      "source": "bus:trigger"
     }
   },
   "time": 0,

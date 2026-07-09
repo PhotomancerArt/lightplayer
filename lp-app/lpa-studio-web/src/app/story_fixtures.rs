@@ -1218,7 +1218,7 @@ fn orbit_shader_child() -> UiNodeChild {
         UiNodeSection::ConfigSlots(vec![
             UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s"))
                 .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-                    "clock#time.seconds",
+                    "bus:time",
                 ))),
             UiConfigSlot::record(
                 "parameters",

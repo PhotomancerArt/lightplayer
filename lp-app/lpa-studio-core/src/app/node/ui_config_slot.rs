@@ -435,9 +435,7 @@ mod tests {
     #[test]
     fn primary_affordance_uses_highest_aspect_affordance() {
         let slot = UiConfigSlot::value("fade", "Fade", UiSlotValue::f32(-1.0))
-            .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-                "bus#time.seconds",
-            )))
+            .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time")))
             .with_state(
                 UiSlotFieldState::editable()
                     .with_dirty(UiNodeDirtyState::Dirty)
@@ -488,9 +486,8 @@ mod tests {
 
     #[test]
     fn bound_source_provides_bound_affordance() {
-        let slot = UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333)).with_source(
-            UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds")),
-        );
+        let slot = UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333))
+            .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time")));
 
         assert_eq!(slot.primary_affordance(), UiSlotAffordance::Bound);
     }

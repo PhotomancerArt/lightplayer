@@ -19,9 +19,9 @@ pub struct SlotBindingFact {
 /// The remote side of an authored binding.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SlotBindingFactKind {
-    /// The slot consumes from an endpoint (`"source": "bus#time.seconds"`).
+    /// The slot consumes from an endpoint (`"source": "bus:time"`).
     Source(UiBindingEndpoint),
-    /// The slot publishes to an endpoint (`"target": "bus#trigger"`).
+    /// The slot publishes to an endpoint (`"target": "bus:trigger"`).
     Target(UiBindingEndpoint),
     /// The slot is fed an authored literal (`"value": …`).
     Literal(UiBindingEndpoint),

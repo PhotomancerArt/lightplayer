@@ -453,7 +453,7 @@ mod tests {
   },
   "bindings": {
     "emitters": {
-      "target": "bus#fluid.emitters"
+      "target": "bus:fluid.emitters"
     }
   },
   "consumed": {
@@ -510,7 +510,7 @@ void tick() {
   "viscosity": 3e-05,
   "bindings": {
     "emitters": {
-      "source": "bus#fluid.emitters"
+      "source": "bus:fluid.emitters"
     }
   }
 }

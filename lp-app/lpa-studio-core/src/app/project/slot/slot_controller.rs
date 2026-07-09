@@ -382,7 +382,7 @@ impl SlotController {
     fn ui_produced_binding(&self) -> UiProducedBinding {
         let mut binding = UiProducedBinding::none();
         if let Some(endpoint) = &self.publish {
-            if endpoint.label.starts_with("bus#") {
+            if endpoint.label.starts_with("bus:") {
                 binding.bindings.bus_target = Some(endpoint.clone());
             } else {
                 binding.bindings.target_bindings.push(endpoint.clone());

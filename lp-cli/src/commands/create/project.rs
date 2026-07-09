@@ -13,9 +13,9 @@ use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
-    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
-    HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot, ProjectDef,
-    RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
+    BusSlotRef, ChannelName, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode,
+    FixtureSamplingConfig, HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot,
+    OptionSlot, ProjectDef, RenderOrder, RenderOrderSlot, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -238,18 +238,18 @@ fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
 fn bus_input_binding_defs(slot: &str) -> BindingDefs {
     single_binding_defs(
         "input",
-        BindingDef::source(BindingRef::Bus(BusSlotRef::new(
-            SlotPath::parse(slot).expect("valid bus slot path"),
-        ))),
+        BindingDef::source(BindingRef::Bus(BusSlotRef::new(ChannelName(String::from(
+            slot,
+        ))))),
     )
 }
 
 fn bus_output_binding_defs(slot: &str) -> BindingDefs {
     single_binding_defs(
         "output",
-        BindingDef::target(BindingRef::Bus(BusSlotRef::new(
-            SlotPath::parse(slot).expect("valid bus slot path"),
-        ))),
+        BindingDef::target(BindingRef::Bus(BusSlotRef::new(ChannelName(String::from(
+            slot,
+        ))))),
     )
 }
 
@@ -257,15 +257,15 @@ fn fixture_binding_defs() -> BindingDefs {
     let mut entries = lp_collection::VecMap::new();
     entries.insert(
         String::from("input"),
-        BindingDef::source(BindingRef::Bus(BusSlotRef::new(
-            SlotPath::parse("visual.out").expect("valid visual bus slot"),
-        ))),
+        BindingDef::source(BindingRef::Bus(BusSlotRef::new(ChannelName(String::from(
+            "visual.out",
+        ))))),
     );
     entries.insert(
         String::from("output"),
-        BindingDef::target(BindingRef::Bus(BusSlotRef::new(
-            SlotPath::parse("control.out").expect("valid control bus slot"),
-        ))),
+        BindingDef::target(BindingRef::Bus(BusSlotRef::new(ChannelName(String::from(
+            "control.out",
+        ))))),
     );
     BindingDefs::new(entries)
 }

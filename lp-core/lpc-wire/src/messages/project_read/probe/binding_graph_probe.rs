@@ -111,7 +111,7 @@ pub enum WireBindingOrigin {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct WireBusChannel {
-    /// Channel name (`time.seconds`, `trigger`, `visual.out`, …).
+    /// Channel name (`time`, `trigger`, `visual.out`, …).
     pub name: String,
     /// Established channel kind, when any binding declared one.
     pub kind: Option<Kind>,
