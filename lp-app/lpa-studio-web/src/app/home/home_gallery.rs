@@ -114,12 +114,14 @@ pub fn HomeGallery(
                     h2 { class: section_title_class(), "Your projects" }
                     if home.library_available {
                         div { class: "tw:flex tw:items-center tw:gap-2",
-                            // a file-input label can't be a UiAction; it
-                            // wears the same quiet-chip classes instead
-                            label {
+                            // a real button (matching the ActionButton quiet
+                            // chip exactly) that forwards to the hidden file
+                            // input — a file dialog can't be a UiAction
+                            button {
                                 class: quiet_action_class(),
-                                r#for: "home-import-zip",
+                                r#type: "button",
                                 title: "Install a project from a zip archive.",
+                                onclick: move |_| open_import_picker(),
                                 span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                                     StudioIcon { name: StudioIconName::Upload, size: 14 }
                                 }
@@ -132,33 +134,29 @@ pub fn HomeGallery(
                                 accept: ".zip",
                                 onchange: move |event| import_picked(event.files()),
                             }
-                            ActionButton {
-                                action: home_action(HomeOp::NewProject),
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
                         }
                     }
                 }
                 if home.library_available {
-                    div { class: card_grid_class(),
-                        for card in home.projects.clone() {
-                            PackageCard {
-                                key: "{card.uid}",
-                                opening: home.opening.as_deref() == Some(card.uid.as_str()),
-                                busy,
-                                card,
-                                now_secs,
-                                on_action,
-                            }
+                    if home.projects.is_empty() {
+                        // the one way to start: open an example (D17 — "new
+                        // project" IS the examples place); imports arrive by
+                        // button or drag
+                        p { class: "tw:m-0 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:px-4 tw:py-5 tw:text-sm tw:text-muted-foreground",
+                            "No projects yet — open an example below to start. It becomes your project on the first save. You can also drop a project zip anywhere on this page."
                         }
-                        button {
-                            class: "tw:grid tw:min-h-24 tw:cursor-pointer tw:place-items-center tw:gap-1 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:p-3 tw:text-muted-foreground tw:transition-colors tw:hover:border-accent tw:hover:text-strong-foreground",
-                            r#type: "button",
-                            onclick: move |_| on_action.call(home_action(HomeOp::NewProject)),
-                            span { class: "tw:text-sm tw:font-semibold", "New project" }
-                            span { class: "tw:text-xs tw:text-dim-foreground", "or drop a zip anywhere" }
+                    } else {
+                        div { class: card_grid_class(),
+                            for card in home.projects.clone() {
+                                PackageCard {
+                                    key: "{card.uid}",
+                                    opening: home.opening.as_deref() == Some(card.uid.as_str()),
+                                    busy,
+                                    card,
+                                    now_secs,
+                                    on_action,
+                                }
+                            }
                         }
                     }
                 } else {
@@ -201,6 +199,23 @@ pub fn HomeGallery(
         }
     }
 }
+
+/// Forward the Import button to the hidden file input (a file dialog
+/// cannot be a `UiAction`; the button still wears the shared quiet chip).
+#[cfg(target_arch = "wasm32")]
+fn open_import_picker() {
+    use wasm_bindgen::JsCast;
+    if let Some(input) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("home-import-zip"))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        input.click();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn open_import_picker() {}
 
 /// Read every dropped/picked `.zip` and dispatch it as an import action.
 fn import_handler(

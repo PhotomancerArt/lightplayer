@@ -31,11 +31,11 @@ pub enum HomeOp {
         uid: String,
     },
     /// Open an example: seed it into the library once, then open the copy.
+    /// Also the ONE way to start a project (D17: "new project" is the
+    /// examples place; the empty library points here).
     OpenExample {
         id: String,
     },
-    /// Create a new project in the library (from the built-in template).
-    NewProject,
     RenamePackage {
         uid: String,
         name: String,
@@ -68,12 +68,6 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Primary,
             )
             .with_icon("play"),
-            Self::NewProject => ActionMeta::new(
-                "New project",
-                "Create a new project in your library.",
-                ActionPriority::Secondary,
-            )
-            .with_icon("add"),
             Self::RenamePackage { .. } => {
                 ActionMeta::new("Rename", "Rename this project.", ActionPriority::Secondary)
                     .with_icon("edit")
@@ -108,8 +102,7 @@ impl ControllerOp for HomeOp {
                 deadline: PROJECT_LOAD_DEADLINE,
             },
             // Library CRUD is local store work; the standard budget bounds it.
-            Self::NewProject
-            | Self::RenamePackage { .. }
+            Self::RenamePackage { .. }
             | Self::DuplicatePackage { .. }
             | Self::DeletePackage { .. }
             | Self::ImportZip { .. } => ActionClass::Foreground {
@@ -162,7 +155,6 @@ mod tests {
     #[test]
     fn library_crud_uses_the_project_action_deadline() {
         for op in [
-            HomeOp::NewProject,
             HomeOp::RenamePackage {
                 uid: "prj_1".to_string(),
                 name: "n".to_string(),

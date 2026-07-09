@@ -1096,6 +1096,9 @@
   .tw\:py-4 {
     padding-block: calc(var(--tw-spacing) * 4);
   }
+  .tw\:py-5 {
+    padding-block: calc(var(--tw-spacing) * 5);
+  }
   .tw\:py-8 {
     padding-block: calc(var(--tw-spacing) * 8);
   }

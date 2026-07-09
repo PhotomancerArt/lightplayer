@@ -477,31 +477,6 @@ impl StudioController {
             HomeOp::OpenExample { id } => {
                 self.open_from_home(PendingOpen::Example(id), updates).await
             }
-            HomeOp::NewProject => {
-                let store = self.home_store()?;
-                let now = (self.now_secs)();
-                let names: Vec<String> = store
-                    .list()
-                    .map_err(home_library_error)?
-                    .into_iter()
-                    .map(|summary| summary.name)
-                    .collect();
-                let name = unique_project_name("New Project", &names);
-                let template = crate::app::home::embedded_example(
-                    crate::app::project::demo_project::DEMO_PROJECT_ID,
-                )
-                .expect("the basic template is embedded");
-                let summary = store
-                    .install_files_with_fresh_uid(
-                        &name,
-                        &template.files(),
-                        crate::app::library::PackageProvenance::Created,
-                        now,
-                    )
-                    .map_err(home_library_error)?;
-                Ok(UiNotices::new()
-                    .with_notice(UiNotice::info(format!("Created {}", summary.name))))
-            }
             HomeOp::RenamePackage { uid, name } => {
                 let name = name.trim();
                 if name.is_empty() {
@@ -1402,21 +1377,6 @@ fn home_library_error(error: crate::app::library::LibraryError) -> UiError {
     UiError::MissingSession(format!("library: {error}"))
 }
 
-/// "New Project", "New Project 2", … — the first name not already taken.
-fn unique_project_name(base: &str, taken: &[String]) -> String {
-    if !taken.iter().any(|name| name == base) {
-        return base.to_string();
-    }
-    let mut counter = 2;
-    loop {
-        let candidate = format!("{base} {counter}");
-        if !taken.iter().any(|name| name == &candidate) {
-            return candidate;
-        }
-        counter += 1;
-    }
-}
-
 fn emit_activity(
     updates: &UxUpdateSink,
     target: UxActivityTarget,
@@ -1706,8 +1666,8 @@ mod tests {
     }
 
     #[test]
-    fn home_ops_create_rename_duplicate_import_and_delete_library_packages() {
-        use crate::app::library::{LibraryStore, export_package};
+    fn home_ops_rename_duplicate_import_and_delete_library_packages() {
+        use crate::app::library::{LibraryStore, PackageProvenance, export_package};
         use crate::{HOME_NODE_ID, HomeOp, ZipBytes};
         use lpfs::LpFsMemory;
 
@@ -1723,20 +1683,15 @@ mod tests {
         studio.attach_library(store.clone());
         let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
 
-        // create twice: names stay unique
-        block_on_ready(studio.dispatch(home_action(HomeOp::NewProject))).unwrap();
-        block_on_ready(studio.dispatch(home_action(HomeOp::NewProject))).unwrap();
+        // seed one package (creation happens via examples in the UI — the
+        // gallery has no create op; see D17)
+        let seeded = store
+            .install_package("Seeded", &[], PackageProvenance::Created, 42.0)
+            .unwrap();
         let home = studio.view().home.expect("home with library");
         assert!(home.library_available);
-        let names: Vec<&str> = home.projects.iter().map(|c| c.name.as_str()).collect();
-        assert!(names.contains(&"New Project") && names.contains(&"New Project 2"));
-        let uid = home
-            .projects
-            .iter()
-            .find(|card| card.name == "New Project")
-            .unwrap()
-            .uid
-            .clone();
+        assert_eq!(home.projects.len(), 1);
+        let uid = seeded.uid.to_string();
 
         // rename, then duplicate the renamed package
         block_on_ready(studio.dispatch(home_action(HomeOp::RenamePackage {

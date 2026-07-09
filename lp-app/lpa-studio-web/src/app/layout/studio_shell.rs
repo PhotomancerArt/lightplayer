@@ -35,9 +35,7 @@ pub fn StudioShell(
         return rsx! {
             main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
                 header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
-                    div {
-                        p { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "LightPlayer Studio" }
-                    }
+                    ShellLogo {}
                     VersionBadge {}
                 }
                 div { class: "tw:grid tw:gap-7",
@@ -52,9 +50,7 @@ pub fn StudioShell(
         return rsx! {
             main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
                 header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
-                    div {
-                        p { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "LightPlayer Studio" }
-                    }
+                    ShellLogo {}
                     VersionBadge {}
                 }
                 div { class: "tw:grid tw:gap-7",
@@ -79,9 +75,7 @@ pub fn StudioShell(
     rsx! {
         main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
             header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
-                div {
-                    p { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "LightPlayer Studio" }
-                }
+                ShellLogo {}
                 VersionBadge {}
             }
 
@@ -128,6 +122,22 @@ pub fn StudioShell(
                     RuntimeLog { console, on_console }
                 }
             }
+        }
+    }
+}
+
+/// The shell wordmark; links home. Navigating to `#/` fires `hashchange`,
+/// which the route listener turns into the full return-to-gallery
+/// (disconnect) — the same path as the browser back button.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ShellLogo() -> Element {
+    rsx! {
+        a {
+            class: "tw:text-xs tw:font-bold tw:uppercase tw:text-heading tw:no-underline tw:transition-colors tw:hover:text-strong-foreground",
+            href: "#/",
+            title: "Back to the gallery",
+            "LightPlayer Studio"
         }
     }
 }
