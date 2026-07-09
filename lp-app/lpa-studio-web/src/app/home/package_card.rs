@@ -32,6 +32,7 @@ pub(crate) fn PackageCard(
     let now = now_secs.unwrap_or_else(platform_now_secs);
     let open_card = card.clone();
     let edited_line = card.last_saved_at.map(|at| time_ago(now, at));
+    // the slug IS the title; the thumbnail initial skips its date stamp
 
     rsx! {
         article {
@@ -39,15 +40,15 @@ pub(crate) fn PackageCard(
             onclick: move |_| {
                 if !busy && !opening {
                     on_action.call(home_action(HomeOp::OpenPackage {
-                        uid: open_card.uid.clone(),
+                        key: open_card.uid.clone(),
                     }));
                 }
             },
-            CardThumb { seed: card.uid.clone(), label: card.name.clone() }
+            CardThumb { seed: card.uid.clone(), label: card.slug.clone() }
             div { class: "tw:flex tw:items-start tw:justify-between tw:gap-2 tw:p-3",
                 div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
                     p { class: "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",
-                        "{card.name}"
+                        "{card.slug}"
                     }
                     if opening {
                         p { class: "tw:m-0 tw:text-xs tw:text-status-working-foreground", "Opening…" }
@@ -80,7 +81,7 @@ pub(crate) fn PackageCard(
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> Element {
-    let mut rename_value = use_signal(|| card.name.clone());
+    let mut rename_value = use_signal(|| card.slug.clone());
     let rename_uid = card.uid.clone();
     let export_card = card.clone();
     let duplicate = home_action(HomeOp::DuplicatePackage {
@@ -93,7 +94,7 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
         "Delete project",
         format!(
             "Delete \"{}\" and its history from your library?",
-            card.name
+            card.slug
         ),
         "Delete",
     ));

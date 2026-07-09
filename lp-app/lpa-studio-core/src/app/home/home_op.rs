@@ -26,9 +26,10 @@ impl core::fmt::Debug for ZipBytes {
 /// string straight off the card view model.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HomeOp {
-    /// Open a library package: push its head to the simulator (D13/D19).
+    /// Open a library package — by slug (URLs) or `prj_…` uid (cards) —
+    /// pushing its head to the simulator (D13/D19).
     OpenPackage {
-        uid: String,
+        key: String,
     },
     /// Open an example: seed it into the library once, then open the copy.
     /// Also the ONE way to start a project (D17: "new project" is the
@@ -136,7 +137,7 @@ mod tests {
     fn opens_use_the_project_load_deadline() {
         for op in [
             HomeOp::OpenPackage {
-                uid: "prj_1".to_string(),
+                key: "prj_1".to_string(),
             },
             HomeOp::OpenExample {
                 id: "examples/basic".to_string(),

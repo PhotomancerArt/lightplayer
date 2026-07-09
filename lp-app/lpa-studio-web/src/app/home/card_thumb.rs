@@ -21,9 +21,12 @@ pub(crate) fn CardThumb(
         saturation + 12,
         lightness + 10,
     );
+    // dated slugs (2026-07-09-1421-basic) take their initial from the
+    // label part, not the stamp
     let initial = label
         .chars()
-        .next()
+        .find(|c| c.is_alphabetic())
+        .or_else(|| label.chars().next())
         .map(|c| c.to_uppercase().to_string())
         .unwrap_or_default();
     let initial_class = if muted {

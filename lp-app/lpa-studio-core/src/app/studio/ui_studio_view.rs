@@ -16,10 +16,12 @@ pub struct UiStudioView {
     /// pane layout (no project open, no device flow engaged — M4).
     pub home: Option<Box<crate::app::home::UiHomeView>>,
     /// The `prj_…` uid of the open library package, when one backs the
-    /// running project. The web shell mirrors this into `?project=` so a
-    /// reload reopens the same project (URL follows the view — covering
-    /// example opens and clears on disconnect without action plumbing).
+    /// running project (identity for route↔view comparisons).
     pub open_project_uid: Option<String>,
+    /// The open package's slug — the user-facing identifier the web shell
+    /// mirrors into `#/project/<slug>` (URL follows the view, covering
+    /// example opens and clearing on disconnect without action plumbing).
+    pub open_project_slug: Option<String>,
 }
 
 impl UiStudioView {
@@ -29,6 +31,7 @@ impl UiStudioView {
             console,
             home: None,
             open_project_uid: None,
+            open_project_slug: None,
         }
     }
 
@@ -37,8 +40,9 @@ impl UiStudioView {
         self
     }
 
-    pub fn with_open_project_uid(mut self, uid: Option<String>) -> Self {
+    pub fn with_open_project(mut self, uid: Option<String>, slug: Option<String>) -> Self {
         self.open_project_uid = uid;
+        self.open_project_slug = slug;
         self
     }
 

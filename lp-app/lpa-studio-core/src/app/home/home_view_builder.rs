@@ -109,7 +109,6 @@ fn package_card(
 
     Ok(UiPackageCard {
         uid,
-        name: summary.name,
         kind: summary.kind,
         slug: summary.slug,
         last_saved_at,
@@ -138,7 +137,7 @@ fn provenance_line(store: &LibraryStore, meta: &PackageMeta) -> Option<String> {
                         .list()
                         .ok()?
                         .into_iter()
-                        .find_map(|summary| (summary.uid == uid).then_some(summary.name))
+                        .find_map(|summary| (summary.uid == uid).then_some(summary.slug))
                 })
                 .unwrap_or_else(|| parent_project.clone());
             Some(format!("Forked from {parent}"))
@@ -153,7 +152,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         let uid = association.project.to_string();
         projects
             .iter()
-            .find_map(|card| (card.uid == uid).then(|| card.name.clone()))
+            .find_map(|card| (card.uid == uid).then(|| card.slug.clone()))
             .unwrap_or(uid)
     });
     UiDeviceCard {
@@ -185,6 +184,7 @@ mod tests {
                 *counter.borrow_mut() += 1;
                 [*counter.borrow(); 16]
             }),
+            Rc::new(|| "2026-07-09-1421".to_string()),
         )
     }
 
@@ -222,7 +222,7 @@ mod tests {
         let basic = view
             .projects
             .iter()
-            .find(|card| card.name == "Basic")
+            .find(|card| card.slug == "2026-07-09-1421-basic")
             .unwrap();
         assert_eq!(basic.provenance.as_deref(), Some("Remixed from Basic"));
         assert_eq!(basic.last_saved_at, Some(20.0));
@@ -230,25 +230,30 @@ mod tests {
         let scratch = view
             .projects
             .iter()
-            .find(|card| card.name == "Scratch")
+            .find(|card| card.slug == "2026-07-09-1421-scratch")
             .unwrap();
         assert_eq!(scratch.provenance, None);
         assert_eq!(scratch.kind, "Project");
     }
 
     #[test]
-    fn fork_provenance_names_the_parent() {
+    fn fork_provenance_names_the_parent_slug() {
         let store = store();
         let original = store.create("Original", 1.0).unwrap();
-        store.duplicate(original.uid, "Copy", 2.0).unwrap();
+        let copy_summary = store.duplicate(original.uid, 2.0).unwrap();
+        // re-stamped label, uniqued against the (same-stamp) original
+        assert_eq!(copy_summary.slug, "2026-07-09-1421-original-2");
 
         let view = build_home_view(Some(&store), None, None);
         let copy = view
             .projects
             .iter()
-            .find(|card| card.name == "Copy")
+            .find(|card| card.uid == copy_summary.uid.to_string())
             .unwrap();
-        assert_eq!(copy.provenance.as_deref(), Some("Forked from Original"));
+        assert_eq!(
+            copy.provenance.as_deref(),
+            Some("Forked from 2026-07-09-1421-original")
+        );
     }
 
     #[test]
@@ -284,7 +289,7 @@ mod tests {
         let porch = view
             .projects
             .iter()
-            .find(|card| card.name == "Porch")
+            .find(|card| card.slug == "2026-07-09-1421-porch")
             .unwrap();
         assert_eq!(porch.on_device.as_deref(), Some("Luna's porch sign"));
     }

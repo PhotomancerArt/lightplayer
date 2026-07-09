@@ -204,6 +204,7 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
     let store = LibraryStore::new(
         Rc::new(RefCell::new(LpFsMemory::new())),
         Rc::new(|| [7u8; 16]),
+        Rc::new(|| "2026-07-09-1421".to_string()),
     );
     let summary = store
         .install_package(
@@ -224,7 +225,7 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
-            uid: summary.uid.to_string(),
+            key: summary.uid.to_string(),
         },
     )));
     drive(actor.run_one_batch_for_test());
@@ -267,6 +268,7 @@ fn save_after_home_open_pulls_the_edit_into_the_library() {
     let store = LibraryStore::new(
         Rc::new(RefCell::new(LpFsMemory::new())),
         Rc::new(|| [8u8; 16]),
+        Rc::new(|| "2026-07-09-1421".to_string()),
     );
     let summary = store
         .install_package(
@@ -287,7 +289,7 @@ fn save_after_home_open_pulls_the_edit_into_the_library() {
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
-            uid: summary.uid.to_string(),
+            key: summary.uid.to_string(),
         },
     )));
     drive(actor.run_one_batch_for_test());

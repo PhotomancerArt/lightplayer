@@ -64,7 +64,7 @@ pub struct StudioController {
 /// What a home card asked to open.
 #[derive(Clone, Debug)]
 enum PendingOpen {
-    /// A library package, by `prj_…` uid string.
+    /// A library package, by key (`prj_…` uid or slug).
     Package(String),
     /// An embedded example, by id (seeded into the library on first open).
     Example(String),
@@ -74,7 +74,7 @@ impl PendingOpen {
     /// The card key the gallery marks busy.
     fn card_key(&self) -> &str {
         match self {
-            PendingOpen::Package(uid) => uid,
+            PendingOpen::Package(key) => key,
             PendingOpen::Example(id) => id,
         }
     }
@@ -167,8 +167,10 @@ impl StudioController {
         } else {
             vec![device_view]
         };
-        UiStudioView::new(panes, self.console_view())
-            .with_open_project_uid(self.project.active_library_uid())
+        UiStudioView::new(panes, self.console_view()).with_open_project(
+            self.project.active_library_uid(),
+            self.project.active_library_slug(),
+        )
     }
 
     /// The home gallery, when the shell should show it: no project open and
@@ -470,8 +472,8 @@ impl StudioController {
 
     async fn execute_home_op(&mut self, op: HomeOp, updates: UxUpdateSink) -> UiResult {
         match op {
-            HomeOp::OpenPackage { uid } => {
-                self.open_from_home(PendingOpen::Package(uid), updates)
+            HomeOp::OpenPackage { key } => {
+                self.open_from_home(PendingOpen::Package(key), updates)
                     .await
             }
             HomeOp::OpenExample { id } => {
@@ -485,28 +487,22 @@ impl StudioController {
                     ));
                 }
                 let store = self.home_store()?;
-                store
+                let final_slug = store
                     .rename(parse_project_uid(&uid)?, name)
                     .map_err(home_library_error)?;
-                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Renamed to {name}"))))
+                Ok(
+                    UiNotices::new()
+                        .with_notice(UiNotice::info(format!("Renamed to {final_slug}"))),
+                )
             }
             HomeOp::DuplicatePackage { uid } => {
                 let store = self.home_store()?;
                 let now = (self.now_secs)();
-                let uid = parse_project_uid(&uid)?;
-                let source_name = store
-                    .list()
-                    .map_err(home_library_error)?
-                    .into_iter()
-                    .find_map(|summary| (summary.uid == uid).then_some(summary.name))
-                    .ok_or_else(|| {
-                        UiError::UnsupportedAction("project not found in the library".to_string())
-                    })?;
                 let copy = store
-                    .duplicate(uid, &format!("{source_name} copy"), now)
+                    .duplicate(parse_project_uid(&uid)?, now)
                     .map_err(home_library_error)?;
                 Ok(UiNotices::new()
-                    .with_notice(UiNotice::info(format!("Duplicated as {}", copy.name))))
+                    .with_notice(UiNotice::info(format!("Duplicated as {}", copy.slug))))
             }
             HomeOp::DeletePackage { uid } => {
                 let store = self.home_store()?;
@@ -609,7 +605,7 @@ impl StudioController {
         let result = {
             let server = self.device.server.client_mut()?;
             match &pending {
-                PendingOpen::Package(uid) => self.project.open_library_package(server, uid).await,
+                PendingOpen::Package(key) => self.project.open_library_package(server, key).await,
                 PendingOpen::Example(id) => self.project.open_example_package(server, id).await,
             }
         };
@@ -1679,6 +1675,7 @@ mod tests {
                 *counter.borrow_mut() += 1;
                 [*counter.borrow(); 16]
             }),
+            Rc::new(|| "2026-07-09-1421".to_string()),
         );
         studio.attach_library(store.clone());
         let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
@@ -1693,7 +1690,7 @@ mod tests {
         assert_eq!(home.projects.len(), 1);
         let uid = seeded.uid.to_string();
 
-        // rename, then duplicate the renamed package
+        // rename (slug move), then duplicate the renamed package
         block_on_ready(studio.dispatch(home_action(HomeOp::RenamePackage {
             uid: uid.clone(),
             name: "Porch".to_string(),
@@ -1705,15 +1702,16 @@ mod tests {
         let copy = home
             .projects
             .iter()
-            .find(|card| card.name == "Porch copy")
-            .expect("duplicate landed");
-        assert_eq!(copy.provenance.as_deref(), Some("Forked from Porch"));
+            .find(|card| card.slug == "2026-07-09-1421-porch")
+            .expect("duplicate landed (re-stamped from the renamed slug)");
+        assert_eq!(copy.provenance.as_deref(), Some("Forked from porch"));
 
         // export the copy's bytes, delete it, and import it back
         let zip = {
             let handle = store.open(copy.uid.parse().unwrap()).unwrap();
             export_package(&handle).unwrap()
         };
+        let copy_uid = copy.uid.clone();
         block_on_ready(studio.dispatch(home_action(HomeOp::DeletePackage {
             uid: copy.uid.clone(),
         })))
@@ -1725,7 +1723,7 @@ mod tests {
                 .unwrap()
                 .projects
                 .iter()
-                .any(|card| card.name == "Porch copy")
+                .any(|card| card.uid == copy_uid)
         );
         block_on_ready(studio.dispatch(home_action(HomeOp::ImportZip {
             file_name: "porch-copy.zip".to_string(),
@@ -1736,9 +1734,11 @@ mod tests {
         let imported = home
             .projects
             .iter()
-            .find(|card| card.name == "Porch copy")
+            .find(|card| card.provenance.as_deref() == Some("Imported from zip"))
             .expect("import landed");
-        assert_eq!(imported.provenance.as_deref(), Some("Imported from zip"));
+        // re-stamped from the imported manifest's label; the deleted copy
+        // freed the plain stamp+label slot
+        assert_eq!(imported.slug, "2026-07-09-1421-porch");
     }
 
     #[test]

@@ -777,12 +777,13 @@ impl ProjectController {
     pub(crate) async fn open_library_package(
         &mut self,
         server: &mut StudioServerClient,
-        uid: &str,
+        key: &str,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         self.mark_opening_project();
-        let uid = uid
-            .parse()
-            .map_err(|e| UiError::UnsupportedAction(format!("invalid project uid: {e}")))?;
+        let uid = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            context.store.resolve_key(key).map_err(library_ui_error)?
+        };
         self.open_installed_package(server, uid).await
     }
 
@@ -837,11 +838,8 @@ impl ProjectController {
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let context = self.library.as_mut().ok_or_else(no_library_error)?;
         let handle = context.store.open(uid).map_err(library_ui_error)?;
-        let name =
-            crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())
-                .map_err(library_ui_error)?
-                .name
-                .unwrap_or_else(|| handle.slug.clone());
+        // the slug is THE user-facing identifier — it titles the editor
+        let title = handle.slug.clone();
         let files = handle.read_all_files().map_err(library_ui_error)?;
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
 
@@ -850,7 +848,7 @@ impl ProjectController {
             handle,
             last_synced: loaded.synced_version,
         });
-        self.mark_ready(name, loaded.handle_id, loaded.inventory);
+        self.mark_ready(title, loaded.handle_id, loaded.inventory);
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
     }
@@ -1370,7 +1368,7 @@ impl ProjectController {
     }
 
     /// The `prj_…` uid of the open library package, when the running
-    /// project is backed by one (drives the web shell's `?project=` param).
+    /// project is backed by one.
     pub fn active_library_uid(&self) -> Option<String> {
         Some(
             self.library
@@ -1381,6 +1379,12 @@ impl ProjectController {
                 .uid
                 .to_string(),
         )
+    }
+
+    /// The open library package's slug (drives the web shell's
+    /// `#/project/<slug>` URL).
+    pub fn active_library_slug(&self) -> Option<String> {
+        Some(self.library.as_ref()?.active.as_ref()?.handle.slug.clone())
     }
 
     /// Install the runtime-node-id → def-artifact map.

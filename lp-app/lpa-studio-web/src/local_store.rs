@@ -71,7 +71,22 @@ mod wasm {
         Some(lpa_studio_core::app::library::LibraryStore::new(
             fs,
             std::rc::Rc::new(random_bytes),
+            std::rc::Rc::new(local_slug_stamp),
         ))
+    }
+
+    /// Local wall-clock `YYYY-MM-DD-HHMM` for new-package slugs (the
+    /// sans-IO core takes this injected — it never reads a clock).
+    fn local_slug_stamp() -> String {
+        let now = js_sys::Date::new_0();
+        format!(
+            "{:04}-{:02}-{:02}-{:02}{:02}",
+            now.get_full_year(),
+            now.get_month() + 1,
+            now.get_date(),
+            now.get_hours(),
+            now.get_minutes(),
+        )
     }
 
     fn random_bytes() -> [u8; 16] {

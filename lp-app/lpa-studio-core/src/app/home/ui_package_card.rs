@@ -7,9 +7,10 @@
 pub struct UiPackageCard {
     /// `prj_…` uid string — the identity every card action carries.
     pub uid: String,
-    pub name: String,
     /// Manifest kind ("Project" today, "Module" later).
     pub kind: String,
+    /// THE user-facing identifier (dated: `2026-07-09-1421-basic`): card
+    /// title, URL, export name. Rename edits it.
     pub slug: String,
     /// The last `Saved` event's timestamp (f64 epoch seconds), or the
     /// package's creation time before any save.

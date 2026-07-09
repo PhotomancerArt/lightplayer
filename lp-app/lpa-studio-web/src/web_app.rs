@@ -61,17 +61,24 @@ pub fn App() -> Element {
     // browser-navigation listener dispatches actions for back/forward.
     let mut route = use_signal(router::boot_route);
     use_hook(move || router::replace(&route.peek().clone()));
-    // The uid the view currently shows (for the navigation listener) and
-    // whether an open ever started this session (the boot-time home flash
-    // must not rewrite the URL that requested a startup reopen).
-    let open_uid_now = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    // The (uid, slug) the view currently shows (for the navigation
+    // listener) and whether an open ever started this session (the
+    // boot-time home flash must not rewrite the URL that requested a
+    // startup reopen).
+    let open_ids_now = use_hook(|| Rc::new(RefCell::new(None::<(String, String)>)));
     let saw_opening = use_hook(|| Rc::new(Cell::new(false)));
+    // A route-driven open we dispatched (startup / back-forward / hash nav)
+    // that the actor hasn't started yet. While set, stale home views must
+    // not trip the "open ended" fallback — the race: a queued RefreshTick's
+    // home view can land between the navigation and the action starting.
+    let pending_route_open = use_hook(|| Rc::new(Cell::new(false)));
 
     // Install the global `log::` sink and the JS-console mirror hook, then
     // spawn the actor once and drive the view signal from its change-gated
     // channel.
-    let loop_open_uid = Rc::clone(&open_uid_now);
+    let loop_open_ids = Rc::clone(&open_ids_now);
     let loop_saw_opening = Rc::clone(&saw_opening);
+    let loop_pending_route_open = Rc::clone(&pending_route_open);
     let bridge = use_hook(move || {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
@@ -80,20 +87,26 @@ pub fn App() -> Element {
         let mut view_rx = handle.view;
         spawn(async move {
             while let Some(next) = view_rx.recv().await {
-                *loop_open_uid.borrow_mut() = next.open_project_uid.clone();
+                *loop_open_ids.borrow_mut() = next
+                    .open_project_uid
+                    .clone()
+                    .zip(next.open_project_slug.clone());
                 let opening_now = next
                     .home
                     .as_ref()
                     .is_some_and(|home| home.opening.is_some());
                 if opening_now || next.open_project_uid.is_some() {
                     loop_saw_opening.set(true);
+                    // the dispatched open has started; fallbacks may judge it
+                    loop_pending_route_open.set(false);
                 }
 
-                // view → route: the URL follows the actor's state
+                // view → route: the URL follows the actor's state; the
+                // slug is the user-facing key the URL carries
                 let current = route.peek().clone();
-                if let Some(uid) = &next.open_project_uid {
-                    if current.project_uid() != Some(uid.as_str()) {
-                        let target = StudioRoute::Project { uid: uid.clone() };
+                if let Some(slug) = &next.open_project_slug {
+                    if !current.project_matches_view(&next) {
+                        let target = StudioRoute::Project { key: slug.clone() };
                         if matches!(current, StudioRoute::Home) {
                             // a gallery open: a real navigation, so a real
                             // history entry (back returns to the gallery)
@@ -112,8 +125,11 @@ pub fn App() -> Element {
                     // The boot-time home flash (nothing started yet) keeps
                     // the route so the startup reopen can use it.
                     let has_panes = !next.panes.is_empty();
-                    if has_panes || (next.home.is_some() && !opening_now && loop_saw_opening.get())
-                    {
+                    let open_ended = next.home.is_some()
+                        && !opening_now
+                        && loop_saw_opening.get()
+                        && !loop_pending_route_open.get();
+                    if has_panes || open_ended {
                         router::replace(&StudioRoute::Home);
                         route.set(StudioRoute::Home);
                     }
@@ -133,7 +149,8 @@ pub fn App() -> Element {
     // matching action. Programmatic navigate/replace calls fire no browser
     // events, so everything arriving here is real user navigation.
     let nav_bridge = bridge.clone();
-    let nav_open_uid = Rc::clone(&open_uid_now);
+    let nav_open_ids = Rc::clone(&open_ids_now);
+    let nav_pending_route_open = Rc::clone(&pending_route_open);
     let _route_listener = use_hook(move || {
         router::install_route_listener(move || {
             let new_route = router::current_route();
@@ -144,7 +161,7 @@ pub fn App() -> Element {
             route.set(new_route.clone());
             match &new_route {
                 StudioRoute::Home => {
-                    if nav_open_uid.borrow().is_some() {
+                    if nav_open_ids.borrow().is_some() {
                         // back to the gallery = full return: the gallery
                         // only renders when the link is idle
                         nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
@@ -153,11 +170,16 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Project { uid } => {
-                    if nav_open_uid.borrow().as_deref() != Some(uid.as_str()) {
+                StudioRoute::Project { key } => {
+                    let already_open = nav_open_ids
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|(uid, slug)| uid == key || slug == key);
+                    if !already_open {
+                        nav_pending_route_open.set(true);
                         nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
                             HOME_NODE_ID,
-                            HomeOp::OpenPackage { uid: uid.clone() },
+                            HomeOp::OpenPackage { key: key.clone() },
                         )));
                     }
                 }
@@ -186,6 +208,7 @@ pub fn App() -> Element {
     // (without persistence) if the store is unavailable.
     let startup_route = use_hook(|| route.peek().clone());
     let startup_bridge = bridge.clone();
+    let startup_pending_route_open = Rc::clone(&pending_route_open);
     use_hook(move || {
         let startup_bridge = startup_bridge.clone();
         spawn(async move {
@@ -200,12 +223,13 @@ pub fn App() -> Element {
                 }
             }
             store_status.set(status);
-            if let StudioRoute::Project { uid } = &startup_route {
+            if let StudioRoute::Project { key } = &startup_route {
+                startup_pending_route_open.set(true);
                 startup_bridge
                     .tx
                     .send(StudioCommand::Action(UiAction::from_op(
                         HOME_NODE_ID,
-                        HomeOp::OpenPackage { uid: uid.clone() },
+                        HomeOp::OpenPackage { key: key.clone() },
                     )));
             }
         });

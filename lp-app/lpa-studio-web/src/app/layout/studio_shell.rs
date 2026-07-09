@@ -29,6 +29,7 @@ pub fn StudioShell(
         home,
         // consumed by the web shell's URL sync, not the layout
         open_project_uid: _,
+        open_project_slug: _,
     } = view;
 
     if opening_frame && panes.is_empty() {

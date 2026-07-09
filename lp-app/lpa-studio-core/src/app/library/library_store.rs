@@ -11,7 +11,7 @@ use lpfs::{FsError, LpFs};
 
 use super::package_manifest::{self, ManifestFields};
 use super::package_meta::{self, PackageMeta, PackageProvenance};
-use super::package_slug::unique_slug;
+use super::package_slug::{dated_slug, slugify, strip_date_prefix, unique_slug};
 use super::{HISTORY_DIR, PACKAGES_DIR};
 
 /// Library operation failure.
@@ -129,17 +129,23 @@ impl PackageHandle {
 
 /// The library: package CRUD over a caller-supplied store.
 ///
-/// Randomness is injected (`random` supplies uid bytes) per the sans-IO
-/// discipline; timestamps arrive as arguments.
+/// Randomness (`random`, uid bytes) and the local wall-clock slug stamp
+/// (`stamp`, `"YYYY-MM-DD-HHMM"`) are injected per the sans-IO discipline;
+/// timestamps arrive as arguments.
 #[derive(Clone)]
 pub struct LibraryStore {
     fs: Rc<RefCell<dyn LpFs>>,
     random: Rc<dyn Fn() -> [u8; 16]>,
+    stamp: Rc<dyn Fn() -> String>,
 }
 
 impl LibraryStore {
-    pub fn new(fs: Rc<RefCell<dyn LpFs>>, random: Rc<dyn Fn() -> [u8; 16]>) -> Self {
-        Self { fs, random }
+    pub fn new(
+        fs: Rc<RefCell<dyn LpFs>>,
+        random: Rc<dyn Fn() -> [u8; 16]>,
+        stamp: Rc<dyn Fn() -> String>,
+    ) -> Self {
+        Self { fs, random, stamp }
     }
 
     /// The store root — packages, history, and the device registry all live
@@ -156,24 +162,26 @@ impl LibraryStore {
                 Err(e) => log::warn!("skipping package dir {slug}: {e}"),
             }
         }
-        summaries.sort_by(|a, b| a.name.cmp(&b.name));
+        // slug order = date order for stamped slugs (newest naming sorts last)
+        summaries.sort_by(|a, b| a.slug.cmp(&b.slug));
         Ok(summaries)
     }
 
     /// Create a package from files (the primitive behind create/seed/import).
     ///
-    /// Ensures a manifest exists (minimal one if `files` lacks it), applies
-    /// `fallback_name` when the manifest has no name, mints the uid, writes
-    /// the provenance sidecar, and initializes history (origin event + the
-    /// initial save snapshot).
+    /// The package gets a date-based slug (`<stamp>-<label>`, uniqued —
+    /// the user-facing identifier). Ensures a manifest exists (minimal one
+    /// if `files` lacks it), applies `label` as the manifest name when it
+    /// has none, mints the uid, writes the provenance sidecar, and
+    /// initializes history (origin event + the initial save snapshot).
     pub fn install_package(
         &self,
-        fallback_name: &str,
+        label: &str,
         files: &[(String, Vec<u8>)],
         provenance: PackageProvenance,
         now: f64,
     ) -> Result<PackageSummary, LibraryError> {
-        let slug = unique_slug(fallback_name, &self.package_slugs()?);
+        let slug = dated_slug(&(self.stamp)(), label, &self.package_slugs()?);
         let package_fs = self.chroot_package(&slug)?;
         {
             let view = package_fs.borrow();
@@ -182,7 +190,7 @@ impl LibraryStore {
                 view.write_file(path.as_str().as_path(), bytes)?;
             }
             if !view.file_exists(package_manifest::MANIFEST_PATH.as_path())? {
-                let minimal = serde_json::json!({ "kind": "Project", "name": fallback_name });
+                let minimal = serde_json::json!({ "kind": "Project", "name": label });
                 view.write_file(
                     package_manifest::MANIFEST_PATH.as_path(),
                     serde_json::to_vec_pretty(&minimal)
@@ -192,7 +200,7 @@ impl LibraryStore {
             }
             let fields = package_manifest::read_manifest(&*view)?;
             if fields.name.is_none() {
-                package_manifest::set_name(&*view, fallback_name)?;
+                package_manifest::set_name(&*view, label)?;
             }
             package_manifest::ensure_uid(&*view, &(self.random)())?;
             package_meta::write_meta(
@@ -217,13 +225,11 @@ impl LibraryStore {
     }
 
     /// Duplicate = fork at head: independent copy with fork provenance.
-    pub fn duplicate(
-        &self,
-        uid: PrefixedUid,
-        new_name: &str,
-        now: f64,
-    ) -> Result<PackageSummary, LibraryError> {
+    /// The copy's slug re-stamps the source's label (`2026-07-09-1500-basic`
+    /// from `2026-07-08-1851-basic`); the new date is the differentiator.
+    pub fn duplicate(&self, uid: PrefixedUid, now: f64) -> Result<PackageSummary, LibraryError> {
         let source = self.open(uid)?;
+        let label = strip_date_prefix(&source.slug).to_string();
         let head = source.history.head();
         let files: Vec<(String, Vec<u8>)> = source
             .read_all_files()?
@@ -238,14 +244,48 @@ impl LibraryStore {
             None => PackageProvenance::Created,
         };
         // the copy must mint its own uid: drop the manifest's before install
-        let package = self.install_files_with_fresh_uid(new_name, &files, provenance, now)?;
+        let package = self.install_files_with_fresh_uid(&label, &files, provenance, now)?;
         Ok(package)
     }
 
-    pub fn rename(&self, uid: PrefixedUid, name: &str) -> Result<(), LibraryError> {
-        let handle = self.open(uid)?;
-        let view = handle.package_fs.borrow();
-        package_manifest::set_name(&*view, name)
+    /// Rename = change the slug and MOVE the package directory. The uid (and
+    /// therefore history and device associations) is untouched; the manifest
+    /// `name` field is the editor's concern, not the gallery's. Returns the
+    /// final slug (slugified, collision-suffixed). No-op when unchanged.
+    pub fn rename(&self, uid: PrefixedUid, new_slug: &str) -> Result<String, LibraryError> {
+        let old_slug = self
+            .slug_for_uid(uid)?
+            .ok_or_else(|| LibraryError::NotFound(uid.to_string()))?;
+        let requested = slugify(new_slug);
+        if requested == old_slug {
+            return Ok(old_slug);
+        }
+        let taken: Vec<String> = self
+            .package_slugs()?
+            .into_iter()
+            .filter(|slug| slug != &old_slug)
+            .collect();
+        let final_slug = unique_slug(&requested, &taken);
+
+        // move: copy every file into the new dir, then drop the old one
+        let old_fs = self.chroot_package(&old_slug)?;
+        let new_fs = self.chroot_package(&final_slug)?;
+        {
+            let old_view = old_fs.borrow();
+            let new_view = new_fs.borrow();
+            let entries = old_view.list_dir("/".as_path(), true)?;
+            for entry in entries {
+                if old_view.is_dir(entry.as_path()).unwrap_or(false) {
+                    continue;
+                }
+                let bytes = old_view.read_file(entry.as_path())?;
+                new_view.write_file(entry.as_path(), &bytes)?;
+            }
+        }
+        self.fs
+            .borrow()
+            .delete_dir(format!("{PACKAGES_DIR}/{old_slug}").as_str().as_path())?;
+        Ok(final_slug)
     }
 
     pub fn delete(&self, uid: PrefixedUid) -> Result<(), LibraryError> {
@@ -258,6 +298,26 @@ impl LibraryStore {
             Ok(()) | Err(FsError::NotFound(_)) => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Resolve a card/URL key — a `prj_…` uid or a slug — to the uid.
+    pub fn resolve_key(&self, key: &str) -> Result<PrefixedUid, LibraryError> {
+        if key.starts_with("prj_") {
+            return key
+                .parse()
+                .map_err(|e| LibraryError::Manifest(format!("invalid uid {key:?}: {e}")));
+        }
+        if !self.package_slugs()?.iter().any(|slug| slug == key) {
+            return Err(LibraryError::NotFound(key.to_string()));
+        }
+        let package_fs = self.chroot_package(key)?;
+        let view = package_fs.borrow();
+        let fields = package_manifest::read_manifest(&*view)?;
+        fields
+            .uid
+            .ok_or_else(|| LibraryError::Manifest(format!("package {key} has no uid")))?
+            .parse()
+            .map_err(|e| LibraryError::Manifest(format!("package {key} uid: {e}")))
     }
 
     pub fn open(&self, uid: PrefixedUid) -> Result<PackageHandle, LibraryError> {
@@ -441,6 +501,7 @@ mod tests {
                 *counter.borrow_mut() += 1;
                 [*counter.borrow(); 16]
             }),
+            Rc::new(|| "2026-07-09-1421".to_string()),
         )
     }
 
@@ -460,7 +521,7 @@ mod tests {
     fn create_mints_uid_sidecar_slug_and_history() {
         let store = store();
         let summary = store.create("My Project!", 1.0).unwrap();
-        assert_eq!(summary.slug, "my-project");
+        assert_eq!(summary.slug, "2026-07-09-1421-my-project");
         assert_eq!(summary.name, "My Project!");
 
         let handle = store.open(summary.uid).unwrap();
@@ -497,9 +558,10 @@ mod tests {
             .unwrap();
         let original_head = store.open(original.uid).unwrap().history.head().unwrap();
 
-        let copy = store.duplicate(original.uid, "demo copy", 2.0).unwrap();
+        let copy = store.duplicate(original.uid, 2.0).unwrap();
         assert_ne!(copy.uid, original.uid);
-        assert_eq!(copy.slug, "demo-copy");
+        // re-stamped label, uniqued against the same-stamp original
+        assert_eq!(copy.slug, "2026-07-09-1421-demo-2");
 
         let copy_handle = store.open(copy.uid).unwrap();
         // fork origin seeds the line with the parent head (v1); the copy's
@@ -516,16 +578,48 @@ mod tests {
     }
 
     #[test]
-    fn rename_patches_name_only() {
+    fn rename_moves_the_directory_and_keeps_identity() {
         let store = store();
         let summary = store
             .install_package("demo", &demo_files(), PackageProvenance::Created, 1.0)
             .unwrap();
-        store.rename(summary.uid, "renamed").unwrap();
+        let old_slug = summary.slug.clone();
+        let head_before = store.open(summary.uid).unwrap().history.head();
+
+        let final_slug = store.rename(summary.uid, "Porch Sign!").unwrap();
+        assert_eq!(final_slug, "porch-sign"); // verbatim slugified, no auto date
+
         let listed = store.list().unwrap();
-        assert_eq!(listed[0].name, "renamed");
-        assert_eq!(listed[0].uid, summary.uid);
-        assert_eq!(listed[0].slug, "demo"); // dir unchanged
+        assert_eq!(listed.len(), 1, "the old directory is gone");
+        assert_eq!(listed[0].slug, "porch-sign");
+        assert_eq!(listed[0].uid, summary.uid, "identity survives the move");
+
+        let handle = store.open(summary.uid).unwrap();
+        assert_eq!(handle.slug, "porch-sign");
+        assert_eq!(handle.history.head(), head_before, "history untouched");
+        assert!(
+            handle
+                .read_all_files()
+                .unwrap()
+                .iter()
+                .any(|(path, _)| path == "shader.glsl"),
+            "files moved"
+        );
+        assert_ne!(old_slug, final_slug);
+
+        // no-op rename returns the same slug without churn
+        assert_eq!(
+            store.rename(summary.uid, "porch sign").unwrap(),
+            "porch-sign"
+        );
+
+        // resolve by either key
+        assert_eq!(store.resolve_key("porch-sign").unwrap(), summary.uid);
+        assert_eq!(
+            store.resolve_key(&summary.uid.to_string()).unwrap(),
+            summary.uid
+        );
+        assert!(store.resolve_key(&old_slug).is_err());
     }
 
     #[test]
@@ -540,7 +634,11 @@ mod tests {
     #[test]
     fn open_round_trips_history_across_store_instances() {
         let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
-        let store = LibraryStore::new(fs.clone(), Rc::new(|| [3u8; 16]));
+        let store = LibraryStore::new(
+            fs.clone(),
+            Rc::new(|| [3u8; 16]),
+            Rc::new(|| "2026-07-09-1421".to_string()),
+        );
         let summary = store
             .install_package("demo", &demo_files(), PackageProvenance::Created, 1.0)
             .unwrap();
@@ -553,7 +651,11 @@ mod tests {
         // unchanged content: no-op
         assert!(handle.record_save(3.0).unwrap().is_none());
 
-        let store2 = LibraryStore::new(fs, Rc::new(|| [4u8; 16]));
+        let store2 = LibraryStore::new(
+            fs,
+            Rc::new(|| [4u8; 16]),
+            Rc::new(|| "2026-07-09-1421".to_string()),
+        );
         let handle2 = store2.open(summary.uid).unwrap();
         assert_eq!(handle2.history.head(), handle.history.head());
         assert_eq!(

@@ -123,6 +123,7 @@ mod tests {
         LibraryStore::new(
             Rc::new(RefCell::new(LpFsMemory::new())),
             Rc::new(move || [seed; 16]),
+            Rc::new(|| "2026-07-09-1421".to_string()),
         )
     }
 

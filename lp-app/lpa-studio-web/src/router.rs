@@ -12,7 +12,8 @@
 //!
 //! ```text
 //! #/                     home (the gallery) — also the empty/unknown hash
-//! #/project/<prj_uid>    a library project, open in the simulator
+//! #/project/<key>        a library project (slug — the user-facing
+//!                        identifier — or a `prj_…` uid as fallback)
 //! #/stories[/<story-id>] the story book (dev)
 //! ```
 //!
@@ -53,8 +54,9 @@ use lpa_studio_core::UiStudioView;
 pub(crate) enum StudioRoute {
     /// The gallery.
     Home,
-    /// A library project, open (or opening) in the simulator.
-    Project { uid: String },
+    /// A library project, open (or opening) in the simulator. The key is
+    /// the slug (preferred) or a `prj_…` uid (machine-stable fallback).
+    Project { key: String },
     /// The story book; `None` selects the book's default story.
     Stories { story_id: Option<String> },
 }
@@ -77,11 +79,9 @@ impl StudioRoute {
         let mut segments = path.split('/').filter(|s| !s.is_empty());
         match segments.next() {
             Some("project") => match segments.next() {
-                Some(uid) if uid.starts_with("prj_") && segments.next().is_none() => {
-                    StudioRoute::Project {
-                        uid: uid.to_string(),
-                    }
-                }
+                Some(key) if segments.next().is_none() => StudioRoute::Project {
+                    key: key.to_string(),
+                },
                 _ => StudioRoute::Home,
             },
             Some("stories") => {
@@ -99,24 +99,20 @@ impl StudioRoute {
     pub(crate) fn hash(&self) -> String {
         match self {
             StudioRoute::Home => "#/".to_string(),
-            StudioRoute::Project { uid } => format!("#/project/{uid}"),
+            StudioRoute::Project { key } => format!("#/project/{key}"),
             StudioRoute::Stories { story_id: None } => "#/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("#/stories/{id}"),
         }
     }
 
-    /// The uid when this route is a project.
-    pub(crate) fn project_uid(&self) -> Option<&str> {
-        match self {
-            StudioRoute::Project { uid } => Some(uid),
-            _ => None,
-        }
-    }
-
-    /// Whether the emitted view already shows this route's project.
+    /// Whether the emitted view already shows this route's project (the
+    /// key may be either the slug or the uid).
     pub(crate) fn project_matches_view(&self, view: &UiStudioView) -> bool {
         match self {
-            StudioRoute::Project { uid } => view.open_project_uid.as_deref() == Some(uid),
+            StudioRoute::Project { key } => {
+                view.open_project_uid.as_deref() == Some(key)
+                    || view.open_project_slug.as_deref() == Some(key)
+            }
             _ => false,
         }
     }
@@ -135,7 +131,7 @@ pub(crate) fn boot_route() -> StudioRoute {
     }
     if let Some(search) = current_search() {
         if let Some(uid) = legacy_project_param(&search) {
-            return StudioRoute::Project { uid };
+            return StudioRoute::Project { key: uid };
         }
     }
     route
@@ -333,7 +329,10 @@ mod tests {
         let routes = [
             StudioRoute::Home,
             StudioRoute::Project {
-                uid: "prj_abc123".to_string(),
+                key: "2026-07-09-1421-basic".to_string(),
+            },
+            StudioRoute::Project {
+                key: "prj_abc123".to_string(),
             },
             StudioRoute::Stories { story_id: None },
             StudioRoute::Stories {
@@ -353,7 +352,6 @@ mod tests {
             "#/",
             "#/nope",
             "#/project",
-            "#/project/not-a-uid",
             "#/project/prj_x/extra",
         ] {
             assert_eq!(StudioRoute::parse(hash), StudioRoute::Home, "{hash:?}");
@@ -381,6 +379,12 @@ mod tests {
         assert_eq!(
             legacy_project_param("?project=prj_abc"),
             Some("prj_abc".to_string())
+        );
+        assert_eq!(
+            StudioRoute::parse("#/project/prj_abc"),
+            StudioRoute::Project {
+                key: "prj_abc".to_string()
+            }
         );
         assert_eq!(legacy_project_param("?project=nope"), None);
         assert_eq!(
