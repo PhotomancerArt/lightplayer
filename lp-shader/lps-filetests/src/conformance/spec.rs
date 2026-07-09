@@ -142,22 +142,6 @@ vec3 probe_psrdnoise3_grad(vec3 x, vec3 period, float alpha, uint seed) {
 }
 "#;
 
-/// Known Q32 bug in `psrdnoise3_q32.rs` (2026-07-08, M2 conformance):
-/// the simplex rank-order step is inverted. `Vec3Q32::step(self, edge)`
-/// computes `step(edge, self)` (1 when `self >= edge`), so
-/// `f0.xyx().step(f0.yzz())` evaluates the *opposite* of the GLSL
-/// `step(f0.xyx, f0.yzz)` it ports (the code comment documents the intended
-/// GLSL semantics). The wrong simplex corners are traversed; some inputs
-/// fall outside every corner's radial support and return exactly 0
-/// ("dead zones"). Measured against the float oracle over the psrdnoise3
-/// corpus (196 cases): noise value max_err 0.9267 (55 cases > 0.05),
-/// gradient max_err 4.3533 (67 cases > 0.5). An inverted-step f32
-/// reference reproduces the Q32 output to ~1e-3, confirming the root
-/// cause. Fix is follow-up work (recorded in the GPU-preview roadmap
-/// notes); the canonical GLSL keeps the correct stegu ordering.
-const PSRDNOISE3_STEP_BUG: &str =
-    "psrdnoise3_q32 inverted simplex rank-order step (Vec3Q32::step argument order)";
-
 /// Seeds used across seeded corpora.
 const SEEDS: [u32; 2] = [0, 123];
 
@@ -543,7 +527,7 @@ pub fn all_specs() -> Vec<BuiltinSpec> {
                 tol: 0.05,
                 max_outliers: 0,
             },
-            known_q32_bug: Some(PSRDNOISE3_STEP_BUG),
+            known_q32_bug: None,
             cases: cases_psrdnoise3,
         },
         BuiltinSpec {
@@ -553,7 +537,7 @@ pub fn all_specs() -> Vec<BuiltinSpec> {
                 tol: 0.5,
                 max_outliers: 0,
             },
-            known_q32_bug: Some(PSRDNOISE3_STEP_BUG),
+            known_q32_bug: None,
             cases: cases_psrdnoise3,
         },
     ]
