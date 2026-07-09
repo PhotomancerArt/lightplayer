@@ -54,6 +54,17 @@ pub fn App() -> Element {
         };
     }
 
+    // Dev-only measurement page (GPU-preview discovery M1); never linked
+    // from product navigation and absent from non-stories builds.
+    #[cfg(all(feature = "stories", target_arch = "wasm32"))]
+    if crate::exploration::preview_lab::should_show_preview_lab() {
+        return rsx! {
+            style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            crate::exploration::preview_lab::PreviewLabPage {}
+        };
+    }
+
     let mut view = use_signal(UiStudioView::empty);
     // Install the global `log::` sink and the JS-console mirror hook, then
     // spawn the actor once and drive the view signal from its change-gated

@@ -52,3 +52,20 @@ pub fn tick_runtime(runtime_id: u32, delta_ms: u32) -> Result<String, String> {
 pub fn drain_output_json(runtime_id: u32) -> Result<String, String> {
     runtime_registry::with_runtime_mut(runtime_id, |runtime| runtime.drain_output_json())
 }
+
+/// Materialize the visual product on a bus channel as sRGB RGBA8 pixels.
+///
+/// The returned `Uint8Array` (width × height × 4 bytes, row-major) is a fresh
+/// JS-owned buffer, so the worker can transfer it to the page without copying
+/// and without routing pixels through the JSON envelope path.
+#[wasm_bindgen]
+pub fn render_bus_texture_rgba8(
+    runtime_id: u32,
+    channel: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    runtime_registry::with_runtime_mut(runtime_id, |runtime| {
+        runtime.render_bus_texture_rgba8(channel, width, height)
+    })
+}

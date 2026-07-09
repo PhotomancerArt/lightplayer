@@ -46,9 +46,10 @@ impl ClientIo for BrowserWorkerClientIo {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         let frame = json::to_string(&msg)
             .map_err(|error| TransportError::Serialization(error.to_string()))?;
-        self.state
-            .borrow()
-            .post(&BrowserInputEnvelope::ProtocolIn { frame })
+        self.state.borrow().post(&BrowserInputEnvelope::ProtocolIn {
+            runtime_id: None,
+            frame,
+        })
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
@@ -65,7 +66,7 @@ impl ClientIo for BrowserWorkerClientIo {
             let outputs = self.state.borrow().take_outputs()?;
             let state = &self.state;
             self.pending.ingest(outputs, |output| match output {
-                BrowserOutputEnvelope::ProtocolOut { frame } => json::from_str(&frame)
+                BrowserOutputEnvelope::ProtocolOut { frame, .. } => json::from_str(&frame)
                     .map(BatchItem::Protocol)
                     .map_err(|error| TransportError::Deserialization(error.to_string())),
                 output => {
@@ -153,7 +154,11 @@ fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UiLogDraft> {
             message,
             ..
         } => Some(worker_log_draft(&level, target, message)),
-        BrowserOutputEnvelope::ProtocolOut { .. } => None,
+        BrowserOutputEnvelope::PreviewError { message, .. } => {
+            Some(worker_log_draft("error", "fw-browser".to_string(), message))
+        }
+        BrowserOutputEnvelope::ProtocolOut { .. }
+        | BrowserOutputEnvelope::RuntimeCreated { .. } => None,
     }
 }
 

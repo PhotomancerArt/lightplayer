@@ -423,7 +423,12 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn render_texture_product(
+    /// Materialize a visual product handle into a CPU texture.
+    ///
+    /// This is the same materialization the wire render-product probe uses;
+    /// it is public so host-side preview surfaces (e.g. the browser preview
+    /// lab) can pull frames without routing pixels through the JSON protocol.
+    pub fn render_texture_product(
         &mut self,
         registry: &ProjectRegistry,
         product: VisualProduct,
@@ -447,6 +452,61 @@ impl Engine {
             frame_time_seconds: time_s,
         };
         host.render_node_texture(product, request)
+    }
+
+    /// Resolve a bus channel to the visual product handle it currently carries.
+    ///
+    /// Preview surfaces call this once after a project loads to discover the
+    /// product behind a visual bus channel (conventionally `visual.out`), then
+    /// materialize frames with [`Self::render_texture_product`]. Product
+    /// handles are node-owned and stay stable across frames, so callers should
+    /// cache the result rather than re-resolving per frame (resolution may
+    /// re-run producer nodes).
+    pub fn resolve_bus_visual_product(
+        &mut self,
+        registry: &ProjectRegistry,
+        channel: &str,
+    ) -> Result<VisualProduct, SessionResolveError> {
+        let key = QueryKey::Bus(lpc_model::ChannelName(channel.to_string()));
+        let fid = self.revision;
+        let mut resolver_tmp = core::mem::replace(&mut self.resolver, Resolver::new());
+        resolver_tmp.clear_frame_cache();
+        let mut session = EngineSession::new(
+            fid,
+            &mut resolver_tmp,
+            ResolveTrace::new(ResolveLogLevel::Off),
+        );
+        let mut producers_ticked = VecSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
+        let radio_service = self.services.radio_service();
+        let mut host = EngineResolveHost {
+            tree: &mut self.tree,
+            registry,
+            producers_ticked: &mut producers_ticked,
+            runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
+            graphics: self.graphics.clone(),
+            time_provider,
+            button_service,
+            radio_service,
+            frame_time_seconds: time_s,
+        };
+        let result = session.resolve(&mut host, key);
+        self.resolver = resolver_tmp;
+        let production = result?;
+        let Some(leaf) = production.value_leaf() else {
+            return Err(SessionResolveError::other(format!(
+                "bus channel {channel:?} did not resolve to a leaf value"
+            )));
+        };
+        match leaf.value() {
+            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => Ok(*product),
+            other => Err(SessionResolveError::other(format!(
+                "bus channel {channel:?} does not carry a visual product (got {other:?})"
+            ))),
+        }
     }
 
     #[cfg(test)]

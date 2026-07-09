@@ -22,6 +22,7 @@ lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-shared = { path = "../../lp-core/lpc-shared" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
+lps-shared = { path = "../../lp-shader/lps-shared" }
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

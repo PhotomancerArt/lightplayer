@@ -30,6 +30,8 @@ The wasm-bindgen exports are intentionally small and firmware-shaped:
 - tick the runtime deterministically
 - drain structured output envelope JSON
 - read runtime count
+- render a bus visual product to sRGB RGBA8 pixels (`render_bus_texture_rgba8`,
+  the binary preview path — pixels return as a fresh `Uint8Array`, never JSON)
 
 `lpa-link` owns the Studio browser-worker wrapper under its
 `browser_worker` provider. The `fw-browser/www/fw-browser-worker.js` file is a
@@ -38,7 +40,17 @@ standalone smoke-page wrapper for this crate's local browser smoke test.
 Input envelopes currently include `protocol_in`, `tick`, `start`, `stop`, and
 `drain`. `protocol_in` carries a whole `lpc_wire` client JSON frame. Output
 envelopes currently include `status`, `log`, and `protocol_out`. `protocol_out`
-carries a whole `lpc_wire` server JSON frame.
+carries a whole `lpc_wire` server JSON frame plus the producing `runtime_id`,
+so multi-runtime workers can demultiplex protocol streams.
+
+The `lpa-link` worker wrapper adds worker-level message kinds on top of this
+crate's envelopes: `create_runtime` (answered by `runtime_created`) for hosting
+several runtimes in one worker, and `preview_frame`, which ticks a runtime and
+calls `render_bus_texture_rgba8` in one worker turn. `preview_frame` answers
+with a binary `preview_pixels` message whose pixel `ArrayBuffer` is posted as a
+transferable — the pixels never ride the JSON envelope path — or with a JSON
+`preview_error` envelope on failure. These exist for the Studio preview lab
+(dev-only measurement page).
 
 Automated smoke coverage should load/tick projects through this boundary and
 inspect canonical project-read `OutputChannels` resources rather than reaching

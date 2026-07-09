@@ -25,11 +25,42 @@ pub enum BrowserInputEnvelope {
         fw_browser_wasm_path: String,
         tick_mode: BrowserTickMode,
     },
+    /// Create an additional named runtime in an already-booted worker.
+    ///
+    /// The worker answers with [`BrowserOutputEnvelope::RuntimeCreated`].
+    /// Preview surfaces that host several runtimes per worker use this; the
+    /// boot runtime keeps serving single-runtime consumers untouched.
+    CreateRuntime {
+        label: String,
+    },
     ProtocolIn {
+        /// Target runtime; `None` addresses the boot runtime.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        runtime_id: Option<u32>,
         frame: String,
     },
     Tick {
+        /// Target runtime; `None` addresses the boot runtime.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        runtime_id: Option<u32>,
         delta_ms: Option<u32>,
+    },
+    /// Tick a runtime and render its bus visual product in one worker turn.
+    ///
+    /// The worker replies with a binary `preview_pixels` message (transferable
+    /// `ArrayBuffer`, surfaced as [`super::PreviewPixelFrame`]) on success or
+    /// [`BrowserOutputEnvelope::PreviewError`] on failure. Pixels never ride
+    /// the JSON envelope path.
+    PreviewFrame {
+        runtime_id: u32,
+        /// Clock advance before rendering; `None` renders without ticking.
+        delta_ms: Option<u32>,
+        /// Bus channel carrying the visual product (conventionally `visual.out`).
+        channel: String,
+        width: u32,
+        height: u32,
+        /// Caller correlation id echoed back on the pixel frame.
+        frame_id: u32,
     },
     Start,
     Stop,
@@ -52,6 +83,17 @@ pub enum BrowserOutputEnvelope {
         message: String,
     },
     ProtocolOut {
+        /// Producing runtime, so multi-runtime workers can demultiplex
+        /// protocol streams.
+        runtime_id: u32,
         frame: String,
+    },
+    /// Response to [`BrowserInputEnvelope::CreateRuntime`].
+    RuntimeCreated { runtime_id: u32, label: String },
+    /// A `preview_frame` request failed; carries the caller's `frame_id`.
+    PreviewError {
+        runtime_id: u32,
+        frame_id: u32,
+        message: String,
     },
 }

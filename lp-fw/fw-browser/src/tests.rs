@@ -259,7 +259,7 @@ fn collect_protocol_out(envelopes_json: &str) -> Vec<WireServerMessage> {
     envelopes
         .into_iter()
         .filter_map(|envelope| match envelope {
-            BrowserOutputEnvelope::ProtocolOut { frame } => {
+            BrowserOutputEnvelope::ProtocolOut { frame, .. } => {
                 Some(json::from_str(&frame).expect("server frame"))
             }
             _ => None,

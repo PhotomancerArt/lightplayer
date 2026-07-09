@@ -20,6 +20,7 @@ pub mod server;
 pub mod template;
 
 pub use error::ServerError;
+pub use lpc_engine::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 pub use lpc_engine::{
     ButtonService, Graphics, LpGraphics, LpShader, RadioService, ShaderCompileOptions,
 };

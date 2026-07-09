@@ -12,6 +12,7 @@ description = "Static Dioxus web shell for LightPlayer Studio"
 stories = ["dep:lpa-studio-web-story-macros"]
 
 [dependencies]
+async-trait = "0.1"
 dioxus = { version = "0.7", features = ["web"] }
 dioxus-icons = "0.1"
 futures-util = "0.3"
@@ -19,22 +20,35 @@ gloo-net = { version = "0.6", features = ["http"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 log = { workspace = true }
+lpa-client = { path = "../lpa-client", default-features = false }
+lpa-link = { path = "../lpa-link", features = ["browser-worker"] }
 lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
+lpc-wire = { path = "../../lp-core/lpc-wire" }
 serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true }
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
+    "Blob",
+    "BlobPropertyBag",
+    "CanvasRenderingContext2d",
     "Document",
     "Element",
     "Event",
     "EventTarget",
     "History",
+    "HtmlCanvasElement",
     "HtmlElement",
+    "ImageData",
     "Location",
+    "MessageEvent",
     "Navigator",
+    "Performance",
     "PointerEvent",
     "StorageManager",
+    "Url",
     "Window",
+    "Worker",
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -12,11 +12,12 @@ mod manual_time_provider;
 mod runtime;
 mod runtime_registry;
 mod server_transport;
+mod texture_convert;
 mod wasm_exports;
 
 pub use wasm_exports::{
     create_runtime, drain_output_json, fw_browser_init_exports, handle_envelope_json,
-    runtime_count, tick_runtime,
+    render_bus_texture_rgba8, runtime_count, tick_runtime,
 };
 
 #[cfg(test)]
