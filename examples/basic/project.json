@@ -1,7 +1,7 @@
 {
   "kind": "Project",
   "format": 1,
-  "name": "basic",
+  "name": "Basic",
   "nodes": {
     "clock": {
       "ref": "./clock.json"

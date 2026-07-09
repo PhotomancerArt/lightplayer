@@ -1,12 +1,15 @@
 //! A "Your projects" gallery card.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{ControllerId, HOME_NODE_ID, HomeOp, UiAction, UiPackageCard};
+use lpa_studio_core::{
+    ActionConfirmation, ControllerId, HOME_NODE_ID, HomeOp, UiAction, UiPackageCard,
+};
 
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::package_export::export_package_to_download;
 use crate::app::home::time_ago::time_ago;
-use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIconName};
+use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName};
+use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class};
 
 /// One package card: thumbnail, name, meta, and the card menu. Clicking the
 /// card opens the copy the card *is* — the library head, pushed to the
@@ -70,16 +73,30 @@ pub(crate) fn PackageCard(
     }
 }
 
-/// The card menu: rename form plus duplicate / export / delete items.
+/// The card menu: rename form plus duplicate / export / delete rows. The
+/// rows are `UiAction`s rendered in the shared menu-item context (export is
+/// a web-side handler wearing the same classes) — one action vocabulary,
+/// one look.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> Element {
     let mut rename_value = use_signal(|| card.name.clone());
     let rename_uid = card.uid.clone();
-    let duplicate_uid = card.uid.clone();
-    let delete_uid = card.uid.clone();
-    let delete_name = card.name.clone();
     let export_card = card.clone();
+    let duplicate = home_action(HomeOp::DuplicatePackage {
+        uid: card.uid.clone(),
+    });
+    let delete = home_action(HomeOp::DeletePackage {
+        uid: card.uid.clone(),
+    })
+    .with_confirmation(ActionConfirmation::new(
+        "Delete project",
+        format!(
+            "Delete \"{}\" and its history from your library?",
+            card.name
+        ),
+        "Delete",
+    ));
 
     rsx! {
         DetailPopover {
@@ -104,38 +121,32 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
                         value: "{rename_value}",
                         oninput: move |event| rename_value.set(event.value()),
                     }
-                    button { class: menu_button_class(), r#type: "submit", "Rename" }
+                    button { class: quiet_action_class(), r#type: "submit", "Rename" }
                 }
             }
             DetailSection {
-                div { class: "tw:grid tw:gap-1",
-                    button {
-                        class: menu_item_class(),
-                        r#type: "button",
-                        onclick: move |_| {
-                            on_action.call(home_action(HomeOp::DuplicatePackage {
-                                uid: duplicate_uid.clone(),
-                            }));
-                        },
-                        "Duplicate"
+                div { class: "tw:grid tw:gap-0.5",
+                    ActionButton {
+                        action: duplicate,
+                        running: false,
+                        variant: ActionButtonVariant::MenuItem,
+                        on_action,
                     }
                     button {
-                        class: menu_item_class(),
+                        class: menu_item_action_class(),
                         r#type: "button",
+                        title: "Download this project as a zip archive.",
                         onclick: move |_| export_package_to_download(&export_card),
-                        "Export zip"
+                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                            StudioIcon { name: StudioIconName::Download, size: 14 }
+                        }
+                        span { "Export zip" }
                     }
-                    button {
-                        class: "tw:flex tw:w-full tw:items-center tw:gap-2 tw:rounded tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-status-error-foreground tw:hover:bg-status-error-bg",
-                        r#type: "button",
-                        onclick: move |_| {
-                            if confirm_delete(&delete_name) {
-                                on_action.call(home_action(HomeOp::DeletePackage {
-                                    uid: delete_uid.clone(),
-                                }));
-                            }
-                        },
-                        "Delete"
+                    ActionButton {
+                        action: delete,
+                        running: false,
+                        variant: ActionButtonVariant::MenuItem,
+                        on_action,
                     }
                 }
             }
@@ -145,14 +156,6 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
 
 pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
-}
-
-pub(crate) fn menu_item_class() -> &'static str {
-    "tw:flex tw:w-full tw:items-center tw:gap-2 tw:rounded tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-muted-foreground tw:hover:bg-white/5 tw:hover:text-strong-foreground"
-}
-
-fn menu_button_class() -> &'static str {
-    "tw:shrink-0 tw:rounded tw:border tw:border-border tw:px-2 tw:py-1 tw:text-sm tw:text-muted-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground"
 }
 
 fn package_card_class(opening: bool) -> &'static str {
@@ -171,22 +174,4 @@ pub(crate) fn platform_now_secs() -> f64 {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn platform_now_secs() -> f64 {
     0.0
-}
-
-#[cfg(target_arch = "wasm32")]
-fn confirm_delete(name: &str) -> bool {
-    web_sys::window()
-        .and_then(|window| {
-            window
-                .confirm_with_message(&format!(
-                    "Delete \"{name}\" and its history from your library?"
-                ))
-                .ok()
-        })
-        .unwrap_or(false)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn confirm_delete(_name: &str) -> bool {
-    false
 }

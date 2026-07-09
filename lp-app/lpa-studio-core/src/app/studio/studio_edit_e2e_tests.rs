@@ -251,6 +251,102 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
 }
 
 #[test]
+fn save_after_home_open_pulls_the_edit_into_the_library() {
+    use crate::app::library::{LibraryStore, PackageProvenance};
+    use crate::{HOME_NODE_ID, HomeOp};
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [8u8; 16]),
+    );
+    let summary = store
+        .install_package(
+            "Porch sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .expect("install library package");
+    controller.attach_library(store.clone());
+
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            uid: summary.uid.to_string(),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("open emits a snapshot");
+
+    // one persisted edit, committed via Save
+    let color_order = find_slot(&snapshot, "color_order");
+    let address = color_order.address.clone().expect("addressed slot");
+    handle.tx.send(set_value_action(
+        address,
+        LpValue::String("bgr".to_string()),
+    ));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("edit emits a snapshot");
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("save emits a snapshot");
+
+    // the runtime committed the edit… (home opens deploy to /projects/studio)
+    let runtime_fixture: String = String::from_utf8(
+        server
+            .borrow()
+            .base_fs()
+            .read_file("/projects/studio/fixture.json".as_path())
+            .expect("runtime fixture.json"),
+    )
+    .expect("utf8")
+    .chars()
+    .filter(|c| !c.is_whitespace())
+    .collect();
+    assert!(
+        runtime_fixture.contains(r#""color_order":"bgr""#),
+        "the runtime def file carries the committed edit; got: {runtime_fixture}"
+    );
+    // …and save-as-pull carried it into the library copy + history
+    let handle = store.open(summary.uid).expect("library package opens");
+    let library_fixture = String::from_utf8(
+        handle
+            .package_fs
+            .borrow()
+            .read_file("/fixture.json".as_path())
+            .expect("library fixture.json"),
+    )
+    .expect("utf8");
+    assert!(
+        library_fixture
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+            .contains(r#""color_order":"bgr""#),
+        "save-as-pull must land the committed edit in the library copy; got: {library_fixture}"
+    );
+    assert!(
+        handle.history.events().len() >= 2,
+        "the save records a history event"
+    );
+}
+
+#[test]
 fn per_slot_transient_reset_reverts_value_through_gated_refresh() {
     // The per-slot Reset affordance on a transient control (the clock `rate`
     // slider): SetValue then `SlotEditOp::Revert` must bring the DTO back to

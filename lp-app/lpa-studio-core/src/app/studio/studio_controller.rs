@@ -168,6 +168,7 @@ impl StudioController {
             vec![device_view]
         };
         UiStudioView::new(panes, self.console_view())
+            .with_open_project_uid(self.project.active_library_uid())
     }
 
     /// The home gallery, when the shell should show it: no project open and

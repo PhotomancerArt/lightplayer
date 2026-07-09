@@ -1527,6 +1527,13 @@
       }
     }
   }
+  .tw\:hover\:border-status-error-border {
+    &:hover {
+      @media (hover: hover) {
+        border-color: var(--tw-color-status-error-border);
+      }
+    }
+  }
   .tw\:hover\:border-status-error-foreground {
     &:hover {
       @media (hover: hover) {

@@ -28,9 +28,24 @@ pub(crate) fn export_package_to_download(card: &UiPackageCard) {
             return;
         }
     };
-    if let Err(error) = trigger_download(&format!("{}.zip", card.slug), &bytes) {
+    if let Err(error) = trigger_download(&export_file_name(&card.slug), &bytes) {
         log::warn!("export download of {} failed: {error:?}", card.name);
     }
+}
+
+/// `2026-07-08-1851-porch-sign.zip` — local wall-clock date and time so a
+/// folder of exports reads chronologically.
+#[cfg(target_arch = "wasm32")]
+fn export_file_name(slug: &str) -> String {
+    let now = js_sys::Date::new_0();
+    format!(
+        "{:04}-{:02}-{:02}-{:02}{:02}-{slug}.zip",
+        now.get_full_year(),
+        now.get_month() + 1,
+        now.get_date(),
+        now.get_hours(),
+        now.get_minutes(),
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]

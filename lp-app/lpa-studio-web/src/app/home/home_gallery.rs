@@ -4,9 +4,13 @@ use dioxus::html::HasFileData;
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, UiAction, UiHomeView, ZipBytes};
 
-use crate::app::home::device_card::{ConnectDeviceCard, DeviceCard, flash_device_action};
+use crate::app::home::device_card::{
+    ConnectDeviceCard, DeviceCard, connect_device_action, flash_device_action,
+};
 use crate::app::home::example_card::ExampleCard;
 use crate::app::home::package_card::{PackageCard, home_action};
+use crate::base::{StudioIcon, StudioIconName};
+use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 
 /// The gallery home screen (roadmap M4): a map of everywhere the user's
 /// light lives. Replaces the old dev-button home; the old connect/flash
@@ -68,11 +72,11 @@ pub fn HomeGallery(
                 section { class: "tw:grid tw:gap-3",
                     header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
                         h2 { class: section_title_class(), "Connected" }
-                        button {
-                            class: quiet_link_class(),
-                            r#type: "button",
-                            onclick: move |_| on_action.call(flash_device_action()),
-                            "Flash firmware…"
+                        ActionButton {
+                            action: flash_device_action(),
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
                         }
                     }
                     div { class: card_grid_class(),
@@ -88,20 +92,18 @@ pub fn HomeGallery(
                     }
                 }
             } else {
-                div { class: "tw:flex tw:items-center tw:gap-4",
-                    button {
-                        class: "tw:inline-flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-sm tw:text-muted-foreground tw:transition-colors tw:hover:border-accent tw:hover:text-strong-foreground",
-                        r#type: "button",
-                        onclick: move |_| {
-                            on_action.call(crate::app::home::device_card::connect_device_action())
-                        },
-                        "Connect a device"
+                div { class: "tw:flex tw:items-center tw:gap-2",
+                    ActionButton {
+                        action: connect_device_action(),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
                     }
-                    button {
-                        class: quiet_link_class(),
-                        r#type: "button",
-                        onclick: move |_| on_action.call(flash_device_action()),
-                        "Flash firmware…"
+                    ActionButton {
+                        action: flash_device_action(),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
                     }
                 }
             }
@@ -112,10 +114,16 @@ pub fn HomeGallery(
                     h2 { class: section_title_class(), "Your projects" }
                     if home.library_available {
                         div { class: "tw:flex tw:items-center tw:gap-2",
+                            // a file-input label can't be a UiAction; it
+                            // wears the same quiet-chip classes instead
                             label {
-                                class: quiet_link_class(),
+                                class: quiet_action_class(),
                                 r#for: "home-import-zip",
-                                "Import"
+                                title: "Install a project from a zip archive.",
+                                span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                                    StudioIcon { name: StudioIconName::Upload, size: 14 }
+                                }
+                                span { "Import" }
                             }
                             input {
                                 class: "tw:hidden",
@@ -124,11 +132,11 @@ pub fn HomeGallery(
                                 accept: ".zip",
                                 onchange: move |event| import_picked(event.files()),
                             }
-                            button {
-                                class: quiet_link_class(),
-                                r#type: "button",
-                                onclick: move |_| on_action.call(home_action(HomeOp::NewProject)),
-                                "New project"
+                            ActionButton {
+                                action: home_action(HomeOp::NewProject),
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
                             }
                         }
                     }
@@ -260,10 +268,6 @@ async fn probe_granted_serial_ports() -> usize {
 
 fn section_title_class() -> &'static str {
     "tw:m-0 tw:text-xs tw:font-extrabold tw:uppercase tw:leading-none tw:text-heading"
-}
-
-fn quiet_link_class() -> &'static str {
-    "tw:cursor-pointer tw:rounded tw:border tw:border-border tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground"
 }
 
 fn card_grid_class() -> &'static str {

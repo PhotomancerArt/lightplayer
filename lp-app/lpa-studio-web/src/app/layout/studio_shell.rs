@@ -22,6 +22,8 @@ pub fn StudioShell(
         panes,
         console,
         home,
+        // consumed by the web shell's URL sync, not the layout
+        open_project_uid: _,
     } = view;
 
     if let Some(home) = home {

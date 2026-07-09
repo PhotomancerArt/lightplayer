@@ -60,35 +60,43 @@ impl ControllerOp for HomeOp {
                 "Open",
                 "Open this project in the simulator.",
                 ActionPriority::Primary,
-            ),
+            )
+            .with_icon("play"),
             Self::OpenExample { .. } => ActionMeta::new(
                 "Open example",
                 "Run this example; it becomes yours on first save.",
                 ActionPriority::Primary,
-            ),
+            )
+            .with_icon("play"),
             Self::NewProject => ActionMeta::new(
                 "New project",
                 "Create a new project in your library.",
                 ActionPriority::Secondary,
-            ),
+            )
+            .with_icon("add"),
             Self::RenamePackage { .. } => {
                 ActionMeta::new("Rename", "Rename this project.", ActionPriority::Secondary)
+                    .with_icon("edit")
             }
             Self::DuplicatePackage { .. } => ActionMeta::new(
                 "Duplicate",
                 "Fork an independent copy of this project.",
                 ActionPriority::Secondary,
-            ),
+            )
+            .with_icon("copy"),
             Self::DeletePackage { .. } => ActionMeta::new(
                 "Delete",
                 "Delete this project and its history from your library.",
                 ActionPriority::Tertiary,
-            ),
+            )
+            .with_icon("remove")
+            .destructive(),
             Self::ImportZip { .. } => ActionMeta::new(
                 "Import zip",
                 "Install a project from a zip archive.",
                 ActionPriority::Secondary,
-            ),
+            )
+            .with_icon("upload"),
         }
     }
 

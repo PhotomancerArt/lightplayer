@@ -69,20 +69,24 @@ pub(crate) fn DeviceCard(
     }
 }
 
-/// The dashed "Connect a device" affordance card.
+/// The dashed "Connect a device" affordance card. Copy comes from the
+/// action's own metadata so the card and the toolbar chip never drift.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn ConnectDeviceCard(on_action: EventHandler<UiAction>) -> Element {
+    let action = connect_device_action();
+    let meta = action.meta().clone();
     rsx! {
         button {
             class: "tw:grid tw:min-h-24 tw:cursor-pointer tw:place-items-center tw:gap-1 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:p-3 tw:text-muted-foreground tw:transition-colors tw:hover:border-accent tw:hover:text-strong-foreground",
             r#type: "button",
-            onclick: move |_| on_action.call(connect_device_action()),
+            title: "{meta.summary}",
+            onclick: move |_| on_action.call(action.clone()),
             span { class: "tw:inline-flex tw:items-center tw:gap-2",
                 StudioIcon { name: StudioIconName::Usb, size: 16 }
-                span { class: "tw:text-sm tw:font-semibold", "Connect a device" }
+                span { class: "tw:text-sm tw:font-semibold", "{meta.label}" }
             }
-            span { class: "tw:text-xs tw:text-dim-foreground", "ESP32 over USB" }
+            span { class: "tw:text-xs tw:text-dim-foreground", "{meta.summary}" }
         }
     }
 }
@@ -96,6 +100,9 @@ pub(crate) fn connect_device_action() -> UiAction {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
         },
     )
+    .with_label("Connect a device")
+    .with_summary("Connect an ESP32 over USB.")
+    .with_icon("usb")
 }
 
 /// The "Flash firmware…" bridge link action (open without attaching).
@@ -106,6 +113,9 @@ pub(crate) fn flash_device_action() -> UiAction {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
         },
     )
+    .with_label("Flash firmware…")
+    .with_summary("Open the ESP32 connection without attaching LightPlayer.")
+    .with_icon("usb")
 }
 
 fn device_card_class(muted: bool) -> &'static str {

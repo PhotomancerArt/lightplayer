@@ -66,6 +66,9 @@ pub fn App() -> Element {
         let mut view_rx = handle.view;
         spawn(async move {
             while let Some(next) = view_rx.recv().await {
+                // the `?project=` param follows the view: set while a
+                // library package is open, cleared when the shell is home
+                studio_url::sync_open_project(&next);
                 view.set(next);
             }
         });

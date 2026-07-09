@@ -8,8 +8,7 @@
 //! default route: no params, no auto-open.
 
 use lpa_studio_core::{
-    DeviceController, DeviceOp, HOME_NODE_ID, HomeOp, LinkProviderKind, ProjectController,
-    ProjectOp, UiAction,
+    DeviceController, DeviceOp, HOME_NODE_ID, HomeOp, LinkProviderKind, UiAction,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -86,29 +85,39 @@ fn startup_action_from_search(search: &str) -> Option<UiAction> {
         })
 }
 
-/// Mirror a dispatched action into the URL, so a reload lands back where
-/// the user is.
+/// Mirror the emitted view into the `project` param: set while a library
+/// package backs the running project, cleared when the shell returns home
+/// *after* a project was open. URL-follows-view covers every open path
+/// uniformly (package cards, example opens once their seeded uid is known,
+/// `?project=` startup reopens) and clears on disconnect without
+/// per-action plumbing. Transitional states (opening, bridge flows) leave
+/// the param untouched — and so does the boot-time home flash, or a
+/// startup reopen would erase the very param that requested it.
+pub(crate) fn sync_open_project(view: &lpa_studio_core::UiStudioView) {
+    thread_local! {
+        /// Whether this page session has shown an open project yet.
+        static SEEN_OPEN_PROJECT: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+    }
+
+    let current = current_search();
+    let current_uid = project_from_search(current.as_deref().unwrap_or(""));
+    let desired = if let Some(uid) = &view.open_project_uid {
+        SEEN_OPEN_PROJECT.with(|seen| seen.set(true));
+        Some(uid.clone())
+    } else if view.home.is_some() && SEEN_OPEN_PROJECT.with(core::cell::Cell::get) {
+        None
+    } else {
+        // boot-time home, transitional states, bridge flows: leave the URL
+        return;
+    };
+    if current_uid != desired {
+        write_param(PROJECT_PARAM, desired.as_deref());
+    }
+}
+
+/// Mirror a dispatched action into the URL (connection intent only — the
+/// `project` param is view-owned, see [`sync_open_project`]).
 pub(crate) fn update_for_action(action: &UiAction) {
-    if action.node_id().as_str() == HOME_NODE_ID {
-        match action.op_as::<HomeOp>() {
-            Some(HomeOp::OpenPackage { uid }) => write_param(PROJECT_PARAM, Some(uid)),
-            // an example's library uid is only known after the open; the
-            // param updates on the next explicit open of the copy
-            Some(HomeOp::OpenExample { .. }) | Some(HomeOp::DeletePackage { .. }) => {
-                write_param(PROJECT_PARAM, None);
-            }
-            _ => {}
-        }
-        return;
-    }
-
-    if action.node_id().as_str() == ProjectController::NODE_ID {
-        if let Some(ProjectOp::DisconnectProject) = action.op_as::<ProjectOp>() {
-            write_param(PROJECT_PARAM, None);
-        }
-        return;
-    }
-
     let Some(op) = action.op_as::<DeviceOp>() else {
         return;
     };
@@ -120,7 +129,6 @@ pub(crate) fn update_for_action(action: &UiAction) {
         }
         DeviceOp::DisconnectDevice => {
             write_param(CONNECTION_PARAM, None);
-            write_param(PROJECT_PARAM, None);
         }
         DeviceOp::OpenProviderForRecovery { .. }
         | DeviceOp::ConnectEndpoint { .. }

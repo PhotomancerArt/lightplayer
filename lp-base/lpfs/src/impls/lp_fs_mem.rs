@@ -13,13 +13,23 @@ use core::cell::RefCell;
 use hashbrown::HashMap;
 
 /// In-memory filesystem implementation for testing
+///
+/// All state — file content, the version counter, and the change log — is
+/// `Rc`-shared, so [`LpFs::chroot`] views observe and contribute to ONE
+/// change history. A write through a chrooted view is visible to
+/// `get_changes_since` on the base fs (with the base-absolute path) and
+/// vice versa, matching the OPFS store's semantics. The change log used to
+/// be forked per chroot, which silently broke change-driven consumers
+/// (e.g. `ChangesSince` never seeing commit writes made through a
+/// project-scoped view).
 pub struct LpFsMemory {
-    /// File storage: path -> contents (using Rc<RefCell> so chrooted filesystems can share)
+    /// File storage: path -> contents (shared across chroot views)
     files: Rc<RefCell<HashMap<LpPathBuf, Vec<u8>>>>,
-    /// Version counter (increments on each change)
-    current_version: RefCell<FsVersion>,
+    /// Version counter (increments on each change; shared across views)
+    current_version: Rc<RefCell<FsVersion>>,
     /// Map of path -> (version, FsEventKind) - only latest change per path
-    changes: RefCell<HashMap<LpPathBuf, (FsVersion, FsEventKind)>>,
+    /// (shared across views)
+    changes: Rc<RefCell<HashMap<LpPathBuf, (FsVersion, FsEventKind)>>>,
 }
 
 impl LpFsMemory {
@@ -27,8 +37,8 @@ impl LpFsMemory {
     pub fn new() -> Self {
         Self {
             files: Rc::new(RefCell::new(HashMap::new())),
-            current_version: RefCell::new(FsVersion::default()),
-            changes: RefCell::new(HashMap::new()),
+            current_version: Rc::new(RefCell::new(FsVersion::default())),
+            changes: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -419,12 +429,13 @@ impl LpFs for LpFsMemory {
             LpPathBuf::from(prefix_str)
         };
 
-        // Wrap self in Rc<RefCell<>> for LpFsView
-        // Create a new LpFsMemory instance that shares the same files storage
+        // Wrap self in Rc<RefCell<>> for LpFsView: the view's parent shares
+        // ALL state (content, version counter, change log) so changes made
+        // through the view are one history with the base fs.
         let parent_rc = Rc::new(RefCell::new(LpFsMemory {
             files: Rc::clone(&self.files),
-            current_version: RefCell::new(*self.current_version.borrow()),
-            changes: RefCell::new(self.changes.borrow().clone()),
+            current_version: Rc::clone(&self.current_version),
+            changes: Rc::clone(&self.changes),
         }));
 
         Ok(Rc::new(RefCell::new(LpFsView::new(
@@ -964,5 +975,41 @@ mod tests {
             .read_file("/src/newfile.txt".as_path())
             .unwrap();
         assert_eq!(new_content, b"new");
+    }
+
+    #[test]
+    fn chroot_shares_one_change_log_with_the_base_fs() {
+        // Regression: the change log used to be forked per chroot, so a
+        // write through a project-scoped view (e.g. the server's overlay
+        // commit) never appeared in the base fs's `get_changes_since` —
+        // silently breaking change-driven consumers like `ChangesSince`
+        // (studio save-as-pull saw an empty page and synced nothing).
+        let fs = LpFsMemory::new();
+        fs.write_file("/projects/demo/a.txt".as_path(), b"v1")
+            .unwrap();
+        let baseline = fs.current_version();
+
+        let chrooted = fs.chroot("/projects/demo".as_path()).unwrap();
+        chrooted
+            .borrow()
+            .write_file("/a.txt".as_path(), b"v2")
+            .unwrap();
+
+        // the view's write advances the shared version…
+        assert!(fs.current_version() > baseline);
+        // …and the base fs sees the event, with the base-absolute path
+        let events = fs.get_changes_since(baseline.next());
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].path.as_str(), "/projects/demo/a.txt");
+
+        // and the reverse holds: base writes are visible through the view,
+        // path-translated and filtered to the view's subtree
+        let view_baseline = fs.current_version();
+        fs.write_file("/projects/demo/b.txt".as_path(), b"x")
+            .unwrap();
+        fs.write_file("/elsewhere/c.txt".as_path(), b"y").unwrap();
+        let view_events = chrooted.borrow().get_changes_since(view_baseline.next());
+        assert_eq!(view_events.len(), 1);
+        assert_eq!(view_events[0].path.as_str(), "/b.txt");
     }
 }

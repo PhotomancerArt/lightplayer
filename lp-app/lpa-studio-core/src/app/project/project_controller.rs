@@ -1361,6 +1361,26 @@ impl ProjectController {
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
         self.root_shape_ids.clear();
+        // the library binding follows the loaded project: a disconnected or
+        // failed project must not keep pulling saves into (or advertising)
+        // the previously open package
+        if let Some(library) = self.library.as_mut() {
+            library.active = None;
+        }
+    }
+
+    /// The `prj_…` uid of the open library package, when the running
+    /// project is backed by one (drives the web shell's `?project=` param).
+    pub fn active_library_uid(&self) -> Option<String> {
+        Some(
+            self.library
+                .as_ref()?
+                .active
+                .as_ref()?
+                .handle
+                .uid
+                .to_string(),
+        )
     }
 
     /// Install the runtime-node-id → def-artifact map.

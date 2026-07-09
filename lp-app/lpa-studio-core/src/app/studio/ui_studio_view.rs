@@ -15,6 +15,11 @@ pub struct UiStudioView {
     /// The home gallery, when the shell should render it instead of the
     /// pane layout (no project open, no device flow engaged — M4).
     pub home: Option<Box<crate::app::home::UiHomeView>>,
+    /// The `prj_…` uid of the open library package, when one backs the
+    /// running project. The web shell mirrors this into `?project=` so a
+    /// reload reopens the same project (URL follows the view — covering
+    /// example opens and clears on disconnect without action plumbing).
+    pub open_project_uid: Option<String>,
 }
 
 impl UiStudioView {
@@ -23,11 +28,17 @@ impl UiStudioView {
             panes,
             console,
             home: None,
+            open_project_uid: None,
         }
     }
 
     pub fn with_home(mut self, home: Option<crate::app::home::UiHomeView>) -> Self {
         self.home = home.map(Box::new);
+        self
+    }
+
+    pub fn with_open_project_uid(mut self, uid: Option<String>) -> Self {
+        self.open_project_uid = uid;
         self
     }
 

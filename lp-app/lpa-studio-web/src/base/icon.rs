@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus, Clock,
-    Cpu, Droplet, Ellipsis, Eraser, Eye, FlaskConical, Folder, Funnel, Image, Info, Lightbulb,
-    Link2, Link2Off, ListMusic, Locate, LocateFixed, MousePointerClick, Pencil, Play, Plus, Radio,
-    Save, Settings, Sparkles, SquareArrowRight, Trash2, TriangleAlert, Undo2, Usb, X, Zap,
+    Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, FlaskConical, Folder, Funnel, Image, Info,
+    Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed, MousePointerClick, Pencil, Play,
+    Plus, Radio, Save, Settings, Sparkles, SquareArrowRight, Trash2, TriangleAlert, Undo2, Upload,
+    Usb, X, Zap,
 };
 
 #[component]
@@ -62,6 +63,9 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Remove => rsx! { Trash2 { size } },
         StudioIconName::Cancel => rsx! { X { size } },
         StudioIconName::More => rsx! { Ellipsis { size } },
+        StudioIconName::Copy => rsx! { Copy { size } },
+        StudioIconName::Download => rsx! { Download { size } },
+        StudioIconName::Upload => rsx! { Upload { size } },
     }
 }
 
@@ -73,6 +77,12 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("save") => Some(StudioIconName::Save),
         Some("revert") => Some(StudioIconName::Revert),
         Some("apply") => Some(StudioIconName::Apply),
+        Some("add") => Some(StudioIconName::Add),
+        Some("remove") => Some(StudioIconName::Remove),
+        Some("edit") => Some(StudioIconName::Edited),
+        Some("copy") => Some(StudioIconName::Copy),
+        Some("download") => Some(StudioIconName::Download),
+        Some("upload") => Some(StudioIconName::Upload),
         _ => None,
     }
 }
@@ -122,6 +132,12 @@ pub enum StudioIconName {
     Cancel,
     /// Ellipsis: the gallery card menu trigger.
     More,
+    /// Duplicate/fork-a-copy affordances.
+    Copy,
+    /// Export-to-file affordances.
+    Download,
+    /// Import-from-file affordances.
+    Upload,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable
