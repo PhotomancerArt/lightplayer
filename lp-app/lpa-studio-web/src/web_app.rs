@@ -17,20 +17,20 @@
 //! the console pane's display filter. The old view-diff mirror here and the
 //! raw-serial-line mirror in `browser_serial_client_io.rs` are gone.
 
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 use core::time::Duration;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::local_store::{self, LocalStoreStatus};
-use crate::studio_url;
+use crate::router::{self, StudioRoute};
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    ConsoleCommand, STUDIO_LOG_SINK, StudioActor, StudioCommand, StudioController, UiAction,
-    UiLogEntry, UiLogLevel, UiStudioView,
+    ConsoleCommand, DeviceController, DeviceOp, HOME_NODE_ID, HomeOp, STUDIO_LOG_SINK, StudioActor,
+    StudioCommand, StudioController, UiAction, UiLogEntry, UiLogLevel, UiStudioView,
 };
 
 const STYLE: &str = include_str!("style.css");
@@ -55,10 +55,24 @@ pub fn App() -> Element {
     }
 
     let mut view = use_signal(UiStudioView::empty);
+    // The route: parsed from the URL at boot (with the legacy `?project=`
+    // mapping), canonicalized once, then kept in sync bidirectionally —
+    // the view loop below mirrors actor state into the URL, and the
+    // browser-navigation listener dispatches actions for back/forward.
+    let mut route = use_signal(router::boot_route);
+    use_hook(move || router::replace(&route.peek().clone()));
+    // The uid the view currently shows (for the navigation listener) and
+    // whether an open ever started this session (the boot-time home flash
+    // must not rewrite the URL that requested a startup reopen).
+    let open_uid_now = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    let saw_opening = use_hook(|| Rc::new(Cell::new(false)));
+
     // Install the global `log::` sink and the JS-console mirror hook, then
     // spawn the actor once and drive the view signal from its change-gated
     // channel.
-    let bridge = use_hook(|| {
+    let loop_open_uid = Rc::clone(&open_uid_now);
+    let loop_saw_opening = Rc::clone(&saw_opening);
+    let bridge = use_hook(move || {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
         controller.set_on_entry(log_to_js_console);
@@ -66,9 +80,45 @@ pub fn App() -> Element {
         let mut view_rx = handle.view;
         spawn(async move {
             while let Some(next) = view_rx.recv().await {
-                // the `?project=` param follows the view: set while a
-                // library package is open, cleared when the shell is home
-                studio_url::sync_open_project(&next);
+                *loop_open_uid.borrow_mut() = next.open_project_uid.clone();
+                let opening_now = next
+                    .home
+                    .as_ref()
+                    .is_some_and(|home| home.opening.is_some());
+                if opening_now || next.open_project_uid.is_some() {
+                    loop_saw_opening.set(true);
+                }
+
+                // view → route: the URL follows the actor's state
+                let current = route.peek().clone();
+                if let Some(uid) = &next.open_project_uid {
+                    if current.project_uid() != Some(uid.as_str()) {
+                        let target = StudioRoute::Project { uid: uid.clone() };
+                        if matches!(current, StudioRoute::Home) {
+                            // a gallery open: a real navigation, so a real
+                            // history entry (back returns to the gallery)
+                            router::navigate(&target);
+                        } else {
+                            // boot/forward resolution: no duplicate entries
+                            router::replace(&target);
+                        }
+                        route.set(target);
+                    }
+                } else if matches!(current, StudioRoute::Project { .. }) {
+                    // the project went away: panes showing means a failed
+                    // open or a bridge flow took over; home without an
+                    // in-flight open (after one started) means the open
+                    // ended unsuccessfully — either way the URL goes home.
+                    // The boot-time home flash (nothing started yet) keeps
+                    // the route so the startup reopen can use it.
+                    let has_panes = !next.panes.is_empty();
+                    if has_panes || (next.home.is_some() && !opening_now && loop_saw_opening.get())
+                    {
+                        router::replace(&StudioRoute::Home);
+                        route.set(StudioRoute::Home);
+                    }
+                }
+
                 view.set(next);
             }
         });
@@ -77,6 +127,48 @@ pub fn App() -> Element {
             tx: handle.tx,
             delay: handle.delay,
         }
+    });
+
+    // route → actor: back/forward and manual hash edits dispatch the
+    // matching action. Programmatic navigate/replace calls fire no browser
+    // events, so everything arriving here is real user navigation.
+    let nav_bridge = bridge.clone();
+    let nav_open_uid = Rc::clone(&open_uid_now);
+    let _route_listener = use_hook(move || {
+        router::install_route_listener(move || {
+            let new_route = router::current_route();
+            let old = route.peek().clone();
+            if new_route == old {
+                return;
+            }
+            route.set(new_route.clone());
+            match &new_route {
+                StudioRoute::Home => {
+                    if nav_open_uid.borrow().is_some() {
+                        // back to the gallery = full return: the gallery
+                        // only renders when the link is idle
+                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
+                            DeviceController::NODE_ID,
+                            DeviceOp::DisconnectDevice,
+                        )));
+                    }
+                }
+                StudioRoute::Project { uid } => {
+                    if nav_open_uid.borrow().as_deref() != Some(uid.as_str()) {
+                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
+                            HOME_NODE_ID,
+                            HomeOp::OpenPackage { uid: uid.clone() },
+                        )));
+                    }
+                }
+                StudioRoute::Stories { .. } => {
+                    // the story book mounts on fresh page loads only (its
+                    // early return in App runs before any hooks); reload to
+                    // keep the hook order sound
+                    router::hard_reload();
+                }
+            }
+        })
     });
 
     // The local project store: mounted in the startup hook below (which
@@ -89,10 +181,10 @@ pub fn App() -> Element {
     };
 
     // Startup ordering matters: the library must attach before the startup
-    // action runs, or opens would go through the legacy (storeless) path on
+    // open runs, or opens would go through the legacy (storeless) path on
     // first paint. The store mount is awaited here; the sim still starts
     // (without persistence) if the store is unavailable.
-    let startup_action = use_hook(studio_url::read_startup_action);
+    let startup_route = use_hook(|| route.peek().clone());
     let startup_bridge = bridge.clone();
     use_hook(move || {
         let startup_bridge = startup_bridge.clone();
@@ -108,8 +200,13 @@ pub fn App() -> Element {
                 }
             }
             store_status.set(status);
-            if let Some(action) = startup_action {
-                startup_bridge.tx.send(StudioCommand::Action(action));
+            if let StudioRoute::Project { uid } = &startup_route {
+                startup_bridge
+                    .tx
+                    .send(StudioCommand::Action(UiAction::from_op(
+                        HOME_NODE_ID,
+                        HomeOp::OpenPackage { uid: uid.clone() },
+                    )));
             }
         });
     });
@@ -128,7 +225,6 @@ pub fn App() -> Element {
 
     let action_bridge = bridge.clone();
     let on_action = move |action: UiAction| {
-        studio_url::update_for_action(&action);
         action_bridge.tx.send(StudioCommand::Action(action));
     };
 
@@ -147,6 +243,13 @@ pub fn App() -> Element {
         console_bridge.tx.send(StudioCommand::Console(command));
     };
 
+    // The URL's intent picks the frame: a project route whose project the
+    // view hasn't reached yet renders the opening frame, not the gallery.
+    let current_view = view.read().clone();
+    let current_route = route.read().clone();
+    let opening_frame = matches!(current_route, StudioRoute::Project { .. })
+        && !current_route.project_matches_view(&current_view);
+
     rsx! {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
@@ -157,8 +260,9 @@ pub fn App() -> Element {
             }
         }
         StudioShell {
-            view: view.read().clone(),
+            view: current_view,
             running: false,
+            opening_frame,
             on_action,
             on_console,
         }

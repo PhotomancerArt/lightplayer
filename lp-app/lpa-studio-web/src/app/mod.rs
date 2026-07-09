@@ -14,7 +14,7 @@ pub mod project;
 pub(crate) mod story_fixtures;
 
 pub use device::RuntimeLog;
-pub use home::HomeGallery;
+pub use home::{HomeGallery, ProjectOpeningFrame};
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;
 pub use project::{ProjectNodeWorkspace, ProjectPane};

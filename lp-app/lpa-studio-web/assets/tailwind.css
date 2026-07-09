@@ -40,6 +40,7 @@
     --tw-radius-xs: var(--studio-radius-xs);
     --tw-radius-sm: var(--studio-radius-sm);
     --tw-radius-md: var(--studio-radius-md);
+    --tw-animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     --tw-default-transition-duration: 150ms;
     --tw-default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     --tw-color-background: var(--studio-color-bg);
@@ -228,6 +229,9 @@
   .tw\:h-2 {
     height: calc(var(--tw-spacing) * 2);
   }
+  .tw\:h-2\.5 {
+    height: calc(var(--tw-spacing) * 2.5);
+  }
   .tw\:h-3\.5 {
     height: calc(var(--tw-spacing) * 3.5);
   }
@@ -341,6 +345,9 @@
   }
   .tw\:w-2 {
     width: calc(var(--tw-spacing) * 2);
+  }
+  .tw\:w-2\.5 {
+    width: calc(var(--tw-spacing) * 2.5);
   }
   .tw\:w-3\.5 {
     width: calc(var(--tw-spacing) * 3.5);
@@ -475,6 +482,9 @@
   }
   .tw\:rotate-90 {
     rotate: 90deg;
+  }
+  .tw\:animate-pulse {
+    animation: var(--tw-animate-pulse);
   }
   .tw\:cursor-not-allowed {
     cursor: not-allowed;
@@ -923,6 +933,9 @@
   }
   .tw\:bg-status-working-bg {
     background-color: var(--tw-color-status-working-bg);
+  }
+  .tw\:bg-status-working-foreground {
+    background-color: var(--tw-color-status-working-foreground);
   }
   .tw\:bg-step-active {
     background-color: var(--tw-color-step-active);
@@ -1953,6 +1966,11 @@
   syntax: "*";
   inherits: false;
   initial-value: solid;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.5;
+  }
 }
 @layer properties {
   @supports ((-webkit-hyphens: none) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color:rgb(from red r g b)))) {
