@@ -58,7 +58,9 @@ members = [
     "lp-shader/lps-builtins-emu-app",
     "lp-shader/lps-filetests-app",
     "lp-app/web-demo",
-    "spikes/naga-wasm-poc", "lp-shader/lps-q32",
+    "spikes/naga-wasm-poc",
+    "spikes/wgpu-preview-poc",
+    "lp-shader/lps-q32",
 ]
 resolver = "2"
 
