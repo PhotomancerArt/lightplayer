@@ -9,6 +9,7 @@ use crate::{
     SlotShape, SlotShapeId, SlotValueShape, SlotVariantShape,
 };
 use alloc::boxed::Box;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 
 /// Parse a static shape id.
@@ -120,6 +121,21 @@ pub fn field_with_semantics_and_policy(
 ) -> SlotFieldShape {
     SlotFieldShape::with_semantics_and_policy(name, shape, semantics, policy)
         .expect("valid static slot field name")
+}
+
+/// Build one record field carrying full dataflow metadata, including an
+/// optional declarative default binding (derive-macro codegen entry point).
+pub fn field_with_dataflow(
+    name: &str,
+    shape: SlotShape,
+    semantics: SlotSemantics,
+    policy: SlotPolicy,
+    default_bind: Option<&str>,
+) -> SlotFieldShape {
+    let mut field = SlotFieldShape::with_semantics_and_policy(name, shape, semantics, policy)
+        .expect("valid static slot field name");
+    field.default_bind = default_bind.map(ToString::to_string);
+    field
 }
 
 /// Build one enum variant.

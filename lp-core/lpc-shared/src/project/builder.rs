@@ -340,6 +340,7 @@ impl OutputBuilder {
         let path = artifact_path_for_node(&node_name);
 
         let config = OutputDef {
+            input: Default::default(),
             endpoint: ValueSlot::new(self.endpoint),
             bindings: bus_input_binding_defs("control.out"),
             options: OptionSlot::some(self.options),
@@ -397,6 +398,7 @@ impl FixtureBuilder {
         let _texture_path = self.texture_path;
 
         let config = FixtureDef {
+            input: Default::default(),
             render_size: lpc_model::Dim2uSlot::new(lpc_model::Dim2u {
                 width: 16,
                 height: 16,
@@ -450,7 +452,8 @@ fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
     let mut slots = VecMap::new();
     slots.insert(
         String::from("time"),
-        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
+        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None)
+            .with_default_bind(BindingRef::parse("bus:time").expect("bus:time endpoint")),
     );
     MapSlot::new(slots)
 }

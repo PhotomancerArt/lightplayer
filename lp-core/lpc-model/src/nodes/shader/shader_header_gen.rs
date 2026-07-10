@@ -232,6 +232,7 @@ mod tests {
         consumed.insert(
             String::from("time"),
             ShaderSlotDef {
+                default_bind: crate::OptionSlot::none(),
                 kind: crate::ValueSlot::new(ShaderSlotKind::Value),
                 value: crate::ValueSlot::new(ShaderValueShapeRef::builtin("f32")),
                 key: crate::OptionSlot::none(),

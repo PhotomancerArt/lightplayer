@@ -5,7 +5,7 @@ use crate::{Slotted, ValueSlot};
 #[slot(default_policy = "read_only_transient")]
 pub struct ClockState {
     /// Clock time in seconds after rate and scrub offset are applied.
-    #[slot(produced)]
+    #[slot(produced, default_bind = "bus:time")]
     pub seconds: ValueSlot<f32>,
     /// Last produced clock delta in seconds.
     #[slot(produced)]

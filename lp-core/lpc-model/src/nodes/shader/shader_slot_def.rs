@@ -6,9 +6,9 @@
 //! structure into every shader artifact.
 
 use crate::{
-    FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    Slotted, StaticLpType, StaticSlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
-    ValueSlot,
+    BindingRef, FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotShapeId, SlotValue,
+    SlotValueShape, Slotted, StaticLpType, StaticSlotValueShape, ToLpValue, ValueEditorHint,
+    ValueRootError, ValueSlot,
 };
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,10 @@ pub struct ShaderSlotDef {
     pub kind: ValueSlot<ShaderSlotKind>,
     pub value: ValueSlot<ShaderValueShapeRef>,
     pub key: OptionSlot<ValueSlot<ShaderMapKeyDef>>,
+    /// Declarative default binding endpoint (`bus:<channel>`), materialized
+    /// at load when no authored binding names this slot (ADR 2026-07-09).
+    /// Consumed slots source from the channel; produced slots publish to it.
+    pub default_bind: OptionSlot<ValueSlot<BindingRef>>,
     pub default: OptionSlot<ValueSlot<f32>>,
     pub min: OptionSlot<ValueSlot<f32>>,
     pub max: OptionSlot<ValueSlot<f32>>,
@@ -30,11 +34,18 @@ pub struct ShaderSlotDef {
 }
 
 impl ShaderSlotDef {
+    /// Attach a declarative default binding endpoint (`bus:<channel>`).
+    pub fn with_default_bind(mut self, endpoint: BindingRef) -> Self {
+        self.default_bind = OptionSlot::some(ValueSlot::new(endpoint));
+        self
+    }
+
     pub fn value_f32(label: &str, description: &str, default: f32, min: Option<f32>) -> Self {
         Self {
             kind: ValueSlot::new(ShaderSlotKind::Value),
             value: ValueSlot::new(ShaderValueShapeRef::builtin("f32")),
             key: OptionSlot::none(),
+            default_bind: OptionSlot::none(),
             default: OptionSlot::some(ValueSlot::new(default)),
             min: min
                 .map(ValueSlot::new)
@@ -51,6 +62,7 @@ impl ShaderSlotDef {
             kind: ValueSlot::new(ShaderSlotKind::Map),
             value: ValueSlot::new(ShaderValueShapeRef::native(value)),
             key: OptionSlot::some(ValueSlot::new(ShaderMapKeyDef::U32)),
+            default_bind: OptionSlot::none(),
             default: OptionSlot::none(),
             min: OptionSlot::none(),
             max: OptionSlot::none(),

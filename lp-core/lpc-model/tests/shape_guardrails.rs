@@ -11,7 +11,8 @@ use std::collections::HashSet;
 
 use lpc_model::slot_shapes::{static_slot_shape, static_slot_shape_ids, static_slot_shape_name};
 use lpc_model::{
-    SlotDirection, SlotShapeId, StaticLpType, StaticSlotFieldShape, StaticSlotShapeDescriptor,
+    BindingRef, SlotDirection, SlotShapeId, StaticLpType, StaticSlotFieldShape,
+    StaticSlotShapeDescriptor,
 };
 
 /// Every field whose value carries a product (visual/control) must declare a
@@ -110,4 +111,57 @@ fn walk(
         }
         StaticSlotShapeDescriptor::Unit { .. } | StaticSlotShapeDescriptor::Value { .. } => {}
     }
+}
+
+/// Every declared `default_bind` must parse as a `bus:` endpoint with the
+/// real grammar (the derive macro can only check lexically — it cannot
+/// depend on this crate).
+#[test]
+fn default_binds_parse_as_bus_endpoints() {
+    let mut offenders = Vec::new();
+    for &id in static_slot_shape_ids() {
+        let Some(shape) = static_slot_shape(id) else {
+            continue;
+        };
+        let name = static_slot_shape_name(id)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{id:?}"));
+        let mut visited = HashSet::new();
+        walk(shape, &name, &mut visited, &mut |context, field| {
+            if let Some(endpoint) = field.default_bind
+                && !matches!(BindingRef::parse(endpoint), Ok(BindingRef::Bus(_)))
+            {
+                offenders.push(format!("{context}.{} = `{endpoint}`", field.name));
+            }
+        });
+    }
+    assert!(
+        offenders.is_empty(),
+        "default_bind endpoints must parse as bus refs: {offenders:?}"
+    );
+}
+
+/// `default_bind` only makes sense on dataflow slots that the loader can
+/// wire: it must accompany a declared direction.
+#[test]
+fn default_binds_require_a_declared_direction() {
+    let mut offenders = Vec::new();
+    for &id in static_slot_shape_ids() {
+        let Some(shape) = static_slot_shape(id) else {
+            continue;
+        };
+        let name = static_slot_shape_name(id)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{id:?}"));
+        let mut visited = HashSet::new();
+        walk(shape, &name, &mut visited, &mut |context, field| {
+            if field.default_bind.is_some() && field.semantics.direction == SlotDirection::Local {
+                offenders.push(format!("{context}.{}", field.name));
+            }
+        });
+    }
+    assert!(
+        offenders.is_empty(),
+        "default_bind requires #[slot(produced)] or #[slot(consumed)]: {offenders:?}"
+    );
 }

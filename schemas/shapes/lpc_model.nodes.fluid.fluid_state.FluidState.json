@@ -2,6 +2,7 @@
   "record": {
     "fields": [
       {
+        "default_bind": "bus:visual.out",
         "name": "output",
         "policy": {
           "persistence": "transient",

@@ -242,6 +242,9 @@
         "default": {
           "type": "number"
         },
+        "default_bind": {
+          "type": "string"
+        },
         "description": {
           "type": "string"
         },
@@ -759,6 +762,41 @@
         "endpoint": {
           "type": "string"
         },
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "control"
+            },
+            "node": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preferred_extent": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "samples_per_row": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
         "kind": {
           "const": "Output"
         },
@@ -793,6 +831,41 @@
         },
         "gamma_correction": {
           "type": "boolean"
+        },
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "visual"
+            },
+            "node": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preferred_extent": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "samples_per_row": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
         },
         "kind": {
           "const": "Fixture"

@@ -2,6 +2,25 @@
   "record": {
     "fields": [
       {
+        "default_bind": "bus:visual.out",
+        "name": "input",
+        "semantics": {
+          "direction": "consumed"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "visual_product",
+              "id": 689649576,
+              "meta": {},
+              "ty": {
+                "product": "visual"
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "render_size",
         "shape": {
           "value": {

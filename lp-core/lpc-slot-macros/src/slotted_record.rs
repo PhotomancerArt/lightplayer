@@ -47,12 +47,17 @@ pub(crate) fn derive_record(
         let static_policy = selected_policy
             .map(attr::field_policy_tokens)
             .unwrap_or_else(|| quote! { ::lpc_model::SlotPolicy::writable_persisted() });
+        let default_bind = match &field_attr.default_bind {
+            Some(endpoint) => quote! { Some(#endpoint) },
+            None => quote! { None },
+        };
         shape_fields.push(quote! {
-            ::lpc_model::slot::shape::field_with_semantics_and_policy(
+            ::lpc_model::slot::shape::field_with_dataflow(
                 #field_name,
                 #shape,
                 #semantics,
                 #policy,
+                #default_bind,
             )
         });
         static_shape_options.push(static_shape);
@@ -62,6 +67,7 @@ pub(crate) fn derive_record(
                 shape: #static_shape_binding,
                 semantics: #semantics,
                 policy: #static_policy,
+                default_bind: #default_bind,
             }
         });
         static_shape_bindings.push(static_shape_binding);

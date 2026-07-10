@@ -1,10 +1,18 @@
-use crate::{BindingDefs, HwEndpointSpec, OptionSlot, Ratio, RatioSlot, Slotted, ValueSlot};
+use crate::{
+    BindingDefs, ControlProductSlot, HwEndpointSpec, OptionSlot, Ratio, RatioSlot, Slotted,
+    ValueSlot,
+};
 
 pub const DEFAULT_OUTPUT_ENDPOINT_SPEC: &str = "ws281x:rmt:D10";
 
 /// Authored hardware output node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct OutputDef {
+    /// Control product this output drives each frame. Runtime dataflow
+    /// input — resolved through the binding graph, never authored as a
+    /// value (declared so the wiring is first-class schema, roadmap D8).
+    #[slot(consumed, default_bind = "bus:control.out")]
+    pub input: ControlProductSlot,
     pub endpoint: ValueSlot<HwEndpointSpec>,
     /// Authored slot bindings for output inputs.
     pub bindings: BindingDefs,
@@ -17,6 +25,7 @@ impl OutputDef {
 
     pub fn new(endpoint: HwEndpointSpec) -> Self {
         Self {
+            input: ControlProductSlot::default(),
             endpoint: ValueSlot::new(endpoint),
             bindings: BindingDefs::default(),
             options: OptionSlot::none(),

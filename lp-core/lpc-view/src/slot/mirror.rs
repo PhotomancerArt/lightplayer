@@ -201,6 +201,7 @@ mod tests {
                             shape: SlotShape::value(LpType::F32),
                             semantics: Default::default(),
                             policy: Default::default(),
+                            default_bind: None,
                         }],
                     },
                     semantics: Default::default(),
@@ -211,6 +212,7 @@ mod tests {
                     shape: SlotShape::value(LpType::String),
                     semantics: Default::default(),
                     policy: Default::default(),
+                    default_bind: None,
                 },
             ],
         }

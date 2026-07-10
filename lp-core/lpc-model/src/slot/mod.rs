@@ -90,9 +90,9 @@ pub use slot_value::{
 };
 pub mod shape {
     pub use super::slot_shape_builder::{
-        custom, enum_external, enum_tagged, enum_with_encoding, field, field_with_policy,
-        field_with_semantics, field_with_semantics_and_policy, id, leaf, map, option, record,
-        reference, unit, value, variant,
+        custom, enum_external, enum_tagged, enum_with_encoding, field, field_with_dataflow,
+        field_with_policy, field_with_semantics, field_with_semantics_and_policy, id, leaf, map,
+        option, record, reference, unit, value, variant,
     };
 }
 pub use slot_shape_registry::{

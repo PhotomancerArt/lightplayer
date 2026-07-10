@@ -6,13 +6,12 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use lp_collection::VecSet;
 
-use lpc_model::LpType;
 use lpc_model::{ArtifactSpec, NodeInvocation, NodeKind};
 use lpc_model::{AssetContentType, AssetLocation, NodeDefLocation, NodeDefState};
 use lpc_model::{
-    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, FluidDef, Kind,
-    LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin,
-    ProjectNodePlacement, Revision, ShaderDef, ShaderSlotKind, SlotPath,
+    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, Kind, LpValue,
+    MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin, ProjectNodePlacement,
+    Revision, SlotPath,
 };
 use lpc_model::{SlotDirection, SlotPathSegment, SlotShape, StaticSlotShape};
 use lpc_registry::{AssetText, ParseCtx, ProjectRegistry};
@@ -69,7 +68,6 @@ pub(super) struct ProjectedNode {
     pub(super) use_location: lpc_model::NodeUseLocation,
     pub(super) id: NodeId,
     pub(super) kind: NodeKind,
-    pub(super) provides_default_time_bus: bool,
     pub(super) ownership: ProjectedNodeOwnership,
 }
 
@@ -211,10 +209,6 @@ impl ProjectLoader {
                 }
             })?;
             let kind = def_entry.state.kind().unwrap_or(NodeKind::Project);
-            let provides_default_time_bus = def_entry
-                .state
-                .loaded_def()
-                .is_some_and(node_provides_default_time_bus);
             let state_error = def_entry
                 .state
                 .is_error()
@@ -315,7 +309,6 @@ impl ProjectLoader {
                 use_location: project_node.key,
                 id: node_id,
                 kind,
-                provides_default_time_bus,
                 ownership,
             });
         }
@@ -394,7 +387,7 @@ impl ProjectLoader {
                 &config.bindings,
                 frame,
             )?;
-            register_clock_default_time_binding(runtime, node, &config.bindings, frame)?;
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
 
         for node in projected_nodes {
@@ -533,7 +526,7 @@ impl ProjectLoader {
                     path: node_label(node),
                     reason: format!("bind output demand slot: {e}"),
                 })?;
-            register_source_binding(
+            register_optional_source_binding(
                 runtime,
                 projected_nodes,
                 node,
@@ -541,6 +534,7 @@ impl ProjectLoader {
                 &config.bindings,
                 frame,
             )?;
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
             runtime.add_demand_root(node.id);
         }
 
@@ -568,7 +562,17 @@ impl ProjectLoader {
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>();
-            let needs_default_time_binding = shader_needs_default_time_binding(&config);
+            let consumed_defaults = config
+                .consumed_slots
+                .entries
+                .iter()
+                .filter_map(|(name, slot)| {
+                    slot.default_bind
+                        .data
+                        .as_ref()
+                        .map(|endpoint| (name.clone(), endpoint.value().to_string()))
+                })
+                .collect::<Vec<_>>();
             runtime
                 .attach_runtime_node(
                     node.id,
@@ -580,7 +584,6 @@ impl ProjectLoader {
                     reason: format!("attach shader runtime: {e}"),
                 })?;
             register_target_binding(runtime, projected_nodes, node, "output", &bindings, frame)?;
-            register_visual_default_output_binding(runtime, node, &bindings, frame)?;
             for name in consumed_slot_names {
                 register_optional_source_binding(
                     runtime,
@@ -591,9 +594,19 @@ impl ProjectLoader {
                     frame,
                 )?;
             }
-            if needs_default_time_binding {
-                add_visual_default_time_binding(runtime, node, frame)?;
+            for (name, endpoint) in consumed_defaults {
+                register_default_bind(
+                    runtime,
+                    projected_nodes,
+                    node,
+                    &bindings,
+                    frame,
+                    &name,
+                    SlotDirection::Consumed,
+                    &endpoint,
+                )?;
             }
+            register_declared_defaults(runtime, projected_nodes, node, &bindings, frame)?;
         }
 
         for node in projected_nodes {
@@ -698,7 +711,6 @@ impl ProjectLoader {
                 &config.bindings,
                 frame,
             )?;
-            register_fluid_default_time_binding(runtime, projected_nodes, node, &config, frame)?;
             register_optional_source_binding(
                 runtime,
                 projected_nodes,
@@ -715,7 +727,7 @@ impl ProjectLoader {
                 &config.bindings,
                 frame,
             )?;
-            register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
 
         for node in projected_nodes {
@@ -725,7 +737,15 @@ impl ProjectLoader {
             if node.kind != NodeKind::Playlist {
                 continue;
             }
-            let (idle_entry, default_fade, entries, time_source, output_target, trigger_source) = {
+            let (
+                idle_entry,
+                default_fade,
+                entries,
+                time_source,
+                output_target,
+                trigger_source,
+                authored_bindings,
+            ) = {
                 let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
                     continue;
                 };
@@ -742,6 +762,7 @@ impl ProjectLoader {
                     binding_source(&config.bindings, "trigger")
                         .map(|source| binding_source_endpoint(projected_nodes, node, source))
                         .transpose()?,
+                    config.bindings.clone(),
                 )
             };
             if let Some(source) = time_source {
@@ -786,9 +807,7 @@ impl ProjectLoader {
                         reason: format!("register output target binding: {e}"),
                     })?;
             }
-            if output_target.is_none() {
-                add_visual_default_output_binding(runtime, node, frame)?;
-            }
+            register_declared_defaults(runtime, projected_nodes, node, &authored_bindings, frame)?;
             runtime
                 .attach_runtime_node(
                     node.id,
@@ -840,7 +859,7 @@ impl ProjectLoader {
                     mark_node_load_error(runtime, node.id, frame, message);
                 }
             }
-            register_source_binding(
+            register_optional_source_binding(
                 runtime,
                 projected_nodes,
                 node,
@@ -856,6 +875,7 @@ impl ProjectLoader {
                 &config.bindings,
                 frame,
             )?;
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
 
         Ok(())
@@ -1195,15 +1215,6 @@ fn asset_for_node_content_type(
     }
 }
 
-fn node_provides_default_time_bus(config: &NodeDef) -> bool {
-    match config {
-        NodeDef::Clock(config) => {
-            binding_target(&config.bindings, "seconds").is_none_or(is_time_seconds_bus_target)
-        }
-        _ => false,
-    }
-}
-
 fn resolve_node_loc<'a>(
     projected_nodes: &'a [ProjectedNode],
     current: &'a ProjectedNode,
@@ -1269,22 +1280,8 @@ fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a Autho
     bindings.entries().get(slot)?.target_ref()
 }
 
-/// Declared direction of a node's root slot, looked up in the kind's def and
-/// state record shapes (first path segment). `None` when the slot is dynamic
-/// (shader consumed entries) or otherwise undeclared — the guardrail only
-/// fires on declared mislabels (ADR 2026-07-09 declarative-default-bindings).
-fn declared_slot_direction(kind: NodeKind, slot: &lpc_model::SlotPath) -> Option<SlotDirection> {
-    let SlotPathSegment::Field(name) = slot.segments().first()? else {
-        return None;
-    };
-    let name = name.as_str();
-    let field_direction = |shape: SlotShape| match shape {
-        SlotShape::Record { fields, .. } => fields
-            .iter()
-            .find(|field| field.name.as_str() == name)
-            .map(|field| field.semantics.direction),
-        _ => None,
-    };
+/// Def and state record shapes for a node kind, when static ones exist.
+fn kind_shapes(kind: NodeKind) -> (Option<SlotShape>, Option<SlotShape>) {
     use lpc_model::nodes::button::ButtonState;
     use lpc_model::nodes::clock::ClockDef;
     use lpc_model::nodes::clock::ClockState;
@@ -1325,9 +1322,147 @@ fn declared_slot_direction(kind: NodeKind, slot: &lpc_model::SlotPath) -> Option
         NodeKind::Texture => Some(TextureState::slot_shape()),
         _ => None,
     };
+    (def_shape, state_shape)
+}
+
+/// Declared direction of a node's root slot, looked up in the kind's def and
+/// state record shapes (first path segment). `None` when the slot is dynamic
+/// (shader consumed entries) or otherwise undeclared — the guardrail only
+/// fires on declared mislabels (ADR 2026-07-09 declarative-default-bindings).
+fn declared_slot_direction(kind: NodeKind, slot: &lpc_model::SlotPath) -> Option<SlotDirection> {
+    let SlotPathSegment::Field(name) = slot.segments().first()? else {
+        return None;
+    };
+    let name = name.as_str();
+    let field_direction = |shape: SlotShape| match shape {
+        SlotShape::Record { fields, .. } => fields
+            .iter()
+            .find(|field| field.name.as_str() == name)
+            .map(|field| field.semantics.direction),
+        _ => None,
+    };
+    let (def_shape, state_shape) = kind_shapes(kind);
     def_shape
         .and_then(field_direction)
         .or_else(|| state_shape.and_then(field_direction))
+}
+
+/// Slot-declared default bindings for a node kind: (slot name, declared
+/// direction, `bus:` endpoint) triples from the def and state shapes.
+fn declared_default_binds(kind: NodeKind) -> Vec<(String, SlotDirection, String)> {
+    let mut out = Vec::new();
+    let mut collect = |shape: Option<SlotShape>| {
+        if let Some(SlotShape::Record { fields, .. }) = shape {
+            for field in fields {
+                if let Some(endpoint) = &field.default_bind {
+                    out.push((
+                        field.name.as_str().to_string(),
+                        field.semantics.direction,
+                        endpoint.clone(),
+                    ));
+                }
+            }
+        }
+    };
+    let (def_shape, state_shape) = kind_shapes(kind);
+    collect(def_shape);
+    collect(state_shape);
+    out
+}
+
+/// Materialize slot-declared default bindings (ADR 2026-07-09): one generic
+/// pass replacing the five per-kind loader helpers. Authored bindings for
+/// the same slot win; produced defaults are suppressed for entry-owned
+/// children (ownership context stays a loader rule, not slot metadata);
+/// everything registers unconditionally at fallback priority — an unfilled
+/// channel (readers, no writer) is surfaced on the bus instead of hidden.
+fn register_declared_defaults(
+    engine: &mut Engine,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    for (name, direction, endpoint) in declared_default_binds(current.kind) {
+        register_default_bind(
+            engine,
+            projected_nodes,
+            current,
+            bindings,
+            frame,
+            &name,
+            direction,
+            &endpoint,
+        )?;
+    }
+    Ok(())
+}
+
+/// Register one declarative default binding: produced slots publish to the
+/// endpoint's channel, consumed/local slots source from it.
+#[allow(clippy::too_many_arguments, reason = "loader registration plumbing")]
+fn register_default_bind(
+    engine: &mut Engine,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
+    bindings: &BindingDefs,
+    frame: Revision,
+    name: &str,
+    direction: SlotDirection,
+    endpoint: &str,
+) -> Result<(), ProjectLoadError> {
+    let channel = match lpc_model::BindingRef::parse(endpoint) {
+        Ok(lpc_model::BindingRef::Bus(bus)) => bus.channel().clone(),
+        _ => {
+            return Err(ProjectLoadError::InvalidProjectReference {
+                path: node_label(current),
+                reason: format!("invalid default_bind `{endpoint}` on slot `{name}`"),
+            });
+        }
+    };
+    let slot = SlotPath::parse(name).map_err(|e| ProjectLoadError::InvalidProjectReference {
+        path: node_label(current),
+        reason: format!("invalid default_bind slot `{name}`: {e}"),
+    })?;
+    let draft = if direction == SlotDirection::Produced {
+        if current.ownership.suppress_visual_default_output()
+            || binding_target(bindings, name).is_some()
+        {
+            return Ok(());
+        }
+        BindingDraft {
+            source: BindingSource::ProducedSlot {
+                node: current.id,
+                slot,
+            },
+            target: BindingTarget::BusChannel(channel),
+            priority: BindingPriority::default_fallback(),
+            kind: binding_kind_for_slot(name),
+            owner: current.id,
+        }
+    } else {
+        if binding_source(bindings, name).is_some() {
+            return Ok(());
+        }
+        BindingDraft {
+            source: BindingSource::BusChannel(channel),
+            target: BindingTarget::ConsumedSlot {
+                node: current.id,
+                slot,
+            },
+            priority: BindingPriority::default_fallback(),
+            kind: binding_kind_for_slot(name),
+            owner: current.id,
+        }
+    };
+    assert_draft_directions(projected_nodes, current, &draft)?;
+    engine
+        .add_binding(draft, frame)
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
+            path: node_label(current),
+            reason: format!("register {name} default binding: {e}"),
+        })?;
+    Ok(())
 }
 
 fn projected_node_kind(projected_nodes: &[ProjectedNode], id: NodeId) -> Option<NodeKind> {
@@ -1485,160 +1620,11 @@ fn register_target_binding(
     Ok(())
 }
 
-fn register_visual_default_output_binding(
-    engine: &mut Engine,
-    current: &ProjectedNode,
-    bindings: &BindingDefs,
-    frame: Revision,
-) -> Result<(), ProjectLoadError> {
-    if current.ownership.suppress_visual_default_output()
-        || binding_target(bindings, "output").is_some()
-    {
-        return Ok(());
-    }
-    add_visual_default_output_binding(engine, current, frame)
-}
-
-fn add_visual_default_output_binding(
-    engine: &mut Engine,
-    current: &ProjectedNode,
-    frame: Revision,
-) -> Result<(), ProjectLoadError> {
-    engine
-        .add_binding(
-            BindingDraft {
-                source: BindingSource::ProducedSlot {
-                    node: current.id,
-                    slot: SlotPath::parse("output").expect("visual output slot path"),
-                },
-                target: BindingTarget::BusChannel(ChannelName(String::from("visual.out"))),
-                priority: BindingPriority::default_fallback(),
-                kind: Kind::Color,
-                owner: current.id,
-            },
-            frame,
-        )
-        .map_err(|e| ProjectLoadError::InvalidProjectReference {
-            path: node_label(current),
-            reason: format!("register visual default output binding: {e}"),
-        })?;
-    Ok(())
-}
-
 fn binding_kind_for_slot(slot_name: &str) -> Kind {
     match slot_name {
         "time" | "seconds" | "delta_seconds" => Kind::Instant,
         _ => Kind::Color,
     }
-}
-
-fn register_clock_default_time_binding(
-    engine: &mut Engine,
-    current: &ProjectedNode,
-    bindings: &BindingDefs,
-    frame: Revision,
-) -> Result<(), ProjectLoadError> {
-    if binding_target(bindings, "seconds").is_some() {
-        return Ok(());
-    }
-    engine
-        .add_binding(
-            BindingDraft {
-                source: BindingSource::ProducedSlot {
-                    node: current.id,
-                    slot: SlotPath::parse("seconds").expect("clock seconds slot path"),
-                },
-                target: BindingTarget::BusChannel(ChannelName(String::from("time"))),
-                priority: BindingPriority::default_fallback(),
-                kind: Kind::Instant,
-                owner: current.id,
-            },
-            frame,
-        )
-        .map_err(|e| ProjectLoadError::InvalidProjectReference {
-            path: node_label(current),
-            reason: format!("register clock default time binding: {e}"),
-        })?;
-    Ok(())
-}
-
-fn shader_needs_default_time_binding(config: &ShaderDef) -> bool {
-    if binding_source(&config.bindings, "time").is_some() {
-        return false;
-    }
-    let Some(slot) = config.consumed_slots.entries.get("time") else {
-        return false;
-    };
-    *slot.kind.value() == ShaderSlotKind::Value
-        && slot.value.value().as_lp_type() == Some(LpType::F32)
-}
-
-fn add_visual_default_time_binding(
-    engine: &mut Engine,
-    current: &ProjectedNode,
-    frame: Revision,
-) -> Result<(), ProjectLoadError> {
-    engine
-        .add_binding(
-            BindingDraft {
-                source: BindingSource::BusChannel(ChannelName(String::from("time"))),
-                target: BindingTarget::ConsumedSlot {
-                    node: current.id,
-                    slot: SlotPath::parse("time").expect("visual shader time slot path"),
-                },
-                priority: BindingPriority::default_fallback(),
-                kind: Kind::Instant,
-                owner: current.id,
-            },
-            frame,
-        )
-        .map_err(|e| ProjectLoadError::InvalidProjectReference {
-            path: node_label(current),
-            reason: format!("register visual shader default time binding: {e}"),
-        })?;
-    Ok(())
-}
-
-fn register_fluid_default_time_binding(
-    engine: &mut Engine,
-    projected_nodes: &[ProjectedNode],
-    current: &ProjectedNode,
-    config: &FluidDef,
-    frame: Revision,
-) -> Result<(), ProjectLoadError> {
-    if binding_source(&config.bindings, "time").is_some() || !has_default_time_bus(projected_nodes)
-    {
-        return Ok(());
-    }
-    engine
-        .add_binding(
-            BindingDraft {
-                source: BindingSource::BusChannel(ChannelName(String::from("time"))),
-                target: BindingTarget::ConsumedSlot {
-                    node: current.id,
-                    slot: SlotPath::parse("time").expect("fluid time slot path"),
-                },
-                priority: BindingPriority::default_fallback(),
-                kind: Kind::Instant,
-                owner: current.id,
-            },
-            frame,
-        )
-        .map_err(|e| ProjectLoadError::InvalidProjectReference {
-            path: node_label(current),
-            reason: format!("register fluid default time binding: {e}"),
-        })?;
-    Ok(())
-}
-
-fn has_default_time_bus(projected_nodes: &[ProjectedNode]) -> bool {
-    projected_nodes
-        .iter()
-        .any(|node| node.provides_default_time_bus)
-}
-
-fn is_time_seconds_bus_target(target: &AuthoredBindingRef) -> bool {
-    matches!(target, AuthoredBindingRef::Bus(bus) if bus.channel().0.clone() == "time")
 }
 
 fn binding_source_endpoint(
@@ -2176,7 +2162,8 @@ mod tests {
     "time": {
       "kind": "value",
       "value": "f32",
-      "default": 0.0
+      "default": 0.0,
+      "default_bind": "bus:time"
     }
   }
 }
@@ -3953,13 +3940,16 @@ mod tests {
         fs
     }
 
+    // The time default is declared on the slot-def (ADR 2026-07-09) — the
+    // old "any unbound f32 time input" global convention is retired.
     const CHAR_SHADER_WITH_TIME: &str = r#"
 {
   "kind": "Shader",
   "source": { "path": "shader.glsl" },
   "render_order": 0,
   "consumed": {
-    "time": { "kind": "value", "value": "f32", "default": 0.0 }
+    "time": { "kind": "value", "value": "f32", "default": 0.0,
+              "default_bind": "bus:time" }
   }
 }
 "#;
@@ -4058,12 +4048,13 @@ mod tests {
     }
 
     #[test]
-    fn char_fluid_time_default_is_gated_on_a_clock_publishing_time() {
-        // CURRENT behavior: fluid's time default only registers when a clock
-        // provides bus:time (`has_default_time_bus`). The ADR deliberately
-        // removes this gate in the declarative swap — defaults register
-        // unconditionally and an unfilled channel is surfaced on the bus —
-        // so this test is EXPECTED TO FLIP then (update both branches).
+    fn char_fluid_time_default_registers_unconditionally() {
+        // Pre-ADR, fluid's time default was gated on a clock providing
+        // bus:time (`has_default_time_bus`). The declarative swap removed
+        // the gate: defaults register unconditionally and an unfilled
+        // channel (readers, no writer) is surfaced on the bus, where the UI
+        // can warn — fluid cannot work without time, and hiding the missing
+        // wiring helped nobody.
         let fluid_json = r#"
 {
   "kind": "Fluid",
@@ -4085,8 +4076,8 @@ mod tests {
         let rt = load_project(&without_clock);
         let fluid = sibling(&rt, "fluid");
         assert!(
-            !default_sources(&rt, fluid, "time", "time"),
-            "pre-ADR: fluid time default is gated on a clock"
+            default_sources(&rt, fluid, "time", "time"),
+            "fluid time default registers even without a clock (unfilled channel)"
         );
     }
 

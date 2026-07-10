@@ -163,6 +163,7 @@ vec4 render(vec2 pos) {
 
     // Create output node
     let output_config = OutputDef {
+        input: Default::default(),
         endpoint: ValueSlot::new(HwEndpointSpec::from_static("ws281x:rmt:D10")),
         bindings: bus_input_binding_defs("control.out"),
         options: OptionSlot::none(),
@@ -174,6 +175,7 @@ vec4 render(vec2 pos) {
 
     // Create fixture node
     let fixture_config = FixtureDef {
+        input: Default::default(),
         render_size: Dim2uSlot::new(Dim2u {
             width: 16,
             height: 16,
@@ -230,7 +232,8 @@ fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
     let mut slots = VecMap::new();
     slots.insert(
         String::from("time"),
-        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
+        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None)
+            .with_default_bind(BindingRef::parse("bus:time").expect("bus:time endpoint")),
     );
     MapSlot::new(slots)
 }

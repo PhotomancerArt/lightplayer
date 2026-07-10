@@ -73,7 +73,8 @@ const SHADER_NODE_JSON: &[u8] = br#"{
       "value": "f32",
       "default": 0,
       "label": "Time",
-      "description": "Project clock time in seconds"
+      "description": "Project clock time in seconds",
+      "default_bind": "bus:time"
     }
   }
 }
