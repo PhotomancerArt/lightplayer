@@ -3882,4 +3882,238 @@ mod tests {
         )
         .expect("fixture.json");
     }
+    // --- Default-binding characterization (M5, ADR 2026-07-09) -------------
+    //
+    // These tests pin the CURRENT loader-helper behavior before the swap to
+    // declarative slot-declared defaults. The generic materialization pass
+    // must keep every green assertion here green — except where the ADR
+    // deliberately changes behavior, each called out inline.
+
+    fn default_publishes(
+        rt: &LoadedProjectRuntime,
+        node: NodeId,
+        slot: &str,
+        channel: &str,
+    ) -> bool {
+        rt.tree().bindings().any(|binding| {
+            binding.priority == BindingPriority::default_fallback()
+                && matches!(
+                    (&binding.source, &binding.target),
+                    (
+                        BindingSource::ProducedSlot { node: n, slot: s },
+                        BindingTarget::BusChannel(c),
+                    ) if *n == node && s == &SlotPath::parse(slot).expect("slot") && c.0 == channel
+                )
+        })
+    }
+
+    fn default_sources(rt: &LoadedProjectRuntime, node: NodeId, slot: &str, channel: &str) -> bool {
+        rt.tree().bindings().any(|binding| {
+            binding.priority == BindingPriority::default_fallback()
+                && matches!(
+                    (&binding.source, &binding.target),
+                    (
+                        BindingSource::BusChannel(c),
+                        BindingTarget::ConsumedSlot { node: n, slot: s },
+                    ) if *n == node && s == &SlotPath::parse(slot).expect("slot") && c.0 == channel
+                )
+        })
+    }
+
+    fn sibling(rt: &LoadedProjectRuntime, name: &str) -> NodeId {
+        let root = rt.tree().root();
+        rt.tree()
+            .lookup_sibling(root, NodeName::parse(name).unwrap())
+            .unwrap_or_else(|| panic!("{name} node"))
+    }
+
+    fn load_project(fs: &LpFsMemory) -> LoadedProjectRuntime {
+        let services = EngineServices::new(TreePath::parse("/char.show").expect("path"));
+        ProjectLoader::load_from_root(fs, services).expect("load characterization project")
+    }
+
+    fn char_project(nodes: &[(&str, &str)]) -> LpFsMemory {
+        let fs = LpFsMemory::new();
+        let mut entries = String::new();
+        for (index, (name, _)) in nodes.iter().enumerate() {
+            if index > 0 {
+                entries.push_str(",\n");
+            }
+            entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
+        }
+        let project = format!(
+            "{{\n  \"kind\": \"Project\",\n  \"format\": 1,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
+        );
+        fs.write_file("/project.json".as_path(), project.as_bytes())
+            .expect("project.json");
+        for (name, json) in nodes {
+            fs.write_file(format!("/{name}.json").as_str().as_path(), json.as_bytes())
+                .unwrap_or_else(|_| panic!("{name}.json"));
+        }
+        fs
+    }
+
+    const CHAR_SHADER_WITH_TIME: &str = r#"
+{
+  "kind": "Shader",
+  "source": { "path": "shader.glsl" },
+  "render_order": 0,
+  "consumed": {
+    "time": { "kind": "value", "value": "f32", "default": 0.0 }
+  }
+}
+"#;
+
+    const CHAR_SHADER_GLSL: &[u8] = b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }";
+
+    #[test]
+    fn char_minimal_clock_publishes_time_default_only_for_seconds() {
+        let fs = char_project(&[("clock", "{ \"kind\": \"Clock\" }")]);
+        let rt = load_project(&fs);
+        let clock = sibling(&rt, "clock");
+        assert!(default_publishes(&rt, clock, "seconds", "time"));
+        assert!(
+            !rt.tree().bindings().any(|binding| matches!(
+                &binding.source,
+                BindingSource::ProducedSlot { node, slot }
+                    if *node == clock && slot == &SlotPath::parse("delta_seconds").expect("slot")
+            )),
+            "delta_seconds has no default channel"
+        );
+    }
+
+    #[test]
+    fn char_authored_clock_target_suppresses_the_default() {
+        let fs = char_project(&[(
+            "clock",
+            r#"{ "kind": "Clock", "bindings": { "seconds": { "target": "bus:custom" } } }"#,
+        )]);
+        let rt = load_project(&fs);
+        let clock = sibling(&rt, "clock");
+        assert!(!default_publishes(&rt, clock, "seconds", "time"));
+        assert!(rt.tree().bindings().any(|binding| {
+            binding.priority != BindingPriority::default_fallback()
+                && matches!(
+                    (&binding.source, &binding.target),
+                    (
+                        BindingSource::ProducedSlot { node, .. },
+                        BindingTarget::BusChannel(c),
+                    ) if *node == clock && c.0 == "custom"
+                )
+        }));
+    }
+
+    #[test]
+    fn char_shader_gets_time_and_visual_out_defaults() {
+        let fs = char_project(&[
+            ("clock", "{ \"kind\": \"Clock\" }"),
+            ("shader", CHAR_SHADER_WITH_TIME),
+        ]);
+        fs.write_file("/shader.glsl".as_path(), CHAR_SHADER_GLSL)
+            .expect("shader.glsl");
+        let rt = load_project(&fs);
+        let shader = sibling(&rt, "shader");
+        assert!(default_sources(&rt, shader, "time", "time"));
+        assert!(default_publishes(&rt, shader, "output", "visual.out"));
+    }
+
+    #[test]
+    fn char_shader_time_default_registers_even_without_a_clock() {
+        // Shaders do NOT gate their time default on a clock existing (unlike
+        // fluid, below). The channel simply has readers and no writer.
+        let fs = char_project(&[("shader", CHAR_SHADER_WITH_TIME)]);
+        fs.write_file("/shader.glsl".as_path(), CHAR_SHADER_GLSL)
+            .expect("shader.glsl");
+        let rt = load_project(&fs);
+        let shader = sibling(&rt, "shader");
+        assert!(default_sources(&rt, shader, "time", "time"));
+    }
+
+    #[test]
+    fn char_authored_shader_time_suppresses_the_default() {
+        let fs = char_project(&[
+            ("clock", "{ \"kind\": \"Clock\" }"),
+            (
+                "shader",
+                r#"
+{
+  "kind": "Shader",
+  "source": { "path": "shader.glsl" },
+  "render_order": 0,
+  "consumed": {
+    "time": { "kind": "value", "value": "f32", "default": 0.0 }
+  },
+  "bindings": {
+    "time": { "source": "bus:custom" }
+  }
+}
+"#,
+            ),
+        ]);
+        fs.write_file("/shader.glsl".as_path(), CHAR_SHADER_GLSL)
+            .expect("shader.glsl");
+        let rt = load_project(&fs);
+        let shader = sibling(&rt, "shader");
+        assert!(!default_sources(&rt, shader, "time", "time"));
+    }
+
+    #[test]
+    fn char_fluid_time_default_is_gated_on_a_clock_publishing_time() {
+        // CURRENT behavior: fluid's time default only registers when a clock
+        // provides bus:time (`has_default_time_bus`). The ADR deliberately
+        // removes this gate in the declarative swap — defaults register
+        // unconditionally and an unfilled channel is surfaced on the bus —
+        // so this test is EXPECTED TO FLIP then (update both branches).
+        let fluid_json = r#"
+{
+  "kind": "Fluid",
+  "size": { "width": 8, "height": 8 },
+  "solver_iterations": 1,
+  "step_hz": 25,
+  "fade_speed": 0.08,
+  "viscosity": 0.00003,
+  "time": 0
+}
+"#;
+        let with_clock =
+            char_project(&[("clock", "{ \"kind\": \"Clock\" }"), ("fluid", fluid_json)]);
+        let rt = load_project(&with_clock);
+        let fluid = sibling(&rt, "fluid");
+        assert!(default_sources(&rt, fluid, "time", "time"));
+
+        let without_clock = char_project(&[("fluid", fluid_json)]);
+        let rt = load_project(&without_clock);
+        let fluid = sibling(&rt, "fluid");
+        assert!(
+            !default_sources(&rt, fluid, "time", "time"),
+            "pre-ADR: fluid time default is gated on a clock"
+        );
+    }
+
+    #[test]
+    fn char_playlist_entry_children_do_not_compete_for_visual_out() {
+        let fs = examples_fyeah_sign_fs();
+        let fs: &dyn LpFs = &fs;
+        let services = EngineServices::new(TreePath::parse("/fyeah.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign");
+        let default_publishers = rt
+            .tree()
+            .bindings()
+            .filter(|binding| {
+                binding.priority == BindingPriority::default_fallback()
+                    && matches!(
+                        (&binding.source, &binding.target),
+                        (
+                            BindingSource::ProducedSlot { .. },
+                            BindingTarget::BusChannel(c),
+                        ) if c.0 == "visual.out"
+                    )
+            })
+            .count();
+        assert_eq!(
+            default_publishers, 1,
+            "only the playlist itself default-publishes visual.out; entry \
+             children are ownership-suppressed"
+        );
+    }
 }
