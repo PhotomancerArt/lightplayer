@@ -14,6 +14,7 @@ use lpc_model::{
     LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin,
     ProjectNodePlacement, Revision, ShaderDef, ShaderSlotKind, SlotPath,
 };
+use lpc_model::{SlotDirection, SlotPathSegment, SlotShape, StaticSlotShape};
 use lpc_registry::{AssetText, ParseCtx, ProjectRegistry};
 use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireSlotIndex};
 use lpfs::LpFs;
@@ -746,6 +747,7 @@ impl ProjectLoader {
             if let Some(source) = time_source {
                 register_source_binding_at_path(
                     runtime,
+                    projected_nodes,
                     node,
                     "time",
                     source,
@@ -756,6 +758,7 @@ impl ProjectLoader {
             if let Some(source) = trigger_source {
                 register_source_binding_at_path(
                     runtime,
+                    projected_nodes,
                     node,
                     "trigger",
                     source,
@@ -1266,6 +1269,111 @@ fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a Autho
     bindings.entries().get(slot)?.target_ref()
 }
 
+/// Declared direction of a node's root slot, looked up in the kind's def and
+/// state record shapes (first path segment). `None` when the slot is dynamic
+/// (shader consumed entries) or otherwise undeclared — the guardrail only
+/// fires on declared mislabels (ADR 2026-07-09 declarative-default-bindings).
+fn declared_slot_direction(kind: NodeKind, slot: &lpc_model::SlotPath) -> Option<SlotDirection> {
+    let SlotPathSegment::Field(name) = slot.segments().first()? else {
+        return None;
+    };
+    let name = name.as_str();
+    let field_direction = |shape: SlotShape| match shape {
+        SlotShape::Record { fields, .. } => fields
+            .iter()
+            .find(|field| field.name.as_str() == name)
+            .map(|field| field.semantics.direction),
+        _ => None,
+    };
+    use lpc_model::nodes::button::ButtonState;
+    use lpc_model::nodes::clock::ClockDef;
+    use lpc_model::nodes::clock::ClockState;
+    use lpc_model::nodes::fixture::FixtureDef;
+    use lpc_model::nodes::fixture::FixtureState;
+    use lpc_model::nodes::fluid::FluidDef;
+    use lpc_model::nodes::fluid::FluidState;
+    use lpc_model::nodes::output::OutputDef;
+    use lpc_model::nodes::playlist::PlaylistDef;
+    use lpc_model::nodes::playlist::PlaylistState;
+    use lpc_model::nodes::radio::ControlRadioDef;
+    use lpc_model::nodes::radio::ControlRadioState;
+    use lpc_model::nodes::shader::ShaderState;
+    use lpc_model::nodes::shader::{ComputeShaderDef, ShaderDef};
+    use lpc_model::nodes::texture::TextureDef;
+    use lpc_model::nodes::texture::TextureState;
+    let def_shape = match kind {
+        NodeKind::Button => Some(lpc_model::nodes::button::ButtonDef::slot_shape()),
+        NodeKind::Clock => Some(ClockDef::slot_shape()),
+        NodeKind::Fixture => Some(FixtureDef::slot_shape()),
+        NodeKind::Fluid => Some(FluidDef::slot_shape()),
+        NodeKind::Playlist => Some(PlaylistDef::slot_shape()),
+        NodeKind::ControlRadio => Some(ControlRadioDef::slot_shape()),
+        NodeKind::Shader => Some(ShaderDef::slot_shape()),
+        NodeKind::ComputeShader => Some(ComputeShaderDef::slot_shape()),
+        NodeKind::Output => Some(OutputDef::slot_shape()),
+        NodeKind::Texture => Some(TextureDef::slot_shape()),
+        _ => None,
+    };
+    let state_shape = match kind {
+        NodeKind::Button => Some(ButtonState::slot_shape()),
+        NodeKind::Clock => Some(ClockState::slot_shape()),
+        NodeKind::Fixture => Some(FixtureState::slot_shape()),
+        NodeKind::Fluid => Some(FluidState::slot_shape()),
+        NodeKind::Playlist => Some(PlaylistState::slot_shape()),
+        NodeKind::ControlRadio => Some(ControlRadioState::slot_shape()),
+        NodeKind::Shader => Some(ShaderState::slot_shape()),
+        NodeKind::Texture => Some(TextureState::slot_shape()),
+        _ => None,
+    };
+    def_shape
+        .and_then(field_direction)
+        .or_else(|| state_shape.and_then(field_direction))
+}
+
+fn projected_node_kind(projected_nodes: &[ProjectedNode], id: NodeId) -> Option<NodeKind> {
+    projected_nodes
+        .iter()
+        .find(|node| node.id == id)
+        .map(|node| node.kind)
+}
+
+/// Load-time direction guardrail: a draft whose source names a produced slot
+/// (or whose target names a consumed slot) must reference a slot whose
+/// declared shape direction is compatible. Undeclared slots pass through;
+/// declared mislabels fail the load with a clear reason instead of silently
+/// generating wrong wiring.
+fn assert_draft_directions(
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
+    draft: &BindingDraft,
+) -> Result<(), ProjectLoadError> {
+    if let BindingSource::ProducedSlot { node, slot } = &draft.source
+        && let Some(kind) = projected_node_kind(projected_nodes, *node)
+        && let Some(direction) = declared_slot_direction(kind, slot)
+        && direction != SlotDirection::Produced
+    {
+        return Err(ProjectLoadError::InvalidProjectReference {
+            path: node_label(current),
+            reason: format!(
+                "binding source slot `{slot}` on {kind:?} is declared {direction:?}, expected Produced"
+            ),
+        });
+    }
+    if let BindingTarget::ConsumedSlot { node, slot } = &draft.target
+        && let Some(kind) = projected_node_kind(projected_nodes, *node)
+        && let Some(direction) = declared_slot_direction(kind, slot)
+        && direction == SlotDirection::Produced
+    {
+        return Err(ProjectLoadError::InvalidProjectReference {
+            path: node_label(current),
+            reason: format!(
+                "binding target slot `{slot}` on {kind:?} is declared Produced and cannot consume"
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn register_source_binding(
     engine: &mut Engine,
     projected_nodes: &[ProjectedNode],
@@ -1286,31 +1394,39 @@ fn register_source_binding(
             path: node_label(current),
             reason: format!("invalid target slot `{slot_name}`: {e}"),
         })?;
-    register_source_binding_at_path(engine, current, slot_name, source, target_slot, frame)
+    register_source_binding_at_path(
+        engine,
+        projected_nodes,
+        current,
+        slot_name,
+        source,
+        target_slot,
+        frame,
+    )
 }
 
 fn register_source_binding_at_path(
     engine: &mut Engine,
+    projected_nodes: &[ProjectedNode],
     current: &ProjectedNode,
     binding_slot_name: &str,
     source: BindingSource,
     target_slot: SlotPath,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
+    let draft = BindingDraft {
+        source,
+        target: BindingTarget::ConsumedSlot {
+            node: current.id,
+            slot: target_slot,
+        },
+        priority: BindingPriority::new(0),
+        kind: binding_kind_for_slot(binding_slot_name),
+        owner: current.id,
+    };
+    assert_draft_directions(projected_nodes, current, &draft)?;
     engine
-        .add_binding(
-            BindingDraft {
-                source,
-                target: BindingTarget::ConsumedSlot {
-                    node: current.id,
-                    slot: target_slot,
-                },
-                priority: BindingPriority::new(0),
-                kind: binding_kind_for_slot(binding_slot_name),
-                owner: current.id,
-            },
-            frame,
-        )
+        .add_binding(draft, frame)
         .map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("register {binding_slot_name} source binding: {e}"),
@@ -1349,20 +1465,19 @@ fn register_target_binding(
             path: node_label(current),
             reason: format!("invalid source slot `{slot_name}`: {e}"),
         })?;
+    let draft = BindingDraft {
+        source: BindingSource::ProducedSlot {
+            node: current.id,
+            slot: source_slot,
+        },
+        target,
+        priority: BindingPriority::authored(),
+        kind: binding_kind_for_slot(slot_name),
+        owner: current.id,
+    };
+    assert_draft_directions(projected_nodes, current, &draft)?;
     engine
-        .add_binding(
-            BindingDraft {
-                source: BindingSource::ProducedSlot {
-                    node: current.id,
-                    slot: source_slot,
-                },
-                target,
-                priority: BindingPriority::authored(),
-                kind: binding_kind_for_slot(slot_name),
-                owner: current.id,
-            },
-            frame,
-        )
+        .add_binding(draft, frame)
         .map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("register {slot_name} target binding: {e}"),

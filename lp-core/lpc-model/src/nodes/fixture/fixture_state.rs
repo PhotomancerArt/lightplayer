@@ -4,8 +4,10 @@ use crate::{ControlExtent, ControlProduct, ControlProductSlot, NodeId, Slotted};
 
 /// Runtime state exposed by a fixture node.
 #[derive(Default, Slotted)]
+#[slot(default_policy = "read_only_transient")]
 pub struct FixtureState {
     /// Renderable control output produced by this fixture node.
+    #[slot(produced)]
     pub output: ControlProductSlot,
 }
 
