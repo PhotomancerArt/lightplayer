@@ -73,10 +73,7 @@ fn scan_helper_op_needs(ir: &LpirModule) -> (bool, bool) {
 /// lowering calls, but `lps-glsl` emits `Fsqrt`/`Fnearest` directly without
 /// declaring them. Returns a copy of `ir` with the missing helper import
 /// decls appended, or `None` when `ir` already has everything emission needs.
-pub(crate) fn with_missing_helper_imports(
-    ir: &LpirModule,
-    mode: FloatMode,
-) -> Option<LpirModule> {
+pub(crate) fn with_missing_helper_imports(ir: &LpirModule, mode: FloatMode) -> Option<LpirModule> {
     if mode != FloatMode::Q32 {
         return None;
     }
