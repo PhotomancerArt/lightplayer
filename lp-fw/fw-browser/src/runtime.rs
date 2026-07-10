@@ -5,9 +5,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use fw_core::{drain_client_messages, tick_server_frame};
+use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{
-    ButtonService, Graphics, LpGraphics, LpServer, RadioService, RenderTextureRequest,
-    VisualProduct,
+    ButtonService, LpGraphics, LpServer, RadioService, RenderTextureRequest, VisualProduct,
 };
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
@@ -52,7 +52,7 @@ impl BrowserFirmwareRuntime {
         )));
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let radio_service: Rc<dyn RadioService> = hardware;
-        let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+        let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
         let time = ManualTimeProvider::new();
         let time_provider: Rc<dyn TimeProvider> = Rc::new(time.clone());
         let server = LpServer::new_with_hardware_services(

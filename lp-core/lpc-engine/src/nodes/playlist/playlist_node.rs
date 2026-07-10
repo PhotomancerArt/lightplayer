@@ -1,19 +1,21 @@
 //! Runtime playlist node: selects and blends owned visual child entries.
 
 use alloc::format;
+use alloc::vec;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
+use lp_gfx::TextureHandle;
 use lpc_model::{
     ControlMessage, FromLpValue, NodeId, PlaylistState, SlotAccess, SlotData, SlotPath,
     SlotShapeRegistry, SlotShapeRegistryError,
 };
-use lps_shared::{TextureBuffer, TextureStorageFormat};
+use lps_shared::TextureStorageFormat;
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, RuntimeStateShape, TickContext,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext, err_ctx,
 };
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
@@ -231,27 +233,32 @@ impl RenderNode for PlaylistNode {
                 .graphics()
                 .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
             graphics
-                .alloc_output_buffer(request.width, request.height)
-                .map_err(|e| NodeError::msg(format!("playlist scratch texture: {e}")))?
+                .create_render_target(request.width, request.height)
+                .map_err(err_ctx("playlist scratch texture"))?
         };
         self.render_texture_into(product, request, &mut texture, ctx)?;
-        let bytes = texture.data().to_vec();
-        ctx.graphics()
+        let bytes = ctx
+            .graphics()
             .expect("graphics checked above")
-            .free_output_buffer(texture);
+            .read_back(&texture)
+            .map_err(err_ctx("playlist scratch read back"))?
+            .into_bytes();
         TextureRenderProduct::rgba16_unorm(request.width, request.height, bytes)
-            .map_err(|e| NodeError::msg(format!("playlist texture product: {e}")))
+            .map_err(err_ctx("playlist texture product"))
     }
 
     fn render_texture_into(
         &mut self,
         _product: lpc_model::VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         let Some(active) = self.active_product else {
-            target.data_mut().fill(0);
+            ctx.graphics()
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+                .clear_texture(target)
+                .map_err(err_ctx("playlist clear target"))?;
             return Ok(());
         };
         let Some(alpha) = self.transition_alpha(ctx.time_seconds()) else {
@@ -272,29 +279,38 @@ impl RenderNode for PlaylistNode {
                 .graphics()
                 .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
             graphics
-                .alloc_output_buffer(request.width, request.height)
-                .map_err(|e| NodeError::msg(format!("playlist previous texture: {e}")))?
+                .create_render_target(request.width, request.height)
+                .map_err(err_ctx("playlist previous texture"))?
         };
         let mut active_texture = {
             let graphics = ctx
                 .graphics()
                 .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
             graphics
-                .alloc_output_buffer(request.width, request.height)
-                .map_err(|e| NodeError::msg(format!("playlist active texture: {e}")))?
+                .create_render_target(request.width, request.height)
+                .map_err(err_ctx("playlist active texture"))?
         };
         ctx.render_texture_into(previous, request, &mut previous_texture)?;
         ctx.render_texture_into(active, request, &mut active_texture)?;
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        let previous_bytes = graphics
+            .read_back(&previous_texture)
+            .map_err(err_ctx("playlist previous read back"))?;
+        let active_bytes = graphics
+            .read_back(&active_texture)
+            .map_err(err_ctx("playlist active read back"))?;
+        let mut blended = vec![0u8; previous_bytes.bytes().len()];
         blend_rgba16(
-            previous_texture.data(),
-            active_texture.data(),
+            previous_bytes.bytes(),
+            active_bytes.bytes(),
             alpha,
-            target.data_mut(),
+            &mut blended,
         )?;
-        let graphics = ctx.graphics().expect("graphics checked above");
-        graphics.free_output_buffer(previous_texture);
-        graphics.free_output_buffer(active_texture);
-        Ok(())
+        graphics
+            .write_texture(target, &blended)
+            .map_err(err_ctx("playlist crossfade write"))
     }
 
     fn sample_visual_into(
@@ -305,7 +321,10 @@ impl RenderNode for PlaylistNode {
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         let Some(active) = self.active_product else {
-            target.samples.data_mut().fill(0);
+            ctx.graphics()
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+                .clear_sample_out(target.samples)
+                .map_err(err_ctx("playlist clear samples"))?;
             return Ok(());
         };
         let Some(alpha) = self.transition_alpha(ctx.time_seconds()) else {
@@ -324,60 +343,57 @@ impl RenderNode for PlaylistNode {
                 .graphics()
                 .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
             graphics
-                .alloc_sample_rgba16(point_count)
-                .map_err(|e| NodeError::msg(format!("playlist previous samples: {e}")))?
+                .create_sample_out(point_count)
+                .map_err(err_ctx("playlist previous samples"))?
         };
         let mut active_samples = {
             let graphics = ctx
                 .graphics()
                 .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-            match graphics.alloc_sample_rgba16(point_count) {
-                Ok(samples) => samples,
-                Err(e) => {
-                    graphics.free_sample_rgba16(previous_samples);
-                    return Err(NodeError::msg(format!("playlist active samples: {e}")));
-                }
-            }
+            graphics
+                .create_sample_out(point_count)
+                .map_err(err_ctx("playlist active samples"))?
         };
 
         let points = request.points;
-        let result = (|| {
-            ctx.sample_visual_into(
-                previous,
-                VisualSampleBufferRequest {
-                    points: &mut *points,
-                    output_width: request.output_width,
-                    output_height: request.output_height,
-                    time_seconds: request.time_seconds,
-                },
-                VisualSampleTarget {
-                    samples: &mut previous_samples,
-                },
-            )?;
-            ctx.sample_visual_into(
-                active,
-                VisualSampleBufferRequest {
-                    points: &mut *points,
-                    output_width: request.output_width,
-                    output_height: request.output_height,
-                    time_seconds: request.time_seconds,
-                },
-                VisualSampleTarget {
-                    samples: &mut active_samples,
-                },
-            )?;
-            blend_rgba16_samples(
-                previous_samples.data(),
-                active_samples.data(),
-                alpha,
-                target.samples.data_mut(),
-            )
-        })();
-
-        let graphics = ctx.graphics().expect("graphics checked above");
-        graphics.free_sample_rgba16(previous_samples);
-        graphics.free_sample_rgba16(active_samples);
-        result
+        ctx.sample_visual_into(
+            previous,
+            VisualSampleBufferRequest {
+                points: &mut *points,
+                output_width: request.output_width,
+                output_height: request.output_height,
+                time_seconds: request.time_seconds,
+            },
+            VisualSampleTarget {
+                samples: &mut previous_samples,
+            },
+        )?;
+        ctx.sample_visual_into(
+            active,
+            VisualSampleBufferRequest {
+                points: &mut *points,
+                output_width: request.output_width,
+                output_height: request.output_height,
+                time_seconds: request.time_seconds,
+            },
+            VisualSampleTarget {
+                samples: &mut active_samples,
+            },
+        )?;
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        let previous_channels = graphics
+            .read_sample_out(&previous_samples)
+            .map_err(err_ctx("playlist previous sample read"))?;
+        let active_channels = graphics
+            .read_sample_out(&active_samples)
+            .map_err(err_ctx("playlist active sample read"))?;
+        let mut blended = vec![0u16; previous_channels.len()];
+        blend_rgba16_samples(&previous_channels, &active_channels, alpha, &mut blended)?;
+        graphics
+            .write_sample_out(target.samples, &blended)
+            .map_err(err_ctx("playlist crossfade sample write"))
     }
 }
 
@@ -422,7 +438,7 @@ fn control_message_from_slot_data(data: &SlotData) -> Result<Option<ControlMessa
     };
     ControlMessage::from_lp_value(value.value())
         .map(Some)
-        .map_err(|e| NodeError::msg(format!("control message value: {e}")))
+        .map_err(err_ctx("control message value"))
 }
 
 fn resolve_entry_product(
@@ -438,8 +454,7 @@ fn resolve_entry_product(
     let value = production
         .value_leaf()
         .ok_or_else(|| NodeError::msg("playlist child output is not a value"))?;
-    lpc_model::VisualProduct::from_lp_value(value.value())
-        .map_err(|e| NodeError::msg(format!("playlist child output: {e}")))
+    lpc_model::VisualProduct::from_lp_value(value.value()).map_err(err_ctx("playlist child output"))
 }
 
 fn blend_rgba16(

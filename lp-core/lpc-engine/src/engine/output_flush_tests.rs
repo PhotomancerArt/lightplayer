@@ -2,12 +2,11 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::default_demand_input_path;
-use crate::engine::error::Error;
-use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use crate::node::test_placeholder_spine;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
@@ -18,6 +17,11 @@ use crate::nodes::{
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resource::RuntimeBufferId;
+use lp_gfx::{
+    GfxError, LpGraphics, LpShader, SampleOutHandle, SamplePointsHandle, ShaderCompileOptions,
+    TextureData, TextureHandle,
+};
+use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::{
@@ -29,6 +33,7 @@ use lpc_shared::output::{
     MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
+use lps_shared::TextureStorageFormat;
 
 use super::{Engine, EngineServices};
 
@@ -64,26 +69,25 @@ fn endpoint(spec: &'static str) -> HwEndpointSpec {
 }
 
 struct CountingGraphics {
-    inner: crate::Graphics,
+    inner: TargetLpvmGraphics,
+    /// Render-target allocations observed via [`LpGraphics::create_render_target`].
+    ///
+    /// Frees are RAII (handle drop) and go straight to the backend, so reuse
+    /// is asserted through the allocation count alone: a cached target that
+    /// is reused across frames allocates exactly once.
     output_alloc_count: AtomicU32,
-    output_free_count: AtomicU32,
 }
 
 impl CountingGraphics {
     fn new() -> Self {
         Self {
-            inner: crate::Graphics::new(),
+            inner: TargetLpvmGraphics::new(),
             output_alloc_count: AtomicU32::new(0),
-            output_free_count: AtomicU32::new(0),
         }
     }
 
     fn output_alloc_count(&self) -> u32 {
         self.output_alloc_count.load(Ordering::Relaxed)
-    }
-
-    fn output_free_count(&self) -> u32 {
-        self.output_free_count.load(Ordering::Relaxed)
     }
 }
 
@@ -92,7 +96,7 @@ impl LpGraphics for CountingGraphics {
         &self,
         source: &str,
         options: &ShaderCompileOptions,
-    ) -> Result<Box<dyn LpShader>, Error> {
+    ) -> Result<Box<dyn LpShader>, GfxError> {
         self.inner.compile_shader(source, options)
     }
 
@@ -100,34 +104,63 @@ impl LpGraphics for CountingGraphics {
         self.inner.backend_name()
     }
 
-    fn alloc_output_buffer(
+    fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
+        self.output_alloc_count.fetch_add(1, Ordering::Relaxed);
+        self.inner.create_render_target(width, height)
+    }
+
+    fn create_texture(
         &self,
         width: u32,
         height: u32,
-    ) -> Result<lp_shader::LpsTextureBuf, Error> {
-        self.output_alloc_count.fetch_add(1, Ordering::Relaxed);
-        self.inner.alloc_output_buffer(width, height)
+        format: TextureStorageFormat,
+        texels: &[u8],
+    ) -> Result<TextureHandle, GfxError> {
+        self.inner.create_texture(width, height, format, texels)
     }
 
-    fn free_output_buffer(&self, buffer: lp_shader::LpsTextureBuf) {
-        self.output_free_count.fetch_add(1, Ordering::Relaxed);
-        self.inner.free_output_buffer(buffer);
+    fn write_texture(&self, texture: &mut TextureHandle, texels: &[u8]) -> Result<(), GfxError> {
+        self.inner.write_texture(texture, texels)
     }
 
-    fn alloc_sample_points(&self, count: u32) -> Result<lp_shader::LpsSamplePointBuf, Error> {
-        self.inner.alloc_sample_points(count)
+    fn clear_texture(&self, texture: &mut TextureHandle) -> Result<(), GfxError> {
+        self.inner.clear_texture(texture)
     }
 
-    fn alloc_sample_rgba16(&self, count: u32) -> Result<lp_shader::LpsSampleRgba16Buf, Error> {
-        self.inner.alloc_sample_rgba16(count)
+    fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError> {
+        self.inner.read_back(texture)
     }
 
-    fn free_sample_points(&self, buffer: lp_shader::LpsSamplePointBuf) {
-        self.inner.free_sample_points(buffer);
+    fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError> {
+        self.inner.create_sample_points(count)
     }
 
-    fn free_sample_rgba16(&self, buffer: lp_shader::LpsSampleRgba16Buf) {
-        self.inner.free_sample_rgba16(buffer);
+    fn write_sample_points(
+        &self,
+        points: &mut SamplePointsHandle,
+        xy_q16: &[i32],
+    ) -> Result<(), GfxError> {
+        self.inner.write_sample_points(points, xy_q16)
+    }
+
+    fn read_sample_points(&self, points: &SamplePointsHandle) -> Result<Vec<i32>, GfxError> {
+        self.inner.read_sample_points(points)
+    }
+
+    fn create_sample_out(&self, count: u32) -> Result<SampleOutHandle, GfxError> {
+        self.inner.create_sample_out(count)
+    }
+
+    fn write_sample_out(&self, out: &mut SampleOutHandle, rgba16: &[u16]) -> Result<(), GfxError> {
+        self.inner.write_sample_out(out, rgba16)
+    }
+
+    fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
+        self.inner.read_sample_out(out)
+    }
+
+    fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
+        self.inner.clear_sample_out(out)
     }
 }
 
@@ -497,12 +530,8 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     assert_eq!(
         graphics.output_alloc_count(),
         1,
-        "fixture should allocate one render target and reuse it across frames",
-    );
-    assert_eq!(
-        graphics.output_free_count(),
-        0,
-        "unchanged render size should not resize/free the fixture target",
+        "fixture should allocate one render target and reuse it across frames \
+         (an unchanged render size must not resize/reallocate the target)",
     );
 }
 
@@ -517,7 +546,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
     let registry = ProjectRegistry::new();
-    rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+    rt.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
@@ -645,7 +674,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
     let registry = ProjectRegistry::new();
-    rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+    rt.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);

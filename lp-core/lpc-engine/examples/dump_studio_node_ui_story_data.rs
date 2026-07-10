@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use lpc_engine::{
-    ButtonService, EngineProjectReadSource, EngineServices, Graphics, ProjectLoader, RadioService,
+    ButtonService, EngineProjectReadSource, EngineServices, ProjectLoader, RadioService,
 };
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::{
@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     services.set_radio_service(Some(radio_service));
 
     let mut runtime = ProjectLoader::load_from_root(&fs, services)?;
-    runtime.set_graphics(Some(Arc::new(Graphics::new())));
+    runtime.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     for _ in 0..102 {
         runtime.tick(33)?;
     }

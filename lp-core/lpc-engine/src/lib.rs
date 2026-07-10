@@ -13,13 +13,13 @@ extern crate alloc;
 
 pub mod dataflow;
 pub mod engine;
-pub mod gfx;
 pub mod node;
 pub mod nodes;
 pub mod product;
 pub mod products;
 pub mod resource;
 pub mod resources;
+pub mod shader_abi;
 
 pub use engine::error::Error;
 pub use engine::{
@@ -27,4 +27,7 @@ pub use engine::{
     FrameTime, OutputFlushError, ProjectLoadError, ProjectLoader, ProjectReadEventStreamError,
     RadioService, RuntimeApplyResult,
 };
-pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};
+// Graphics seam re-exports: the traits/handles live in `lp-gfx`; the
+// cfg-selected CPU implementation is `lp_gfx_lpvm::LpvmGraphics` (constructed
+// by hosts, injected via `Engine::set_graphics`).
+pub use lp_gfx::{GfxError, LpGraphics, LpShader, ShaderCompileOptions};

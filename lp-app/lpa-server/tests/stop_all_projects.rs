@@ -3,7 +3,8 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpa_server::{Graphics, LpGraphics, LpServer, handlers::handle_client_message};
+use lp_gfx_lpvm::TargetLpvmGraphics;
+use lpa_server::{LpGraphics, LpServer, handlers::handle_client_message};
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpc_shared::ProjectBuilder;
 use lpc_shared::output::MemoryOutputProvider;
@@ -76,7 +77,7 @@ fn test_stop_all_projects() {
     // Create output provider
     let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
 
     // Create server with prepared filesystem
     let mut server = LpServer::new(

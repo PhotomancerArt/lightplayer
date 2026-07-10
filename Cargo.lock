@@ -3638,6 +3638,7 @@ name = "fw-browser"
 version = "40.0.0"
 dependencies = [
  "fw-core",
+ "lp-gfx-lpvm",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
@@ -3685,6 +3686,7 @@ dependencies = [
  "fw-core",
  "hashbrown 0.15.5",
  "log",
+ "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
  "lp-riscv-elf",
@@ -3731,6 +3733,7 @@ dependencies = [
  "littlefs-rust",
  "log",
  "lp-collection 1.0.0",
+ "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
  "lp-shader",
@@ -3756,6 +3759,7 @@ name = "fw-host"
 version = "40.0.0"
 dependencies = [
  "fw-core",
+ "lp-gfx-lpvm",
  "lpa-client",
  "lpa-server",
  "lpc-hardware",
@@ -5064,6 +5068,7 @@ dependencies = [
  "jsonschema",
  "log",
  "lp-collection 1.0.0",
+ "lp-gfx-lpvm",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
@@ -5114,6 +5119,29 @@ version = "1.0.0"
 source = "git+https://github.com/light-player/lp-common?branch=main#c27c24b3ce4bf6e7af1c3e1db84c20095d0aad56"
 dependencies = [
  "rustc-hash 2.1.1",
+]
+
+[[package]]
+name = "lp-gfx"
+version = "40.0.0"
+dependencies = [
+ "lp-shader",
+ "lpir",
+ "lps-q32",
+ "lps-shared",
+]
+
+[[package]]
+name = "lp-gfx-lpvm"
+version = "40.0.0"
+dependencies = [
+ "lp-gfx",
+ "lp-shader",
+ "lps-builtins",
+ "lps-shared",
+ "lpvm",
+ "lpvm-native",
+ "lpvm-wasm",
 ]
 
 [[package]]
@@ -5279,6 +5307,7 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
+ "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
  "lpc-engine",
@@ -5298,6 +5327,7 @@ dependencies = [
  "async-trait",
  "js-sys",
  "log",
+ "lp-gfx-lpvm",
  "lpa-client",
  "lpa-link",
  "lpa-server",
@@ -5355,6 +5385,8 @@ dependencies = [
  "libm",
  "log",
  "lp-collection 1.0.0",
+ "lp-gfx",
+ "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
  "lp-shader",
@@ -5366,12 +5398,8 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "lpir",
- "lps-builtins",
  "lps-q32",
  "lps-shared",
- "lpvm",
- "lpvm-native",
- "lpvm-wasm",
  "serde",
  "serde_json",
  "spin",

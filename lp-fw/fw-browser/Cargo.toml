@@ -17,6 +17,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 fw-core = { path = "../fw-core", features = ["std"] }
 lpa-server = { path = "../../lp-app/lpa-server" }
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm" }
 lpc-hardware = { path = "../../lp-core/lpc-hardware" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-shared = { path = "../../lp-core/lpc-shared" }

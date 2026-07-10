@@ -31,6 +31,9 @@ members = [
     "lp-core/lpc-slot-macros",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    # lp-gfx workspace members
+    "lp-gfx/lp-gfx",
+    "lp-gfx/lp-gfx-lpvm",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -89,6 +92,9 @@ default-members = [
     "lp-core/lpc-model",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    # lp-gfx workspace members
+    "lp-gfx/lp-gfx",
+    "lp-gfx/lp-gfx-lpvm",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",

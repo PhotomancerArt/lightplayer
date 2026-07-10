@@ -34,6 +34,9 @@ hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 
 [dev-dependencies]
+# Concrete CPU graphics backend for tests and doc examples (the server takes
+# an injected `Arc<dyn LpGraphics>`; hosts construct the backend).
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, features = ["std"] }
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["std"] }
 lpc-registry = { path = "../../lp-core/lpc-registry", default-features = false, features = ["std"] }

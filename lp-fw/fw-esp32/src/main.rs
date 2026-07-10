@@ -417,7 +417,8 @@ use {
     core::cell::RefCell,
     hardware::button::Esp32GpioButtonDriver,
     hardware::manifest_loader::load_hardware_manifest,
-    lpa_server::{ButtonService, Graphics, LpGraphics, LpServer},
+    lp_gfx_lpvm::TargetLpvmGraphics,
+    lpa_server::{ButtonService, LpGraphics, LpServer},
     lpc_hardware::{HardwareSystem, HwRegistry},
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
@@ -697,7 +698,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Create server (with time provider for shader comp timing). RV32 uses lpvm-native rt_jit.
     esp_println::println!("[INIT] Creating LpServer instance...");
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let button_service: Rc<dyn ButtonService> = hardware_system.clone();
     let radio_service: Rc<dyn lpa_server::RadioService> = hardware_system.clone();
     let mut server = LpServer::new_with_hardware_services(

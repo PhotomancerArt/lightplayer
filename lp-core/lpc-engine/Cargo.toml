@@ -26,9 +26,8 @@ serde = { workspace = true, features = ["derive"] }
 hashbrown = { workspace = true }
 spin = { workspace = true }
 lpir = { path = "../../lp-shader/lpir", default-features = false }
+lp-gfx = { path = "../../lp-gfx/lp-gfx", default-features = false }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
-lpvm = { path = "../../lp-shader/lpvm", default-features = false }
-lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
@@ -43,19 +42,10 @@ lpc-shared = { path = "../lpc-shared", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 libm = "0.2"
 
-# Backend selection: exactly one LPVM engine is wired into `gfx::Graphics`,
-# chosen by target architecture rather than a Cargo feature.
-#   - riscv32       → lpvm-native (rt_jit)        — bare-metal firmware
-#   - everything else → lpvm-wasm (rt_wasmtime/rt_browser) — host or wasm32 guest
-[target.'cfg(target_arch = "riscv32")'.dependencies]
-# Note: lpvm-native's 'debug' feature (interleaved/disasm sections) is disabled
-# for firmware builds to reduce code size and improve compilation performance.
-lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
-
-[target.'cfg(not(target_arch = "riscv32"))'.dependencies]
-lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }
-
 [dev-dependencies]
+# Concrete CPU graphics backend for tests and examples (the engine itself
+# depends only on the `lp-gfx` traits; hosts construct the backend).
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
 # Per-thread ambient revision so parallel engine tests that tick/stamp
 # revisions cannot race each other through the process-wide clock.
 lpc-model = { path = "../lpc-model", features = ["test-support"] }

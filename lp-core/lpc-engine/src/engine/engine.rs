@@ -23,7 +23,6 @@ use crate::dataflow::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
-use crate::gfx::LpGraphics;
 use crate::node::RuntimeNodeEntry;
 use crate::node::catch_node_panic::catch_node_panic_framed;
 use crate::node::{
@@ -38,6 +37,7 @@ use crate::products::visual::{
     VisualSampleTarget,
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
+use lp_gfx::{LpGraphics, TextureHandle};
 
 use super::{ButtonService, EngineError, EngineServices, ProjectRuntimeIndex, RadioService};
 use super::{FrameNum, FrameTime};
@@ -1044,7 +1044,7 @@ impl EngineResolveHost<'_> {
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
     ) -> Result<(), SessionResolveError> {
         let node_id = product.node();
         let revision = current_revision();
@@ -1534,7 +1534,7 @@ impl ControlRenderServices for EngineResolveHost<'_> {
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
     ) -> Result<(), NodeError> {
         self.render_node_texture_into(product, request, target)
             .map_err(|e| NodeError::msg(format!("render texture: {e}")))
@@ -1565,7 +1565,7 @@ impl VisualRenderServices for EngineResolveHost<'_> {
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
     ) -> Result<(), NodeError> {
         self.render_node_texture_into(product, request, target)
             .map_err(|e| NodeError::msg(format!("render texture: {e}")))

@@ -5,6 +5,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use lp_gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
 use lpc_model::{
     AddSubMode, AssetLocation, DivMode, GlslOpts, MapSlot, MulMode, NodeId, NodeRuntimeStatus,
     Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState,
@@ -14,18 +15,17 @@ use lpc_model::{
 use lpc_model::{ShaderDef, SlotAccessor};
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
-use lps_shared::TextureBuffer;
 
 use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
-use crate::gfx::uniforms::{VisualUniform, build_uniforms};
-use crate::gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
     PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
+    err_ctx,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
+use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
 use super::shader_input_materialize::materialize_shader_input;
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
@@ -169,7 +169,7 @@ impl ShaderNode {
     fn update_config_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let accessors =
             ShaderConfigAccessors::get_or_compile(&mut self.config_accessors, ctx.slot_shapes())
-                .map_err(|e| NodeError::msg(format!("compile shader config view: {e}")))?;
+                .map_err(err_ctx("compile shader config view"))?;
         let next_add_sub = accessors.add_sub.get(ctx)?;
         let next_mul = accessors.mul.get(ctx)?;
         let next_div = accessors.div.get(ctx)?;
@@ -499,42 +499,38 @@ impl RenderNode for ShaderNode {
                 .graphics()
                 .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
             let texture = graphics
-                .alloc_output_buffer(request.width, request.height)
-                .map_err(|e| NodeError::msg(format!("alloc_output_buffer: {e}")))?;
+                .create_render_target(request.width, request.height)
+                .map_err(err_ctx("create_render_target"))?;
             if texture.format() != request.format {
-                let allocated = texture.format();
-                graphics.free_output_buffer(texture);
                 return Err(NodeError::msg(format!(
-                    "graphics allocated {allocated:?}, requested {:?}",
+                    "graphics allocated {:?}, requested {:?}",
+                    texture.format(),
                     request.format
                 )));
             }
             texture
         };
-        if let Err(e) = self.render_texture_into(product, request, &mut texture, ctx) {
-            if let Some(graphics) = ctx.graphics() {
-                graphics.free_output_buffer(texture);
-            }
-            return Err(e);
-        }
+        self.render_texture_into(product, request, &mut texture, ctx)?;
 
-        let width = texture.width();
-        let height = texture.height();
-        let format = texture.format();
-        let pixels = texture.data().to_vec();
-        if let Some(graphics) = ctx.graphics() {
-            graphics.free_output_buffer(texture);
-        }
-
-        TextureRenderProduct::new(width, height, format, pixels)
-            .map_err(|e| NodeError::msg(format!("texture product: {e}")))
+        let data = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+            .read_back(&texture)
+            .map_err(err_ctx("read back render target"))?;
+        TextureRenderProduct::new(
+            data.width(),
+            data.height(),
+            data.format(),
+            data.into_bytes(),
+        )
+        .map_err(err_ctx("texture product"))
     }
 
     fn render_texture_into(
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         validate_shader_visual_product(self.node_id, product)?;
@@ -561,7 +557,10 @@ impl RenderNode for ShaderNode {
                     .as_deref()
                     .unwrap_or("shader not compiled")
             );
-            target.data_mut().fill(0);
+            ctx.graphics()
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+                .clear_texture(target)
+                .map_err(err_ctx("clear render target"))?;
             return Ok(());
         }
         let uniforms = build_uniforms(request.width, request.height, &self.visual_uniforms);
@@ -569,12 +568,9 @@ impl RenderNode for ShaderNode {
             .shader
             .as_mut()
             .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
-        if !shader.has_render() {
-            return Err(NodeError::msg("compiled shader has no render() entry"));
-        }
         shader
             .render(target, &uniforms)
-            .map_err(|e| NodeError::msg(format!("shader render: {e}")))
+            .map_err(err_ctx("shader render"))
     }
 
     fn sample_visual_into(
@@ -601,7 +597,10 @@ impl RenderNode for ShaderNode {
                     .as_deref()
                     .unwrap_or("shader not compiled")
             );
-            target.samples.data_mut().fill(0);
+            ctx.graphics()
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+                .clear_sample_out(target.samples)
+                .map_err(err_ctx("clear sample target"))?;
             return Ok(());
         }
         let uniforms = build_uniforms(
@@ -615,7 +614,7 @@ impl RenderNode for ShaderNode {
             .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
         shader
             .sample_rgba16(request.points, target.samples, &uniforms)
-            .map_err(|e| NodeError::msg(format!("shader sample: {e}")))
+            .map_err(err_ctx("shader sample"))
     }
 }
 
@@ -706,20 +705,21 @@ mod tests {
     use crate::dataflow::resolver::QueryKey;
     use crate::dataflow::resolver::ResolveLogLevel;
     use crate::engine::Engine;
-    use crate::engine::error::Error;
     use crate::engine::resolve_with_engine_host;
-    use crate::gfx::LpGraphics;
     use crate::nodes::TextureNode;
     use crate::products::visual::{
         TextureSampleBatch, TextureUvSamplePoint, VisualProduct, VisualSampleBufferRequest,
         VisualSampleTarget, texel_center_to_uv_q16,
     };
+    use lp_gfx::{GfxError, LpGraphics, SampleOutHandle, SamplePointsHandle, TextureData};
+    use lp_gfx_lpvm::TargetLpvmGraphics;
     use lpc_model::{
         ArtifactLocation, ArtifactSpec, AssetContentType, MapSlot, NodeDef, NodeInvocation,
         NodeRuntimeStatus, Revision, SlotDataAccess, StaticSlotShape, TextureDef, TreePath,
     };
     use lpc_registry::{AssetText, ProjectRegistry};
     use lpc_wire::{WireChildKind, WireSlotIndex};
+    use lps_shared::TextureStorageFormat;
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
 
@@ -749,7 +749,7 @@ mod tests {
     {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let tex_invocation = NodeInvocation::new(ArtifactSpec::path("tex.toml"));
@@ -888,7 +888,7 @@ mod tests {
 
     #[test]
     fn shader_direct_sampling_uses_requested_output_size_uniform() {
-        let graphics = Arc::new(crate::Graphics::new());
+        let graphics = Arc::new(TargetLpvmGraphics::new());
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
@@ -906,9 +906,11 @@ mod tests {
             0.0,
         );
 
-        let mut points = graphics.alloc_sample_points(1).expect("points");
-        points.data_mut().copy_from_slice(&[5 * 65536, 8 * 65536]);
-        let mut samples = graphics.alloc_sample_rgba16(1).expect("samples");
+        let mut points = graphics.create_sample_points(1).expect("points");
+        graphics
+            .write_sample_points(&mut points, &[5 * 65536, 8 * 65536])
+            .expect("write points");
+        let mut samples = graphics.create_sample_out(1).expect("samples");
 
         node.sample_visual_into(
             VisualProduct::new(NodeId::new(1), 0),
@@ -925,7 +927,7 @@ mod tests {
         )
         .expect("sample visual");
 
-        let got = samples.data();
+        let got = graphics.read_sample_out(&samples).expect("read samples");
         assert!((i32::from(got[0]) - 32768).abs() <= 16, "{got:?}");
         assert!((i32::from(got[1]) - 32768).abs() <= 16, "{got:?}");
         assert_eq!(got[2], 0);
@@ -934,7 +936,7 @@ mod tests {
 
     #[test]
     fn shader_direct_sampling_matches_rendered_texture_pixel_center() {
-        let graphics = Arc::new(crate::Graphics::new());
+        let graphics = Arc::new(TargetLpvmGraphics::new());
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
@@ -975,11 +977,11 @@ mod tests {
             time_seconds: 0.0,
         });
 
-        let mut points = graphics.alloc_sample_points(1).expect("points");
-        points
-            .data_mut()
-            .copy_from_slice(&[((2 * 65536) + 32768), ((3 * 65536) + 32768)]);
-        let mut samples = graphics.alloc_sample_rgba16(1).expect("samples");
+        let mut points = graphics.create_sample_points(1).expect("points");
+        graphics
+            .write_sample_points(&mut points, &[(2 * 65536) + 32768, (3 * 65536) + 32768])
+            .expect("write points");
+        let mut samples = graphics.create_sample_out(1).expect("samples");
         node.sample_visual_into(
             product,
             VisualSampleBufferRequest {
@@ -996,7 +998,7 @@ mod tests {
         .expect("sample visual");
 
         let rendered = texture_sample.samples[0].rgba_unorm16;
-        let direct = samples.data();
+        let direct = graphics.read_sample_out(&samples).expect("read samples");
         for channel in 0..4 {
             assert!(
                 (i32::from(rendered[channel]) - i32::from(direct[channel])).abs() <= 16,
@@ -1136,18 +1138,27 @@ mod tests {
             time_seconds: 0.0,
         };
 
-        let mut texture = graphics.alloc_output_buffer(4, 4).expect("texture");
+        let mut texture = graphics.create_render_target(4, 4).expect("texture");
         for _ in 0..3 {
             node.render_texture_into(product, &request, &mut texture, &mut ctx)
                 .expect("fallback render");
         }
         assert_eq!(graphics.compile_count(), 1);
         assert!(node.compilation_error().is_some());
-        assert!(texture.data().iter().all(|byte| *byte == 0));
+        assert!(
+            graphics
+                .read_back(&texture)
+                .expect("read back")
+                .bytes()
+                .iter()
+                .all(|byte| *byte == 0)
+        );
 
-        let mut points = graphics.alloc_sample_points(1).expect("points");
-        points.data_mut().copy_from_slice(&[0, 0]);
-        let mut samples = graphics.alloc_sample_rgba16(1).expect("samples");
+        let mut points = graphics.create_sample_points(1).expect("points");
+        graphics
+            .write_sample_points(&mut points, &[0, 0])
+            .expect("write points");
+        let mut samples = graphics.create_sample_out(1).expect("samples");
         node.sample_visual_into(
             product,
             VisualSampleBufferRequest {
@@ -1163,11 +1174,17 @@ mod tests {
         )
         .expect("fallback sample");
         assert_eq!(graphics.compile_count(), 1);
-        assert!(samples.data().iter().all(|channel| *channel == 0));
+        assert!(
+            graphics
+                .read_sample_out(&samples)
+                .expect("read samples")
+                .iter()
+                .all(|channel| *channel == 0)
+        );
     }
 
     struct CountingGraphics {
-        inner: crate::Graphics,
+        inner: TargetLpvmGraphics,
         compile_count: AtomicU32,
         fail_compile: bool,
     }
@@ -1175,7 +1192,7 @@ mod tests {
     impl CountingGraphics {
         fn new() -> Self {
             Self {
-                inner: crate::Graphics::new(),
+                inner: TargetLpvmGraphics::new(),
                 compile_count: AtomicU32::new(0),
                 fail_compile: false,
             }
@@ -1198,12 +1215,10 @@ mod tests {
             &self,
             _source: &str,
             _options: &ShaderCompileOptions,
-        ) -> Result<Box<dyn LpShader>, Error> {
+        ) -> Result<Box<dyn LpShader>, GfxError> {
             self.compile_count.fetch_add(1, Ordering::Relaxed);
             if self.fail_compile {
-                return Err(Error::Other {
-                    message: String::from("test compile failure"),
-                });
+                return Err(GfxError::Compile(String::from("test compile failure")));
             }
             Ok(Box::new(CountingShader))
         }
@@ -1212,32 +1227,70 @@ mod tests {
             "counting-test"
         }
 
-        fn alloc_output_buffer(
+        fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
+            self.inner.create_render_target(width, height)
+        }
+
+        fn create_texture(
             &self,
             width: u32,
             height: u32,
-        ) -> Result<lp_shader::LpsTextureBuf, Error> {
-            self.inner.alloc_output_buffer(width, height)
+            format: TextureStorageFormat,
+            texels: &[u8],
+        ) -> Result<TextureHandle, GfxError> {
+            self.inner.create_texture(width, height, format, texels)
         }
 
-        fn free_output_buffer(&self, buffer: lp_shader::LpsTextureBuf) {
-            self.inner.free_output_buffer(buffer);
+        fn write_texture(
+            &self,
+            texture: &mut TextureHandle,
+            texels: &[u8],
+        ) -> Result<(), GfxError> {
+            self.inner.write_texture(texture, texels)
         }
 
-        fn alloc_sample_points(&self, count: u32) -> Result<lp_shader::LpsSamplePointBuf, Error> {
-            self.inner.alloc_sample_points(count)
+        fn clear_texture(&self, texture: &mut TextureHandle) -> Result<(), GfxError> {
+            self.inner.clear_texture(texture)
         }
 
-        fn alloc_sample_rgba16(&self, count: u32) -> Result<lp_shader::LpsSampleRgba16Buf, Error> {
-            self.inner.alloc_sample_rgba16(count)
+        fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError> {
+            self.inner.read_back(texture)
         }
 
-        fn free_sample_points(&self, buffer: lp_shader::LpsSamplePointBuf) {
-            self.inner.free_sample_points(buffer);
+        fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError> {
+            self.inner.create_sample_points(count)
         }
 
-        fn free_sample_rgba16(&self, buffer: lp_shader::LpsSampleRgba16Buf) {
-            self.inner.free_sample_rgba16(buffer);
+        fn write_sample_points(
+            &self,
+            points: &mut SamplePointsHandle,
+            xy_q16: &[i32],
+        ) -> Result<(), GfxError> {
+            self.inner.write_sample_points(points, xy_q16)
+        }
+
+        fn read_sample_points(&self, points: &SamplePointsHandle) -> Result<Vec<i32>, GfxError> {
+            self.inner.read_sample_points(points)
+        }
+
+        fn create_sample_out(&self, count: u32) -> Result<SampleOutHandle, GfxError> {
+            self.inner.create_sample_out(count)
+        }
+
+        fn write_sample_out(
+            &self,
+            out: &mut SampleOutHandle,
+            rgba16: &[u16],
+        ) -> Result<(), GfxError> {
+            self.inner.write_sample_out(out, rgba16)
+        }
+
+        fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
+            self.inner.read_sample_out(out)
+        }
+
+        fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
+            self.inner.clear_sample_out(out)
         }
     }
 
@@ -1246,15 +1299,12 @@ mod tests {
     impl LpShader for CountingShader {
         fn render(
             &mut self,
-            texture: &mut lp_shader::LpsTextureBuf,
+            _target: &mut TextureHandle,
             _uniforms: &LpsValueF32,
-        ) -> Result<(), Error> {
-            texture.data_mut().fill(0);
+        ) -> Result<(), GfxError> {
+            // Render targets from `create_render_target` are freshly zeroed,
+            // so "render black" is a no-op for this counting stub.
             Ok(())
-        }
-
-        fn has_render(&self) -> bool {
-            true
         }
     }
 }

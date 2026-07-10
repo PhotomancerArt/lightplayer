@@ -14,12 +14,13 @@ use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
 use crate::dataflow::resolver::QueryKey;
-use crate::gfx::{LpComputeShader, ShaderCompileOptions, compute_desc_from_model_def};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
     PressureLevel, ProduceResult, TickContext,
 };
+use crate::shader_abi::compute_desc_from_model_def;
+use lp_gfx::{LpComputeShader, ShaderCompileOptions};
 
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
@@ -455,7 +456,7 @@ void tick() {{
         );
 
         let mut engine = Engine::new(TreePath::parse("/compute.show").expect("path"));
-        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = lpc_model::Revision::new(1);
         let root = engine.tree().root();
         let node_id = engine
