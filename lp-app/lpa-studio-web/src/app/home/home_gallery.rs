@@ -148,9 +148,12 @@ pub fn HomeGallery(
                     } else {
                         div { class: card_grid_class(),
                             for card in home.projects.clone() {
+                                // opens arrive keyed by uid (menu paths)
+                                // or slug (href navigation) — match either
                                 PackageCard {
                                     key: "{card.uid}",
-                                    opening: home.opening.as_deref() == Some(card.uid.as_str()),
+                                    opening: home.opening.as_deref() == Some(card.uid.as_str())
+                                        || home.opening.as_deref() == Some(card.slug.as_str()),
                                     busy,
                                     card,
                                     now_secs,

@@ -30,20 +30,28 @@ pub(crate) fn PackageCard(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(platform_now_secs);
-    let open_card = card.clone();
     let edited_line = card.last_saved_at.map(|at| time_ago(now, at));
     // the slug IS the title; the thumbnail initial skips its date stamp
 
     rsx! {
         article {
             class: package_card_class(opening),
-            onclick: move |_| {
-                if !busy && !opening {
-                    on_action.call(home_action(HomeOp::OpenPackage {
-                        key: open_card.uid.clone(),
-                    }));
-                }
-            },
+            // Opening a card is NAVIGATION, so it is a real <a> to the
+            // project route: plain click rides the hashchange → open path,
+            // and cmd/middle-click "open in new tab" works natively. The
+            // link stretches over the card (absolute overlay) instead of
+            // wrapping it, so the card menu isn't interactive-inside-
+            // interactive markup; the menu floats above it (z-order).
+            a {
+                class: "tw:absolute tw:inset-0 tw:z-[1]",
+                href: "#/project/{card.slug}",
+                aria_label: "Open {card.slug}",
+                onclick: move |event| {
+                    if busy || opening {
+                        event.prevent_default();
+                    }
+                },
+            }
             CardThumb { seed: card.uid.clone(), label: card.slug.clone() }
             div { class: "tw:flex tw:items-start tw:justify-between tw:gap-2 tw:p-3",
                 div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
@@ -75,7 +83,8 @@ pub(crate) fn PackageCard(
                         }
                     }
                 }
-                span { onclick: move |event| event.stop_propagation(),
+                span {
+                    class: "tw:relative tw:z-[2]",
                     PackageCardMenu { card: card.clone(), on_action }
                 }
             }
@@ -169,10 +178,11 @@ pub(crate) fn home_action(op: HomeOp) -> UiAction {
 }
 
 fn package_card_class(opening: bool) -> &'static str {
+    // tw:relative anchors the stretched open link (see the card markup)
     if opening {
-        "tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+        "tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
     } else {
-        "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+        "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
     }
 }
 
