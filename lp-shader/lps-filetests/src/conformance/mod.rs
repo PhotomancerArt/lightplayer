@@ -331,12 +331,12 @@ mod tests {
         // Only the color/math canonicals and their probes are compiled in
         // Q32 mode; see the exclusion rationale above.
         //
-        // The wasm.q32 backend rejects modules with *overloaded* local GLSL
-        // functions (duplicate export names fail wasm validation — verified
-        // 2026-07-08, pre-existing backend limitation, not introduced
-        // here). The canonical sources legitimately use overloading, so
-        // this tier uniquifies the color/math overloads with an
-        // assertion-guarded textual transform before compiling.
+        // The same probe text drives both sides: `canonical_subset_source`
+        // renames `lpfn_` → `lpo_`, so the canonical side calls the compiled
+        // canonical overloads while the rust side calls the `lpfn_*`
+        // builtins. (The wasm.q32 backend disambiguates overloaded export
+        // names by signature — see `lpvm-wasm`'s `export_fn_names` and the
+        // `function/overload-local-duplicate.glsl` filetest.)
         let rust_probes = "\
 float probe_saturate1(float x) { return lpfn_saturate(x); }\n\
 vec3 probe_saturate3(vec3 v) { return lpfn_saturate(v); }\n\
@@ -346,64 +346,8 @@ vec3 probe_hsv2rgb3(vec3 hsv) { return lpfn_hsv2rgb(hsv); }\n\
 vec4 probe_hsv2rgb4(vec4 hsv) { return lpfn_hsv2rgb(hsv); }\n\
 vec3 probe_rgb2hsv3(vec3 rgb) { return lpfn_rgb2hsv(rgb); }\n\
 vec4 probe_rgb2hsv4(vec4 rgb) { return lpfn_rgb2hsv(rgb); }\n";
-        let canonical_probes = "\
-float probe_saturate1(float x) { return lpo_saturate_f(x); }\n\
-vec3 probe_saturate3(vec3 v) { return lpo_saturate_v3(v); }\n\
-vec4 probe_saturate4(vec4 v) { return lpo_saturate_v4(v); }\n\
-vec3 probe_hue2rgb(float h) { return lpo_hue2rgb(h); }\n\
-vec3 probe_hsv2rgb3(vec3 hsv) { return lpo_hsv2rgb_v3(hsv); }\n\
-vec4 probe_hsv2rgb4(vec4 hsv) { return lpo_hsv2rgb_v4(hsv); }\n\
-vec3 probe_rgb2hsv3(vec3 rgb) { return lpo_rgb2hsv_v3(rgb); }\n\
-vec4 probe_rgb2hsv4(vec4 rgb) { return lpo_rgb2hsv_v4(rgb); }\n";
         let keep = ["saturate", "hue2rgb", "hsv2rgb", "rgb2hsv"];
-        let mut unit = super::oracle::canonical_subset_source(|name| keep.contains(&name), "");
-        // Uniquify overload definitions and their (few) internal call
-        // sites; each pattern must occur exactly once or the canonical
-        // sources changed and this transform needs updating.
-        for (from, to) in [
-            (
-                "float lpo_saturate(float x)",
-                "float lpo_saturate_f(float x)",
-            ),
-            ("vec3 lpo_saturate(vec3 v)", "vec3 lpo_saturate_v3(vec3 v)"),
-            ("vec4 lpo_saturate(vec4 v)", "vec4 lpo_saturate_v4(vec4 v)"),
-            (
-                "vec3 lpo_hsv2rgb(vec3 hsv)",
-                "vec3 lpo_hsv2rgb_v3(vec3 hsv)",
-            ),
-            (
-                "vec4 lpo_hsv2rgb(vec4 hsv)",
-                "vec4 lpo_hsv2rgb_v4(vec4 hsv)",
-            ),
-            (
-                "vec3 lpo_rgb2hsv(vec3 rgb)",
-                "vec3 lpo_rgb2hsv_v3(vec3 rgb)",
-            ),
-            (
-                "vec4 lpo_rgb2hsv(vec4 rgb)",
-                "vec4 lpo_rgb2hsv_v4(vec4 rgb)",
-            ),
-            (
-                "return lpo_saturate(vec3(r, g, b));",
-                "return lpo_saturate_v3(vec3(r, g, b));",
-            ),
-            (
-                "return vec4(lpo_hsv2rgb(hsv.xyz), hsv.w);",
-                "return vec4(lpo_hsv2rgb_v3(hsv.xyz), hsv.w);",
-            ),
-            (
-                "return vec4(lpo_rgb2hsv(rgb.xyz), rgb.w);",
-                "return vec4(lpo_rgb2hsv_v3(rgb.xyz), rgb.w);",
-            ),
-        ] {
-            assert_eq!(
-                unit.matches(from).count(),
-                1,
-                "canonical source changed: expected exactly one `{from}`"
-            );
-            unit = unit.replace(from, to);
-        }
-        unit.push_str(canonical_probes);
+        let unit = super::oracle::canonical_subset_source(|name| keep.contains(&name), rust_probes);
         let mut compiled = Q32Probes::build(&unit).expect("q32-compiled canonical build");
         let mut rust = Q32Probes::build(rust_probes).expect("q32 probe build");
 
