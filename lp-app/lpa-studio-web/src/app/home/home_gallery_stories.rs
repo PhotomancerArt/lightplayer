@@ -29,6 +29,7 @@ fn packages() -> Vec<UiPackageCard> {
             last_saved_at: Some(STORY_NOW - 2.0 * 3600.0),
             provenance: None,
             on_device: Some("Luna's porch sign".to_string()),
+            open_elsewhere: false,
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
@@ -37,6 +38,7 @@ fn packages() -> Vec<UiPackageCard> {
             last_saved_at: Some(STORY_NOW - 5.0 * 86_400.0),
             provenance: Some("Remixed from Basic".to_string()),
             on_device: None,
+            open_elsewhere: false,
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
@@ -45,6 +47,7 @@ fn packages() -> Vec<UiPackageCard> {
             last_saved_at: Some(STORY_NOW - 40.0 * 86_400.0),
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
             on_device: None,
+            open_elsewhere: false,
         },
     ]
 }
@@ -111,6 +114,32 @@ fn populated() -> Element {
                 home,
                 now_secs: Some(STORY_NOW),
                 has_ever_granted: Some(true),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story]
+fn project_open_in_another_tab() -> Element {
+    // M4b: a project another tab holds open — neutral badge, card stays
+    // fully rendered and clickable (the refusal notice explains)
+    let mut projects = packages();
+    projects[0].open_elsewhere = true;
+    let home = UiHomeView {
+        devices: Vec::new(),
+        projects,
+        examples: examples(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            HomeGallery {
+                home,
+                now_secs: Some(STORY_NOW),
+                has_ever_granted: Some(false),
                 on_action: |_| {},
             }
         }

@@ -187,7 +187,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
 
 #[test]
 fn home_open_package_pushes_the_library_head_end_to_end() {
-    use crate::app::library::{LibraryStore, PackageProvenance};
+    use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
     use crate::{HOME_NODE_ID, HomeOp};
 
     let server = Rc::new(RefCell::new(edit_e2e_server()));
@@ -217,7 +217,10 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
             1.0,
         )
         .expect("install library package");
-    controller.attach_library(store.clone());
+    controller.attach_library(Rc::new(MemoryLibraryHost::new(
+        store.clone(),
+        Rc::new(|| 1.0),
+    )));
 
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
@@ -252,8 +255,73 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
 }
 
 #[test]
+fn opening_another_package_releases_the_previous_project_lock() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+    use crate::{HOME_NODE_ID, HomeOp};
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [9u8; 16]),
+        Rc::new(|| "2026-07-09-1421".to_string()),
+    );
+    let files: Vec<(String, Vec<u8>)> = edit_e2e_files()
+        .iter()
+        .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+        .collect();
+    let first = store
+        .install_package("First", &files, PackageProvenance::Created, 1.0)
+        .expect("install first");
+    let second = store
+        .install_package("Second", &files, PackageProvenance::Created, 2.0)
+        .expect("install second");
+    let host = Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 1.0)));
+    controller.attach_library(host.clone());
+
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    let open = |key: String| {
+        StudioCommand::Action(UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage { key },
+        ))
+    };
+    handle.tx.send(open(first.uid.to_string()));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("first open emits a snapshot");
+    assert!(
+        host.closed_projects().is_empty(),
+        "the open project holds its lock"
+    );
+
+    handle.tx.send(open(second.uid.to_string()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("second open emits a snapshot");
+    assert!(snapshot.home.is_none(), "the second project is open");
+    assert_eq!(
+        host.closed_projects(),
+        vec![first.uid.to_string()],
+        "switching projects releases the previous lock (and only that one)"
+    );
+    assert_eq!(
+        host.saved_notifications(),
+        Vec::<String>::new(),
+        "no save happened"
+    );
+}
+
+#[test]
 fn save_after_home_open_pulls_the_edit_into_the_library() {
-    use crate::app::library::{LibraryStore, PackageProvenance};
+    use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
     use crate::{HOME_NODE_ID, HomeOp};
 
     let server = Rc::new(RefCell::new(edit_e2e_server()));
@@ -281,7 +349,10 @@ fn save_after_home_open_pulls_the_edit_into_the_library() {
             1.0,
         )
         .expect("install library package");
-    controller.attach_library(store.clone());
+    controller.attach_library(Rc::new(MemoryLibraryHost::new(
+        store.clone(),
+        Rc::new(|| 1.0),
+    )));
 
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;

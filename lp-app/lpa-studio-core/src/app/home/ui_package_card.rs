@@ -21,4 +21,8 @@ pub struct UiPackageCard {
     /// Parity line: the name of a registered device currently holding this
     /// package's head, when one does ("On <name> ✓").
     pub on_device: Option<String>,
+    /// Another tab holds this project open (its `lp-project` Web Lock).
+    /// Structural actions refuse while set; the card gets the badge
+    /// treatment (M4b P4).
+    pub open_elsewhere: bool,
 }

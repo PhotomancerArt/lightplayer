@@ -1,6 +1,11 @@
-//! Building [`UiHomeView`] from the library, registry, and embedded examples.
+//! Building [`UiHomeView`] from hydrated library inputs, the registry,
+//! and embedded examples.
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use lpc_history::EventKind;
+use lpfs::LpFs;
 
 use crate::UiIssue;
 use crate::app::library::{LibraryStore, PackageMeta, PackageProvenance};
@@ -12,10 +17,70 @@ use super::ui_example_card::UiExampleCard;
 use super::ui_home_view::UiHomeView;
 use super::ui_package_card::UiPackageCard;
 
-/// Build the gallery view model. `library` is `None` when no local store
-/// mounted (the gallery still shows examples and the connect card).
+/// The gallery's hydrated library data: built asynchronously from a host
+/// catalog snapshot (`StudioController::refresh_library`) and cached —
+/// `view()` never reads a live store.
+#[derive(Debug, Clone, Default)]
+pub struct HomeInputs {
+    pub projects: Vec<UiPackageCard>,
+    pub devices: Vec<UiDeviceCard>,
+    /// Listing failed — the gallery surfaces this instead of an empty
+    /// library.
+    pub issue: Option<UiIssue>,
+}
+
+/// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
+/// marks the projects other tabs hold open (their cards get the badge
+/// treatment and refuse structural actions kindly).
+pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String]) -> HomeInputs {
+    let store = LibraryStore::read_only(fs);
+
+    let registered = DeviceRegistry::new(store.fs_handle())
+        .list()
+        .unwrap_or_else(|error| {
+            log::warn!("home: device registry unreadable: {error}");
+            Vec::new()
+        });
+
+    let mut issue = None;
+    let projects: Vec<UiPackageCard> = match store.list() {
+        Ok(summaries) => summaries
+            .into_iter()
+            .filter_map(|summary| {
+                package_card(&store, &registered, summary)
+                    .map_err(|error| log::warn!("home: skipping package card: {error}"))
+                    .ok()
+            })
+            .map(|mut card| {
+                card.open_elsewhere = open_elsewhere.iter().any(|uid| *uid == card.uid);
+                card
+            })
+            .collect(),
+        Err(error) => {
+            issue = Some(UiIssue::new(format!(
+                "Your projects could not be listed: {error}"
+            )));
+            Vec::new()
+        }
+    };
+
+    let devices = registered
+        .iter()
+        .map(|device| device_card(device, &projects))
+        .collect();
+
+    HomeInputs {
+        projects,
+        devices,
+        issue,
+    }
+}
+
+/// Assemble the gallery view model from cached inputs. `inputs` is `None`
+/// when no local store mounted (the gallery still shows examples and the
+/// connect card).
 pub fn build_home_view(
-    library: Option<&LibraryStore>,
+    inputs: Option<&HomeInputs>,
     opening: Option<String>,
     issue: Option<UiIssue>,
 ) -> UiHomeView {
@@ -28,7 +93,7 @@ pub fn build_home_view(
         })
         .collect();
 
-    let Some(store) = library else {
+    let Some(inputs) = inputs else {
         return UiHomeView {
             devices: Vec::new(),
             projects: Vec::new(),
@@ -39,43 +104,13 @@ pub fn build_home_view(
         };
     };
 
-    let registered = DeviceRegistry::new(store.fs_handle())
-        .list()
-        .unwrap_or_else(|error| {
-            log::warn!("home: device registry unreadable: {error}");
-            Vec::new()
-        });
-
-    let mut issue = issue;
-    let projects: Vec<UiPackageCard> = match store.list() {
-        Ok(summaries) => summaries
-            .into_iter()
-            .filter_map(|summary| {
-                package_card(store, &registered, summary)
-                    .map_err(|error| log::warn!("home: skipping package card: {error}"))
-                    .ok()
-            })
-            .collect(),
-        Err(error) => {
-            issue.get_or_insert_with(|| {
-                UiIssue::new(format!("Your projects could not be listed: {error}"))
-            });
-            Vec::new()
-        }
-    };
-
-    let devices = registered
-        .iter()
-        .map(|device| device_card(device, &projects))
-        .collect();
-
     UiHomeView {
-        devices,
-        projects,
+        devices: inputs.devices.clone(),
+        projects: inputs.projects.clone(),
         examples,
         library_available: true,
         opening,
-        issue,
+        issue: issue.or_else(|| inputs.issue.clone()),
     }
 }
 
@@ -114,6 +149,7 @@ fn package_card(
         last_saved_at,
         provenance: meta.and_then(|meta| provenance_line(store, &meta)),
         on_device,
+        open_elsewhere: false, // stamped by the hydration pass
     })
 }
 
@@ -188,6 +224,11 @@ mod tests {
         )
     }
 
+    fn view_of(store: &LibraryStore) -> UiHomeView {
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+        build_home_view(Some(&inputs), None, None)
+    }
+
     #[test]
     fn no_library_still_lists_examples() {
         let view = build_home_view(None, None, None);
@@ -195,6 +236,18 @@ mod tests {
         assert!(view.projects.is_empty());
         assert_eq!(view.examples.len(), embedded_examples().len());
         assert!(view.examples.iter().any(|example| example.name == "Basic"));
+    }
+
+    #[test]
+    fn open_elsewhere_uids_stamp_their_cards() {
+        let store = store();
+        let held = store.create("Held", 1.0).unwrap();
+        let free = store.create("Free", 2.0).unwrap();
+
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[held.uid.to_string()]);
+        let by_uid = |uid: &str| inputs.projects.iter().find(|card| card.uid == uid).unwrap();
+        assert!(by_uid(&held.uid.to_string()).open_elsewhere);
+        assert!(!by_uid(&free.uid.to_string()).open_elsewhere);
     }
 
     #[test]
@@ -215,7 +268,7 @@ mod tests {
             )
             .unwrap();
 
-        let view = build_home_view(Some(&store), None, None);
+        let view = view_of(&store);
         assert!(view.library_available);
         assert_eq!(view.projects.len(), 2);
 
@@ -244,7 +297,7 @@ mod tests {
         // re-stamped label, uniqued against the (same-stamp) original
         assert_eq!(copy_summary.slug, "2026-07-09-1421-original-2");
 
-        let view = build_home_view(Some(&store), None, None);
+        let view = view_of(&store);
         let copy = view
             .projects
             .iter()
@@ -278,7 +331,7 @@ mod tests {
             })
             .unwrap();
 
-        let view = build_home_view(Some(&store), None, None);
+        let view = view_of(&store);
         assert_eq!(view.devices.len(), 1);
         assert_eq!(view.devices[0].name, "Luna's porch sign");
         assert!(matches!(

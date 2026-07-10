@@ -26,3 +26,14 @@ pub async fn open_library_root() -> Result<FileSystemDirectoryHandle, OpfsError>
     let root = opfs_root().await?;
     open_dir(&root, LIBRARY_ROOT_DIR, true).await
 }
+
+/// Open a subdirectory of the library root by lp-style path, e.g.
+/// `/packages/porch-sign` or `/history/prj_…` — the per-scope mount points
+/// of the per-project locking model.
+pub async fn open_library_subdir(
+    path: &str,
+    create: bool,
+) -> Result<FileSystemDirectoryHandle, OpfsError> {
+    let root = open_library_root().await?;
+    open_dir(&root, path, create).await
+}

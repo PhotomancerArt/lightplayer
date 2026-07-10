@@ -1,37 +1,49 @@
 //! Export-to-zip download for gallery cards.
 //!
-//! Export reads the mounted library directly (it's read-only), encodes with
-//! the M3 zip codec, and hands the bytes to the browser as a download —
-//! no actor round-trip.
+//! Export hydrates a lock-free library snapshot through the host
+//! (read-only by design), encodes with the M3 zip codec, and hands the
+//! bytes to the browser as a download — no actor round-trip.
 
 use lpa_studio_core::UiPackageCard;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn export_package_to_download(card: &UiPackageCard) {
-    use lpa_studio_core::app::library::export_package;
+    use lpa_studio_core::app::library::{LibraryStore, export_package};
 
-    let Some(store) = crate::local_store::library_store() else {
+    let Some(host) = crate::local_store::library_host() else {
         log::warn!("export: the local library is unavailable");
         return;
     };
-    let uid = match card.uid.parse() {
-        Ok(uid) => uid,
-        Err(error) => {
-            log::warn!("export: invalid package uid {}: {error}", card.uid);
-            return;
+    let uid_key = card.uid.clone();
+    let slug = card.slug.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let fs = match host.catalog_snapshot().await {
+            Ok(fs) => fs,
+            Err(error) => {
+                log::warn!("export snapshot failed: {error}");
+                return;
+            }
+        };
+        let store = LibraryStore::read_only(fs);
+        let uid = match store.resolve_key(&uid_key) {
+            Ok(uid) => uid,
+            Err(error) => {
+                log::warn!("export: cannot resolve {uid_key}: {error}");
+                return;
+            }
+        };
+        let bytes = match store.open(uid).and_then(|handle| export_package(&handle)) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                log::warn!("export of {slug} failed: {error}");
+                return;
+            }
+        };
+        // the slug already carries its date stamp — no extra prefix
+        if let Err(error) = trigger_download(&format!("{slug}.zip"), &bytes) {
+            log::warn!("export download of {slug} failed: {error:?}");
         }
-    };
-    let bytes = match store.open(uid).and_then(|handle| export_package(&handle)) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            log::warn!("export of {} failed: {error}", card.slug);
-            return;
-        }
-    };
-    // the slug already carries its date stamp — no extra prefix
-    if let Err(error) = trigger_download(&format!("{}.zip", card.slug), &bytes) {
-        log::warn!("export download of {} failed: {error:?}", card.slug);
-    }
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -64,6 +64,15 @@ pub(crate) fn PackageCard(
                                 "On {device} ✓"
                             }
                         }
+                        // a fact, not a warning: neutral chip; the card stays
+                        // clickable — the open's refusal notice explains
+                        if card.open_elsewhere {
+                            p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground",
+                                span { class: "tw:inline-block tw:rounded tw:border tw:border-border tw:px-1.5 tw:py-px",
+                                    "Open in another tab"
+                                }
+                            }
+                        }
                     }
                 }
                 span { onclick: move |event| event.stop_propagation(),

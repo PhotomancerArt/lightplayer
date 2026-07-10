@@ -9,8 +9,9 @@ use lpa_link::{
     LinkProviderKind,
 };
 
+use crate::app::home::home_view_builder::HomeInputs;
 use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
-use crate::app::library::LibraryStore;
+use crate::app::library::{CatalogOp, LibraryHost};
 use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
@@ -52,9 +53,17 @@ pub struct StudioController {
     /// a dispatched action, focus change, or log — so the next gate emits even
     /// though the project revision did not move.
     dirty: bool,
-    /// The attached library, also held by the project flows; the home
-    /// gallery's ops and view build against this clone (M4).
-    home_library: Option<LibraryStore>,
+    /// The injected library host (M4b): catalog transactions, project
+    /// open/close, and gallery snapshots all go through this seam. Also
+    /// held by the project flows.
+    library_host: Option<Rc<dyn LibraryHost>>,
+    /// Cached gallery inputs, hydrated from a host catalog snapshot by
+    /// [`Self::refresh_library`] — `view()` never reads a live store.
+    home_inputs: Option<HomeInputs>,
+    /// A library re-hydration is due (attach, home op, save, close, or a
+    /// cross-tab `LibraryChanged` ping). Drained at the end of every
+    /// dispatch and by the actor after each batch.
+    library_refresh_pending: bool,
     /// A home-card open in flight: keeps the gallery on screen (card busy)
     /// while the simulator opens, and tells the connect flow which package
     /// to push instead of probing running projects.
@@ -98,7 +107,9 @@ impl StudioController {
             applied_revision: None,
             // The first view is always new to the UI, so start dirty.
             dirty: true,
-            home_library: None,
+            library_host: None,
+            home_inputs: None,
+            library_refresh_pending: false,
             pending_open: None,
         }
     }
@@ -189,7 +200,7 @@ impl StudioController {
             _ => None,
         };
         Some(home_view_builder::build_home_view(
-            self.home_library.as_ref(),
+            self.home_inputs.as_ref(),
             opening.map(|pending| pending.card_key().to_string()),
             issue,
         ))
@@ -268,12 +279,56 @@ impl StudioController {
     /// Apply a console command (from [`StudioCommand::Console`]): mutate the
     /// display filter or clear the ring, and mark the view dirty so the next
     /// gate emits the reshaped console.
-    /// Install the mounted library into the project flows (load-as-push /
-    /// save-as-pull — roadmap M3). Shares the controller's stamping clock.
-    pub fn attach_library(&mut self, store: crate::app::library::LibraryStore) {
+    /// Install the injected library host into the home gallery and the
+    /// project flows (load-as-push / save-as-pull — roadmap M3/M4b).
+    /// Schedules the first gallery hydration; the actor (or the next
+    /// dispatch) drains it.
+    pub fn attach_library(&mut self, host: Rc<dyn LibraryHost>) {
         let clock = std::rc::Rc::clone(&self.now_secs);
-        self.home_library = Some(store.clone());
-        self.project.set_library(store, clock);
+        self.library_host = Some(Rc::clone(&host));
+        self.project.set_library(host, clock);
+        self.request_library_refresh();
+    }
+
+    /// Note that the gallery's cached inputs are stale. Cheap; the actual
+    /// re-hydration happens in [`Self::refresh_library_if_pending`].
+    pub fn request_library_refresh(&mut self) {
+        if self.library_host.is_some() {
+            self.library_refresh_pending = true;
+        }
+    }
+
+    /// Re-hydrate the cached gallery inputs when a refresh is due, and
+    /// release any project locks whose projects closed since the last
+    /// settle. Called at the end of every dispatch and by the actor after
+    /// each command batch, so host futures always get driven even when a
+    /// close happened on a synchronous path.
+    pub async fn settle_library(&mut self) {
+        self.project.release_closed_library_projects().await;
+        if !self.library_refresh_pending {
+            return;
+        }
+        self.library_refresh_pending = false;
+        let Some(host) = self.library_host.clone() else {
+            return;
+        };
+        let open_elsewhere = host.open_elsewhere_uids().await;
+        match host.catalog_snapshot().await {
+            Ok(fs) => {
+                self.home_inputs =
+                    Some(home_view_builder::hydrate_home_inputs(fs, &open_elsewhere));
+            }
+            Err(error) => {
+                log::warn!("library snapshot failed: {error}");
+                self.home_inputs = Some(HomeInputs {
+                    issue: Some(crate::UiIssue::new(format!(
+                        "Your projects could not be listed: {error}"
+                    ))),
+                    ..HomeInputs::default()
+                });
+            }
+        }
+        self.mark_dirty();
     }
 
     pub fn apply_console_command(&mut self, command: ConsoleCommand) {
@@ -309,6 +364,9 @@ impl StudioController {
     ) -> UiResult {
         updates.emit(UxUpdate::View(self.view()));
         let result = self.dispatch_inner(action, updates.clone()).await;
+        // Release closed projects' locks and re-hydrate the gallery when
+        // the action made either due (open/close/save/home ops).
+        self.settle_library().await;
         // A dispatched action changes local state (project/device state, focus,
         // logs, or an error to surface), so the actor's next gate must emit.
         self.mark_dirty();
@@ -473,11 +531,12 @@ impl StudioController {
     async fn execute_home_op(&mut self, op: HomeOp, updates: UxUpdateSink) -> UiResult {
         match op {
             HomeOp::OpenPackage { key } => {
-                self.open_from_home(PendingOpen::Package(key), updates)
-                    .await
+                return self
+                    .open_from_home(PendingOpen::Package(key), updates)
+                    .await;
             }
             HomeOp::OpenExample { id } => {
-                self.open_from_home(PendingOpen::Example(id), updates).await
+                return self.open_from_home(PendingOpen::Example(id), updates).await;
             }
             HomeOp::RenamePackage { uid, name } => {
                 let name = name.trim();
@@ -486,48 +545,87 @@ impl StudioController {
                         "a project name cannot be empty".to_string(),
                     ));
                 }
-                let store = self.home_store()?;
-                let final_slug = store
-                    .rename(parse_project_uid(&uid)?, name)
-                    .map_err(home_library_error)?;
-                Ok(
-                    UiNotices::new()
-                        .with_notice(UiNotice::info(format!("Renamed to {final_slug}"))),
-                )
+                let outcome = self
+                    .run_catalog_op(CatalogOp::Rename {
+                        uid,
+                        new_slug: name.to_string(),
+                    })
+                    .await?;
+                let renamed = outcome
+                    .summary
+                    .map(|summary| summary.slug)
+                    .unwrap_or_else(|| name.to_string());
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Renamed to {renamed}"))))
             }
             HomeOp::DuplicatePackage { uid } => {
-                let store = self.home_store()?;
-                let now = (self.now_secs)();
-                let copy = store
-                    .duplicate(parse_project_uid(&uid)?, now)
-                    .map_err(home_library_error)?;
-                Ok(UiNotices::new()
-                    .with_notice(UiNotice::info(format!("Duplicated as {}", copy.slug))))
+                let outcome = self.run_catalog_op(CatalogOp::Duplicate { uid }).await?;
+                let copy = outcome
+                    .summary
+                    .map(|summary| summary.slug)
+                    .unwrap_or_default();
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Duplicated as {copy}"))))
             }
             HomeOp::DeletePackage { uid } => {
-                let store = self.home_store()?;
-                store
-                    .delete(parse_project_uid(&uid)?)
-                    .map_err(home_library_error)?;
+                self.run_catalog_op(CatalogOp::Delete { uid }).await?;
                 Ok(UiNotices::new().with_notice(UiNotice::info("Project deleted")))
             }
             HomeOp::ImportZip { file_name, bytes } => {
-                let store = self.home_store()?;
-                let now = (self.now_secs)();
-                let summary =
-                    crate::app::library::import_zip(&store, &bytes.0, now).map_err(|error| {
-                        UiError::UnsupportedAction(format!("could not import {file_name}: {error}"))
-                    })?;
-                Ok(UiNotices::new()
-                    .with_notice(UiNotice::info(format!("Imported {}", summary.name))))
+                let outcome = self
+                    .run_catalog_op(CatalogOp::ImportZip {
+                        file_name,
+                        bytes: bytes.0,
+                    })
+                    .await?;
+                let imported = outcome
+                    .summary
+                    .map(|summary| summary.name)
+                    .unwrap_or_default();
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Imported {imported}"))))
             }
         }
     }
 
-    /// The attached library for home ops, or the error the gallery surfaces
-    /// when the local store never mounted.
-    fn home_store(&self) -> Result<LibraryStore, UiError> {
-        self.home_library.clone().ok_or_else(|| {
+    /// Run one catalog transaction through the host and schedule a gallery
+    /// re-hydration (the dispatch wrapper drains it).
+    async fn run_catalog_op(
+        &mut self,
+        op: CatalogOp,
+    ) -> Result<crate::app::library::CatalogOutcome, UiError> {
+        let host = self.library_host()?;
+        let result = host
+            .catalog(op)
+            .await
+            .map_err(|error| self.library_error_with_name(error));
+        self.request_library_refresh();
+        result
+    }
+
+    /// The friendly error copy, upgraded with the project's slug when the
+    /// cached gallery inputs know it ("2026-07-02-0930-porch-sign is open
+    /// in another tab" beats "This project…"). Falls back to the generic
+    /// `From` wording otherwise.
+    fn library_error_with_name(&self, error: crate::app::library::LibraryHostError) -> UiError {
+        if let crate::app::library::LibraryHostError::OpenElsewhere { key } = &error {
+            let slug = self.home_inputs.as_ref().and_then(|inputs| {
+                inputs
+                    .projects
+                    .iter()
+                    .find(|card| card.uid == *key || card.slug == *key)
+                    .map(|card| card.slug.clone())
+            });
+            if let Some(slug) = slug {
+                return UiError::UnsupportedAction(format!(
+                    "{slug} is open in another tab — close it there first"
+                ));
+            }
+        }
+        UiError::from(error)
+    }
+
+    /// The attached library host for home ops, or the error the gallery
+    /// surfaces when the local store never mounted.
+    fn library_host(&self) -> Result<Rc<dyn LibraryHost>, UiError> {
+        self.library_host.clone().ok_or_else(|| {
             UiError::MissingSession("the local project library is unavailable".to_string())
         })
     }
@@ -536,7 +634,7 @@ impl StudioController {
     /// the simulator first when nothing is connected (D13: a library card
     /// opens in the sim; the sim is invisible infrastructure).
     async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
-        self.home_store()?;
+        self.library_host()?;
         // a connected hardware device is M5's push flow, not an open
         if let Some(connection) = self.device.link.active_connection() {
             if !should_auto_load_demo_project(&connection) {
@@ -1364,15 +1462,6 @@ fn should_auto_load_demo_project(connection: &LinkConnection) -> bool {
     matches!(connection.kind, LinkConnectionKind::BrowserWorker { .. })
 }
 
-fn parse_project_uid(uid: &str) -> Result<lpc_history::PrefixedUid, UiError> {
-    uid.parse()
-        .map_err(|e| UiError::UnsupportedAction(format!("invalid project uid: {e}")))
-}
-
-fn home_library_error(error: crate::app::library::LibraryError) -> UiError {
-    UiError::MissingSession(format!("library: {error}"))
-}
-
 fn emit_activity(
     updates: &UxUpdateSink,
     target: UxActivityTarget,
@@ -1663,7 +1752,9 @@ mod tests {
 
     #[test]
     fn home_ops_rename_duplicate_import_and_delete_library_packages() {
-        use crate::app::library::{LibraryStore, PackageProvenance, export_package};
+        use crate::app::library::{
+            LibraryStore, MemoryLibraryHost, PackageProvenance, export_package,
+        };
         use crate::{HOME_NODE_ID, HomeOp, ZipBytes};
         use lpfs::LpFsMemory;
 
@@ -1677,7 +1768,10 @@ mod tests {
             }),
             Rc::new(|| "2026-07-09-1421".to_string()),
         );
-        studio.attach_library(store.clone());
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 42.0),
+        )));
         let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
 
         // seed one package (creation happens via examples in the UI — the
@@ -1685,6 +1779,10 @@ mod tests {
         let seeded = store
             .install_package("Seeded", &[], PackageProvenance::Created, 42.0)
             .unwrap();
+        // the gallery is cache+invalidate now: hydrate the pending refresh
+        // (the actor's settle point, driven by hand in controller tests)
+        studio.request_library_refresh();
+        block_on_ready(studio.settle_library());
         let home = studio.view().home.expect("home with library");
         assert!(home.library_available);
         assert_eq!(home.projects.len(), 1);
@@ -1739,6 +1837,56 @@ mod tests {
         // re-stamped from the imported manifest's label; the deleted copy
         // freed the plain stamp+label slot
         assert_eq!(imported.slug, "2026-07-09-1421-porch");
+    }
+
+    #[test]
+    fn open_elsewhere_projects_refuse_kindly_and_badge_their_cards() {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(|| [9u8; 16]),
+            Rc::new(|| "2026-07-09-1421".to_string()),
+        );
+        let held = store
+            .install_package("Held", &[], PackageProvenance::Created, 42.0)
+            .unwrap();
+        let host = Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 42.0)));
+        host.set_open_elsewhere(vec![held.uid.to_string()]);
+        studio.attach_library(host.clone());
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        // structural ops refuse with the friendly multi-tab message
+        let error = block_on_ready(studio.dispatch(home_action(HomeOp::DeletePackage {
+            uid: held.uid.to_string(),
+        })))
+        .expect_err("delete of an open-elsewhere project refuses");
+        assert!(
+            error.to_string().contains("open in another tab"),
+            "friendly refusal, got: {error}"
+        );
+        // by the second dispatch the gallery inputs are hydrated, so the
+        // refusal names the project (P4 copy)
+        let error = block_on_ready(studio.dispatch(home_action(HomeOp::RenamePackage {
+            uid: held.uid.to_string(),
+            name: "stolen".to_string(),
+        })))
+        .expect_err("rename of an open-elsewhere project refuses");
+        assert!(
+            error
+                .to_string()
+                .contains("2026-07-09-1421-held is open in another tab"),
+            "named refusal, got: {error}"
+        );
+
+        // the gallery data carries the badge (the failed dispatches still
+        // settled the pending hydration from attach)
+        let home = studio.view().home.expect("home with library");
+        assert_eq!(home.projects.len(), 1, "the held project still lists");
+        assert!(home.projects[0].open_elsewhere, "card carries the badge");
     }
 
     #[test]

@@ -7,14 +7,16 @@
 //! therefore queue priority, not a web of cancel flags: the actor drains pending
 //! actions ahead of ticks and coalesces redundant ticks (see the actor loop).
 
+use std::rc::Rc;
+
 use crate::UiAction;
-use crate::app::library::LibraryStore;
+use crate::app::library::LibraryHost;
 use crate::app::studio::console_command::ConsoleCommand;
 
-/// A mounted library store riding the command queue (Debug-opaque: the
-/// store holds an fs handle and an rng closure).
+/// The injected library host riding the command queue (Debug-opaque: a
+/// platform edge object).
 #[derive(Clone)]
-pub struct LibraryAttachment(pub LibraryStore);
+pub struct LibraryAttachment(pub Rc<dyn LibraryHost>);
 
 impl core::fmt::Debug for LibraryAttachment {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -37,6 +39,10 @@ pub enum StudioCommand {
     /// the actor ahead of the batch's actions; never coalesced away, unlike
     /// `RefreshTick`, because each is a distinct user gesture.
     Console(ConsoleCommand),
+    /// The library changed under us (another tab's catalog transaction or
+    /// save, via the host's BroadcastChannel). Coalescable like
+    /// `RefreshTick`: the actor schedules one gallery re-hydration.
+    LibraryChanged,
     /// A timer-driven passive refresh tick. Coalescable and droppable: the actor
     /// keeps at most one pending tick and drops a tick that would run behind a
     /// pending action.

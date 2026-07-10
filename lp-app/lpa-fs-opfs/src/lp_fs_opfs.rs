@@ -21,7 +21,7 @@ use lpfs::{
 use web_sys::FileSystemDirectoryHandle;
 
 use crate::opfs_error::OpfsError;
-use crate::opfs_read::load_tree;
+use crate::opfs_read::load_tree_filtered;
 use crate::opfs_write::{remove_path, write_file};
 
 struct Shared {
@@ -49,8 +49,22 @@ pub struct FlushReport {
 impl LpFsOpfs {
     /// Load the OPFS directory into memory and wrap it as a store.
     pub async fn mount(dir: FileSystemDirectoryHandle) -> Result<Self, OpfsError> {
+        Self::mount_filtered(dir, |_| false).await
+    }
+
+    /// [`Self::mount`], skipping directories the predicate rejects (checked
+    /// before descending — skipped subtrees are never read from OPFS).
+    ///
+    /// A filtered store never sees the skipped subtrees, so it must stay
+    /// read-only over them: flushing would not resurrect files it never
+    /// loaded, but writes *near* a skipped subtree are the caller's risk.
+    /// Gallery snapshots (read-only, no flusher) are the intended user.
+    pub async fn mount_filtered(
+        dir: FileSystemDirectoryHandle,
+        skip_dir: impl Fn(&str) -> bool,
+    ) -> Result<Self, OpfsError> {
         let inner = LpFsMemory::new();
-        for (path, bytes) in load_tree(&dir).await? {
+        for (path, bytes) in load_tree_filtered(&dir, skip_dir).await? {
             inner.write_file(path.as_path(), &bytes).map_err(|e| {
                 OpfsError::new("mount", path.as_str().to_string(), e.to_string().into())
             })?;

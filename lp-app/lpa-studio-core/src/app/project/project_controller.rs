@@ -80,11 +80,19 @@ pub struct ProjectController {
     library: Option<LibraryContext>,
 }
 
-/// Library wiring for load-as-push / save-as-pull (roadmap M3).
+/// Library wiring for load-as-push / save-as-pull (roadmap M3), reworked
+/// onto the injected [`LibraryHost`](crate::app::library::LibraryHost)
+/// seam (M4b): opens acquire per-project locks in the host; closes must
+/// release them.
 struct LibraryContext {
-    store: crate::app::library::LibraryStore,
+    host: std::rc::Rc<dyn crate::app::library::LibraryHost>,
     now_secs: std::rc::Rc<dyn Fn() -> f64>,
     active: Option<ActiveLibraryProject>,
+    /// Projects that stopped being active on a synchronous path (state
+    /// reset, replacement open) and still hold their host-side lock.
+    /// Drained by [`ProjectController::release_closed_library_projects`]
+    /// at the studio controller's async choke points.
+    pending_close: Vec<String>,
 }
 
 /// The open library package backing the running project.
@@ -117,17 +125,36 @@ impl ProjectController {
         }
     }
 
-    /// Attach the mounted library (browser shell, after the store mounts).
+    /// Attach the injected library host (browser shell, once the store
+    /// backing it is ready).
     pub fn set_library(
         &mut self,
-        store: crate::app::library::LibraryStore,
+        host: std::rc::Rc<dyn crate::app::library::LibraryHost>,
         now_secs: std::rc::Rc<dyn Fn() -> f64>,
     ) {
         self.library = Some(LibraryContext {
-            store,
+            host,
             now_secs,
             active: None,
+            pending_close: Vec::new(),
         });
+    }
+
+    /// Release host-side project locks for projects that stopped being
+    /// active on a synchronous path. Idempotent; awaited at the studio
+    /// controller's settle points.
+    pub(crate) async fn release_closed_library_projects(&mut self) {
+        let Some(context) = self.library.as_mut() else {
+            return;
+        };
+        if context.pending_close.is_empty() {
+            return;
+        }
+        let host = std::rc::Rc::clone(&context.host);
+        let to_close = std::mem::take(&mut context.pending_close);
+        for uid in to_close {
+            host.close_project(&uid).await;
+        }
     }
 
     pub fn set_state(&mut self, state: ProjectState) {
@@ -771,73 +798,72 @@ impl ProjectController {
         Ok(loaded.logs)
     }
 
-    /// Load-as-push (D19): open a library package by uid — push its head to
-    /// the runtime, replacing whatever project is loaded. A page refresh
-    /// re-pushes the head.
+    /// Load-as-push (D19): open a library package by key (slug or `prj_…`
+    /// uid) — the host acquires the project lock, then the head is pushed
+    /// to the runtime, replacing whatever project is loaded. A page
+    /// refresh re-pushes the head.
     pub(crate) async fn open_library_package(
         &mut self,
         server: &mut StudioServerClient,
         key: &str,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         self.mark_opening_project();
-        let uid = {
+        let host = {
             let context = self.library.as_ref().ok_or_else(no_library_error)?;
-            context.store.resolve_key(key).map_err(library_ui_error)?
+            std::rc::Rc::clone(&context.host)
         };
-        self.open_installed_package(server, uid).await
+        let opened = host.open_project(key).await.map_err(UiError::from)?;
+        self.open_opened_package(server, opened).await
     }
 
-    /// Open an example: seed it into the library once (found by provenance
-    /// on every later open — it never reseeds), then open the copy.
+    /// Open an example: seed it into the library once (a catalog
+    /// transaction — found by provenance on every later open, it never
+    /// reseeds), then open the copy like any package.
     pub(crate) async fn open_example_package(
         &mut self,
         server: &mut StudioServerClient,
         id: &str,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         self.mark_opening_project();
-        let summary = self.ensure_example_seeded(id)?;
-        self.open_installed_package(server, summary.uid).await
+        let host = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            std::rc::Rc::clone(&context.host)
+        };
+        let outcome = host
+            .catalog(crate::app::library::CatalogOp::EnsureExampleSeeded { id: id.to_string() })
+            .await
+            .map_err(UiError::from)?;
+        let summary = outcome.summary.ok_or_else(|| {
+            UiError::MissingSession(format!("seeding example {id} produced no package"))
+        })?;
+        let opened = host
+            .open_project(&summary.uid.to_string())
+            .await
+            .map_err(UiError::from)?;
+        self.open_opened_package(server, opened).await
     }
 
-    /// Seed-once: the library package seeded from example `id`, installing
-    /// the embedded files on first open.
-    fn ensure_example_seeded(
-        &mut self,
-        id: &str,
-    ) -> Result<crate::app::library::PackageSummary, UiError> {
-        use crate::app::library::PackageProvenance;
-
-        let context = self.library.as_mut().ok_or_else(no_library_error)?;
-        let now = (context.now_secs)();
-        if let Some(existing) = context
-            .store
-            .find_seeded_from(id)
-            .map_err(library_ui_error)?
-        {
-            return Ok(existing);
-        }
-        let example = crate::app::home::embedded_example(id)
-            .ok_or_else(|| UiError::UnsupportedAction(format!("unknown example {id}")))?;
-        context
-            .store
-            .install_package(
-                example.name,
-                &example.files(),
-                PackageProvenance::SeededFrom {
-                    source: id.to_string(),
-                },
-                now,
-            )
-            .map_err(library_ui_error)
-    }
-
-    async fn open_installed_package(
+    /// Push a host-opened project to the runtime and make it the active
+    /// library project. A previously active project's lock is queued for
+    /// release (the settle points drain it).
+    async fn open_opened_package(
         &mut self,
         server: &mut StudioServerClient,
-        uid: lpc_history::PrefixedUid,
+        opened: crate::app::library::OpenedProject,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let context = self.library.as_mut().ok_or_else(no_library_error)?;
-        let handle = context.store.open(uid).map_err(library_ui_error)?;
+        if let Some(previous) = context.active.take() {
+            if previous.handle.uid != opened.uid {
+                context.pending_close.push(previous.handle.uid.to_string());
+            }
+        }
+        let handle = crate::app::library::PackageHandle::load(
+            opened.uid,
+            opened.slug,
+            opened.package_fs,
+            opened.history_fs,
+        )
+        .map_err(library_ui_error)?;
         // the slug is THE user-facing identifier — it titles the editor
         let title = handle.slug.clone();
         let files = handle.read_all_files().map_err(library_ui_error)?;
@@ -889,6 +915,8 @@ impl ProjectController {
         }
         active.handle.record_save(now).map_err(library_ui_error)?;
         active.last_synced = pulled.version;
+        // fire-and-forget: hosts broadcast so other tabs' galleries refresh
+        context.host.notify_saved(&active.handle.uid.to_string());
 
         // corruption tripwire: library copy must now match the runtime
         let local = active
@@ -1361,9 +1389,12 @@ impl ProjectController {
         self.root_shape_ids.clear();
         // the library binding follows the loaded project: a disconnected or
         // failed project must not keep pulling saves into (or advertising)
-        // the previously open package
+        // the previously open package. Its host lock is queued for release
+        // (this path is sync; the settle points drain the queue).
         if let Some(library) = self.library.as_mut() {
-            library.active = None;
+            if let Some(previous) = library.active.take() {
+                library.pending_close.push(previous.handle.uid.to_string());
+            }
         }
     }
 

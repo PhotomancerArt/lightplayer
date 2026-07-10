@@ -61,6 +61,47 @@ pub struct PackageHandle {
 }
 
 impl PackageHandle {
+    /// Build a handle from per-project fs handles: replay history from
+    /// `history_fs`, initializing it from the package's provenance sidecar
+    /// when the log is empty (first open of a fresh package).
+    ///
+    /// This is the store-free half of [`LibraryStore::open`]; the
+    /// `LibraryHost` implementations use it over per-project mounts.
+    pub fn load(
+        uid: PrefixedUid,
+        slug: String,
+        package_fs: Rc<RefCell<dyn LpFs>>,
+        history_fs: Rc<RefCell<dyn LpFs>>,
+    ) -> Result<Self, LibraryError> {
+        let history = {
+            let view = history_fs.borrow();
+            let log = EventLog::new(&*view);
+            let events = log
+                .read_all()
+                .map_err(|e| LibraryError::History(e.to_string()))?;
+            if events.is_empty() {
+                let meta = {
+                    let package_view = package_fs.borrow();
+                    package_meta::read_meta(&*package_view)?
+                };
+                let origin = origin_event_for(meta);
+                log.append(&origin)
+                    .map_err(|e| LibraryError::History(e.to_string()))?;
+                ProjectHistory::new(origin).map_err(|e| LibraryError::History(e.to_string()))?
+            } else {
+                ProjectHistory::from_events(events)
+                    .map_err(|e| LibraryError::History(e.to_string()))?
+            }
+        };
+        Ok(PackageHandle {
+            uid,
+            slug,
+            package_fs,
+            history_fs,
+            history,
+        })
+    }
+
     /// Snapshot the package and record a `Saved` event — unless the content
     /// hash equals the current head (no-op guard: no event spam).
     pub fn record_save(&mut self, at: f64) -> Result<Option<ContentHash>, LibraryError> {
@@ -146,6 +187,17 @@ impl LibraryStore {
         stamp: Rc<dyn Fn() -> String>,
     ) -> Self {
         Self { fs, random, stamp }
+    }
+
+    /// A store for read paths (gallery snapshots, exports): rng and slug
+    /// stamping are only reached by package-creating ops, so they panic —
+    /// mutating a snapshot is a bug, not a fallback.
+    pub fn read_only(fs: Rc<RefCell<dyn LpFs>>) -> Self {
+        Self::new(
+            fs,
+            Rc::new(|| unreachable!("read-only store never mints uids")),
+            Rc::new(|| unreachable!("read-only store never stamps slugs")),
+        )
     }
 
     /// The store root — packages, history, and the device registry all live
@@ -329,33 +381,7 @@ impl LibraryStore {
             let fs = self.fs.borrow();
             fs.chroot(format!("{HISTORY_DIR}/{uid}").as_str().as_path())?
         };
-        let history = {
-            let view = history_fs.borrow();
-            let log = EventLog::new(&*view);
-            let events = log
-                .read_all()
-                .map_err(|e| LibraryError::History(e.to_string()))?;
-            if events.is_empty() {
-                let meta = {
-                    let package_view = package_fs.borrow();
-                    package_meta::read_meta(&*package_view)?
-                };
-                let origin = origin_event_for(meta);
-                log.append(&origin)
-                    .map_err(|e| LibraryError::History(e.to_string()))?;
-                ProjectHistory::new(origin).map_err(|e| LibraryError::History(e.to_string()))?
-            } else {
-                ProjectHistory::from_events(events)
-                    .map_err(|e| LibraryError::History(e.to_string()))?
-            }
-        };
-        Ok(PackageHandle {
-            uid,
-            slug,
-            package_fs,
-            history_fs,
-            history,
-        })
+        PackageHandle::load(uid, slug, package_fs, history_fs)
     }
 
     /// Find a package by its provenance source (seed-once checks).

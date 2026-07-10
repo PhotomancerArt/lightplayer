@@ -193,18 +193,14 @@ pub fn App() -> Element {
         })
     });
 
-    // The local project store: mounted in the startup hook below (which
-    // also attaches the library and only then fires the connect action).
+    // The local project library: probed in the startup hook below (which
+    // also attaches the library host and only then fires the connect
+    // action).
     let mut store_status = use_signal(|| LocalStoreStatus::Initializing);
-    let on_store_retry = move |_| {
-        spawn(async move {
-            store_status.set(local_store::init_local_store().await);
-        });
-    };
 
     // Startup ordering matters: the library must attach before the startup
     // open runs, or opens would go through the legacy (storeless) path on
-    // first paint. The store mount is awaited here; the sim still starts
+    // first paint. The probe is awaited here; the sim still starts
     // (without persistence) if the store is unavailable.
     let startup_route = use_hook(|| route.peek().clone());
     let startup_bridge = bridge.clone();
@@ -216,11 +212,12 @@ pub fn App() -> Element {
             let status = local_store::init_local_store().await;
             #[cfg(target_arch = "wasm32")]
             if status == LocalStoreStatus::Ready {
-                if let Some(library) = local_store::library_store() {
+                if let Some(host) = local_store::library_host() {
                     startup_bridge.tx.send(StudioCommand::AttachLibrary(
-                        lpa_studio_core::app::studio::studio_command::LibraryAttachment(library),
+                        lpa_studio_core::app::studio::studio_command::LibraryAttachment(host),
                     ));
                 }
+                install_library_listeners(&startup_bridge.tx);
             }
             store_status.set(status);
             if let StudioRoute::Project { key } = &startup_route {
@@ -278,10 +275,7 @@ pub fn App() -> Element {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
         div { class: "tw:mx-auto tw:w-[min(1520px,100%)] tw:px-7 tw:pt-4 tw:max-[880px]:px-[18px]",
-            LocalStoreBanner {
-                status: store_status.read().clone(),
-                on_retry: on_store_retry,
-            }
+            LocalStoreBanner { status: store_status.read().clone() }
         }
         StudioShell {
             view: current_view,
@@ -298,6 +292,63 @@ pub fn App() -> Element {
 /// deadline; native callers would pass a `sleep`-backed factory instead.
 fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
+}
+
+/// Wire the cross-tab library refresh triggers (M4b): a BroadcastChannel
+/// message from another tab's catalog transaction / save / close, and
+/// this tab becoming visible again, both enqueue a coalescable
+/// `LibraryChanged`; `pagehide` best-effort-flushes open project stores.
+/// Installed once at startup; the closures live for the page.
+#[cfg(target_arch = "wasm32")]
+fn install_library_listeners(tx: &CommandSender) {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
+
+    match web_sys::BroadcastChannel::new(crate::library_host_opfs::LIBRARY_CHANNEL) {
+        Ok(channel) => {
+            let ping_tx = tx.clone();
+            let on_message = Closure::wrap(Box::new(move |_event: web_sys::MessageEvent| {
+                ping_tx.send(StudioCommand::LibraryChanged);
+            }) as Box<dyn FnMut(_)>);
+            channel.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+            on_message.forget();
+            // keep the receiving channel alive for the page lifetime
+            core::mem::forget(channel);
+        }
+        Err(e) => log::warn!("BroadcastChannel unavailable, no cross-tab refresh: {e:?}"),
+    }
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    if let Some(document) = window.document() {
+        let visible_tx = tx.clone();
+        let document_for_check = document.clone();
+        let on_visible = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            if document_for_check.visibility_state() == web_sys::VisibilityState::Visible {
+                visible_tx.send(StudioCommand::LibraryChanged);
+            }
+        }) as Box<dyn FnMut(_)>);
+        if let Err(e) = document.add_event_listener_with_callback(
+            "visibilitychange",
+            on_visible.as_ref().unchecked_ref(),
+        ) {
+            log::warn!("visibilitychange listener failed: {e:?}");
+        }
+        on_visible.forget();
+    }
+
+    let on_pagehide = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+        if let Some(host) = local_store::opfs_library_host() {
+            host.flush_open_projects_best_effort();
+        }
+    }) as Box<dyn FnMut(_)>);
+    if let Err(e) =
+        window.add_event_listener_with_callback("pagehide", on_pagehide.as_ref().unchecked_ref())
+    {
+        log::warn!("pagehide listener failed: {e:?}");
+    }
+    on_pagehide.forget();
 }
 
 /// The controller's log-stamping clock on wasm: seconds since the Unix epoch
