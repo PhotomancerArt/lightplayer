@@ -658,11 +658,60 @@ impl ProjectController {
         self.slot_shapes = view.slots.registry.clone();
         self.root_shape_ids = view.slots.root_shapes.clone();
         reconcile_root_nodes(&mut self.root_nodes, view);
+        self.apply_default_binding_overlay();
         if let Some(target) = self.active_editor_target.clone() {
             self.focus_editor_target(&target);
         }
         ensure_default_node_focus(&mut self.root_nodes);
         Ok(())
+    }
+
+    /// Overlay graph-derived default bindings onto per-slot indicators: every
+    /// effective binding with `origin: default` marks its owning slot as
+    /// bound/publishing with a default-origin endpoint (DEF badge, popover
+    /// explanation). The authored facts applied during the tree walk always
+    /// win — defaults only fill slots the authored pass left direct or
+    /// unpublished (M5 honest indicator, ADR 2026-07-09).
+    fn apply_default_binding_overlay(&mut self) {
+        use crate::app::project::slot::{SlotBindingFact, SlotBindingFactKind};
+        let Some(graph) = self.binding_graph() else {
+            return;
+        };
+        let mut facts: Vec<(NodeId, SlotBindingFact)> = Vec::new();
+        for binding in &graph.bindings {
+            if binding.origin != lpc_wire::WireBindingOrigin::Default {
+                continue;
+            }
+            let Some(slot) = binding.slot.as_ref() else {
+                continue;
+            };
+            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+                continue;
+            };
+            let endpoint = self
+                .ui_binding_endpoint(&binding.endpoint)
+                .with_default_origin();
+            let kind = match binding.direction {
+                lpc_wire::WireBindingDirection::Consumes => SlotBindingFactKind::Source(endpoint),
+                lpc_wire::WireBindingDirection::Publishes => SlotBindingFactKind::Target(endpoint),
+            };
+            facts.push((
+                binding.node,
+                SlotBindingFact {
+                    slot: name.as_str().to_string(),
+                    kind,
+                },
+            ));
+        }
+        for (node_id, fact) in facts {
+            if let Some(node) = self
+                .root_nodes
+                .iter_mut()
+                .find_map(|node| node.node_by_runtime_id_mut(node_id))
+            {
+                node.apply_default_binding_fact(&fact);
+            }
+        }
     }
 
     pub fn actions(&self, server_connected: bool) -> Vec<UiAction> {
@@ -1353,6 +1402,9 @@ impl ProjectController {
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
         let result = self.apply_project_view(sync.project_view());
         self.sync = Some(sync);
+        // The overlay reads the binding graph through `self.sync`, which was
+        // taken out during the view apply — run it now that it is restored.
+        self.apply_default_binding_overlay();
         result
     }
 
@@ -3179,6 +3231,134 @@ mod tests {
         // action (D7 linked navigation).
         assert_eq!(channel.readers[0].node_label, "Orbit");
         assert!(channel.readers[0].focus.is_some());
+    }
+
+    #[test]
+    fn default_binding_overlay_fills_unbound_slots_with_def_endpoints() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots_without_bindings(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![
+                lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("seconds").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Publishes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        channel: "time".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Default,
+                    priority: -1000,
+                    kind: lpc_model::Kind::Instant,
+                },
+                lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("time").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Consumes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        channel: "time".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Default,
+                    priority: -1000,
+                    kind: lpc_model::Kind::Instant,
+                },
+            ],
+            channels: Vec::new(),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+        project.apply_default_binding_overlay();
+
+        let nodes = project.ui_nodes();
+        let sections = node_sections(&nodes[0]);
+        let produced = section_produced_values(sections);
+        assert_eq!(produced[0].label, "Seconds");
+        let bus_target = produced[0]
+            .binding
+            .bindings
+            .bus_target
+            .as_ref()
+            .expect("default publish overlays the unbound produced value");
+        assert_eq!(bus_target.label, "bus:time");
+        assert!(bus_target.default_origin, "overlay wiring is DEF-flagged");
+
+        // The consumed slot's default fills the config row the same way and
+        // carries the popover origin explanation.
+        let config = section_config_slots(sections);
+        let time = config.iter().find(|slot| slot.label == "Time").unwrap();
+        let UiSlotSourceState::Bound(endpoint) = &time.source else {
+            panic!("expected DEF-bound time slot, got {:?}", time.source);
+        };
+        assert_eq!(endpoint.label, "bus:time");
+        assert!(endpoint.default_origin);
+        let aspects = time.visible_aspects();
+        let binding_aspect = aspects
+            .iter()
+            .find(|aspect| aspect.kind == crate::UiSlotAspectKind::Binding)
+            .expect("binding aspect");
+        assert!(
+            binding_aspect
+                .rows
+                .iter()
+                .any(|row| row.label == "Origin" && row.value == "default binding"),
+            "popover explains the default origin"
+        );
+    }
+
+    #[test]
+    fn default_binding_overlay_never_overwrites_authored_facts() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse("seconds").unwrap()),
+                direction: lpc_wire::WireBindingDirection::Publishes,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: "other".to_string(),
+                },
+                origin: lpc_wire::WireBindingOrigin::Default,
+                priority: -1000,
+                kind: lpc_model::Kind::Instant,
+            }],
+            channels: Vec::new(),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+        project.apply_default_binding_overlay();
+
+        let nodes = project.ui_nodes();
+        let produced = section_produced_values(node_sections(&nodes[0]));
+        assert_eq!(produced[0].label, "Seconds");
+        let bus_target = produced[0]
+            .binding
+            .bindings
+            .bus_target
+            .as_ref()
+            .expect("authored publish stays");
+        assert_eq!(
+            bus_target.label, "bus:time",
+            "authored endpoint wins over the default overlay"
+        );
+        assert!(!bus_target.default_origin);
     }
 
     #[test]

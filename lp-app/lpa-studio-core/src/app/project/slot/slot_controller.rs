@@ -227,6 +227,29 @@ impl SlotController {
         }
     }
 
+    /// Apply one graph-derived default binding fact, filling only slots the
+    /// authored pass left direct/unpublished — authored bindings always win
+    /// (M5 honest indicator, ADR 2026-07-09).
+    pub(in crate::app::project) fn apply_default_binding_fact(&mut self, fact: &SlotBindingFact) {
+        for child in &mut self.children {
+            if child.root_field_name() != Some(fact.slot.as_str()) {
+                continue;
+            }
+            match &fact.kind {
+                SlotBindingFactKind::Source(endpoint) | SlotBindingFactKind::Literal(endpoint) => {
+                    if matches!(child.source, UiSlotSourceState::Direct) {
+                        child.source = UiSlotSourceState::Bound(endpoint.clone());
+                    }
+                }
+                SlotBindingFactKind::Target(endpoint) => {
+                    if child.publish.is_none() {
+                        child.publish = Some(endpoint.clone());
+                    }
+                }
+            }
+        }
+    }
+
     /// True when this root has a top-level field child named `name`.
     pub(in crate::app::project) fn has_root_field(&self, name: &str) -> bool {
         self.children

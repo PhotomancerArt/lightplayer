@@ -328,9 +328,13 @@ fn bound_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
     if let Some(detail) = endpoint.detail.as_ref() {
         row = row.with_detail(detail.clone());
     }
-    UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+    let mut aspect = UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
         .with_row(row)
-        .with_affordance(UiSlotAffordance::Bound)
+        .with_affordance(UiSlotAffordance::Bound);
+    if endpoint.default_origin {
+        aspect = aspect.with_row(default_origin_row());
+    }
+    aspect
 }
 
 fn published_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
@@ -338,9 +342,20 @@ fn published_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
     if let Some(detail) = endpoint.detail.as_ref() {
         row = row.with_detail(detail.clone());
     }
-    UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+    let mut aspect = UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
         .with_row(row)
-        .with_affordance(UiSlotAffordance::Bound)
+        .with_affordance(UiSlotAffordance::Bound);
+    if endpoint.default_origin {
+        aspect = aspect.with_row(default_origin_row());
+    }
+    aspect
+}
+
+/// Popover explanation for default-origin wiring: what DEF means and how to
+/// override it (M5 honest indicator).
+fn default_origin_row() -> UiSlotAspectRow {
+    UiSlotAspectRow::new("Origin", "default binding")
+        .with_detail("Declared by the slot (default_bind); authoring a binding overrides it.")
 }
 
 fn type_info_aspect(slot: &UiConfigSlot) -> UiSlotAspect {

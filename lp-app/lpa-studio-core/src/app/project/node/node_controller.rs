@@ -297,6 +297,30 @@ impl NodeController {
         }
     }
 
+    /// Apply one graph-derived default binding fact to this node's roots
+    /// (fills only slots authored facts left empty).
+    pub(in crate::app::project) fn apply_default_binding_fact(
+        &mut self,
+        fact: &crate::app::project::slot::SlotBindingFact,
+    ) {
+        for slot in &mut self.slots {
+            slot.apply_default_binding_fact(fact);
+        }
+    }
+
+    /// Find a mutable descendant node controller by runtime node id.
+    pub(in crate::app::project) fn node_by_runtime_id_mut(
+        &mut self,
+        id: NodeId,
+    ) -> Option<&mut NodeController> {
+        if self.target.node_id == id {
+            return Some(self);
+        }
+        self.children
+            .iter_mut()
+            .find_map(|child| child.node_by_runtime_id_mut(id))
+    }
+
     fn reconcile_children(&mut self, children: Vec<&TreeEntryView>, view: &ProjectView) {
         let mut previous = self
             .children

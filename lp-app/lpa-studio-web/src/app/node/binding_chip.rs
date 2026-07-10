@@ -31,7 +31,12 @@ pub fn BindingChip(endpoint: UiBindingEndpoint, direction: BindingChipDirection)
         BindingChipDirection::Consumes => "Bound from",
         BindingChipDirection::Publishes => "Publishes to",
     };
-    let title = format!("{verb} {}", endpoint.label);
+    let mut title = format!("{verb} {}", endpoint.label);
+    if endpoint.default_origin {
+        title.push_str(
+            " — default binding (declared by the slot; authoring a binding overrides it)",
+        );
+    }
 
     rsx! {
         span {
@@ -45,6 +50,12 @@ pub fn BindingChip(endpoint: UiBindingEndpoint, direction: BindingChipDirection)
                 span { class: "tw:flex-none tw:text-[10px] tw:font-bold", "\u{2192}" }
             }
             code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[11px]", "{compact}" }
+            if endpoint.default_origin {
+                span {
+                    class: "tw:flex-none tw:text-[9px] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                    "def"
+                }
+            }
         }
     }
 }

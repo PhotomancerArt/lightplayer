@@ -45,6 +45,26 @@ pub(crate) fn direct_value() -> Element {
     }
 }
 
+#[story(
+    description = "A row wired by the slot's declarative default_bind: same violet bound treatment plus the DEF badge; the popover explains the origin and that authoring a binding overrides it."
+)]
+pub(crate) fn bound_default() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::value(
+                "time",
+                "Time",
+                UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
+            )
+            .with_source(UiSlotSourceState::Bound(
+                UiBindingEndpoint::new("bus:time").with_default_origin(),
+            )),
+            depth: 0,
+            index: 0,
+        }
+    }
+}
+
 #[story(description = "A row whose visible value comes from a binding endpoint.")]
 pub(crate) fn bound_value() -> Element {
     rsx! {

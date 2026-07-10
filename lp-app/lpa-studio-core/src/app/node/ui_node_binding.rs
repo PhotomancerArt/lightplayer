@@ -9,6 +9,10 @@ pub struct UiBindingEndpoint {
     pub label: String,
     /// Optional detail, usually the owning node or slot path.
     pub detail: Option<String>,
+    /// True when this wiring came from the slot's declarative `default_bind`
+    /// rather than an authored binding (ADR 2026-07-09). Indicators wear a
+    /// DEF badge and popovers explain the origin.
+    pub default_origin: bool,
 }
 
 impl UiBindingEndpoint {
@@ -17,12 +21,19 @@ impl UiBindingEndpoint {
         Self {
             label: label.into(),
             detail: None,
+            default_origin: false,
         }
     }
 
     /// Add secondary detail to the endpoint.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// Mark this endpoint as wired by declarative default policy.
+    pub fn with_default_origin(mut self) -> Self {
+        self.default_origin = true;
         self
     }
 }
@@ -116,6 +127,9 @@ fn endpoint_row(label: &'static str, endpoint: &UiBindingEndpoint) -> UiSlotAspe
     let mut row = UiSlotAspectRow::new(label, endpoint.label.clone());
     if let Some(detail) = endpoint.detail.as_ref() {
         row = row.with_detail(detail.clone());
+    }
+    if endpoint.default_origin {
+        row = row.with_detail("default binding");
     }
     row
 }
