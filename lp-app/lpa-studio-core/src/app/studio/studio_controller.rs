@@ -1602,16 +1602,9 @@ impl StudioController {
                     outcome.notices.extend(open_outcome.notices);
                     return Ok(outcome);
                 }
-                // connect-is-a-pull (D8): bank + classify the device's
-                // copy before anything else runs. Hardware only — the sim
-                // is not a device (D22). Failures are logged, never fatal
-                // to the connect (flash/erase must stay reachable).
-                if !should_auto_load_demo_project(connection) {
-                    self.refresh_device_sync().await;
-                } else {
+                if should_auto_load_demo_project(connection) {
                     self.device_sync = None;
                 }
-                self.rederive_deploy();
                 emit_activity(
                     &updates,
                     device_section_target(DeviceController::SECTION_DEVICE),
@@ -1635,6 +1628,8 @@ impl StudioController {
                                 "No LightPlayer firmware detected during server readiness",
                             ));
                             self.device.server.fail_no_firmware();
+                            // now the dialog's Blank state is the truth
+                            self.rederive_deploy();
                             return Ok(UiNotices::new().with_notice(UiNotice::info(
                                 "No LightPlayer firmware detected; flash firmware onto the selected ESP32",
                             )));
@@ -1665,10 +1660,20 @@ impl StudioController {
                     }
                     AutoProjectConnect::NotFound => {}
                 }
+                // connect-is-a-pull (D8): bank + classify the device's
+                // copy — AFTER the readiness probe, so the wire is ready
+                // and `has_lightplayer_state` is settled. Hardware only —
+                // the sim is not a device (D22). Failures are logged,
+                // never fatal (flash/erase must stay reachable).
+                if !should_auto_load_demo_project(connection) {
+                    self.refresh_device_sync().await;
+                }
+                self.rederive_deploy();
                 Ok(outcome)
             }
             Err(error) => {
                 self.device.server.fail(error.to_string());
+                self.rederive_deploy();
                 Err(error)
             }
         }

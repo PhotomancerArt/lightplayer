@@ -155,6 +155,7 @@ fn DeployDialogBody(deploy: UiDeployView, on_action: EventHandler<UiAction>) -> 
                 }
             }
         },
+        DeployState::Inspecting => progress_line("Checking what's on the device…"),
         DeployState::Flashing => progress_line("Flashing firmware…"),
         DeployState::Stamping { name } => progress_line(&format!("Naming this device \"{name}\"…")),
         DeployState::Pushing { target, .. } => progress_line(&format!("Pushing {}…", target.slug)),
@@ -219,6 +220,7 @@ fn dialog_title(state: &DeployState) -> &'static str {
     match state {
         DeployState::NeedsDevice => "Connect a device",
         DeployState::Blank { .. } => "Install firmware",
+        DeployState::Inspecting => "Checking the device…",
         DeployState::NeedsIdentity { .. } => "Name this device",
         DeployState::ChoosingPackage { .. } => "Choose a project",
         DeployState::Reviewing { .. } => "Review push",

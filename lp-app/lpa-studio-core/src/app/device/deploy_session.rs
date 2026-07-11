@@ -48,6 +48,11 @@ pub enum DeployState {
     NeedsDevice,
     /// Link up, no firmware answered: wizard step 1.
     Blank { flashed_once: bool },
+    /// Link + firmware up but the connect-time pull hasn't landed yet —
+    /// a transient "checking the device" step, never a claim about
+    /// firmware (that bug shipped once: an unready wire rendered as
+    /// "no firmware yet" on a perfectly healthy board).
+    Inspecting,
     /// Firmware up, no stamped identity: wizard step 2. The name input
     /// starts from `suggested_name` (may be empty; Continue is disabled
     /// until non-empty — gently insist, D14).
@@ -281,9 +286,9 @@ fn derive_state(
         return DeployState::Blank { flashed_once };
     }
     let Some(sync) = &env.device_sync else {
-        // firmware up but the pull hasn't landed yet — treat as blank-ish
-        // wait; the controller re-derives when the pull completes
-        return DeployState::Blank { flashed_once };
+        // firmware answered but the pull hasn't landed — say "checking",
+        // never "no firmware"; the controller re-derives when it lands
+        return DeployState::Inspecting;
     };
     let Some(identity) = &sync.identity else {
         return DeployState::NeedsIdentity {
@@ -313,6 +318,7 @@ fn state_name(state: &DeployState) -> &'static str {
     match state {
         DeployState::NeedsDevice => "waiting for a device",
         DeployState::Blank { .. } => "waiting for firmware",
+        DeployState::Inspecting => "checking the device",
         DeployState::NeedsIdentity { .. } => "naming the device",
         DeployState::ChoosingPackage { .. } => "choosing a project",
         DeployState::Reviewing { .. } => "reviewing a push",
@@ -400,6 +406,21 @@ mod tests {
         assert_eq!(chosen, target(1));
         session.push_finished();
         assert!(matches!(session.state, DeployState::Done { .. }));
+    }
+
+    #[test]
+    fn firmware_without_pull_result_says_checking_not_blank() {
+        // regression: an unready wire must never render as "no firmware"
+        let session = DeploySession::open(&env(true, true, None), None);
+        assert_eq!(session.state, DeployState::Inspecting);
+        // and it is NOT sticky: the pull landing re-derives forward
+        let mut session = session;
+        session.rederive(&env(
+            true,
+            true,
+            synced(Some(identity()), DeviceContent::Empty),
+        ));
+        assert!(matches!(session.state, DeployState::ChoosingPackage { .. }));
     }
 
     #[test]
