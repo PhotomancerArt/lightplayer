@@ -393,6 +393,16 @@ impl StudioController {
                         UiLogOrigin::Studio,
                         format!("device pull failed: {error}"),
                     ));
+                    // an actionable state, never an eternal "Checking…":
+                    // the dialog shows the unreadable note; flash/erase
+                    // stay reachable
+                    self.device_sync = Some(DeviceSyncState {
+                        identity: None,
+                        content: DeviceContent::Unreadable {
+                            detail: format!("could not read the device: {error}"),
+                        },
+                    });
+                    self.mark_dirty();
                     return;
                 }
             }

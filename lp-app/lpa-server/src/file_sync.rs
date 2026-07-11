@@ -44,6 +44,9 @@ pub fn handle_changes_since(
                     }
                 }
             }
+            // a storage that never existed is EMPTY, not an error — a
+            // fresh device has no /projects/<id> until the first push
+            Err(lpfs::FsError::NotFound(_)) => {}
             Err(e) => return changes_error(format!("list_dir {}: {e}", prefix.as_str())),
         }
     } else {

@@ -92,9 +92,27 @@ pub async fn pull_device_copy(
     storage_id: &str,
 ) -> Result<PulledDeviceCopy, UiError> {
     let mut logs = Vec::new();
-    let pulled = server
+    let pulled = match server
         .pull_changed_files(storage_id, lpc_model::FsVersion::new(0))
-        .await?;
+        .await
+    {
+        Ok(pulled) => pulled,
+        // older firmware reports a never-pushed storage dir as an fs
+        // error instead of an empty set — treat it as the empty device
+        // it is (the current wire returns empty; this is the fallback)
+        Err(error) if error.to_string().contains("no such file or directory") => {
+            return Ok(PulledDeviceCopy {
+                files: Vec::new(),
+                observed: empty_package_hash(),
+                has_manifest: false,
+                manifest_uid: None,
+                manifest_name: None,
+                identity: None,
+                logs,
+            });
+        }
+        Err(error) => return Err(error),
+    };
     logs.extend(pulled.logs);
     let files: Vec<(String, Vec<u8>)> = pulled
         .updates
@@ -404,6 +422,13 @@ fn replace_package_content_with_snapshot(
     SnapshotStore::new(&*history_fs)
         .materialize(&observed, &*package_fs)
         .map_err(|e| LibraryError::History(e.to_string()))
+}
+
+/// The canonical hash of an empty package (a fresh device's storage).
+fn empty_package_hash() -> ContentHash {
+    lpc_history::hash_package(&LpFsMemory::new())
+        .map(|(hash, _)| hash)
+        .expect("hashing an empty package cannot fail")
 }
 
 /// Stage pulled files as an in-memory package for snapshotting (`/.lp/*`
