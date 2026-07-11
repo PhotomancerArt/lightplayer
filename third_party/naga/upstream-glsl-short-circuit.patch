@@ -1,0 +1,95 @@
+--- a/naga/src/front/glsl/context.rs
++++ b/naga/src/front/glsl/context.rs
+@@ -599,6 +599,92 @@
+             }
+             HirExprKind::Literal(literal) if pos != ExprPos::Lhs => {
+                 self.add_expression(Expression::Literal(literal), meta)?
++            }
++            // [lp2025 fork] GLSL `&&` and `||` short-circuit: the right operand is
++            // only evaluated when the left operand does not already decide the
++            // result. Upstream lowers both operands eagerly, which hoists side
++            // effects (calls, assignments) in the right operand into
++            // unconditionally-executed statements. Lower the right operand in its
++            // own body: when that body is pure (only `Emit` statements) splice it
++            // into the current body and keep the plain `Binary` expression;
++            // otherwise lower like the ternary below — a temporary local written
++            // in both arms of an `If`, with the right operand evaluated only in
++            // the arm the spec says evaluates it.
++            HirExprKind::Binary { left, op, right }
++                if pos != ExprPos::Lhs
++                    && !self.is_const
++                    && matches!(
++                        op,
++                        BinaryOperator::LogicalAnd | BinaryOperator::LogicalOr
++                    ) =>
++            {
++                let (left, left_meta) =
++                    self.lower_expect_inner(stmt, frontend, left, ExprPos::Rhs)?;
++                let (right_body, (right, right_meta)) = self.new_body_with_ret(|ctx| {
++                    ctx.lower_expect_inner(stmt, frontend, right, ExprPos::Rhs)
++                })?;
++
++                let right_is_pure = right_body
++                    .iter()
++                    .all(|s| matches!(s, Statement::Emit(_)));
++                if right_is_pure {
++                    // No side effects to guard: keep the branchless expression.
++                    self.body.extend_block(right_body);
++                    self.add_expression(Expression::Binary { left, op, right }, meta)?
++                } else {
++                    // Both operands are `bool` in valid GLSL; the local takes the
++                    // left operand's type and validation rejects anything else.
++                    self.typifier_grow(left, left_meta)?;
++                    let ty = self.resolve_type_handle(left, left_meta)?;
++                    let local = self.locals.append(
++                        LocalVariable {
++                            name: None,
++                            ty,
++                            init: None,
++                        },
++                        meta,
++                    );
++                    let local_expr =
++                        self.add_expression(Expression::LocalVariable(local), meta)?;
++
++                    // One arm evaluates the right operand, the other reuses the
++                    // left value (`false && _ == false`, `true || _ == true`).
++                    let mut right_body = right_body;
++                    right_body.push(
++                        Statement::Store {
++                            pointer: local_expr,
++                            value: right,
++                        },
++                        right_meta,
++                    );
++                    let mut left_body = Block::new();
++                    left_body.push(
++                        Statement::Store {
++                            pointer: local_expr,
++                            value: left,
++                        },
++                        left_meta,
++                    );
++                    let (accept, reject) = match op {
++                        BinaryOperator::LogicalAnd => (right_body, left_body),
++                        _ => (left_body, right_body),
++                    };
++                    self.body.push(
++                        Statement::If {
++                            condition: left,
++                            accept,
++                            reject,
++                        },
++                        meta,
++                    );
++
++                    self.add_expression(
++                        Expression::Load {
++                            pointer: local_expr,
++                        },
++                        meta,
++                    )?
++                }
+             }
+             HirExprKind::Binary { left, op, right } if pos != ExprPos::Lhs => {
+                 let (mut left, left_meta) =

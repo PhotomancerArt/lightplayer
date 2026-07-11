@@ -33,9 +33,20 @@ unchanged.
 
 ## Upstreaming
 
-This is arguably an upstream bug and the patch is written to be
-upstreamable (it mirrors the neighbouring ternary lowering). If/when it lands
-upstream and a naga release containing it is adopted, delete this fork and the
+This is an upstream bug and the patch is written to be upstreamable:
+
+- naga's **wgsl-in** already lowers runtime `&&`/`||` to exactly this
+  temp-local + `If` shape ("To simulate short-circuiting behavior…",
+  `src/front/wgsl/lower/mod.rs`, `binary_short_circuit` path) — glsl-in
+  never got the same treatment.
+- glsl-in's own ternary lowering (directly below the patched arm) already
+  implements lazy operand evaluation for `?:`.
+
+`upstream-glsl-short-circuit.patch` is the fork hunk rebased onto the wgpu
+repo layout (`naga/src/front/glsl/context.rs`), ready for a PR when we want
+to send one; drop the `[lp2025 fork]` comment tag and add a glsl-in snapshot
+test in the wgpu repo when doing so. If/when it lands upstream and a naga
+release containing it is adopted, delete this fork and the
 `[patch.crates-io]` entry.
 
 ## Updating
