@@ -62,7 +62,6 @@ vec2 test_cos_vec2() {
     return cos(vec2(rt(0.0), rt(1.5707963267948966)));
 }
 
-// @broken(rv32n.q32)
 // run: test_cos_vec2() ~= vec2(1.0, 0.0) (tolerance: 0.01)
 
 vec3 test_cos_vec3() {

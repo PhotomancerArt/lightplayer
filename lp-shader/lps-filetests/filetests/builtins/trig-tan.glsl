@@ -55,7 +55,6 @@ vec2 test_tan_vec2() {
     return tan(vec2(rt(0.0), rt(0.7853981633974483)));
 }
 
-// @broken(rv32n.q32)
 // run: test_tan_vec2() ~= vec2(0.0, 1.0)
 
 vec3 test_tan_vec3() {

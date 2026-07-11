@@ -56,7 +56,6 @@ vec2 test_asinh_vec2() {
     return asinh(vec2(rt(0.0), rt(1.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_asinh_vec2() ~= vec2(0.0, 0.881373587019543)
 
 vec3 test_asinh_vec3() {
