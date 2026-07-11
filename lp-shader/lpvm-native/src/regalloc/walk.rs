@@ -82,6 +82,30 @@ fn build_passthrough_set(
         }
     }
 
+    // The entry value survives in its ABI register only until the first
+    // call executes: a call's argument moves and the (caller-saved) callee
+    // clobber the argument registers. Args of any call after the first in
+    // the stream are disqualified. A back-edge means even the first call
+    // can execute twice — its second iteration would read a register the
+    // first iteration's callee clobbered — so any loop disqualifies all
+    // call args. (Stream order is layout order for structured control
+    // flow, so an earlier-stream call can only run after a later-stream
+    // one via a back-edge.)
+    let mut seen_labels: Vec<crate::vinst::LabelId> = Vec::new();
+    let mut has_back_edge = false;
+    for inst in vinsts {
+        match inst {
+            VInst::Label(id, _) => seen_labels.push(*id),
+            VInst::Br { target, .. } | VInst::BrIf { target, .. } => {
+                if seen_labels.contains(target) {
+                    has_back_edge = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut seen_call = false;
     for inst in vinsts {
         match inst {
             VInst::Call {
@@ -91,11 +115,17 @@ fn build_passthrough_set(
                 caller_sret_vm_abi_swap,
                 ..
             } => {
+                let clobbered_by_prior_call = seen_call || has_back_edge;
+                seen_call = true;
                 let call_args = args.vregs(vreg_pool);
                 let isa = func_abi.isa();
                 for (i, &arg_vreg) in call_args.iter().enumerate() {
                     let idx = arg_vreg.0 as usize;
                     if idx >= passthrough.len() || disqualified[idx] || passthrough[idx].is_none() {
+                        continue;
+                    }
+                    if clobbered_by_prior_call {
+                        disqualified[idx] = true;
                         continue;
                     }
                     let entry_reg = passthrough[idx].unwrap();

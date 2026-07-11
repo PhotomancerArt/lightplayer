@@ -68,6 +68,8 @@ pub(crate) fn emit_module(
     options: &crate::options::WasmOptions,
 ) -> Result<(Vec<u8>, Option<i32>, Option<EnvMemorySpec>), String> {
     debug_assert_eq!(export_names.len(), ir.functions.len());
+    let augmented = imports::with_missing_helper_imports(ir, options.float_mode);
+    let ir = augmented.as_ref().unwrap_or(ir);
     let filtered = imports::build_filtered_imports(ir)?;
     let filtered_fn_count = filtered.decls.len() as u32;
 
