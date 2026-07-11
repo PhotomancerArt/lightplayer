@@ -56,7 +56,6 @@ vec2 test_cosh_vec2() {
     return cosh(vec2(rt(0.0), rt(1.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_cosh_vec2() ~= vec2(1.0, 1.5430806348152437)
 
 vec3 test_cosh_vec3() {

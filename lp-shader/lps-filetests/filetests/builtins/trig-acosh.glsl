@@ -49,7 +49,6 @@ vec2 test_acosh_vec2() {
     return acosh(vec2(rt(1.0), rt(2.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_acosh_vec2() ~= vec2(0.0, 1.3169578969248166)
 
 vec3 test_acosh_vec3() {

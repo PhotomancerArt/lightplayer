@@ -57,7 +57,6 @@ vec2 test_inversesqrt_vec2() {
     return inversesqrt(vec2(rt(1.0), rt(4.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_inversesqrt_vec2() ~= vec2(1.0, 0.5)
 
 vec3 test_inversesqrt_vec3() {

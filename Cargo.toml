@@ -231,6 +231,10 @@ codegen-units = 4
 
 [patch.crates-io]
 esp-storage = { path = "third_party/esp-storage" }
+# naga 29.0.0 fork: glsl-in lowers `&&`/`||` with side-effecting right operands
+# to control flow so they short-circuit per the GLSL spec (upstream evaluates
+# eagerly). See third_party/naga/README-LP.md; candidate for an upstream PR.
+naga = { path = "third_party/naga" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
 # no_std JSON serializer patch: preserve serde_json::RawValue as raw JSON.
