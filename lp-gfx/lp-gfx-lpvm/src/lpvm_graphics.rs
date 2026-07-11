@@ -154,6 +154,38 @@ where
         Ok(())
     }
 
+    /// CPU blend over the backing byte buffers (byte-identical to the
+    /// playlist crossfade this replaced: `mix` in f32 over raw u16 channel
+    /// values, `+0.5` rounding, saturating to `[0, 65535]`).
+    fn blend_textures(
+        &self,
+        previous: &TextureHandle,
+        active: &TextureHandle,
+        alpha: f32,
+        target: &mut TextureHandle,
+    ) -> Result<(), GfxError> {
+        let previous = texture_buf(previous)?.data();
+        let active = texture_buf(active)?.data();
+        let target = texture_buf_mut(target)?.data_mut();
+        if previous.len() != active.len() || previous.len() != target.len() {
+            return Err(GfxError::Backend(String::from(
+                "blend_textures: texture length mismatch",
+            )));
+        }
+        let alpha = clamp01(alpha);
+        for ((prev, next), out) in previous
+            .chunks_exact(2)
+            .zip(active.chunks_exact(2))
+            .zip(target.chunks_exact_mut(2))
+        {
+            let a = u16::from_le_bytes([prev[0], prev[1]]) as f32;
+            let b = u16::from_le_bytes([next[0], next[1]]) as f32;
+            let mixed = mix_u16(a, b, alpha);
+            out.copy_from_slice(&mixed.to_le_bytes());
+        }
+        Ok(())
+    }
+
     fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError> {
         let buffer = texture_buf(texture)?;
         Ok(TextureData::new(
@@ -266,6 +298,30 @@ where
                 "sample out handle backing was not an LpsSampleRgba16Buf"
             ),
         }
+    }
+}
+
+/// Blend one u16 channel (moved verbatim from the playlist node's crossfade
+/// so the CPU tier stays byte-identical).
+fn mix_u16(a: f32, b: f32, alpha: f32) -> u16 {
+    let mixed = a * (1.0 - alpha) + b * alpha + 0.5;
+    if mixed <= 0.0 {
+        0
+    } else if mixed >= u16::MAX as f32 {
+        u16::MAX
+    } else {
+        mixed as u16
+    }
+}
+
+/// Saturating `[0, 1]` clamp (moved verbatim from the playlist node).
+fn clamp01(value: f32) -> f32 {
+    if value <= 0.0 {
+        0.0
+    } else if value >= 1.0 {
+        1.0
+    } else {
+        value
     }
 }
 

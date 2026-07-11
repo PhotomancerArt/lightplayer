@@ -292,25 +292,12 @@ impl RenderNode for PlaylistNode {
         };
         ctx.render_texture_into(previous, request, &mut previous_texture)?;
         ctx.render_texture_into(active, request, &mut active_texture)?;
-        let graphics = ctx
-            .graphics()
-            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-        let previous_bytes = graphics
-            .read_back(&previous_texture)
-            .map_err(err_ctx("playlist previous read back"))?;
-        let active_bytes = graphics
-            .read_back(&active_texture)
-            .map_err(err_ctx("playlist active read back"))?;
-        let mut blended = vec![0u8; previous_bytes.bytes().len()];
-        blend_rgba16(
-            previous_bytes.bytes(),
-            active_bytes.bytes(),
-            alpha,
-            &mut blended,
-        )?;
-        graphics
-            .write_texture(target, &blended)
-            .map_err(err_ctx("playlist crossfade write"))
+        // GPU-resident op: the blend happens behind the graphics trait so
+        // render products never leave the GPU on accelerated backends.
+        ctx.graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+            .blend_textures(&previous_texture, &active_texture, alpha, target)
+            .map_err(err_ctx("playlist crossfade blend"))
     }
 
     fn sample_visual_into(
@@ -457,29 +444,9 @@ fn resolve_entry_product(
     lpc_model::VisualProduct::from_lp_value(value.value()).map_err(err_ctx("playlist child output"))
 }
 
-fn blend_rgba16(
-    previous: &[u8],
-    active: &[u8],
-    alpha: f32,
-    target: &mut [u8],
-) -> Result<(), NodeError> {
-    if previous.len() != active.len() || previous.len() != target.len() {
-        return Err(NodeError::msg("playlist crossfade texture length mismatch"));
-    }
-    let alpha = clamp01(alpha);
-    for ((prev, next), out) in previous
-        .chunks_exact(2)
-        .zip(active.chunks_exact(2))
-        .zip(target.chunks_exact_mut(2))
-    {
-        let a = u16::from_le_bytes([prev[0], prev[1]]) as f32;
-        let b = u16::from_le_bytes([next[0], next[1]]) as f32;
-        let mixed = mix_u16(a, b, alpha);
-        out.copy_from_slice(&mixed.to_le_bytes());
-    }
-    Ok(())
-}
-
+// Texture crossfade blending moved behind `LpGraphics::blend_textures`
+// (GPU-resident op family); the sample-channel blend below stays CPU-side
+// for now — sample buffers are the GPU-sample-points milestone's domain.
 fn blend_rgba16_samples(
     previous: &[u16],
     active: &[u16],

@@ -34,6 +34,9 @@ members = [
     # lp-gfx workspace members
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
+    # NOT in default-members: wgpu's dependency tree is heavy and the GPU
+    # backend is host-optional (build/test it explicitly, like the spike).
+    "lp-gfx/lp-gfx-wgpu",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -62,7 +65,6 @@ members = [
     "lp-shader/lps-filetests-app",
     "lp-app/web-demo",
     "spikes/naga-wasm-poc",
-    "spikes/wgpu-preview-poc",
     "lp-shader/lps-q32",
 ]
 resolver = "2"

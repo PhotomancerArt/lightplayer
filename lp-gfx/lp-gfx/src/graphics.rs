@@ -78,7 +78,28 @@ pub trait LpGraphics: Send + Sync {
     /// Zero every texel of `texture`.
     fn clear_texture(&self, texture: &mut TextureHandle) -> Result<(), GfxError>;
 
+    /// Blend two same-shape RGBA16 textures into `target`:
+    /// `target = previous × (1 − alpha) + active × alpha` per channel
+    /// (`alpha` clamped to `[0, 1]`, result rounded to the unorm16 grid).
+    ///
+    /// This is the first member of the **GPU-resident texture-op family**:
+    /// operations on render products belong behind this trait so the data
+    /// never leaves the GPU on accelerated backends. [`Self::read_back`] is
+    /// reserved for sinks that inherently need bytes (fixture sampling, wire
+    /// probes) — never for transforms. See the crate README.
+    fn blend_textures(
+        &self,
+        previous: &TextureHandle,
+        active: &TextureHandle,
+        alpha: f32,
+        target: &mut TextureHandle,
+    ) -> Result<(), GfxError>;
+
     /// Read a texture back as owned CPU bytes.
+    ///
+    /// For sinks that inherently need bytes (fixture sampling, wire probes).
+    /// Transforms on render products belong behind GPU-resident ops like
+    /// [`Self::blend_textures`] instead — see the crate README doctrine.
     fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError>;
 
     /// Allocate a zeroed buffer of `count` Q16.16 pixel-space sample points.

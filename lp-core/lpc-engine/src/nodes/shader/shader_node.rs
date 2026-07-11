@@ -1253,6 +1253,16 @@ mod tests {
             self.inner.clear_texture(texture)
         }
 
+        fn blend_textures(
+            &self,
+            previous: &TextureHandle,
+            active: &TextureHandle,
+            alpha: f32,
+            target: &mut TextureHandle,
+        ) -> Result<(), GfxError> {
+            self.inner.blend_textures(previous, active, alpha, target)
+        }
+
         fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError> {
             self.inner.read_back(texture)
         }

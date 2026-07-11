@@ -36,6 +36,23 @@ engine (`lpc-engine`) and shader execution backends.
   semantics. Which tier/backend is active is user-visible state. See
   `docs/adr/2026-07-09-preview-fidelity-tiers.md`.
 
+## GPU-resident texture ops
+
+A shader's output is a render product that may route (playlist), be
+materialized and transformed, or feed another shader. **If every operation on
+the data is GPU-side, it never leaves the GPU**: operations on render
+products belong behind `LpGraphics` so accelerated backends run them without
+readback. `blend_textures` (playlist crossfade) is the first member of this
+op family — CPU backends implement it over their byte buffers, GPU backends
+as a small fixed pipeline. The family grows as new product transforms
+appear; nodes must not hand-roll `read_back` → transform → `write_texture`
+loops for anything that is a per-texel transform.
+
+`read_back` is for **sinks that inherently need bytes** — fixture/LED
+sampling, wire probes — never for transforms. (On the browser GPU tier
+`read_back` is unavailable entirely; sinks needing bytes run on the CPU
+tier.)
+
 ## Handle lifetime rules
 
 - A handle is only valid with the `LpGraphics` that created it; backends

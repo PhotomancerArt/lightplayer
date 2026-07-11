@@ -5145,6 +5145,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-gfx-wgpu"
+version = "40.0.0"
+dependencies = [
+ "lp-gfx",
+ "lp-gfx-lpvm",
+ "lp-shader",
+ "lpir",
+ "lps-builtins",
+ "lps-frontend",
+ "lps-shared",
+ "lpvm-wasm",
+ "naga 29.0.0",
+ "png",
+ "pollster",
+ "wgpu 29.0.0",
+]
+
+[[package]]
 name = "lp-perf"
 version = "40.0.0"
 dependencies = [
@@ -10153,21 +10171,6 @@ checksum = "d0b8e1e505095f24cb4a578f04b1421d456257dca7fac114d9d9dd3d978c34b8"
 dependencies = [
  "naga 29.0.0",
  "wgpu-types 29.0.4",
-]
-
-[[package]]
-name = "wgpu-preview-poc"
-version = "40.0.0"
-dependencies = [
- "lp-shader",
- "lpir",
- "lps-builtins",
- "lps-shared",
- "lpvm-wasm",
- "naga 29.0.0",
- "png",
- "pollster",
- "wgpu 29.0.0",
 ]
 
 [[package]]

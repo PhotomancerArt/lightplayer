@@ -1,4 +1,6 @@
-//! Frame diffing (GPU f32 vs Q32 reference) and PNG output.
+//! Frame diffing (GPU f32 vs Q32 reference) and PNG output. Ported from
+//! `spikes/wgpu-preview-poc` — the numbers must stay comparable to
+//! m3-report.md.
 
 use std::io::BufWriter;
 use std::path::Path;
@@ -26,28 +28,14 @@ impl DiffStats {
     }
 }
 
-/// Count non-finite lanes in a GPU frame (Metal fast-math can NaN where the
-/// Q32 path saturates — see the m3 report's `tanh` finding).
+/// Count non-finite lanes in a raw GPU f32 frame.
 pub fn count_non_finite(pixels: &[f32]) -> usize {
     pixels.iter().filter(|v| !v.is_finite()).count()
 }
 
-/// Quantize a GPU rgba f32 frame with the CPU path's packing rule
-/// (Q16.16 raw fraction, truncating, saturating to 65535: `v * 65536`
-/// clamped — 1.0 maps to 65535 exactly as on the wasm path). Non-finite
-/// lanes quantize to 0 (count them separately via [`count_non_finite`]).
-pub fn quantize_gpu_frame(pixels: &[f32]) -> Vec<u16> {
-    pixels
-        .iter()
-        .map(|&v| {
-            let raw = (f64::from(v) * 65536.0).floor();
-            raw.clamp(0.0, 65535.0) as u16
-        })
-        .collect()
-}
-
 /// Per-pixel stats between two rgba unorm16 frames (alpha ignored: the CPU
-/// path saturates authored alpha the same way, and preview cards are opaque).
+/// path saturates authored alpha the same way, and preview cards are
+/// opaque).
 pub fn diff_frames(reference: &[u16], gpu: &[u16]) -> DiffStats {
     assert_eq!(reference.len(), gpu.len(), "frame size mismatch");
     let pixel_count = reference.len() / 4;
@@ -141,36 +129,4 @@ fn write_rgb8_png(path: &Path, width: u32, height: u32, rgb: &[u8]) -> std::io::
         .write_image_data(rgb)
         .map_err(std::io::Error::other)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn quantize_matches_wasm_packing_rule() {
-        // Same rule the synthesised render loop applies: raw Q16.16 fraction,
-        // saturated to 65535 (0.25 → 16384, 1.0 → 65535, negatives → 0).
-        let q = quantize_gpu_frame(&[0.25, 1.0, -0.5, 0.5]);
-        assert_eq!(q, vec![16384, 65535, 0, 32768]);
-    }
-
-    #[test]
-    fn diff_stats_on_identical_frames_are_zero() {
-        let frame = vec![1000u16, 2000, 3000, 65535, 0, 0, 0, 65535];
-        let stats = diff_frames(&frame, &frame);
-        assert_eq!(stats.mean_abs, [0.0; 3]);
-        assert_eq!(stats.max_abs, [0.0; 3]);
-        assert_eq!(stats.frac_over_8bit_8, 0.0);
-    }
-
-    #[test]
-    fn diff_stats_report_per_channel_delta() {
-        let a = vec![0u16, 0, 0, 65535];
-        let b = vec![65535u16, 0, 0, 65535];
-        let stats = diff_frames(&a, &b);
-        assert!((stats.max_abs[0] - 1.0).abs() < 1e-9);
-        assert_eq!(stats.max_abs[1], 0.0);
-        assert_eq!(stats.frac_over_8bit_8, 1.0);
-    }
 }
