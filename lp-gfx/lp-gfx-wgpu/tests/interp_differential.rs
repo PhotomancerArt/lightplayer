@@ -116,20 +116,15 @@ fn gpu_agrees_with_the_f32_interpreter() {
     }
 }
 
-/// Known frontend divergence, annotated — NOT worked around.
-///
-/// GLSL `&&`/`||` must short-circuit; the naga-glsl-in-based frontends
-/// evaluate side-effecting operands eagerly (torture-corpus finding, 58
-/// `@broken` directives). Observed here: **the GPU tier is eager too** —
-/// naga glsl-in hoists the RHS call to a statement before the `&&`, so the
-/// emitted WGSL evaluates it unconditionally. The two f32 paths therefore
-/// *agree with each other* while both diverging from GLSL spec semantics:
-/// this is a frontend bug uniform across tiers (shared naga lowering), not
-/// a CPU-vs-GPU tier divergence. When the frontend fix lands, the
-/// expectations below must flip to short-circuit semantics
-/// (`counter == 0` for x <= 8) on both paths.
+/// GLSL `&&`/`||` must short-circuit, and since the third_party/naga fork
+/// landed (glsl-in lowers side-effecting right operands to control flow;
+/// see the control/torture corpus) every tier that consumes the shared
+/// naga lowering does: the side-effecting RHS call runs only when the LHS
+/// is true, on both the f32 interpreter oracle and the GPU path. This test
+/// previously pinned the eager pre-fix behavior and was designed to fail
+/// when the fix landed.
 #[test]
-fn eager_logical_and_divergence_is_annotated() {
+fn logical_and_short_circuits_on_all_tiers() {
     let Some(graphics) = util::test_graphics() else {
         eprintln!("SKIP: no GPU adapter available");
         return;
@@ -149,23 +144,20 @@ fn eager_logical_and_divergence_is_annotated() {
         // Both paths agree on the condition value itself.
         assert!((interp[1] - expected_c).abs() < 1e-6, "interp condition");
         assert_eq!(gpu[(x as usize) * 4 + 1] > 32768, x > 8, "gpu condition");
+        // Short-circuit: bump() runs only when the left operand is true.
+        let expected_counter = expected_c * 0.25;
         eprintln!(
-            "eager-&&: x={x}: interp counter*0.25={} gpu counter*0.25={gpu_counter} \
-             (short-circuit semantics would give {})",
+            "short-circuit &&: x={x}: interp counter*0.25={} gpu counter*0.25={gpu_counter} \
+             (expected {expected_counter})",
             interp[0],
-            expected_c * 0.25,
-        );
-        // Both paths: eager — bump() always runs (see the doc comment).
-        assert!(
-            (interp[0] - 0.25).abs() < 1e-6,
-            "interpreter is eager today (frontend bug); if this starts \
-             failing the frontend fix landed — update this annotation"
         );
         assert!(
-            (gpu_counter - 0.25).abs() < 1e-4,
-            "GPU tier is eager today too (naga glsl-in hoists the call); \
-             if this starts failing the frontend fix landed — update this \
-             annotation"
+            (interp[0] - expected_counter).abs() < 1e-6,
+            "interpreter must not evaluate the RHS call when x <= 8"
+        );
+        assert!(
+            (gpu_counter - expected_counter).abs() < 1e-4,
+            "GPU tier must not evaluate the RHS call when x <= 8"
         );
     }
 }
