@@ -29,21 +29,16 @@ iteration, or a re-ordered side effect each produce a different value.
 Short-circuit tests use a global `g_trace` mutated by a helper `chk(k, v)`,
 so the value also proves which operands were (not) evaluated, in order.
 
-## Known bug: eager `&&` / `||` evaluation
+## Short-circuit `&&` / `||`
 
-GLSL requires `&&` and `||` to short-circuit, but the current frontend
-lowering evaluates both operands (`docs/design/lpir/02-core-ops.md` documents
-the gap; `docs/design/lpir/08-glsl-mapping.md` says side-effecting cases must
-lower to control flow). All three verified targets agree with each other on
-the eager behavior, so this is a frontend-lowering conformance bug, not a
-backend divergence. Expected values in this corpus are the GLSL-correct
-short-circuit results; the generator evaluates every directive under both
-semantics and marks exactly those whose value differs as
-`@broken(rv32n.q32) @broken(rv32c.q32) @broken(wasm.q32)`. When the lowering
-is fixed these will show up as unexpected passes; strip the annotations with
-`scripts/filetests.sh --fix` and delete this generator feature.
-Ternary conditions and arms already evaluate lazily (see
-`terncond_sideeffect.glsl`, which passes unannotated).
+GLSL requires `&&` and `||` to short-circuit, and both frontends lower
+side-effecting right operands to control flow (naga glsl-in via the
+third_party/naga fork; lps-glsl natively). Expected values in this corpus
+are the GLSL-correct short-circuit results. The corpus previously carried
+`@broken(rv32n.q32) @broken(rv32c.q32) @broken(wasm.q32)` on every directive
+whose value differed under the old eager lowering; those were removed when
+the lowering was fixed. Ternary conditions and arms also evaluate lazily
+(see `terncond_sideeffect.glsl`).
 
 ## Enumeration axes
 

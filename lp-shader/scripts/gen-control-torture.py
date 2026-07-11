@@ -38,19 +38,6 @@ TORTURE_DIR = os.path.normpath(
 
 REGEN_CMD = "python3 lp-shader/scripts/gen-control-torture.py --write"
 
-# Targets the corpus is verified against; @broken annotations name these.
-BROKEN_TARGETS = ["rv32n.q32", "rv32c.q32", "wasm.q32"]
-
-# Header note attached to any file containing @broken directives.
-BROKEN_NOTE = [
-    "KNOWN BUG: GLSL requires && / || to short-circuit, but the current",
-    "frontend lowering evaluates both operands (docs/design/lpir/02-core-ops.md",
-    "documents the gap; docs/design/lpir/08-glsl-mapping.md says side-effecting",
-    "cases must lower to control flow). Expected values below are the",
-    "GLSL-correct short-circuit results; directives whose value would differ",
-    "under eager evaluation are marked @broken until the lowering is fixed.",
-]
-
 I32_MIN = -(2**31)
 I32_MAX = 2**31 - 1
 
@@ -273,18 +260,16 @@ class _ReturnSig(Exception):
 class Interp:
     """Exact-int reference interpreter for the AST subset above.
 
-    `eager_logic=True` models the current LightPlayer lowering of `&&` / `||`,
-    which evaluates BOTH operands (see docs/design/lpir/02-core-ops.md); GLSL
-    itself requires short-circuit evaluation. Directives whose result differs
-    between the two semantics are emitted with @broken annotations.
+    `&&` / `||` short-circuit exactly as GLSL requires; both frontends now
+    lower side-effecting right operands to control flow (see
+    docs/design/lpir/02-core-ops.md).
     """
 
     FUEL = 100_000
 
-    def __init__(self, funcs: dict, global_decls: list, eager_logic: bool = False):
+    def __init__(self, funcs: dict, global_decls: list):
         self.funcs = funcs
         self.global_decls = global_decls  # list of (type, name, init_int)
-        self.eager_logic = eager_logic
 
     def run(self, fn_name: str, args: tuple) -> int:
         self.fuel = self.FUEL
@@ -338,16 +323,8 @@ class Interp:
         if isinstance(e, B):
             op = e.op
             if op == "&&":
-                if self.eager_logic:
-                    a = bool(self.eval(e.lhs, env))
-                    b = bool(self.eval(e.rhs, env))
-                    return a and b
                 return bool(self.eval(e.lhs, env)) and bool(self.eval(e.rhs, env))
             if op == "||":
-                if self.eager_logic:
-                    a = bool(self.eval(e.lhs, env))
-                    b = bool(self.eval(e.rhs, env))
-                    return a or b
                 return bool(self.eval(e.lhs, env)) or bool(self.eval(e.rhs, env))
             a = self.eval(e.lhs, env)
             b = self.eval(e.rhs, env)
@@ -447,21 +424,14 @@ class TestFile:
         for fn, _runs in self.tests:
             funcs[fn.name] = fn
         interp = Interp(funcs, self.globals)
-        interp_eager = Interp(funcs, self.globals, eager_logic=True)
 
         test_lines = []
-        any_broken = False
         for fn, runs in self.tests:
             test_lines.append(emit_func(fn))
             test_lines.append("")
             for args in runs:
                 expected = interp.run(fn.name, args)
-                eager = interp_eager.run(fn.name, args)
                 arg_str = ", ".join(str(a) for a in args)
-                if eager != expected:
-                    any_broken = True
-                    for target in BROKEN_TARGETS:
-                        test_lines.append(f"// @broken({target})")
                 test_lines.append(f"// run: {fn.name}({arg_str}) == {expected}")
             test_lines.append("")
 
@@ -470,10 +440,6 @@ class TestFile:
         lines.append(f"// Control-flow torture: {self.title}")
         for n in self.notes:
             lines.append(f"// {n}" if n else "//")
-        if any_broken:
-            lines.append("//")
-            for n in BROKEN_NOTE:
-                lines.append(f"// {n}")
         lines.append("//")
         lines.append("// GENERATED FILE - do not edit by hand.")
         lines.append(f"// Regenerate: {REGEN_CMD}")
@@ -2190,21 +2156,16 @@ iteration, or a re-ordered side effect each produce a different value.
 Short-circuit tests use a global `g_trace` mutated by a helper `chk(k, v)`,
 so the value also proves which operands were (not) evaluated, in order.
 
-## Known bug: eager `&&` / `||` evaluation
+## Short-circuit `&&` / `||`
 
-GLSL requires `&&` and `||` to short-circuit, but the current frontend
-lowering evaluates both operands (`docs/design/lpir/02-core-ops.md` documents
-the gap; `docs/design/lpir/08-glsl-mapping.md` says side-effecting cases must
-lower to control flow). All three verified targets agree with each other on
-the eager behavior, so this is a frontend-lowering conformance bug, not a
-backend divergence. Expected values in this corpus are the GLSL-correct
-short-circuit results; the generator evaluates every directive under both
-semantics and marks exactly those whose value differs as
-`@broken(rv32n.q32) @broken(rv32c.q32) @broken(wasm.q32)`. When the lowering
-is fixed these will show up as unexpected passes; strip the annotations with
-`scripts/filetests.sh --fix` and delete this generator feature.
-Ternary conditions and arms already evaluate lazily (see
-`terncond_sideeffect.glsl`, which passes unannotated).
+GLSL requires `&&` and `||` to short-circuit, and both frontends lower
+side-effecting right operands to control flow (naga glsl-in via the
+third_party/naga fork; lps-glsl natively). Expected values in this corpus
+are the GLSL-correct short-circuit results. The corpus previously carried
+`@broken(rv32n.q32) @broken(rv32c.q32) @broken(wasm.q32)` on every directive
+whose value differed under the old eager lowering; those were removed when
+the lowering was fixed. Ternary conditions and arms also evaluate lazily
+(see `terncond_sideeffect.glsl`).
 
 ## Enumeration axes
 
