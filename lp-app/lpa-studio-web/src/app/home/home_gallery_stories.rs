@@ -30,6 +30,7 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: None,
             on_device: Some("Luna's porch sign".to_string()),
             open_elsewhere: false,
+            connected_device: None,
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
@@ -39,6 +40,7 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: Some("Remixed from Basic".to_string()),
             on_device: None,
             open_elsewhere: false,
+            connected_device: None,
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
@@ -48,6 +50,7 @@ fn packages() -> Vec<UiPackageCard> {
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
             on_device: None,
             open_elsewhere: false,
+            connected_device: None,
         },
     ]
 }
@@ -103,6 +106,47 @@ fn populated() -> Element {
     let home = UiHomeView {
         devices: devices(),
         projects: packages(),
+        examples: examples(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            HomeGallery {
+                home,
+                now_secs: Some(STORY_NOW),
+                has_ever_granted: Some(true),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story]
+fn connected_device_unified_card() -> Element {
+    // D24: the connected device holding a local project = ONE project
+    // card with the connected indication; a blank second board keeps its
+    // own device card
+    use lpa_studio_core::UiCardConnection;
+
+    let mut projects = packages();
+    projects[0].connected_device = Some(UiCardConnection {
+        device_name: "Luna's porch sign".to_string(),
+        relation: lpa_studio_core::SyncRelation::AtHead,
+    });
+    projects[1].connected_device = Some(UiCardConnection {
+        device_name: "Workbench ESP32".to_string(),
+        relation: lpa_studio_core::SyncRelation::Behind,
+    });
+    let home = UiHomeView {
+        devices: vec![UiDeviceCard {
+            uid: Some("dev_4hJk6Lm01nPqRs3T".to_string()),
+            name: "Fresh board".to_string(),
+            transport: "USB".to_string(),
+            state: UiDeviceCardState::Blank,
+        }],
+        projects,
         examples: examples(),
         library_available: true,
         opening: None,

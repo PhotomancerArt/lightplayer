@@ -140,6 +140,92 @@ impl ProjectController {
         });
     }
 
+    /// Bank a device observation on the ACTIVE library project — this tab
+    /// owns its history subtree (M4b), so the catalog-transaction path
+    /// must not be used for it. Returns `false` when the active project
+    /// doesn't match `project_uid` (the caller falls back to a catalog
+    /// transaction).
+    pub(crate) fn record_device_observation_on_active(
+        &mut self,
+        project_uid: &str,
+        device: lpc_history::PrefixedUid,
+        observed: lpc_history::ContentHash,
+        files: &[(String, Vec<u8>)],
+        now: f64,
+    ) -> Result<bool, UiError> {
+        let Some(context) = self.library.as_mut() else {
+            return Ok(false);
+        };
+        let Some(active) = context.active.as_mut() else {
+            return Ok(false);
+        };
+        if active.handle.uid.to_string() != project_uid {
+            return Ok(false);
+        }
+        crate::app::places::device_session::bank_observation_on_handle(
+            &mut active.handle,
+            device,
+            observed,
+            files,
+            now,
+        )
+        .map_err(library_ui_error)?;
+        Ok(true)
+    }
+
+    /// The active library project's push payload (files + canonical
+    /// hash), when it matches `project_uid`. The deploy flow prefers the
+    /// live handle over a snapshot so an about-to-push copy is exactly
+    /// what the editor shows as saved.
+    pub(crate) fn active_package_payload(
+        &self,
+        project_uid: &str,
+    ) -> Result<Option<(Vec<(String, Vec<u8>)>, lpc_history::ContentHash)>, UiError> {
+        let Some(context) = self.library.as_ref() else {
+            return Ok(None);
+        };
+        let Some(active) = context.active.as_ref() else {
+            return Ok(None);
+        };
+        if active.handle.uid.to_string() != project_uid {
+            return Ok(None);
+        }
+        let files = active.handle.read_all_files().map_err(library_ui_error)?;
+        let hash = active.handle.content_hash().map_err(library_ui_error)?;
+        Ok(Some((files, hash)))
+    }
+
+    /// Record a push on the ACTIVE library project (this tab owns its
+    /// history subtree — M4b). Returns `false` when the active project
+    /// doesn't match (the caller uses the catalog transaction instead).
+    pub(crate) fn record_push_on_active(
+        &mut self,
+        project_uid: &str,
+        device: lpc_history::PrefixedUid,
+        version: lpc_history::ContentHash,
+        now: f64,
+    ) -> Result<bool, UiError> {
+        let Some(context) = self.library.as_mut() else {
+            return Ok(false);
+        };
+        let Some(active) = context.active.as_mut() else {
+            return Ok(false);
+        };
+        if active.handle.uid.to_string() != project_uid {
+            return Ok(false);
+        }
+        let event = active
+            .handle
+            .history
+            .record_push(version, device, now, None)
+            .map_err(|e| UiError::MissingSession(format!("record push: {e}")))?;
+        let history_fs = active.handle.history_fs.borrow();
+        lpc_history::EventLog::new(&*history_fs)
+            .append(&event)
+            .map_err(|e| UiError::MissingSession(format!("record push: {e}")))?;
+        Ok(true)
+    }
+
     /// Release host-side project locks for projects that stopped being
     /// active on a synchronous path. Idempotent; awaited at the studio
     /// controller's settle points.

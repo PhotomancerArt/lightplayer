@@ -22,6 +22,13 @@ pub struct UiStudioView {
     /// mirrors into `#/project/<slug>` (URL follows the view, covering
     /// example opens and clearing on disconnect without action plumbing).
     pub open_project_slug: Option<String>,
+    /// Connect-as-pull result for the attached DEVICE (never the sim —
+    /// D22): identity + content classification. Feeds the device pane,
+    /// gallery cards, and the deploy dialog (M5).
+    pub device_sync: Option<crate::app::places::DeviceSyncState>,
+    /// The deploy dialog, when open — rendered as a modal overlay over
+    /// whatever the shell shows (M5).
+    pub deploy: Option<Box<crate::app::device::UiDeployView>>,
 }
 
 impl UiStudioView {
@@ -32,6 +39,8 @@ impl UiStudioView {
             home: None,
             open_project_uid: None,
             open_project_slug: None,
+            device_sync: None,
+            deploy: None,
         }
     }
 
@@ -43,6 +52,19 @@ impl UiStudioView {
     pub fn with_open_project(mut self, uid: Option<String>, slug: Option<String>) -> Self {
         self.open_project_uid = uid;
         self.open_project_slug = slug;
+        self
+    }
+
+    pub fn with_device_sync(
+        mut self,
+        device_sync: Option<crate::app::places::DeviceSyncState>,
+    ) -> Self {
+        self.device_sync = device_sync;
+        self
+    }
+
+    pub fn with_deploy(mut self, deploy: Option<crate::app::device::UiDeployView>) -> Self {
+        self.deploy = deploy.map(Box::new);
         self
     }
 

@@ -497,6 +497,13 @@ fn origin_event_for(meta: Option<PackageMeta>) -> HistoryEvent {
             source_version: None,
         },
         PackageProvenance::ImportedZip { .. } => EventKind::ImportedZip,
+        PackageProvenance::PulledFromDevice { device_uid, .. } => match device_uid.parse() {
+            Ok(device) => EventKind::PulledFromDevice { device },
+            Err(_) => {
+                log::warn!("unparseable device provenance; falling back to Created origin");
+                EventKind::Created
+            }
+        },
         PackageProvenance::ForkedFrom {
             parent_project,
             parent_version,

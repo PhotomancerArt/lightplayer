@@ -310,11 +310,24 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
     match op {
         CatalogOp::Rename { uid, .. }
         | CatalogOp::Duplicate { uid }
-        | CatalogOp::Delete { uid } => Some(uid),
+        | CatalogOp::Delete { uid }
+        | CatalogOp::RecordDeviceObservation {
+            project_uid: uid, ..
+        }
+        | CatalogOp::AdoptObservedVersion {
+            project_uid: uid, ..
+        }
+        | CatalogOp::ForkObservedVersion {
+            project_uid: uid, ..
+        }
+        | CatalogOp::RecordPush {
+            project_uid: uid, ..
+        } => Some(uid),
         CatalogOp::Create { .. }
         | CatalogOp::ImportZip { .. }
         | CatalogOp::EnsureExampleSeeded { .. }
-        | CatalogOp::UpsertRegisteredDevice(_) => None,
+        | CatalogOp::UpsertRegisteredDevice(_)
+        | CatalogOp::AdoptDevicePackage { .. } => None,
     }
 }
 

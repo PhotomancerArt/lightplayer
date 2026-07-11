@@ -14,15 +14,24 @@ pub struct UiDeviceCard {
     pub state: UiDeviceCardState,
 }
 
-/// The M4 slice of the device state chart. The full chart
-/// (blank / mid-flash / diverged verbs) is M5's — recorded as O2.
+/// The device card state chart (O2, settled in M5). Under D24
+/// unification, a connected device holding a LOCALLY-KNOWN project has
+/// no device card at all — the project card carries the connected
+/// indication — so the connected states here cover only devices whose
+/// contents aren't a local project.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiDeviceCardState {
-    /// Connected and running: click opens the editor against the device.
+    /// Connected, no firmware answering: click opens the deploy wizard.
+    Blank,
+    /// Connected and running a project (shown when the project is not a
+    /// local library entry — otherwise D24 unifies onto the project
+    /// card). Click opens the editor against the device.
     ConnectedRunning {
         /// The project the device holds, when known.
         project: Option<String>,
     },
+    /// Connected but the contents are unreadable or awaiting identity.
+    ConnectedUnknown { detail: String },
     /// Remembered but offline: muted card from the registry.
     RememberedOffline {
         /// f64 epoch seconds.

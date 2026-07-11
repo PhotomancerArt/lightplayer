@@ -67,6 +67,44 @@ pub enum CatalogOp {
         id: String,
     },
     UpsertRegisteredDevice(RegisteredDevice),
+    /// Connect-as-pull (D8) for a project NOT open in this tab: bank the
+    /// observed device copy into that project's history (no-op when the
+    /// hash is known) and refresh the registry entry. The host takes the
+    /// project's lock first (structural ordering) — refusal means the
+    /// project is open in another tab and the observation is skipped by
+    /// the caller (that tab owns the history subtree).
+    RecordDeviceObservation {
+        project_uid: String,
+        device: RegisteredDevice,
+        observed: lpc_history::ContentHash,
+        files: Vec<(String, Vec<u8>)>,
+    },
+    /// Adopt a device's unknown project as a new library package (D11),
+    /// keeping its on-device uid; registry entry recorded.
+    AdoptDevicePackage {
+        device: RegisteredDevice,
+        files: Vec<(String, Vec<u8>)>,
+    },
+    /// Diverged verb (D11): a banked observed version becomes the
+    /// project's new head.
+    AdoptObservedVersion {
+        project_uid: String,
+        observed: lpc_history::ContentHash,
+    },
+    /// Diverged verb (D11): fork a banked observed version into a new
+    /// project named after the device (D9).
+    ForkObservedVersion {
+        project_uid: String,
+        observed: lpc_history::ContentHash,
+        device_name: String,
+    },
+    /// Record a completed push: history `Pushed` event + device
+    /// association.
+    RecordPush {
+        project_uid: String,
+        device: RegisteredDevice,
+        version: lpc_history::ContentHash,
+    },
 }
 
 /// What a catalog transaction produced.
@@ -218,10 +256,67 @@ pub fn apply_catalog_op(
         ),
         CatalogOp::EnsureExampleSeeded { id } => Some(ensure_example_seeded(store, &id, now)?),
         CatalogOp::UpsertRegisteredDevice(device) => {
-            crate::app::places::DeviceRegistry::new(store.fs_handle())
-                .upsert(device)
+            // merge semantics: sight-only upserts (association None) must
+            // not erase what was last pushed
+            crate::app::places::device_session::upsert_device_merged(store, device)
                 .map_err(|e| LibraryHostError::Host(e.to_string()))?;
             None
+        }
+        CatalogOp::RecordDeviceObservation {
+            project_uid,
+            device,
+            observed,
+            files,
+        } => {
+            crate::app::places::device_session::record_device_observation(
+                store,
+                &project_uid,
+                &device,
+                observed,
+                &files,
+                now,
+            )?;
+            Some(summary_for(store, parse_uid(&project_uid)?)?)
+        }
+        CatalogOp::AdoptDevicePackage { device, files } => Some(
+            crate::app::places::device_session::adopt_device_package(store, &device, &files, now)?,
+        ),
+        CatalogOp::AdoptObservedVersion {
+            project_uid,
+            observed,
+        } => {
+            crate::app::places::device_session::adopt_observed_version(
+                store,
+                &project_uid,
+                observed,
+                now,
+            )?;
+            Some(summary_for(store, parse_uid(&project_uid)?)?)
+        }
+        CatalogOp::ForkObservedVersion {
+            project_uid,
+            observed,
+            device_name,
+        } => Some(crate::app::places::device_session::fork_observed_version(
+            store,
+            &project_uid,
+            observed,
+            &device_name,
+            now,
+        )?),
+        CatalogOp::RecordPush {
+            project_uid,
+            device,
+            version,
+        } => {
+            crate::app::places::device_session::record_push(
+                store,
+                &project_uid,
+                &device,
+                version,
+                now,
+            )?;
+            Some(summary_for(store, parse_uid(&project_uid)?)?)
         }
     };
     Ok(CatalogOutcome { summary })
@@ -340,7 +435,19 @@ impl LibraryHost for MemoryLibraryHost {
         let refused = match &op {
             CatalogOp::Rename { uid, .. }
             | CatalogOp::Duplicate { uid }
-            | CatalogOp::Delete { uid } => self.refuses(uid).then(|| uid.clone()),
+            | CatalogOp::Delete { uid }
+            | CatalogOp::RecordDeviceObservation {
+                project_uid: uid, ..
+            }
+            | CatalogOp::AdoptObservedVersion {
+                project_uid: uid, ..
+            }
+            | CatalogOp::ForkObservedVersion {
+                project_uid: uid, ..
+            }
+            | CatalogOp::RecordPush {
+                project_uid: uid, ..
+            } => self.refuses(uid).then(|| uid.clone()),
             _ => None,
         };
         let result = match refused {

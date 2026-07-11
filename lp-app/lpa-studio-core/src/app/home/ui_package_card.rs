@@ -25,4 +25,15 @@ pub struct UiPackageCard {
     /// Structural actions refuse while set; the card gets the badge
     /// treatment (M4b P4).
     pub open_elsewhere: bool,
+    /// A LIVE connected device currently holds this project — D24: one
+    /// card, connected indication (no separate device card).
+    pub connected_device: Option<UiCardConnection>,
+}
+
+/// The live-device indication a unified project card carries (D24).
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiCardConnection {
+    pub device_name: String,
+    /// How the device's copy relates to the library line.
+    pub relation: lpc_history::SyncRelation,
 }

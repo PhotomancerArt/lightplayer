@@ -27,6 +27,12 @@ pub enum PackageProvenance {
         parent_project: String,
         parent_version: String,
     },
+    /// Adopted from a device carrying a project this library did not know
+    /// (connect-as-pull, D8/D11).
+    PulledFromDevice {
+        device_uid: String,
+        device_name: String,
+    },
 }
 
 /// The sidecar contents.

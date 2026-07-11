@@ -30,6 +30,9 @@ pub fn StudioShell(
         // consumed by the web shell's URL sync, not the layout
         open_project_uid: _,
         open_project_slug: _,
+        // rendered by the device pane (M5)
+        device_sync: _,
+        deploy,
     } = view;
 
     if opening_frame && panes.is_empty() {
@@ -58,6 +61,9 @@ pub fn StudioShell(
                     HomeGallery { home: *home, now_secs, on_action }
                     RuntimeLog { console, on_console }
                 }
+            }
+            if let Some(deploy) = deploy {
+                crate::app::DeployDialog { deploy: *deploy, on_action }
             }
         };
     }
@@ -123,6 +129,9 @@ pub fn StudioShell(
                     RuntimeLog { console, on_console }
                 }
             }
+        }
+        if let Some(deploy) = deploy {
+            crate::app::DeployDialog { deploy: *deploy, on_action }
         }
     }
 }

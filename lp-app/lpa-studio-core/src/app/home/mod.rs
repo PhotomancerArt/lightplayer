@@ -20,4 +20,4 @@ pub use home_op::{HOME_NODE_ID, HomeOp, ZipBytes};
 pub use ui_device_card::{UiDeviceCard, UiDeviceCardState};
 pub use ui_example_card::UiExampleCard;
 pub use ui_home_view::UiHomeView;
-pub use ui_package_card::UiPackageCard;
+pub use ui_package_card::{UiCardConnection, UiPackageCard};

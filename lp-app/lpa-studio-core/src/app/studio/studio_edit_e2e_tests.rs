@@ -255,6 +255,263 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
 }
 
 #[test]
+fn device_connect_pulls_classifies_and_adopts() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost};
+    use crate::app::places::DeviceContent;
+    use lpc_history::SyncRelation;
+
+    // a "device": an in-process server whose /projects/studio holds a
+    // project the library does NOT know, plus a stamped identity
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let device_project_dir = "/projects/studio";
+    {
+        let server = server.borrow();
+        let fs = server.base_fs();
+        fs.write_file(
+            format!("{device_project_dir}/project.json").as_path(),
+            br#"{"kind":"Project","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
+        )
+        .unwrap();
+        fs.write_file(
+            format!("{device_project_dir}/shader.glsl").as_path(),
+            b"wild",
+        )
+        .unwrap();
+        fs.write_file(
+            format!("{device_project_dir}/.lp/device.json").as_path(),
+            br#"{"uid":"dev_aaaaaaaaaaaaaaaa","name":"Bench board"}"#,
+        )
+        .unwrap();
+    }
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [3u8; 16]),
+        Rc::new(|| "2026-07-10-1000".to_string()),
+    );
+    let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
+    controller.attach_library(host.clone());
+
+    // 1) unknown uid + stamped identity → adoption
+    drive(controller.refresh_device_sync());
+    let sync = controller.device_sync().expect("device state cached");
+    assert_eq!(
+        sync.identity
+            .as_ref()
+            .map(|identity| identity.name.as_str()),
+        Some("Bench board")
+    );
+    let DeviceContent::Adopted {
+        project_uid, slug, ..
+    } = &sync.content
+    else {
+        panic!("unknown project adopts, got {:?}", sync.content);
+    };
+    assert_eq!(project_uid, "prj_devicedevicedevi");
+    assert_eq!(slug, "2026-07-10-1000-porch-wild");
+    let adopted = store.open("prj_devicedevicedevi".parse().unwrap()).unwrap();
+    assert!(matches!(
+        adopted.history.events().first().unwrap().kind,
+        lpc_history::EventKind::PulledFromDevice { .. }
+    ));
+    let registry = crate::app::places::DeviceRegistry::new(store.fs_handle());
+    assert_eq!(registry.list().unwrap().len(), 1);
+
+    // 2) reconnect: now the uid is known and the hashes match → AtHead,
+    //    no second adoption
+    drive(controller.refresh_device_sync());
+    let sync = controller.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, slug, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(*relation, SyncRelation::AtHead);
+    assert_eq!(slug, "2026-07-10-1000-porch-wild");
+    assert_eq!(store.list().unwrap().len(), 1, "no duplicate adoption");
+
+    // 3) the device copy changes behind our back → diverged, banked
+    {
+        let server = server.borrow();
+        server
+            .base_fs()
+            .write_file(
+                format!("{device_project_dir}/shader.glsl").as_path(),
+                b"changed on device",
+            )
+            .unwrap();
+    }
+    drive(controller.refresh_device_sync());
+    let sync = controller.device_sync().expect("device state cached");
+    let DeviceContent::Known {
+        relation, observed, ..
+    } = &sync.content
+    else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(*relation, SyncRelation::Diverged);
+    let handle = store.open("prj_devicedevicedevi".parse().unwrap()).unwrap();
+    assert!(
+        handle.history.knows(*observed),
+        "diverged device copy is banked at connect (push never destroys)"
+    );
+}
+
+#[test]
+fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
+    use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployState};
+    use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+    use crate::app::places::{DeviceContent, DeviceRegistry};
+    use lpc_history::{EventKind, SyncRelation};
+
+    // a "device": empty project storage, no identity, firmware answering
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    controller.set_device_connection_for_test(lpa_link::LinkConnection::fake(
+        "fake-runtime",
+        "fake-session",
+    ));
+
+    // a library with one pushable project (the edit-e2e node graph)
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [4u8; 16]),
+        Rc::new(|| "2026-07-10-1100".to_string()),
+    );
+    let summary = store
+        .install_package(
+            "Porch",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
+    controller.attach_library(host.clone());
+    drive(controller.settle_library());
+    drive(controller.refresh_device_sync());
+
+    let deploy_action = |op: DeployOp| UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op);
+
+    // open the dialog: firmware yes, identity no → NeedsIdentity
+    drive(controller.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    let view = controller.view();
+    let deploy = view.deploy.as_ref().expect("dialog open");
+    assert!(
+        matches!(deploy.state, DeployState::NeedsIdentity { .. }),
+        "empty unstamped device asks for a name, got {:?}",
+        deploy.state
+    );
+    assert_eq!(deploy.choices.len(), 1, "the picker offers the library");
+
+    // stamp: writes /.lp/device.json on the device + registry entry
+    drive(controller.dispatch(deploy_action(DeployOp::StampIdentity {
+        name: "Luna's porch sign".to_string(),
+    })))
+    .unwrap();
+    let stamped_identity = {
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file("/projects/studio/.lp/device.json".as_path())
+            .expect("identity stamped on the device");
+        crate::app::places::DeviceIdentity::from_json_bytes(&bytes).unwrap()
+    };
+    assert_eq!(stamped_identity.name, "Luna's porch sign");
+    assert!(stamped_identity.uid.starts_with("dev_"));
+    let registry = DeviceRegistry::new(store.fs_handle());
+    assert_eq!(registry.list().unwrap().len(), 1);
+    assert!(matches!(
+        controller.view().deploy.as_ref().unwrap().state,
+        DeployState::ChoosingPackage { .. }
+    ));
+
+    // choose the project → Reviewing
+    drive(controller.dispatch(deploy_action(DeployOp::ChoosePackage {
+        key: summary.uid.to_string(),
+    })))
+    .unwrap();
+    assert!(matches!(
+        controller.view().deploy.as_ref().unwrap().state,
+        DeployState::Reviewing { .. }
+    ));
+
+    // push: replace-and-load on the device, hash-verified; identity
+    // survives; history + association recorded; device now AtHead
+    drive(controller.dispatch(deploy_action(DeployOp::ConfirmPush))).unwrap();
+    let view = controller.view();
+    let DeployState::Done { device, pushed } = &view.deploy.as_ref().unwrap().state else {
+        panic!(
+            "push completes, got {:?}",
+            view.deploy.as_ref().unwrap().state
+        );
+    };
+    assert_eq!(device.name, "Luna's porch sign");
+    assert_eq!(pushed.slug, summary.slug);
+
+    let device_manifest = String::from_utf8(
+        server
+            .borrow()
+            .base_fs()
+            .read_file("/projects/studio/project.json".as_path())
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        device_manifest.contains(&summary.uid.to_string()),
+        "the device holds the pushed project"
+    );
+    let restamped = server
+        .borrow()
+        .base_fs()
+        .read_file("/projects/studio/.lp/device.json".as_path());
+    assert!(restamped.is_ok(), "identity survives the replace");
+
+    let handle = store.open(summary.uid).unwrap();
+    assert!(
+        handle
+            .history
+            .events()
+            .iter()
+            .any(|event| matches!(event.kind, EventKind::Pushed { .. })),
+        "the push is a history event"
+    );
+    let devices = registry.list().unwrap();
+    let association = devices[0]
+        .association
+        .as_ref()
+        .expect("association recorded");
+    assert_eq!(association.project, summary.uid);
+
+    let sync = controller.device_sync().expect("re-pulled after push");
+    assert!(
+        matches!(
+            &sync.content,
+            DeviceContent::Known {
+                relation: SyncRelation::AtHead,
+                ..
+            }
+        ),
+        "device is at head after the push, got {:?}",
+        sync.content
+    );
+}
+
+#[test]
 fn opening_another_package_releases_the_previous_project_lock() {
     use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
     use crate::{HOME_NODE_ID, HomeOp};

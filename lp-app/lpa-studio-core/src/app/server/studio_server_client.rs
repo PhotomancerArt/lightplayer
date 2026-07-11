@@ -213,6 +213,31 @@ impl StudioServerClient {
     }
 
     /// Canonical package hash of a project directory (push/pull verify).
+    /// Write one file into a project storage without touching the rest
+    /// (identity stamping: `/.lp/device.json` must survive pushes and be
+    /// writable without one).
+    pub async fn write_project_file(
+        &mut self,
+        project_id: &str,
+        relative_path: &str,
+        bytes: &[u8],
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        let outcome = self
+            .client
+            .push_project_files(
+                project_id,
+                [lpa_client::project_deploy::ProjectDeployFile::new(
+                    relative_path,
+                    bytes,
+                )],
+            )
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(logs)
+    }
+
     pub async fn hash_package(
         &mut self,
         project_id: &str,

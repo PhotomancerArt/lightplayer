@@ -6,8 +6,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, DeviceController, DeviceOp, LinkProviderKind, UiAction, UiDeviceCard,
-    UiDeviceCardState,
+    ControllerId, DEPLOY_NODE_ID, DeployOp, UiAction, UiDeviceCard, UiDeviceCardState,
 };
 
 use crate::app::home::time_ago::time_ago;
@@ -26,12 +25,20 @@ pub(crate) fn DeviceCard(
 ) -> Element {
     let now = now_secs.unwrap_or_else(super::package_card::platform_now_secs);
     let (dot_class, status_line) = match &card.state {
+        UiDeviceCardState::Blank => (
+            "tw:h-2 tw:w-2 tw:rounded-full tw:bg-status-warning-foreground",
+            "Ready to set up — install firmware".to_string(),
+        ),
         UiDeviceCardState::ConnectedRunning { project } => (
             "tw:h-2 tw:w-2 tw:rounded-full tw:bg-status-good-foreground",
             project
                 .clone()
                 .map(|project| format!("Running {project}"))
                 .unwrap_or_else(|| "Connected".to_string()),
+        ),
+        UiDeviceCardState::ConnectedUnknown { detail } => (
+            "tw:h-2 tw:w-2 tw:rounded-full tw:bg-status-good-foreground",
+            detail.clone(),
         ),
         UiDeviceCardState::RememberedOffline {
             last_seen_at,
@@ -51,6 +58,18 @@ pub(crate) fn DeviceCard(
     rsx! {
         article {
             class: device_card_class(muted),
+            // every device card is a drop target: project card → device
+            // card opens the deploy dialog pre-filled (replace preview)
+            ondragover: move |event| event.prevent_default(),
+            ondrop: move |event| {
+                event.prevent_default();
+                if let Some(key) = super::package_card::take_dragged_project() {
+                    on_action.call(UiAction::from_op(
+                        ControllerId::new(DEPLOY_NODE_ID),
+                        DeployOp::OpenDialog { target_key: Some(key) },
+                    ));
+                }
+            },
             onclick: move |_| on_action.call(connect_device_action()),
             header { class: "tw:flex tw:items-center tw:gap-2 tw:border-b tw:border-border tw:bg-terminal tw:px-3 tw:py-2",
                 span { class: dot_class }
@@ -91,31 +110,28 @@ pub(crate) fn ConnectDeviceCard(on_action: EventHandler<UiAction>) -> Element {
     }
 }
 
-/// Connect = the browser serial flow (the classic device pane takes over —
-/// the M4 bridge; M5 replaces it with the provision dialog).
+/// Connect = open the deploy dialog (M5): connect, provision, and push
+/// all live there; the gallery never becomes a pane takeover.
 pub(crate) fn connect_device_action() -> UiAction {
     UiAction::from_op(
-        ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::OpenProvider {
-            provider_id: LinkProviderKind::BrowserSerialEsp32,
-        },
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::OpenDialog { target_key: None },
     )
     .with_label("Connect a device")
-    .with_summary("Connect an ESP32 over USB.")
+    .with_summary("Connect, provision, and push to a device.")
     .with_icon("usb")
 }
 
-/// The "Flash firmware…" bridge link action (open without attaching).
+/// "Flash firmware…" also enters the dialog — its blank/needs-device
+/// states carry the flash and recovery flows.
 pub(crate) fn flash_device_action() -> UiAction {
     UiAction::from_op(
-        ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::OpenProviderForRecovery {
-            provider_id: LinkProviderKind::BrowserSerialEsp32,
-        },
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::OpenDialog { target_key: None },
     )
     .with_label("Flash firmware…")
-    .with_summary("Open the ESP32 connection without attaching LightPlayer.")
-    .with_icon("usb")
+    .with_summary("Install or repair LightPlayer firmware on an ESP32.")
+    .with_icon("zap")
 }
 
 fn device_card_class(muted: bool) -> &'static str {

@@ -1,8 +1,11 @@
 //! A "Your projects" gallery card.
 
+use std::cell::RefCell;
+
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ActionConfirmation, ControllerId, HOME_NODE_ID, HomeOp, UiAction, UiPackageCard,
+    ActionConfirmation, ControllerId, DEPLOY_NODE_ID, DeployOp, HOME_NODE_ID, HomeOp, SyncRelation,
+    UiAction, UiPackageCard,
 };
 
 use crate::app::home::card_thumb::CardThumb;
@@ -36,6 +39,12 @@ pub(crate) fn PackageCard(
     rsx! {
         article {
             class: package_card_class(opening),
+            // drag a project onto a device card = deploy dialog pre-filled
+            draggable: true,
+            ondragstart: {
+                let uid = card.uid.clone();
+                move |_| set_dragged_project(uid.clone())
+            },
             // Opening a card is NAVIGATION, so it is a real <a> to the
             // project route: plain click rides the hashchange → open path,
             // and cmd/middle-click "open in new tab" works natively. The
@@ -67,9 +76,20 @@ pub(crate) fn PackageCard(
                         if let Some(provenance) = card.provenance.clone() {
                             p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-dim-foreground", "{provenance}" }
                         }
-                        if let Some(device) = card.on_device.clone() {
-                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground",
-                                "On {device} ✓"
+                        // the association parity line yields to the LIVE
+                        // indication when the device is actually here
+                        if card.connected_device.is_none() {
+                            if let Some(device) = card.on_device.clone() {
+                                p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground",
+                                    "On {device} ✓"
+                                }
+                            }
+                        }
+                        // D24: the live device rides the project card —
+                        // one card, connected indication
+                        if let Some(connection) = card.connected_device.clone() {
+                            p { class: connected_line_class(connection.relation),
+                                {connected_line(&connection.device_name, connection.relation)}
                             }
                         }
                         // a fact, not a warning: neutral chip; the card stays
@@ -117,6 +137,18 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
         "Delete",
     ));
 
+    let push_to_device = card.connected_device.as_ref().map(|connection| {
+        UiAction::from_op(
+            ControllerId::new(DEPLOY_NODE_ID),
+            DeployOp::OpenDialog {
+                target_key: Some(card.uid.clone()),
+            },
+        )
+        .with_label(format!("Push to {}…", connection.device_name))
+        .with_summary("Review and push this project to the connected device.")
+        .with_icon("upload")
+    });
+
     rsx! {
         DetailPopover {
             icon: StudioIconName::More,
@@ -145,6 +177,14 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
             }
             DetailSection {
                 div { class: "tw:grid tw:gap-0.5",
+                    if let Some(push) = push_to_device {
+                        ActionButton {
+                            action: push,
+                            running: false,
+                            variant: ActionButtonVariant::MenuItem,
+                            on_action,
+                        }
+                    }
                     ActionButton {
                         action: duplicate,
                         running: false,
@@ -183,6 +223,39 @@ fn package_card_class(opening: bool) -> &'static str {
         "tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
     } else {
         "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+    }
+}
+
+thread_local! {
+    /// The project uid mid-drag (HTML5 dataTransfer is awkward through
+    /// Dioxus; a same-page hand-off cell is all card→card drag needs).
+    static DRAGGED_PROJECT: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn set_dragged_project(uid: String) {
+    DRAGGED_PROJECT.with(|cell| *cell.borrow_mut() = Some(uid));
+}
+
+pub(crate) fn take_dragged_project() -> Option<String> {
+    DRAGGED_PROJECT.with(|cell| cell.borrow_mut().take())
+}
+
+/// The D24 connected indication: green only when the device is current
+/// (green = good); behind/diverged read as facts needing attention.
+fn connected_line(device_name: &str, relation: SyncRelation) -> String {
+    match relation {
+        SyncRelation::AtHead => format!("On {device_name} — connected ✓"),
+        SyncRelation::Behind => format!("On {device_name} — behind your copy"),
+        SyncRelation::Diverged => format!("On {device_name} — edited elsewhere"),
+    }
+}
+
+fn connected_line_class(relation: SyncRelation) -> &'static str {
+    match relation {
+        SyncRelation::AtHead => "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground",
+        SyncRelation::Behind | SyncRelation::Diverged => {
+            "tw:m-0 tw:truncate tw:text-xs tw:text-status-working-foreground"
+        }
     }
 }
 
