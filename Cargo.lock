@@ -5680,6 +5680,7 @@ dependencies = [
  "lps-builtin-ids",
  "lps-builtins",
  "lps-frontend",
+ "lps-glsl",
  "lps-q32",
  "lps-shared",
  "lpvm",
