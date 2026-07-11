@@ -12,10 +12,10 @@ use crate::app::home::package_card::{PackageCard, home_action};
 use crate::base::{StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 
-/// The gallery home screen (roadmap M4): a map of everywhere the user's
-/// light lives. Replaces the old dev-button home; the old connect/flash
-/// flows stay reachable through the connect card and the flash link (the
-/// transitional bridge, deleted in M5).
+/// The gallery home screen (roadmap M4, unconditional at `#/` since M5):
+/// a map of everywhere the user's light lives. The connect card and the
+/// flash link open the deploy dialog — connect, provision, and push all
+/// live there (D22/D24).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn HomeGallery(

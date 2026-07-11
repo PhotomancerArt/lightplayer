@@ -215,11 +215,6 @@ impl StudioController {
             .with_deploy(self.deploy_view())
     }
 
-    /// The home gallery, when the shell should show it: no project open and
-    /// either the link is idle or a home-card open is in flight. Any engaged
-    /// device flow (connect endpoint, flashing, a sim without a project)
-    /// falls back to the classic pane layout — the M4 transitional bridge to
-    /// the pre-gallery connect/flash flows.
     /// The home gallery: shown whenever NO project is open — always
     /// (D24; the M4 transitional bridge and its home-only-when-link-idle
     /// rule are gone). Connected devices are cards, not a pane takeover;
