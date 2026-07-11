@@ -4,7 +4,7 @@ use lpvm_wasm::rt_browser::init_host_exports;
 use wasm_bindgen::prelude::*;
 
 use crate::envelope::BrowserInputEnvelope;
-use crate::runtime_registry;
+use crate::{logger, runtime_registry};
 
 /// Initialize LPVM browser host exports.
 ///
@@ -12,12 +12,14 @@ use crate::runtime_registry;
 /// module's `wasm_bindgen::exports()`.
 #[wasm_bindgen]
 pub fn fw_browser_init_exports(exports: JsValue) {
+    logger::install();
     init_host_exports(exports);
 }
 
 /// Create a browser-local firmware runtime and return its runtime id.
 #[wasm_bindgen]
 pub fn create_runtime(label: &str) -> Result<u32, String> {
+    logger::install();
     runtime_registry::create_runtime(label)
 }
 

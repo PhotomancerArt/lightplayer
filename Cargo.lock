@@ -3627,6 +3627,7 @@ name = "fw-browser"
 version = "40.0.0"
 dependencies = [
  "fw-core",
+ "log",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
