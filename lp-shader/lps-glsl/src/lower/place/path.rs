@@ -288,31 +288,49 @@ fn apply_flat_index(
     index: crate::hir::ExprId,
     ty: &LpsType,
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
-    let LoweredPlace::Flat(flat) = place else {
-        return Ok(None);
-    };
     let Some(index) = constant_index(ctx.arena.expr(index)) else {
         return Ok(None);
     };
     let width = crate::hir::scalar_lane_count(ty);
-    let source_width = if flat.ty.is_matrix() || flat.ty.is_array() {
+    let place_ty = place_ty(&place);
+    let source_width = if place_ty.is_matrix() || place_ty.is_array() {
         width
     } else {
         1
     };
-    let source_count = flat.lanes.len() / source_width;
-    if index >= source_count {
-        return Ok(None);
-    }
     let start = index * source_width;
     let end = start + width;
-    let Some(lanes) = flat.lanes.get(start..end) else {
-        return Ok(None);
-    };
-    Ok(Some(LoweredPlace::Flat(FlatPlace {
-        ty: ty.clone(),
-        lanes: lanes.to_vec(),
-    })))
+    Ok(match place {
+        LoweredPlace::Flat(flat) => {
+            let source_count = flat.lanes.len() / source_width;
+            if index >= source_count {
+                return Ok(None);
+            }
+            let Some(lanes) = flat.lanes.get(start..end) else {
+                return Ok(None);
+            };
+            Some(LoweredPlace::Flat(FlatPlace {
+                ty: ty.clone(),
+                lanes: lanes.to_vec(),
+            }))
+        }
+        LoweredPlace::Memory(memory) => {
+            let source_count = memory.lane_offsets.len() / source_width;
+            if index >= source_count {
+                return Ok(None);
+            }
+            let Some(lane_offsets) = memory.lane_offsets.get(start..end) else {
+                return Ok(None);
+            };
+            Some(LoweredPlace::Memory(MemoryPlace {
+                lane_offsets: lane_offsets.to_vec(),
+                ty: ty.clone(),
+                base: memory.base,
+                static_offset: memory.static_offset,
+                dynamic_offset: memory.dynamic_offset,
+            }))
+        }
+    })
 }
 
 fn place_ty(place: &LoweredPlace) -> LpsType {
