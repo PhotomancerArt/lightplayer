@@ -72,7 +72,6 @@ float test_determinant_mat4_negative() {
     return determinant(m);
 }
 
-// @unimplemented(jit.q32)
 // run: test_determinant_mat4_negative() ~= 1.0
 
 float test_determinant_mat2_fractions() {

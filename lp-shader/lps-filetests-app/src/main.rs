@@ -70,8 +70,8 @@ struct TestOptions {
     /// Skip the 'yes' confirmation prompt for mutation flags (--fix, --mark-*)
     #[arg(long)]
     assume_yes: bool,
-    /// Run only the specified target(s): comma-separated and/or backend shorthand (jit, wasm, rv32c)
-    /// or full names (jit.q32). Example: `-t wasm,jit` or `--target rv32c`.
+    /// Run only the specified target(s): comma-separated and/or backend shorthand (wasm, rv32c, rv32n)
+    /// or full names (wasm.q32). Example: `-t wasm,rv32n` or `--target rv32c`.
     #[arg(short, long)]
     target: Option<String>,
     #[command(flatten)]

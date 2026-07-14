@@ -4,7 +4,6 @@
 //! and future agents should share when they deploy a project through a running
 //! `lp-server`.
 
-use lpc_model::AsLpPathBuf;
 use lpc_wire::{ClientRequest, FsRequest, WireProjectHandle, WireServerMsgBody};
 
 use crate::client_error::{ClientError, ClientResult};
@@ -31,13 +30,6 @@ impl ProjectDeployFile {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
-
-    fn into_write_request(self, project_id: &str) -> ClientRequest {
-        ClientRequest::Filesystem(FsRequest::Write {
-            path: project_file_path(project_id, &self.relative_path).as_path_buf(),
-            data: self.bytes,
-        })
-    }
 }
 
 pub fn project_load_path(project_id: &str) -> String {
@@ -57,9 +49,13 @@ pub fn project_write_requests(
     project_id: &str,
     files: impl IntoIterator<Item = ProjectDeployFile>,
 ) -> Vec<ClientRequest> {
+    // chunk-aware: files larger than one frame's raw chunk budget become
+    // WriteChunk sequences instead of a single oversized Write frame
     files
         .into_iter()
-        .map(|file| file.into_write_request(project_id))
+        .flat_map(|file| {
+            crate::file_sync_ops::file_write_requests(project_id, &file.relative_path, &file.bytes)
+        })
         .collect()
 }
 
@@ -97,6 +93,19 @@ pub fn validate_project_deploy_response(
                 Ok(None)
             }
         }
+        (
+            ClientRequest::Filesystem(FsRequest::WriteChunk { path, .. }),
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::WriteChunk { error, .. }),
+        ) => {
+            if let Some(error) = error {
+                Err(ClientError::Server(format!(
+                    "failed to write chunk of {}: {error}",
+                    path.as_str()
+                )))
+            } else {
+                Ok(None)
+            }
+        }
         (ClientRequest::LoadProject { .. }, WireServerMsgBody::LoadProject { handle }) => {
             Ok(Some(*handle))
         }
@@ -114,6 +123,9 @@ pub fn request_label(request: &ClientRequest) -> &'static str {
         ClientRequest::Filesystem(FsRequest::DeleteFile { .. }) => "fs.delete_file",
         ClientRequest::Filesystem(FsRequest::DeleteDir { .. }) => "fs.delete_dir",
         ClientRequest::Filesystem(FsRequest::ListDir { .. }) => "fs.list_dir",
+        ClientRequest::Filesystem(FsRequest::ChangesSince { .. }) => "fs.changes_since",
+        ClientRequest::Filesystem(FsRequest::WriteChunk { .. }) => "fs.write_chunk",
+        ClientRequest::Filesystem(FsRequest::HashPackage { .. }) => "fs.hash_package",
         ClientRequest::LoadProject { .. } => "project.load",
         ClientRequest::UnloadProject { .. } => "project.unload",
         ClientRequest::ProjectRead { .. } => "project.read",

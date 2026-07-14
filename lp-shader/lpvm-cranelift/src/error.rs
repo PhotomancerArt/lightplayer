@@ -38,9 +38,6 @@ impl std::error::Error for CompileError {}
 pub enum CompilerError {
     /// GLSL parse / naga frontend (line-oriented message).
     Parse(String),
-    /// Naga → LPIR lowering (`glsl` feature / `lps-frontend`).
-    #[cfg(feature = "glsl")]
-    Lower(lps_frontend::LowerError),
     /// LPIR → machine code.
     Codegen(CompileError),
 }
@@ -49,8 +46,6 @@ impl core::fmt::Display for CompilerError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             CompilerError::Parse(s) => write!(f, "{s}"),
-            #[cfg(feature = "glsl")]
-            CompilerError::Lower(e) => write!(f, "{e}"),
             CompilerError::Codegen(e) => write!(f, "{e}"),
         }
     }
@@ -60,8 +55,6 @@ impl core::fmt::Display for CompilerError {
 impl std::error::Error for CompilerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            #[cfg(feature = "glsl")]
-            CompilerError::Lower(e) => Some(e),
             CompilerError::Codegen(e) => Some(e),
             _ => None,
         }

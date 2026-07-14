@@ -158,8 +158,6 @@ env_logger = "0.11"
 cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-module = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-jit = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-native = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
 cranelift-object = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
 cranelift-reader = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
 cranelift-control = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
@@ -241,6 +239,10 @@ codegen-units = 4
 
 [patch.crates-io]
 esp-storage = { path = "third_party/esp-storage" }
+# naga 29.0.0 fork: glsl-in lowers `&&`/`||` with side-effecting right operands
+# to control flow so they short-circuit per the GLSL spec (upstream evaluates
+# eagerly). See third_party/naga/README-LP.md; candidate for an upstream PR.
+naga = { path = "third_party/naga" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
 # no_std JSON serializer patch: preserve serde_json::RawValue as raw JSON.
@@ -260,8 +262,6 @@ ser-write-json = { path = "third_party/ser-write-json" }
 #cranelift-codegen = { path = "../lp-cranelift/cranelift/codegen" }
 #cranelift-frontend = { path = "../lp-cranelift/cranelift/frontend" }
 #cranelift-module = { path = "../lp-cranelift/cranelift/module" }
-#cranelift-jit = { path = "../lp-cranelift/cranelift/jit" }
-#cranelift-native = { path = "../lp-cranelift/cranelift/native" }
 #cranelift-object = { path = "../lp-cranelift/cranelift/object" }
 #cranelift-reader = { path = "../lp-cranelift/cranelift/reader" }
 #cranelift-control = { path = "../lp-cranelift/cranelift/control" }

@@ -435,7 +435,10 @@ fn segment_label(segment: &str) -> String {
 }
 
 pub fn should_show_story_book() -> bool {
-    location_hash().is_some_and(|hash| hash.starts_with("#/stories"))
+    matches!(
+        crate::router::current_route(),
+        crate::router::StudioRoute::Stories { .. }
+    )
 }
 
 #[component]
@@ -652,22 +655,24 @@ impl StoryViewport {
 }
 
 fn selected_story_route_from_hash() -> StoryRoute {
-    location_hash()
-        .and_then(|hash| parse_story_hash(&hash))
-        .unwrap_or_else(|| StoryRoute {
-            story_id: DEFAULT_STORY_ID.to_string(),
-            viewport: StoryViewport::Lg,
-        })
+    // route identity comes from the shared router vocabulary; the
+    // hash-internal `?viewport=` query stays this module's concern
+    let story_id = match crate::router::current_route() {
+        crate::router::StudioRoute::Stories { story_id: Some(id) } if story_route_exists(&id) => id,
+        _ => DEFAULT_STORY_ID.to_string(),
+    };
+    StoryRoute {
+        story_id,
+        viewport: viewport_from_hash_query(),
+    }
 }
 
-fn parse_story_hash(hash: &str) -> Option<StoryRoute> {
-    let route = hash.strip_prefix("#/stories/")?;
-    let (story_id, query) = route.split_once('?').unwrap_or((route, ""));
-    if !story_route_exists(story_id) {
-        return None;
-    }
-    let story_id = story_id.to_string();
-    let viewport = query
+fn viewport_from_hash_query() -> StoryViewport {
+    location_hash()
+        .as_deref()
+        .and_then(|hash| hash.split_once('?'))
+        .map(|(_, query)| query)
+        .unwrap_or("")
         .split('&')
         .filter_map(|part| part.split_once('='))
         .find_map(|(key, value)| {
@@ -675,12 +680,14 @@ fn parse_story_hash(hash: &str) -> Option<StoryRoute> {
                 .then(|| StoryViewport::parse(value))
                 .flatten()
         })
-        .unwrap_or(StoryViewport::Lg);
-    Some(StoryRoute { story_id, viewport })
+        .unwrap_or(StoryViewport::Lg)
 }
 
 fn story_hash(story_id: &str, viewport: StoryViewport) -> String {
-    format!("#/stories/{story_id}?viewport={}", viewport.slug())
+    let route = crate::router::StudioRoute::Stories {
+        story_id: Some(story_id.to_string()),
+    };
+    format!("{}?viewport={}", route.hash(), viewport.slug())
 }
 
 fn set_story_hash(story_id: &str, viewport: StoryViewport) {
@@ -739,6 +746,10 @@ fn story_png_viewport() -> StoryViewport {
         .unwrap_or(StoryViewport::Lg)
 }
 
+/// HARNESS SEAM — frozen contract with `scripts/studio-story-pngs.mjs`:
+/// capture URLs are `?story-png=1&story=<id>&viewport=<vp>#/stories/<id>`.
+/// These query params are not routing (see `crate::router`) and must not
+/// change shape without updating the capture script in the same commit.
 fn is_story_png_mode() -> bool {
     web_sys::window()
         .map(|window| window.location())

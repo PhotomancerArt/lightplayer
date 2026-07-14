@@ -116,7 +116,7 @@ OPTIONS:
     -h, --help          Show this help message
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
-    -t, --target SPEC   Run target(s): comma-separated, backend shorthand (jit,wasm,rv32c), or full names (jit.q32)
+    -t, --target SPEC   Run target(s): comma-separated, backend shorthand (wasm,rv32c,rv32n), or full names (wasm.q32)
     --summary           Same as --concise (alias for the wrapper script)
     --debug             Full output plus CLIF/disassembly on failure (same as DEBUG=1)
     --concise           Minimal output even for a single file
@@ -166,8 +166,8 @@ EXAMPLES:
     # Fix unexpected passes: remove @unimplemented from tests that now pass
     filetests.sh --target wasm.q32 --fix
 
-    # Baseline: mark all current failures @unimplemented(backend=jit), then re-run to get exit 0
-    filetests.sh --target jit.q32 --mark-unimplemented --assume-yes
+    # Baseline: mark all current failures @unimplemented(backend=wasm), then re-run to get exit 0
+    filetests.sh --target wasm.q32 --mark-unimplemented --assume-yes
 
 PATTERN SYNTAX:
     *         Matches any sequence of characters

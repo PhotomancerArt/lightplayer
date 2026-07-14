@@ -4,8 +4,8 @@ use lpvm_wasm::rt_browser::init_host_exports;
 use wasm_bindgen::prelude::*;
 
 use crate::envelope::BrowserInputEnvelope;
-use crate::runtime_registry;
 use crate::tier::RuntimeTier;
+use crate::{logger, runtime_registry};
 
 /// Initialize LPVM browser host exports.
 ///
@@ -13,6 +13,7 @@ use crate::tier::RuntimeTier;
 /// module's `wasm_bindgen::exports()`.
 #[wasm_bindgen]
 pub fn fw_browser_init_exports(exports: JsValue) {
+    logger::install();
     init_host_exports(exports);
 }
 
@@ -46,6 +47,7 @@ pub async fn init_gpu_device() -> String {
 /// `runtime_created` message so hosts can show the tier badge.
 #[wasm_bindgen]
 pub fn create_runtime(label: &str, tier: &str) -> Result<String, String> {
+    logger::install();
     let requested = match tier {
         "gpu" => RuntimeTier::Gpu,
         "cpu" => RuntimeTier::Cpu,

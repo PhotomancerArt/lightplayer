@@ -30,7 +30,6 @@ float test_struct_mat_declare_matrix2d() {
     return 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_declare_matrix2d() == 1.0
 
 int test_struct_mat_declare_matrix4x4() {
@@ -38,7 +37,6 @@ int test_struct_mat_declare_matrix4x4() {
     return 1;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_declare_matrix4x4() == 1
 
 // ----------------------------------------------------------------------------
@@ -50,7 +48,6 @@ float test_struct_mat_construct_m2_diagonal() {
     return s.col0[0];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_construct_m2_diagonal() ~= 1.0
 
 float test_struct_mat_construct_m2_offdiag() {
@@ -59,7 +56,6 @@ float test_struct_mat_construct_m2_offdiag() {
     return s.col1[0];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_construct_m2_offdiag() ~= 3.0
 
 float test_struct_mat_construct_affine2d_offset_y() {
@@ -67,7 +63,6 @@ float test_struct_mat_construct_affine2d_offset_y() {
     return a.offset.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_construct_affine2d_offset_y() ~= 7.0
 
 vec3 test_struct_mat_construct_transform3d_translation() {
@@ -75,7 +70,6 @@ vec3 test_struct_mat_construct_transform3d_translation() {
     return t.translation;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_construct_transform3d_translation() ~= vec3(0.25, 0.5, 0.75)
 
 float test_struct_mat_construct_m4_identity_corner() {
@@ -84,7 +78,6 @@ float test_struct_mat_construct_m4_identity_corner() {
     return s.matrix[2].z;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_construct_m4_identity_corner() ~= 1.0
 
 // ----------------------------------------------------------------------------
@@ -96,7 +89,6 @@ vec2 test_struct_mat_read_m2_column1() {
     return s.col1;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_read_m2_column1() ~= vec2(30.0, 40.0)
 
 float test_struct_mat_read_m3_column0_x() {
@@ -107,7 +99,6 @@ float test_struct_mat_read_m3_column0_x() {
     return t.rotation[0].x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_read_m3_column0_x() ~= 2.0
 
 vec4 test_struct_mat_read_m4_column3() {
@@ -122,7 +113,6 @@ vec4 test_struct_mat_read_m4_column3() {
     return s.matrix[3];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_read_m4_column3() ~= vec4(2.0, 3.0, 4.0, 1.0)
 
 // ----------------------------------------------------------------------------
@@ -136,7 +126,6 @@ float test_struct_mat_write_m2_reassign() {
     return s.col1[1];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_write_m2_reassign() ~= 9.0
 
 float test_struct_mat_write_affine2d_offset() {
@@ -145,7 +134,6 @@ float test_struct_mat_write_affine2d_offset() {
     return a.offset.x + a.linear0[0];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_write_affine2d_offset() ~= 0.0
 
 float test_struct_mat_write_transform3d_rot_element() {
@@ -157,7 +145,6 @@ float test_struct_mat_write_transform3d_rot_element() {
     return t.rotation[1].y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_write_transform3d_rot_element() ~= 8.0
 
 // ----------------------------------------------------------------------------
@@ -171,7 +158,6 @@ float test_struct_mat_assign_copy_matrix2d() {
     return b.col0[0] + b.col1[1];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_assign_copy_matrix2d() ~= 5.0
 
 float test_struct_mat_assign_copy_affine2d() {
@@ -181,7 +167,6 @@ float test_struct_mat_assign_copy_affine2d() {
     return b.offset.x * b.linear0[0];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_assign_copy_affine2d() ~= 4.0
 
 vec3 test_struct_mat_assign_copy_transform3d() {
@@ -191,7 +176,6 @@ vec3 test_struct_mat_assign_copy_transform3d() {
     return b.translation + b.rotation[0].xyz;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_assign_copy_transform3d() ~= vec3(10.0, 8.0, 7.0)
 
 // ----------------------------------------------------------------------------
@@ -203,7 +187,6 @@ float test_struct_mat_element_m2_01() {
     return s.col0[1] + s.col1[0] + s.col1[1];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_element_m2_01() ~= 1.0
 
 float test_struct_mat_element_m3_22() {
@@ -211,7 +194,6 @@ float test_struct_mat_element_m3_22() {
     return t.rotation[2].z;
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_element_m3_22() ~= 1.0
 
 float test_struct_mat_element_m4_11() {
@@ -219,7 +201,6 @@ float test_struct_mat_element_m4_11() {
     return s.matrix[1][1];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_element_m4_11() ~= 1.0
 
 float test_struct_mat_element_m4_nontrivial() {
@@ -234,5 +215,4 @@ float test_struct_mat_element_m4_nontrivial() {
     return s.matrix[1][2];
 }
 
-// @unimplemented(jit.q32)
 // run: test_struct_mat_element_m4_nontrivial() ~= 1.0

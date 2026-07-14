@@ -23,7 +23,6 @@ float test_edge_uniform_write_error_read() {
     return time + 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_uniform_write_error_read() ~= 1.0
 
 int test_edge_uniform_write_error_int() {
@@ -31,7 +30,6 @@ int test_edge_uniform_write_error_int() {
     return count + 5;
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_uniform_write_error_int() == 5
 
 vec2 test_edge_uniform_write_error_vec2() {
@@ -39,7 +37,6 @@ vec2 test_edge_uniform_write_error_vec2() {
     return position * 2.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_uniform_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_uniform_write_error_vec3() {
@@ -47,7 +44,6 @@ vec3 test_edge_uniform_write_error_vec3() {
     return color + vec3(0.1, 0.1, 0.1);
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_uniform_write_error_vec3() ~= vec3(0.1, 0.1, 0.1)
 
 mat4 test_edge_uniform_write_error_mat4() {
@@ -55,7 +51,6 @@ mat4 test_edge_uniform_write_error_mat4() {
     return transform;
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_uniform_write_error_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_edge_uniform_write_error_calculations() {

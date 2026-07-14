@@ -17,7 +17,6 @@ void test_out_writeonly_float() {
     fragment_depth = 0.5;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_float() == 0.0
 
@@ -26,7 +25,6 @@ void test_out_writeonly_int() {
     stencil_value = 128;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_int() == 0.0
 
@@ -35,7 +33,6 @@ void test_out_writeonly_uint() {
     object_id = 42u;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_uint() == 0.0
 
@@ -44,7 +41,6 @@ void test_out_writeonly_bool() {
     visible = true;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_bool() == 0.0
 
@@ -53,7 +49,6 @@ void test_out_writeonly_vec2() {
     screen_position = vec2(0.5, 0.5);
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_vec2() == 0.0
 
@@ -62,7 +57,6 @@ void test_out_writeonly_vec3() {
     normal_vector = vec3(0.0, 1.0, 0.0);
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_vec3() == 0.0
 
@@ -71,7 +65,6 @@ void test_out_writeonly_vec4() {
     fragment_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_vec4() == 0.0
 
@@ -85,7 +78,6 @@ void test_out_writeonly_calculations() {
     object_id = 100u;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_calculations() == 0.0
 
@@ -99,6 +91,5 @@ void test_out_writeonly_fragment_output() {
     visible = true;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_out_writeonly_fragment_output() == 0.0

@@ -56,7 +56,6 @@ vec2 test_atanh_vec2() {
     return atanh(vec2(rt(0.0), rt(0.5)));
 }
 
-// @broken(rv32n.q32)
 // run: test_atanh_vec2() ~= vec2(0.0, 0.5493061443340548)
 
 vec3 test_atanh_vec3() {

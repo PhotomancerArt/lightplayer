@@ -62,7 +62,6 @@ vec2 test_sin_vec2() {
     return sin(vec2(rt(0.0), rt(1.5707963267948966)));
 }
 
-// @broken(rv32n.q32)
 // run: test_sin_vec2() ~= vec2(0.0, 1.0)
 
 vec3 test_sin_vec3() {

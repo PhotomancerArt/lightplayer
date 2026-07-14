@@ -11,10 +11,15 @@ description = "Headless LightPlayer Studio application core"
 [dependencies]
 lpa-client = { path = "../lpa-client", default-features = false }
 lpa-link = { path = "../lpa-link" }
+lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+lpfs = { path = "../../lp-base/lpfs", default-features = false }
 log = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 async-trait = { version = "0.1", optional = true }
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
@@ -27,7 +32,7 @@ web-sys = { version = "0.3", optional = true, features = ["Window"] }
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm" }
 lpa-server = { path = "../lpa-server" }
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
-lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
+lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 
 [features]
 default = []

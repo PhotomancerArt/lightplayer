@@ -231,6 +231,72 @@ impl LpFs for LpFsFlash {
         Ok(())
     }
 
+    /// Native append (M2b follow-up, landed in M5): open with APPEND and
+    /// write the chunk — no whole-file RAM residency, O(chunk) instead of
+    /// the trait default's read-modify-write. The device push path
+    /// (WriteChunk) appends per chunk, so this is the hot path.
+    fn append_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
+        if !path.is_absolute() {
+            return Err(FsError::InvalidPath(format!(
+                "Path must be absolute: {}",
+                path.as_str()
+            )));
+        }
+        let lfs_path = Self::to_lfs_path(path);
+        if lfs_path.is_empty() {
+            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
+        }
+        self.ensure_parent_dirs(lfs_path)?;
+        let existed = {
+            let inner = self.inner.borrow();
+            inner.fs.exists(lfs_path)
+        };
+        {
+            let inner = self.inner.borrow_mut();
+            let file = inner
+                .fs
+                .open(
+                    lfs_path,
+                    OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::APPEND,
+                )
+                .map_err(|e| FsError::Filesystem(format!("append {}: {e}", path.as_str())))?;
+            file.write(data)
+                .map_err(|e| FsError::Filesystem(format!("append {}: {e}", path.as_str())))?;
+            file.close()
+                .map_err(|e| FsError::Filesystem(format!("close {}: {e}", path.as_str())))?;
+        }
+        let kind = if existed {
+            FsEventKind::Modify
+        } else {
+            FsEventKind::Create
+        };
+        self.record_change(path, kind);
+        Ok(())
+    }
+
+    /// Native size via stat — the trait default reads the whole file.
+    fn file_size(&self, path: &LpPath) -> Result<u64, FsError> {
+        if !path.is_absolute() {
+            return Err(FsError::InvalidPath(format!(
+                "Path must be absolute: {}",
+                path.as_str()
+            )));
+        }
+        let lfs_path = Self::to_lfs_path(path);
+        let inner = self.inner.borrow();
+        let meta = inner
+            .fs
+            .stat(lfs_path)
+            .map_err(|e| map_lfs_read_error(path, e))?;
+        if meta.file_type != LfsFileType::File {
+            return Err(FsError::Filesystem(format!(
+                "{} is not a file",
+                path.as_str()
+            )));
+        }
+        Ok(meta.size as u64)
+    }
+
     fn file_exists(&self, path: &LpPath) -> Result<bool, FsError> {
         if !path.is_absolute() {
             return Err(FsError::InvalidPath(format!(

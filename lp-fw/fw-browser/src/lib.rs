@@ -9,6 +9,7 @@
 mod envelope;
 mod executor;
 mod gpu;
+mod logger;
 mod manual_time_provider;
 mod preview_surface;
 mod runtime;

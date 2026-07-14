@@ -232,6 +232,282 @@ fn runtime_loads_project_and_renders_output_after_ticks() {
     );
 }
 
+#[wasm_bindgen_test]
+fn file_sync_round_trips_over_the_protocol() {
+    // M2b acceptance proof on the BrowserWorker path: push a project into a
+    // fresh runtime purely over protocol frames (chunked where needed),
+    // hash-verify, load it, edit it, pull exactly the delta back.
+    use lpc_wire::budget::FILE_SYNC_CHUNK_BYTES;
+    use lpc_wire::server::{FileChangeKind, FileCursor, FsResponse};
+
+    fw_browser_init_exports(wasm_bindgen::exports());
+    let runtime_id = create_runtime("file-sync-e2e").expect("create runtime");
+    let mut next_id = 1u64;
+
+    // --- assemble the project: smoke files + one multi-chunk binary file
+    let project_fs = build_smoke_project();
+    let mut files = collect_project_files(&project_fs.borrow());
+    let big: Vec<u8> = (0..(2 * FILE_SYNC_CHUNK_BYTES + 808))
+        .map(|i| (i % 251) as u8)
+        .collect();
+    files.push(("assets/big.bin".to_string(), big.clone()));
+
+    // --- push: Write for small files, WriteChunk sequence for the big one
+    for (relative_path, content) in &files {
+        let full_path = format!("/projects/e2esync/{relative_path}");
+        if content.len() <= FILE_SYNC_CHUNK_BYTES {
+            let responses = send_protocol_request(
+                runtime_id,
+                next_request_id(&mut next_id),
+                ClientRequest::Filesystem(FsRequest::Write {
+                    path: full_path.as_str().as_path_buf(),
+                    data: content.clone(),
+                }),
+                1,
+            );
+            assert!(matches!(
+                &responses[0].msg,
+                WireServerMsgBody::Filesystem(FsResponse::Write { error: None, .. })
+            ));
+        } else {
+            for (index, chunk) in content.chunks(FILE_SYNC_CHUNK_BYTES).enumerate() {
+                let responses = send_protocol_request(
+                    runtime_id,
+                    next_request_id(&mut next_id),
+                    ClientRequest::Filesystem(FsRequest::WriteChunk {
+                        path: full_path.as_str().as_path_buf(),
+                        offset: (index * FILE_SYNC_CHUNK_BYTES) as u32,
+                        data: chunk.to_vec(),
+                    }),
+                    1,
+                );
+                match &responses[0].msg {
+                    WireServerMsgBody::Filesystem(FsResponse::WriteChunk {
+                        error: None,
+                        written,
+                        ..
+                    }) => assert_eq!(*written as usize, chunk.len()),
+                    other => panic!("write chunk failed: {other:?}"),
+                }
+            }
+        }
+    }
+
+    // --- a mis-offset chunk is rejected, file untouched
+    let responses = send_protocol_request(
+        runtime_id,
+        next_request_id(&mut next_id),
+        ClientRequest::Filesystem(FsRequest::WriteChunk {
+            path: "/projects/e2esync/assets/big.bin".as_path_buf(),
+            offset: 17,
+            data: vec![0u8; 4],
+        }),
+        1,
+    );
+    match &responses[0].msg {
+        WireServerMsgBody::Filesystem(FsResponse::WriteChunk { error: Some(e), .. }) => {
+            assert!(e.contains("offset mismatch"), "unexpected error: {e}");
+        }
+        other => panic!("expected offset-mismatch error, got {other:?}"),
+    }
+
+    // --- hash-verify against a local mirror of the same files
+    let mirror = LpFsMemory::new();
+    for (relative_path, content) in &files {
+        mirror
+            .write_file(format!("/{relative_path}").as_str().as_path(), content)
+            .expect("mirror write");
+    }
+    let (expected_hash, _) = lpc_history::hash_package(&mirror).expect("mirror hash");
+    let responses = send_protocol_request(
+        runtime_id,
+        next_request_id(&mut next_id),
+        ClientRequest::Filesystem(FsRequest::HashPackage {
+            prefix: "/projects/e2esync".as_path_buf(),
+        }),
+        1,
+    );
+    match &responses[0].msg {
+        WireServerMsgBody::Filesystem(FsResponse::PackageHash {
+            hash, error: None, ..
+        }) => {
+            assert_eq!(hash, &expected_hash.to_string());
+        }
+        other => panic!("hash package failed: {other:?}"),
+    }
+
+    // --- the pushed project actually loads
+    let responses = send_protocol_request(
+        runtime_id,
+        next_request_id(&mut next_id),
+        ClientRequest::LoadProject {
+            path: "e2esync".to_string(),
+        },
+        1,
+    );
+    assert!(matches!(
+        &responses[0].msg,
+        WireServerMsgBody::Filesystem(_) | WireServerMsgBody::LoadProject { .. }
+    ));
+
+    // --- full pull (since = 0), paginated, reassembles byte-identically
+    let pull_all = |next_id: &mut u64, since: i64| {
+        let mut pulled: std::collections::BTreeMap<String, Option<Vec<u8>>> =
+            std::collections::BTreeMap::new();
+        let mut first_version: Option<i64> = None;
+        let mut cursor: Option<FileCursor> = None;
+        loop {
+            let responses = send_protocol_request(
+                runtime_id,
+                next_request_id(next_id),
+                ClientRequest::Filesystem(FsRequest::ChangesSince {
+                    prefix: "/projects/e2esync".as_path_buf(),
+                    since: lpc_model::FsVersion::new(since),
+                    cursor: cursor.take(),
+                }),
+                1,
+            );
+            let WireServerMsgBody::Filesystem(FsResponse::Changes {
+                entries,
+                next,
+                version,
+                error,
+            }) = &responses[0].msg
+            else {
+                panic!("expected Changes response");
+            };
+            assert!(error.is_none(), "changes error: {error:?}");
+            first_version.get_or_insert(version.expect("version on page").as_i64());
+            for entry in entries {
+                match entry.kind {
+                    FileChangeKind::Delete => {
+                        pulled.insert(entry.path.as_str().to_string(), None);
+                    }
+                    FileChangeKind::Upsert => {
+                        let slot = pulled
+                            .entry(entry.path.as_str().to_string())
+                            .or_insert_with(|| Some(Vec::new()));
+                        let buffer = slot.get_or_insert_with(Vec::new);
+                        assert_eq!(buffer.len(), entry.offset as usize, "chunk order");
+                        buffer.extend_from_slice(&entry.data);
+                    }
+                }
+            }
+            match next {
+                Some(n) => cursor = Some(n.clone()),
+                None => break,
+            }
+        }
+        (pulled, first_version.unwrap())
+    };
+
+    let (pulled, version) = pull_all(&mut next_id, 0);
+    assert_eq!(pulled.len(), files.len());
+    assert_eq!(pulled["/assets/big.bin"].as_deref(), Some(big.as_slice()));
+
+    // --- edit one file; the delta pull returns exactly it, then nothing
+    let responses = send_protocol_request(
+        runtime_id,
+        next_request_id(&mut next_id),
+        ClientRequest::Filesystem(FsRequest::Write {
+            path: "/projects/e2esync/note.txt".as_path_buf(),
+            data: b"edited".to_vec(),
+        }),
+        1,
+    );
+    assert!(matches!(
+        &responses[0].msg,
+        WireServerMsgBody::Filesystem(FsResponse::Write { error: None, .. })
+    ));
+
+    let (delta, version2) = pull_all(&mut next_id, version);
+    assert_eq!(
+        delta.len(),
+        1,
+        "delta should be exactly the edit: {delta:?}"
+    );
+    assert_eq!(delta["/note.txt"].as_deref(), Some(b"edited".as_ref()));
+
+    let (empty, _) = pull_all(&mut next_id, version2);
+    assert!(
+        empty.is_empty(),
+        "nothing after adopting the version: {empty:?}"
+    );
+}
+
+#[wasm_bindgen_test]
+fn load_project_tolerates_library_artifacts() {
+    // M3 pushes add a uid field to project.json and a /.lp/meta.json
+    // sidecar; loading must tolerate both (A/B to isolate failures).
+    fw_browser_init_exports(wasm_bindgen::exports());
+
+    let case = |label: &str, add_uid: bool, add_sidecar: bool| {
+        let runtime_id = create_runtime(label).expect("create runtime");
+        let mut next_id = 1u64;
+        let project_fs = build_smoke_project();
+        for (path, mut content) in collect_project_files(&project_fs.borrow()) {
+            if add_uid && path == "project.json" {
+                // canonical insertion: kind stays first (streaming codec)
+                let text = String::from_utf8(content).unwrap();
+                let patched = text.replacen(
+                    "\"kind\": \"Project\",",
+                    "\"kind\": \"Project\",\n  \"uid\": \"prj_0000000000000042\",",
+                    1,
+                );
+                assert_ne!(patched, text, "kind anchor not found in manifest");
+                content = patched.into_bytes();
+            }
+            let full_path = format!("/projects/{label}/{path}").as_path_buf();
+            let responses = send_protocol_request(
+                runtime_id,
+                next_request_id(&mut next_id),
+                ClientRequest::Filesystem(FsRequest::Write {
+                    path: full_path,
+                    data: content,
+                }),
+                1,
+            );
+            assert!(!responses.is_empty(), "{label}: write got no response");
+        }
+        if add_sidecar {
+            let responses = send_protocol_request(
+                runtime_id,
+                next_request_id(&mut next_id),
+                ClientRequest::Filesystem(FsRequest::Write {
+                    path: format!("/projects/{label}/.lp/meta.json").as_path_buf(),
+                    data: br#"{"provenance":{"seededFrom":{"source":"examples/basic"}},"createdAt":1.0}"#.to_vec(),
+                }),
+                1,
+            );
+            assert!(
+                !responses.is_empty(),
+                "{label}: sidecar write got no response"
+            );
+        }
+        let responses = send_protocol_request(
+            runtime_id,
+            next_request_id(&mut next_id),
+            ClientRequest::LoadProject {
+                path: label.to_string(),
+            },
+            1,
+        );
+        assert!(
+            !responses.is_empty(),
+            "{label}: LoadProject got NO response (worker would hang)"
+        );
+        match &responses[0].msg {
+            WireServerMsgBody::LoadProject { .. } => {}
+            other => panic!("{label}: LoadProject failed: {other:?}"),
+        }
+    };
+
+    case("lib-plain", false, false);
+    case("lib-uid", true, false);
+    case("lib-sidecar", false, true);
+    case("lib-both", true, true);
+}
+
 fn next_request_id(next_id: &mut u64) -> u64 {
     let id = *next_id;
     *next_id += 1;

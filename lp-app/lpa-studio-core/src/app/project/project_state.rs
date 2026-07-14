@@ -9,7 +9,9 @@ pub enum ProjectState {
     ConnectingRunningProject {
         progress: ProgressState,
     },
-    LoadingDemoProject {
+    /// Pushing a package (library copy, example, or the legacy demo deploy)
+    /// to the runtime and loading it.
+    OpeningProject {
         progress: ProgressState,
     },
     Ready {

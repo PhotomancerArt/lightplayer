@@ -55,7 +55,6 @@ float test_edge_lvalue_out_expression() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_lvalue_out_expression() ~= 0.0
@@ -69,7 +68,6 @@ float test_edge_lvalue_inout_literal() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_lvalue_inout_literal() ~= 0.0
@@ -109,7 +107,6 @@ float test_edge_lvalue_out_function_call() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_lvalue_out_function_call() ~= 0.0

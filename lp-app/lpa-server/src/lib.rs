@@ -11,6 +11,7 @@
 #![no_std]
 
 pub mod error;
+pub mod file_sync;
 pub mod handlers;
 pub mod project;
 pub mod project_manager;

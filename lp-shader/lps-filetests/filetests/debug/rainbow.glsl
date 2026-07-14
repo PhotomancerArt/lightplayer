@@ -1,7 +1,7 @@
 // test run
 //
 // Integration-style checks mirroring examples/basic/src/rainbow.shader/main.glsl.
-// Expectations are blessed from jit.q32; wasm.q32 must match within tolerance.
+// Expectations are blessed from wasm.q32; other targets must match within tolerance.
 
 const bool CYCLE_PALETTE = true;
 
@@ -136,5 +136,4 @@ vec4 test_rainbow_main_corner_t5() {
 }
 
 // @unsupported(rv32c.q32)
-// @broken(rv32lpn.q32)
 // run: test_rainbow_main_corner_t5() ~= vec4(0.64055, 0.0, 0.64708, 1.0) (tolerance: 0.002)

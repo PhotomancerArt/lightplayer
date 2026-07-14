@@ -56,7 +56,6 @@ vec2 test_tanh_vec2() {
     return tanh(vec2(rt(0.0), rt(1.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_tanh_vec2() ~= vec2(0.0, 0.7615941559557649)
 
 vec3 test_tanh_vec3() {

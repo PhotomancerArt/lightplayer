@@ -216,22 +216,62 @@ pub(crate) fn emit_scalar(
         LpirOp::IdivS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().sdiv(a, b));
+            def_v_expr(builder, vars, *dst, |bd| {
+                // RV32 semantics: x / 0 = -1, i32::MIN / -1 = i32::MIN.
+                // Cranelift `sdiv` traps on both, so divide by a guarded divisor
+                // and select the RV32 result for the hazardous cases.
+                let z = bd.ins().icmp_imm(IntCC::Equal, b, 0);
+                let m1 = bd.ins().icmp_imm(IntCC::Equal, b, -1);
+                let hazard = bd.ins().bor(z, m1);
+                let one = bd.ins().iconst(types::I32, 1);
+                let safe_b = bd.ins().select(hazard, one, b);
+                let q = bd.ins().sdiv(a, safe_b);
+                // x / -1 == -x with wrapping, which also yields i32::MIN for i32::MIN.
+                let neg_a = bd.ins().ineg(a);
+                let q = bd.ins().select(m1, neg_a, q);
+                let all_ones = bd.ins().iconst(types::I32, -1);
+                bd.ins().select(z, all_ones, q)
+            });
         }
         LpirOp::IdivU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().udiv(a, b));
+            def_v_expr(builder, vars, *dst, |bd| {
+                // RV32 semantics: x / 0 = all ones. Cranelift `udiv` traps on zero.
+                let z = bd.ins().icmp_imm(IntCC::Equal, b, 0);
+                let one = bd.ins().iconst(types::I32, 1);
+                let safe_b = bd.ins().select(z, one, b);
+                let q = bd.ins().udiv(a, safe_b);
+                let all_ones = bd.ins().iconst(types::I32, -1);
+                bd.ins().select(z, all_ones, q)
+            });
         }
         LpirOp::IremS { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().srem(a, b));
+            def_v_expr(builder, vars, *dst, |bd| {
+                // RV32 semantics: x % 0 = x, i32::MIN % -1 = 0. Guard both trap
+                // cases; a divisor of -1 becomes 1, and x % 1 == 0 matches RV32.
+                let z = bd.ins().icmp_imm(IntCC::Equal, b, 0);
+                let m1 = bd.ins().icmp_imm(IntCC::Equal, b, -1);
+                let hazard = bd.ins().bor(z, m1);
+                let one = bd.ins().iconst(types::I32, 1);
+                let safe_b = bd.ins().select(hazard, one, b);
+                let r = bd.ins().srem(a, safe_b);
+                bd.ins().select(z, a, r)
+            });
         }
         LpirOp::IremU { dst, lhs, rhs } => {
             let a = use_v(builder, vars, *lhs);
             let b = use_v(builder, vars, *rhs);
-            def_v_expr(builder, vars, *dst, |bd| bd.ins().urem(a, b));
+            def_v_expr(builder, vars, *dst, |bd| {
+                // RV32 semantics: x % 0 = x. Cranelift `urem` traps on zero.
+                let z = bd.ins().icmp_imm(IntCC::Equal, b, 0);
+                let one = bd.ins().iconst(types::I32, 1);
+                let safe_b = bd.ins().select(z, one, b);
+                let r = bd.ins().urem(a, safe_b);
+                bd.ins().select(z, a, r)
+            });
         }
         LpirOp::Ineg { dst, src } => {
             let a = use_v(builder, vars, *src);

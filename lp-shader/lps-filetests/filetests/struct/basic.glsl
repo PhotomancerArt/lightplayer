@@ -28,7 +28,6 @@ float test_basic_declare_point() {
     return 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_declare_point() == 1.0
 
 int test_basic_declare_color() {
@@ -36,7 +35,6 @@ int test_basic_declare_color() {
     return 1;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_declare_color() == 1
 
 bool test_basic_declare_person() {
@@ -44,7 +42,6 @@ bool test_basic_declare_person() {
     return true;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_declare_person() == true
 
 uint test_basic_declare_counter() {
@@ -52,7 +49,6 @@ uint test_basic_declare_counter() {
     return 1u;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_declare_counter() == 1u
 
 // === Construction ===
@@ -62,7 +58,6 @@ float test_basic_construct_point_x() {
     return p.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_construct_point_x() ~= 1.0
 
 float test_basic_construct_point_y() {
@@ -70,7 +65,6 @@ float test_basic_construct_point_y() {
     return p.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_construct_point_y() ~= 2.0
 
 float test_basic_construct_color_g() {
@@ -78,7 +72,6 @@ float test_basic_construct_color_g() {
     return c.g;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_construct_color_g() ~= 0.7
 
 float test_basic_construct_color_b() {
@@ -86,7 +79,6 @@ float test_basic_construct_color_b() {
     return c.b;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_construct_color_b() ~= 0.9
 
 int test_basic_construct_person_age() {
@@ -94,7 +86,6 @@ int test_basic_construct_person_age() {
     return p.age;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_construct_person_age() == 25
 
 uint test_basic_construct_counter() {
@@ -102,7 +93,6 @@ uint test_basic_construct_counter() {
     return c.count;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_construct_counter() == 42u
 
 // === Member read ===
@@ -112,7 +102,6 @@ float test_basic_read_point_x() {
     return p.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_read_point_x() ~= 3.0
 
 float test_basic_read_color_r() {
@@ -120,7 +109,6 @@ float test_basic_read_color_r() {
     return c.r;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_read_color_r() ~= 0.5
 
 bool test_basic_read_person_is_student() {
@@ -128,7 +116,6 @@ bool test_basic_read_person_is_student() {
     return p.isStudent;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_read_person_is_student() == false
 
 float test_basic_read_person_height() {
@@ -136,7 +123,6 @@ float test_basic_read_person_height() {
     return p.height;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_read_person_height() ~= 190.0
 
 // === Member write ===
@@ -147,7 +133,6 @@ float test_basic_write_point_x() {
     return p.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_write_point_x() ~= 5.0
 
 float test_basic_write_color_g() {
@@ -156,7 +141,6 @@ float test_basic_write_color_g() {
     return c.g;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_write_color_g() ~= 0.8
 
 int test_basic_write_person_age() {
@@ -165,7 +149,6 @@ int test_basic_write_person_age() {
     return p.age;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_write_person_age() == 7
 
 uint test_basic_write_counter() {
@@ -174,7 +157,6 @@ uint test_basic_write_counter() {
     return c.count;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_write_counter() == 99u
 
 // === Whole-struct assignment ===
@@ -186,7 +168,6 @@ float test_basic_assign_point_x() {
     return p1.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_assign_point_x() ~= 3.0
 
 float test_basic_assign_color_g() {
@@ -196,7 +177,6 @@ float test_basic_assign_color_g() {
     return c1.g;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_assign_color_g() ~= 0.5
 
 int test_basic_assign_person_age() {
@@ -206,7 +186,6 @@ int test_basic_assign_person_age() {
     return a.age;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_assign_person_age() == 50
 
 // === Mixed types ===
@@ -217,7 +196,6 @@ int test_basic_mixed_types() {
 }
 
 // int(17.55) = 17 -> 25 + 17 + 1 = 43
-// @unimplemented(jit.q32)
 // run: test_basic_mixed_types() == 43
 
 float test_basic_assign_then_read_chained() {
@@ -227,7 +205,6 @@ float test_basic_assign_then_read_chained() {
     return a.x + a.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_assign_then_read_chained() ~= 17.0
 
 bool test_basic_write_bool_member() {
@@ -236,5 +213,4 @@ bool test_basic_write_bool_member() {
     return p.isStudent;
 }
 
-// @unimplemented(jit.q32)
 // run: test_basic_write_bool_member() == true

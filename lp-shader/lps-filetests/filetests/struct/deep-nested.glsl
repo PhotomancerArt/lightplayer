@@ -60,7 +60,6 @@ float test_deep_declare_panel_grid() {
     return 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_declare_panel_grid() ~= 1.0
 
 float test_deep_construct_read_path_4level() {
@@ -69,7 +68,6 @@ float test_deep_construct_read_path_4level() {
     return panel_grid.header.top.start.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_construct_read_path_4level() ~= 0.0
 
 float test_deep_path_read_tagged_header() {
@@ -77,7 +75,6 @@ float test_deep_path_read_tagged_header() {
     return panel_grid.header.top.start.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_path_read_tagged_header() ~= 10.0
 
 float test_deep_path_read_content_bottom_end_x() {
@@ -85,7 +82,6 @@ float test_deep_path_read_content_bottom_end_x() {
     return panel_grid.content.bottom.end.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_path_read_content_bottom_end_x() ~= 1.0
 
 float test_deep_path_write_content_top_end_y() {
@@ -94,7 +90,6 @@ float test_deep_path_write_content_top_end_y() {
     return panel_grid.content.top.end.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_path_write_content_top_end_y() ~= 100.0
 
 float test_deep_path_write_footer_left_start_x() {
@@ -103,7 +98,6 @@ float test_deep_path_write_footer_left_start_x() {
     return panel_grid.footer.left.start.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_path_write_footer_left_start_x() ~= -3.5
 
 // Same final shape as `panel_grid.header = replacement` after deep_mk_panel_grid(1,2,3).
@@ -115,7 +109,6 @@ float test_deep_partial_assign_header_via_constructor() {
     return panel_grid.header.top.start.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_partial_assign_header_via_constructor() ~= 7.0
 
 float test_deep_read_after_header_construct_and_write() {
@@ -125,7 +118,6 @@ float test_deep_read_after_header_construct_and_write() {
     return panel_grid.header.right.end.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_read_after_header_construct_and_write() ~= 9.0
 
 // --- Compact 4-level chain: Outer → Middle → Inner → Coord -------------------
@@ -151,7 +143,6 @@ float test_deep_chain_declare_outer() {
     return 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_chain_declare_outer() ~= 1.0
 
 float test_deep_chain_construct_read_4deep() {
@@ -159,7 +150,6 @@ float test_deep_chain_construct_read_4deep() {
     return o.m.i.c.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_chain_construct_read_4deep() ~= 5.0
 
 float test_deep_chain_write_inner_coord() {
@@ -168,7 +158,6 @@ float test_deep_chain_write_inner_coord() {
     return o.m.i.c.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_chain_write_inner_coord() ~= 42.0
 
 // `o.m = Middle(...)` hits nested aggregate assign (not phase 04); use whole-struct rebuild.
@@ -177,7 +166,6 @@ float test_deep_chain_rebuild_outer_with_middle() {
     return o.m.i.c.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_chain_rebuild_outer_with_middle() ~= 8.0
 
 float test_deep_chain_whole_outer_assign() {
@@ -187,7 +175,6 @@ float test_deep_chain_whole_outer_assign() {
     return a.m.i.c.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_chain_whole_outer_assign() ~= 99.0
 
 float test_deep_mixed_panel_grid_and_chain() {
@@ -198,5 +185,4 @@ float test_deep_mixed_panel_grid_and_chain() {
     return a + b;
 }
 
-// @unimplemented(jit.q32)
 // run: test_deep_mixed_panel_grid_and_chain() ~= 3.0

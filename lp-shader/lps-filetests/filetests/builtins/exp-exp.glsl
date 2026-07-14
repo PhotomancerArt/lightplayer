@@ -56,7 +56,6 @@ vec2 test_exp_vec2() {
     return exp(vec2(rt(0.0), rt(1.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_exp_vec2() ~= vec2(1.0, 2.718281828459045)
 
 vec3 test_exp_vec3() {

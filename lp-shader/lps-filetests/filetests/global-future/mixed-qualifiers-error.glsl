@@ -24,7 +24,6 @@ float test_edge_multiple_qualifiers_error_const() {
     return valid_const * 2.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -36,7 +35,6 @@ float test_edge_multiple_qualifiers_error_uniform() {
     return valid_uniform + 1.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -48,7 +46,6 @@ vec2 test_edge_multiple_qualifiers_error_in() {
     return valid_in + vec2(1.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -60,7 +57,6 @@ void test_edge_multiple_qualifiers_error_out() {
     valid_out = vec3(1.0, 0.0, 0.0);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -73,7 +69,6 @@ float test_edge_multiple_qualifiers_error_buffer() {
     return valid_buffer;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -92,7 +87,6 @@ float test_edge_multiple_qualifiers_error_combined() {
     return result;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)

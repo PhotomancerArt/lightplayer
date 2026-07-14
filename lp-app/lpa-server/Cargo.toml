@@ -23,6 +23,7 @@ std = [
 [dependencies]
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
+lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 lpc-registry = { path = "../../lp-core/lpc-registry", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }

@@ -10,7 +10,6 @@ float test_round_half_up() {
     return round(2.5);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
@@ -29,7 +28,6 @@ float test_roundeven_half_up() {
     return roundEven(2.5);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
@@ -55,7 +53,6 @@ float test_large_number_precision() {
     return 1e10 + 1.0;
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
@@ -74,7 +71,6 @@ vec2 test_vec_precision() {
     return vec2(1.0 + 1e-10, 1e10 + 1.0);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)

@@ -491,6 +491,18 @@ mod tests {
     }
 
     #[test]
+    fn test_append_file_default_read_modify_write() {
+        // LpFsStd uses the trait's default append (read-modify-write);
+        // this pins the default's semantics: create-on-append + extend.
+        let temp_dir = TempDir::new().unwrap();
+        let fs = LpFsStd::new(temp_dir.path().to_path_buf());
+
+        fs.append_file("/log.txt".as_path(), b"one").unwrap();
+        fs.append_file("/log.txt".as_path(), b" two").unwrap();
+        assert_eq!(fs.read_file("/log.txt".as_path()).unwrap(), b"one two");
+    }
+
+    #[test]
     fn test_path_validation_prevents_escape() {
         let temp_dir = TempDir::new().unwrap();
         let fs = LpFsStd::new(temp_dir.path().to_path_buf());
