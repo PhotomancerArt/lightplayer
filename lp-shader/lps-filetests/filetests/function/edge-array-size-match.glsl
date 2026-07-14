@@ -14,7 +14,6 @@ float test_edge_array_size_match() {
     return sum_array(data); // OK: sizes match
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_array_size_match() ~= 6.0
 
 /*
@@ -26,7 +25,6 @@ float test_edge_array_size_mismatch() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_array_size_mismatch() ~= 0.0
@@ -46,7 +44,6 @@ float test_edge_array_size_explicit() {
     return float(data[0] + data[1] + data[2] + data[3]);
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_array_size_explicit() ~= 20.0
 
 /*
@@ -58,7 +55,6 @@ float test_edge_array_size_too_small() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_array_size_too_small() ~= 0.0
@@ -73,7 +69,6 @@ float test_edge_array_size_too_large() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_array_size_too_large() ~= 0.0
@@ -90,7 +85,6 @@ float test_edge_array_size_vector() {
     return result.x + result.y; // 4.0 + 6.0 = 10.0
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_array_size_vector() ~= 10.0
 
 float sum2(float[2] arr) {
@@ -108,7 +102,6 @@ float test_edge_array_size_different_types() {
     return sum2(arr2) + sum4(arr4);
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_array_size_different_types() ~= 13.0
 
 bool all_true(bool[3] arr) {
@@ -121,7 +114,6 @@ bool test_edge_array_size_bool() {
     return all_true(flags);
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_array_size_bool() == true
 
 // See param-array.glsl: const-qualified by-value array parameters are not lowered yet.
@@ -135,7 +127,6 @@ float test_edge_array_size_const() {
     return average(data);
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_array_size_const() ~= 30.0
 
 /*
@@ -146,7 +137,6 @@ float test_edge_array_size_implicit() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_array_size_implicit() ~= 0.0
@@ -166,5 +156,4 @@ float test_edge_array_size_multidimensional() {
     return sum_matrix(mat);
 }
 
-// @unimplemented(jit.q32)
 // run: test_edge_array_size_multidimensional() ~= 21.0

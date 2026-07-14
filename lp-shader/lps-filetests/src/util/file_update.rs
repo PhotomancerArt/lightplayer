@@ -646,8 +646,11 @@ float one() { return 1.0; }
             u.per_directive_unimplemented_present(6, rv32c)
                 .expect("rv32c")
         );
-        let jit = Target::from_name("jit.q32").expect("jit");
-        assert!(!u.per_directive_unimplemented_present(6, jit).expect("jit"));
+        let rv32n = Target::from_name("rv32n.q32").expect("rv32n");
+        assert!(
+            !u.per_directive_unimplemented_present(6, rv32n)
+                .expect("rv32n")
+        );
     }
 
     #[test]

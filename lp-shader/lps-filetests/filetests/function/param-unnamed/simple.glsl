@@ -13,5 +13,4 @@ float test_param_unnamed_simple() {
     return add(3.0, 4.0);
 }
 
-// @unimplemented(jit.q32)
 // run: test_param_unnamed_simple() ~= 7.0

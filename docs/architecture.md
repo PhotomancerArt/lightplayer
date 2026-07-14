@@ -167,11 +167,11 @@ Both Q32 (fixed-point) and f32 (float) implementations exist. The generator app
 ### Filetests
 
 Cranelift-style file-based tests under `lps-filetests/filetests/`. Each `.glsl` file declares
-expected results; the harness compiles and executes on three backends:
+expected results; the harness compiles and executes on several backends:
 
-- **jit.q32** — Host JIT via `lpvm-cranelift` (default, fast local iteration)
-- **wasm.q32** — WASM via `lps-wasm` + Wasmtime
-- **rv32.q32** — RV32 via `lpvm-cranelift` object mode + `lp-riscv-emu`
+- **wasm.q32** — WASM via `lpvm-wasm` + Wasmtime (the host execution target)
+- **rv32c.q32** — RV32 via `lpvm-cranelift` object mode + `lp-riscv-emu`
+- **rv32n.q32 / rv32lpn.q32** — RV32 via the hand-built `lpvm-native` backend + `lp-riscv-emu`
 
 Run with `./scripts/filetests.sh` or `just test-filetests`.
 

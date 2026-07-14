@@ -18,7 +18,6 @@ lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lpvm-cranelift = { path = "../lpvm-cranelift", default-features = false, features = [
     "std",
-    "glsl",
     "riscv32-object",
 ] }
 lpir = { path = "../lpir" }

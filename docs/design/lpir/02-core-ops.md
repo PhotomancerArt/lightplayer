@@ -33,7 +33,13 @@ For byte addressing, `iadd` / `isub` (and immediate forms where the non-immediat
 
 Integer arithmetic is wrapping modulo 2³² except where an operation is defined by signed or unsigned interpretation of bit patterns (`idiv_*`, `irem_*`).
 
-For `idiv_s`, `idiv_u`, `irem_s`, and `irem_u`, if the divisor is `0`, the result is `0` and the operation does not trap.
+Integer division and remainder never trap and follow RISC-V (RV32M) semantics for the edge cases, since the device tier gets these for free from hardware:
+
+- `idiv_s` with divisor `0` → `-1`; `idiv_u` with divisor `0` → all ones (`0xFFFF_FFFF`)
+- `irem_s` / `irem_u` with divisor `0` → the dividend
+- `idiv_s` of `i32::MIN` by `-1` (unrepresentable quotient) → `i32::MIN`; `irem_s` of `i32::MIN` by `-1` → `0`
+
+Backends whose native division traps on these inputs (WebAssembly, Cranelift) must emit guards to produce these results.
 
 `fmod` is not a core operation; it is provided via import (for example `@std.math::fmod`).
 

@@ -8,7 +8,7 @@
 //
 // The other backends still break on genuine overloads (verified 2026-07-09),
 // hence the @broken annotations:
-// - jit.q32 / rv32c.q32: cranelift `declare` keys functions by name, so the
+// - rv32c.q32: cranelift `declare` keys functions by name, so the
 //   second overload is rejected as an incompatible redeclaration.
 // - rv32n.q32: lpvm-native hits a regalloc internal error
 //   (isa/rv32/emit.rs:850).
@@ -33,7 +33,6 @@ float test_overload_scalar_vs_vector() {
     return pick(2.0) + pick(vec3(1.0, 2.0, 3.0)).y + pick(vec4(1.0, 2.0, 3.0, 4.0)).z;
 }
 
-// @broken(jit.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(rv32lpn.q32)
@@ -53,7 +52,6 @@ float test_overload_arity_and_nested_call() {
     return combine(1.0) + combine(2.0, 3.0);
 }
 
-// @broken(jit.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(rv32lpn.q32)

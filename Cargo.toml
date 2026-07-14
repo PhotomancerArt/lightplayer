@@ -148,8 +148,6 @@ env_logger = "0.11"
 cranelift-codegen = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-frontend = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-module = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-jit = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
-cranelift-native = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
 cranelift-object = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
 cranelift-reader = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0" }
 cranelift-control = { git = "https://github.com/light-player/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
@@ -254,8 +252,6 @@ ser-write-json = { path = "third_party/ser-write-json" }
 #cranelift-codegen = { path = "../lp-cranelift/cranelift/codegen" }
 #cranelift-frontend = { path = "../lp-cranelift/cranelift/frontend" }
 #cranelift-module = { path = "../lp-cranelift/cranelift/module" }
-#cranelift-jit = { path = "../lp-cranelift/cranelift/jit" }
-#cranelift-native = { path = "../lp-cranelift/cranelift/native" }
 #cranelift-object = { path = "../lp-cranelift/cranelift/object" }
 #cranelift-reader = { path = "../lp-cranelift/cranelift/reader" }
 #cranelift-control = { path = "../lp-cranelift/cranelift/control" }

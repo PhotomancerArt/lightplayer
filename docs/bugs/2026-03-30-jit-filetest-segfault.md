@@ -208,3 +208,15 @@ To pinpoint the crash location:
 - Related comment in `lpvm-cranelift/src/process_sync.rs`:
   > "Concurrent `cranelift_jit` finalization and/or object emission has produced process crashes (
   > SIGSEGV)"
+
+## Resolution (2026-07-11)
+
+The `jit.q32` filetest target and the host in-process JIT (`CraneliftEngine` /
+`JITModule` path in `lpvm-cranelift`) were removed rather than fixed. Further
+investigation showed the crashes were heap corruption in the JIT path: macOS
+xzone malloc aborts (`brk #1` in `_xzm_xzone_malloc_freelist_outlined`) during
+unrelated allocations, with crash probability highly sensitive to binary layout
+(adding an inert 32KB static to `lpvm-cranelift` flipped a stable build to
+crashing in 16/20 runs). `wasm.q32` (wasmtime) is the host execution target;
+`lpvm-cranelift` remains as the RV32 object-emission reference compiler
+(`rv32c.q32`).

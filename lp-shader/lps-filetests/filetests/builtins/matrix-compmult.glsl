@@ -15,7 +15,6 @@ mat2 test_matrixcompmult_mat2_identity() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -27,7 +26,6 @@ mat2 test_matrixcompmult_mat2_simple() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -39,7 +37,6 @@ mat3 test_matrixcompmult_mat3() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -51,7 +48,6 @@ mat4 test_matrixcompmult_mat4() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -63,7 +59,6 @@ mat2 test_matrixcompmult_mat2_zeros() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -75,7 +70,6 @@ mat2 test_matrixcompmult_mat2_negative() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -87,7 +81,6 @@ mat3 test_matrixcompmult_mat3_negative() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -99,7 +92,6 @@ mat4 test_matrixcompmult_mat4_negative() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -111,7 +103,6 @@ mat2 test_matrixcompmult_mat2_fractions() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -123,7 +114,6 @@ mat3 test_matrixcompmult_mat3_fractions() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -135,7 +125,6 @@ mat4 test_matrixcompmult_mat4_fractions() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -147,7 +136,6 @@ mat2 test_matrixcompmult_mat2_variables() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -159,7 +147,6 @@ mat3 test_matrixcompmult_mat3_variables() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -171,7 +158,6 @@ mat4 test_matrixcompmult_mat4_variables() {
     return matrixCompMult(a, b);
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -181,7 +167,6 @@ mat2 test_matrixcompmult_mat2_expressions() {
     return matrixCompMult(mat2(2.0, 3.0, 4.0, 5.0), mat2(3.0, 4.0, 5.0, 6.0));
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -191,7 +176,6 @@ mat3 test_matrixcompmult_mat3_expressions() {
     return matrixCompMult(mat3(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0), mat3(2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0));
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)
@@ -201,7 +185,6 @@ mat4 test_matrixcompmult_mat4_expressions() {
     return matrixCompMult(mat4(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0), mat4(2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0));
 }
 
-// @unsupported(jit.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(wasm.q32)

@@ -59,7 +59,6 @@ float test_single_member_float() {
     return s.value;
 }
 
-// @unimplemented(jit.q32)
 // run: test_single_member_float() ~= 42.0
 
 float test_single_member_vec3_sum() {
@@ -67,7 +66,6 @@ float test_single_member_vec3_sum() {
     return s.v.x + s.v.y + s.v.z;
 }
 
-// @unimplemented(jit.q32)
 // run: test_single_member_vec3_sum() ~= 6.0
 
 float test_single_member_nested() {
@@ -75,7 +73,6 @@ float test_single_member_nested() {
     return s.p.x + s.p.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_single_member_nested() ~= 7.0
 
 float test_big_struct_16_fields() {
@@ -86,7 +83,6 @@ float test_big_struct_16_fields() {
     return b.f1 + b.f16;
 }
 
-// @unimplemented(jit.q32)
 // run: test_big_struct_16_fields() ~= 17.0
 
 float test_big_struct_f8_f9() {
@@ -97,7 +93,6 @@ float test_big_struct_f8_f9() {
     return b.f8 + b.f9;
 }
 
-// @unimplemented(jit.q32)
 // run: test_big_struct_f8_f9() ~= 17.0
 
 float test_big_struct_f2_f15() {
@@ -108,7 +103,6 @@ float test_big_struct_f2_f15() {
     return b.f2 + b.f15;
 }
 
-// @unimplemented(jit.q32)
 // run: test_big_struct_f2_f15() ~= 17.0
 
 float test_padding1_members() {
@@ -116,7 +110,6 @@ float test_padding1_members() {
     return p.v.x + p.v.y + p.v.z + p.f;
 }
 
-// @unimplemented(jit.q32)
 // run: test_padding1_members() ~= 10.0
 
 float test_padding2_members() {
@@ -124,7 +117,6 @@ float test_padding2_members() {
     return p.f + p.v.x + p.v.y - p.v.z; // 1 + 2 + 3 - 4
 }
 
-// @unimplemented(jit.q32)
 // run: test_padding2_members() ~= 2.0
 
 float test_floats4_sum() {
@@ -132,7 +124,6 @@ float test_floats4_sum() {
     return f.a + f.b + f.c + f.d;
 }
 
-// @unimplemented(jit.q32)
 // run: test_floats4_sum() ~= 10.0
 
 float test_floats4_reassign() {
@@ -141,7 +132,6 @@ float test_floats4_reassign() {
     return f.a + f.b + f.c + f.d; // 1+2+10+4
 }
 
-// @unimplemented(jit.q32)
 // run: test_floats4_reassign() ~= 17.0
 
 float test_vec2s2_sums() {
@@ -149,7 +139,6 @@ float test_vec2s2_sums() {
     return v.a.x + v.a.y + v.b.x + v.b.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_vec2s2_sums() ~= 10.0
 
 float test_vec2s2_b_x() {
@@ -157,7 +146,6 @@ float test_vec2s2_b_x() {
     return v.b.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_vec2s2_b_x() ~= 5.0
 
 float test_rmw_sequence() {
@@ -168,7 +156,6 @@ float test_rmw_sequence() {
     return a + b;  // 1.0 + 5.0
 }
 
-// @unimplemented(jit.q32)
 // run: test_rmw_sequence() ~= 6.0
 
 float test_rmw_sequence_y() {
@@ -179,7 +166,6 @@ float test_rmw_sequence_y() {
     return a + b; // 3 + 7
 }
 
-// @unimplemented(jit.q32)
 // run: test_rmw_sequence_y() ~= 10.0
 
 float test_rmw_padding1_float() {
@@ -190,7 +176,6 @@ float test_rmw_padding1_float() {
     return a + b;
 }
 
-// @unimplemented(jit.q32)
 // run: test_rmw_padding1_float() ~= 10.0
 
 float test_padding1_whole_copy() {
@@ -199,7 +184,6 @@ float test_padding1_whole_copy() {
     return b.v.x + b.f;
 }
 
-// @unimplemented(jit.q32)
 // run: test_padding1_whole_copy() ~= 5.0
 
 float test_single_vec3_dot() {
@@ -207,7 +191,6 @@ float test_single_vec3_dot() {
     return dot(s.v, s.v);
 }
 
-// @unimplemented(jit.q32)
 // run: test_single_vec3_dot() ~= 4.0
 
 float test_single_nested_rmw() {
@@ -217,5 +200,4 @@ float test_single_nested_rmw() {
     return a + s.p.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_single_nested_rmw() ~= 5.0

@@ -930,8 +930,6 @@ cargo-update:
                  -p cranelift-codegen \
                  -p cranelift-frontend \
                  -p cranelift-module \
-                 -p cranelift-jit \
-                 -p cranelift-native \
                  -p cranelift-object \
                  -p cranelift-reader \
                  -p cranelift-control \

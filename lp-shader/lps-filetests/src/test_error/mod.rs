@@ -5,9 +5,7 @@ use crate::test_run::TestCaseStats;
 use anyhow::{Result, anyhow};
 use lps_diagnostics::{ErrorCode, GlFileId, GlSourceLoc, GlslError};
 use lps_frontend::naga::{ShaderStage, front::glsl::Error as NagaGlslError};
-use lpvm_cranelift::{
-    CompileOptions, CompilerError, FloatMode as LpirFloatMode, jit_from_ir_owned,
-};
+use lpvm_cranelift::{CompileOptions, CompilerError, FloatMode as LpirFloatMode};
 use std::path::Path;
 
 /// Run an error test: compile, expect failure, match diagnostics to expectations.
@@ -122,7 +120,7 @@ fn collect_glsl_error_test_diagnostics(
         return Err(vec![GlslError::new(ErrorCode::E0400, msg)]);
     }
 
-    match jit_from_ir_owned(ir, meta, options) {
+    match lpvm_cranelift::object_bytes_from_ir(&ir, options) {
         Ok(_) => Ok(()),
         Err(e) => Err(vec![codegen_compiler_error_to_glsl(e)]),
     }
