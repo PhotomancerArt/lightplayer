@@ -21,6 +21,7 @@ lpc-hardware = { path = "../../lp-core/lpc-hardware" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-shared = { path = "../../lp-core/lpc-shared" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+log = { workspace = true }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }
 serde = { workspace = true, features = ["derive"] }

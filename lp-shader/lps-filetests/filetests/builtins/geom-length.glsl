@@ -38,9 +38,6 @@ float test_length_vec2_negative() {
     return length(vec2(rt(-3.0), rt(4.0)));
 }
 
-// rv32n returns garbage for several length() cases (same known lpvm-native
-// Q32 sqrt bug as test_sqrt_vec2 in exp-sqrt.glsl); other targets pass.
-// @broken(rv32n.q32)
 // run: test_length_vec2_negative() ~= 5.0
 
 float test_length_vec3() {
@@ -48,7 +45,6 @@ float test_length_vec3() {
     return length(vec3(rt(1.0), rt(2.0), rt(2.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_length_vec3() ~= 3.0
 
 float test_length_vec4() {
@@ -56,12 +52,10 @@ float test_length_vec4() {
     return length(vec4(rt(1.0), rt(1.0), rt(1.0), rt(1.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_length_vec4() ~= 2.0
 
 float test_length_unit_x() {
     return length(vec2(rt(1.0), rt(0.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_length_unit_x() ~= 1.0
