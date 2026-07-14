@@ -239,6 +239,8 @@ pub fn ConfigSlotRow(
                     aspects,
                     initially_open,
                     revert: slot_detail_revert(chrome, slot.edit_entry_address.clone(), on_action),
+                    on_action,
+                    authoring: slot.authoring.clone(),
                 }
             }
             if let Some(child) = presence_child {

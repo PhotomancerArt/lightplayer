@@ -40,6 +40,8 @@ pub fn ProducedProductView(
             treatment,
             fit: media,
             flush: media,
+            on_action,
+            authoring: product.authoring.clone(),
             ProductPreview {
                 kind: product.kind,
                 preview: product.preview.clone(),

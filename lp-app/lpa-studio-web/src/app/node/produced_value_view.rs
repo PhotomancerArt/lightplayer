@@ -1,7 +1,7 @@
 //! Leaf presentation for a produced value stat.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiProducedValue, UiSlotUnit};
+use lpa_studio_core::{UiAction, UiProducedValue, UiSlotUnit};
 
 use crate::app::node::{
     BindingChip, BindingChipDirection, SlotPane, SlotPaneTreatment, SlotUnitDisplay,
@@ -13,6 +13,7 @@ use crate::app::node::{
 pub fn ProducedValueView(
     value: UiProducedValue,
     #[props(default = false)] initially_open: bool,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let aspects = value.visible_aspects();
     let unit = value.display_unit();
@@ -31,6 +32,8 @@ pub fn ProducedValueView(
             aspects,
             initially_open,
             treatment,
+            on_action,
+            authoring: value.authoring.clone(),
             span { class: "{reading_class}",
                 strong { class: "ux-produced-value-number", "{display_value}" }
                 if let Some(unit) = unit {

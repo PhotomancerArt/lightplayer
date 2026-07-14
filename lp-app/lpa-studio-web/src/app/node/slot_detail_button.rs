@@ -43,6 +43,10 @@ pub fn SlotDetailButton(
     /// affordances — roadmap D11). Rows render as plain text without it.
     #[props(default = None)]
     on_action: Option<EventHandler<UiAction>>,
+    /// Binding authoring surface (M4): renders the Bind/Retarget/Unbind
+    /// section when present alongside a dispatch conduit.
+    #[props(default = None)]
+    authoring: Option<lpa_studio_core::UiBindingAuthoring>,
 ) -> Element {
     let affordance = primary_affordance(&aspects);
     let style = slot_affordance_style(affordance);
@@ -68,6 +72,9 @@ pub fn SlotDetailButton(
                         on_action,
                         aspect,
                     }
+                }
+                if let (Some(authoring), Some(on_action)) = (authoring, on_action) {
+                    crate::app::node::BindingAuthoringSection { authoring, on_action }
                 }
             }
         }

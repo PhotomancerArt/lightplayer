@@ -71,6 +71,9 @@ pub fn SlotPane(
     /// navigation affordances); plain informational panes omit it.
     #[props(default)]
     on_action: Option<EventHandler<UiAction>>,
+    /// Binding authoring surface for the detail popup (M4).
+    #[props(default)]
+    authoring: Option<lpa_studio_core::UiBindingAuthoring>,
     /// The value display rendered, centered, in the pane body.
     children: Element,
 ) -> Element {
@@ -95,6 +98,7 @@ pub fn SlotPane(
                     aspects,
                     initially_open,
                     on_action,
+                    authoring,
                 }
             }
             div { class: body_class,
