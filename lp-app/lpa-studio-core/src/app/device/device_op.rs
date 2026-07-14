@@ -82,6 +82,7 @@ impl ControllerOp for DeviceOp {
                 "Erase firmware and device data from this ESP32.",
                 ActionPriority::Tertiary,
             )
+            .destructive()
             .with_confirmation(ActionConfirmation::new(
                 "Wipe device",
                 "This erases firmware and device data from the selected ESP32.",

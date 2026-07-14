@@ -495,6 +495,106 @@ where
             .map(|handle| ClientOutcome::new(handle, events))
             .ok_or_else(|| ClientError::Protocol("project deploy did not load project".into()))
     }
+
+    /// Pull the files changed under a project since an fs revision
+    /// (paginated; save-as-pull and connect-as-pull ride this).
+    ///
+    /// Returns the reassembled updates plus the fs version to use as the
+    /// next pull's `since`.
+    pub async fn pull_changed_files(
+        &mut self,
+        project_id: &str,
+        since: lpc_model::FsVersion,
+    ) -> ClientResult<ClientOutcome<(Vec<crate::file_sync_ops::FileUpdate>, lpc_model::FsVersion)>>
+    {
+        let mut events = Vec::new();
+        let mut collector = crate::file_sync_ops::ChangesCollector::new();
+        let mut cursor = None;
+        loop {
+            let request = crate::file_sync_ops::changes_since_request(project_id, since, cursor);
+            let outcome = self.send_request(request).await?;
+            events.extend(outcome.events);
+            cursor = collector.accept(&outcome.value.msg)?;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let value = collector.finish()?;
+        Ok(ClientOutcome::new(value, events))
+    }
+
+    /// Whole-project replace: clear the project directory, then push files
+    /// (load-as-push, device push). An absent directory is tolerated —
+    /// replacing nothing is a plain push. Verification is the caller's
+    /// `hash_package` call.
+    pub async fn replace_project_files(
+        &mut self,
+        project_id: &str,
+        files: impl IntoIterator<Item = ProjectDeployFile>,
+    ) -> ClientResult<ClientOutcome<()>> {
+        use lpc_model::AsLpPathBuf;
+        let mut events = Vec::new();
+        let prefix = format!("/projects/{project_id}");
+        let request = ClientRequest::Filesystem(FsRequest::DeleteDir {
+            path: prefix.as_str().as_path_buf(),
+        });
+        let outcome = self.send_request(request).await?;
+        events.extend(outcome.events);
+        if let WireServerMsgBody::Filesystem(FsResponse::DeleteDir {
+            error: Some(error), ..
+        }) = &outcome.value.msg
+        {
+            // fs errors cross the wire as display strings; "not found" is
+            // fine (replacing an absent project), anything else isn't
+            if !error.starts_with("File not found") {
+                return Err(ClientError::Server(format!(
+                    "failed to clear {prefix}: {error}"
+                )));
+            }
+        }
+        let push = self.push_project_files(project_id, files).await?;
+        events.extend(push.events);
+        Ok(ClientOutcome::new((), events))
+    }
+
+    /// Whole-project replace, then load: StopAll → clear dir → chunked
+    /// writes → LoadProject. The open-a-library-project primitive
+    /// (load-as-push, D19).
+    pub async fn replace_and_load_project(
+        &mut self,
+        project_id: &str,
+        files: &[(String, Vec<u8>)],
+    ) -> ClientResult<ClientOutcome<WireProjectHandle>> {
+        let mut events = Vec::new();
+        let stop = self.send_request(ClientRequest::StopAllProjects).await?;
+        events.extend(stop.events);
+        validate_project_deploy_response(&ClientRequest::StopAllProjects, &stop.value.msg)?;
+
+        let deploy_files: Vec<ProjectDeployFile> = files
+            .iter()
+            .map(|(path, bytes)| ProjectDeployFile::new(path.clone(), bytes.clone()))
+            .collect();
+        let replace = self.replace_project_files(project_id, deploy_files).await?;
+        events.extend(replace.events);
+
+        let request = ClientRequest::LoadProject {
+            path: crate::project_deploy::project_load_path(project_id),
+        };
+        let outcome = self.send_request(request.clone()).await?;
+        events.extend(outcome.events);
+        let handle = validate_project_deploy_response(&request, &outcome.value.msg)?
+            .ok_or_else(|| ClientError::Protocol("load did not return a handle".into()))?;
+        Ok(ClientOutcome::new(handle, events))
+    }
+
+    /// Canonical package hash of a project directory (push/pull verify).
+    pub async fn hash_package(&mut self, project_id: &str) -> ClientResult<ClientOutcome<String>> {
+        let outcome = self
+            .send_request(crate::file_sync_ops::hash_package_request(project_id))
+            .await?;
+        let hash = crate::file_sync_ops::validate_hash_package_response(&outcome.value.msg)?;
+        Ok(ClientOutcome::new(hash, outcome.events))
+    }
 }
 
 #[cfg(test)]

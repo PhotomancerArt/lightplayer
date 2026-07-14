@@ -24,6 +24,10 @@ pub struct ProjectDef {
     /// (future) offline upgrader own this value.
     #[slot(policy = "read_only_persisted")]
     pub format: OptionSlot<ValueSlot<u32>>,
+    /// Stable project identity (`prj_…`, base-62), minted by the library
+    /// when a project enters it. Travels with the files: parity checks,
+    /// history, and device associations key off it (PM roadmap M1/M3).
+    pub uid: OptionSlot<ValueSlot<String>>,
     pub name: OptionSlot<ValueSlot<String>>,
     /// Named child node positions owned by this project.
     ///

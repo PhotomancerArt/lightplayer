@@ -31,6 +31,36 @@ pub trait LpFs {
     /// Creates the file if it doesn't exist, overwrites if it does.
     fn write_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError>;
 
+    /// Append data to a file, creating it if it doesn't exist.
+    ///
+    /// Path is relative to project root.
+    ///
+    /// The default implementation is read-modify-write. Backends with a
+    /// native append (in-memory buffers, LittleFS) should override it:
+    /// appends are how chunked wire file-writes land (files larger than
+    /// one protocol frame), and read-modify-write is O(n²) across a
+    /// chunked transfer.
+    fn append_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
+        let mut existing = if self.file_exists(path)? {
+            self.read_file(path)?
+        } else {
+            alloc::vec::Vec::new()
+        };
+        existing.extend_from_slice(data);
+        self.write_file(path, &existing)
+    }
+
+    /// Size of a file in bytes.
+    ///
+    /// Path is relative to project root.
+    ///
+    /// The default implementation reads the whole file; backends with cheap
+    /// metadata (in-memory maps, `std::fs`, LittleFS stat) should override
+    /// it — chunked wire writes validate append offsets against the size.
+    fn file_size(&self, path: &LpPath) -> Result<u64, FsError> {
+        Ok(self.read_file(path)?.len() as u64)
+    }
+
     /// Check if a file exists in the filesystem
     ///
     /// Path is relative to project root.

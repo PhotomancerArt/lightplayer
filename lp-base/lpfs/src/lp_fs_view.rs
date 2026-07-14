@@ -124,6 +124,23 @@ impl LpFs for LpFsView {
         self.parent.borrow().write_file(parent_lp_path, data)
     }
 
+    fn append_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
+        // Delegate so the parent's native append (and change recording) is used
+        self.validate_path(path)?;
+        let normalized = path.to_path_buf();
+        let parent_path = self.parent_path(normalized.as_str());
+        let parent_lp_path = LpPath::new(parent_path.as_str());
+        self.parent.borrow().append_file(parent_lp_path, data)
+    }
+
+    fn file_size(&self, path: &LpPath) -> Result<u64, FsError> {
+        self.validate_path(path)?;
+        let normalized = path.to_path_buf();
+        let parent_path = self.parent_path(normalized.as_str());
+        let parent_lp_path = LpPath::new(parent_path.as_str());
+        self.parent.borrow().file_size(parent_lp_path)
+    }
+
     fn file_exists(&self, path: &LpPath) -> Result<bool, FsError> {
         // Validate input is absolute (contract: LpFs only accepts absolute paths)
         self.validate_path(path)?;

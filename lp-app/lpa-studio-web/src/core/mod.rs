@@ -27,7 +27,9 @@ pub mod terminal_output;
 pub(crate) mod terminal_output_stories;
 pub mod view;
 
-pub use action::{ActionButton, ActionStrip};
+pub use action::{
+    ActionButton, ActionButtonVariant, ActionStrip, menu_item_action_class, quiet_action_class,
+};
 pub use issue_view::IssueView;
 pub use log_list::LogList;
 pub use metric_grid::MetricGrid;

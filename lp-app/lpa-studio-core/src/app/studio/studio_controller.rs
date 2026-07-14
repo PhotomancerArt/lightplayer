@@ -9,6 +9,14 @@ use lpa_link::{
     LinkProviderKind,
 };
 
+use crate::app::device::{
+    DEPLOY_NODE_ID, DeployOp, DeploySession, DeployState, DeployTarget, UiDeployChoice,
+    UiDeployView,
+};
+use crate::app::home::home_view_builder::HomeInputs;
+use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
+use crate::app::library::{CatalogOp, LibraryHost};
+use crate::app::places::device_session::{self, DeviceContent, DeviceSyncState};
 use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
@@ -16,7 +24,7 @@ use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectedLink, Controller, ControllerContext,
-    DeviceController, DeviceOp, LinkOpenOutcome, NodeRevertOp, ProjectConnectResult,
+    DeviceController, DeviceOp, LinkOpenOutcome, LinkState, NodeRevertOp, ProjectConnectResult,
     ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState,
     ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
     UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView,
@@ -50,6 +58,52 @@ pub struct StudioController {
     /// a dispatched action, focus change, or log — so the next gate emits even
     /// though the project revision did not move.
     dirty: bool,
+    /// The injected library host (M4b): catalog transactions, project
+    /// open/close, and gallery snapshots all go through this seam. Also
+    /// held by the project flows.
+    library_host: Option<Rc<dyn LibraryHost>>,
+    /// Cached gallery inputs, hydrated from a host catalog snapshot by
+    /// [`Self::refresh_library`] — `view()` never reads a live store.
+    home_inputs: Option<HomeInputs>,
+    /// A library re-hydration is due (attach, home op, save, close, or a
+    /// cross-tab `LibraryChanged` ping). Drained at the end of every
+    /// dispatch and by the actor after each batch.
+    library_refresh_pending: bool,
+    /// A home-card open in flight: keeps the gallery on screen (card busy)
+    /// while the simulator opens, and tells the connect flow which package
+    /// to push instead of probing running projects.
+    pending_open: Option<PendingOpen>,
+    /// What the attached DEVICE holds, computed by connect-as-pull (D8)
+    /// right after the server protocol attaches to hardware. `None` while
+    /// disconnected or when the runtime is the simulator (the sim is not
+    /// a device — D22).
+    device_sync: Option<DeviceSyncState>,
+    /// The open deploy dialog, when there is one (M5). Pure state — the
+    /// controller executes its effects through the existing seams.
+    deploy: Option<DeploySession>,
+    /// Injected randomness for identity minting (`dev_` uids). The web
+    /// shell installs crypto randomness at startup; the default is a
+    /// clock-derived fallback good enough for tests.
+    random: Rc<dyn Fn() -> [u8; 16]>,
+}
+
+/// What a home card asked to open.
+#[derive(Clone, Debug)]
+enum PendingOpen {
+    /// A library package, by key (`prj_…` uid or slug).
+    Package(String),
+    /// An embedded example, by id (seeded into the library on first open).
+    Example(String),
+}
+
+impl PendingOpen {
+    /// The card key the gallery marks busy.
+    fn card_key(&self) -> &str {
+        match self {
+            PendingOpen::Package(key) => key,
+            PendingOpen::Example(id) => id,
+        }
+    }
 }
 
 impl StudioController {
@@ -70,7 +124,21 @@ impl StudioController {
             applied_revision: None,
             // The first view is always new to the UI, so start dirty.
             dirty: true,
+            library_host: None,
+            home_inputs: None,
+            library_refresh_pending: false,
+            pending_open: None,
+            device_sync: None,
+            deploy: None,
+            random: Rc::new(clock_fallback_random),
         }
+    }
+
+    /// Install the platform's randomness (crypto bytes on the web) for
+    /// identity minting. The constructor default derives bytes from the
+    /// clock — unique enough for tests, not for production.
+    pub fn set_random(&mut self, random: impl Fn() -> [u8; 16] + 'static) {
+        self.random = Rc::new(random);
     }
 
     /// The controller's shared stamping clock, for the actor's progressive
@@ -123,18 +191,50 @@ impl StudioController {
     }
 
     pub fn view(&self) -> UiStudioView {
-        let project_snapshot = self.project.snapshot();
-        let project_actions = self.project.actions(self.device.has_lightplayer_state());
-        let device_view = self.device.view(&project_snapshot.state, project_actions);
-        let panes = if self.project_is_loaded() {
-            vec![
-                self.project.view(self.device.has_lightplayer_state()),
-                device_view,
-            ]
-        } else {
-            vec![device_view]
-        };
+        if let Some(home) = self.home_view() {
+            return UiStudioView::new(Vec::new(), self.console_view())
+                .with_home(Some(home))
+                .with_device_sync(self.device_sync.clone())
+                .with_deploy(self.deploy_view());
+        }
+        let device_view = self
+            .device
+            .view(self.device_sync.as_ref(), self.usual_device_line());
+        // gallery-always (D24): home covers every no-project state, so the
+        // pane layout exists only for an open project
+        let panes = vec![
+            self.project.view(self.device.has_lightplayer_state()),
+            device_view,
+        ];
         UiStudioView::new(panes, self.console_view())
+            .with_open_project(
+                self.project.active_library_uid(),
+                self.project.active_library_slug(),
+            )
+            .with_device_sync(self.device_sync.clone())
+            .with_deploy(self.deploy_view())
+    }
+
+    /// The home gallery: shown whenever NO project is open — always
+    /// (D24; the M4 transitional bridge and its home-only-when-link-idle
+    /// rule are gone). Connected devices are cards, not a pane takeover;
+    /// link trouble surfaces as a gallery issue chip.
+    fn home_view(&self) -> Option<UiHomeView> {
+        if self.project_is_loaded() {
+            return None;
+        }
+        let opening = self.pending_open.as_ref();
+        let issue = match self.device.link.state() {
+            LinkState::SelectingProvider { issue, .. } => issue.clone(),
+            LinkState::Failed { issue } => Some(issue.clone()),
+            _ => None,
+        };
+        Some(home_view_builder::build_home_view(
+            self.home_inputs.as_ref(),
+            opening.map(|pending| pending.card_key().to_string()),
+            issue,
+            self.device_sync.as_ref(),
+        ))
     }
 
     /// The console slice of the view: ring entries passing the display
@@ -210,6 +310,748 @@ impl StudioController {
     /// Apply a console command (from [`StudioCommand::Console`]): mutate the
     /// display filter or clear the ring, and mark the view dirty so the next
     /// gate emits the reshaped console.
+    /// Install the injected library host into the home gallery and the
+    /// project flows (load-as-push / save-as-pull — roadmap M3/M4b).
+    /// Schedules the first gallery hydration; the actor (or the next
+    /// dispatch) drains it.
+    pub fn attach_library(&mut self, host: Rc<dyn LibraryHost>) {
+        let clock = std::rc::Rc::clone(&self.now_secs);
+        self.library_host = Some(Rc::clone(&host));
+        self.project.set_library(host, clock);
+        self.request_library_refresh();
+    }
+
+    /// Note that the gallery's cached inputs are stale. Cheap; the actual
+    /// re-hydration happens in [`Self::refresh_library_if_pending`].
+    pub fn request_library_refresh(&mut self) {
+        if self.library_host.is_some() {
+            self.library_refresh_pending = true;
+        }
+    }
+
+    /// Re-hydrate the cached gallery inputs when a refresh is due, and
+    /// release any project locks whose projects closed since the last
+    /// settle. Called at the end of every dispatch and by the actor after
+    /// each command batch, so host futures always get driven even when a
+    /// close happened on a synchronous path.
+    pub async fn settle_library(&mut self) {
+        self.project.release_closed_library_projects().await;
+        if !self.library_refresh_pending {
+            return;
+        }
+        self.library_refresh_pending = false;
+        let Some(host) = self.library_host.clone() else {
+            return;
+        };
+        let open_elsewhere = host.open_elsewhere_uids().await;
+        match host.catalog_snapshot().await {
+            Ok(fs) => {
+                self.home_inputs =
+                    Some(home_view_builder::hydrate_home_inputs(fs, &open_elsewhere));
+            }
+            Err(error) => {
+                log::warn!("library snapshot failed: {error}");
+                self.home_inputs = Some(HomeInputs {
+                    issue: Some(crate::UiIssue::new(format!(
+                        "Your projects could not be listed: {error}"
+                    ))),
+                    ..HomeInputs::default()
+                });
+            }
+        }
+        self.mark_dirty();
+    }
+
+    /// What the attached device holds (connect-as-pull result), for the
+    /// pane, cards, and deploy dialog. `None` while disconnected or when
+    /// the runtime is the simulator.
+    pub fn device_sync(&self) -> Option<&DeviceSyncState> {
+        self.device_sync.as_ref()
+    }
+
+    /// Connect-is-a-pull (D8): pull the attached device's copy, classify
+    /// it against the library, persist per the M4b locking model, refresh
+    /// the registry, and cache the result. Never fails the connect —
+    /// errors are logged and leave the state `None` (flash/erase must
+    /// stay reachable on a device we can't read).
+    pub(crate) async fn refresh_device_sync(&mut self) {
+        self.device_sync = None;
+        let pulled = {
+            let Ok(server) = self.device.server.client_mut() else {
+                return;
+            };
+            match device_session::pull_device_copy(
+                server,
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
+            )
+            .await
+            {
+                Ok(pulled) => pulled,
+                Err(error) => {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!("device pull failed: {error}"),
+                    ));
+                    // an actionable state, never an eternal "Checking…":
+                    // the dialog shows the unreadable note; flash/erase
+                    // stay reachable
+                    self.device_sync = Some(DeviceSyncState {
+                        identity: None,
+                        content: DeviceContent::Unreadable {
+                            detail: format!("could not read the device: {error}"),
+                        },
+                    });
+                    self.mark_dirty();
+                    return;
+                }
+            }
+        };
+        match self.absorb_device_pull(pulled).await {
+            Ok(state) => {
+                self.device_sync = Some(state);
+                self.mark_dirty();
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("device state could not be recorded: {error}"),
+                ));
+            }
+        }
+    }
+
+    /// Classify a pulled device copy and persist what the locking model
+    /// allows: the active project's observation goes through this tab's
+    /// own handle; other projects' observations and adoptions run as
+    /// catalog transactions; a project open in ANOTHER tab is classified
+    /// but not banked (that tab owns the history subtree).
+    async fn absorb_device_pull(
+        &mut self,
+        mut pulled: device_session::PulledDeviceCopy,
+    ) -> Result<DeviceSyncState, UiError> {
+        self.record_logs(core::mem::take(&mut pulled.logs));
+        let now = (self.now_secs)();
+        let identity = pulled.identity.clone();
+
+        if let Some(identity) = &identity {
+            self.upsert_device_entry(identity, now).await;
+        }
+
+        // a device with no project files — or only `.lp/*` metadata (a
+        // freshly stamped board) — is EMPTY, not unreadable
+        let has_project_content = pulled
+            .files
+            .iter()
+            .any(|(path, _)| !path.starts_with(".lp/"));
+        if !has_project_content {
+            return Ok(DeviceSyncState {
+                identity,
+                content: DeviceContent::Empty,
+            });
+        }
+        if !pulled.has_manifest {
+            return Ok(DeviceSyncState {
+                identity,
+                content: DeviceContent::Unreadable {
+                    detail: "project files present but no readable manifest".to_string(),
+                },
+            });
+        }
+
+        // resolve the manifest uid against the library
+        let local = match (&pulled.manifest_uid, self.library_host()) {
+            (Some(uid), Ok(host)) => match host.catalog_snapshot().await {
+                Ok(fs) => {
+                    let store = crate::app::library::LibraryStore::read_only(fs);
+                    match store.list() {
+                        Ok(summaries) => summaries
+                            .into_iter()
+                            .find(|summary| summary.uid.to_string() == *uid)
+                            .map(|summary| {
+                                let relation = store
+                                    .open(summary.uid)
+                                    .map(|handle| handle.history.classify(pulled.observed))
+                                    .unwrap_or(lpc_history::SyncRelation::Diverged);
+                                (summary, relation)
+                            }),
+                        Err(_) => None,
+                    }
+                }
+                Err(_) => None,
+            },
+            _ => None,
+        };
+
+        if let Some((summary, relation)) = local {
+            let content = DeviceContent::Known {
+                project_uid: summary.uid.to_string(),
+                slug: summary.slug.clone(),
+                observed: pulled.observed,
+                relation,
+            };
+            let Some(identity_value) = identity.clone() else {
+                // anonymous hardware: classification only (the wizard
+                // stamps an identity, then this re-runs)
+                return Ok(DeviceSyncState { identity, content });
+            };
+            let device_uid: lpc_history::PrefixedUid = identity_value.uid.parse().map_err(|e| {
+                UiError::MissingSession(format!("device uid {:?}: {e}", identity_value.uid))
+            })?;
+            let handled = self.project.record_device_observation_on_active(
+                &summary.uid.to_string(),
+                device_uid,
+                pulled.observed,
+                &pulled.files,
+                now,
+            )?;
+            if !handled {
+                let host = self.library_host()?;
+                let op = CatalogOp::RecordDeviceObservation {
+                    project_uid: summary.uid.to_string(),
+                    device: device_session::registry_entry_for(&identity_value, now),
+                    observed: pulled.observed,
+                    files: pulled.files.clone(),
+                };
+                if let Err(error) = host.catalog(op).await {
+                    // open in another tab (or busy): that tab owns the
+                    // history — classify only, don't bank from here
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Info,
+                        UiLogOrigin::Studio,
+                        format!(
+                            "device observation for {} not banked: {error}",
+                            summary.slug
+                        ),
+                    ));
+                }
+            }
+            self.request_library_refresh();
+            return Ok(DeviceSyncState { identity, content });
+        }
+
+        // unknown project: adopt when the device has an identity to
+        // attribute it to; otherwise wait for the wizard to stamp one
+        let Some(identity_value) = &identity else {
+            return Ok(DeviceSyncState {
+                identity,
+                content: DeviceContent::PendingIdentity {
+                    observed: pulled.observed,
+                },
+            });
+        };
+        let host = self.library_host()?;
+        let outcome = host
+            .catalog(CatalogOp::AdoptDevicePackage {
+                device: device_session::registry_entry_for(identity_value, now),
+                files: pulled.files.clone(),
+            })
+            .await
+            .map_err(UiError::from)?;
+        self.request_library_refresh();
+        let summary = outcome.summary.ok_or_else(|| {
+            UiError::MissingSession("device adoption produced no package".to_string())
+        })?;
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            format!("Adopted \"{}\" from {}", summary.slug, identity_value.name),
+        ));
+        Ok(DeviceSyncState {
+            identity,
+            content: DeviceContent::Adopted {
+                project_uid: summary.uid.to_string(),
+                slug: summary.slug,
+                observed: pulled.observed,
+            },
+        })
+    }
+
+    /// Record the device sighting in the registry (merge semantics: an
+    /// association survives sight-only upserts).
+    async fn upsert_device_entry(
+        &mut self,
+        identity: &crate::app::places::DeviceIdentity,
+        now: f64,
+    ) {
+        let Ok(host) = self.library_host() else {
+            return;
+        };
+        let entry = device_session::registry_entry_for(identity, now);
+        if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
+            log::warn!("device registry upsert failed: {error}");
+        }
+        self.request_library_refresh();
+    }
+
+    /// Where the open project usually lives: the registered device whose
+    /// association points at it, for the pane's disconnected state (D23).
+    fn usual_device_line(&self) -> Option<String> {
+        let slug = self.project.active_library_slug()?;
+        let inputs = self.home_inputs.as_ref()?;
+        inputs
+            .devices
+            .iter()
+            .find_map(|device| match &device.state {
+                crate::app::home::UiDeviceCardState::RememberedOffline {
+                    last_known: Some(known),
+                    ..
+                } if *known == slug => Some(format!("Usually on {}.", device.name)),
+                _ => None,
+            })
+    }
+
+    /// The dialog view model, when the dialog is open.
+    fn deploy_view(&self) -> Option<UiDeployView> {
+        let session = self.deploy.as_ref()?;
+        let choices = self
+            .home_inputs
+            .as_ref()
+            .map(|inputs| {
+                inputs
+                    .projects
+                    .iter()
+                    .map(|card| UiDeployChoice {
+                        uid: card.uid.clone(),
+                        slug: card.slug.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(UiDeployView {
+            state: session.state.clone(),
+            choices,
+            connect_actions: self.deploy_connect_actions(),
+        })
+    }
+
+    /// Hardware connect actions for the dialog's `NeedsDevice` state:
+    /// mid-selection link states surface their endpoint choices; settled
+    /// states offer the ESP32 provider (and recovery open). The simulator
+    /// is never offered — it is not a device (D22).
+    fn deploy_connect_actions(&self) -> Vec<UiAction> {
+        use lpa_link::LinkProviderKind;
+        let device_node = self.device.node_id();
+        match self.device.link.state() {
+            LinkState::SelectingEndpoint {
+                provider_id,
+                endpoints,
+            } => endpoints
+                .iter()
+                .map(|endpoint| {
+                    UiAction::from_op(
+                        device_node.clone(),
+                        crate::DeviceOp::ConnectEndpoint {
+                            provider_id: *provider_id,
+                            endpoint_id: endpoint.id.clone(),
+                        },
+                    )
+                    .with_label(format!("Open {}", endpoint.label))
+                    .with_summary(endpoint.summary.clone())
+                })
+                .collect(),
+            _ => vec![
+                UiAction::from_op(
+                    device_node.clone(),
+                    crate::DeviceOp::OpenProvider {
+                        provider_id: LinkProviderKind::BrowserSerialEsp32,
+                    },
+                )
+                .with_label("Connect ESP32")
+                .with_summary("Connect an ESP32 over USB.")
+                .with_icon("usb")
+                .with_priority(crate::ActionPriority::Primary),
+                UiAction::from_op(
+                    device_node,
+                    crate::DeviceOp::OpenProviderForRecovery {
+                        provider_id: LinkProviderKind::BrowserSerialEsp32,
+                    },
+                )
+                .with_label("Open for flashing")
+                .with_summary("Open the ESP32 connection without attaching LightPlayer.")
+                .with_icon("usb")
+                .with_priority(crate::ActionPriority::Secondary),
+            ],
+        }
+    }
+
+    /// The dialog's environment snapshot (entry-state derivation input).
+    fn deploy_environment(&self) -> crate::app::device::DeployEnvironment {
+        let device_link_connected = self
+            .device
+            .link
+            .active_connection()
+            .map(|connection| !should_auto_load_demo_project(&connection))
+            .unwrap_or(false);
+        crate::app::device::DeployEnvironment {
+            device_link_connected,
+            firmware_available: device_link_connected && self.device.has_lightplayer_state(),
+            device_sync: self.device_sync.clone(),
+        }
+    }
+
+    /// Re-derive the open dialog's step after the environment changed
+    /// (connects, disconnects, pull results).
+    fn rederive_deploy(&mut self) {
+        let env = self.deploy_environment();
+        if let Some(session) = self.deploy.as_mut() {
+            session.rederive(&env);
+            self.mark_dirty();
+        }
+    }
+
+    /// Resolve a slug-or-uid key to a concrete push target from a fresh
+    /// library snapshot.
+    async fn resolve_deploy_target(&mut self, key: &str) -> Result<DeployTarget, UiError> {
+        let host = self.library_host()?;
+        let fs = host.catalog_snapshot().await.map_err(UiError::from)?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        let uid = store
+            .resolve_key(key)
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))?;
+        let handle = store
+            .open(uid)
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))?;
+        let head = handle
+            .content_hash()
+            .map_err(|e| UiError::MissingSession(format!("library: {e}")))?;
+        Ok(DeployTarget {
+            project_uid: uid.to_string(),
+            slug: handle.slug.clone(),
+            head,
+            version_number: handle.history.version_number(head),
+        })
+    }
+
+    async fn execute_deploy_op(&mut self, op: DeployOp, updates: UxUpdateSink) -> UiResult {
+        match op {
+            DeployOp::OpenDialog { target_key } => {
+                let target = match target_key {
+                    Some(key) => Some(self.resolve_deploy_target(&key).await?),
+                    None => None,
+                };
+                self.deploy = Some(DeploySession::open(&self.deploy_environment(), target));
+                Ok(UiNotices::new())
+            }
+            DeployOp::CloseDialog => {
+                if self
+                    .deploy
+                    .as_ref()
+                    .is_some_and(|session| session.close_blocked())
+                {
+                    return Err(UiError::UnsupportedAction(
+                        "A device operation is still running — let it finish first".to_string(),
+                    ));
+                }
+                self.deploy = None;
+                Ok(UiNotices::new())
+            }
+            DeployOp::FlashFirmware => {
+                let resume = self.deploy_state_now()?;
+                self.deploy_session()?
+                    .begin_flash()
+                    .map_err(deploy_transition_error)?;
+                updates.emit(UxUpdate::View(self.view()));
+                let result = self.provision_firmware(updates).await;
+                let env = self.deploy_environment();
+                match result {
+                    Ok(outcome) => {
+                        if let Some(session) = self.deploy.as_mut() {
+                            session.flash_finished(&env, true);
+                        }
+                        Ok(outcome)
+                    }
+                    Err(error) => {
+                        if let Some(session) = self.deploy.as_mut() {
+                            session.fail(format!("Flashing failed: {error}"), resume);
+                        }
+                        Err(error)
+                    }
+                }
+            }
+            DeployOp::StampIdentity { name } => {
+                let resume = self.deploy_state_now()?;
+                self.deploy_session()?
+                    .begin_stamp(name.clone())
+                    .map_err(deploy_transition_error)?;
+                updates.emit(UxUpdate::View(self.view()));
+                let result = self.run_identity_stamp(name.trim().to_string()).await;
+                let env = self.deploy_environment();
+                match result {
+                    Ok(identity) => {
+                        if let Some(session) = self.deploy.as_mut() {
+                            session.stamp_finished(&env);
+                        }
+                        Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                            "This device is now \"{}\"",
+                            identity.name
+                        ))))
+                    }
+                    Err(error) => {
+                        if let Some(session) = self.deploy.as_mut() {
+                            session.fail(format!("Naming the device failed: {error}"), resume);
+                        }
+                        Err(error)
+                    }
+                }
+            }
+            DeployOp::ChoosePackage { key } => {
+                let target = self.resolve_deploy_target(&key).await?;
+                let env = self.deploy_environment();
+                self.deploy_session()?
+                    .choose_target(&env, target)
+                    .map_err(deploy_transition_error)?;
+                Ok(UiNotices::new())
+            }
+            DeployOp::ConfirmPush => {
+                let resume = self.deploy_state_now()?;
+                let (device, target) = self
+                    .deploy_session()?
+                    .begin_push()
+                    .map_err(deploy_transition_error)?;
+                updates.emit(UxUpdate::View(self.view()));
+                let result = self.run_device_push(&device, &target).await;
+                match result {
+                    Ok(()) => {
+                        if let Some(session) = self.deploy.as_mut() {
+                            session.push_finished();
+                        }
+                        self.request_library_refresh();
+                        Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                            "Pushed {} to {}",
+                            target.slug, device.name
+                        ))))
+                    }
+                    Err(error) => {
+                        if let Some(session) = self.deploy.as_mut() {
+                            session.fail(format!("Push failed: {error}"), resume);
+                        }
+                        Err(error)
+                    }
+                }
+            }
+            DeployOp::AdoptDeviceCopy => {
+                let (project_uid, observed) = self.reviewing_diverged_copy()?;
+                let host = self.library_host()?;
+                host.catalog(CatalogOp::AdoptObservedVersion {
+                    project_uid,
+                    observed,
+                })
+                .await
+                .map_err(|error| self.library_error_with_name(error))?;
+                self.request_library_refresh();
+                self.refresh_device_sync().await;
+                self.rederive_deploy();
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info("The device's version is now the newest")))
+            }
+            DeployOp::KeepBothFork => {
+                let (project_uid, observed) = self.reviewing_diverged_copy()?;
+                let device_name = match self.deploy_state_now()? {
+                    DeployState::Reviewing { device, .. } => device.name,
+                    _ => "device".to_string(),
+                };
+                let host = self.library_host()?;
+                let outcome = host
+                    .catalog(CatalogOp::ForkObservedVersion {
+                        project_uid,
+                        observed,
+                        device_name,
+                    })
+                    .await
+                    .map_err(|error| self.library_error_with_name(error))?;
+                self.request_library_refresh();
+                let slug = outcome
+                    .summary
+                    .map(|summary| summary.slug)
+                    .unwrap_or_default();
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info(format!("Saved the device's copy as {slug}"))))
+            }
+            DeployOp::EraseDevice => {
+                let resume = self.deploy_state_now()?;
+                let result = self.reset_to_blank(updates).await;
+                let env = self.deploy_environment();
+                match result {
+                    Ok(outcome) => {
+                        if let Some(session) = self.deploy.as_mut() {
+                            session.rederive(&env);
+                        }
+                        Ok(outcome)
+                    }
+                    Err(error) => {
+                        if let Some(session) = self.deploy.as_mut() {
+                            session.fail(format!("Erase failed: {error}"), resume);
+                        }
+                        Err(error)
+                    }
+                }
+            }
+            DeployOp::RetryFailed => {
+                self.deploy_session()?
+                    .retry()
+                    .map_err(deploy_transition_error)?;
+                Ok(UiNotices::new())
+            }
+        }
+    }
+
+    /// The open session, or the friendly no-dialog error.
+    fn deploy_session(&mut self) -> Result<&mut DeploySession, UiError> {
+        self.deploy
+            .as_mut()
+            .ok_or_else(|| UiError::UnsupportedAction("The device dialog is not open".to_string()))
+    }
+
+    fn deploy_state_now(&mut self) -> Result<DeployState, UiError> {
+        Ok(self.deploy_session()?.state.clone())
+    }
+
+    /// The (project, observed hash) a diverged review is looking at.
+    fn reviewing_diverged_copy(&mut self) -> Result<(String, lpc_history::ContentHash), UiError> {
+        match self.deploy_state_now()? {
+            DeployState::Reviewing {
+                on_device:
+                    DeviceContent::Known {
+                        project_uid,
+                        observed,
+                        relation: lpc_history::SyncRelation::Diverged,
+                        ..
+                    },
+                ..
+            } => Ok((project_uid, observed)),
+            _ => Err(UiError::UnsupportedAction(
+                "The device's copy is not diverged".to_string(),
+            )),
+        }
+    }
+
+    /// Stamp a `dev_` identity onto the connected device: mint the uid,
+    /// write `/.lp/device.json` over the wire, register the device, and
+    /// re-pull (adoption may now run for previously-anonymous content).
+    async fn run_identity_stamp(
+        &mut self,
+        name: String,
+    ) -> Result<crate::app::places::DeviceIdentity, UiError> {
+        let identity = crate::app::places::DeviceIdentity {
+            uid: lpc_history::PrefixedUid::mint(lpc_history::UidPrefix::Device, &(self.random)())
+                .to_string(),
+            name,
+        };
+        {
+            let server = self.device.server.client_mut()?;
+            let logs = server
+                .write_project_file(
+                    crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
+                    ".lp/device.json",
+                    &identity.to_json_bytes(),
+                )
+                .await?;
+            self.record_logs(logs);
+        }
+        let now = (self.now_secs)();
+        self.upsert_device_entry(&identity, now).await;
+        self.refresh_device_sync().await;
+        Ok(identity)
+    }
+
+    /// Push a library head to the device: hash-verified replace-and-load,
+    /// identity re-stamp (the replace clears the storage dir), then the
+    /// push event + association. The library side prefers the active
+    /// handle (this tab owns it); otherwise a snapshot read + catalog
+    /// transaction.
+    async fn run_device_push(
+        &mut self,
+        device: &crate::app::places::DeviceIdentity,
+        target: &DeployTarget,
+    ) -> Result<(), UiError> {
+        // 1. payload: live handle when the project is open here
+        let payload = self.project.active_package_payload(&target.project_uid)?;
+        let (files, local_hash) = match payload {
+            Some(payload) => payload,
+            None => {
+                let host = self.library_host()?;
+                let fs = host.catalog_snapshot().await.map_err(UiError::from)?;
+                let store = crate::app::library::LibraryStore::read_only(fs);
+                let uid = target
+                    .project_uid
+                    .parse()
+                    .map_err(|e| UiError::MissingSession(format!("project uid: {e}")))?;
+                let handle = store
+                    .open(uid)
+                    .map_err(|e| UiError::MissingSession(format!("library: {e}")))?;
+                (
+                    handle
+                        .read_all_files()
+                        .map_err(|e| UiError::MissingSession(format!("library: {e}")))?,
+                    handle
+                        .content_hash()
+                        .map_err(|e| UiError::MissingSession(format!("library: {e}")))?,
+                )
+            }
+        };
+
+        // 2. hash-verified replace + load (the device runs it immediately),
+        //    then re-stamp the identity the replace wiped
+        {
+            let server = self.device.server.client_mut()?;
+            let loaded = server
+                .open_library_project(&files, &local_hash.to_string())
+                .await?;
+            self.record_logs(loaded.logs);
+            let server = self.device.server.client_mut()?;
+            let logs = server
+                .write_project_file(
+                    crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
+                    ".lp/device.json",
+                    &identity_json(device),
+                )
+                .await?;
+            self.record_logs(logs);
+        }
+
+        // 3. the push event + association (active handle first — M4b)
+        let now = (self.now_secs)();
+        let device_uid: lpc_history::PrefixedUid = device
+            .uid
+            .parse()
+            .map_err(|e| UiError::MissingSession(format!("device uid: {e}")))?;
+        let recorded_on_active =
+            self.project
+                .record_push_on_active(&target.project_uid, device_uid, local_hash, now)?;
+        let host = self.library_host()?;
+        if recorded_on_active {
+            // association still goes through the registry (store root)
+            let mut entry = device_session::registry_entry_for(device, now);
+            entry.association = Some(lpc_history::DeviceAssociation {
+                device: device_uid,
+                project: target
+                    .project_uid
+                    .parse()
+                    .map_err(|e| UiError::MissingSession(format!("project uid: {e}")))?,
+                version: local_hash,
+                at: now,
+            });
+            host.catalog(CatalogOp::UpsertRegisteredDevice(entry))
+                .await
+                .map_err(UiError::from)?;
+        } else {
+            host.catalog(CatalogOp::RecordPush {
+                project_uid: target.project_uid.clone(),
+                device: device_session::registry_entry_for(device, now),
+                version: local_hash,
+            })
+            .await
+            .map_err(|error| self.library_error_with_name(error))?;
+        }
+
+        // 4. the device now runs the pushed head
+        self.refresh_device_sync().await;
+        self.rederive_deploy();
+        Ok(())
+    }
+
     pub fn apply_console_command(&mut self, command: ConsoleCommand) {
         match command {
             ConsoleCommand::SetMinLevel(level) => self.log_filter.min_level = level,
@@ -243,6 +1085,9 @@ impl StudioController {
     ) -> UiResult {
         updates.emit(UxUpdate::View(self.view()));
         let result = self.dispatch_inner(action, updates.clone()).await;
+        // Release closed projects' locks and re-hydrate the gallery when
+        // the action made either due (open/close/save/home ops).
+        self.settle_library().await;
         // A dispatched action changes local state (project/device state, focus,
         // logs, or an error to surface), so the actor's next gate must emit.
         self.mark_dirty();
@@ -295,6 +1140,14 @@ impl StudioController {
         let device_node_id = self.device.node_id();
         let project_node_id = self.project.node_id();
 
+        if node_id.as_str() == HOME_NODE_ID {
+            let op = action.into_op::<HomeOp>()?;
+            return self.execute_home_op(op, updates).await;
+        }
+        if node_id.as_str() == DEPLOY_NODE_ID {
+            let op = action.into_op::<DeployOp>()?;
+            return self.execute_deploy_op(op, updates).await;
+        }
         if node_id == device_node_id {
             let op = action.into_op::<DeviceOp>()?;
             return self.execute_device_op(op, updates).await;
@@ -353,6 +1206,7 @@ impl StudioController {
             DeviceOp::RefreshConnections => {
                 self.device.link.refresh_provider_catalog();
                 self.device.server.disconnect();
+                self.device_sync = None;
                 self.project.reset();
                 Ok(UiNotices::new().with_notice(UiNotice::info("Connection catalog refreshed")))
             }
@@ -363,7 +1217,7 @@ impl StudioController {
                 if provider_id != LinkProviderKind::BrowserSerialEsp32 {
                     emit_activity(
                         &updates,
-                        device_section_target(DeviceController::SECTION_CONNECT_DEVICE),
+                        device_section_target(DeviceController::SECTION_DEVICE),
                         "Opening device",
                         "Opening",
                         format!("Opening {}", provider_id.label()),
@@ -385,7 +1239,7 @@ impl StudioController {
             } => {
                 emit_activity(
                     &updates,
-                    device_section_target(DeviceController::SECTION_CONNECT_DEVICE),
+                    device_section_target(DeviceController::SECTION_DEVICE),
                     "Opening device session",
                     "Connecting",
                     "Opening device endpoint",
@@ -396,6 +1250,207 @@ impl StudioController {
                     .connect_endpoint(provider_id, endpoint_id)
                     .await?;
                 self.attach_connected_link(connected, updates).await
+            }
+        }
+    }
+
+    async fn execute_home_op(&mut self, op: HomeOp, updates: UxUpdateSink) -> UiResult {
+        match op {
+            HomeOp::OpenPackage { key } => {
+                return self
+                    .open_from_home(PendingOpen::Package(key), updates)
+                    .await;
+            }
+            HomeOp::OpenExample { id } => {
+                return self.open_from_home(PendingOpen::Example(id), updates).await;
+            }
+            HomeOp::RenamePackage { uid, name } => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(UiError::UnsupportedAction(
+                        "a project name cannot be empty".to_string(),
+                    ));
+                }
+                let outcome = self
+                    .run_catalog_op(CatalogOp::Rename {
+                        uid,
+                        new_slug: name.to_string(),
+                    })
+                    .await?;
+                let renamed = outcome
+                    .summary
+                    .map(|summary| summary.slug)
+                    .unwrap_or_else(|| name.to_string());
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Renamed to {renamed}"))))
+            }
+            HomeOp::DuplicatePackage { uid } => {
+                let outcome = self.run_catalog_op(CatalogOp::Duplicate { uid }).await?;
+                let copy = outcome
+                    .summary
+                    .map(|summary| summary.slug)
+                    .unwrap_or_default();
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Duplicated as {copy}"))))
+            }
+            HomeOp::DeletePackage { uid } => {
+                self.run_catalog_op(CatalogOp::Delete { uid }).await?;
+                Ok(UiNotices::new().with_notice(UiNotice::info("Project deleted")))
+            }
+            HomeOp::ImportZip { file_name, bytes } => {
+                let outcome = self
+                    .run_catalog_op(CatalogOp::ImportZip {
+                        file_name,
+                        bytes: bytes.0,
+                    })
+                    .await?;
+                let imported = outcome
+                    .summary
+                    .map(|summary| summary.name)
+                    .unwrap_or_default();
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!("Imported {imported}"))))
+            }
+        }
+    }
+
+    /// Run one catalog transaction through the host and schedule a gallery
+    /// re-hydration (the dispatch wrapper drains it).
+    async fn run_catalog_op(
+        &mut self,
+        op: CatalogOp,
+    ) -> Result<crate::app::library::CatalogOutcome, UiError> {
+        let host = self.library_host()?;
+        let result = host
+            .catalog(op)
+            .await
+            .map_err(|error| self.library_error_with_name(error));
+        self.request_library_refresh();
+        result
+    }
+
+    /// The friendly error copy, upgraded with the project's slug when the
+    /// cached gallery inputs know it ("2026-07-02-0930-porch-sign is open
+    /// in another tab" beats "This project…"). Falls back to the generic
+    /// `From` wording otherwise.
+    fn library_error_with_name(&self, error: crate::app::library::LibraryHostError) -> UiError {
+        if let crate::app::library::LibraryHostError::OpenElsewhere { key } = &error {
+            let slug = self.home_inputs.as_ref().and_then(|inputs| {
+                inputs
+                    .projects
+                    .iter()
+                    .find(|card| card.uid == *key || card.slug == *key)
+                    .map(|card| card.slug.clone())
+            });
+            if let Some(slug) = slug {
+                return UiError::UnsupportedAction(format!(
+                    "{slug} is open in another tab — close it there first"
+                ));
+            }
+        }
+        UiError::from(error)
+    }
+
+    /// The attached library host for home ops, or the error the gallery
+    /// surfaces when the local store never mounted.
+    fn library_host(&self) -> Result<Rc<dyn LibraryHost>, UiError> {
+        self.library_host.clone().ok_or_else(|| {
+            UiError::MissingSession("the local project library is unavailable".to_string())
+        })
+    }
+
+    /// Open a home card: push the package's head to the simulator, starting
+    /// the simulator first when nothing is connected (D13: a library card
+    /// opens in the sim; the sim is invisible infrastructure).
+    async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
+        self.library_host()?;
+        // a connected hardware device is M5's push flow, not an open
+        if let Some(connection) = self.device.link.active_connection() {
+            if !should_auto_load_demo_project(&connection) {
+                return Err(UiError::UnsupportedAction(
+                    "Pushing to a connected device lands with the provision dialog (M5); \
+                     disconnect the device to open this project in the simulator"
+                        .to_string(),
+                ));
+            }
+        }
+        self.pending_open = Some(pending);
+        let result = self.open_from_home_inner(updates).await;
+        self.pending_open = None;
+        result
+    }
+
+    async fn open_from_home_inner(&mut self, updates: UxUpdateSink) -> UiResult {
+        // already attached to the simulator: replace-and-load directly
+        if self.device.has_lightplayer_state() {
+            return self.open_pending_package(updates).await;
+        }
+        // an open sim link without a server session reconnects first;
+        // otherwise start the simulator — both paths run the pending open
+        // inside `connect_server_connection`
+        if self.device.link.active_connection().is_some() {
+            return self.connect_server_from_link(updates).await;
+        }
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_DEVICE),
+            "Starting simulator",
+            "Opening",
+            "Starting the simulator runtime",
+        );
+        match self
+            .device
+            .link
+            .open_provider(LinkProviderKind::BrowserWorker)
+            .await?
+        {
+            LinkOpenOutcome::Connected(connected) => {
+                self.attach_connected_link(connected, updates).await
+            }
+            LinkOpenOutcome::Opened => Err(UiError::MissingSession(
+                "the simulator opened without connecting".to_string(),
+            )),
+            LinkOpenOutcome::Cancelled { message } => {
+                Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+            }
+        }
+    }
+
+    /// Push the pending package to the connected runtime and load it.
+    async fn open_pending_package(&mut self, updates: UxUpdateSink) -> UiResult {
+        let pending = self
+            .pending_open
+            .clone()
+            .ok_or_else(|| UiError::MissingSession("no pending package to open".to_string()))?;
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_DEVICE),
+            "Opening project",
+            "Opening",
+            "Pushing the project to the simulator",
+        );
+        let result = {
+            let server = self.device.server.client_mut()?;
+            match &pending {
+                PendingOpen::Package(key) => self.project.open_library_package(server, key).await,
+                PendingOpen::Example(id) => self.project.open_example_package(server, id).await,
+            }
+        };
+        match result {
+            Ok(logs) => {
+                self.record_logs(logs);
+                let sync = self.sync_project_after_attach(updates).await?;
+                Ok(UiNotices::new().with_notice(project_sync_notice(
+                    sync.synced,
+                    "Project opened",
+                    "Project opened; project sync needs attention",
+                )))
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Error,
+                    UiLogOrigin::Studio,
+                    error.to_string(),
+                ));
+                self.project.fail(error.to_string());
+                Err(error)
             }
         }
     }
@@ -489,7 +1544,7 @@ impl StudioController {
         self.device.server.disconnect();
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_CONNECT_DEVICE),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Opening device for flashing",
             "Opening",
             "Opening device without attaching LightPlayer",
@@ -519,7 +1574,7 @@ impl StudioController {
             self.device.server.disconnect();
             emit_activity(
                 &updates,
-                device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+                device_section_target(DeviceController::SECTION_DEVICE),
                 "Reopening device",
                 "Connecting",
                 "Resetting device before server connect",
@@ -537,14 +1592,14 @@ impl StudioController {
     ) -> UiResult {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Connecting LightPlayer",
             "Connecting",
             "Opening server protocol",
         );
         let server_updates = retarget_activity_updates(
             updates.clone(),
-            device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+            device_section_target(DeviceController::SECTION_DEVICE),
         );
         match self.device.server.attach_link_connection(
             self.device.link.registry_handle(),
@@ -555,9 +1610,20 @@ impl StudioController {
                 let mut outcome =
                     UiNotices::new().with_notice(UiNotice::info("Server protocol connected"));
                 updates.emit(UxUpdate::View(self.view()));
+                // a home-card open skips the running-project probe: opening
+                // is a push of the library head regardless of what runs
+                // (D19); the sim-only guard lives in `open_from_home`
+                if self.pending_open.is_some() && should_auto_load_demo_project(connection) {
+                    let open_outcome = self.open_pending_package(updates).await?;
+                    outcome.notices.extend(open_outcome.notices);
+                    return Ok(outcome);
+                }
+                if should_auto_load_demo_project(connection) {
+                    self.device_sync = None;
+                }
                 emit_activity(
                     &updates,
-                    device_section_target(DeviceController::SECTION_OPEN_PROJECT),
+                    device_section_target(DeviceController::SECTION_DEVICE),
                     "Checking running projects",
                     "Checking",
                     "Checking server response",
@@ -578,6 +1644,8 @@ impl StudioController {
                                 "No LightPlayer firmware detected during server readiness",
                             ));
                             self.device.server.fail_no_firmware();
+                            // now the dialog's Blank state is the truth
+                            self.rederive_deploy();
                             return Ok(UiNotices::new().with_notice(UiNotice::info(
                                 "No LightPlayer firmware detected; flash firmware onto the selected ESP32",
                             )));
@@ -608,10 +1676,20 @@ impl StudioController {
                     }
                     AutoProjectConnect::NotFound => {}
                 }
+                // connect-is-a-pull (D8): bank + classify the device's
+                // copy — AFTER the readiness probe, so the wire is ready
+                // and `has_lightplayer_state` is settled. Hardware only —
+                // the sim is not a device (D22). Failures are logged,
+                // never fatal (flash/erase must stay reachable).
+                if !should_auto_load_demo_project(connection) {
+                    self.refresh_device_sync().await;
+                }
+                self.rederive_deploy();
                 Ok(outcome)
             }
             Err(error) => {
                 self.device.server.fail(error.to_string());
+                self.rederive_deploy();
                 Err(error)
             }
         }
@@ -620,7 +1698,7 @@ impl StudioController {
     async fn connect_running_project(&mut self, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_OPEN_PROJECT),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Connecting project",
             "Connecting",
             "Checking loaded projects",
@@ -665,7 +1743,7 @@ impl StudioController {
     ) -> Result<AutoProjectConnect, UiError> {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_OPEN_PROJECT),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Checking running projects",
             "Checking",
             "Checking loaded projects",
@@ -698,7 +1776,7 @@ impl StudioController {
     async fn connect_loaded_project(&mut self, handle_id: u32, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_OPEN_PROJECT),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Connecting project",
             "Connecting",
             "Loading project shape",
@@ -732,7 +1810,7 @@ impl StudioController {
     async fn load_demo_project(&mut self, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_OPEN_PROJECT),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Loading demo project",
             "Loading",
             "Uploading demo project",
@@ -820,13 +1898,16 @@ impl StudioController {
 
     async fn disconnect_device(&mut self) -> UiResult {
         self.project.reset();
+        self.device_sync = None;
         self.device.server.disconnect();
         self.device.link.disconnect().await?;
+        self.rederive_deploy();
         Ok(UiNotices::new().with_notice(UiNotice::info("Device disconnected")))
     }
 
     async fn disconnect_lightplayer(&mut self) -> UiResult {
         self.project.reset();
+        self.device_sync = None;
         self.device.server.disconnect();
         Ok(UiNotices::new().with_notice(UiNotice::info("LightPlayer disconnected")))
     }
@@ -860,7 +1941,7 @@ impl StudioController {
         let management_updates = capture_log_updates(
             retarget_activity_updates(
                 updates.clone(),
-                device_section_target(DeviceController::SECTION_CONNECT_DEVICE),
+                device_section_target(DeviceController::SECTION_DEVICE),
             ),
             Rc::clone(&captured_logs),
         );
@@ -886,7 +1967,7 @@ impl StudioController {
         let mut outcome = UiNotices::new().with_notice(UiNotice::info("Device reset"));
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Reconnecting device",
             "Connecting",
             "Waiting for device boot",
@@ -930,7 +2011,7 @@ impl StudioController {
         let management_updates = capture_log_updates(
             retarget_activity_updates(
                 updates.clone(),
-                device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+                device_section_target(DeviceController::SECTION_DEVICE),
             ),
             Rc::clone(&captured_logs),
         );
@@ -954,7 +2035,7 @@ impl StudioController {
         let mut outcome = UiNotices::new().with_notice(provision_notice(&management.result));
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Reconnecting device",
             "Connecting",
             "Waiting for firmware boot",
@@ -998,7 +2079,7 @@ impl StudioController {
         let management_updates = capture_log_updates(
             retarget_activity_updates(
                 updates.clone(),
-                device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+                device_section_target(DeviceController::SECTION_DEVICE),
             ),
             Rc::clone(&captured_logs),
         );
@@ -1022,7 +2103,7 @@ impl StudioController {
         let mut outcome = UiNotices::new().with_notice(reset_notice(&management.result));
         emit_activity(
             &updates,
-            device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+            device_section_target(DeviceController::SECTION_DEVICE),
             "Reconnecting device",
             "Connecting",
             "Checking for LightPlayer firmware",
@@ -1071,6 +2152,11 @@ impl StudioController {
 impl StudioController {
     /// A controller whose link + server are connected and whose project is
     /// `Ready`, with `client` wired as the server IO so a refresh sends reads.
+    #[cfg(test)]
+    pub(crate) fn set_device_connection_for_test(&mut self, connection: LinkConnection) {
+        self.device.link.set_active_connection_for_test(connection);
+    }
+
     pub(crate) fn connected_with_client_for_test(client: crate::StudioServerClient) -> Self {
         use crate::{ConnectedDeviceSummary, LinkState, ProjectInventorySummary};
         use lpa_link::LinkProviderKind;
@@ -1119,6 +2205,29 @@ fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> Ui
     } else {
         UiNotice::warning(needs_attention)
     }
+}
+
+fn deploy_transition_error(error: crate::app::device::InvalidTransition) -> UiError {
+    UiError::UnsupportedAction(error.to_string())
+}
+
+fn identity_json(identity: &crate::app::places::DeviceIdentity) -> Vec<u8> {
+    identity.to_json_bytes()
+}
+
+/// Constructor-default randomness: clock-derived bytes. Unique enough
+/// for tests; the web shell replaces it with crypto randomness via
+/// [`StudioController::set_random`].
+fn clock_fallback_random() -> [u8; 16] {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0x5eed);
+    let n = COUNTER.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed);
+    let a = n.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    let b = a ^ (a >> 33);
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&a.to_le_bytes());
+    bytes[8..].copy_from_slice(&b.to_le_bytes());
+    bytes
 }
 
 fn should_auto_load_demo_project(connection: &LinkConnection) -> bool {
@@ -1269,7 +2378,6 @@ mod tests {
 
     use super::*;
     use crate::core::status::UiStatusKind;
-    use crate::core::view::steps_view::UiStepState;
     use crate::{
         ConnectedDeviceSummary, ControllerId, LinkController, LinkState, ProjectController,
         ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectNodeAddress,
@@ -1402,87 +2510,195 @@ mod tests {
     }
 
     #[test]
-    fn initial_view_exposes_device_pane() {
+    fn initial_view_shows_the_home_gallery() {
         let studio = StudioController::new(|| 0.0);
 
         let view = studio.view();
 
-        assert_eq!(view.panes.len(), 1);
-        assert_eq!(view.panes[0].node_id.as_str(), DeviceController::NODE_ID);
-        assert_eq!(device_section_ids(&view), vec!["select-connection"]);
+        let home = view.home.expect("an idle studio shows home");
+        assert!(view.panes.is_empty(), "home replaces the pane layout");
+        assert!(!home.library_available, "no store attached on host");
+        assert!(!home.examples.is_empty(), "examples always show");
     }
 
     #[test]
-    fn connected_without_project_keeps_project_actions_in_device_pane() {
+    fn home_ops_rename_duplicate_import_and_delete_library_packages() {
+        use crate::app::library::{
+            LibraryStore, MemoryLibraryHost, PackageProvenance, export_package,
+        };
+        use crate::{HOME_NODE_ID, HomeOp, ZipBytes};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let counter = Rc::new(RefCell::new(0u8));
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(move || {
+                *counter.borrow_mut() += 1;
+                [*counter.borrow(); 16]
+            }),
+            Rc::new(|| "2026-07-09-1421".to_string()),
+        );
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 42.0),
+        )));
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        // seed one package (creation happens via examples in the UI — the
+        // gallery has no create op; see D17)
+        let seeded = store
+            .install_package("Seeded", &[], PackageProvenance::Created, 42.0)
+            .unwrap();
+        // the gallery is cache+invalidate now: hydrate the pending refresh
+        // (the actor's settle point, driven by hand in controller tests)
+        studio.request_library_refresh();
+        block_on_ready(studio.settle_library());
+        let home = studio.view().home.expect("home with library");
+        assert!(home.library_available);
+        assert_eq!(home.projects.len(), 1);
+        let uid = seeded.uid.to_string();
+
+        // rename (slug move), then duplicate the renamed package
+        block_on_ready(studio.dispatch(home_action(HomeOp::RenamePackage {
+            uid: uid.clone(),
+            name: "Porch".to_string(),
+        })))
+        .unwrap();
+        block_on_ready(studio.dispatch(home_action(HomeOp::DuplicatePackage { uid: uid.clone() })))
+            .unwrap();
+        let home = studio.view().home.unwrap();
+        let copy = home
+            .projects
+            .iter()
+            .find(|card| card.slug == "2026-07-09-1421-porch")
+            .expect("duplicate landed (re-stamped from the renamed slug)");
+        assert_eq!(copy.provenance.as_deref(), Some("Forked from porch"));
+
+        // export the copy's bytes, delete it, and import it back
+        let zip = {
+            let handle = store.open(copy.uid.parse().unwrap()).unwrap();
+            export_package(&handle).unwrap()
+        };
+        let copy_uid = copy.uid.clone();
+        block_on_ready(studio.dispatch(home_action(HomeOp::DeletePackage {
+            uid: copy.uid.clone(),
+        })))
+        .unwrap();
+        assert!(
+            !studio
+                .view()
+                .home
+                .unwrap()
+                .projects
+                .iter()
+                .any(|card| card.uid == copy_uid)
+        );
+        block_on_ready(studio.dispatch(home_action(HomeOp::ImportZip {
+            file_name: "porch-copy.zip".to_string(),
+            bytes: ZipBytes(zip),
+        })))
+        .unwrap();
+        let home = studio.view().home.unwrap();
+        let imported = home
+            .projects
+            .iter()
+            .find(|card| card.provenance.as_deref() == Some("Imported from zip"))
+            .expect("import landed");
+        // re-stamped from the imported manifest's label; the deleted copy
+        // freed the plain stamp+label slot
+        assert_eq!(imported.slug, "2026-07-09-1421-porch");
+    }
+
+    #[test]
+    fn open_elsewhere_projects_refuse_kindly_and_badge_their_cards() {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(|| [9u8; 16]),
+            Rc::new(|| "2026-07-09-1421".to_string()),
+        );
+        let held = store
+            .install_package("Held", &[], PackageProvenance::Created, 42.0)
+            .unwrap();
+        let host = Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 42.0)));
+        host.set_open_elsewhere(vec![held.uid.to_string()]);
+        studio.attach_library(host.clone());
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        // structural ops refuse with the friendly multi-tab message
+        let error = block_on_ready(studio.dispatch(home_action(HomeOp::DeletePackage {
+            uid: held.uid.to_string(),
+        })))
+        .expect_err("delete of an open-elsewhere project refuses");
+        assert!(
+            error.to_string().contains("open in another tab"),
+            "friendly refusal, got: {error}"
+        );
+        // by the second dispatch the gallery inputs are hydrated, so the
+        // refusal names the project (P4 copy)
+        let error = block_on_ready(studio.dispatch(home_action(HomeOp::RenamePackage {
+            uid: held.uid.to_string(),
+            name: "stolen".to_string(),
+        })))
+        .expect_err("rename of an open-elsewhere project refuses");
+        assert!(
+            error
+                .to_string()
+                .contains("2026-07-09-1421-held is open in another tab"),
+            "named refusal, got: {error}"
+        );
+
+        // the gallery data carries the badge (the failed dispatches still
+        // settled the pending hydration from attach)
+        let home = studio.view().home.expect("home with library");
+        assert_eq!(home.projects.len(), 1, "the held project still lists");
+        assert!(home.projects[0].open_elsewhere, "card carries the badge");
+    }
+
+    #[test]
+    fn connected_without_project_shows_gallery_not_panes() {
         let mut studio = connected_studio();
         studio.project.reset();
 
         let view = studio.view();
+        assert!(view.home.is_some(), "no project open means gallery (D24)");
+        assert!(view.panes.is_empty());
+        // the gallery's actions are home ops; the wizard's project steps
+        // are gone for good
         let actions = view_actions(&view);
-
-        assert_eq!(view.panes.len(), 1);
-        assert_eq!(view.panes[0].node_id.as_str(), DeviceController::NODE_ID);
-        assert_eq!(
-            device_section_ids(&view),
-            vec![
-                "select-connection",
-                "connect-device",
-                "connect-lightplayer",
-                "open-project"
-            ]
-        );
-        assert!(actions.iter().any(|action| {
+        assert!(!actions.iter().any(|action| {
             matches!(
                 action.op_as::<ProjectOp>(),
-                Some(ProjectOp::ConnectRunningProject)
+                Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
             )
         }));
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<ProjectOp>(),
-            Some(ProjectOp::LoadDemoProject)
-        )));
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::DisconnectLightPlayer)
-        )));
-        assert!(
-            !actions
-                .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
-        );
-        assert!(
-            actions.iter().any(|action| matches!(
-                action.op_as::<DeviceOp>(),
-                Some(DeviceOp::DisconnectDevice)
-            ))
-        );
     }
 
     #[test]
-    fn connected_link_without_server_hides_open_project_step() {
+    fn connected_link_without_project_shows_the_gallery() {
+        // gallery-always (D24): an engaged link with no open project is a
+        // gallery state, never a pane takeover
         let studio = link_connected_studio();
 
         let view = studio.view();
-        let actions = view_actions(&view);
-
-        assert_eq!(
-            device_section_ids(&view),
-            vec!["select-connection", "connect-device", "connect-lightplayer"]
+        assert!(
+            view.home.is_some(),
+            "home renders whenever no project is open"
         );
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ConnectLightPlayer)
-        )));
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<ProjectOp>(),
-            Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
-        )));
+        assert!(view.panes.is_empty());
     }
 
     #[test]
-    fn no_firmware_failure_hides_connect_lightplayer_action() {
+    fn no_firmware_marks_the_device_pane_ready_to_flash() {
+        // an open project whose device link answers without firmware:
+        // the pane escalates to the flash affordance (the dialog's Blank
+        // state is the full wizard; the pane mirrors the status)
         let mut studio = connected_studio();
-        studio.project.reset();
         studio
             .device
             .link
@@ -1493,52 +2709,17 @@ mod tests {
         });
 
         let view = studio.view();
+        let device_pane = view
+            .panes
+            .iter()
+            .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
+            .expect("device pane");
+        assert_eq!(device_pane.status.kind, UiStatusKind::Warning);
+        assert_eq!(device_pane.status.label, "Ready to flash");
         let actions = view_actions(&view);
-
-        assert_eq!(view.panes[0].status.kind, UiStatusKind::Warning);
-        assert_eq!(view.panes[0].status.label, "Ready to flash");
-        assert_eq!(
-            device_section_ids(&view),
-            vec!["select-connection", "connect-device", "connect-lightplayer"]
-        );
-        let UiViewContent::Stack(stack) = &view.panes[0].body else {
-            panic!("device pane should render a stack view");
-        };
-        let lightplayer_section = stack
-            .sections
-            .iter()
-            .find(|section| section.id == "connect-lightplayer")
-            .expect("connect lightplayer section should exist");
-        assert_eq!(lightplayer_section.title, "LightPlayer unavailable");
-        assert_eq!(lightplayer_section.state, UiStepState::Active);
-        assert!(matches!(lightplayer_section.body, UiViewContent::Text(_)));
-        let device_section = stack
-            .sections
-            .iter()
-            .find(|section| section.id == "connect-device")
-            .expect("connect device section should exist");
-        assert!(device_section.actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
-        )));
-        assert!(
-            device_section
-                .actions
-                .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
-        );
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::ProvisionFirmware)
-        )));
-        assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
-        );
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ConnectLightPlayer)
         )));
     }
 
@@ -1552,28 +2733,18 @@ mod tests {
         assert_eq!(view.panes.len(), 2);
         assert_eq!(view.panes[0].node_id.as_str(), ProjectController::NODE_ID);
         assert_eq!(view.panes[1].node_id.as_str(), DeviceController::NODE_ID);
-        assert_eq!(
-            device_section_ids(&view),
-            vec![
-                "select-connection",
-                "connect-device",
-                "connect-lightplayer",
-                "open-project"
-            ]
-        );
+        // D23: the pane is about hardware — one device section plus the
+        // visually separate firmware section; the wizard steps are gone
+        assert_eq!(device_section_ids(&view), vec!["device", "firmware"]);
         assert!(!actions.iter().any(|action| matches!(
             action.op_as::<ProjectOp>(),
             Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
         )));
+        // the pane's door to the deploy dialog + session control
         assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::DisconnectLightPlayer)
+            action.op_as::<crate::app::device::DeployOp>(),
+            Some(crate::app::device::DeployOp::OpenDialog { .. })
         )));
-        assert!(
-            !actions
-                .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
-        );
         assert!(
             actions.iter().any(|action| matches!(
                 action.op_as::<DeviceOp>(),
@@ -1583,7 +2754,7 @@ mod tests {
     }
 
     #[test]
-    fn connected_lightplayer_offers_non_destructive_device_reset() {
+    fn device_pane_offers_firmware_ops_separately() {
         let mut studio = connected_studio();
         studio
             .device
@@ -1592,15 +2763,7 @@ mod tests {
 
         let actions = view_actions(&studio.view());
 
-        assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetDevice)))
-        );
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::DisconnectLightPlayer)
-        )));
+        // firmware ops live in their own section (D15), away from deploy
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::ProvisionFirmware)
@@ -1610,15 +2773,10 @@ mod tests {
                 .iter()
                 .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
         );
-        assert!(
-            actions.iter().any(|action| matches!(
-                action.op_as::<DeviceOp>(),
-                Some(DeviceOp::DisconnectDevice)
-            ))
-        );
+        // the wizard's connect plumbing is gone
         assert!(!actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ConnectLightPlayer)
+            Some(DeviceOp::ConnectLightPlayer | DeviceOp::OpenProvider { .. })
         )));
     }
 
@@ -1631,18 +2789,7 @@ mod tests {
             .set_active_session_for_test(management_capable_session());
 
         let actions = view_actions(&studio.view());
-
-        // Sidebar tidy (P6): a ready project pane renders no
-        // Refresh/Disconnect buttons — the ops stay dispatchable, but no
-        // pane offers them. Device management recovery stays visible.
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<ProjectOp>(),
-            Some(ProjectOp::DisconnectProject | ProjectOp::RefreshProject)
-        )));
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::DisconnectLightPlayer)
-        )));
+        // recovery stays reachable from the editor's firmware section
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::ProvisionFirmware)
@@ -1650,23 +2797,8 @@ mod tests {
         assert!(
             actions
                 .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetDevice)))
-        );
-        assert!(
-            actions
-                .iter()
                 .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
         );
-        assert!(
-            actions.iter().any(|action| matches!(
-                action.op_as::<DeviceOp>(),
-                Some(DeviceOp::DisconnectDevice)
-            ))
-        );
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ConnectLightPlayer)
-        )));
     }
 
     #[test]
@@ -1737,17 +2869,8 @@ mod tests {
             studio.device.link.snapshot().state,
             LinkState::Connected { .. }
         ));
-        let actions = view_actions(&studio.view());
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ConnectLightPlayer)
-        )));
-        assert!(
-            actions.iter().any(|action| matches!(
-                action.op_as::<DeviceOp>(),
-                Some(DeviceOp::DisconnectDevice)
-            ))
-        );
+        // no project → gallery, with the link still up underneath
+        assert!(studio.view().home.is_some());
     }
 
     #[test]
@@ -2037,7 +3160,7 @@ mod tests {
                     activity,
                     ..
                 } if pane_node_id.as_str() == DeviceController::NODE_ID
-                    && section_id == DeviceController::SECTION_CONNECT_DEVICE
+                    && section_id == DeviceController::SECTION_DEVICE
                     && activity.title == "Opening device session"
             )
         }));
@@ -2050,8 +3173,17 @@ mod tests {
                 _ => None,
             })
             .expect("dispatch should emit a final view");
-        assert_eq!(last_view.panes[0].status.kind, UiStatusKind::Error);
-        assert_eq!(last_view.panes[0].status.label, "Needs attention");
+        // the failed connect lands back on provider selection, which is home
+        // under M4 — the issue rides the gallery instead of a pane status
+        let home = last_view
+            .home
+            .expect("provider selection with an issue shows home");
+        assert!(
+            home.issue
+                .expect("the connect failure surfaces on home")
+                .message
+                .contains("Failed to open serial port.")
+        );
     }
 
     #[test]
@@ -2074,7 +3206,7 @@ mod tests {
         });
         let target = UxActivityTarget::stack_section(
             DeviceController::NODE_ID,
-            DeviceController::SECTION_CONNECT_LIGHTPLAYER,
+            DeviceController::SECTION_DEVICE,
         );
         let retargeted = retarget_activity_updates(sink, target.clone());
 
@@ -2129,6 +3261,14 @@ mod tests {
                 "Fake runtime",
             ),
         });
+        // hardware, as far as the pane is concerned (Fake != BrowserWorker)
+        studio
+            .device
+            .link
+            .set_active_connection_for_test(lpa_link::LinkConnection::fake(
+                "fake-runtime",
+                "fake-session",
+            ));
         studio
     }
 

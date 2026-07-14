@@ -616,10 +616,33 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
     })()
   `;
   const started = Date.now();
+  let lastForcedFrame = 0;
   while (Date.now() - started < 10_000) {
     const ready = await evaluate(cdp, sessionId, expression);
     if (ready) {
       return;
+    }
+    // Headless pages stop producing frames once the load-time BeginFrames are
+    // spent, but the app flushes DOM updates (e.g. popover positioning) on
+    // requestAnimationFrame — a story that finishes mounting after the last
+    // organic frame would wait here forever. A discarded 1x1 screenshot
+    // forces a BeginFrame so rAF-driven work can make progress; throttled
+    // (only after the story dawdles, at most every 250ms) so parallel pages
+    // don't wedge Chrome with screenshot traffic.
+    const now = Date.now();
+    if (now - started > 500 && now - lastForcedFrame > 250) {
+      lastForcedFrame = now;
+      await cdp
+        .send(
+          "Page.captureScreenshot",
+          {
+            format: "png",
+            fromSurface: true,
+            clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 },
+          },
+          sessionId,
+        )
+        .catch(() => {});
     }
     await delay(50);
   }

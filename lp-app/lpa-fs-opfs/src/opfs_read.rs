@@ -18,6 +18,19 @@ use crate::opfs_error::OpfsError;
 pub async fn load_tree(
     dir: &FileSystemDirectoryHandle,
 ) -> Result<Vec<(LpPathBuf, Vec<u8>)>, OpfsError> {
+    load_tree_filtered(dir, |_| false).await
+}
+
+/// [`load_tree`], skipping directories the predicate rejects.
+///
+/// `skip_dir` sees absolute lp-style directory paths (`/history/prj_x/blobs`)
+/// and is consulted *before descending* — a skipped directory's files are
+/// never read, which is the point: gallery snapshots skip history payloads
+/// without paying to load them.
+pub async fn load_tree_filtered(
+    dir: &FileSystemDirectoryHandle,
+    skip_dir: impl Fn(&str) -> bool,
+) -> Result<Vec<(LpPathBuf, Vec<u8>)>, OpfsError> {
     let mut out = Vec::new();
     let mut stack: Vec<(FileSystemDirectoryHandle, String)> = vec![(dir.clone(), String::new())];
 
@@ -41,6 +54,9 @@ pub async fn load_tree(
             let child_path = format!("{prefix}/{}", handle.name());
             match handle.kind() {
                 FileSystemHandleKind::Directory => {
+                    if skip_dir(&child_path) {
+                        continue;
+                    }
                     let dir_handle: FileSystemDirectoryHandle = handle.unchecked_into();
                     stack.push((dir_handle, child_path));
                 }
@@ -55,6 +71,37 @@ pub async fn load_tree(
             }
         }
     }
+    Ok(out)
+}
+
+/// Names of the immediate child *directories* of `dir` (files skipped).
+///
+/// The husk-pruning primitive: the flusher removes files but never
+/// directories, so catalog transactions compare this OPFS listing against
+/// the mounted (files-only) tree to find empty leftovers.
+pub async fn list_child_dirs(dir: &FileSystemDirectoryHandle) -> Result<Vec<String>, OpfsError> {
+    let mut out = Vec::new();
+    let entries: AsyncIterator = dir.values();
+    loop {
+        let next_promise = entries
+            .next()
+            .map_err(|e| OpfsError::new("iterate", "/".to_string(), e))?;
+        let next = JsFuture::from(next_promise)
+            .await
+            .map_err(|e| OpfsError::new("iterate", "/".to_string(), e))?;
+        let next: IteratorNext = next.unchecked_into();
+        if next.done() {
+            break;
+        }
+        let handle: FileSystemHandle = next
+            .value()
+            .dyn_into()
+            .map_err(|e| OpfsError::new("iterate", "/".to_string(), e))?;
+        if handle.kind() == FileSystemHandleKind::Directory {
+            out.push(handle.name());
+        }
+    }
+    out.sort();
     Ok(out)
 }
 

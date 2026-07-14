@@ -109,6 +109,169 @@ impl StudioServerClient {
     pub fn take_pending_logs(&mut self) -> Vec<UiLogDraft> {
         core::mem::take(&mut *self.pending_logs.borrow_mut())
     }
+
+    /// Open a library project on the runtime: whole-project replace →
+    /// hash verification → load → version probe (load-as-push, D19).
+    ///
+    /// `expected_hash` is the library copy's canonical hash; a mismatch is
+    /// a hard error (the runtime would be running something other than the
+    /// library head).
+    pub async fn open_library_project(
+        &mut self,
+        files: &[(String, Vec<u8>)],
+        expected_hash: &str,
+    ) -> Result<LoadedLibraryProject, UiError> {
+        let deploy = self
+            .client
+            .replace_and_load_project(DEMO_PROJECT_STORAGE_ID, files)
+            .await
+            .map_err(map_client_error)?;
+        let handle = deploy.value;
+        let mut logs = map_client_events(deploy.events);
+
+        let hash = self
+            .client
+            .hash_package(DEMO_PROJECT_STORAGE_ID)
+            .await
+            .map_err(map_client_error)?;
+        logs.extend(map_client_events(hash.events));
+        if hash.value != expected_hash {
+            return Err(map_client_error(
+                lpa_client::client_error::ClientError::Protocol(format!(
+                    "pushed project hash mismatch: runtime {} vs library {expected_hash}",
+                    hash.value
+                )),
+            ));
+        }
+
+        // version probe: an empty changes page carries the runtime's
+        // current fs revision — the baseline for save-as-pull
+        let version_probe = self
+            .client
+            .pull_changed_files(
+                DEMO_PROJECT_STORAGE_ID,
+                lpc_model::FsVersion::new(i64::MAX - 1),
+            )
+            .await
+            .map_err(map_client_error)?;
+        logs.extend(map_client_events(version_probe.events));
+        let (_, synced_version) = version_probe.value;
+
+        let inventory = self
+            .client
+            .project_inventory_read(handle)
+            .await
+            .map_err(map_client_error)?;
+        logs.extend(map_client_events(inventory.events));
+        logs.extend(self.take_pending_logs());
+
+        Ok(LoadedLibraryProject {
+            handle_id: handle.id(),
+            inventory: ProjectInventorySummary::from(&inventory.value),
+            node_def_artifacts: node_def_artifacts(&inventory.value),
+            synced_version,
+            logs,
+        })
+    }
+
+    /// Pull files changed under a project since `since` (save-as-pull /
+    /// connect-as-pull; roadmap M2b). Returns updates + the next `since`.
+    pub async fn pull_changed_files(
+        &mut self,
+        project_id: &str,
+        since: lpc_model::FsVersion,
+    ) -> Result<PulledFiles, UiError> {
+        let outcome = self
+            .client
+            .pull_changed_files(project_id, since)
+            .await
+            .map_err(map_client_error)?;
+        let (updates, version) = outcome.value;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(PulledFiles {
+            updates,
+            version,
+            logs,
+        })
+    }
+
+    /// Whole-project replace push (load-as-push / device push; M2b).
+    pub async fn replace_project_files(
+        &mut self,
+        project_id: &str,
+        files: impl IntoIterator<Item = lpa_client::project_deploy::ProjectDeployFile>,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        let outcome = self
+            .client
+            .replace_project_files(project_id, files)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(logs)
+    }
+
+    /// Canonical package hash of a project directory (push/pull verify).
+    /// Write one file into a project storage without touching the rest
+    /// (identity stamping: `/.lp/device.json` must survive pushes and be
+    /// writable without one).
+    pub async fn write_project_file(
+        &mut self,
+        project_id: &str,
+        relative_path: &str,
+        bytes: &[u8],
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        let outcome = self
+            .client
+            .push_project_files(
+                project_id,
+                [lpa_client::project_deploy::ProjectDeployFile::new(
+                    relative_path,
+                    bytes,
+                )],
+            )
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(logs)
+    }
+
+    pub async fn hash_package(
+        &mut self,
+        project_id: &str,
+    ) -> Result<(String, Vec<UiLogDraft>), UiError> {
+        let outcome = self
+            .client
+            .hash_package(project_id)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok((outcome.value, logs))
+    }
+}
+
+/// Result of opening a library project on the runtime.
+pub struct LoadedLibraryProject {
+    pub handle_id: u32,
+    pub inventory: ProjectInventorySummary,
+    /// Runtime node id → containing def artifact (see
+    /// [`LoadedDemoProject::node_def_artifacts`]).
+    pub node_def_artifacts: BTreeMap<NodeId, ArtifactLocation>,
+    /// The runtime fs revision right after the push — save-as-pull's first
+    /// `since`.
+    pub synced_version: lpc_model::FsVersion,
+    pub logs: Vec<UiLogDraft>,
+}
+
+/// Result of a changed-files pull: reassembled updates, the fs version to
+/// use as the next pull's `since`, and protocol logs.
+pub struct PulledFiles {
+    pub updates: Vec<lpa_client::file_sync_ops::FileUpdate>,
+    pub version: lpc_model::FsVersion,
+    pub logs: Vec<UiLogDraft>,
 }
 
 pub struct LoadedDemoProject {
