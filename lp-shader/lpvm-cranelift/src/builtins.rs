@@ -1,10 +1,9 @@
-//! JIT builtin symbols and LPIR import resolution.
+//! Builtin symbols and LPIR import resolution.
 //!
-//! Cranelift [`Signature`] and [`get_function_pointer`] for each [`BuiltinId`] are generated in
+//! The Cranelift [`Signature`] for each [`BuiltinId`] is generated in
 //! [`crate::generated_builtin_abi`] from `rust_signature` metadata in `lps-builtins`
 //! (`lps-builtins-gen-app`). Re-run codegen after changing any `extern "C"` builtin.
 
-use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -27,10 +26,6 @@ pub(crate) fn cranelift_sig_for_builtin(
     call_conv: CallConv,
 ) -> Signature {
     crate::generated_builtin_abi::cranelift_sig_for_builtin_inner(builtin, pointer_type, call_conv)
-}
-
-pub(crate) fn get_function_pointer(builtin: BuiltinId) -> *const u8 {
-    crate::generated_builtin_abi::get_function_pointer_inner(builtin)
 }
 
 pub(crate) fn resolve_import(
@@ -144,17 +139,6 @@ pub(crate) fn declare_lpir_opcode_builtins(
         fdiv: declare(BuiltinId::LpLpirFdivQ32)?,
         fsqrt: declare(BuiltinId::LpLpirFsqrtQ32)?,
         fnearest: declare(BuiltinId::LpLpirFnearestQ32)?,
-    })
-}
-
-pub(crate) fn symbol_lookup_fn() -> Box<dyn Fn(&str) -> Option<*const u8> + Send> {
-    Box::new(|name: &str| {
-        for builtin in BuiltinId::all() {
-            if builtin.name() == name {
-                return Some(get_function_pointer(*builtin));
-            }
-        }
-        None
     })
 }
 

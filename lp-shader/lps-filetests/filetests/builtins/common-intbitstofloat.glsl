@@ -18,7 +18,6 @@ float test_intbitstofloat_one() {
     return intBitsToFloat(1065353216);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -30,7 +29,6 @@ float test_intbitstofloat_neg_one() {
     return intBitsToFloat(-1082130432);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -42,7 +40,6 @@ float test_intbitstofloat_inf() {
     return intBitsToFloat(2139095040);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -54,7 +51,6 @@ float test_intbitstofloat_neg_inf() {
     return intBitsToFloat(-8388608);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -66,7 +62,6 @@ vec2 test_intbitstofloat_vec2() {
     return intBitsToFloat(ivec2(1065353216, -1082130432));
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -78,7 +73,6 @@ vec3 test_intbitstofloat_vec3() {
     return intBitsToFloat(ivec3(0, 1065353216, 1073741824));
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -90,7 +84,6 @@ vec4 test_intbitstofloat_vec4() {
     return intBitsToFloat(ivec4(1065353216, 0, -1082130432, 2139095040));
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)

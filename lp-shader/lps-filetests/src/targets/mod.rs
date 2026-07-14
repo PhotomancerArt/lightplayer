@@ -7,8 +7,6 @@ pub use display::parse_target_filters;
 /// Compilation/execution backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Backend {
-    /// Host LPIR JIT (`lpvm-cranelift`).
-    Jit,
     /// LPIR → RV32 via Cranelift + linked builtins + emulator.
     Rv32,
     /// LPIR → RV32 via `lpvm-native` + linked builtins + emulator.
@@ -33,16 +31,12 @@ pub enum Isa {
     Riscv32,
     /// WebAssembly 32-bit.
     Wasm32,
-    /// Native host.
-    Native,
 }
 
 /// Execution mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExecMode {
-    /// JIT on host.
-    Jit,
-    /// Emulator (e.g. RISC-V emulator).
+    /// Emulator (e.g. RISC-V emulator) or wasmtime.
     Emulator,
 }
 
@@ -71,7 +65,7 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, jit, rv32c, rv32n, rv32lpn — used for error messages and CLI.
+/// Order: wasm, rv32c, rv32n, rv32lpn — used for error messages and CLI.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         frontend: Frontend::Naga,
@@ -79,13 +73,6 @@ pub const ALL_TARGETS: &[Target] = &[
         float_mode: FloatMode::Q32,
         isa: Isa::Wasm32,
         exec_mode: ExecMode::Emulator,
-    },
-    Target {
-        frontend: Frontend::Naga,
-        backend: Backend::Jit,
-        float_mode: FloatMode::Q32,
-        isa: Isa::Native,
-        exec_mode: ExecMode::Jit,
     },
     Target {
         frontend: Frontend::Naga,
@@ -114,9 +101,9 @@ pub const ALL_TARGETS: &[Target] = &[
 /// frontend — the primary on-device pipeline), rv32c (Cranelift), wasm (Q32).
 /// CI should run the full [`ALL_TARGETS`] list (see plan README / phase 05).
 pub const DEFAULT_TARGETS: &[Target] = &[
-    ALL_TARGETS[3],
-    ALL_TARGETS[4],
     ALL_TARGETS[2],
+    ALL_TARGETS[3],
+    ALL_TARGETS[1],
     ALL_TARGETS[0],
 ];
 

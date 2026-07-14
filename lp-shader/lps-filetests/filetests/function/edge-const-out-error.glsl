@@ -32,7 +32,6 @@ float test_edge_const_inout_error() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_const_inout_error() ~= 0.0
@@ -74,7 +73,6 @@ float test_edge_const_multiple_qualifiers() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_const_multiple_qualifiers() ~= 0.0

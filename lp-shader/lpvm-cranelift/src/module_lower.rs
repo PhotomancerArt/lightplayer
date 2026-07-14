@@ -1,11 +1,9 @@
-//! Shared LPIR → Cranelift lowering for any [`cranelift_module::Module`] (JIT or object).
+//! Shared LPIR → Cranelift lowering for any [`cranelift_module::Module`].
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
-use cranelift_codegen::ir::{FuncRef, Signature, StackSlot, StackSlotData, StackSlotKind, types};
-use cranelift_codegen::isa::CallConv;
+use cranelift_codegen::ir::{FuncRef, StackSlot, StackSlotData, StackSlotKind};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{FuncId, Linkage, Module};
 use lpir::FloatMode;
@@ -17,43 +15,12 @@ use crate::compile_options::{CompileOptions, MemoryStrategy};
 use crate::emit::{self, LpirBuiltinRefs, translate_function};
 use crate::error::{CompileError, CompilerError};
 
-/// Order used when declaring and defining user functions (affects `FuncId` / object symbol order).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LpirFuncEmitOrder {
-    /// Same order as [`LpirModule::functions`] (host JIT).
-    Source,
-    /// Lexicographic by LPIR function name (used for `ObjectModule` symbol order).
-    #[cfg_attr(
-        not(feature = "riscv32-object"),
-        allow(
-            dead_code,
-            reason = "only constructed when feature riscv32-object is on"
-        )
-    )]
-    Name,
-}
-
-/// Result of lowering LPIR into a module before target-specific finalization.
-pub(crate) struct LoweredLpirModule {
-    pub func_ids: Vec<FuncId>,
-    pub func_names: Vec<String>,
-    pub signatures: VecMap<String, Signature>,
-    /// LPIR scalar return words per function (for StructReturn ABIs where `Signature::returns` is empty).
-    pub logical_return_words: VecMap<String, usize>,
-    pub ir_param_counts: Vec<u16>,
-    pub name_to_index: VecMap<String, usize>,
-    pub call_conv: CallConv,
-    pub pointer_type: types::Type,
-    pub float_mode: FloatMode,
-}
-
 /// Declare imports, declare user functions, and define bodies. Caller runs `finalize_definitions` or `finish`.
 pub(crate) fn lower_lpir_into_module<M: Module>(
     module: &mut M,
     ir: &LpirModule,
     options: CompileOptions,
-    order: LpirFuncEmitOrder,
-) -> Result<LoweredLpirModule, CompilerError> {
+) -> Result<(), CompilerError> {
     let mode = options.float_mode;
     if mode == FloatMode::F32 && !ir.imports.is_empty() {
         return Err(CompilerError::Codegen(CompileError::unsupported(
@@ -87,14 +54,15 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         .map(|(i, k)| (*k, i))
         .collect();
 
-    let indices: Vec<LpirFuncId> = match (order, options.memory_strategy) {
-        (_, MemoryStrategy::LowMemory) => {
+    // Lexicographic by LPIR function name for a stable object symbol order; LowMemory
+    // defines the largest bodies first so peak context memory is bounded by the biggest one.
+    let indices: Vec<LpirFuncId> = match options.memory_strategy {
+        MemoryStrategy::LowMemory => {
             let mut v: Vec<LpirFuncId> = ir.functions.keys().copied().collect();
             v.sort_by(|a, b| ir.functions[b].body.len().cmp(&ir.functions[a].body.len()));
             v
         }
-        (LpirFuncEmitOrder::Source, _) => ir.functions.keys().copied().collect(),
-        (LpirFuncEmitOrder::Name, _) => {
+        _ => {
             let mut v: Vec<LpirFuncId> = ir.functions.keys().copied().collect();
             v.sort_by(|a, b| ir.functions[a].name.cmp(&ir.functions[b].name));
             v
@@ -102,14 +70,9 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
     };
 
     let mut func_ids = Vec::with_capacity(indices.len());
-    let mut signatures = VecMap::new();
-    let mut logical_return_words = VecMap::new();
-    let mut func_names = Vec::with_capacity(indices.len());
-    let mut ir_param_counts = Vec::with_capacity(indices.len());
 
     for &fid in &indices {
         let f = &ir.functions[&fid];
-        logical_return_words.insert(f.name.clone(), f.return_types.len());
         let sig = emit::signature_for_ir_func(f, call_conv, mode, pointer_type, module.isa());
         let id = module
             .declare_function(&f.name, Linkage::Export, &sig)
@@ -119,15 +82,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
                     f.name
                 )))
             })?;
-        signatures.insert(f.name.clone(), sig);
-        func_names.push(f.name.clone());
-        ir_param_counts.push(f.param_count);
         func_ids.push(id);
-    }
-
-    let mut name_to_index = VecMap::new();
-    for (j, name) in func_names.iter().enumerate() {
-        name_to_index.insert(name.clone(), j);
     }
 
     // Map LPIR function rank (BTree key order) -> Cranelift FuncId for local calls.
@@ -235,15 +190,5 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         }
     }
 
-    Ok(LoweredLpirModule {
-        func_ids,
-        func_names,
-        signatures,
-        logical_return_words,
-        ir_param_counts,
-        name_to_index,
-        call_conv,
-        pointer_type,
-        float_mode: mode,
-    })
+    Ok(())
 }

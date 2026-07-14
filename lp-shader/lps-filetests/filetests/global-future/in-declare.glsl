@@ -18,7 +18,6 @@ float test_declare_in_float() {
     return time + 1.0;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_in_float() ~= 1.0
 
@@ -27,7 +26,6 @@ int test_declare_in_int() {
     return vertex_id * 2;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_in_int() == 0
 
@@ -36,7 +34,6 @@ uint test_declare_in_uint() {
     return int(instance_id + 1u);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -48,7 +45,6 @@ bool test_declare_in_bool() {
     return selected;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_in_bool() == false
 
@@ -57,7 +53,6 @@ vec2 test_declare_in_vec2() {
     return tex_coord + vec2(0.5, 0.5);
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_in_vec2() ~= vec2(0.5, 0.5)
 
@@ -66,7 +61,6 @@ vec3 test_declare_in_vec3() {
     return position * 2.0;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_in_vec3() ~= vec3(0.0, 0.0, 0.0)
 
@@ -75,7 +69,6 @@ vec4 test_declare_in_vec4() {
     return color;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_in_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
@@ -86,6 +79,5 @@ float test_declare_in_calculate() {
     return scaled_time + adjusted_tex.x + adjusted_tex.y;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_in_calculate() ~= 0.2

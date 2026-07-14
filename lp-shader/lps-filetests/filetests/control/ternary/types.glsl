@@ -92,7 +92,6 @@ int test_ternary_struct() {
     return int(result.x + result.y);
 }
 
-// @unimplemented(jit.q32)
 // run: test_ternary_struct() == 3
 
 struct Color {
@@ -122,7 +121,6 @@ int test_ternary_array_element() {
     return result;
 }
 
-// @unimplemented(jit.q32)
 // run: test_ternary_array_element() == 1
 
 // Mixed vector component access

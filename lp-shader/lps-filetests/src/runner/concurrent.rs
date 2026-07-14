@@ -42,7 +42,7 @@ pub enum Reply {
         per_target: PerTargetStats,
         /// Test case statistics (aggregated).
         stats: TestCaseStats,
-        /// Line numbers with unexpected passes per target (e.g. "jit.q32").
+        /// Line numbers with unexpected passes per target (e.g. "wasm.q32").
         unexpected_pass_by_target: BTreeMap<String, Vec<usize>>,
         /// Line numbers that failed per target.
         failed_lines_by_target: BTreeMap<String, Vec<usize>>,
@@ -77,9 +77,7 @@ impl ConcurrentRunner {
         let request_mutex = Arc::new(Mutex::new(request_rx));
         let (reply_tx, reply_rx) = channel();
 
-        // Default to num_cpus: WASM and RV32 backends are thread-safe. JIT has issues with
-        // multi-file runs (see docs/bugs/2026-03-30-jit-filetest-segfault.md) - skip JIT for bulk
-        // operations or use single-threaded mode when JIT testing.
+        // Default to num_cpus: WASM and RV32 backends are thread-safe.
         let num_threads = std::env::var("LP_FILETESTS_THREADS")
             .ok()
             .and_then(|s| {

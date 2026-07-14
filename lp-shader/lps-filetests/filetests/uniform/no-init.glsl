@@ -27,7 +27,6 @@ float test_uniform_no_init_float() {
     return time + 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_uniform_no_init_float() ~= 1.0
 
 int test_uniform_no_init_int() {
@@ -35,7 +34,6 @@ int test_uniform_no_init_int() {
     return count + 10;
 }
 
-// @unimplemented(jit.q32)
 // run: test_uniform_no_init_int() == 10
 
 uint test_uniform_no_init_uint() {
@@ -50,7 +48,6 @@ bool test_uniform_no_init_bool() {
     return enabled || true;
 }
 
-// @unimplemented(jit.q32)
 // run: test_uniform_no_init_bool() == true
 
 vec2 test_uniform_no_init_vec2() {
@@ -58,7 +55,6 @@ vec2 test_uniform_no_init_vec2() {
     return position + vec2(1.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
 // run: test_uniform_no_init_vec2() ~= vec2(1.0, 1.0)
 
 vec3 test_uniform_no_init_vec3() {
@@ -66,7 +62,6 @@ vec3 test_uniform_no_init_vec3() {
     return color * 2.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_uniform_no_init_vec3() ~= vec3(0.0, 0.0, 0.0)
 
 vec4 test_uniform_no_init_vec4() {
@@ -74,7 +69,6 @@ vec4 test_uniform_no_init_vec4() {
     return data;
 }
 
-// @unimplemented(jit.q32)
 // run: test_uniform_no_init_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat4 test_uniform_no_init_mat4() {
@@ -82,7 +76,6 @@ mat4 test_uniform_no_init_mat4() {
     return transform;
 }
 
-// @unimplemented(jit.q32)
 // run: test_uniform_no_init_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_uniform_no_init_calculations() {
@@ -96,5 +89,4 @@ float test_uniform_no_init_calculations() {
     return result;
 }
 
-// @unimplemented(jit.q32)
 // run: test_uniform_no_init_calculations() ~= 0.0

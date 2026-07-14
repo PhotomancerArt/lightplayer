@@ -22,7 +22,6 @@ void test_access_write_float() {
     global_float = 42.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -34,7 +33,6 @@ void test_access_write_int() {
     global_int = -123;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -46,7 +44,6 @@ void test_access_write_uint() {
     global_uint = 987u;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -58,7 +55,6 @@ void test_access_write_bool() {
     global_bool = true;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -70,7 +66,6 @@ void test_access_write_vec2() {
     global_vec2 = vec2(1.0, 2.0);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -82,7 +77,6 @@ void test_access_write_vec3() {
     global_vec3 = vec3(1.0, 2.0, 3.0);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -94,7 +88,6 @@ void test_access_write_vec4() {
     global_vec4 = vec4(1.0, 2.0, 3.0, 4.0);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -106,7 +99,6 @@ void test_access_write_mat2() {
     global_mat2 = mat2(1.0, 2.0, 3.0, 4.0);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -118,7 +110,6 @@ void test_access_write_out() {
     out_depth = 0.5;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -133,7 +124,6 @@ void test_access_write_buffer() {
     buffer_data[3] = 20.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -145,7 +135,6 @@ void test_access_write_shared() {
     shared_counter = 42.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -161,7 +150,6 @@ float test_access_write_read() {
     return global_float + float(global_int) + global_vec2.x + global_vec2.y;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
