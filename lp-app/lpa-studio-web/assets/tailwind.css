@@ -1666,9 +1666,19 @@
       outline-color: var(--tw-color-border-strong);
     }
   }
+  .tw\:disabled\:cursor-default {
+    &:disabled {
+      cursor: default;
+    }
+  }
   .tw\:disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
+    }
+  }
+  .tw\:disabled\:opacity-50 {
+    &:disabled {
+      opacity: 50%;
     }
   }
   .tw\:disabled\:opacity-60 {
