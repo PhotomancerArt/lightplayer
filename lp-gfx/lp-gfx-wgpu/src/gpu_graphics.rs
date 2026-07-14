@@ -43,6 +43,7 @@ impl GpuGraphics {
                 device,
                 queue,
                 blend_pipeline: OnceLock::new(),
+                surface_blit_pipeline: OnceLock::new(),
             }),
             compute_delegate,
         }
@@ -66,8 +67,52 @@ impl GpuGraphics {
         )
     }
 
+    /// Present a render product to a wgpu surface (zero readback).
+    ///
+    /// The GPU-tier card path: the product texture is blitted to the
+    /// surface's current frame through the fixed present pipeline
+    /// (unorm16-grid quantization + sRGB encode matching the CPU tier's
+    /// byte conversion) and the frame is presented. The surface must be
+    /// configured with a **non-sRGB** color format; see
+    /// [`crate::surface_blit`] for the single-encode invariant.
+    pub fn present_to_surface(
+        &self,
+        texture: &TextureHandle,
+        surface: &wgpu::Surface<'_>,
+    ) -> Result<(), GfxError> {
+        let frame = match surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            status @ (wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Outdated
+            | wgpu::CurrentSurfaceTexture::Lost
+            | wgpu::CurrentSurfaceTexture::Validation) => {
+                return Err(GfxError::Render(format!(
+                    "surface frame acquire: {status:?}"
+                )));
+            }
+        };
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        crate::surface_blit::present_to_view(
+            &self.shared,
+            gpu_texture(texture)?,
+            &view,
+            frame.texture.format(),
+        )?;
+        frame.present();
+        Ok(())
+    }
+
     fn allocator(&self) -> Arc<dyn HandleAllocator> {
         self.shared.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shared_for_tests(&self) -> &GpuShared {
+        &self.shared
     }
 
     fn texture_handle(
@@ -122,6 +167,10 @@ impl LpGraphics for GpuGraphics {
 
     fn backend_name(&self) -> &'static str {
         "wgpu"
+    }
+
+    fn native_semantics(&self) -> ShaderSemantics {
+        ShaderSemantics::F32Gpu
     }
 
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
@@ -200,6 +249,13 @@ impl LpGraphics for GpuGraphics {
         )
     }
 
+    /// Native wgpu can block on a buffer map; the browser tier cannot, so
+    /// render products stay GPU-resident there (fidelity-tiers ADR — the
+    /// probe edge surfaces the residency instead of an error string).
+    fn supports_read_back(&self) -> bool {
+        cfg!(not(target_arch = "wasm32"))
+    }
+
     fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError> {
         Ok(SamplePointsHandle::from_backend_parts(
             count,
@@ -268,6 +324,9 @@ pub(crate) struct GpuShared {
     pub(crate) queue: wgpu::Queue,
     /// Fixed blend pipeline, built on first use (not a shader cache).
     pub(crate) blend_pipeline: OnceLock<BlendPipeline>,
+    /// Fixed surface-present pipeline, built on first use for the surface
+    /// format (one surface format per device).
+    pub(crate) surface_blit_pipeline: OnceLock<crate::surface_blit::SurfaceBlitPipeline>,
 }
 
 impl HandleAllocator for GpuShared {

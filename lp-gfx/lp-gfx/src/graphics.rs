@@ -54,6 +54,17 @@ pub trait LpGraphics: Send + Sync {
         "unknown"
     }
 
+    /// The [`ShaderSemantics`] tier this backend executes natively.
+    ///
+    /// Tier selection happens once, when the host constructs the backend
+    /// (fidelity-tiers ADR); visual render paths align their compile
+    /// requests with the selected backend by asking it — the honor-or-fail
+    /// contract on [`Self::compile_shader`] stays intact (a mismatched
+    /// explicit request still errors, never silently substitutes).
+    fn native_semantics(&self) -> crate::ShaderSemantics {
+        crate::ShaderSemantics::Q32
+    }
+
     /// Allocate a zeroed RGBA16 render-target texture for
     /// [`LpShader::render`].
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError>;
@@ -101,6 +112,20 @@ pub trait LpGraphics: Send + Sync {
     /// Transforms on render products belong behind GPU-resident ops like
     /// [`Self::blend_textures`] instead — see the crate README doctrine.
     fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError>;
+
+    /// Whether [`Self::read_back`] can service requests on this backend.
+    ///
+    /// CPU backends keep textures host-resident and always answer `true`
+    /// (the default). The browser GPU tier answers `false`: readback would
+    /// require blocking on an async buffer map, so render products stay
+    /// GPU-resident and byte-needing consumers must run on the CPU tier
+    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md`). Render paths use
+    /// this to decide between materializing byte-backed texture products and
+    /// returning handle-carrying (GPU-resident) ones — an explicit
+    /// capability, never an error-sniffing fallback.
+    fn supports_read_back(&self) -> bool {
+        true
+    }
 
     /// Allocate a zeroed buffer of `count` Q16.16 pixel-space sample points.
     fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError>;

@@ -158,7 +158,9 @@ fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UiLogDraft> {
             Some(worker_log_draft("error", "fw-browser".to_string(), message))
         }
         BrowserOutputEnvelope::ProtocolOut { .. }
-        | BrowserOutputEnvelope::RuntimeCreated { .. } => None,
+        | BrowserOutputEnvelope::RuntimeCreated { .. }
+        | BrowserOutputEnvelope::SurfaceAttached { .. }
+        | BrowserOutputEnvelope::PreviewPresented { .. } => None,
     }
 }
 

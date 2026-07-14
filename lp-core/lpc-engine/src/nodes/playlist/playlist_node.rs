@@ -237,9 +237,14 @@ impl RenderNode for PlaylistNode {
                 .map_err(err_ctx("playlist scratch texture"))?
         };
         self.render_texture_into(product, request, &mut texture, ctx)?;
-        let bytes = ctx
-            .graphics()
-            .expect("graphics checked above")
+        let graphics = ctx.graphics().expect("graphics checked above");
+        if !graphics.supports_read_back() {
+            // GPU-resident tier: keep the rendered target on the GPU
+            // (fidelity-tiers ADR; see the shader node's render_texture).
+            return TextureRenderProduct::gpu_resident(texture)
+                .map_err(err_ctx("playlist gpu texture product"));
+        }
+        let bytes = graphics
             .read_back(&texture)
             .map_err(err_ctx("playlist scratch read back"))?
             .into_bytes();

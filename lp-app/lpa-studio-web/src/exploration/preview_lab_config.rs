@@ -33,6 +33,55 @@ impl LabProject {
     }
 }
 
+/// Shader-execution tier layout for a lab run (fidelity-tiers ADR: tier is
+/// requested explicitly per card; the granted tier is shown on the card
+/// badge, never silently substituted).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabTier {
+    /// Every card on the CPU tier (Q32 `lpvm-wasm`, byte transport).
+    #[default]
+    Cpu,
+    /// Every card on the GPU tier (f32 WebGPU, surface presentation).
+    Gpu,
+    /// Side-by-side: even card indexes request GPU, odd request CPU.
+    Both,
+}
+
+impl LabTier {
+    pub const ALL: [Self; 3] = [Self::Cpu, Self::Gpu, Self::Both];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Gpu => "gpu",
+            Self::Both => "both",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.key() == value)
+    }
+
+    /// The tier requested for one card index.
+    pub fn requested_for_card(self, index: usize) -> CardTierRequest {
+        match self {
+            Self::Cpu => CardTierRequest::Cpu,
+            Self::Gpu => CardTierRequest::Gpu,
+            Self::Both if index % 2 == 0 => CardTierRequest::Gpu,
+            Self::Both => CardTierRequest::Cpu,
+        }
+    }
+}
+
+/// Tier requested for a single card.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CardTierRequest {
+    Cpu,
+    Gpu,
+}
+
 /// One lab run's configuration.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct LabConfig {
@@ -45,6 +94,8 @@ pub struct LabConfig {
     /// Square texture edge in pixels.
     pub size: u32,
     pub project: LabProject,
+    /// Requested shader-execution tier layout.
+    pub tier: LabTier,
     /// Start the run as soon as the page mounts (automation).
     pub autostart: bool,
 }
@@ -57,6 +108,7 @@ impl Default for LabConfig {
             fps: 15,
             size: 128,
             project: LabProject::Basic,
+            tier: LabTier::Cpu,
             autostart: false,
         }
     }
@@ -109,6 +161,11 @@ impl LabConfig {
                         config.project = project;
                     }
                 }
+                "tier" => {
+                    if let Some(tier) = LabTier::parse(value) {
+                        config.tier = tier;
+                    }
+                }
                 "autostart" => config.autostart = value == "1" || value == "true",
                 _ => {}
             }
@@ -124,7 +181,7 @@ mod tests {
     #[test]
     fn parses_full_lab_hash() {
         let config = LabConfig::parse_hash(
-            "#/preview-lab?cards=40&workers=4&fps=20&size=64&project=fyeah-sign&autostart=1",
+            "#/preview-lab?cards=40&workers=4&fps=20&size=64&project=fyeah-sign&tier=gpu&autostart=1",
         )
         .expect("lab route");
 
@@ -136,9 +193,18 @@ mod tests {
                 fps: 20,
                 size: 64,
                 project: LabProject::FyeahSign,
+                tier: LabTier::Gpu,
                 autostart: true,
             }
         );
+    }
+
+    #[test]
+    fn both_tier_alternates_gpu_then_cpu_by_card_index() {
+        assert_eq!(LabTier::Both.requested_for_card(0), CardTierRequest::Gpu);
+        assert_eq!(LabTier::Both.requested_for_card(1), CardTierRequest::Cpu);
+        assert_eq!(LabTier::Cpu.requested_for_card(0), CardTierRequest::Cpu);
+        assert_eq!(LabTier::Gpu.requested_for_card(1), CardTierRequest::Gpu);
     }
 
     #[test]

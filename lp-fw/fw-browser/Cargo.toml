@@ -18,6 +18,7 @@ crate-type = ["cdylib", "rlib"]
 fw-core = { path = "../fw-core", features = ["std"] }
 lpa-server = { path = "../../lp-app/lpa-server" }
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm" }
+lp-gfx-wgpu = { path = "../../lp-gfx/lp-gfx-wgpu" }
 lpc-hardware = { path = "../../lp-core/lpc-hardware" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-shared = { path = "../../lp-core/lpc-shared" }
@@ -28,6 +29,10 @@ lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["OffscreenCanvas"] }
+# Single-threaded worker wasm: same fragile Send/Sync stance as lp-gfx-wgpu.
+wgpu = { version = "29", features = ["fragile-send-sync-non-atomic-wasm"] }
 
 [dev-dependencies]
 lpc-view = { path = "../../lp-core/lpc-view" }

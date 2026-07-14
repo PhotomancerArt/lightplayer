@@ -1,8 +1,14 @@
 #!/usr/bin/env node
-// Preview-lab measurement sweep (PoC A / M1).
-// Launches headless Chrome, opens the lab page per configuration with
-// autostart, waits for the run to reach "running", then samples
-// window.__labStats and records averaged results.
+// Preview-lab measurement sweep (PoC A / M1; GPU-vs-CPU tiers added in
+// lp-gfx M3). Launches headless Chrome, opens the lab page per
+// configuration with autostart, waits for the run to reach "running", then
+// samples window.__labStats and records averaged results.
+//
+// The GPU tier requires WebGPU in headless Chrome: the launcher passes
+// --enable-unsafe-webgpu and --use-angle=metal (override/extend with
+// CHROME_EXTRA_FLAGS). Runs whose cards were granted a different tier than
+// requested are flagged in the output (no-silent-fallback ADR) — never
+// treat a cpu-granted "gpu" run as a GPU measurement.
 
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -21,22 +27,26 @@ const RUNNING_TIMEOUT_MS = 300_000;
 
 function sweepConfigs() {
   const configs = [];
-  // Scaling: N x workers at 15fps / 128px / basic.
-  for (const workers of [1, 2, 4]) {
-    for (const cards of [1, 5, 10, 20, 40]) {
-      configs.push({ cards, workers, fps: 15, size: 128, project: "basic" });
+  // Both tiers over the same m1-shaped matrix so the GPU-vs-CPU comparison
+  // is one JSON file. SWEEP_TIERS=gpu (comma list) restricts the matrix —
+  // used to resume an interrupted sweep half without redoing the other.
+  const tiers = (process.env.SWEEP_TIERS ?? "cpu,gpu").split(",").filter(Boolean);
+  for (const tier of tiers) {
+    // Scaling: N x workers at 15fps / 128px / basic.
+    for (const workers of [1, 2, 4]) {
+      for (const cards of [1, 5, 10, 20, 40]) {
+        configs.push({ tier, cards, workers, fps: 15, size: 128, project: "basic" });
+      }
     }
-  }
-  // Worker sweet spot fine point.
-  configs.push({ cards: 20, workers: 3, fps: 15, size: 128, project: "basic" });
-  // fps / size envelope at N=20, workers=4.
-  configs.push({ cards: 20, workers: 4, fps: 10, size: 128, project: "basic" });
-  configs.push({ cards: 20, workers: 4, fps: 20, size: 128, project: "basic" });
-  configs.push({ cards: 20, workers: 4, fps: 15, size: 96, project: "basic" });
-  configs.push({ cards: 20, workers: 4, fps: 15, size: 64, project: "basic" });
-  // Project variety at N=5, workers=2.
-  for (const project of ["fluid", "events", "fyeah-sign"]) {
-    configs.push({ cards: 5, workers: 2, fps: 15, size: 128, project });
+    // fps / size envelope at N=20, workers=4.
+    configs.push({ tier, cards: 20, workers: 4, fps: 10, size: 128, project: "basic" });
+    configs.push({ tier, cards: 20, workers: 4, fps: 20, size: 128, project: "basic" });
+    configs.push({ tier, cards: 20, workers: 4, fps: 15, size: 96, project: "basic" });
+    configs.push({ tier, cards: 20, workers: 4, fps: 15, size: 64, project: "basic" });
+    // Project variety at N=5, workers=2.
+    for (const project of ["fluid", "events", "fyeah-sign"]) {
+      configs.push({ tier, cards: 5, workers: 2, fps: 15, size: 128, project });
+    }
   }
   return configs;
 }
@@ -54,6 +64,15 @@ class Cdp {
     this.ws = ws;
     this.nextId = 1;
     this.pending = new Map();
+    // A dropped DevTools socket (Chrome crash, OOM, disk-full) must fail
+    // the sweep loudly: if pending promises are simply abandoned, node's
+    // event loop drains and the process exits 0 mid-sweep looking healthy.
+    ws.addEventListener("close", () => {
+      for (const pending of this.pending.values()) {
+        pending.reject(new Error("CDP socket closed"));
+      }
+      this.pending.clear();
+    });
     ws.addEventListener("message", (event) => {
       const message = JSON.parse(event.data.toString());
       if (!message.id) return;
@@ -91,6 +110,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function launchChrome() {
   const userDataDir = await mkdtemp(path.join(tmpdir(), "preview-lab-chrome-"));
   const port = 9260 + Math.floor(Math.random() * 300);
+  const extraFlags = (process.env.CHROME_EXTRA_FLAGS ?? "").split(/\s+/).filter(Boolean);
   const child = spawn(
     CHROME,
     [
@@ -100,7 +120,12 @@ async function launchChrome() {
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-background-timer-throttling",
+      // WebGPU for the GPU tier. headless=new keeps the GPU process; ANGLE
+      // on Metal gives the real adapter on macOS.
+      "--enable-unsafe-webgpu",
+      "--use-angle=metal",
       "--window-size=1400,1000",
+      ...extraFlags,
       "about:blank",
     ],
     { stdio: "ignore" },
@@ -117,7 +142,7 @@ async function launchChrome() {
 }
 
 function labUrl(config) {
-  const query = `cards=${config.cards}&workers=${config.workers}&fps=${config.fps}&size=${config.size}&project=${config.project}&autostart=1`;
+  const query = `cards=${config.cards}&workers=${config.workers}&fps=${config.fps}&size=${config.size}&project=${config.project}&tier=${config.tier ?? "cpu"}&autostart=1`;
   return `${BASE_URL}?r=${Date.now()}#/preview-lab?${query}`;
 }
 
@@ -178,7 +203,19 @@ function summarize(config, samples) {
   for (const key of aggKeys) aggregate[key] = mean(samples.map((s) => s.aggregate[key]));
   const last = samples[samples.length - 1];
   const cardFps = last.cards.map((c) => c.stats.achieved_fps);
+  // No-silent-fallback check: every card must run the tier the config asked
+  // for (in "both" layouts even indexes are gpu, odd cpu).
+  const requestedTier = (index) => {
+    const tier = config.tier ?? "cpu";
+    if (tier === "both") return index % 2 === 0 ? "gpu" : "cpu";
+    return tier;
+  };
+  const tierMismatches = last.cards
+    .filter((c) => c.tier !== requestedTier(c.index))
+    .map((c) => [c.index, c.tier, c.tier_reason]);
   return {
+    granted_tiers: [...new Set(last.cards.map((c) => c.tier))],
+    tier_mismatches: tierMismatches,
     aggregate,
     total_dropped: last.aggregate.total_dropped,
     total_errors: last.aggregate.total_errors,
@@ -198,8 +235,11 @@ console.log(`chrome: ${chrome.version} (port ${chrome.port})`);
 const cdp = await Cdp.open(chrome.wsUrl);
 const results = [];
 try {
+  // SWEEP_ONLY=<substring> restricts runs by label (resume/one-off).
+  const only = process.env.SWEEP_ONLY;
   for (const config of sweepConfigs()) {
-    const label = `${config.project} N=${config.cards} W=${config.workers} ${config.fps}fps ${config.size}px`;
+    const label = `${config.tier ?? "cpu"} ${config.project} N=${config.cards} W=${config.workers} ${config.fps}fps ${config.size}px`;
+    if (only && !label.includes(only)) continue;
     process.stdout.write(`run ${label} ... `);
     const outcome = await runConfig(cdp, config);
     results.push(outcome);

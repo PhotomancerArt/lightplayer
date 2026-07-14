@@ -7,15 +7,17 @@
 //! come back as transferable `ArrayBuffer`s and are presented with
 //! `putImageData`; JSON envelopes only carry control and timing metadata.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
 use lpa_client::LpClient;
-use lpa_link::providers::browser_worker::{BrowserInputEnvelope, PreviewPixelFrame};
+use lpa_link::providers::browser_worker::{
+    BrowserInputEnvelope, BrowserRuntimeTier, PreviewPixelFrame,
+};
 use wasm_bindgen::{JsCast, JsValue};
 
-use crate::exploration::preview_lab_config::LabConfig;
+use crate::exploration::preview_lab_config::{CardTierRequest, LabConfig};
 use crate::exploration::preview_lab_stats::{
     CardStats, CardStatsSnapshot, LabAggregate, PreviewFrameSample, aggregate,
 };
@@ -23,7 +25,7 @@ use crate::exploration::preview_lab_stats::{
 use super::example_projects;
 use super::lab_client_io::LabClientIo;
 use super::lab_sleep::LabSleeper;
-use super::worker_rig::WorkerRig;
+use super::worker_rig::{PresentedFrame, WorkerRig};
 
 /// Scheduling/polling loop period. Small enough not to dominate transport
 /// latency at 20 fps targets.
@@ -34,6 +36,9 @@ const PUBLISH_EVERY_MS: f64 = 500.0;
 const MAX_TICK_DELTA_MS: f64 = 250.0;
 /// How long to wait for `runtime_created` after `create_runtime`.
 const CREATE_RUNTIME_POLL_LIMIT: usize = 500;
+/// How long to wait for the card canvas to mount and the worker to ack
+/// `attach_surface` (GPU tier), in 4 ms polls.
+const ATTACH_SURFACE_POLL_LIMIT: usize = 500;
 
 /// Point-in-time lab state for the UI and the automation JSON
 /// (`window.__labStats`).
@@ -42,6 +47,9 @@ pub struct LabView {
     pub phase: String,
     pub running: bool,
     pub elapsed_s: f64,
+    /// Run generation for canvas element ids: a GPU-tier canvas is consumed
+    /// by `transferControlToOffscreen`, so every run mounts fresh canvases.
+    pub generation: u32,
     pub cards: Vec<LabCardView>,
     pub aggregate: LabAggregate,
     pub worker_wasm_memory_bytes: Vec<f64>,
@@ -54,6 +62,11 @@ pub struct LabCardView {
     pub index: usize,
     pub worker: usize,
     pub status: String,
+    /// Granted tier badge: `"gpu"`, `"cpu"`, or `"…"` before creation.
+    pub tier: String,
+    /// Why a GPU request resolved to the CPU tier (fidelity-tiers ADR:
+    /// surfaced on the card, never silent).
+    pub tier_reason: Option<String>,
     pub error: Option<String>,
     pub stats: CardStatsSnapshot,
 }
@@ -62,6 +75,8 @@ pub struct LabCardView {
 /// the spawned run future owns the rest of the lifecycle.
 pub struct LabRun {
     pub config: LabConfig,
+    /// Monotonic per-page run counter (canvas ids are per-generation).
+    pub generation: u32,
     stop_requested: bool,
     rigs: Vec<Rc<RefCell<WorkerRig>>>,
     cards: Vec<LabCard>,
@@ -70,11 +85,26 @@ pub struct LabRun {
 
 impl LabRun {
     pub fn new(config: LabConfig) -> Self {
+        thread_local! {
+            static NEXT_GENERATION: Cell<u32> = const { Cell::new(1) };
+        }
+        let generation = NEXT_GENERATION.with(|next| {
+            let generation = next.get();
+            next.set(generation + 1);
+            generation
+        });
         let cards = (0..config.cards as usize)
-            .map(|index| LabCard::new(index, index % config.workers as usize))
+            .map(|index| {
+                LabCard::new(
+                    index,
+                    index % config.workers as usize,
+                    config.tier.requested_for_card(index),
+                )
+            })
             .collect();
         Self {
             config,
+            generation,
             stop_requested: false,
             rigs: Vec::new(),
             cards,
@@ -98,6 +128,12 @@ struct LabCard {
     index: usize,
     worker_index: usize,
     runtime_id: Option<u32>,
+    /// Tier requested at creation (from the run configuration).
+    requested_tier: CardTierRequest,
+    /// Tier the worker actually granted (recorded from `runtime_created`).
+    granted_tier: Option<BrowserRuntimeTier>,
+    /// Why a GPU request resolved to CPU (shown on the card badge).
+    tier_reason: Option<String>,
     status: CardStatus,
     error: Option<String>,
     next_due_ms: f64,
@@ -108,11 +144,14 @@ struct LabCard {
 }
 
 impl LabCard {
-    fn new(index: usize, worker_index: usize) -> Self {
+    fn new(index: usize, worker_index: usize, requested_tier: CardTierRequest) -> Self {
         Self {
             index,
             worker_index,
             runtime_id: None,
+            requested_tier,
+            granted_tier: None,
+            tier_reason: None,
             status: CardStatus::Pending,
             error: None,
             next_due_ms: 0.0,
@@ -120,6 +159,18 @@ impl LabCard {
             in_flight: false,
             stats: CardStats::default(),
             context: None,
+        }
+    }
+
+    fn presents_via_surface(&self) -> bool {
+        self.granted_tier == Some(BrowserRuntimeTier::Gpu)
+    }
+
+    fn tier_label(&self) -> String {
+        match self.granted_tier {
+            Some(BrowserRuntimeTier::Gpu) => "gpu".to_string(),
+            Some(BrowserRuntimeTier::Cpu) => "cpu".to_string(),
+            None => "…".to_string(),
         }
     }
 
@@ -255,14 +306,29 @@ async fn deploy_worker_cards(run: Rc<RefCell<LabRun>>, rig: Rc<RefCell<WorkerRig
         (run_ref.config.clone(), indexes)
     };
 
+    let generation = run.borrow().generation;
     for index in card_indexes {
+        let requested_tier = run.borrow().cards[index].requested_tier;
         run.borrow_mut().cards[index].status = CardStatus::Deploying;
-        match deploy_card(&config, &rig, index, &sleeper).await {
-            Ok(runtime_id) => {
-                let mut run_mut = run.borrow_mut();
-                let card = &mut run_mut.cards[index];
-                card.runtime_id = Some(runtime_id);
-                card.status = CardStatus::Running;
+        match deploy_card(&config, &rig, index, requested_tier, &sleeper).await {
+            Ok(created) => {
+                {
+                    let mut run_mut = run.borrow_mut();
+                    let card = &mut run_mut.cards[index];
+                    card.runtime_id = Some(created.runtime_id);
+                    card.granted_tier = Some(created.tier);
+                    card.tier_reason = created.tier_reason.clone();
+                }
+                // GPU-tier cards present to a transferred canvas surface.
+                let attach = if created.tier == BrowserRuntimeTier::Gpu {
+                    attach_card_surface(&rig, generation, index, created.runtime_id, &sleeper).await
+                } else {
+                    Ok(())
+                };
+                match attach {
+                    Ok(()) => run.borrow_mut().cards[index].status = CardStatus::Running,
+                    Err(error) => run.borrow_mut().cards[index].fail(error),
+                }
             }
             Err(error) => run.borrow_mut().cards[index].fail(error),
         }
@@ -276,32 +342,46 @@ async fn deploy_card(
     config: &LabConfig,
     rig: &Rc<RefCell<WorkerRig>>,
     index: usize,
+    requested_tier: CardTierRequest,
     sleeper: &Rc<LabSleeper>,
-) -> Result<u32, String> {
+) -> Result<super::worker_rig::CreatedRuntime, String> {
     let label = format!("preview-card-{index}");
-    log::info!("preview lab: creating runtime for card {index}");
+    let tier = match requested_tier {
+        CardTierRequest::Cpu => BrowserRuntimeTier::Cpu,
+        CardTierRequest::Gpu => BrowserRuntimeTier::Gpu,
+    };
+    log::info!("preview lab: creating runtime for card {index} (tier request {tier:?})");
     rig.borrow().post(&BrowserInputEnvelope::CreateRuntime {
         label: label.clone(),
+        tier,
     })?;
-    let mut runtime_id = None;
+    let mut created = None;
     for _ in 0..CREATE_RUNTIME_POLL_LIMIT {
         {
             let mut rig_mut = rig.borrow_mut();
             rig_mut.drain_outputs();
-            runtime_id = rig_mut.take_created_runtime(&label);
+            created = rig_mut.take_created_runtime(&label);
         }
-        if runtime_id.is_some() {
+        if created.is_some() {
             break;
         }
         sleeper.sleep_ms(4).await;
     }
-    let runtime_id =
-        runtime_id.ok_or_else(|| format!("timed out creating runtime for card {index}"))?;
-    log::info!("preview lab: card {index} runtime {runtime_id}; deploying project");
+    let created = created.ok_or_else(|| format!("timed out creating runtime for card {index}"))?;
+    log::info!(
+        "preview lab: card {index} runtime {} tier {:?}{}; deploying project",
+        created.runtime_id,
+        created.tier,
+        created
+            .tier_reason
+            .as_deref()
+            .map(|reason| format!(" (reason: {reason})"))
+            .unwrap_or_default()
+    );
 
     let mut client = LpClient::new(LabClientIo::new(
         Rc::clone(rig),
-        runtime_id,
+        created.runtime_id,
         Rc::clone(sleeper),
     ));
     client
@@ -309,7 +389,56 @@ async fn deploy_card(
         .await
         .map_err(|error| format!("deploy card {index}: {error}"))?;
     log::info!("preview lab: card {index} deployed");
-    Ok(runtime_id)
+    Ok(created)
+}
+
+/// Transfer a GPU-tier card's canvas into the worker and wait for the
+/// `surface_attached` ack (or a preview error).
+async fn attach_card_surface(
+    rig: &Rc<RefCell<WorkerRig>>,
+    generation: u32,
+    index: usize,
+    runtime_id: u32,
+    sleeper: &Rc<LabSleeper>,
+) -> Result<(), String> {
+    let id = canvas_element_id(generation, index);
+    let mut canvas = None;
+    for _ in 0..ATTACH_SURFACE_POLL_LIMIT {
+        canvas = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(&id))
+            .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+        if canvas.is_some() {
+            break;
+        }
+        sleeper.sleep_ms(4).await;
+    }
+    let canvas = canvas.ok_or_else(|| format!("canvas #{id} not mounted for surface attach"))?;
+    let offscreen = canvas
+        .transfer_control_to_offscreen()
+        .map_err(|error| format!("transferControlToOffscreen: {error:?}"))?;
+    rig.borrow().attach_preview_surface(runtime_id, offscreen)?;
+
+    for _ in 0..ATTACH_SURFACE_POLL_LIMIT {
+        {
+            let mut rig_mut = rig.borrow_mut();
+            rig_mut.drain_outputs();
+            if rig_mut.take_surface_attached(runtime_id) {
+                return Ok(());
+            }
+            if let Some(error) = rig_mut
+                .take_preview_errors()
+                .into_iter()
+                .find(|error| error.runtime_id == runtime_id)
+            {
+                return Err(format!("attach surface: {}", error.message));
+            }
+        }
+        sleeper.sleep_ms(4).await;
+    }
+    Err(format!(
+        "timed out waiting for surface_attached on card {index}"
+    ))
 }
 
 /// Post `preview_frame` for every running card whose schedule came due.
@@ -336,17 +465,26 @@ fn schedule_due_frames(run: &mut LabRun, now: f64) {
         let Some(runtime_id) = card.runtime_id else {
             continue;
         };
-        let posted =
-            run.rigs[card.worker_index]
-                .borrow()
-                .post(&BrowserInputEnvelope::PreviewFrame {
-                    runtime_id,
-                    delta_ms: Some(delta.round() as u32),
-                    channel: "visual.out".to_string(),
-                    width: size,
-                    height: size,
-                    frame_id,
-                });
+        let envelope = if card.presents_via_surface() {
+            // GPU tier: render straight to the attached card surface; the
+            // render size is the surface size (zero pixel transfer).
+            BrowserInputEnvelope::PresentFrame {
+                runtime_id,
+                delta_ms: Some(delta.round() as u32),
+                channel: "visual.out".to_string(),
+                frame_id,
+            }
+        } else {
+            BrowserInputEnvelope::PreviewFrame {
+                runtime_id,
+                delta_ms: Some(delta.round() as u32),
+                channel: "visual.out".to_string(),
+                width: size,
+                height: size,
+                frame_id,
+            }
+        };
+        let posted = run.rigs[card.worker_index].borrow().post(&envelope);
         match posted {
             Ok(()) => {
                 card.in_flight = true;
@@ -362,13 +500,19 @@ fn schedule_due_frames(run: &mut LabRun, now: f64) {
     }
 }
 
-/// Drain every rig: route envelopes, then present received pixel frames.
+/// Drain every rig: route envelopes, then present received pixel frames and
+/// record GPU-tier present completions.
 fn collect_frames(run: &mut LabRun) {
+    let generation = run.generation;
     for worker_index in 0..run.rigs.len() {
-        let (frames, errors) = {
+        let (frames, presented, errors) = {
             let mut rig = run.rigs[worker_index].borrow_mut();
             rig.drain_outputs();
-            (rig.take_preview_frames(), rig.take_preview_errors())
+            (
+                rig.take_preview_frames(),
+                rig.take_presented_frames(),
+                rig.take_preview_errors(),
+            )
         };
         for error in errors {
             if let Some(card) = card_by_runtime_mut(&mut run.cards, worker_index, error.runtime_id)
@@ -385,7 +529,7 @@ fn collect_frames(run: &mut LabRun) {
             };
             card.in_flight = false;
             let transport_ms = (epoch_now_ms() - frame.posted_epoch_ms).max(0.0);
-            match present_frame(card, &frame) {
+            match present_frame(card, generation, &frame) {
                 Ok(present_ms) => {
                     card.stats.record(
                         now_ms(),
@@ -403,13 +547,40 @@ fn collect_frames(run: &mut LabRun) {
                 }
             }
         }
+        // GPU-tier completions: the frame is already on the card surface —
+        // only the timing header comes back (present_ms is 0 by design:
+        // there is no main-thread canvas work on this tier).
+        for done in presented {
+            record_presented_frame(&mut run.cards, worker_index, &done);
+        }
     }
 }
 
+fn record_presented_frame(cards: &mut [LabCard], worker_index: usize, done: &PresentedFrame) {
+    let Some(card) = card_by_runtime_mut(cards, worker_index, done.runtime_id) else {
+        return;
+    };
+    card.in_flight = false;
+    let transport_ms = (epoch_now_ms() - done.posted_epoch_ms).max(0.0);
+    card.stats.record(
+        now_ms(),
+        PreviewFrameSample {
+            tick_ms: done.tick_ms,
+            render_ms: done.render_ms,
+            transport_ms,
+            present_ms: 0.0,
+        },
+    );
+}
+
 /// Blit one binary frame into the card's canvas; returns present ms.
-fn present_frame(card: &mut LabCard, frame: &PreviewPixelFrame) -> Result<f64, String> {
+fn present_frame(
+    card: &mut LabCard,
+    generation: u32,
+    frame: &PreviewPixelFrame,
+) -> Result<f64, String> {
     let start = now_ms();
-    let context = card_context(card)?;
+    let context = card_context(card, generation)?;
     let canvas = context
         .canvas()
         .ok_or_else(|| "canvas context has no canvas".to_string())?;
@@ -427,7 +598,10 @@ fn present_frame(card: &mut LabCard, frame: &PreviewPixelFrame) -> Result<f64, S
     Ok(now_ms() - start)
 }
 
-fn card_context(card: &mut LabCard) -> Result<web_sys::CanvasRenderingContext2d, String> {
+fn card_context(
+    card: &mut LabCard,
+    generation: u32,
+) -> Result<web_sys::CanvasRenderingContext2d, String> {
     if let Some(context) = &card.context {
         let connected = context
             .canvas()
@@ -438,7 +612,7 @@ fn card_context(card: &mut LabCard) -> Result<web_sys::CanvasRenderingContext2d,
         }
         card.context = None;
     }
-    let id = canvas_element_id(card.index);
+    let id = canvas_element_id(generation, card.index);
     let document = web_sys::window()
         .and_then(|window| window.document())
         .ok_or_else(|| "missing document".to_string())?;
@@ -457,8 +631,11 @@ fn card_context(card: &mut LabCard) -> Result<web_sys::CanvasRenderingContext2d,
     Ok(context)
 }
 
-pub fn canvas_element_id(card_index: usize) -> String {
-    format!("preview-lab-canvas-{card_index}")
+/// Canvas ids are per run generation: a GPU-tier canvas is permanently
+/// consumed by `transferControlToOffscreen`, so each run mounts fresh
+/// canvas elements.
+pub fn canvas_element_id(generation: u32, card_index: usize) -> String {
+    format!("preview-lab-canvas-{generation}-{card_index}")
 }
 
 fn card_by_runtime_mut(
@@ -480,6 +657,8 @@ fn build_view(run: &mut LabRun, phase: &str, running: bool, elapsed_s: f64) -> L
             index: card.index,
             worker: card.worker_index,
             status: card.status_label().to_string(),
+            tier: card.tier_label(),
+            tier_reason: card.tier_reason.clone(),
             error: card.error.clone(),
             stats: card.stats.snapshot(now),
         })
@@ -499,6 +678,7 @@ fn build_view(run: &mut LabRun, phase: &str, running: bool, elapsed_s: f64) -> L
         phase: phase.to_string(),
         running,
         elapsed_s,
+        generation: run.generation,
         aggregate: aggregate(&snapshots),
         cards,
         worker_wasm_memory_bytes: worker_memory,

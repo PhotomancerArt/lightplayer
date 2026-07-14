@@ -31,11 +31,25 @@ self.onmessage = async (event) => {
       case "create_runtime": {
         requireBooted();
         const label = message.label || "browser-runtime";
-        const runtimeId = fwBrowser.create_runtime(label);
-        postMany(fwBrowser.drain_output_json(runtimeId));
-        self.postMessage({ kind: "runtime_created", runtime_id: runtimeId, label });
+        const created = JSON.parse(fwBrowser.create_runtime(label, message.tier || "cpu"));
+        postMany(fwBrowser.drain_output_json(created.runtime_id));
+        self.postMessage({
+          kind: "runtime_created",
+          runtime_id: created.runtime_id,
+          label,
+          tier: created.tier,
+          tier_reason: created.tier_reason ?? null,
+        });
         break;
       }
+      case "attach_surface":
+        requireBooted();
+        attachSurface(message);
+        break;
+      case "present_frame":
+        requireBooted();
+        presentFrame(message);
+        break;
       case "protocol_in":
         requireBooted();
         postMany(
@@ -83,7 +97,15 @@ async function boot(label, modulePath, wasmPath, mode) {
     fwBrowser = await import(modulePath);
     wasmExports = await fwBrowser.default(wasmPath || undefined);
     fwBrowser.fw_browser_init_exports(wasmExports);
-    bootRuntimeId = fwBrowser.create_runtime(label);
+    // One WebGPU device request per worker, at boot. The outcome (available
+    // or unavailable with a reason) is recorded inside the wasm module and
+    // applied to every later `gpu` tier request — boot never fails over it.
+    const gpuInit = JSON.parse(await fwBrowser.init_gpu_device());
+    if (!gpuInit.available) {
+      console.info("[fw-browser-worker] webgpu unavailable:", gpuInit.reason);
+    }
+    // The boot runtime is always CPU-tier (the authoritative sim tier).
+    bootRuntimeId = JSON.parse(fwBrowser.create_runtime(label, "cpu")).runtime_id;
     booted = true;
     tickMode = mode;
     postMany(fwBrowser.drain_output_json(bootRuntimeId));
@@ -128,6 +150,57 @@ function previewFrame(message) {
       },
       [pixels.buffer],
     );
+  } catch (error) {
+    self.postMessage({
+      kind: "preview_error",
+      runtime_id: runtimeId,
+      frame_id: frameId,
+      message: String(error?.stack || error),
+    });
+  }
+}
+
+// GPU-tier surface attachment: the OffscreenCanvas arrives in the message
+// transfer list and moves into the wasm runtime as the card's wgpu surface.
+function attachSurface(message) {
+  const runtimeId = message.runtime_id;
+  try {
+    fwBrowser.attach_preview_surface(runtimeId, message.canvas);
+    postMany(fwBrowser.drain_output_json(runtimeId));
+    self.postMessage({ kind: "surface_attached", runtime_id: runtimeId });
+  } catch (error) {
+    self.postMessage({
+      kind: "preview_error",
+      runtime_id: runtimeId,
+      frame_id: 0,
+      message: String(error?.stack || error),
+    });
+  }
+}
+
+// GPU-tier present path: tick + render straight to the attached card surface
+// in one worker turn. No pixels leave the GPU; only the timing header is
+// posted back (mirrors the binary preview path's measurements).
+function presentFrame(message) {
+  const runtimeId = message.runtime_id;
+  const frameId = message.frame_id || 0;
+  try {
+    const t0 = performance.now();
+    if (message.delta_ms != null) {
+      postMany(fwBrowser.tick_runtime(runtimeId, Math.max(1, message.delta_ms)));
+    }
+    const t1 = performance.now();
+    fwBrowser.present_bus_texture(runtimeId, message.channel || "visual.out");
+    const t2 = performance.now();
+    self.postMessage({
+      kind: "preview_presented",
+      runtime_id: runtimeId,
+      frame_id: frameId,
+      tick_ms: t1 - t0,
+      render_ms: t2 - t1,
+      posted_epoch_ms: performance.timeOrigin + performance.now(),
+      wasm_memory_bytes: wasmExports?.memory?.buffer?.byteLength || 0,
+    });
   } catch (error) {
     self.postMessage({
       kind: "preview_error",

@@ -158,6 +158,34 @@ impl BrowserWorkerHandle {
             .map_err(|error| LinkError::other(format!("{error:?}")))
     }
 
+    /// Transfer an `OffscreenCanvas` into the worker as a GPU-tier
+    /// runtime's card surface.
+    ///
+    /// This message cannot ride the serde envelope path: the canvas is a
+    /// transferable JS object that must travel in the `postMessage` transfer
+    /// list (ownership moves to the worker). The worker answers with
+    /// [`BrowserOutputEnvelope::SurfaceAttached`] on success or
+    /// [`BrowserOutputEnvelope::PreviewError`] (`frame_id` 0) on failure.
+    pub fn attach_preview_surface(
+        &self,
+        runtime_id: u32,
+        canvas: web_sys::OffscreenCanvas,
+    ) -> Result<(), LinkError> {
+        let message = js_sys::Object::new();
+        let set = |key: &str, value: &JsValue| -> Result<(), LinkError> {
+            js_sys::Reflect::set(&message, &JsValue::from_str(key), value)
+                .map(|_| ())
+                .map_err(|error| LinkError::other(format!("{error:?}")))
+        };
+        set("kind", &JsValue::from_str("attach_surface"))?;
+        set("runtime_id", &JsValue::from_f64(f64::from(runtime_id)))?;
+        set("canvas", canvas.as_ref())?;
+        let transfer = js_sys::Array::of1(canvas.as_ref());
+        self.worker
+            .post_message_with_transfer(&message, &transfer)
+            .map_err(|error| LinkError::other(format!("{error:?}")))
+    }
+
     pub fn take_outputs(&mut self) -> Vec<BrowserOutputEnvelope> {
         core::mem::take(&mut *self.outputs.borrow_mut())
     }
@@ -270,8 +298,16 @@ fn boot_output_summary(outputs: &[BrowserOutputEnvelope]) -> String {
         BrowserOutputEnvelope::ProtocolOut { .. } => {
             "; last worker output was a protocol frame".to_string()
         }
-        BrowserOutputEnvelope::RuntimeCreated { runtime_id, label } => {
+        BrowserOutputEnvelope::RuntimeCreated {
+            runtime_id, label, ..
+        } => {
             format!("; last worker output created runtime {runtime_id} ({label})")
+        }
+        BrowserOutputEnvelope::SurfaceAttached { runtime_id } => {
+            format!("; last worker output attached a surface to runtime {runtime_id}")
+        }
+        BrowserOutputEnvelope::PreviewPresented { runtime_id, .. } => {
+            format!("; last worker output presented a frame for runtime {runtime_id}")
         }
         BrowserOutputEnvelope::PreviewError { message, .. } => {
             format!("; last worker output was a preview error: {message}")

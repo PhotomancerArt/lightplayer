@@ -33,6 +33,7 @@ pub mod gpu_graphics;
 pub mod read_back;
 pub mod render;
 pub mod sample_backing;
+pub mod surface_blit;
 pub mod tanh_pass;
 pub mod texture_backing;
 pub mod uniform_layout;

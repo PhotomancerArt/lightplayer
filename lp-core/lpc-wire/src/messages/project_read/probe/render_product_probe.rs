@@ -30,6 +30,16 @@ pub enum RenderProductProbeResult {
         #[serde(with = "crate::serde_base64")]
         bytes: Vec<u8>,
     },
+    /// The product rendered successfully but stayed GPU-resident: the
+    /// producing runtime runs the GPU tier, where texture readback is
+    /// unavailable (fidelity-tiers ADR). Byte-needing consumers must probe a
+    /// CPU-tier runtime.
+    GpuResident {
+        product: VisualProduct,
+        revision: Revision,
+        width: u32,
+        height: u32,
+    },
     Unsupported {
         product: VisualProduct,
         reason: String,
@@ -78,7 +88,9 @@ impl RenderProductProbeResult {
                 },
                 bytes,
             )),
-            other @ (Self::Unsupported { .. } | Self::Error { .. }) => Err(other),
+            other @ (Self::GpuResident { .. } | Self::Unsupported { .. } | Self::Error { .. }) => {
+                Err(other)
+            }
         }
     }
 }

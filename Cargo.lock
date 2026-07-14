@@ -3639,6 +3639,7 @@ version = "40.0.0"
 dependencies = [
  "fw-core",
  "lp-gfx-lpvm",
+ "lp-gfx-wgpu",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
@@ -3651,7 +3652,10 @@ dependencies = [
  "serde",
  "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-test",
+ "web-sys",
+ "wgpu 29.0.0",
 ]
 
 [[package]]

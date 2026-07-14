@@ -975,7 +975,9 @@ fn accumulate_fixture_channels_from_texture_product(
     }
 
     let batch = uv_batch_for_fixture_entries(mapping_entries, width, height);
-    let sample_result = texture.sample_batch(&batch);
+    let sample_result = texture
+        .sample_batch(&batch)
+        .map_err(|error| NodeError::msg(format!("fixture texture sampling: {error}")))?;
     accumulate_fixture_channels_from_texture_samples(mapping_entries, &sample_result.samples)
 }
 

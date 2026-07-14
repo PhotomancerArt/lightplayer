@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use crate::exploration::preview_lab_config::{LabConfig, LabProject};
+use crate::exploration::preview_lab_config::{LabConfig, LabProject, LabTier};
 
 use super::lab_runner::{LabRun, LabView, canvas_element_id, run_lab};
 
@@ -117,6 +117,19 @@ pub fn PreviewLabPage() -> Element {
                         }
                     }
                 }
+                div { class: "tw:grid tw:gap-1",
+                    span { class: "tw:text-xs tw:font-bold tw:uppercase tw:text-subtle-foreground", "Tier" }
+                    div { class: "tw:flex tw:gap-1",
+                        for tier in LabTier::ALL {
+                            button {
+                                class: choice_class(config.read().tier == tier),
+                                r#type: "button",
+                                onclick: move |_| config.write().tier = tier,
+                                "{tier.key()}"
+                            }
+                        }
+                    }
+                }
                 div { class: "tw:ml-auto tw:flex tw:gap-2",
                     button {
                         class: "tw:rounded-sm tw:border tw:border-accent-border tw:bg-card-raised tw:px-4 tw:py-1.5 tw:text-sm tw:font-bold tw:text-strong-foreground",
@@ -156,6 +169,8 @@ pub fn PreviewLabPage() -> Element {
                     {
                         let card = current.cards.get(index);
                         let status = card.map(|c| c.status.clone()).unwrap_or_else(|| "idle".to_string());
+                        let tier = card.map(|c| c.tier.clone()).unwrap_or_else(|| "…".to_string());
+                        let tier_reason = card.and_then(|c| c.tier_reason.clone());
                         let stat_line = card
                             .map(|c| {
                                 format!(
@@ -169,10 +184,10 @@ pub fn PreviewLabPage() -> Element {
                             })
                             .unwrap_or_default();
                         let error = card.and_then(|c| c.error.clone());
-                        let canvas_id = canvas_element_id(index);
+                        let canvas_id = canvas_element_id(current.generation, index);
                         rsx! {
                             div {
-                                key: "{index}",
+                                key: "{canvas_id}",
                                 class: "tw:grid tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-2",
                                 canvas {
                                     id: "{canvas_id}",
@@ -181,8 +196,16 @@ pub fn PreviewLabPage() -> Element {
                                     style: "width: 128px; height: 128px; image-rendering: pixelated; background: #000;",
                                 }
                                 div { class: "tw:w-[128px] tw:font-mono tw:text-[0.6rem] tw:leading-tight tw:text-subtle-foreground",
-                                    div { "#{index} {status}" }
+                                    div { class: "tw:flex tw:items-center tw:gap-1",
+                                        span { "#{index} {status}" }
+                                        span { class: tier_badge_class(&tier), "{tier}" }
+                                    }
                                     div { "{stat_line}" }
+                                    if let Some(reason) = tier_reason {
+                                        div { class: "tw:text-warning-foreground tw:break-words",
+                                            "gpu→cpu: {reason}"
+                                        }
+                                    }
                                     if let Some(error) = error {
                                         div { class: "tw:text-error-foreground tw:break-words", "{error}" }
                                     }
@@ -218,6 +241,20 @@ fn ConfigChoice(
                 }
             }
         }
+    }
+}
+
+/// Visible tier badge (fidelity-tiers ADR: which tier a card runs on is
+/// user-visible state, never inferred).
+fn tier_badge_class(tier: &str) -> &'static str {
+    match tier {
+        "gpu" => {
+            "tw:rounded-sm tw:border tw:border-accent-border tw:px-1 tw:font-bold tw:uppercase tw:text-strong-foreground"
+        }
+        "cpu" => {
+            "tw:rounded-sm tw:border tw:border-border-strong tw:px-1 tw:font-bold tw:uppercase tw:text-muted-foreground"
+        }
+        _ => "tw:px-1 tw:text-muted-foreground",
     }
 }
 

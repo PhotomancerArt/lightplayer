@@ -8,16 +8,20 @@
 
 mod envelope;
 mod executor;
+mod gpu;
 mod manual_time_provider;
+mod preview_surface;
 mod runtime;
 mod runtime_registry;
 mod server_transport;
 mod texture_convert;
+mod tier;
 mod wasm_exports;
 
 pub use wasm_exports::{
-    create_runtime, drain_output_json, fw_browser_init_exports, handle_envelope_json,
-    render_bus_texture_rgba8, runtime_count, tick_runtime,
+    attach_preview_surface, create_runtime, drain_output_json, fw_browser_init_exports,
+    handle_envelope_json, init_gpu_device, present_bus_texture, render_bus_texture_rgba8,
+    runtime_count, tick_runtime,
 };
 
 #[cfg(test)]

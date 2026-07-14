@@ -120,6 +120,11 @@ impl ShaderNode {
         lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         self.compilation_error = None;
         let compile_opts = ShaderCompileOptions {
+            // Visual shaders run on the tier the host selected when it
+            // constructed the backend (fidelity-tiers ADR) — Q32 on CPU
+            // backends, F32Gpu on the GPU tier. `q32_options` only applies
+            // to the Q32 tier; GPU backends never see it.
+            semantics: graphics.native_semantics(),
             q32_options: map_model_q32_options(&self.glsl_opts),
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
             ..ShaderCompileOptions::default()
@@ -512,9 +517,17 @@ impl RenderNode for ShaderNode {
         };
         self.render_texture_into(product, request, &mut texture, ctx)?;
 
-        let data = ctx
+        let graphics = ctx
             .graphics()
-            .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        if !graphics.supports_read_back() {
+            // GPU-resident tier: the product keeps the render target handle;
+            // presentation blits it to a surface, byte consumers get
+            // `try_raw_bytes() == None` (fidelity-tiers ADR).
+            return TextureRenderProduct::gpu_resident(texture)
+                .map_err(err_ctx("gpu texture product"));
+        }
+        let data = graphics
             .read_back(&texture)
             .map_err(err_ctx("read back render target"))?;
         TextureRenderProduct::new(
@@ -881,7 +894,7 @@ mod tests {
             }],
             time_seconds: 0.5,
         };
-        let sample = texture.sample_batch(&batch);
+        let sample = texture.sample_batch(&batch).expect("host product samples");
         assert!(sample.samples[0].rgba_unorm16[0] > 26_000);
         assert!(sample.samples[0].rgba_unorm16[0] < 40_000);
     }
@@ -997,7 +1010,7 @@ mod tests {
         )
         .expect("sample visual");
 
-        let rendered = texture_sample.samples[0].rgba_unorm16;
+        let rendered = texture_sample.expect("host product samples").samples[0].rgba_unorm16;
         let direct = graphics.read_sample_out(&samples).expect("read samples");
         for channel in 0..4 {
             assert!(

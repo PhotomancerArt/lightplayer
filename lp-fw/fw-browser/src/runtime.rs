@@ -7,7 +7,8 @@ use std::sync::Arc;
 use fw_core::{drain_client_messages, tick_server_frame};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{
-    ButtonService, LpGraphics, LpServer, RadioService, RenderTextureRequest, VisualProduct,
+    ButtonService, LpGraphics, LpServer, RadioService, RenderTextureRequest, TextureRenderProduct,
+    VisualProduct,
 };
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
@@ -17,10 +18,15 @@ use lpc_wire::{ClientMessage, json};
 use lpfs::LpFsMemory;
 use lps_shared::TextureStorageFormat;
 
+use lp_gfx_wgpu::GpuGraphics;
+
 use crate::envelope::{BrowserInputEnvelope, BrowserOutputEnvelope};
 use crate::executor::block_on;
+use crate::gpu::{self, WorkerGpu};
 use crate::manual_time_provider::ManualTimeProvider;
+use crate::preview_surface::PreviewSurface;
 use crate::server_transport::BrowserServerTransport;
+use crate::tier::{RuntimeTier, TierSelection};
 
 /// One in-browser LightPlayer firmware instance.
 ///
@@ -41,18 +47,62 @@ pub(crate) struct BrowserFirmwareRuntime {
     /// resolved once per channel and re-resolved only after a render error
     /// (e.g. a project reload invalidated the handle).
     bus_visual_product: Option<(String, VisualProduct)>,
+    /// The tier chosen at creation (fidelity-tiers ADR: recorded, surfaced,
+    /// never silently changed).
+    tier: TierSelection,
+    /// GPU-tier presentation state (`None` on the CPU tier).
+    gpu: Option<GpuRuntimeState>,
+}
+
+/// GPU-tier pieces owned by one runtime: the worker's shared device, the
+/// runtime's `GpuGraphics` backend, and (once attached) its card surface.
+struct GpuRuntimeState {
+    worker_gpu: Rc<WorkerGpu>,
+    graphics: Arc<GpuGraphics>,
+    surface: Option<PreviewSurface>,
 }
 
 impl BrowserFirmwareRuntime {
-    /// Build a memory-backed browser firmware runtime.
-    pub(crate) fn new(id: u32, label: &str) -> Result<Self, String> {
+    /// Build a memory-backed browser firmware runtime on the requested tier.
+    ///
+    /// Tier selection happens here, exactly once: a `Gpu` request while the
+    /// worker device is unavailable produces a CPU-tier runtime with the
+    /// reason recorded (visible state, not an error — the CPU tier is always
+    /// functional). The selection is emitted as one structured log line and
+    /// returned to the worker script for the `runtime_created` message.
+    pub(crate) fn new(id: u32, label: &str, requested: RuntimeTier) -> Result<Self, String> {
         let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
         let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
             HwRegistry::new(default_esp32c6_hardware_manifest()),
         )));
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let radio_service: Rc<dyn RadioService> = hardware;
-        let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+
+        let (tier, gpu) = match requested {
+            RuntimeTier::Cpu => (TierSelection::granted(RuntimeTier::Cpu), None),
+            RuntimeTier::Gpu => match gpu::device() {
+                Ok(worker_gpu) => {
+                    let graphics = Arc::new(GpuGraphics::new(
+                        worker_gpu.device.clone(),
+                        worker_gpu.queue.clone(),
+                        Box::new(TargetLpvmGraphics::new()),
+                    ));
+                    (
+                        TierSelection::granted(RuntimeTier::Gpu),
+                        Some(GpuRuntimeState {
+                            worker_gpu,
+                            graphics,
+                            surface: None,
+                        }),
+                    )
+                }
+                Err(reason) => (TierSelection::cpu_because(reason), None),
+            },
+        };
+        let graphics: Arc<dyn LpGraphics> = match &gpu {
+            Some(state) => state.graphics.clone(),
+            None => Arc::new(TargetLpvmGraphics::new()),
+        };
         let time = ManualTimeProvider::new();
         let time_provider: Rc<dyn TimeProvider> = Rc::new(time.clone());
         let server = LpServer::new_with_hardware_services(
@@ -76,9 +126,20 @@ impl BrowserFirmwareRuntime {
             running: false,
             outbox: Vec::new(),
             bus_visual_product: None,
+            tier,
+            gpu,
         };
         runtime.status("booting", Some("browser firmware runtime created"));
         runtime.log("info", "fw-browser runtime booted");
+        // The one structured tier-selection log line (fidelity-tiers ADR).
+        let tier_line = match (&runtime.tier.tier, &runtime.tier.reason) {
+            (RuntimeTier::Gpu, _) => "tier selected: tier=gpu backend=wgpu".to_string(),
+            (RuntimeTier::Cpu, None) => "tier selected: tier=cpu backend=lpvm".to_string(),
+            (RuntimeTier::Cpu, Some(reason)) => {
+                format!("tier selected: tier=cpu backend=lpvm requested=gpu reason={reason}")
+            }
+        };
+        runtime.log("info", &tier_line);
         runtime.status("ready", None);
         Ok(runtime)
     }
@@ -86,6 +147,11 @@ impl BrowserFirmwareRuntime {
     /// Numeric handle used by the wasm runtime registry.
     pub(crate) fn id(&self) -> u32 {
         self.id
+    }
+
+    /// The tier recorded at creation.
+    pub(crate) fn tier(&self) -> &TierSelection {
+        &self.tier
     }
 
     /// Apply one browser input envelope to the runtime.
@@ -164,6 +230,98 @@ impl BrowserFirmwareRuntime {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>, String> {
+        let texture = self.render_bus_texture(channel, width, height)?;
+        let bytes = texture.try_raw_bytes().ok_or_else(|| {
+            "render produced a GPU-resident texture (GPU-tier runtime); use surface \
+             presentation (`present_frame`) instead of the byte transport"
+                .to_string()
+        })?;
+        Ok(crate::texture_convert::rgba16_unorm_to_rgba8_srgb(bytes))
+    }
+
+    /// Attach a transferred `OffscreenCanvas` as this runtime's card surface.
+    ///
+    /// GPU tier only: the CPU tier presents through the `preview_frame` byte
+    /// transport and never gets a surface (explicit answer, no fallback).
+    pub(crate) fn attach_preview_surface(
+        &mut self,
+        canvas: web_sys::OffscreenCanvas,
+    ) -> Result<(), String> {
+        let id = self.id;
+        let tier_reason = self.tier.reason.clone();
+        let Some(gpu) = self.gpu.as_mut() else {
+            let reason = tier_reason
+                .map(|reason| format!(" (gpu unavailable: {reason})"))
+                .unwrap_or_default();
+            return Err(format!(
+                "runtime {id} is on the CPU tier{reason}; surface presentation requires the \
+                 GPU tier"
+            ));
+        };
+        gpu.surface = Some(PreviewSurface::attach(&gpu.worker_gpu, canvas)?);
+        self.log("info", "preview surface attached");
+        Ok(())
+    }
+
+    /// Render the visual product on `channel` and present it to the attached
+    /// card surface (zero readback — the GPU-tier presentation path).
+    pub(crate) fn present_bus_texture(&mut self, channel: &str) -> Result<(), String> {
+        // Device-lost is a terminal, visible state: every present fails with
+        // the recorded reason and the card shows the error (no retry loop).
+        if let Some(lost) = gpu::device_lost() {
+            return Err(format!("gpu device lost: {lost}"));
+        }
+        let (width, height) = {
+            let gpu = self
+                .gpu
+                .as_ref()
+                .ok_or_else(|| "present requires a GPU-tier runtime".to_string())?;
+            let surface = gpu
+                .surface
+                .as_ref()
+                .ok_or_else(|| "present before attach_surface".to_string())?;
+            (surface.width(), surface.height())
+        };
+
+        let texture = self.render_bus_texture(channel, width, height)?;
+        let gpu = self.gpu.as_ref().expect("gpu state checked above");
+        let surface = gpu.surface.as_ref().expect("surface checked above");
+
+        // Host-resident products (e.g. the fluid node's CPU-sim texels) are
+        // legal on the GPU tier: bridge them with a one-frame upload. Only a
+        // product with neither a handle nor host bytes is a bug.
+        let uploaded;
+        let handle = match texture.gpu_handle() {
+            Some(handle) => handle,
+            None => {
+                let bytes = texture.try_raw_bytes().ok_or_else(|| {
+                    "render produced a texture with neither GPU handle nor host bytes".to_string()
+                })?;
+                uploaded = gpu
+                    .graphics
+                    .create_texture(
+                        texture.width(),
+                        texture.height(),
+                        texture.storage_format(),
+                        bytes,
+                    )
+                    .map_err(|error| format!("upload host product for present: {error}"))?;
+                &uploaded
+            }
+        };
+
+        gpu.graphics
+            .present_to_surface(handle, surface.surface())
+            .map_err(|error| format!("present to surface: {error}"))
+    }
+
+    /// Resolve (with caching) and render the visual product on a bus channel.
+    fn render_bus_texture(
+        &mut self,
+        channel: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<TextureRenderProduct, String> {
         let handle = self
             .server
             .project_manager()
@@ -194,19 +352,15 @@ impl BrowserFirmwareRuntime {
             format: TextureStorageFormat::Rgba16Unorm,
             time_seconds: project.engine().frame_time().total_ms as f32 / 1000.0,
         };
-        let texture = match project.render_visual_texture(product, &request) {
-            Ok(texture) => texture,
+        match project.render_visual_texture(product, &request) {
+            Ok(texture) => Ok(texture),
             Err(error) => {
                 // A stale product handle (project reload) renders as an error;
                 // drop the cache so the next frame re-resolves the bus.
                 self.bus_visual_product = None;
-                return Err(format!("{error}"));
+                Err(format!("{error}"))
             }
-        };
-        let bytes = texture
-            .try_raw_bytes()
-            .ok_or_else(|| "render returned non-resident texture".to_string())?;
-        Ok(crate::texture_convert::rgba16_unorm_to_rgba8_srgb(bytes))
+        }
     }
 
     fn flush_protocol_out(&mut self) -> Result<(), String> {
