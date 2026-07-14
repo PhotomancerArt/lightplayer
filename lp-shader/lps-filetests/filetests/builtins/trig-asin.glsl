@@ -57,7 +57,6 @@ vec2 test_asin_vec2() {
     return asin(vec2(rt(0.0), rt(0.5)));
 }
 
-// @broken(rv32n.q32)
 // run: test_asin_vec2() ~= vec2(0.0, 0.5235987755982988) (tolerance: 0.01)
 
 vec3 test_asin_vec3() {

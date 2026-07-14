@@ -53,7 +53,7 @@ Each cell is the LPIR opcode (or `call`) used for the Naga `BinaryOperator` when
 
 A cell marked `—` is not used for that combination in the supported GLSL subset (or is lowered by other means before it reaches this table).
 
-Short-circuiting `&&` and `||` on `bool` are preserved when side effects require it by lowering to control flow; pure boolean cases may use `iand` / `ior` on `0`/`1` values as in the table.
+Short-circuiting `&&` and `||` on `bool` are preserved: the naga glsl-in fork (`third_party/naga`) lowers side-effecting right operands to an `If` with a temporary local before this table applies, so only pure boolean cases reach `iand` / `ior`.
 
 ## Unary operators
 

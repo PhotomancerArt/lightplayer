@@ -64,8 +64,12 @@ pub(crate) struct FuncEmitCtx<'a> {
 
 pub(crate) fn emit_module(
     ir: &LpirModule,
+    export_names: &[String],
     options: &crate::options::WasmOptions,
 ) -> Result<(Vec<u8>, Option<i32>, Option<EnvMemorySpec>), String> {
+    debug_assert_eq!(export_names.len(), ir.functions.len());
+    let augmented = imports::with_missing_helper_imports(ir, options.float_mode);
+    let ir = augmented.as_ref().unwrap_or(ir);
     let filtered = imports::build_filtered_imports(ir)?;
     let filtered_fn_count = filtered.decls.len() as u32;
 
@@ -148,9 +152,9 @@ pub(crate) fn emit_module(
             0,
         );
     }
-    for (i, f) in ir.functions.values().enumerate() {
+    for (i, name) in export_names.iter().enumerate() {
         let wasm_fn_index = filtered_fn_count + i as u32;
-        exports.export(f.name.as_str(), ExportKind::Func, wasm_fn_index);
+        exports.export(name.as_str(), ExportKind::Func, wasm_fn_index);
     }
     if render_entry.is_some() {
         let render_fn_index = filtered_fn_count + ir.functions.len() as u32;

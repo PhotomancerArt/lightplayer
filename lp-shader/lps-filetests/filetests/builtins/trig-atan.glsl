@@ -52,7 +52,6 @@ float test_atan2_first_quadrant() {
     return atan(rt(1.0), rt(1.0));
 }
 
-// @broken(rv32n.q32)
 // run: test_atan2_first_quadrant() ~= 0.7853981633974483
 
 float test_atan2_second_quadrant() {
@@ -60,7 +59,6 @@ float test_atan2_second_quadrant() {
     return atan(rt(1.0), rt(-1.0));
 }
 
-// @broken(rv32n.q32)
 // run: test_atan2_second_quadrant() ~= 2.356194490192345
 
 float test_atan2_third_quadrant() {
@@ -68,7 +66,6 @@ float test_atan2_third_quadrant() {
     return atan(rt(-1.0), rt(-1.0));
 }
 
-// @broken(rv32n.q32)
 // run: test_atan2_third_quadrant() ~= -2.356194490192345
 
 float test_atan2_fourth_quadrant() {
@@ -76,7 +73,6 @@ float test_atan2_fourth_quadrant() {
     return atan(rt(-1.0), rt(1.0));
 }
 
-// @broken(rv32n.q32)
 // run: test_atan2_fourth_quadrant() ~= -0.7853981633974483
 
 // Q32: atan2(0,0) must not use the div(0,0) fast-path (would saturate and
@@ -86,7 +82,6 @@ float test_atan2_both_zero_q32_stable() {
     return atan(rt(0.0), rt(0.0));
 }
 
-// @broken(rv32n.q32)
 // run: test_atan2_both_zero_q32_stable() ~= 0.0
 
 vec2 test_atan_vec2() {
@@ -94,7 +89,6 @@ vec2 test_atan_vec2() {
     return atan(vec2(rt(0.0), rt(1.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_atan_vec2() ~= vec2(0.0, 0.7853981633974483)
 
 vec3 test_atan_vec3() {

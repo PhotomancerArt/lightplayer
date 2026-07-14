@@ -23,8 +23,6 @@ pub(crate) struct FilteredImports {
 fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
     let n = ir.imports.len() as u32;
     let mut used = BTreeSet::new();
-    let mut needs_lpir_sqrt = false;
-    let mut needs_glsl_round = false;
 
     for f in ir.functions.values() {
         for op in &f.body {
@@ -35,17 +33,11 @@ fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
                     }
                 }
             }
-            // Track LPIR ops that resolve to builtin calls at emit time (Q32 mode)
-            if matches!(op, LpirOp::Fsqrt { .. }) {
-                needs_lpir_sqrt = true;
-            }
-            if matches!(op, LpirOp::Fnearest { .. }) {
-                needs_glsl_round = true;
-            }
         }
     }
 
     // Add imports for LPIR ops that call builtins in Q32 mode
+    let (needs_lpir_sqrt, needs_glsl_round) = scan_helper_op_needs(ir);
     if needs_lpir_sqrt {
         if let Some(idx) = find_import_index(ir, "lpir", "sqrt") {
             used.insert(idx);
@@ -58,6 +50,60 @@ fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
     }
 
     used
+}
+
+/// LPIR ops whose Q32 lowering resolves to a builtin import call at emit time:
+/// `Fsqrt` → `@lpir::sqrt`, `Fnearest` → `@glsl::round`.
+fn scan_helper_op_needs(ir: &LpirModule) -> (bool, bool) {
+    let mut needs_lpir_sqrt = false;
+    let mut needs_glsl_round = false;
+    for f in ir.functions.values() {
+        for op in &f.body {
+            match op {
+                LpirOp::Fsqrt { .. } => needs_lpir_sqrt = true,
+                LpirOp::Fnearest { .. } => needs_glsl_round = true,
+                _ => {}
+            }
+        }
+    }
+    (needs_lpir_sqrt, needs_glsl_round)
+}
+
+/// The naga-based `lps-frontend` pre-registers the helper imports Q32 op
+/// lowering calls, but `lps-glsl` emits `Fsqrt`/`Fnearest` directly without
+/// declaring them. Returns a copy of `ir` with the missing helper import
+/// decls appended, or `None` when `ir` already has everything emission needs.
+pub(crate) fn with_missing_helper_imports(ir: &LpirModule, mode: FloatMode) -> Option<LpirModule> {
+    if mode != FloatMode::Q32 {
+        return None;
+    }
+    let (needs_lpir_sqrt, needs_glsl_round) = scan_helper_op_needs(ir);
+    let mut missing = Vec::new();
+    if needs_lpir_sqrt && find_import_index(ir, "lpir", "sqrt").is_none() {
+        missing.push(helper_import_decl("lpir", "sqrt"));
+    }
+    if needs_glsl_round && find_import_index(ir, "glsl", "round").is_none() {
+        missing.push(helper_import_decl("glsl", "round"));
+    }
+    if missing.is_empty() {
+        return None;
+    }
+    let mut out = ir.clone();
+    out.imports.extend(missing);
+    Some(out)
+}
+
+/// `f32 -> f32` helper import decl (the shape of both Q32 helper builtins).
+fn helper_import_decl(module: &str, func_name: &str) -> ImportDecl {
+    ImportDecl {
+        module_name: String::from(module),
+        func_name: String::from(func_name),
+        param_types: vec![IrType::F32],
+        return_types: vec![IrType::F32],
+        lpfn_glsl_params: None,
+        needs_vmctx: false,
+        sret: false,
+    }
 }
 
 fn find_import_index(ir: &LpirModule, module: &str, func_name: &str) -> Option<u32> {

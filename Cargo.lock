@@ -3641,6 +3641,7 @@ name = "fw-browser"
 version = "40.0.0"
 dependencies = [
  "fw-core",
+ "log",
  "lpa-server",
  "lpc-hardware",
  "lpc-history",
@@ -5701,6 +5702,7 @@ dependencies = [
  "lps-builtin-ids",
  "lps-builtins",
  "lps-frontend",
+ "lps-glsl",
  "lps-q32",
  "lps-shared",
  "lpvm",
@@ -5974,8 +5976,6 @@ dependencies = [
 [[package]]
 name = "naga"
 version = "29.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85b4372fed0bd362d646d01b6926df0e837859ccc522fed720c395e0460f29c8"
 dependencies = [
  "arrayvec",
  "bit-set 0.9.1",

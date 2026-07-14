@@ -110,9 +110,15 @@ pub const ALL_TARGETS: &[Target] = &[
     },
 ];
 
-/// Default targets for local `cargo test` / app runs: rv32n, rv32c (Cranelift), wasm (Q32).
+/// Default targets for local `cargo test` / app runs: rv32n, rv32lpn (lps-glsl
+/// frontend — the primary on-device pipeline), rv32c (Cranelift), wasm (Q32).
 /// CI should run the full [`ALL_TARGETS`] list (see plan README / phase 05).
-pub const DEFAULT_TARGETS: &[Target] = &[ALL_TARGETS[3], ALL_TARGETS[2], ALL_TARGETS[0]];
+pub const DEFAULT_TARGETS: &[Target] = &[
+    ALL_TARGETS[3],
+    ALL_TARGETS[4],
+    ALL_TARGETS[2],
+    ALL_TARGETS[0],
+];
 
 /// Annotation kind for test directives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,9 +226,10 @@ mod tests {
 
     #[test]
     fn test_default_targets_order_matches_const() {
-        assert_eq!(DEFAULT_TARGETS.len(), 3);
+        assert_eq!(DEFAULT_TARGETS.len(), 4);
         assert_eq!(DEFAULT_TARGETS[0].name(), "rv32n.q32");
-        assert_eq!(DEFAULT_TARGETS[1].name(), "rv32c.q32");
-        assert_eq!(DEFAULT_TARGETS[2].name(), "wasm.q32");
+        assert_eq!(DEFAULT_TARGETS[1].name(), "rv32lpn.q32");
+        assert_eq!(DEFAULT_TARGETS[2].name(), "rv32c.q32");
+        assert_eq!(DEFAULT_TARGETS[3].name(), "wasm.q32");
     }
 }

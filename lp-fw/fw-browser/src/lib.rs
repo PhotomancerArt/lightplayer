@@ -8,6 +8,7 @@
 
 mod envelope;
 mod executor;
+mod logger;
 mod manual_time_provider;
 mod runtime;
 mod runtime_registry;
