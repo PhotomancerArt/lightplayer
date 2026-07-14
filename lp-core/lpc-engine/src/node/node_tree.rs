@@ -253,6 +253,21 @@ impl<N> RuntimeNodeTree<N> {
         Ok(binding_ref)
     }
 
+    /// Remove every node-owned binding and reset the derived index. The
+    /// loader's binding phase re-registers from defs afterwards, so the index
+    /// always matches what a fresh load would produce (incremental binding
+    /// apply, Option C).
+    pub fn clear_bindings(&mut self, revision: Revision) {
+        for entry in self.entries_mut() {
+            if entry.bindings.value().is_empty() {
+                continue;
+            }
+            entry.bindings.get_mut().clear();
+            entry.bindings.mark_updated(revision);
+        }
+        self.binding_index = NodeBindingIndex::default();
+    }
+
     /// Iterate over all node-owned bindings.
     pub fn bindings(&self) -> impl Iterator<Item = &BindingEntry> {
         self.entries()

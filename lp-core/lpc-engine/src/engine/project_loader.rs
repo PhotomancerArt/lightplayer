@@ -119,6 +119,7 @@ impl ProjectLoader {
         let projected_nodes =
             Self::build_runtime_spine(&registry, &mut runtime, project_specifier.clone(), frame)?;
         Self::attach_projected_nodes(root, &mut registry, &mut runtime, &projected_nodes, frame)?;
+        Self::register_projected_bindings(&mut registry, &mut runtime, &projected_nodes, frame)?;
 
         Ok(LoadedProjectRuntime::new(runtime, registry))
     }
@@ -362,7 +363,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Clock {
                 continue;
             }
-            let NodeDef::Clock(config) = projected_node_config(registry, node)?.clone() else {
+            let NodeDef::Clock(_) = projected_node_config(registry, node)? else {
                 continue;
             };
             runtime
@@ -371,23 +372,6 @@ impl ProjectLoader {
                     path: node_label(node),
                     reason: format!("attach clock runtime: {e}"),
                 })?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "seconds",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "delta_seconds",
-                &config.bindings,
-                frame,
-            )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
 
         for node in projected_nodes {
@@ -397,7 +381,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Button {
                 continue;
             }
-            let NodeDef::Button(config) = projected_node_config(registry, node)?.clone() else {
+            let NodeDef::Button(_) = projected_node_config(registry, node)? else {
                 continue;
             };
             runtime
@@ -406,30 +390,6 @@ impl ProjectLoader {
                     path: node_label(node),
                     reason: format!("attach button runtime: {e}"),
                 })?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "down",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "held",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "up",
-                &config.bindings,
-                frame,
-            )?;
         }
 
         for node in projected_nodes {
@@ -439,8 +399,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::ControlRadio {
                 continue;
             }
-            let NodeDef::ControlRadio(config) = projected_node_config(registry, node)?.clone()
-            else {
+            let NodeDef::ControlRadio(_) = projected_node_config(registry, node)? else {
                 continue;
             };
             runtime
@@ -449,22 +408,6 @@ impl ProjectLoader {
                     path: node_label(node),
                     reason: format!("attach control radio runtime: {e}"),
                 })?;
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "input",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "output",
-                &config.bindings,
-                frame,
-            )?;
             runtime.add_demand_root(node.id);
         }
 
@@ -508,33 +451,6 @@ impl ProjectLoader {
             runtime
                 .services_mut()
                 .register_output_sink(sink_id, &config);
-            runtime
-                .add_binding(
-                    BindingDraft {
-                        source: BindingSource::Literal(LpValue::F32(0.0)),
-                        target: BindingTarget::ConsumedSlot {
-                            node: node.id,
-                            slot: demand_input_path(),
-                        },
-                        priority: BindingPriority::new(0),
-                        kind: Kind::Color,
-                        owner: node.id,
-                    },
-                    frame,
-                )
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("bind output demand slot: {e}"),
-                })?;
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "input",
-                &config.bindings,
-                frame,
-            )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
             runtime.add_demand_root(node.id);
         }
 
@@ -555,24 +471,6 @@ impl ProjectLoader {
                 AssetContentType::ShaderSource,
                 "shader source",
             )?;
-            let bindings = config.bindings.clone();
-            let consumed_slot_names = config
-                .consumed_slots
-                .entries
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>();
-            let consumed_defaults = config
-                .consumed_slots
-                .entries
-                .iter()
-                .filter_map(|(name, slot)| {
-                    slot.default_bind
-                        .data
-                        .as_ref()
-                        .map(|endpoint| (name.clone(), endpoint.value().to_string()))
-                })
-                .collect::<Vec<_>>();
             runtime
                 .attach_runtime_node(
                     node.id,
@@ -583,30 +481,6 @@ impl ProjectLoader {
                     path: node_label(node),
                     reason: format!("attach shader runtime: {e}"),
                 })?;
-            register_target_binding(runtime, projected_nodes, node, "output", &bindings, frame)?;
-            for name in consumed_slot_names {
-                register_optional_source_binding(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    name.as_str(),
-                    &bindings,
-                    frame,
-                )?;
-            }
-            for (name, endpoint) in consumed_defaults {
-                register_default_bind(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    &bindings,
-                    frame,
-                    &name,
-                    SlotDirection::Consumed,
-                    &endpoint,
-                )?;
-            }
-            register_declared_defaults(runtime, projected_nodes, node, &bindings, frame)?;
         }
 
         for node in projected_nodes {
@@ -627,19 +501,6 @@ impl ProjectLoader {
                 AssetContentType::ComputeShaderSource,
                 "compute shader source",
             )?;
-            let bindings = config.bindings.clone();
-            let consumed_slot_names = config
-                .consumed_slots
-                .entries
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>();
-            let produced_slot_names = config
-                .produced_slots
-                .entries
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>();
             runtime
                 .attach_runtime_node(
                     node.id,
@@ -664,27 +525,6 @@ impl ProjectLoader {
                     path: node_label(node),
                     reason: format!("attach compute shader runtime: {e}"),
                 })?;
-
-            for name in consumed_slot_names {
-                register_optional_source_binding(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    name.as_str(),
-                    &bindings,
-                    frame,
-                )?;
-            }
-            for name in produced_slot_names {
-                register_target_binding(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    name.as_str(),
-                    &bindings,
-                    frame,
-                )?;
-            }
         }
 
         for node in projected_nodes {
@@ -694,7 +534,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Fluid {
                 continue;
             }
-            let NodeDef::Fluid(config) = projected_node_config(registry, node)?.clone() else {
+            let NodeDef::Fluid(_) = projected_node_config(registry, node)? else {
                 continue;
             };
             runtime
@@ -703,31 +543,6 @@ impl ProjectLoader {
                     path: node_label(node),
                     reason: format!("attach fluid runtime: {e}"),
                 })?;
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "time",
-                &config.bindings,
-                frame,
-            )?;
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "emitters",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "output",
-                &config.bindings,
-                frame,
-            )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
 
         for node in projected_nodes {
@@ -737,15 +552,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Playlist {
                 continue;
             }
-            let (
-                idle_entry,
-                default_fade,
-                entries,
-                time_source,
-                output_target,
-                trigger_source,
-                authored_bindings,
-            ) = {
+            let (idle_entry, default_fade, entries) = {
                 let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
                     continue;
                 };
@@ -753,61 +560,8 @@ impl ProjectLoader {
                     *config.idle_entry.value(),
                     config.default_fade.value().0,
                     playlist_runtime_entries(projected_nodes, node.id, config),
-                    binding_source(&config.bindings, "time")
-                        .map(|source| binding_source_endpoint(projected_nodes, node, source))
-                        .transpose()?,
-                    binding_target(&config.bindings, "output")
-                        .map(|target| binding_target_endpoint(projected_nodes, node, target))
-                        .transpose()?,
-                    binding_source(&config.bindings, "trigger")
-                        .map(|source| binding_source_endpoint(projected_nodes, node, source))
-                        .transpose()?,
-                    config.bindings.clone(),
                 )
             };
-            if let Some(source) = time_source {
-                register_source_binding_at_path(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    "time",
-                    source,
-                    SlotPath::parse("time").expect("playlist time slot"),
-                    frame,
-                )?;
-            }
-            if let Some(source) = trigger_source {
-                register_source_binding_at_path(
-                    runtime,
-                    projected_nodes,
-                    node,
-                    "trigger",
-                    source,
-                    SlotPath::parse("trigger").expect("playlist trigger slot"),
-                    frame,
-                )?;
-            }
-            if let Some(target) = output_target.clone() {
-                runtime
-                    .add_binding(
-                        BindingDraft {
-                            source: BindingSource::ProducedSlot {
-                                node: node.id,
-                                slot: playlist_output_path(),
-                            },
-                            target,
-                            priority: BindingPriority::authored(),
-                            kind: binding_kind_for_slot("output"),
-                            owner: node.id,
-                        },
-                        frame,
-                    )
-                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                        path: node_label(node),
-                        reason: format!("register output target binding: {e}"),
-                    })?;
-            }
-            register_declared_defaults(runtime, projected_nodes, node, &authored_bindings, frame)?;
             runtime
                 .attach_runtime_node(
                     node.id,
@@ -859,25 +613,25 @@ impl ProjectLoader {
                     mark_node_load_error(runtime, node.id, frame, message);
                 }
             }
-            register_optional_source_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "input",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                projected_nodes,
-                node,
-                "output",
-                &config.bindings,
-                frame,
-            )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
         }
 
+        Ok(())
+    }
+
+    /// The loader's binding phase: register every binding the projected
+    /// nodes contribute. Load runs it after all nodes attach; incremental
+    /// apply re-runs it against a cleared index so the runtime's bindings
+    /// always match what a fresh load would produce (incremental binding
+    /// apply, Option C).
+    pub(super) fn register_projected_bindings(
+        registry: &mut ProjectRegistry,
+        runtime: &mut Engine,
+        projected_nodes: &[ProjectedNode],
+        frame: Revision,
+    ) -> Result<(), ProjectLoadError> {
+        for node in projected_nodes {
+            register_node_bindings(registry, runtime, projected_nodes, node, frame)?;
+        }
         Ok(())
     }
 }
@@ -1345,6 +1099,266 @@ fn declared_slot_direction(kind: NodeKind, slot: &lpc_model::SlotPath) -> Option
     def_shape
         .and_then(field_direction)
         .or_else(|| state_shape.and_then(field_direction))
+}
+
+/// The loader's binding phase: register every binding one projected node
+/// contributes — authored entries, loader plumbing (the output demand
+/// literal), and slot-declared defaults. Mirrors what the attach arms
+/// registered before the phases were split; behavior parity is pinned by the
+/// characterization tests.
+fn register_node_bindings(
+    registry: &mut ProjectRegistry,
+    runtime: &mut Engine,
+    projected_nodes: &[ProjectedNode],
+    node: &ProjectedNode,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    // Unloaded/errored defs project with the `Project` fallback kind and
+    // register nothing — same tolerance the attach arms' kind filters gave
+    // them (the node renders as an error node; the load must not fail).
+    if node.kind == NodeKind::Project {
+        return Ok(());
+    }
+    match projected_node_config(registry, node)?.clone() {
+        NodeDef::Clock(config) => {
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "seconds",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "delta_seconds",
+                &config.bindings,
+                frame,
+            )?;
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+        }
+        NodeDef::Button(config) => {
+            for slot in ["down", "held", "up"] {
+                register_target_binding(
+                    runtime,
+                    projected_nodes,
+                    node,
+                    slot,
+                    &config.bindings,
+                    frame,
+                )?;
+            }
+        }
+        NodeDef::ControlRadio(config) => {
+            register_optional_source_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "input",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+        }
+        NodeDef::Output(config) => {
+            runtime
+                .add_binding(
+                    BindingDraft {
+                        source: BindingSource::Literal(LpValue::F32(0.0)),
+                        target: BindingTarget::ConsumedSlot {
+                            node: node.id,
+                            slot: demand_input_path(),
+                        },
+                        priority: BindingPriority::new(0),
+                        kind: Kind::Color,
+                        owner: node.id,
+                    },
+                    frame,
+                )
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("bind output demand slot: {e}"),
+                })?;
+            register_optional_source_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "input",
+                &config.bindings,
+                frame,
+            )?;
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+        }
+        NodeDef::Shader(config) => {
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+            for name in config.consumed_slots.entries.keys() {
+                register_optional_source_binding(
+                    runtime,
+                    projected_nodes,
+                    node,
+                    name.as_str(),
+                    &config.bindings,
+                    frame,
+                )?;
+            }
+            for (name, slot) in config.consumed_slots.entries.iter() {
+                let Some(endpoint) = slot.default_bind.data.as_ref() else {
+                    continue;
+                };
+                register_default_bind(
+                    runtime,
+                    projected_nodes,
+                    node,
+                    &config.bindings,
+                    frame,
+                    name,
+                    SlotDirection::Consumed,
+                    &endpoint.value().to_string(),
+                )?;
+            }
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+        }
+        NodeDef::ComputeShader(config) => {
+            for name in config.consumed_slots.entries.keys() {
+                register_optional_source_binding(
+                    runtime,
+                    projected_nodes,
+                    node,
+                    name.as_str(),
+                    &config.bindings,
+                    frame,
+                )?;
+            }
+            for name in config.produced_slots.entries.keys() {
+                register_target_binding(
+                    runtime,
+                    projected_nodes,
+                    node,
+                    name.as_str(),
+                    &config.bindings,
+                    frame,
+                )?;
+            }
+        }
+        NodeDef::Fluid(config) => {
+            register_optional_source_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "time",
+                &config.bindings,
+                frame,
+            )?;
+            register_optional_source_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "emitters",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+        }
+        NodeDef::Playlist(config) => {
+            if let Some(source) = binding_source(&config.bindings, "time")
+                .map(|source| binding_source_endpoint(projected_nodes, node, source))
+                .transpose()?
+            {
+                register_source_binding_at_path(
+                    runtime,
+                    projected_nodes,
+                    node,
+                    "time",
+                    source,
+                    SlotPath::parse("time").expect("playlist time slot"),
+                    frame,
+                )?;
+            }
+            if let Some(source) = binding_source(&config.bindings, "trigger")
+                .map(|source| binding_source_endpoint(projected_nodes, node, source))
+                .transpose()?
+            {
+                register_source_binding_at_path(
+                    runtime,
+                    projected_nodes,
+                    node,
+                    "trigger",
+                    source,
+                    SlotPath::parse("trigger").expect("playlist trigger slot"),
+                    frame,
+                )?;
+            }
+            if let Some(target) = binding_target(&config.bindings, "output")
+                .map(|target| binding_target_endpoint(projected_nodes, node, target))
+                .transpose()?
+            {
+                runtime
+                    .add_binding(
+                        BindingDraft {
+                            source: BindingSource::ProducedSlot {
+                                node: node.id,
+                                slot: playlist_output_path(),
+                            },
+                            target,
+                            priority: BindingPriority::authored(),
+                            kind: binding_kind_for_slot("output"),
+                            owner: node.id,
+                        },
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("register output target binding: {e}"),
+                    })?;
+            }
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+        }
+        NodeDef::Fixture(config) => {
+            register_optional_source_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "input",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+        }
+        NodeDef::Project(_) | NodeDef::Texture(_) => {}
+    }
+    Ok(())
 }
 
 /// Slot-declared default bindings for a node kind: (slot name, declared
