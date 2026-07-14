@@ -3,16 +3,17 @@ use std::collections::BTreeMap;
 use lpc_model::slot::{SlotFieldShapeView, SlotPersistence};
 use lpc_model::{
     LpType, LpValue, ProductRef, Revision, SlotData, SlotDirection, SlotMapKey, SlotMapKeyShape,
-    SlotName, SlotPathSegment, SlotPolicy, SlotSemantics, SlotShapeLookup, SlotShapeRegistry,
-    SlotShapeView, SlotValueShape, SlotValueShapeView, ValueEditorHint,
+    SlotName, SlotPath, SlotPathSegment, SlotPolicy, SlotSemantics, SlotShapeLookup,
+    SlotShapeRegistry, SlotShapeView, SlotValueShape, SlotValueShapeView, ValueEditorHint,
 };
 
 use crate::{
-    PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiBindingEndpoint,
-    UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState, UiProducedBinding, UiProducedProduct,
-    UiProducedValue, UiProductRef, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
-    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOptionality,
-    UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
+    PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiBindingAuthoring,
+    UiBindingAuthoringDirection, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody,
+    UiNodeDirtyState, UiProducedBinding, UiProducedProduct, UiProducedValue, UiProductRef,
+    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
+    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
+    UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
 };
 
 use super::{PrefixEditState, SlotBindingFact, SlotBindingFactKind, SlotEditJoin};
@@ -162,6 +163,51 @@ impl SlotController {
             state: SlotControllerState::new(),
             children: Vec::new(),
         }
+    }
+
+    /// Binding authoring surface for this slot, when it is a bindable root
+    /// field (M4): root-level def fields author `source` bindings, root-level
+    /// produced state fields author `target` bindings — keyed by the field
+    /// name in the node's def-root `bindings` map. The authored endpoint (if
+    /// any, default-origin excluded) enables Retarget/Unbind.
+    pub(in crate::app::project) fn binding_authoring(
+        &self,
+        direction: UiBindingAuthoringDirection,
+    ) -> Option<UiBindingAuthoring> {
+        let key = self.root_field_name()?.to_string();
+        if key == "bindings" {
+            return None;
+        }
+        let expected_root = match direction {
+            UiBindingAuthoringDirection::Source => ProjectSlotRoot::Def,
+            UiBindingAuthoringDirection::Target => ProjectSlotRoot::State,
+        };
+        if self.address.root != expected_root {
+            return None;
+        }
+        let authored = match direction {
+            UiBindingAuthoringDirection::Source => match &self.source {
+                UiSlotSourceState::Bound(endpoint) if !endpoint.default_origin => {
+                    Some(endpoint.clone())
+                }
+                _ => None,
+            },
+            UiBindingAuthoringDirection::Target => self
+                .publish
+                .as_ref()
+                .filter(|endpoint| !endpoint.default_origin)
+                .cloned(),
+        };
+        Some(UiBindingAuthoring {
+            key,
+            direction,
+            bindings_map: ProjectSlotAddress::new(
+                self.address.node.clone(),
+                ProjectSlotRoot::Def,
+                SlotPath::root().child(SlotName::parse("bindings").expect("valid slot name")),
+            ),
+            authored,
+        })
     }
 
     /// Extract authored binding facts from this root's `bindings` child.
@@ -346,6 +392,10 @@ impl SlotController {
         .with_source(self.ui_source())
         .with_state(self.ui_field_state(edits));
 
+        if let Some(authoring) = self.binding_authoring(UiBindingAuthoringDirection::Source) {
+            slot = slot.with_authoring(authoring);
+        }
+
         if let Some(publish) = &self.publish {
             slot = slot.with_publish(publish.clone());
         }
@@ -489,6 +539,7 @@ impl SlotController {
         produced.detail = Some(ui_value.kind.type_label().to_string());
         produced.unit = self.ui_unit();
         produced.binding = self.ui_produced_binding();
+        produced.authoring = self.binding_authoring(UiBindingAuthoringDirection::Target);
         Some(produced)
     }
 

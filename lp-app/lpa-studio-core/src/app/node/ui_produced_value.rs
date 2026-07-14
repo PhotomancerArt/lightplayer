@@ -20,6 +20,8 @@ pub struct UiProducedValue {
     pub binding: UiProducedBinding,
     /// Edited-state affordance for authored produced-value metadata.
     pub dirty: UiNodeDirtyState,
+    /// Binding authoring surface when this value is bindable (M4).
+    pub authoring: Option<crate::UiBindingAuthoring>,
 }
 
 impl UiProducedValue {
@@ -32,6 +34,7 @@ impl UiProducedValue {
             unit: None,
             binding: UiProducedBinding::none(),
             dirty: UiNodeDirtyState::Clean,
+            authoring: None,
         }
     }
 

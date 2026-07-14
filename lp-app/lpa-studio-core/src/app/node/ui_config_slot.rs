@@ -93,6 +93,8 @@ pub struct UiConfigSlot {
     pub issues: Vec<String>,
     /// Stable popup sections and row-level presentation affordances.
     pub aspects: Vec<UiSlotAspect>,
+    /// Binding authoring surface when this row is bindable (M4).
+    pub authoring: Option<crate::UiBindingAuthoring>,
 }
 
 impl UiConfigSlot {
@@ -142,7 +144,14 @@ impl UiConfigSlot {
             state: UiSlotFieldState::editable(),
             issues: Vec::new(),
             aspects: Vec::new(),
+            authoring: None,
         }
+    }
+
+    /// Attach the binding authoring surface (M4).
+    pub fn with_authoring(mut self, authoring: crate::UiBindingAuthoring) -> Self {
+        self.authoring = Some(authoring);
+        self
     }
 
     /// Attach the stable slot address edits should target.

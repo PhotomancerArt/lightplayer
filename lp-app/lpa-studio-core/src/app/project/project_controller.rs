@@ -162,6 +162,51 @@ impl ProjectController {
         Some(crate::UiBusView { channels })
     }
 
+    /// Channels the binding picker offers: every channel observed in the
+    /// effective binding graph plus the well-known registry, well-known
+    /// first (M4). Kinds come from the registry, falling back to the wire
+    /// graph's established kind.
+    pub fn ui_channel_choices(&self) -> Vec<crate::UiChannelChoice> {
+        let observed: Vec<(String, Option<String>)> = self
+            .binding_graph()
+            .map(|graph| {
+                graph
+                    .channels
+                    .iter()
+                    .map(|channel| {
+                        (
+                            channel.name.clone(),
+                            channel.kind.map(|kind| format!("{kind:?}")),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut choices: Vec<crate::UiChannelChoice> = lpc_model::WELL_KNOWN_CHANNELS
+            .iter()
+            .map(|channel| crate::UiChannelChoice {
+                name: channel.name.to_string(),
+                kind: Some(format!("{:?}", channel.kind)),
+                doc: Some(channel.doc),
+                well_known: true,
+                observed: observed.iter().any(|(name, _)| name == channel.name),
+            })
+            .collect();
+        for (name, kind) in observed {
+            if choices.iter().any(|choice| choice.name == name) {
+                continue;
+            }
+            choices.push(crate::UiChannelChoice {
+                name,
+                kind,
+                doc: None,
+                well_known: false,
+                observed: true,
+            });
+        }
+        choices
+    }
+
     /// Find the node controller currently carrying a runtime node id.
     fn node_by_runtime_id(&self, id: lpc_model::NodeId) -> Option<&NodeController> {
         fn walk(node: &NodeController, id: lpc_model::NodeId) -> Option<&NodeController> {
@@ -235,10 +280,41 @@ impl ProjectController {
             if node.has_slot_root_field(name) {
                 continue;
             }
-            let endpoint = self.ui_binding_endpoint(&binding.endpoint);
+            // Literal-sourced wiring (the output demand slot's constant) is
+            // loader plumbing, not a user-facing route — no row.
+            if matches!(
+                binding.endpoint,
+                lpc_wire::WireBindingEndpoint::Literal { .. }
+            ) {
+                continue;
+            }
+            let mut endpoint = self.ui_binding_endpoint(&binding.endpoint);
+            if binding.origin == lpc_wire::WireBindingOrigin::Default {
+                endpoint = endpoint.with_default_origin();
+            }
+            let authoring = crate::UiBindingAuthoring {
+                key: name.to_string(),
+                direction: match binding.direction {
+                    lpc_wire::WireBindingDirection::Consumes => {
+                        crate::UiBindingAuthoringDirection::Source
+                    }
+                    lpc_wire::WireBindingDirection::Publishes => {
+                        crate::UiBindingAuthoringDirection::Target
+                    }
+                },
+                bindings_map: crate::ProjectSlotAddress::new(
+                    node.address().clone(),
+                    crate::ProjectSlotRoot::Def,
+                    lpc_model::SlotPath::root()
+                        .child(lpc_model::SlotName::parse("bindings").expect("valid slot name")),
+                ),
+                authored: (binding.origin == lpc_wire::WireBindingOrigin::Authored)
+                    .then(|| endpoint.clone()),
+            };
             let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
                 .with_description("Runtime slot wired by binding; it has no authored value here.")
-                .with_state(crate::UiSlotFieldState::readonly());
+                .with_state(crate::UiSlotFieldState::readonly())
+                .with_authoring(authoring);
             row = match binding.direction {
                 lpc_wire::WireBindingDirection::Consumes => {
                     row.with_source(crate::UiSlotSourceState::Bound(endpoint))
@@ -821,6 +897,7 @@ impl ProjectController {
             nodes,
         )
         .with_project_name(self.project_name(project_id))
+        .with_channel_choices(self.ui_channel_choices())
         .with_root_slots(root_slots)
         .with_dirty(dirty)
         .with_pending_edits(self.pending_edits())
@@ -3359,6 +3436,146 @@ mod tests {
             "authored endpoint wins over the default overlay"
         );
         assert!(!bus_target.default_origin);
+    }
+
+    #[test]
+    fn binding_authoring_rides_config_and_produced_rows() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let sections = node_sections(&nodes[0]);
+
+        // Consumed config row: source direction, authored endpoint enables
+        // retarget/unbind, addresses point into the bindings map.
+        let config = section_config_slots(sections);
+        let time = config.iter().find(|slot| slot.label == "Time").unwrap();
+        let authoring = time.authoring.as_ref().expect("config row authoring");
+        assert_eq!(authoring.key, "time");
+        assert_eq!(
+            authoring.direction,
+            crate::UiBindingAuthoringDirection::Source
+        );
+        assert_eq!(
+            authoring.authored.as_ref().map(|e| e.label.as_str()),
+            Some("bus:time")
+        );
+        let endpoint = authoring
+            .endpoint_value_address()
+            .expect("endpoint address");
+        assert_eq!(endpoint.root, ProjectSlotRoot::Def);
+        assert_eq!(endpoint.path.to_string(), "bindings[time].source.some");
+
+        // Produced value: target direction, authored publish present.
+        let produced = section_produced_values(sections);
+        let authoring = produced[0].authoring.as_ref().expect("produced authoring");
+        assert_eq!(authoring.key, "seconds");
+        assert_eq!(
+            authoring.direction,
+            crate::UiBindingAuthoringDirection::Target
+        );
+        assert!(authoring.authored.is_some());
+        assert_eq!(
+            authoring
+                .endpoint_value_address()
+                .expect("endpoint address")
+                .path
+                .to_string(),
+            "bindings[seconds].target.some"
+        );
+    }
+
+    #[test]
+    fn default_wiring_offers_bind_not_retarget() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots_without_bindings(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse("time").unwrap()),
+                direction: lpc_wire::WireBindingDirection::Consumes,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: "time".to_string(),
+                },
+                origin: lpc_wire::WireBindingOrigin::Default,
+                priority: -1000,
+                kind: lpc_model::Kind::Instant,
+            }],
+            channels: Vec::new(),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+        project.apply_default_binding_overlay();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let time = config.iter().find(|slot| slot.label == "Time").unwrap();
+        let authoring = time.authoring.as_ref().expect("authoring");
+        // Default wiring is not an authored entry: Bind (not Retarget), and
+        // there is nothing to unbind.
+        assert!(authoring.authored.is_none());
+    }
+
+    #[test]
+    fn channel_choices_merge_observed_and_well_known() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: Vec::new(),
+            channels: vec![
+                lpc_wire::WireBusChannel {
+                    name: "time".to_string(),
+                    kind: Some(lpc_model::Kind::Instant),
+                    providers: vec![0],
+                    consumers: vec![1],
+                    value: None,
+                },
+                lpc_wire::WireBusChannel {
+                    name: "wobble".to_string(),
+                    kind: None,
+                    providers: vec![0],
+                    consumers: Vec::new(),
+                    value: None,
+                },
+            ],
+        };
+        let _ = node;
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+
+        let choices = project.ui_channel_choices();
+        // Well-known first, observed flags merged, ad-hoc channels appended.
+        assert_eq!(choices[0].name, "time");
+        assert!(choices[0].well_known);
+        assert!(choices[0].observed);
+        let wobble = choices.iter().find(|c| c.name == "wobble").unwrap();
+        assert!(!wobble.well_known);
+        assert!(wobble.observed);
+        assert!(
+            choices
+                .iter()
+                .any(|c| c.name == "visual.out" && c.well_known)
+        );
     }
 
     #[test]
