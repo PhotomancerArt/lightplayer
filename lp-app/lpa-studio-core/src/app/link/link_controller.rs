@@ -4,17 +4,16 @@ use std::rc::Rc;
 use lpa_link::providers::{LinkEnv, LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{
     LinkConnection, LinkDiagnosticSeverity, LinkEndpointId, LinkError, LinkLogLevel,
-    LinkManagementRequest, LinkManagementResult, LinkOperation, LinkProvider, LinkProviderKind,
-    LinkSession, LinkSessionId,
+    LinkManagementRequest, LinkManagementResult, LinkProvider, LinkProviderKind, LinkSession,
+    LinkSessionId,
 };
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
 use crate::{
-    ActionPriority, ConnectedDeviceSummary, Controller, ControllerId, EndpointChoice, LinkOp,
-    LinkSnapshot, LinkState, ProgressState, ProviderChoice, UiAction, UiActivityView, UiError,
-    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiPaneView, UiProgress,
-    UiStatus, UiViewContent, UxUpdate, UxUpdateSink,
+    ConnectedDeviceSummary, ControllerId, EndpointChoice, LinkSnapshot, LinkState, ProgressState,
+    ProviderChoice, UiActivityView, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UiLogSource, UiProgress, UiStatus, UxUpdate, UxUpdateSink,
 };
 use lpa_link::{LinkManagementEvent, LinkManagementEventSink};
 
@@ -84,69 +83,6 @@ impl LinkController {
 
     pub fn active_connection(&self) -> Option<LinkConnection> {
         self.active_connection.clone()
-    }
-
-    pub fn actions(&self, server_connected: bool) -> Vec<UiAction> {
-        match &self.state {
-            LinkState::SelectingProvider { providers, .. } => providers
-                .iter()
-                .map(|provider| {
-                    self.action(LinkOp::OpenProvider {
-                        provider_id: provider.id,
-                    })
-                    .with_label(provider_action_label(provider.id))
-                    .with_summary(provider.summary.clone())
-                    .with_short_label(provider_action_short_label(provider.id))
-                    .with_icon(provider_action_icon(provider.id))
-                    .with_priority(provider_action_priority(provider.id))
-                })
-                .collect(),
-            LinkState::SelectingEndpoint {
-                provider_id,
-                endpoints,
-            } => endpoints
-                .iter()
-                .map(|endpoint| {
-                    self.action(LinkOp::ConnectEndpoint {
-                        provider_id: *provider_id,
-                        endpoint_id: endpoint.id.clone(),
-                    })
-                    .with_label(format!("Open {}", endpoint.label))
-                    .with_summary(endpoint.summary.clone())
-                })
-                .collect(),
-            LinkState::Failed { .. } => vec![self.action(LinkOp::RefreshProviders)],
-            LinkState::DiscoveringEndpoints { .. }
-            | LinkState::Connecting { .. }
-            | LinkState::Managing { .. } => Vec::new(),
-            LinkState::Connected { .. } => {
-                let mut actions = Vec::new();
-                if self.active_supports(LinkOperation::FlashFirmware) {
-                    actions.push(self.action(LinkOp::ProvisionFirmware));
-                }
-                if !server_connected {
-                    actions.push(self.action(LinkOp::ConnectServer));
-                }
-                if self.active_supports(LinkOperation::Reset) {
-                    actions.push(self.action(LinkOp::ResetDevice));
-                }
-                if self.active_supports(LinkOperation::EraseDeviceFlash) {
-                    actions.push(self.action(LinkOp::ResetToBlank));
-                }
-                actions.push(self.action(LinkOp::DisconnectLink));
-                actions
-            }
-        }
-    }
-
-    pub fn view(&self, server_connected: bool) -> UiPaneView {
-        UiPaneView::new(
-            Self::NODE_ID,
-            "Link",
-            link_status(&self.state),
-            link_body(&self.state),
-            self.actions(server_connected),
-        )
     }
 
     pub fn refresh_provider_catalog(&mut self) {
@@ -397,7 +333,7 @@ impl LinkController {
             device: device.clone(),
             progress: ProgressState::new(progress_label.clone()),
         };
-        let node_id = self.node_id();
+        let node_id = ControllerId::new(Self::NODE_ID);
         let activity = Rc::new(RefCell::new(
             UiActivityView::new(progress_label.clone())
                 .with_progress(UiProgress::indeterminate(progress_label.clone())),
@@ -479,12 +415,6 @@ impl LinkController {
         }
     }
 
-    fn active_supports(&self, operation: LinkOperation) -> bool {
-        self.active_session
-            .as_ref()
-            .is_some_and(|session| session.capabilities.supports(operation))
-    }
-
     fn connected_device_summary(&self) -> Result<ConnectedDeviceSummary, UiError> {
         match &self.state {
             LinkState::Connected { device } | LinkState::Managing { device, .. } => {
@@ -494,14 +424,6 @@ impl LinkController {
                 "link is not connected to a device".to_string(),
             )),
         }
-    }
-}
-
-impl Controller for LinkController {
-    type Op = LinkOp;
-
-    fn node_id(&self) -> ControllerId {
-        ControllerId::new(Self::NODE_ID)
     }
 }
 
@@ -543,56 +465,6 @@ fn provider_choices(registry: &LinkProviderRegistry) -> Vec<ProviderChoice> {
         .into_iter()
         .map(ProviderChoice::from_descriptor)
         .collect()
-}
-
-fn link_status(state: &LinkState) -> UiStatus {
-    match state {
-        LinkState::SelectingProvider { .. } => UiStatus::neutral("Choose runtime"),
-        LinkState::DiscoveringEndpoints { .. } => UiStatus::working("Discovering"),
-        LinkState::SelectingEndpoint { .. } => UiStatus::neutral("Choose endpoint"),
-        LinkState::Connecting { .. } => UiStatus::working("Connecting"),
-        LinkState::Managing { .. } => UiStatus::working("Managing"),
-        LinkState::Connected { device } => UiStatus::good(device.label.clone()),
-        LinkState::Failed { .. } => UiStatus::error("Link failed"),
-    }
-}
-
-fn link_body(state: &LinkState) -> UiViewContent {
-    match state {
-        LinkState::SelectingProvider {
-            issue: Some(issue), ..
-        } => UiViewContent::Issue(issue.clone()),
-        LinkState::SelectingProvider { providers, .. } => providers
-            .first()
-            .map(|provider| UiViewContent::text(provider.summary.clone()))
-            .unwrap_or_else(|| UiViewContent::text("No link providers are available.")),
-        LinkState::DiscoveringEndpoints {
-            provider_id,
-            progress,
-        } => UiViewContent::Progress(
-            progress
-                .clone()
-                .with_detail(format!(
-                    "Discovering endpoints from {}.",
-                    provider_id.label()
-                ))
-                .into(),
-        ),
-        LinkState::SelectingEndpoint { endpoints, .. } => endpoints
-            .first()
-            .map(|endpoint| UiViewContent::text(endpoint.summary.clone()))
-            .unwrap_or_else(|| {
-                UiViewContent::text("No endpoints are available for this provider.")
-            }),
-        LinkState::Connecting { progress, .. } => UiViewContent::Progress(progress.clone().into()),
-        LinkState::Managing { progress, .. } => UiViewContent::Progress(progress.clone().into()),
-        LinkState::Connected { device } => UiViewContent::Metrics(vec![
-            UiMetric::new("Provider", device.provider_id.label()),
-            UiMetric::new("Endpoint", &device.endpoint_id),
-            UiMetric::new("Session", &device.session_id),
-        ]),
-        LinkState::Failed { issue } => UiViewContent::Issue(issue.clone()),
-    }
 }
 
 fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogDraft> {
@@ -705,37 +577,6 @@ fn provider_can_open_server(kind: LinkProviderKind) -> bool {
     )
 }
 
-fn provider_action_label(kind: LinkProviderKind) -> String {
-    match kind {
-        LinkProviderKind::BrowserWorker => "Start simulator".to_string(),
-        LinkProviderKind::HostProcess => "Start host runtime".to_string(),
-        LinkProviderKind::BrowserSerialEsp32 => "Connect ESP32".to_string(),
-        LinkProviderKind::HostSerialEsp32 => "Select hardware".to_string(),
-        LinkProviderKind::Fake => "Select fake provider".to_string(),
-    }
-}
-
-fn provider_action_short_label(kind: LinkProviderKind) -> String {
-    match kind {
-        LinkProviderKind::BrowserWorker => "Simulator".to_string(),
-        LinkProviderKind::HostProcess => "Host".to_string(),
-        LinkProviderKind::BrowserSerialEsp32 | LinkProviderKind::HostSerialEsp32 => {
-            "ESP32".to_string()
-        }
-        LinkProviderKind::Fake => "Fake".to_string(),
-    }
-}
-
-fn provider_action_icon(kind: LinkProviderKind) -> String {
-    match kind {
-        LinkProviderKind::BrowserWorker | LinkProviderKind::HostProcess => "play".to_string(),
-        LinkProviderKind::BrowserSerialEsp32 | LinkProviderKind::HostSerialEsp32 => {
-            "usb".to_string()
-        }
-        LinkProviderKind::Fake => "test-tube".to_string(),
-    }
-}
-
 fn provider_auto_connects(kind: LinkProviderKind) -> bool {
     matches!(
         kind,
@@ -806,16 +647,6 @@ async fn open_provider_protocol_if_needed(
 ) -> Result<(), UiError> {
     let _ = provider_id;
     Ok(())
-}
-
-fn provider_action_priority(kind: LinkProviderKind) -> ActionPriority {
-    match kind {
-        LinkProviderKind::BrowserWorker | LinkProviderKind::HostProcess => ActionPriority::Primary,
-        LinkProviderKind::BrowserSerialEsp32 | LinkProviderKind::HostSerialEsp32 => {
-            ActionPriority::Secondary
-        }
-        LinkProviderKind::Fake => ActionPriority::Tertiary,
-    }
 }
 
 fn link_session_logs(
@@ -907,111 +738,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selecting_provider_offers_registry_provider_actions() {
-        let link = LinkController::with_registry(registry_with_fake_endpoint());
-
-        let actions = link.actions(false);
-
-        assert_eq!(actions.len(), 1);
-        assert_eq!(
-            actions[0].op_as::<LinkOp>(),
-            Some(&LinkOp::OpenProvider {
-                provider_id: LinkProviderKind::Fake
-            })
-        );
-        assert_eq!(actions[0].node_id().as_str(), LinkController::NODE_ID);
-        assert_eq!(actions[0].meta().label, "Select fake provider");
-    }
-
-    #[test]
-    fn connected_link_without_server_offers_server_attach() {
-        let mut link = LinkController::with_registry(registry_with_fake_endpoint());
-        link.set_state(LinkState::Connected {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::Fake,
-                "fake-runtime",
-                "fake-session",
-                "Fake runtime",
-            ),
-        });
-
-        let actions = link.actions(false);
-
-        assert_eq!(actions.len(), 2);
-        assert_eq!(actions[0].op_as::<LinkOp>(), Some(&LinkOp::ConnectServer));
-        assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
-    }
-
-    #[test]
-    fn connected_link_with_server_keeps_recovery_actions() {
-        let mut link = LinkController::with_registry(registry_with_fake_endpoint());
-        link.set_state(LinkState::Connected {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::Fake,
-                "fake-runtime",
-                "fake-session",
-                "Fake runtime",
-            ),
-        });
-
-        let actions = link.actions(true);
-
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
-    }
-
-    #[test]
-    fn connected_management_capable_link_offers_provision_and_reset_without_server() {
-        let mut link = LinkController::with_registry(registry_with_fake_endpoint());
-        link.active_session = Some(management_capable_session());
-        link.set_state(LinkState::Connected {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::Fake,
-                "fake-runtime",
-                "fake-session",
-                "Fake runtime",
-            ),
-        });
-
-        let actions = link.actions(false);
-
-        assert_eq!(actions.len(), 5);
-        assert_eq!(
-            actions[0].op_as::<LinkOp>(),
-            Some(&LinkOp::ProvisionFirmware)
-        );
-        assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::ConnectServer));
-        assert_eq!(actions[2].op_as::<LinkOp>(), Some(&LinkOp::ResetDevice));
-        assert_eq!(actions[3].op_as::<LinkOp>(), Some(&LinkOp::ResetToBlank));
-        assert_eq!(actions[4].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
-    }
-
-    #[test]
-    fn connected_management_capable_link_keeps_management_actions_with_server() {
-        let mut link = LinkController::with_registry(registry_with_fake_endpoint());
-        link.active_session = Some(management_capable_session());
-        link.set_state(LinkState::Connected {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::Fake,
-                "fake-runtime",
-                "fake-session",
-                "Fake runtime",
-            ),
-        });
-
-        let actions = link.actions(true);
-
-        assert_eq!(actions.len(), 4);
-        assert_eq!(
-            actions[0].op_as::<LinkOp>(),
-            Some(&LinkOp::ProvisionFirmware)
-        );
-        assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::ResetDevice));
-        assert_eq!(actions[2].op_as::<LinkOp>(), Some(&LinkOp::ResetToBlank));
-        assert_eq!(actions[3].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
-    }
-
-    #[test]
     fn failed_management_returns_to_recoverable_connected_state() {
         let mut link = LinkController::with_registry(registry_with_fake_endpoint());
         link.active_provider = Some(LinkProviderKind::Fake);
@@ -1030,7 +756,6 @@ mod tests {
 
         assert!(matches!(result, Err(UiError::Link(_))));
         assert!(matches!(link.state(), LinkState::Connected { .. }));
-        assert!(!link.actions(false).is_empty());
     }
 
     #[test]
@@ -1100,13 +825,6 @@ mod tests {
                 ..
             } if issue.message.contains("serial discovery failed")
         ));
-        assert_eq!(link.actions(false).len(), 1);
-        assert_eq!(
-            link.actions(false)[0].op_as::<LinkOp>(),
-            Some(&LinkOp::OpenProvider {
-                provider_id: LinkProviderKind::Fake
-            })
-        );
     }
 
     #[test]
@@ -1127,13 +845,6 @@ mod tests {
                 ..
             } if issue.message.contains("Failed to open serial port")
         ));
-        assert_eq!(link.actions(false).len(), 1);
-        assert_eq!(
-            link.actions(false)[0].op_as::<LinkOp>(),
-            Some(&LinkOp::OpenProvider {
-                provider_id: LinkProviderKind::Fake
-            })
-        );
     }
 
     #[test]
@@ -1154,13 +865,6 @@ mod tests {
                 ..
             } if issue.message.contains("server handoff failed")
         ));
-        assert_eq!(link.actions(false).len(), 1);
-        assert_eq!(
-            link.actions(false)[0].op_as::<LinkOp>(),
-            Some(&LinkOp::OpenProvider {
-                provider_id: LinkProviderKind::Fake
-            })
-        );
     }
 
     #[test]

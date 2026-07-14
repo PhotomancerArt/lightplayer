@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, bail};
 use lpa_link::LinkProvider;
 use lpa_link::providers::host_serial_esp32::{
-    HostSerialEsp32Provider, is_likely_esp32_serial_port,
+    HostSerialEsp32Provider, is_likely_esp32_serial_port, prefer_cu_ports,
 };
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
@@ -70,12 +70,15 @@ fn auto_detect_port(baud_rate: u32) -> Result<SerialPortConfig> {
         );
     }
 
-    // Filter for USB serial ports (usbmodem, ttyUSB, etc.)
-    let usb_ports: Vec<String> = all_ports
-        .iter()
-        .filter(|port| is_likely_esp32_serial_port(port))
-        .cloned()
-        .collect();
+    // Filter for USB serial ports (usbmodem, ttyUSB, etc.), preferring the
+    // macOS `/dev/cu.*` twin of each device over its blocking `/dev/tty.*`.
+    let usb_ports: Vec<String> = prefer_cu_ports(
+        all_ports
+            .iter()
+            .filter(|port| is_likely_esp32_serial_port(port))
+            .cloned()
+            .collect(),
+    );
 
     match usb_ports.len() {
         0 => {
@@ -107,7 +110,10 @@ fn auto_detect_port(baud_rate: u32) -> Result<SerialPortConfig> {
 }
 
 /// List host serial ESP32 provider ports without prompting.
-fn list_host_serial_esp32_ports() -> Result<Vec<String>> {
+///
+/// Shared enumeration for CLI port resolution: the interactive path here and
+/// the non-interactive fwcheck path both go through lpa-link discovery.
+pub(crate) fn list_host_serial_esp32_ports() -> Result<Vec<String>> {
     let mut provider = HostSerialEsp32Provider::new();
     let endpoints =
         pollster::block_on(provider.discover()).context("Failed to list serial ports")?;

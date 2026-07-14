@@ -596,11 +596,12 @@ fn server_io_from_link_connection(
         LinkConnectionKind::Fake => Err(UiError::UnsupportedFeature(
             "fake links do not expose a server protocol".to_string(),
         )),
-        LinkConnectionKind::HostProcess
-        | LinkConnectionKind::HostSerialEsp32
-        | LinkConnectionKind::PendingImplementation { .. } => Err(UiError::UnsupportedFeature(
-            format!("server I/O is not implemented for {:?}", connection.kind),
-        )),
+        LinkConnectionKind::HostProcess | LinkConnectionKind::HostSerialEsp32 => {
+            Err(UiError::UnsupportedFeature(format!(
+                "server I/O is not implemented for {:?}",
+                connection.kind
+            )))
+        }
     }
 }
 
@@ -611,7 +612,6 @@ fn connection_protocol(kind: &LinkConnectionKind) -> String {
         LinkConnectionKind::HostProcess => "host-process".to_string(),
         LinkConnectionKind::HostSerialEsp32 => "host-serial-esp32".to_string(),
         LinkConnectionKind::Fake => "fake".to_string(),
-        LinkConnectionKind::PendingImplementation { kind } => kind.clone(),
     }
 }
 

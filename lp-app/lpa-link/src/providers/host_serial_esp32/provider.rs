@@ -126,8 +126,12 @@ impl HostSerialEsp32Provider {
         port_name: String,
         label: String,
     ) {
+        // Only logs + diagnostics: this provider implements no `manage()`, so
+        // advertising Reset would lie (`ResetRuntime` would return
+        // `OperationUnsupported`). Reset/Flash/Erase return together with a
+        // real management implementation (M5, espflash-lib).
         let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
-            .with_capabilities(LinkCapabilities::esp32_serial_base());
+            .with_capabilities(LinkCapabilities::diagnostics_and_logs());
 
         if let Some(existing) = self
             .endpoints
@@ -347,4 +351,20 @@ pub fn is_likely_esp32_serial_port(port_name: &str) -> bool {
         || port_name.contains("ttyUSB")
         || port_name.contains("ttyACM")
         || port_name.contains("tty.usbserial")
+}
+
+/// Prefer macOS call-out (`/dev/cu.*`) devices over their `/dev/tty.*` twins.
+///
+/// macOS exposes each serial device as both `/dev/tty.*` (dial-in, blocks on
+/// carrier detect) and `/dev/cu.*` (call-out, opens immediately). ESP32 boards
+/// never assert DCD, so the `cu.*` twin is the one that works. When any
+/// `/dev/cu.*` candidates exist, only those are returned; otherwise (e.g. on
+/// Linux) the input is returned unchanged.
+pub fn prefer_cu_ports(ports: Vec<String>) -> Vec<String> {
+    let cu_ports: Vec<String> = ports
+        .iter()
+        .filter(|name| name.starts_with("/dev/cu."))
+        .cloned()
+        .collect();
+    if cu_ports.is_empty() { ports } else { cu_ports }
 }

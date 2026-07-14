@@ -1,5 +1,5 @@
 use lpa_link::LinkProviderKind;
-use lpa_link::providers::{LinkProviderAvailability, LinkProviderDescriptor};
+use lpa_link::providers::LinkProviderDescriptor;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderChoice {
@@ -13,7 +13,7 @@ impl ProviderChoice {
         Self {
             id: descriptor.kind,
             label: provider_label(descriptor.kind, descriptor.label),
-            summary: provider_summary(descriptor.kind, descriptor.availability),
+            summary: provider_summary(descriptor.kind),
         }
     }
 
@@ -35,10 +35,7 @@ fn provider_label(kind: LinkProviderKind, fallback: &str) -> String {
     }
 }
 
-fn provider_summary(kind: LinkProviderKind, availability: LinkProviderAvailability) -> String {
-    if let LinkProviderAvailability::Unavailable { reason } = availability {
-        return reason.to_string();
-    }
+fn provider_summary(kind: LinkProviderKind) -> String {
     match kind {
         LinkProviderKind::BrowserWorker => {
             "Run LightPlayer locally in a browser worker.".to_string()

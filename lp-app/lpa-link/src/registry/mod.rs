@@ -10,7 +10,6 @@
 //! options. `LinkProviderInstance` is the enum-dispatched storage type used
 //! because `LinkProvider` has async methods and is not object-safe.
 
-pub mod availability;
 pub mod descriptor;
 pub mod env;
 pub mod instance;

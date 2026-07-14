@@ -47,7 +47,6 @@ pub enum LinkConnectionKind {
     BrowserWorker { protocol: String },
     HostSerialEsp32,
     BrowserSerialEsp32 { protocol: String },
-    PendingImplementation { kind: String },
 }
 
 impl LinkConnection {
@@ -59,20 +58,6 @@ impl LinkConnection {
             endpoint_id: endpoint_id.into(),
             session_id: session_id.into(),
             kind: LinkConnectionKind::Fake,
-            #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
-            server_connection: None,
-        }
-    }
-
-    pub fn pending(
-        endpoint_id: impl Into<LinkEndpointId>,
-        session_id: impl Into<LinkSessionId>,
-        kind: impl Into<String>,
-    ) -> Self {
-        Self {
-            endpoint_id: endpoint_id.into(),
-            session_id: session_id.into(),
-            kind: LinkConnectionKind::PendingImplementation { kind: kind.into() },
             #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
             server_connection: None,
         }

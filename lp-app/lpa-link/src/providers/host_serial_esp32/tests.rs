@@ -16,7 +16,9 @@ fn explicit_port_endpoint_records_metadata() {
         Some("/dev/cu.usbmodem2101")
     );
     let endpoint = provider.endpoint(&endpoint_id).unwrap();
-    assert!(endpoint.capabilities.supports(LinkOperation::Reset));
+    // No Reset: the host provider implements no manage() yet, so it must not
+    // advertise management operations (M5 restores Reset with Flash/Erase).
+    assert!(!endpoint.capabilities.supports(LinkOperation::Reset));
     assert!(endpoint.capabilities.supports(LinkOperation::ReadLogs));
     assert!(
         endpoint

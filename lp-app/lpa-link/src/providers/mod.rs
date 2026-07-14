@@ -29,7 +29,6 @@ pub mod host_process;
 #[cfg(feature = "host-serial-esp32")]
 pub mod host_serial_esp32;
 
-pub use crate::registry::availability::LinkProviderAvailability;
 pub use crate::registry::descriptor::LinkProviderDescriptor;
 pub use crate::registry::env::LinkEnv;
 pub use crate::registry::instance::LinkProviderInstance;

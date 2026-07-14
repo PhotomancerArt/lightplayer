@@ -112,8 +112,10 @@ let registry =
 let providers = registry.descriptors();
 ```
 
-The returned `LinkProviderDescriptor` values contain provider kinds, build
-availability, labels, and low-level `LinkCapabilities`. `LinkProviderKind`
+The returned `LinkProviderDescriptor` values contain provider kinds, labels,
+and low-level `LinkCapabilities`. The registry only constructs providers
+compiled for the current feature/target matrix, so every descriptor it returns
+is usable in the current build/runtime. `LinkProviderKind`
 owns the stable kebab-case key used at app boundaries. Product surfaces such as
 Studio should map these descriptors into their own UX-facing provider cards,
 intents, ordering, and recovery actions.
@@ -123,7 +125,7 @@ intents, ordering, and recovery actions.
 | `fake` | `providers::fake::FakeProvider` | none | test endpoint | diagnostics only | implemented |
 | `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented; returns host `LinkServerConnection` |
 | `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | implemented; owns Worker wrapper/lifecycle |
-| `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect, reset-after-open, logs, diagnostics; future flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
+| `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect (optional reset-after-open), logs, diagnostics; future reset/flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
 | `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, provision firmware, erase to blank, reset, logs, diagnostics; future raw filesystem | implemented for browser Web Serial/probe/flash/erase ownership |
 | `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
 | `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |

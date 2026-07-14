@@ -75,13 +75,15 @@ impl LinkProviderKind {
             Self::HostProcess | Self::BrowserWorker => LinkCapabilities::default()
                 .with(LinkOperation::ReadLogs)
                 .with(LinkOperation::ReadDiagnostics),
-            Self::HostSerialEsp32 => LinkCapabilities::esp32_serial_base(),
+            // Logs + diagnostics only until the host provider grows a real
+            // `manage()` implementation (M5 restores Reset with Flash/Erase).
+            Self::HostSerialEsp32 => LinkCapabilities::diagnostics_and_logs(),
             Self::BrowserSerialEsp32 => LinkCapabilities::esp32_serial_base().with_flash(),
         }
     }
 
     /// Static provider descriptor for this built-in kind.
     pub fn descriptor(self) -> crate::providers::LinkProviderDescriptor {
-        crate::providers::LinkProviderDescriptor::available(self, self.label(), self.capabilities())
+        crate::providers::LinkProviderDescriptor::new(self, self.label(), self.capabilities())
     }
 }
