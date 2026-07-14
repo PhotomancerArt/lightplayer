@@ -4,9 +4,10 @@
 //! and variant names are deliberate and stable. Timestamps are f64 epoch
 //! seconds, always caller-supplied — this crate never reads a clock.
 //!
-//! Exactly one origin event (`Created`, `ImportedZip`, `RemixedFrom`, or
-//! `ForkedFrom`) appears in a project's history, and it is the first event —
-//! enforced by [`crate::lineage::project_history::ProjectHistory`].
+//! Exactly one origin event (`Created`, `ImportedZip`, `RemixedFrom`,
+//! `ForkedFrom`, or `PulledFromDevice`) appears in a project's history, and
+//! it is the first event — enforced by
+//! [`crate::lineage::project_history::ProjectHistory`].
 
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,11 @@ pub enum EventKind {
         parent_project: PrefixedUid,
         parent_version: ContentHash,
     },
+    /// Origin: adopted from a device carrying a project this library did
+    /// not know (connect-as-pull, D8/D11). The adopted content itself is
+    /// the first `Saved` version; the device observation follows as a
+    /// `Connected` event.
+    PulledFromDevice { device: PrefixedUid },
     /// A save advanced the line to this version.
     Saved { version: ContentHash },
     /// This version was pushed to a device.
@@ -65,6 +71,7 @@ impl EventKind {
                 | EventKind::ImportedZip
                 | EventKind::RemixedFrom { .. }
                 | EventKind::ForkedFrom { .. }
+                | EventKind::PulledFromDevice { .. }
         )
     }
 
@@ -116,6 +123,9 @@ mod tests {
                 device: uid(UidPrefix::Device),
                 observed: hash,
             },
+            EventKind::PulledFromDevice {
+                device: uid(UidPrefix::Device),
+            },
         ];
         for kind in events {
             let event = HistoryEvent {
@@ -161,6 +171,12 @@ mod tests {
         let hash = ContentHash::of(b"v");
         assert!(EventKind::Created.is_origin());
         assert!(EventKind::ImportedZip.is_origin());
+        assert!(
+            EventKind::PulledFromDevice {
+                device: uid(crate::uid::uid_prefix::UidPrefix::Device)
+            }
+            .is_origin()
+        );
         assert!(!EventKind::Saved { version: hash }.is_origin());
         assert_eq!(EventKind::Created.origin_version(), None);
         assert_eq!(

@@ -490,27 +490,31 @@ fn eval_op(
         LpirOp::Isub { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, sub),
         LpirOp::Imul { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, mul),
         LpirOp::IdivS { dst, lhs, rhs } => {
+            // RV32 semantics: x / 0 = -1, i32::MIN / -1 = i32::MIN.
             let a = val_i32(get_reg(regs, *lhs)?)?;
             let b = val_i32(get_reg(regs, *rhs)?)?;
-            let v = if b == 0 { 0 } else { a.wrapping_div(b) };
+            let v = if b == 0 { -1 } else { a.wrapping_div(b) };
             set_reg(regs, *dst, Value::I32(v))?;
         }
         LpirOp::IdivU { dst, lhs, rhs } => {
+            // RV32 semantics: x / 0 = all ones.
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
-            let v = if b == 0 { 0 } else { a.wrapping_div(b) };
+            let v = if b == 0 { u32::MAX } else { a.wrapping_div(b) };
             set_reg(regs, *dst, Value::I32(v as i32))?;
         }
         LpirOp::IremS { dst, lhs, rhs } => {
+            // RV32 semantics: x % 0 = x, i32::MIN % -1 = 0.
             let a = val_i32(get_reg(regs, *lhs)?)?;
             let b = val_i32(get_reg(regs, *rhs)?)?;
-            let v = if b == 0 { 0 } else { a.wrapping_rem(b) };
+            let v = if b == 0 { a } else { a.wrapping_rem(b) };
             set_reg(regs, *dst, Value::I32(v))?;
         }
         LpirOp::IremU { dst, lhs, rhs } => {
+            // RV32 semantics: x % 0 = x.
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
-            let v = if b == 0 { 0 } else { a.wrapping_rem(b) };
+            let v = if b == 0 { a } else { a.wrapping_rem(b) };
             set_reg(regs, *dst, Value::I32(v as i32))?;
         }
         LpirOp::Ineg { dst, src } => {

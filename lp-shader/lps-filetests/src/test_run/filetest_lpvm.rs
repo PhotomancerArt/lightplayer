@@ -8,7 +8,7 @@ use lpvm::{
     LpsValueF32, LpsValueQ32, LpvmBuffer, LpvmEngine, LpvmInstance, LpvmMemory, LpvmModule,
     ModuleDebugInfo,
 };
-use lpvm_cranelift::{CompileOptions, CraneliftEngine, CraneliftInstance, CraneliftModule};
+use lpvm_cranelift::CompileOptions;
 use lpvm_emu::{EmuEngine, EmuInstance, EmuModule};
 use lpvm_native::{
     NativeCompileOptions as FaCompileOptions, NativeEmuEngine as FaEmuEngine,
@@ -26,8 +26,6 @@ use crate::targets::{Backend, FloatMode as TargetFloatMode, Frontend, Target};
 /// Each variant retains the backend `lpvm::LpvmEngine` so host code can allocate in the same shared
 /// memory arena the instantiated module uses (texture fixtures, etc.).
 pub enum CompiledShader {
-    /// Host Cranelift JIT (`jit.q32`).
-    Jit(CraneliftEngine, CraneliftModule),
     /// Linked RV32 + shared arena via Cranelift (`rv32c.q32`).
     Emu(EmuEngine, EmuModule),
     /// Linked RV32 + shared arena via `lpvm-native` (`rv32n.q32`).
@@ -38,8 +36,6 @@ pub enum CompiledShader {
 
 /// Per-`// run:` instantiation (mutable VM context / store).
 pub enum FiletestInstance {
-    /// Host Cranelift JIT instance.
-    Jit(CraneliftInstance),
     /// RV32 emulator instance with guest VMContext (Cranelift path).
     Emu(EmuInstance),
     /// RV32 emulator instance with guest VMContext (`lpvm-native` path).
@@ -51,7 +47,6 @@ pub enum FiletestInstance {
 impl CompiledShader {
     pub(crate) fn module_sig(&self) -> &LpsModuleSig {
         match self {
-            Self::Jit(_, m) => m.signatures(),
             Self::Emu(_, m) => m.signatures(),
             Self::NativeFa(_, m) => m.signatures(),
             Self::Wasm(_, m) => m.signatures(),
@@ -60,9 +55,6 @@ impl CompiledShader {
 
     pub(crate) fn instantiate(&self) -> anyhow::Result<FiletestInstance> {
         Ok(match self {
-            Self::Jit(_, m) => {
-                FiletestInstance::Jit(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
-            }
             Self::Emu(_, m) => {
                 FiletestInstance::Emu(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
@@ -78,7 +70,6 @@ impl CompiledShader {
     /// Allocate bytes in this backend's shared memory (same arena as the compiled module).
     pub(crate) fn alloc_shared(&self, size: usize, align: usize) -> anyhow::Result<LpvmBuffer> {
         let mem: &dyn LpvmMemory = match self {
-            Self::Jit(e, _) => e.memory(),
             Self::Emu(e, _) => e.memory(),
             Self::NativeFa(e, _) => e.memory(),
             Self::Wasm(e, _) => e.memory(),
@@ -91,7 +82,6 @@ impl CompiledShader {
 impl FiletestInstance {
     pub(crate) fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, String> {
         match self {
-            Self::Jit(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Emu(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call(name, args).map_err(|e| e.to_string()),
@@ -105,7 +95,6 @@ impl FiletestInstance {
         cycle_model: CycleModel,
     ) -> Result<Vec<i32>, String> {
         match self {
-            Self::Jit(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
             Self::Emu(i) => i
                 .call_q32_with_cycle_model(name, flat, cycle_model)
                 .map_err(|e| e.to_string()),
@@ -118,7 +107,6 @@ impl FiletestInstance {
 
     pub(crate) fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), String> {
         match self {
-            Self::Jit(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::Emu(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
@@ -136,7 +124,6 @@ impl FiletestInstance {
         value: &LpsValueQ32,
     ) -> Result<(), String> {
         match self {
-            Self::Jit(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
             Self::Emu(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
@@ -145,7 +132,6 @@ impl FiletestInstance {
 
     pub(crate) fn debug_state(&self) -> Option<String> {
         match self {
-            Self::Jit(_) => None,
             Self::Emu(i) => i.debug_state(),
             Self::NativeFa(i) => i.debug_state(),
             Self::Wasm(_) => None,
@@ -154,7 +140,6 @@ impl FiletestInstance {
 
     pub(crate) fn last_guest_instruction_count(&self) -> Option<u64> {
         match self {
-            Self::Jit(i) => i.last_guest_instruction_count(),
             Self::Emu(i) => i.last_guest_instruction_count(),
             Self::NativeFa(i) => i.last_guest_instruction_count(),
             Self::Wasm(i) => i.last_guest_instruction_count(),
@@ -163,7 +148,6 @@ impl FiletestInstance {
 
     pub(crate) fn last_guest_cycle_count(&self) -> Option<u64> {
         match self {
-            Self::Jit(i) => i.last_guest_cycle_count(),
             Self::Emu(i) => i.last_guest_cycle_count(),
             Self::NativeFa(i) => i.last_guest_cycle_count(),
             Self::Wasm(i) => i.last_guest_cycle_count(),
@@ -221,13 +205,6 @@ impl CompiledShader {
             ..Default::default()
         };
         match target.backend {
-            Backend::Jit => {
-                let engine = CraneliftEngine::new(opts);
-                let module = engine
-                    .compile(&ir, &meta)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
-                Ok(Self::Jit(engine, module))
-            }
             Backend::Rv32 => {
                 let engine = EmuEngine::new(opts);
                 let module = engine
@@ -275,7 +252,6 @@ impl CompiledShader {
     /// Returns None if the backend doesn't provide debug info.
     pub(crate) fn debug_info(&self) -> Option<&ModuleDebugInfo> {
         match self {
-            Self::Jit(_, _) => None,
             Self::Emu(_, m) => m.debug_info(),
             Self::NativeFa(_, m) => m.debug_info(),
             Self::Wasm(_, _) => None,
@@ -285,7 +261,7 @@ impl CompiledShader {
     pub(crate) fn wasm_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Wasm(_, m) => Some(m.wasm_bytes()),
-            Self::Jit(_, _) | Self::Emu(_, _) | Self::NativeFa(_, _) => None,
+            Self::Emu(_, _) | Self::NativeFa(_, _) => None,
         }
     }
 
@@ -293,7 +269,7 @@ impl CompiledShader {
         match self {
             Self::Emu(_, m) => m.lpir_module(),
             Self::NativeFa(_, m) => m.lpir_module(),
-            Self::Jit(_, _) | Self::Wasm(_, _) => None,
+            Self::Wasm(_, _) => None,
         }
     }
 }

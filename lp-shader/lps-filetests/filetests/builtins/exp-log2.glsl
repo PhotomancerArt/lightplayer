@@ -57,7 +57,6 @@ vec2 test_log2_vec2() {
     return log2(vec2(rt(1.0), rt(2.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_log2_vec2() ~= vec2(0.0, 1.0)
 
 vec3 test_log2_vec3() {

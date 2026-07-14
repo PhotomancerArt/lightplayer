@@ -86,3 +86,42 @@ const PROJECT_READ_RUNTIME_CHUNK_ASSERT: () = assert!(
         <= PROJECT_READ_FRAME_MAX_BYTES,
     "runtime-buffer chunk (base64 + envelope reserve) must fit one project-read frame"
 );
+
+/// Reserve for the per-entry `FileChunk` + envelope JSON around one file-sync
+/// chunk (path, kind, offsets, `FsResponse::Changes` + envelope scaffolding).
+const FILE_SYNC_CHUNK_ENVELOPE_RESERVE_BYTES: usize = 1024;
+
+/// Raw bytes per file-sync chunk (`FsRequest::WriteChunk` uploads and
+/// `FsResponse::Changes` downloads).
+///
+/// Mirrors [`PROJECT_READ_RUNTIME_CHUNK_BYTES`]: a chunk of this many raw
+/// bytes becomes at most `ceil(N/3) * 4` base64 characters (binary worst
+/// case; UTF-8 text travels as escaped JSON text of comparable size), and
+/// with the per-chunk reserve it must fit one frame.
+/// `FILE_SYNC_CHUNK_ASSERT` proves the fit at compile time.
+pub const FILE_SYNC_CHUNK_BYTES: usize = 4 * 1024;
+
+/// Compile-time proof that a full file-sync chunk plus scaffolding fits
+/// under the frame budget.
+#[allow(
+    dead_code,
+    reason = "compile-time assertion; evaluated for its panic, never read"
+)]
+const FILE_SYNC_CHUNK_ASSERT: () = assert!(
+    base64_len(FILE_SYNC_CHUNK_BYTES) + FILE_SYNC_CHUNK_ENVELOPE_RESERVE_BYTES
+        <= PROJECT_READ_FRAME_MAX_BYTES,
+    "file-sync chunk (base64 + envelope reserve) must fit one frame"
+);
+
+/// Maximum raw payload bytes per ChangesSince page (sum of entry `data`).
+///
+/// A page is one ordinary response frame; together with
+/// [`FILE_SYNC_PAGE_MAX_ENTRIES`] this bounds the encoded page under
+/// [`PROJECT_READ_FRAME_MAX_BYTES`] by construction (base64 worst case ≈
+/// 4/3 × raw + per-entry scaffolding). The fs_api worst-case measurement
+/// test keeps these numbers honest against the wire serializer.
+pub const FILE_SYNC_PAGE_RAW_BYTES: usize = 7 * 1024;
+
+/// Maximum entries per ChangesSince page (bounds per-entry path/scaffold
+/// overhead for pages full of tiny files).
+pub const FILE_SYNC_PAGE_MAX_ENTRIES: usize = 12;

@@ -10,9 +10,9 @@ use lpir::{
 };
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
-use crate::body::UnaryOp;
+use crate::body::{BinaryOp, UnaryOp};
 use crate::hir::{
-    ExprId, ExprList, HirArena, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey,
+    ExprId, ExprList, HirArena, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey, PlaceId,
     scalar_base_type, scalar_ir_types, scalar_lane_count,
 };
 use crate::{Diagnostic, Span};
@@ -580,9 +580,15 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             }
         }
         HirExprKind::Binary { op, lhs, rhs } => {
-            let lhs = lower_expr(ctx, *lhs)?;
-            let rhs = lower_expr(ctx, *rhs)?;
-            lower_binary(ctx, expr.span, *op, lhs, rhs, &expr.ty)
+            if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr)
+                && expr_needs_lazy_eval(ctx.arena, *rhs)
+            {
+                lower_short_circuit(ctx, *op, *lhs, *rhs)
+            } else {
+                let lhs = lower_expr(ctx, *lhs)?;
+                let rhs = lower_expr(ctx, *rhs)?;
+                lower_binary(ctx, expr.span, *op, lhs, rhs, &expr.ty)
+            }
         }
         HirExprKind::Sequence { first, second } => {
             let _ = lower_expr(ctx, *first)?;
@@ -593,10 +599,15 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             accept,
             reject,
         } => {
-            let condition = lower_expr(ctx, *condition)?;
-            let accept = lower_expr(ctx, *accept)?;
-            let reject = lower_expr(ctx, *reject)?;
-            lower_select(ctx, expr.span, condition, accept, reject, &expr.ty)
+            if expr_needs_lazy_eval(ctx.arena, *accept) || expr_needs_lazy_eval(ctx.arena, *reject)
+            {
+                lower_lazy_conditional(ctx, expr.span, *condition, *accept, *reject, &expr.ty)
+            } else {
+                let condition = lower_expr(ctx, *condition)?;
+                let accept = lower_expr(ctx, *accept)?;
+                let reject = lower_expr(ctx, *reject)?;
+                lower_select(ctx, expr.span, condition, accept, reject, &expr.ty)
+            }
         }
         HirExprKind::PlaceRead { target } => read_assign_target(ctx, expr.span, *target),
         HirExprKind::Assign { target, value } => {
@@ -608,6 +619,176 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             lower_inc_dec(ctx, expr.span, *target, *op, *prefix)
         }
     }
+}
+
+/// True when an expression must not be evaluated speculatively: it has side
+/// effects (calls that may write state, assignments, increments) or can trap
+/// on some backend (integer division / modulo is unguarded `i32.div_s` on
+/// wasm). GLSL `&&` / `||` / `?:` only evaluate the operands the spec says
+/// they evaluate; operands for which this returns false are safe to keep on
+/// the branchless eager path (`iand` / `ior` / `select`).
+fn expr_needs_lazy_eval(arena: &HirArena, expr: ExprId) -> bool {
+    let e = arena.expr(expr);
+    match &e.kind {
+        HirExprKind::BoolLiteral(_)
+        | HirExprKind::FloatLiteral(_)
+        | HirExprKind::IntLiteral(_)
+        | HirExprKind::UIntLiteral(_)
+        | HirExprKind::Param { .. }
+        | HirExprKind::Local { .. }
+        | HirExprKind::Uniform { .. }
+        | HirExprKind::Global { .. } => false,
+        HirExprKind::Constructor { args } => expr_list_needs_lazy_eval(arena, *args),
+        HirExprKind::Cast { expr } | HirExprKind::Swizzle { base: expr, .. } => {
+            expr_needs_lazy_eval(arena, *expr)
+        }
+        HirExprKind::Index { base, index } => {
+            expr_needs_lazy_eval(arena, *base) || expr_needs_lazy_eval(arena, *index)
+        }
+        HirExprKind::Builtin {
+            args, writebacks, ..
+        } => !writebacks.is_empty() || expr_list_needs_lazy_eval(arena, *args),
+        // User functions may write globals; treat every call as effectful.
+        HirExprKind::UserCall { .. } => true,
+        HirExprKind::ImportCall { args, out, .. } => {
+            out.is_some() || expr_list_needs_lazy_eval(arena, *args)
+        }
+        HirExprKind::TexelFetch { coord, lod, .. } => {
+            expr_needs_lazy_eval(arena, *coord) || expr_needs_lazy_eval(arena, *lod)
+        }
+        HirExprKind::Texture { coord, .. } => expr_needs_lazy_eval(arena, *coord),
+        HirExprKind::Unary { expr, .. } => expr_needs_lazy_eval(arena, *expr),
+        HirExprKind::Binary { op, lhs, rhs } => {
+            let int_div_may_trap = matches!(op, BinaryOp::Div | BinaryOp::Mod)
+                && matches!(
+                    scalar_base_type(&e.ty).as_ref().unwrap_or(&e.ty),
+                    LpsType::Int | LpsType::UInt
+                );
+            int_div_may_trap
+                || expr_needs_lazy_eval(arena, *lhs)
+                || expr_needs_lazy_eval(arena, *rhs)
+        }
+        HirExprKind::Sequence { first, second } => {
+            expr_needs_lazy_eval(arena, *first) || expr_needs_lazy_eval(arena, *second)
+        }
+        HirExprKind::Conditional {
+            condition,
+            accept,
+            reject,
+        } => {
+            expr_needs_lazy_eval(arena, *condition)
+                || expr_needs_lazy_eval(arena, *accept)
+                || expr_needs_lazy_eval(arena, *reject)
+        }
+        HirExprKind::PlaceRead { target } => place_needs_lazy_eval(arena, *target),
+        HirExprKind::Assign { .. } | HirExprKind::IncDec { .. } => true,
+    }
+}
+
+fn expr_list_needs_lazy_eval(arena: &HirArena, list: ExprList) -> bool {
+    arena
+        .expr_list(list)
+        .iter()
+        .any(|arg| expr_needs_lazy_eval(arena, *arg))
+}
+
+fn place_needs_lazy_eval(arena: &HirArena, place: PlaceId) -> bool {
+    arena.place(place).segments.iter().any(|seg| match seg {
+        crate::hir::PlaceSegment::Index { index, .. } => expr_needs_lazy_eval(arena, *index),
+        _ => false,
+    })
+}
+
+/// GLSL `&&` / `||` must short-circuit: the right operand is evaluated only
+/// when the left operand does not already decide the result. Lower to an
+/// if/else where one arm evaluates the right operand and the other reuses the
+/// left value. The result vreg is defined in both arms (never before the
+/// `if`) — the native backend's allocator supports conditional defs only in
+/// this both-arms shape, the same one naga-frontend local stores produce.
+fn lower_short_circuit(
+    ctx: &mut LowerCtx<'_>,
+    op: BinaryOp,
+    lhs: ExprId,
+    rhs: ExprId,
+) -> Result<LowerValue, Diagnostic> {
+    let lhs_span = ctx.arena.expr_span(lhs);
+    let lhs = lower_expr(ctx, lhs)?;
+    let lhs_lane = single_lane(lhs_span, &lhs)?;
+    let result = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push_if(lhs_lane);
+    if op == BinaryOp::LogicalOr {
+        ctx.fb.push(LpirOp::Copy {
+            dst: result,
+            src: lhs_lane,
+        });
+        ctx.fb.push_else();
+    }
+    let rhs_span = ctx.arena.expr_span(rhs);
+    let rhs = lower_expr(ctx, rhs)?;
+    let rhs_lane = single_lane(rhs_span, &rhs)?;
+    ctx.fb.push(LpirOp::Copy {
+        dst: result,
+        src: rhs_lane,
+    });
+    if op == BinaryOp::LogicalAnd {
+        ctx.fb.push_else();
+        ctx.fb.push(LpirOp::Copy {
+            dst: result,
+            src: lhs_lane,
+        });
+    }
+    ctx.fb.end_if();
+    Ok(LowerValue {
+        ty: LpsType::Bool,
+        lanes: vec![result],
+    })
+}
+
+/// GLSL `?:` evaluates only the selected operand. Used when an arm needs lazy
+/// evaluation; pure arms keep the branchless `select` path. Same both-arms
+/// result-def shape as [`lower_short_circuit`].
+fn lower_lazy_conditional(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    condition: ExprId,
+    accept: ExprId,
+    reject: ExprId,
+    result_ty: &LpsType,
+) -> Result<LowerValue, Diagnostic> {
+    let cond = lower_expr(ctx, condition)?;
+    let cond_lane = single_lane(ctx.arena.expr_span(condition), &cond)?;
+    let lanes = scalar_ir_types(result_ty)?
+        .into_iter()
+        .map(|ty| ctx.fb.alloc_vreg(ty))
+        .collect::<Vec<_>>();
+    ctx.fb.push_if(cond_lane);
+    lower_conditional_arm(ctx, span, accept, &lanes)?;
+    ctx.fb.push_else();
+    lower_conditional_arm(ctx, span, reject, &lanes)?;
+    ctx.fb.end_if();
+    Ok(LowerValue {
+        ty: result_ty.clone(),
+        lanes,
+    })
+}
+
+fn lower_conditional_arm(
+    ctx: &mut LowerCtx<'_>,
+    span: Span,
+    arm: ExprId,
+    result_lanes: &[VReg],
+) -> Result<(), Diagnostic> {
+    let value = lower_expr(ctx, arm)?;
+    if value.lanes.len() != result_lanes.len() {
+        return Err(Diagnostic::error(span, "conditional arm lane mismatch"));
+    }
+    for (dst, src) in result_lanes.iter().zip(value.lanes.iter()) {
+        ctx.fb.push(LpirOp::Copy {
+            dst: *dst,
+            src: *src,
+        });
+    }
+    Ok(())
 }
 
 fn lower_import_call_with_out(

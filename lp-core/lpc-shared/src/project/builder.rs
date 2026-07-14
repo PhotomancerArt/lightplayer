@@ -209,6 +209,7 @@ impl ProjectBuilder {
         }
         let project = ProjectDef {
             format: ProjectDef::current_format_slot(),
+            uid: OptionSlot::none(),
             name: OptionSlot::some(ValueSlot::new(self.name.clone())),
             nodes: MapSlot::new(nodes),
         };

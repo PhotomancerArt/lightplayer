@@ -342,7 +342,9 @@ fn psrdnoise3_noperiod(x: Vec3Q32, sin_alpha: i32, cos_alpha: i32) -> (Q32, Q32,
     // To determine which simplex corners are closest, rank order the
     // magnitudes of u,v,w, resolving ties in priority order u,v,w
     // g_ = step(f0.xyx, f0.yzz) -> 1.0 if f0.xyx <= f0.yzz, else 0.0
-    let g_ = f0.xyx().step(f0.yzz());
+    // Vec3Q32::step(self, edge) computes step(edge, self), so f0.yzz is the
+    // receiver and f0.xyx the edge.
+    let g_ = f0.yzz().step(f0.xyx());
     // l_ = 1.0 - g_
     let l_ = Vec3Q32::one() - g_;
     // g = vec3(l_.z, g_.xy)
@@ -471,7 +473,9 @@ pub fn lpfn_psrdnoise3(
     // To determine which simplex corners are closest, rank order the
     // magnitudes of u,v,w, resolving ties in priority order u,v,w
     // g_ = step(f0.xyx, f0.yzz) -> 1.0 if f0.xyx <= f0.yzz, else 0.0
-    let g_ = f0.xyx().step(f0.yzz());
+    // Vec3Q32::step(self, edge) computes step(edge, self), so f0.yzz is the
+    // receiver and f0.xyx the edge.
+    let g_ = f0.yzz().step(f0.xyx());
     // l_ = 1.0 - g_
     let l_ = Vec3Q32::one() - g_;
     // g = vec3(l_.z, g_.xy)

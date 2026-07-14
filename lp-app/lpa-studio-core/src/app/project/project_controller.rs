@@ -75,6 +75,32 @@ pub struct ProjectController {
     root_shape_ids: BTreeMap<String, SlotShapeId>,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
+    /// The local library, when the platform mounted a store (browser).
+    /// Absent on host tests — flows degrade to the legacy deploy path.
+    library: Option<LibraryContext>,
+}
+
+/// Library wiring for load-as-push / save-as-pull (roadmap M3), reworked
+/// onto the injected [`LibraryHost`](crate::app::library::LibraryHost)
+/// seam (M4b): opens acquire per-project locks in the host; closes must
+/// release them.
+struct LibraryContext {
+    host: std::rc::Rc<dyn crate::app::library::LibraryHost>,
+    now_secs: std::rc::Rc<dyn Fn() -> f64>,
+    active: Option<ActiveLibraryProject>,
+    /// Projects that stopped being active on a synchronous path (state
+    /// reset, replacement open) and still hold their host-side lock.
+    /// Drained by [`ProjectController::release_closed_library_projects`]
+    /// at the studio controller's async choke points.
+    pending_close: Vec<String>,
+}
+
+/// The open library package backing the running project.
+struct ActiveLibraryProject {
+    handle: crate::app::library::PackageHandle,
+    /// Runtime fs revision the library is synced to (advances on each
+    /// successful save-as-pull).
+    last_synced: lpc_model::FsVersion,
 }
 
 impl ProjectController {
@@ -95,6 +121,125 @@ impl ProjectController {
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
             next_mutation_cmd_id: 1,
+            library: None,
+        }
+    }
+
+    /// Attach the injected library host (browser shell, once the store
+    /// backing it is ready).
+    pub fn set_library(
+        &mut self,
+        host: std::rc::Rc<dyn crate::app::library::LibraryHost>,
+        now_secs: std::rc::Rc<dyn Fn() -> f64>,
+    ) {
+        self.library = Some(LibraryContext {
+            host,
+            now_secs,
+            active: None,
+            pending_close: Vec::new(),
+        });
+    }
+
+    /// Bank a device observation on the ACTIVE library project — this tab
+    /// owns its history subtree (M4b), so the catalog-transaction path
+    /// must not be used for it. Returns `false` when the active project
+    /// doesn't match `project_uid` (the caller falls back to a catalog
+    /// transaction).
+    pub(crate) fn record_device_observation_on_active(
+        &mut self,
+        project_uid: &str,
+        device: lpc_history::PrefixedUid,
+        observed: lpc_history::ContentHash,
+        files: &[(String, Vec<u8>)],
+        now: f64,
+    ) -> Result<bool, UiError> {
+        let Some(context) = self.library.as_mut() else {
+            return Ok(false);
+        };
+        let Some(active) = context.active.as_mut() else {
+            return Ok(false);
+        };
+        if active.handle.uid.to_string() != project_uid {
+            return Ok(false);
+        }
+        crate::app::places::device_session::bank_observation_on_handle(
+            &mut active.handle,
+            device,
+            observed,
+            files,
+            now,
+        )
+        .map_err(library_ui_error)?;
+        Ok(true)
+    }
+
+    /// The active library project's push payload (files + canonical
+    /// hash), when it matches `project_uid`. The deploy flow prefers the
+    /// live handle over a snapshot so an about-to-push copy is exactly
+    /// what the editor shows as saved.
+    pub(crate) fn active_package_payload(
+        &self,
+        project_uid: &str,
+    ) -> Result<Option<(Vec<(String, Vec<u8>)>, lpc_history::ContentHash)>, UiError> {
+        let Some(context) = self.library.as_ref() else {
+            return Ok(None);
+        };
+        let Some(active) = context.active.as_ref() else {
+            return Ok(None);
+        };
+        if active.handle.uid.to_string() != project_uid {
+            return Ok(None);
+        }
+        let files = active.handle.read_all_files().map_err(library_ui_error)?;
+        let hash = active.handle.content_hash().map_err(library_ui_error)?;
+        Ok(Some((files, hash)))
+    }
+
+    /// Record a push on the ACTIVE library project (this tab owns its
+    /// history subtree — M4b). Returns `false` when the active project
+    /// doesn't match (the caller uses the catalog transaction instead).
+    pub(crate) fn record_push_on_active(
+        &mut self,
+        project_uid: &str,
+        device: lpc_history::PrefixedUid,
+        version: lpc_history::ContentHash,
+        now: f64,
+    ) -> Result<bool, UiError> {
+        let Some(context) = self.library.as_mut() else {
+            return Ok(false);
+        };
+        let Some(active) = context.active.as_mut() else {
+            return Ok(false);
+        };
+        if active.handle.uid.to_string() != project_uid {
+            return Ok(false);
+        }
+        let event = active
+            .handle
+            .history
+            .record_push(version, device, now, None)
+            .map_err(|e| UiError::MissingSession(format!("record push: {e}")))?;
+        let history_fs = active.handle.history_fs.borrow();
+        lpc_history::EventLog::new(&*history_fs)
+            .append(&event)
+            .map_err(|e| UiError::MissingSession(format!("record push: {e}")))?;
+        Ok(true)
+    }
+
+    /// Release host-side project locks for projects that stopped being
+    /// active on a synchronous path. Idempotent; awaited at the studio
+    /// controller's settle points.
+    pub(crate) async fn release_closed_library_projects(&mut self) {
+        let Some(context) = self.library.as_mut() else {
+            return;
+        };
+        if context.pending_close.is_empty() {
+            return;
+        }
+        let host = std::rc::Rc::clone(&context.host);
+        let to_close = std::mem::take(&mut context.pending_close);
+        for uid in to_close {
+            host.close_project(&uid).await;
         }
     }
 
@@ -820,8 +965,9 @@ impl ProjectController {
                     ))
                 })
                 .collect(),
-            ProjectState::ConnectingRunningProject { .. }
-            | ProjectState::LoadingDemoProject { .. } => Vec::new(),
+            ProjectState::ConnectingRunningProject { .. } | ProjectState::OpeningProject { .. } => {
+                Vec::new()
+            }
             // Sidebar tidy (P6, approved item 6): a ready project offers no
             // pane-level buttons — `RefreshProject` / `DisconnectProject`
             // remain as ops (sync recovery, internal refreshes) without a
@@ -930,10 +1076,10 @@ impl ProjectController {
         self.state = ProjectState::SelectingLoadedProject { projects };
     }
 
-    pub fn mark_loading_demo(&mut self) {
+    pub fn mark_opening_project(&mut self) {
         self.clear_loaded_project_state();
-        self.state = ProjectState::LoadingDemoProject {
-            progress: ProgressState::new("Loading demo project"),
+        self.state = ProjectState::OpeningProject {
+            progress: ProgressState::new("Opening project"),
         };
     }
 
@@ -1000,12 +1146,157 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        self.mark_loading_demo();
+        if self.library.is_some() {
+            return self
+                .open_example_package(server, crate::app::project::demo_project::DEMO_PROJECT_ID)
+                .await;
+        }
+        self.mark_opening_project();
+        // legacy path (host tests, storeless platforms): deploy the bundled
+        // files directly — no persistence
         let loaded = server.load_demo_project().await?;
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
         self.project_fs_root = loaded.fs_root;
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
+    }
+
+    /// Load-as-push (D19): open a library package by key (slug or `prj_…`
+    /// uid) — the host acquires the project lock, then the head is pushed
+    /// to the runtime, replacing whatever project is loaded. A page
+    /// refresh re-pushes the head.
+    pub(crate) async fn open_library_package(
+        &mut self,
+        server: &mut StudioServerClient,
+        key: &str,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        self.mark_opening_project();
+        let host = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            std::rc::Rc::clone(&context.host)
+        };
+        let opened = host.open_project(key).await.map_err(UiError::from)?;
+        self.open_opened_package(server, opened).await
+    }
+
+    /// Open an example: seed it into the library once (a catalog
+    /// transaction — found by provenance on every later open, it never
+    /// reseeds), then open the copy like any package.
+    pub(crate) async fn open_example_package(
+        &mut self,
+        server: &mut StudioServerClient,
+        id: &str,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        self.mark_opening_project();
+        let host = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            std::rc::Rc::clone(&context.host)
+        };
+        let outcome = host
+            .catalog(crate::app::library::CatalogOp::EnsureExampleSeeded { id: id.to_string() })
+            .await
+            .map_err(UiError::from)?;
+        let summary = outcome.summary.ok_or_else(|| {
+            UiError::MissingSession(format!("seeding example {id} produced no package"))
+        })?;
+        let opened = host
+            .open_project(&summary.uid.to_string())
+            .await
+            .map_err(UiError::from)?;
+        self.open_opened_package(server, opened).await
+    }
+
+    /// Push a host-opened project to the runtime and make it the active
+    /// library project. A previously active project's lock is queued for
+    /// release (the settle points drain it).
+    async fn open_opened_package(
+        &mut self,
+        server: &mut StudioServerClient,
+        opened: crate::app::library::OpenedProject,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
+        if let Some(previous) = context.active.take() {
+            if previous.handle.uid != opened.uid {
+                context.pending_close.push(previous.handle.uid.to_string());
+            }
+        }
+        let handle = crate::app::library::PackageHandle::load(
+            opened.uid,
+            opened.slug,
+            opened.package_fs,
+            opened.history_fs,
+        )
+        .map_err(library_ui_error)?;
+        // the slug is THE user-facing identifier — it titles the editor
+        let title = handle.slug.clone();
+        let files = handle.read_all_files().map_err(library_ui_error)?;
+        let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
+
+        let loaded = server.open_library_project(&files, &expected_hash).await?;
+        context.active = Some(ActiveLibraryProject {
+            handle,
+            last_synced: loaded.synced_version,
+        });
+        self.mark_ready(title, loaded.handle_id, loaded.inventory);
+        self.def_artifacts = loaded.node_def_artifacts;
+        Ok(loaded.logs)
+    }
+
+    /// Save-as-pull (D20/D8): after a successful commit, pull the changed
+    /// files into the library copy and record a `Saved` event. A failure
+    /// here never fails the user's save — the runtime committed fine; we
+    /// surface a warning and retry on the next save (`last_synced` only
+    /// advances on full success).
+    async fn pull_committed_changes_into_library(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Option<UiNotice>, UiError> {
+        let Some(context) = self.library.as_mut() else {
+            return Ok(None);
+        };
+        let Some(active) = context.active.as_mut() else {
+            return Ok(None);
+        };
+        let now = (context.now_secs)();
+
+        let pulled = server
+            .pull_changed_files(
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
+                active.last_synced,
+            )
+            .await?;
+        if pulled.updates.is_empty() {
+            active.last_synced = pulled.version;
+            return Ok(None);
+        }
+        for update in &pulled.updates {
+            let path = format!("/{}", update.path.trim_start_matches('/'));
+            active
+                .handle
+                .apply_update(lpc_model::LpPath::new(&path), update.content.as_deref())
+                .map_err(library_ui_error)?;
+        }
+        active.handle.record_save(now).map_err(library_ui_error)?;
+        active.last_synced = pulled.version;
+        // fire-and-forget: hosts broadcast so other tabs' galleries refresh
+        context.host.notify_saved(&active.handle.uid.to_string());
+
+        // corruption tripwire: library copy must now match the runtime
+        let local = active
+            .handle
+            .content_hash()
+            .map_err(library_ui_error)?
+            .to_string();
+        let (remote, _) = server
+            .hash_package(crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID)
+            .await?;
+        if local != remote {
+            log::error!("library/runtime hash mismatch after save: {local} vs {remote}");
+            return Ok(Some(UiNotice::warning(
+                "Saved, but the library copy differs from the simulator — please report this",
+            )));
+        }
+        Ok(None)
     }
 
     pub async fn connect_running_project(
@@ -1201,7 +1492,7 @@ impl ProjectController {
                 projects.len()
             )),
             ProjectState::ConnectingRunningProject { progress }
-            | ProjectState::LoadingDemoProject { progress } => {
+            | ProjectState::OpeningProject { progress } => {
                 UiViewContent::Progress(progress.clone().into())
             }
             ProjectState::Ready {
@@ -1459,6 +1750,35 @@ impl ProjectController {
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
         self.root_shape_ids.clear();
+        // the library binding follows the loaded project: a disconnected or
+        // failed project must not keep pulling saves into (or advertising)
+        // the previously open package. Its host lock is queued for release
+        // (this path is sync; the settle points drain the queue).
+        if let Some(library) = self.library.as_mut() {
+            if let Some(previous) = library.active.take() {
+                library.pending_close.push(previous.handle.uid.to_string());
+            }
+        }
+    }
+
+    /// The `prj_…` uid of the open library package, when the running
+    /// project is backed by one.
+    pub fn active_library_uid(&self) -> Option<String> {
+        Some(
+            self.library
+                .as_ref()?
+                .active
+                .as_ref()?
+                .handle
+                .uid
+                .to_string(),
+        )
+    }
+
+    /// The open library package's slug (drives the web shell's
+    /// `#/project/<slug>` URL).
+    pub fn active_library_slug(&self) -> Option<String> {
+        Some(self.library.as_ref()?.active.as_ref()?.handle.slug.clone())
     }
 
     /// Install the runtime-node-id → def-artifact map.
@@ -1601,10 +1921,21 @@ impl ProjectController {
         } else {
             UiNotice::info(format!("Saved {written} project file(s)"))
         };
-        Ok(ProjectEditRun {
-            notices: UiNotices::new().with_notice(notice),
-            logs,
-        })
+        let mut notices = UiNotices::new().with_notice(notice);
+        if written > 0 {
+            // save-as-pull: the library copy tracks every committed save
+            match self.pull_committed_changes_into_library(server).await {
+                Ok(Some(warning)) => notices = notices.with_notice(warning),
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("save-as-pull failed (will retry on next save): {e:?}");
+                    notices = notices.with_notice(UiNotice::warning(
+                        "Saved to the simulator, but not yet to your library — will retry on the next save",
+                    ));
+                }
+            }
+        }
+        Ok(ProjectEditRun { notices, logs })
     }
 
     /// Discard every pending edit: the local edit buffer clears immediately
@@ -2479,7 +2810,7 @@ fn project_status(state: &ProjectState, sync: Option<&ProjectSync>) -> UiStatus 
         ProjectState::NotLoaded => UiStatus::neutral("Not loaded"),
         ProjectState::SelectingLoadedProject { .. } => UiStatus::neutral("Choose project"),
         ProjectState::ConnectingRunningProject { .. } => UiStatus::working("Connecting"),
-        ProjectState::LoadingDemoProject { .. } => UiStatus::working("Loading"),
+        ProjectState::OpeningProject { .. } => UiStatus::working("Loading"),
         ProjectState::Ready { .. } if sync.is_some_and(ProjectSync::is_syncing) => {
             UiStatus::working("Syncing")
         }
@@ -2556,6 +2887,14 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
+}
+
+fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
+    UiError::MissingSession(format!("library: {e}"))
+}
+
+fn no_library_error() -> UiError {
+    UiError::MissingSession("no local library is attached".to_string())
 }
 
 #[cfg(test)]

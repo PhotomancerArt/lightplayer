@@ -445,13 +445,12 @@ fn action_preempts_in_flight_passive_refresh() {
     }
     assert!(finished, "the loop must finish after the pull is cancelled");
 
-    // The recovery action ran: RefreshConnections resets the project, so the
-    // final emitted view drops the project pane and keeps only the device pane.
+    // The recovery action ran: RefreshConnections resets the project and
+    // returns the link to provider selection, which renders as home (M4).
     let final_view = view.try_recv().expect("a final snapshot was emitted");
-    assert_eq!(
-        final_view.panes.len(),
-        1,
-        "RefreshConnections reset the project, leaving only the device pane"
+    assert!(
+        final_view.home.is_some() && final_view.panes.is_empty(),
+        "RefreshConnections reset the project, landing back on home"
     );
 }
 

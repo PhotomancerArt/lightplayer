@@ -18,9 +18,9 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, default-features = false }
-log = { workspace = true, features = ["std"], optional = true }
 serialport = { version = "4.8", optional = true }
 hashbrown = { workspace = true, optional = true }
+log = { workspace = true, features = ["std"], optional = true }
 
 [features]
 default = ["host"]

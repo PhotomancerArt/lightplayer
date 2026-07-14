@@ -22,6 +22,10 @@ pub struct ActionMeta {
     pub enablement: ActionEnablement,
     /// Optional confirmation required before dispatch.
     pub confirmation: Option<ActionConfirmation>,
+    /// Whether the action destroys something the user might want back
+    /// (delete, wipe). Renderers wear the error tint for these in every
+    /// context; destructive actions usually also carry a confirmation.
+    pub destructive: bool,
 }
 
 impl ActionMeta {
@@ -39,7 +43,14 @@ impl ActionMeta {
             priority,
             enablement: ActionEnablement::Enabled,
             confirmation: None,
+            destructive: false,
         }
+    }
+
+    /// Mark the action as destructive (renderers wear the error tint).
+    pub fn destructive(mut self) -> Self {
+        self.destructive = true;
+        self
     }
 
     /// Override the primary visible label.

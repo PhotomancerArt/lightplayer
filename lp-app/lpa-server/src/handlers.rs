@@ -172,6 +172,20 @@ fn handle_fs_request(fs: &mut dyn LpFs, request: FsRequest) -> Result<FsResponse
                 error: Some(format!("{e}")),
             }),
         },
+        FsRequest::ChangesSince {
+            prefix,
+            since,
+            cursor,
+        } => Ok(crate::file_sync::handle_changes_since(
+            fs,
+            prefix.as_path(),
+            since,
+            cursor,
+        )),
+        FsRequest::WriteChunk { path, offset, data } => Ok(crate::file_sync::handle_write_chunk(
+            fs, path, offset, &data,
+        )),
+        FsRequest::HashPackage { prefix } => Ok(crate::file_sync::handle_hash_package(fs, prefix)),
     }
 }
 

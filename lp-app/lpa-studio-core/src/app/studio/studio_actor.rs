@@ -175,6 +175,12 @@ where
         // final snapshot reflects the reshaped console. Actions run next
         // (preemption-as-priority); the coalesced tick runs after. Shutdown
         // only ends the loop after the batch is processed.
+        if let Some(attachment) = plan.attach_library {
+            self.controller.attach_library(attachment.0);
+        }
+        if plan.library_changed {
+            self.controller.request_library_refresh();
+        }
         for command in plan.console {
             self.controller.apply_console_command(command);
         }
@@ -184,6 +190,10 @@ where
         if plan.tick {
             self.run_refresh_tick().await;
         }
+        // Re-hydrate the gallery / release closed projects' locks when due
+        // (attach or LibraryChanged with no action in the batch; actions
+        // settle inside dispatch).
+        self.controller.settle_library().await;
 
         self.emit_if_changed();
         self.publish_refresh_delay();
@@ -369,6 +379,12 @@ struct CommandPlan {
     actions: Vec<UiAction>,
     tick: bool,
     shutdown: bool,
+    /// A library attachment to install before actions (at most one; the
+    /// shell sends it once, ahead of any project action).
+    attach_library: Option<crate::app::studio::studio_command::LibraryAttachment>,
+    /// Coalesced cross-tab library-change pings: schedule one gallery
+    /// re-hydration for the whole batch.
+    library_changed: bool,
 }
 
 impl CommandPlan {
@@ -377,8 +393,12 @@ impl CommandPlan {
         let mut actions = Vec::new();
         let mut tick = false;
         let mut shutdown = false;
+        let mut attach_library = None;
+        let mut library_changed = false;
         for command in batch {
             match command {
+                StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
+                StudioCommand::LibraryChanged => library_changed = true,
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a device-level change is a
                 // server round-trip, so convert it into the equivalent device
@@ -406,6 +426,8 @@ impl CommandPlan {
             actions,
             tick,
             shutdown,
+            attach_library,
+            library_changed,
         }
     }
 }
@@ -491,7 +513,13 @@ fn command_preempts_passive(command: &StudioCommand) -> bool {
         // A queued console command, tick, or shutdown does not preempt an
         // in-flight pull: console mutations are display-side and can wait for
         // the batch after the pull completes.
-        StudioCommand::Console(_) | StudioCommand::RefreshTick | StudioCommand::Shutdown => false,
+        // An attachment is synchronous installation work, same as console;
+        // a cross-tab library ping is background gallery staleness.
+        StudioCommand::AttachLibrary(_)
+        | StudioCommand::LibraryChanged
+        | StudioCommand::Console(_)
+        | StudioCommand::RefreshTick
+        | StudioCommand::Shutdown => false,
     }
 }
 

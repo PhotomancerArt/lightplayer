@@ -343,6 +343,9 @@
             ]
           },
           "type": "object"
+        },
+        "uid": {
+          "type": "string"
         }
       },
       "required": [

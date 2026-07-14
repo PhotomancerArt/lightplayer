@@ -33,7 +33,13 @@ For byte addressing, `iadd` / `isub` (and immediate forms where the non-immediat
 
 Integer arithmetic is wrapping modulo 2³² except where an operation is defined by signed or unsigned interpretation of bit patterns (`idiv_*`, `irem_*`).
 
-For `idiv_s`, `idiv_u`, `irem_s`, and `irem_u`, if the divisor is `0`, the result is `0` and the operation does not trap.
+Integer division and remainder never trap and follow RISC-V (RV32M) semantics for the edge cases, since the device tier gets these for free from hardware:
+
+- `idiv_s` with divisor `0` → `-1`; `idiv_u` with divisor `0` → all ones (`0xFFFF_FFFF`)
+- `irem_s` / `irem_u` with divisor `0` → the dividend
+- `idiv_s` of `i32::MIN` by `-1` (unrepresentable quotient) → `i32::MIN`; `irem_s` of `i32::MIN` by `-1` → `0`
+
+Backends whose native division traps on these inputs (WebAssembly, Cranelift) must emit guards to produce these results.
 
 `fmod` is not a core operation; it is provided via import (for example `@std.math::fmod`).
 
@@ -88,7 +94,7 @@ All operands and results are `i32`. Bitwise operations use two’s-complement bi
 | ishr_s | `v2:i32 = ishr_s v0, v1`     | `i32`, `i32` | `i32`  | Arithmetic right shift; amount `v1 & 31` |
 | ishr_u | `v2:i32 = ishr_u v0, v1`     | `i32`, `i32` | `i32`  | Logical right shift; amount `v1 & 31` |
 
-GLSL `&&` and `||` short-circuit in the source language; LPIR evaluates both operands before `iand` / `ior`. Lowering may introduce control flow when side effects or short-circuit behavior must be preserved.
+GLSL `&&` and `||` short-circuit in the source language. Frontends lower a right operand that has side effects (or can trap, e.g. integer division) to control flow so it is evaluated only when the left operand does not decide the result; pure right operands are evaluated eagerly into `iand` / `ior` on `0`/`1` values. The control-flow torture corpus (`lps-filetests/filetests/control/torture/sc_*.glsl`) verifies this on every target.
 
 GLSL logical NOT on a boolean represented as `i32` can be lowered as `ieq` against integer constant `0`.
 

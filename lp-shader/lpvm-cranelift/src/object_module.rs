@@ -12,7 +12,7 @@ use target_lexicon::{
 
 use crate::compile_options::CompileOptions;
 use crate::error::{CompileError, CompilerError};
-use crate::module_lower::{LpirFuncEmitOrder, lower_lpir_into_module};
+use crate::module_lower::lower_lpir_into_module;
 use crate::process_sync;
 
 /// RISC-V32 imafc ELF triple for emulator-linked objects (matches firmware guest conventions).
@@ -80,12 +80,7 @@ pub fn object_bytes_from_ir(
             )))
         })?;
     let mut object_module = ObjectModule::new(builder);
-    lower_lpir_into_module(
-        &mut object_module,
-        ir,
-        options.clone(),
-        LpirFuncEmitOrder::Name,
-    )?;
+    lower_lpir_into_module(&mut object_module, ir, options.clone())?;
     let product = object_module.finish();
     product
         .emit()

@@ -88,28 +88,51 @@ pub(crate) fn emit_op(
                 .local_set(dst.0);
         }
         LpirOp::IdivS { dst, lhs, rhs } => {
-            sink.local_get(lhs.0)
-                .local_get(rhs.0)
-                .i32_div_s()
-                .local_set(dst.0);
+            // RV32 semantics: x / 0 = -1, i32::MIN / -1 = i32::MIN.
+            // `i32.div_s` traps on both, so guard the divisor.
+            let t = BlockType::Result(ValType::I32);
+            sink.local_get(rhs.0).i32_eqz().if_(t);
+            sink.i32_const(-1);
+            sink.else_();
+            sink.local_get(rhs.0).i32_const(-1).i32_eq().if_(t);
+            // x / -1 == 0 - x with wrapping, which also yields i32::MIN for i32::MIN.
+            sink.i32_const(0).local_get(lhs.0).i32_sub();
+            sink.else_();
+            sink.local_get(lhs.0).local_get(rhs.0).i32_div_s();
+            sink.end();
+            sink.end();
+            sink.local_set(dst.0);
         }
         LpirOp::IdivU { dst, lhs, rhs } => {
-            sink.local_get(lhs.0)
-                .local_get(rhs.0)
-                .i32_div_u()
-                .local_set(dst.0);
+            // RV32 semantics: x / 0 = all ones. `i32.div_u` traps on zero.
+            let t = BlockType::Result(ValType::I32);
+            sink.local_get(rhs.0).i32_eqz().if_(t);
+            sink.i32_const(-1);
+            sink.else_();
+            sink.local_get(lhs.0).local_get(rhs.0).i32_div_u();
+            sink.end();
+            sink.local_set(dst.0);
         }
         LpirOp::IremS { dst, lhs, rhs } => {
-            sink.local_get(lhs.0)
-                .local_get(rhs.0)
-                .i32_rem_s()
-                .local_set(dst.0);
+            // RV32 semantics: x % 0 = x. `i32.rem_s` traps on zero
+            // (i32::MIN % -1 is already 0 in both wasm and RV32).
+            let t = BlockType::Result(ValType::I32);
+            sink.local_get(rhs.0).i32_eqz().if_(t);
+            sink.local_get(lhs.0);
+            sink.else_();
+            sink.local_get(lhs.0).local_get(rhs.0).i32_rem_s();
+            sink.end();
+            sink.local_set(dst.0);
         }
         LpirOp::IremU { dst, lhs, rhs } => {
-            sink.local_get(lhs.0)
-                .local_get(rhs.0)
-                .i32_rem_u()
-                .local_set(dst.0);
+            // RV32 semantics: x % 0 = x. `i32.rem_u` traps on zero.
+            let t = BlockType::Result(ValType::I32);
+            sink.local_get(rhs.0).i32_eqz().if_(t);
+            sink.local_get(lhs.0);
+            sink.else_();
+            sink.local_get(lhs.0).local_get(rhs.0).i32_rem_u();
+            sink.end();
+            sink.local_set(dst.0);
         }
         LpirOp::Ineg { dst, src } => {
             sink.i32_const(0)

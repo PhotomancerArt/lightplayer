@@ -56,7 +56,6 @@ vec2 test_sinh_vec2() {
     return sinh(vec2(rt(0.0), rt(1.0)));
 }
 
-// @broken(rv32n.q32)
 // run: test_sinh_vec2() ~= vec2(0.0, 1.1752011936438014)
 
 vec3 test_sinh_vec3() {

@@ -8,18 +8,17 @@ use crate::app::{PaneFrame, StudioShell};
 use crate::base::{FieldRow, TabItem, Tabs};
 use crate::core::MetricGrid;
 use dioxus::prelude::*;
-use lpa_studio_core::core::view::activity_view::{UiActivityStep, UiActivityStepState};
 use lpa_studio_core::core::view::steps_view::{UiStepState, UiStepView};
 use lpa_studio_core::{
     ControllerId, DeviceController, DeviceOp, LinkEndpointId, LinkProviderKind, ProjectController,
     ProjectEditorOp, ProjectEditorView, ProjectInventorySummary, ProjectNodeStatusTone,
     ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
     ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary, UiAction,
-    UiActivityView, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiIssue,
-    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct, UiProducedValue,
-    UiProgress, UiSlotAsset, UiSlotSourceState, UiSlotValue, UiStatus, UiStepsView, UiStudioView,
-    UiTerminalLine, UiViewContent,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiIssue, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild, UiNodeHeader, UiNodeSection,
+    UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct, UiProducedValue, UiProgress, UiSlotAsset,
+    UiSlotSourceState, UiSlotValue, UiStatus, UiStepsView, UiStudioView, UiTerminalLine,
+    UiViewContent,
 };
 
 /// Timestamp shared by every story log fixture, so stories stay
@@ -297,20 +296,6 @@ pub(crate) fn idle_view() -> UiStudioView {
     story_view(vec![idle_device_view()], Vec::new())
 }
 
-pub(crate) fn browser_serial_canceled_view() -> UiStudioView {
-    story_view(
-        vec![idle_device_view()],
-        vec![studio_log(UiLogLevel::Info, "Port selection canceled")],
-    )
-}
-
-pub(crate) fn browser_serial_open_failed_view() -> UiStudioView {
-    picker_issue_view(
-        "Failed to open serial port.",
-        "Failed to execute 'open' on 'SerialPort': Failed to open serial port.",
-    )
-}
-
 pub(crate) fn endpoint_view() -> UiStudioView {
     story_view(vec![endpoint_device_view()], Vec::new())
 }
@@ -396,217 +381,6 @@ pub(crate) fn project_sync_failed_view() -> UiStudioView {
             UiLogLevel::Error,
             UiLogOrigin::Studio,
             "project sync failed: protocol timeout",
-        )],
-    )
-}
-
-pub(crate) fn lightplayer_disconnected_view() -> UiStudioView {
-    story_view(
-        vec![device_view(
-            UiStatus::good("Simulator connected"),
-            vec![
-                select_connection_complete("Simulator"),
-                connect_device_complete_with_actions(
-                    browser_worker_metrics(),
-                    vec![disconnect_device_action()],
-                ),
-                stack_section(
-                    "connect-lightplayer",
-                    "Connect LightPlayer",
-                    UiStepState::Active,
-                    UiViewContent::text("Attach Studio to LightPlayer on the connected simulator."),
-                    vec![connect_lightplayer_action()],
-                ),
-            ],
-            vec!["[lpa-studio-core] LightPlayer protocol detached; device session remains open"],
-        )],
-        vec![UiLogEntry::new(
-            STORY_LOG_TIMESTAMP,
-            UiLogLevel::Info,
-            UiLogOrigin::Studio,
-            "LightPlayer protocol detached; device session remains open",
-        )],
-    )
-}
-
-pub(crate) fn open_for_flashing_view() -> UiStudioView {
-    story_view(
-        vec![device_view(
-            UiStatus::good("ESP32 over USB"),
-            vec![
-                select_connection_complete("ESP32 over USB"),
-                connect_device_complete_with_actions(esp32_metrics(), device_management_actions()),
-                stack_section(
-                    "connect-lightplayer",
-                    "Connect LightPlayer",
-                    UiStepState::Active,
-                    UiViewContent::text(
-                        "Device is open for recovery. Flash firmware or connect LightPlayer.",
-                    ),
-                    vec![connect_lightplayer_action()],
-                ),
-            ],
-            vec!["[lpa-link] ESP32 opened for flashing"],
-        )],
-        vec![UiLogEntry::new(
-            STORY_LOG_TIMESTAMP,
-            UiLogLevel::Info,
-            UiLogOrigin::Studio,
-            "Device opened for flashing",
-        )],
-    )
-}
-
-pub(crate) fn provision_ready_view() -> UiStudioView {
-    story_view(
-        vec![blank_device_view(
-            UiStatus::warning("Ready to flash"),
-            UiViewContent::text("No LightPlayer firmware is running on this ESP32."),
-            false,
-        )],
-        vec![UiLogEntry::new(
-            STORY_LOG_TIMESTAMP,
-            UiLogLevel::Warn,
-            UiLogOrigin::Studio,
-            "server protocol is unavailable; firmware flashing is available",
-        )],
-    )
-}
-
-pub(crate) fn browser_serial_blank_firmware_view() -> UiStudioView {
-    story_view(
-        vec![blank_device_view(
-            UiStatus::warning("Ready to flash"),
-            UiViewContent::Activity(blank_firmware_activity()),
-            false,
-        )],
-        vec![
-            UiLogEntry::new(
-                STORY_LOG_TIMESTAMP,
-                UiLogLevel::Info,
-                UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32"),
-                "ESP-ROM:esp32c6-20220919",
-            ),
-            UiLogEntry::new(
-                STORY_LOG_TIMESTAMP,
-                UiLogLevel::Info,
-                UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32"),
-                "invalid header: 0xffffffff",
-            ),
-            UiLogEntry::new(
-                STORY_LOG_TIMESTAMP,
-                UiLogLevel::Warn,
-                UiLogOrigin::Studio,
-                "no LightPlayer firmware detected; firmware flashing is available",
-            ),
-        ],
-    )
-}
-
-pub(crate) fn provisioning_view() -> UiStudioView {
-    story_view(
-        vec![device_view(
-            UiStatus::working("Flashing"),
-            vec![
-                select_connection_complete("ESP32 over USB"),
-                connect_device_complete(esp32_metrics()),
-                stack_section(
-                    "connect-lightplayer",
-                    "Flashing firmware",
-                    UiStepState::Active,
-                    UiViewContent::Activity(provisioning_activity()),
-                    Vec::new(),
-                ),
-            ],
-            vec![
-                "[lpa-link] Connected to ESP32 bootloader",
-                "[lpa-link] Writing app image at 0x10000",
-                "[lpa-link] Progress 42%",
-            ],
-        )],
-        vec![UiLogEntry::new(
-            STORY_LOG_TIMESTAMP,
-            UiLogLevel::Info,
-            UiLogOrigin::Link,
-            "Connected to ESP32 bootloader",
-        )],
-    )
-}
-
-pub(crate) fn provision_failed_view() -> UiStudioView {
-    story_view(
-        vec![device_view(
-            UiStatus::error("Needs attention"),
-            vec![
-                select_connection_complete("ESP32 over USB"),
-                connect_device_complete_with_actions(esp32_metrics(), device_management_actions()),
-                stack_section(
-                    "connect-lightplayer",
-                    "Flashing firmware",
-                    UiStepState::NeedsAttention,
-                    UiViewContent::Issue(
-                        UiIssue::new("firmware flashing failed").with_detail(
-                            "Check the cable, boot mode, and browser serial permission.",
-                        ),
-                    ),
-                    Vec::new(),
-                ),
-            ],
-            vec![
-                "[lpa-link] Connected to ESP32 bootloader",
-                "[lpa-link] failed to write firmware image",
-            ],
-        )],
-        vec![UiLogEntry::new(
-            STORY_LOG_TIMESTAMP,
-            UiLogLevel::Error,
-            UiLogOrigin::Link,
-            "failed to write firmware image",
-        )],
-    )
-}
-
-pub(crate) fn resetting_to_blank_view() -> UiStudioView {
-    story_view(
-        vec![device_view(
-            UiStatus::working("Resetting"),
-            vec![
-                select_connection_complete("ESP32 over USB"),
-                connect_device_complete(esp32_metrics()),
-                stack_section(
-                    "connect-lightplayer",
-                    "Wiping device",
-                    UiStepState::Active,
-                    UiViewContent::Activity(reset_activity()),
-                    Vec::new(),
-                ),
-            ],
-            vec![
-                "[lpa-link] Connected to ESP32 bootloader",
-                "[lpa-link] Erasing device flash",
-            ],
-        )],
-        vec![UiLogEntry::new(
-            STORY_LOG_TIMESTAMP,
-            UiLogLevel::Info,
-            UiLogOrigin::Link,
-            "Erasing device flash",
-        )],
-    )
-}
-
-pub(crate) fn reset_complete_view() -> UiStudioView {
-    story_view(
-        vec![blank_device_view(
-            UiStatus::warning("Blank ESP32"),
-            UiViewContent::text("The device has been erased and can be flashed again."),
-            true,
-        )],
-        vec![UiLogEntry::new(
-            STORY_LOG_TIMESTAMP,
-            UiLogLevel::Info,
-            UiLogOrigin::Link,
-            "Chip erase completed successfully",
         )],
     )
 }
@@ -790,82 +564,6 @@ pub(crate) fn device_project_selection_view() -> UiPaneView {
             "[lp-server] loaded projects: 2",
         ],
     )
-}
-
-pub(crate) fn blank_device_view(
-    status: UiStatus,
-    body: UiViewContent,
-    after_reset: bool,
-) -> UiPaneView {
-    let detail = if after_reset {
-        vec![
-            "[lpa-link] Chip erase completed successfully",
-            "[fw-esp32] invalid header: 0xffffffff",
-        ]
-    } else {
-        vec![
-            "[esp32-reset] Hard resetting via RTS pin...",
-            "[fw-esp32] ESP-ROM:esp32c6-20220919",
-            "[fw-esp32] invalid header: 0xffffffff",
-        ]
-    };
-    device_view(
-        status,
-        vec![
-            select_connection_complete("ESP32 over USB"),
-            connect_device_complete_with_actions(esp32_metrics(), device_management_actions()),
-            stack_section(
-                "connect-lightplayer",
-                "LightPlayer unavailable",
-                UiStepState::Active,
-                body,
-                Vec::new(),
-            ),
-        ],
-        detail,
-    )
-}
-
-pub(crate) fn blank_firmware_activity() -> UiActivityView {
-    UiActivityView::new("Connecting ESP32 server")
-        .with_detail("ESP32 boot output looks like blank or erased flash.")
-        .with_steps(vec![
-            UiActivityStep::new("serial-access", "Serial access")
-                .with_state(UiActivityStepState::Complete)
-                .with_detail("Browser serial port is open."),
-            UiActivityStep::new("reset-device", "Reset device")
-                .with_state(UiActivityStepState::Complete)
-                .with_detail("Device reset was requested before protocol attach."),
-            UiActivityStep::new("boot-output", "Boot output")
-                .with_state(UiActivityStepState::Complete),
-            UiActivityStep::new("server-protocol", "LightPlayer protocol")
-                .with_state(UiActivityStepState::Failed),
-        ])
-}
-
-pub(crate) fn provisioning_activity() -> UiActivityView {
-    UiActivityView::new("Flashing firmware")
-        .with_detail("Writing packaged LightPlayer ESP32-C6 firmware.")
-        .with_progress(UiProgress::determinate("Writing flash", 42))
-        .with_steps(vec![
-            UiActivityStep::new("bootloader", "Bootloader")
-                .with_state(UiActivityStepState::Complete),
-            UiActivityStep::new("erase", "Erase").with_state(UiActivityStepState::Complete),
-            UiActivityStep::new("write", "Write firmware").with_state(UiActivityStepState::Active),
-            UiActivityStep::new("reboot", "Reboot").with_state(UiActivityStepState::Pending),
-        ])
-}
-
-pub(crate) fn reset_activity() -> UiActivityView {
-    UiActivityView::new("Wiping device")
-        .with_detail("Erasing ESP32 flash through the bootloader.")
-        .with_progress(UiProgress::determinate("Erasing flash", 58))
-        .with_steps(vec![
-            UiActivityStep::new("bootloader", "Bootloader")
-                .with_state(UiActivityStepState::Complete),
-            UiActivityStep::new("erase", "Erase flash").with_state(UiActivityStepState::Active),
-            UiActivityStep::new("blank", "Blank device").with_state(UiActivityStepState::Pending),
-        ])
 }
 
 pub(crate) fn device_view(
@@ -1377,18 +1075,6 @@ pub(crate) fn disconnect_device_action() -> UiAction {
 
 pub(crate) fn disconnect_lightplayer_action() -> UiAction {
     device_action(DeviceOp::DisconnectLightPlayer)
-}
-
-pub(crate) fn connect_lightplayer_action() -> UiAction {
-    device_action(DeviceOp::ConnectLightPlayer)
-}
-
-pub(crate) fn device_management_actions() -> Vec<UiAction> {
-    vec![
-        device_action(DeviceOp::ProvisionFirmware),
-        device_action(DeviceOp::ResetToBlank),
-        disconnect_device_action(),
-    ]
 }
 
 pub(crate) fn connected_esp32_recovery_actions() -> Vec<UiAction> {

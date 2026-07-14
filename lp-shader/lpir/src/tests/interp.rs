@@ -689,49 +689,53 @@ fn interp_copy() {
 
 #[test]
 fn interp_idiv_s_by_zero() {
+    // RV32 semantics: x / 0 = -1.
     assert_eq!(
         run_i32(
             "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = idiv_s v1, v2\n  return v3\n}\n",
             "f",
             &[Value::I32(42), Value::I32(0)],
         ),
-        0
+        -1
     );
 }
 
 #[test]
 fn interp_idiv_u_by_zero() {
+    // RV32 semantics: x / 0 = all ones.
     assert_eq!(
         run_i32(
             "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = idiv_u v1, v2\n  return v3\n}\n",
             "f",
             &[Value::I32(42), Value::I32(0)],
         ),
-        0
+        -1
     );
 }
 
 #[test]
 fn interp_irem_s_by_zero() {
+    // RV32 semantics: x % 0 = x.
     assert_eq!(
         run_i32(
             "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = irem_s v1, v2\n  return v3\n}\n",
             "f",
             &[Value::I32(42), Value::I32(0)],
         ),
-        0
+        42
     );
 }
 
 #[test]
 fn interp_irem_u_by_zero() {
+    // RV32 semantics: x % 0 = x.
     assert_eq!(
         run_i32(
             "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = irem_u v1, v2\n  return v3\n}\n",
             "f",
             &[Value::I32(42), Value::I32(0)],
         ),
-        0
+        42
     );
 }
 
@@ -744,6 +748,18 @@ fn interp_idiv_s_min_neg1() {
             &[Value::I32(i32::MIN), Value::I32(-1)],
         ),
         i32::MIN.wrapping_div(-1)
+    );
+}
+
+#[test]
+fn interp_irem_s_min_neg1() {
+    assert_eq!(
+        run_i32(
+            "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = irem_s v1, v2\n  return v3\n}\n",
+            "f",
+            &[Value::I32(i32::MIN), Value::I32(-1)],
+        ),
+        0
     );
 }
 

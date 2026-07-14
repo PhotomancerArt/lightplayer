@@ -12,8 +12,17 @@ pub mod controller;
 pub mod core;
 
 pub use self::core::status::UiStatusKind;
+pub use lpc_history::{ContentHash, SyncRelation};
+
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
-pub use app::device::{DeviceController, DeviceOp, DeviceSnapshot};
+pub use app::device::{
+    DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget, DeviceController, DeviceOp,
+    DeviceSnapshot, UiDeployChoice, UiDeployView,
+};
+pub use app::home::{
+    HOME_NODE_ID, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceCardState, UiExampleCard,
+    UiHomeView, UiPackageCard, ZipBytes,
+};
 pub use app::link::{
     ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkController, LinkManagementOutcome,
     LinkOp, LinkOpenOutcome, LinkSnapshot, LinkState, ProgressState, ProviderChoice,

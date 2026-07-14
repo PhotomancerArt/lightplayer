@@ -21,7 +21,6 @@ float test_declare_shared_float() {
     return workgroup_counter;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -34,7 +33,6 @@ int test_declare_shared_int() {
     return workgroup_id;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -47,7 +45,6 @@ uint test_declare_shared_uint() {
     return int(workgroup_size);
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -60,7 +57,6 @@ bool test_declare_shared_bool() {
     return workgroup_flag;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -73,7 +69,6 @@ vec2 test_declare_shared_vec2() {
     return workgroup_position;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -86,7 +81,6 @@ vec3 test_declare_shared_vec3() {
     return workgroup_normal;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -99,7 +93,6 @@ vec4 test_declare_shared_vec4() {
     return workgroup_color;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -112,7 +105,6 @@ mat2 test_declare_shared_mat2() {
     return workgroup_transform;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
@@ -128,7 +120,6 @@ float test_declare_shared_array() {
     return workgroup_data[0] + workgroup_data[1] + workgroup_data[2];
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)

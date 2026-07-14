@@ -57,7 +57,6 @@ vec2 test_acos_vec2() {
     return acos(vec2(rt(1.0), rt(0.5)));
 }
 
-// @broken(rv32n.q32)
 // run: test_acos_vec2() ~= vec2(0.0, 1.0471975511965976) (tolerance: 0.01)
 
 vec3 test_acos_vec3() {

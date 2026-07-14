@@ -11,7 +11,7 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 From the repository root:
 
 ```bash
-# Default backend: jit.q32 only (fast local default)
+# Default targets (rv32n, rv32c, wasm)
 scripts/filetests.sh
 
 # One backend
@@ -25,13 +25,10 @@ scripts/filetests.sh --force-opt q32.mul=wrapping --target wasm.q32
 just test-filetests
 ```
 
-`just test` runs `test-rust` and `test-filetests` in parallel. `test-filetests` runs the script
-three times: default (`rv32c.q32` + `wasm.q32`), then `jit.q32`. Ensure `just build-ci` (or a full
+`just test` runs `test-rust` and `test-filetests` in parallel. Ensure `just build-ci` (or a full
 build that includes RV32 builtins) completed before filetests if you run the RV32 pass locally.
 
-**Parallelism:** filetests default to **num_cpus** workers. WASM and RV32 backends are fully
-thread-safe. JIT backend has issues with multi-file runs; use `LP_FILETESTS_THREADS=1` when testing
-JIT specifically (see `docs/bugs/2026-03-30-jit-filetest-segfault.md`).
+**Parallelism:** filetests default to **num_cpus** workers; all backends are thread-safe.
 
 ### Integration test harness (`#[ignore]`)
 
@@ -138,7 +135,7 @@ Q32, or a path we do not intend to implement there). This is not an assertion fa
 - **`@unsupported(...)`** — permanent “not on this target” (skip; does not count as pass or fail).
 
 Failures are reported with expected vs actual values. Use
-`scripts/filetests.sh --target wasm.q32` (or `jit.q32` / `rv32c.q32`) to focus one backend.
+`scripts/filetests.sh --target wasm.q32` (or `rv32n.q32` / `rv32c.q32`) to focus one backend.
 
 ## Test file format
 
@@ -146,7 +143,7 @@ Test files use GLSL comments for directives and expectations:
 
 ```glsl
 // test run
-// target jit.q32
+// target wasm.q32
 
 float add_float(float a, float b) {
     return a + b;
@@ -166,12 +163,11 @@ int add_int(int a, int b) {
 ### Directives
 
 - `// test run` — marks an execution test file (required for run tests).
-- `// target <backend>.<format>` — file-level default target (e.g. `jit.q32`, `wasm.q32`,
-  `rv32c.q32`).
-- Per-directive filters: `// @jit`, `// @wasm`, `// @rv32c` (see parser / plan docs).
+- `// target <backend>.<format>` — file-level default target (e.g. `wasm.q32`, `rv32c.q32`).
+- Per-directive filters: `// @wasm`, `// @rv32c` (see parser / plan docs).
 
-**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): **`rv32c.q32` + `wasm.q32`**. CI
-runs **jit**, **wasm**, and **rv32c** via `just test-filetests`.
+**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): **`rv32n.q32` + `rv32c.q32` +
+`wasm.q32`**. CI runs the full target list via `just test-filetests`.
 
 ### Run directives
 
@@ -189,8 +185,8 @@ runs **jit**, **wasm**, and **rv32c** via `just test-filetests`.
 2. **Parsing** — directives and `// run:` lines (`src/filetest.rs`, `src/parse/`).
 3. **Bootstrap** — generated `main()` calling each expression under test.
 4. **Compilation** — GLSL → LPIR → backend (`lpvm-native`, `lpvm-cranelift`, `lpvm-wasm`, etc.).
-5. **Execution** — **jit** (in-process), **wasm** (wasmtime), **rv32n** / **rv32c** (emulator +
-   linked builtins), depending on target.
+5. **Execution** — **wasm** (wasmtime), **rv32n** / **rv32lpn** / **rv32c** (emulator + linked
+   builtins), depending on target.
 6. **Comparison** — expected vs actual; BLESS can rewrite expectations.
 
 ### Comparison with Cranelift filetests
@@ -200,17 +196,17 @@ runs **jit**, **wasm**, and **rv32c** via `just test-filetests`.
 
 ## Baseline: mark current failures `@unimplemented`
 
-To make the default `jit.q32` run exit **0** while gaps remain (so each milestone only shows new
+To make a target's run exit **0** while gaps remain (so each milestone only shows new
 regressions), use the filetests app with **exactly one** `--target` and `--mark-unimplemented`.
 You will be prompted to type `yes`, or pass `--assume-yes` for scripts.
 
 ```bash
-cargo run -p lps-filetests-app -- test --target jit.q32 --mark-unimplemented --assume-yes
+cargo run -p lps-filetests-app -- test --target wasm.q32 --mark-unimplemented --assume-yes
 # or: LP_MARK_UNIMPLEMENTED=1 with the same binary (still requires single target)
 ```
 
 Whole-file compile failures in **summary** mode get one file-level
-`// @unimplemented(backend=jit)` before the first `// run:`. Per-directive failures get a marker
+`// @unimplemented(backend=wasm)` before the first `// run:`. Per-directive failures get a marker
 line immediately before each failing `// run:`. Re-run the suite after marking; use `--fix` /
 `LP_FIX_XFAIL=1` to remove markers when a test starts passing.
 

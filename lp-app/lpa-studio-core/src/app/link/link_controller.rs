@@ -69,6 +69,11 @@ impl LinkController {
         self.active_session = Some(session);
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_active_connection_for_test(&mut self, connection: LinkConnection) {
+        self.active_connection = Some(connection);
+    }
+
     pub fn snapshot(&self) -> LinkSnapshot {
         LinkSnapshot::new(self.state.clone())
     }

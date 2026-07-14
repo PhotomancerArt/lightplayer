@@ -1,91 +1,135 @@
-//! Stories for the Studio device pane.
+//! Stories for the D23 device pane (M5): hardware only, never the sim.
+//!
+//! The pre-M5 wizard stories (provider/endpoint steps, provisioning
+//! sequences over the step stack) died with the wizard; the deploy
+//! dialog's stories cover those flows now.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiLogLevel;
+use lpa_studio_core::{
+    ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceController, DeviceOp, UiAction, UiMetric,
+    UiPaneView, UiStatus, UiStepState, UiStepView, UiStepsView, UiViewContent,
+};
 use lpa_studio_web_story_macros::story;
 
-use crate::app::story_fixtures::{
-    browser_serial_blank_firmware_view, browser_serial_canceled_view,
-    browser_serial_open_failed_view, idle_device_view, lightplayer_disconnected_view,
-    open_for_flashing_view, provision_failed_view, provision_ready_view, provisioning_view,
-    reset_complete_view, resetting_to_blank_view, shell_story, studio_log,
-};
 use crate::core::PaneView;
 
-#[story]
-pub(crate) fn device_pane() -> Element {
-    let view = idle_device_view();
+fn pane(status: UiStatus, sections: Vec<UiStepView>) -> UiPaneView {
+    UiPaneView::new(
+        DeviceController::NODE_ID,
+        "Device",
+        status,
+        UiViewContent::Stack(Box::new(UiStepsView::new(sections))),
+        Vec::new(),
+    )
+}
+
+fn story_pane(view: UiPaneView) -> Element {
     rsx! {
-        PaneView {
-            view,
-            primary: true,
-            running: false,
-            on_action: move |_| {},
+        section { class: "tw:max-w-[420px] tw:p-4",
+            PaneView {
+                view,
+                primary: false,
+                running: false,
+                on_action: move |_| {},
+            }
         }
     }
 }
 
-#[story]
-pub(crate) fn browser_serial_canceled() -> Element {
-    shell_story(browser_serial_canceled_view(), false, Vec::new())
-}
-
-#[story]
-pub(crate) fn browser_serial_open_failed() -> Element {
-    shell_story(browser_serial_open_failed_view(), false, Vec::new())
-}
-
-#[story]
-pub(crate) fn server_disconnected_link_ready() -> Element {
-    shell_story(
-        lightplayer_disconnected_view(),
-        false,
-        vec![studio_log(UiLogLevel::Info, "LightPlayer disconnected")],
+fn firmware_section() -> UiStepView {
+    UiStepView::new(
+        DeviceController::SECTION_FIRMWARE,
+        "Firmware",
+        UiStepState::Complete,
     )
+    .with_body(UiViewContent::text(
+        "Firmware operations are separate from project deploys.",
+    ))
+    .with_actions(vec![
+        UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ProvisionFirmware,
+        )
+        .with_label("Update firmware"),
+        UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ResetToBlank,
+        )
+        .with_label("Erase device"),
+    ])
 }
 
 #[story]
-pub(crate) fn open_for_flashing() -> Element {
-    shell_story(open_for_flashing_view(), false, Vec::new())
+pub(crate) fn disconnected_with_association() -> Element {
+    story_pane(pane(
+        UiStatus::neutral("No device"),
+        vec![
+            UiStepView::new(
+                DeviceController::SECTION_DEVICE,
+                "Device",
+                UiStepState::Pending,
+            )
+            .with_body(UiViewContent::text(
+                "Usually on Luna's porch sign.\nRunning in the simulator.",
+            ))
+            .with_actions(vec![UiAction::from_op(
+                ControllerId::new(DEPLOY_NODE_ID),
+                DeployOp::OpenDialog { target_key: None },
+            )]),
+        ],
+    ))
 }
 
 #[story]
-pub(crate) fn provision_ready() -> Element {
-    shell_story(provision_ready_view(), false, Vec::new())
+pub(crate) fn connected_at_head() -> Element {
+    story_pane(pane(
+        UiStatus::good("Luna's porch sign"),
+        vec![
+            UiStepView::new(
+                DeviceController::SECTION_DEVICE,
+                "Device",
+                UiStepState::Complete,
+            )
+            .with_body(UiViewContent::Metrics(vec![
+                UiMetric::new("Name", "Luna's porch sign"),
+                UiMetric::new("Holds", "2026-07-02-0930-porch-sign — up to date"),
+                UiMetric::new("Protocol", "fw-serial-v1"),
+            ]))
+            .with_actions(vec![
+                UiAction::from_op(
+                    ControllerId::new(DEPLOY_NODE_ID),
+                    DeployOp::OpenDialog { target_key: None },
+                )
+                .with_label("Push to device…"),
+                UiAction::from_op(
+                    ControllerId::new(DeviceController::NODE_ID),
+                    DeviceOp::DisconnectDevice,
+                )
+                .with_label("Disconnect"),
+            ]),
+            firmware_section(),
+        ],
+    ))
 }
 
 #[story]
-pub(crate) fn browser_serial_blank_firmware() -> Element {
-    shell_story(browser_serial_blank_firmware_view(), false, Vec::new())
-}
-
-#[story]
-pub(crate) fn provisioning() -> Element {
-    shell_story(provisioning_view(), true, Vec::new())
-}
-
-#[story]
-pub(crate) fn provision_failed() -> Element {
-    shell_story(
-        provision_failed_view(),
-        false,
-        vec![studio_log(
-            UiLogLevel::Error,
-            "browser serial firmware flashing failed",
-        )],
-    )
-}
-
-#[story]
-pub(crate) fn resetting_to_blank() -> Element {
-    shell_story(resetting_to_blank_view(), true, Vec::new())
-}
-
-#[story]
-pub(crate) fn reset_complete() -> Element {
-    shell_story(
-        reset_complete_view(),
-        false,
-        vec![studio_log(UiLogLevel::Info, "ESP32-C6 wiped")],
-    )
+pub(crate) fn ready_to_flash() -> Element {
+    story_pane(pane(
+        UiStatus::warning("Ready to flash"),
+        vec![
+            UiStepView::new(
+                DeviceController::SECTION_DEVICE,
+                "Device",
+                UiStepState::Active,
+            )
+            .with_body(UiViewContent::text(
+                "No LightPlayer firmware is running on this device.",
+            ))
+            .with_actions(vec![UiAction::from_op(
+                ControllerId::new(DEPLOY_NODE_ID),
+                DeployOp::OpenDialog { target_key: None },
+            )]),
+            firmware_section(),
+        ],
+    ))
 }

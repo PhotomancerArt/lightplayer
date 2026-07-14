@@ -352,7 +352,7 @@ mod struct_return_signature_tests {
             sret_arg: Some(VReg(1)),
             vreg_types: vec![IrType::Pointer, IrType::Pointer, IrType::I32],
             slots: Vec::new(),
-            body: Vec::new(),
+            body: Vec::new().into(),
             vreg_pool: Vec::new(),
         };
         let sig = signature_for_ir_func(
@@ -387,7 +387,7 @@ mod struct_return_signature_tests {
             sret_arg: None,
             vreg_types: vec![IrType::Pointer],
             slots: Vec::new(),
-            body: Vec::new(),
+            body: Vec::new().into(),
             vreg_pool: Vec::new(),
         };
         let sig = signature_for_ir_func(
