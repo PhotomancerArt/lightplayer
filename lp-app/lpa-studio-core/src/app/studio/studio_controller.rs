@@ -439,7 +439,13 @@ impl StudioController {
             self.upsert_device_entry(identity, now).await;
         }
 
-        if pulled.files.is_empty() {
+        // a device with no project files — or only `.lp/*` metadata (a
+        // freshly stamped board) — is EMPTY, not unreadable
+        let has_project_content = pulled
+            .files
+            .iter()
+            .any(|(path, _)| !path.starts_with(".lp/"));
+        if !has_project_content {
             return Ok(DeviceSyncState {
                 identity,
                 content: DeviceContent::Empty,
@@ -449,7 +455,7 @@ impl StudioController {
             return Ok(DeviceSyncState {
                 identity,
                 content: DeviceContent::Unreadable {
-                    detail: "no readable project manifest".to_string(),
+                    detail: "project files present but no readable manifest".to_string(),
                 },
             });
         }
