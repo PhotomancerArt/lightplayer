@@ -86,6 +86,14 @@ impl BrowserSerialEsp32Provider {
         browser_serial::is_supported()
     }
 
+    /// Whether this origin already holds at least one granted Web Serial
+    /// port (`navigator.serial.getPorts()` — no permission prompt). This is
+    /// catalog-level metadata: it answers "has a device ever been granted
+    /// here?" without opening anything.
+    pub async fn granted_ports_available() -> bool {
+        browser_serial::granted_ports_count().await > 0
+    }
+
     pub fn is_flash_supported(&self) -> bool {
         browser_esp32_flash::is_supported()
     }

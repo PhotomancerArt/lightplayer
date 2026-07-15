@@ -14,10 +14,9 @@
 //!   visually separate firmware section (flash / erase — D15).
 //!
 //! Since M4/P5 the controller also owns the CONNECT FLOW: the provider
-//! catalog (picker state, still expressed as [`LinkState`] for the views)
+//! catalog (picker state, expressed as [`ConnectFlowState`] for the views)
 //! and the [`RuntimeAttachment`] — a [`DeviceSession`] for hardware, a
-//! worker-io [`SimAttachment`] for the browser simulator. `LinkController`
-//! is bypassed on every path here (P6 deletes it).
+//! worker-io [`SimAttachment`] for the browser simulator.
 //!
 //! Connect/endpoint flows live inside the deploy dialog (M5); this pane
 //! never renders provider plumbing.
@@ -32,15 +31,15 @@ use lpa_link::{
 };
 
 use crate::app::device::DeployOp;
+use crate::app::device::connect_choices::{provider_auto_connects, provider_choices};
 use crate::app::device::device_event_adapter::console_event_sink;
+use crate::app::device::link_ux::{link_session_logs, map_link_error};
 use crate::app::device::runtime_attachment::{DeviceHandle, RuntimeAttachment, SimAttachment};
-use crate::app::link::link_controller::{link_session_logs, map_link_error, provider_choices};
 use crate::core::view::steps_view::{UiStepState, UiStepView};
 use crate::{
-    ConnectedDeviceSummary, Controller, ControllerId, DeviceOp, DeviceSnapshot, EndpointChoice,
-    LinkSnapshot, LinkState, ProgressState, ServerController, ServerFailureKind, ServerState,
-    UiAction, UiError, UiIssue, UiLogDraft, UiMetric, UiPaneView, UiStatus, UiStepsView,
-    UiViewContent,
+    ConnectFlowState, ConnectedDeviceSummary, Controller, ControllerId, DeviceOp, DeviceSnapshot,
+    EndpointChoice, ProgressState, ServerController, ServerFailureKind, ServerState, UiAction,
+    UiError, UiIssue, UiLogDraft, UiMetric, UiPaneView, UiStatus, UiStepsView, UiViewContent,
 };
 
 use crate::app::places::{DeviceContent, DeviceSyncState};
@@ -50,10 +49,9 @@ pub struct DeviceController {
     /// fresh connector; never borrowed across an await (its methods are
     /// synchronous and it is owned by value).
     registry: LinkProviderRegistry,
-    /// The connect-flow view state (picker/progress/failure). Reuses the
-    /// [`LinkState`] vocabulary the views already read; `Connected` is
-    /// entered exactly when [`Self::attachment`] becomes non-`None`.
-    flow: LinkState,
+    /// The connect-flow view state (picker/progress/failure). `Connected`
+    /// is entered exactly when [`Self::attachment`] becomes non-`None`.
+    flow: ConnectFlowState,
     /// What the studio is attached to right now.
     attachment: RuntimeAttachment,
     /// Injected timer factory for [`DeviceSession`] deadlines. The default
@@ -90,7 +88,7 @@ impl DeviceController {
     }
 
     pub fn with_registry(registry: LinkProviderRegistry) -> Self {
-        let flow = LinkState::SelectingProvider {
+        let flow = ConnectFlowState::SelectingProvider {
             providers: provider_choices(&registry),
             issue: None,
         };
@@ -113,12 +111,34 @@ impl DeviceController {
     }
 
     pub fn snapshot(&self) -> DeviceSnapshot {
-        DeviceSnapshot::new(LinkSnapshot::new(self.flow.clone()), self.server.snapshot())
+        DeviceSnapshot::new(self.flow.clone(), self.server.snapshot())
     }
 
     /// The connect-flow view state (picker/progress/failure).
-    pub fn flow_state(&self) -> &LinkState {
+    pub fn flow_state(&self) -> &ConnectFlowState {
         &self.flow
+    }
+
+    /// Hardware device classes in this build's catalog (descriptors whose
+    /// class can flash firmware), for the deploy dialog's connect actions.
+    pub(crate) fn hardware_device_kinds(&self) -> Vec<LinkProviderKind> {
+        crate::app::device::connect_choices::hardware_device_descriptors(&self.registry)
+            .into_iter()
+            .map(|descriptor| descriptor.kind)
+            .collect()
+    }
+
+    /// Transport label for the attached HARDWARE device ("USB" for serial
+    /// classes), from the connector class metadata. `None` when nothing is
+    /// attached or the runtime is the simulator (never a device — D22).
+    pub(crate) fn transport_label(&self) -> Option<&'static str> {
+        if !self.attachment.is_device() {
+            return None;
+        }
+        match &self.flow {
+            ConnectFlowState::Connected { device } => device.provider_id.transport_label(),
+            _ => None,
+        }
     }
 
     pub fn attachment(&self) -> &RuntimeAttachment {
@@ -180,8 +200,8 @@ impl DeviceController {
     }
 
     // -----------------------------------------------------------------
-    // Connect flow (absorbed from LinkController; hardware lands on a
-    // DeviceSession, BrowserWorker on a SimAttachment)
+    // Connect flow (hardware lands on a DeviceSession, BrowserWorker on
+    // a SimAttachment)
     // -----------------------------------------------------------------
 
     /// Reset to the provider catalog. Drops the attachment WITHOUT a
@@ -192,7 +212,7 @@ impl DeviceController {
 
     fn reset_to_provider_selection(&mut self, issue: Option<UiIssue>) {
         self.attachment = RuntimeAttachment::None;
-        self.flow = LinkState::SelectingProvider {
+        self.flow = ConnectFlowState::SelectingProvider {
             providers: provider_choices(&self.registry),
             issue,
         };
@@ -204,7 +224,7 @@ impl DeviceController {
 
     /// Mark the flow failed (surfaced as the gallery issue chip).
     pub fn fail(&mut self, message: impl Into<String>) {
-        self.flow = LinkState::Failed {
+        self.flow = ConnectFlowState::Failed {
             issue: UiIssue::new(message),
         };
     }
@@ -223,7 +243,7 @@ impl DeviceController {
 
         self.discover_provider_endpoints(provider_id).await?;
         let endpoints = match &self.flow {
-            LinkState::SelectingEndpoint { endpoints, .. } => endpoints.clone(),
+            ConnectFlowState::SelectingEndpoint { endpoints, .. } => endpoints.clone(),
             _ => Vec::new(),
         };
         if endpoints.len() == 1 && provider_auto_connects(provider_id) {
@@ -239,7 +259,7 @@ impl DeviceController {
         provider_id: LinkProviderKind,
     ) -> Result<(), UiError> {
         self.attachment = RuntimeAttachment::None;
-        self.flow = LinkState::DiscoveringEndpoints {
+        self.flow = ConnectFlowState::DiscoveringEndpoints {
             provider_id,
             progress: ProgressState::new("Discovering endpoints"),
         };
@@ -261,7 +281,7 @@ impl DeviceController {
             return Err(UiError::Link(message));
         }
 
-        self.flow = LinkState::SelectingEndpoint {
+        self.flow = ConnectFlowState::SelectingEndpoint {
             provider_id,
             endpoints: endpoints
                 .into_iter()
@@ -274,7 +294,7 @@ impl DeviceController {
     #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
     async fn open_browser_serial_provider(&mut self) -> Result<DeviceOpenOutcome, UiError> {
         self.attachment = RuntimeAttachment::None;
-        self.flow = LinkState::DiscoveringEndpoints {
+        self.flow = ConnectFlowState::DiscoveringEndpoints {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             progress: ProgressState::new("Requesting browser serial access"),
         };
@@ -306,7 +326,7 @@ impl DeviceController {
         };
         let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
         let endpoint_id = endpoint_choice.id.clone();
-        self.flow = LinkState::SelectingEndpoint {
+        self.flow = ConnectFlowState::SelectingEndpoint {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
         };
@@ -341,7 +361,7 @@ impl DeviceController {
                 summary: "Open this endpoint.".to_string(),
                 status: lpa_link::LinkEndpointStatus::Available,
             });
-        self.flow = LinkState::Connecting {
+        self.flow = ConnectFlowState::Connecting {
             endpoint: endpoint.clone(),
             progress: ProgressState::new("Opening link session"),
         };
@@ -388,7 +408,7 @@ impl DeviceController {
             RuntimeAttachment::None => unreachable!("connect_endpoint always attaches"),
         };
         self.attachment = attachment;
-        self.flow = LinkState::Connected {
+        self.flow = ConnectFlowState::Connected {
             device: ConnectedDeviceSummary::new(
                 provider_id,
                 session.endpoint_id.as_str(),
@@ -455,14 +475,14 @@ impl DeviceController {
         endpoint_id: &LinkEndpointId,
     ) -> Option<EndpointChoice> {
         match &self.flow {
-            LinkState::SelectingEndpoint {
+            ConnectFlowState::SelectingEndpoint {
                 provider_id: state_provider,
                 endpoints,
             } if *state_provider == provider_id => endpoints
                 .iter()
                 .find(|endpoint| endpoint.id == *endpoint_id)
                 .cloned(),
-            LinkState::Connecting { endpoint, .. }
+            ConnectFlowState::Connecting { endpoint, .. }
                 if endpoint.provider_id == provider_id && endpoint.id == *endpoint_id =>
             {
                 Some(endpoint.clone())
@@ -633,7 +653,7 @@ impl DeviceController {
     pub(crate) fn set_stub_hardware_for_test(&mut self, state: DeviceState) {
         use crate::app::device::runtime_attachment::StubDevice;
         self.attachment = RuntimeAttachment::Device(DeviceHandle::Stub(StubDevice { state }));
-        self.flow = LinkState::Connected {
+        self.flow = ConnectFlowState::Connected {
             device: ConnectedDeviceSummary::new(
                 LinkProviderKind::Fake,
                 "fake-runtime",
@@ -662,7 +682,7 @@ impl DeviceController {
             ),
             connection: LinkConnection::fake("fake-runtime", "fake-session"),
         });
-        self.flow = LinkState::Connected {
+        self.flow = ConnectFlowState::Connected {
             device: ConnectedDeviceSummary::new(
                 LinkProviderKind::Fake,
                 "fake-runtime",
@@ -723,13 +743,6 @@ async fn open_sim_attachment(
     ))
 }
 
-fn provider_auto_connects(kind: LinkProviderKind) -> bool {
-    matches!(
-        kind,
-        LinkProviderKind::BrowserWorker | LinkProviderKind::HostProcess
-    )
-}
-
 /// One line for what the device holds, from the connect-time pull.
 fn content_line(content: &DeviceContent) -> String {
     match content {
@@ -758,5 +771,105 @@ impl Controller for DeviceController {
 impl Default for DeviceController {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    use lpa_link::providers::LinkProviderRegistry;
+    use lpa_link::providers::fake::FakeProvider;
+    use lpa_link::{LinkEndpoint, LinkEndpointId, LinkProviderKind};
+
+    use super::*;
+
+    #[test]
+    fn new_controller_projects_provider_catalog_into_the_flow() {
+        let device = DeviceController::with_registry(registry_with_fake_endpoint());
+
+        assert!(matches!(
+            device.flow_state(),
+            ConnectFlowState::SelectingProvider { providers, .. }
+                if providers.len() == 1 && providers[0].id == LinkProviderKind::Fake
+        ));
+    }
+
+    #[test]
+    fn failed_endpoint_discovery_returns_to_provider_selection_with_issue() {
+        let mut device = DeviceController::with_registry(registry_with_fake(
+            FakeProvider::new()
+                .with_endpoint(fake_endpoint())
+                .with_discover_error("serial discovery failed"),
+        ));
+
+        let result = block_on_ready(device.open_provider(LinkProviderKind::Fake));
+
+        assert!(matches!(result, Err(UiError::Link(_))));
+        assert!(matches!(
+            device.flow_state(),
+            ConnectFlowState::SelectingProvider {
+                issue: Some(issue),
+                ..
+            } if issue.message.contains("serial discovery failed")
+        ));
+    }
+
+    #[test]
+    fn failed_connection_handoff_returns_to_provider_selection_with_issue() {
+        let mut device = DeviceController::with_registry(registry_with_fake(
+            FakeProvider::new()
+                .with_endpoint(fake_endpoint())
+                .with_connection_error("server handoff failed"),
+        ));
+
+        let result = block_on_ready(
+            device.connect_endpoint(LinkProviderKind::Fake, LinkEndpointId::new("fake-runtime")),
+        );
+
+        assert!(matches!(result, Err(UiError::Link(_))));
+        assert!(matches!(
+            device.flow_state(),
+            ConnectFlowState::SelectingProvider {
+                issue: Some(issue),
+                ..
+            } if issue.message.contains("server handoff failed")
+        ));
+        assert!(!device.has_runtime_attachment());
+    }
+
+    fn fake_endpoint() -> LinkEndpoint {
+        LinkEndpoint::new("fake-runtime", LinkProviderKind::Fake, "Fake runtime")
+    }
+
+    fn registry_with_fake_endpoint() -> LinkProviderRegistry {
+        registry_with_fake(FakeProvider::new().with_endpoint(fake_endpoint()))
+    }
+
+    fn registry_with_fake(provider: FakeProvider) -> LinkProviderRegistry {
+        let mut registry = LinkProviderRegistry::new();
+        registry.insert(provider);
+        registry
+    }
+
+    fn block_on_ready<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("test future unexpectedly yielded"),
+        }
+    }
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
     }
 }

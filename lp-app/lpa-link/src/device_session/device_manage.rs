@@ -45,7 +45,10 @@ pub struct DeviceManageOutcome {
     pub result: LinkManagementResult,
     /// Post-rebuild readiness outcome. Post-flash this should be
     /// [`DeviceState::Ready`]; post-erase it is [`DeviceState::BlankFlash`]
-    /// — success for an erase.
+    /// — success for an erase. [`DeviceState::Gone`] means the OPERATION
+    /// succeeded but the post-op rebuild failed: the result is still real
+    /// (the device was flashed/erased), the link just needs a
+    /// [`DeviceSession::reconnect`].
     pub state: DeviceState,
 }
 
@@ -57,11 +60,14 @@ impl DeviceSession {
     /// the [`DeviceEvent`] vocabulary; state transitions keep flowing to the
     /// sink installed at [`DeviceSession::connect`].
     ///
-    /// On failure the session record's status becomes
+    /// On OPERATION failure the session record's status becomes
     /// `LinkSessionStatus::Error`, the state lands on [`DeviceState::Gone`]
     /// (the wire was released), and the mode returns to `AppProtocol`; the
     /// channel becomes usable again after a successful
-    /// [`Self::reconnect`].
+    /// [`Self::reconnect`]. A rebuild failure AFTER a successful operation
+    /// is NOT an error: the outcome is returned with `state: Gone` so the
+    /// operation's result survives (the caller degrades to a notice and
+    /// offers reconnect).
     pub async fn manage(
         &self,
         request: LinkManagementRequest,
@@ -83,7 +89,20 @@ impl DeviceSession {
                 return Err(error);
             }
         };
-        self.shared.rebuild_link().await?;
+        // The operation SUCCEEDED; a failed rebuild must not swallow that
+        // result (P5 regression). Degrade: report the outcome with the state
+        // `rebuild_link` recorded (`Gone`) so the caller can surface the
+        // success and offer a reconnect.
+        if let Err(error) = self.shared.rebuild_link().await {
+            sink.emit(DeviceEvent::LogLine {
+                line: format!("device link rebuild failed after management: {error}"),
+                origin: DeviceLineOrigin::Link,
+            });
+            return Ok(DeviceManageOutcome {
+                result,
+                state: self.shared.state(),
+            });
+        }
         let state = self.shared.drive_readiness().await;
         Ok(DeviceManageOutcome { result, state })
     }

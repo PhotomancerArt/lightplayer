@@ -7,6 +7,7 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use lpa_link::{DeviceState, LinkManagementRequest, LinkManagementResult, LinkProviderKind};
 
 use crate::app::device::device_event_adapter::management_event_sink;
+use crate::app::device::link_ux::management_result_logs;
 use crate::app::device::{
     DEPLOY_NODE_ID, DeployOp, DeploySession, DeployState, DeployTarget, DeviceOpenOutcome,
     UiDeployChoice, UiDeployView,
@@ -14,7 +15,6 @@ use crate::app::device::{
 use crate::app::home::home_view_builder::HomeInputs;
 use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
-use crate::app::link::link_controller::management_result_logs;
 use crate::app::places::device_session::{self, DeviceContent, DeviceSyncState};
 use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::refresh_cadence::RefreshCadence;
@@ -22,12 +22,12 @@ use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
-    AssetContentFetchOp, AssetEditOp, Controller, ControllerContext, DeviceController, DeviceOp,
-    LinkState, NodeRevertOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
-    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction,
-    UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
-    UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate,
-    UxUpdateSink,
+    AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
+    DeviceController, DeviceOp, NodeRevertOp, ProjectConnectResult, ProjectController,
+    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, SlotEditOp,
+    StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiNotice, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent,
+    UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
@@ -178,7 +178,7 @@ impl StudioController {
 
     pub fn snapshot(&self) -> StudioSnapshot {
         StudioSnapshot::new(
-            self.device.snapshot().link,
+            self.device.snapshot().flow,
             self.device.snapshot().server,
             self.project.snapshot(),
             self.logs.to_vec(),
@@ -190,7 +190,7 @@ impl StudioController {
     /// The actor publishes this to the UI timer so the interval policy lives in
     /// core, not as a `LinkProviderKind` match in the view layer.
     pub fn refresh_cadence(&self) -> RefreshCadence {
-        RefreshCadence::for_link_state(&self.device.snapshot().link.state)
+        RefreshCadence::for_flow_state(&self.device.snapshot().flow)
     }
 
     pub fn actions(&self) -> UiActions {
@@ -232,8 +232,8 @@ impl StudioController {
         }
         let opening = self.pending_open.as_ref();
         let issue = match self.device.flow_state() {
-            LinkState::SelectingProvider { issue, .. } => issue.clone(),
-            LinkState::Failed { issue } => Some(issue.clone()),
+            ConnectFlowState::SelectingProvider { issue, .. } => issue.clone(),
+            ConnectFlowState::Failed { issue } => Some(issue.clone()),
             _ => None,
         };
         Some(home_view_builder::build_home_view(
@@ -241,6 +241,7 @@ impl StudioController {
             opening.map(|pending| pending.card_key().to_string()),
             issue,
             self.device_sync.as_ref(),
+            self.device.transport_label(),
         ))
     }
 
@@ -517,7 +518,11 @@ impl StudioController {
                 let host = self.library_host()?;
                 let op = CatalogOp::RecordDeviceObservation {
                     project_uid: summary.uid.to_string(),
-                    device: device_session::registry_entry_for(&identity_value, now),
+                    device: device_session::registry_entry_for(
+                        &identity_value,
+                        self.device.transport_label().unwrap_or_default(),
+                        now,
+                    ),
                     observed: pulled.observed,
                     files: pulled.files.clone(),
                 };
@@ -551,7 +556,11 @@ impl StudioController {
         let host = self.library_host()?;
         let outcome = host
             .catalog(CatalogOp::AdoptDevicePackage {
-                device: device_session::registry_entry_for(identity_value, now),
+                device: device_session::registry_entry_for(
+                    identity_value,
+                    self.device.transport_label().unwrap_or_default(),
+                    now,
+                ),
                 files: pulled.files.clone(),
             })
             .await
@@ -585,7 +594,11 @@ impl StudioController {
         let Ok(host) = self.library_host() else {
             return;
         };
-        let entry = device_session::registry_entry_for(identity, now);
+        let entry = device_session::registry_entry_for(
+            identity,
+            self.device.transport_label().unwrap_or_default(),
+            now,
+        );
         if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
             log::warn!("device registry upsert failed: {error}");
         }
@@ -635,13 +648,15 @@ impl StudioController {
 
     /// Hardware connect actions for the dialog's `NeedsDevice` state:
     /// mid-selection link states surface their endpoint choices; settled
-    /// states offer the ESP32 provider (and recovery open). The simulator
-    /// is never offered — it is not a device (D22).
+    /// states offer the CATALOG's hardware device classes (connect +
+    /// recovery open), derived from descriptors/capabilities — no provider
+    /// kind is hardcoded. The simulator is never offered — it is not a
+    /// device (D22). Copy stays ESP32-shaped until another hardware class
+    /// exists (naming is M7's redesign).
     fn deploy_connect_actions(&self) -> Vec<UiAction> {
-        use lpa_link::LinkProviderKind;
         let device_node = self.device.node_id();
         match self.device.flow_state() {
-            LinkState::SelectingEndpoint {
+            ConnectFlowState::SelectingEndpoint {
                 provider_id,
                 endpoints,
             } => endpoints
@@ -658,28 +673,31 @@ impl StudioController {
                     .with_summary(endpoint.summary.clone())
                 })
                 .collect(),
-            _ => vec![
-                UiAction::from_op(
-                    device_node.clone(),
-                    crate::DeviceOp::OpenProvider {
-                        provider_id: LinkProviderKind::BrowserSerialEsp32,
-                    },
-                )
-                .with_label("Connect ESP32")
-                .with_summary("Connect an ESP32 over USB.")
-                .with_icon("usb")
-                .with_priority(crate::ActionPriority::Primary),
-                UiAction::from_op(
-                    device_node,
-                    crate::DeviceOp::OpenProviderForRecovery {
-                        provider_id: LinkProviderKind::BrowserSerialEsp32,
-                    },
-                )
-                .with_label("Open for flashing")
-                .with_summary("Open the ESP32 connection without attaching LightPlayer.")
-                .with_icon("usb")
-                .with_priority(crate::ActionPriority::Secondary),
-            ],
+            _ => self
+                .device
+                .hardware_device_kinds()
+                .into_iter()
+                .flat_map(|provider_id| {
+                    [
+                        UiAction::from_op(
+                            device_node.clone(),
+                            crate::DeviceOp::OpenProvider { provider_id },
+                        )
+                        .with_label("Connect ESP32")
+                        .with_summary("Connect an ESP32 over USB.")
+                        .with_icon("usb")
+                        .with_priority(crate::ActionPriority::Primary),
+                        UiAction::from_op(
+                            device_node.clone(),
+                            crate::DeviceOp::OpenProviderForRecovery { provider_id },
+                        )
+                        .with_label("Open for flashing")
+                        .with_summary("Open the ESP32 connection without attaching LightPlayer.")
+                        .with_icon("usb")
+                        .with_priority(crate::ActionPriority::Secondary),
+                    ]
+                })
+                .collect(),
         }
     }
 
@@ -1027,7 +1045,11 @@ impl StudioController {
         let host = self.library_host()?;
         if recorded_on_active {
             // association still goes through the registry (store root)
-            let mut entry = device_session::registry_entry_for(device, now);
+            let mut entry = device_session::registry_entry_for(
+                device,
+                self.device.transport_label().unwrap_or_default(),
+                now,
+            );
             entry.association = Some(lpc_history::DeviceAssociation {
                 device: device_uid,
                 project: target
@@ -1043,7 +1065,11 @@ impl StudioController {
         } else {
             host.catalog(CatalogOp::RecordPush {
                 project_uid: target.project_uid.clone(),
-                device: device_session::registry_entry_for(device, now),
+                device: device_session::registry_entry_for(
+                    device,
+                    self.device.transport_label().unwrap_or_default(),
+                    now,
+                ),
                 version: local_hash,
             })
             .await
@@ -2156,6 +2182,11 @@ impl StudioController {
     pub(crate) fn apply_project_view_for_test(&mut self, view: &lpc_view::ProjectView) {
         self.project.apply_project_view(view).unwrap();
     }
+
+    /// The attached hardware's device-session state, for e2e assertions.
+    pub(crate) fn device_state_for_test(&self) -> Option<lpa_link::DeviceState> {
+        self.device.device_state()
+    }
 }
 
 impl ControllerContext for StudioController {
@@ -2346,7 +2377,7 @@ mod tests {
     use super::*;
     use crate::core::status::UiStatusKind;
     use crate::{
-        ControllerId, LinkState, ProjectController, ProjectEditorOp, ProjectEditorTarget,
+        ConnectFlowState, ControllerId, ProjectController, ProjectEditorOp, ProjectEditorTarget,
         ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTarget, ProjectState,
         ProjectSyncPhase, ServerController, ServerFailureKind, ServerState, StudioServerClient,
         UiIssue,
@@ -2357,8 +2388,8 @@ mod tests {
         let studio = StudioController::new(|| 0.0);
 
         assert!(matches!(
-            studio.snapshot().link.state,
-            LinkState::SelectingProvider { .. }
+            studio.snapshot().flow,
+            ConnectFlowState::SelectingProvider { .. }
         ));
     }
 
@@ -2878,8 +2909,8 @@ mod tests {
             ServerState::Disconnected
         ));
         assert!(matches!(
-            studio.snapshot().link.state,
-            LinkState::SelectingEndpoint { .. }
+            studio.snapshot().flow,
+            ConnectFlowState::SelectingEndpoint { .. }
         ));
     }
 
@@ -2898,8 +2929,8 @@ mod tests {
             ServerState::Connected { .. }
         ));
         assert!(matches!(
-            studio.snapshot().link.state,
-            LinkState::Connected { .. }
+            studio.snapshot().flow,
+            ConnectFlowState::Connected { .. }
         ));
     }
 
@@ -2918,8 +2949,8 @@ mod tests {
             ServerState::Disconnected
         ));
         assert!(matches!(
-            studio.snapshot().link.state,
-            LinkState::Connected { .. }
+            studio.snapshot().flow,
+            ConnectFlowState::Connected { .. }
         ));
         // no project → gallery, with the link still up underneath
         assert!(studio.view().home.is_some());
@@ -2940,8 +2971,8 @@ mod tests {
             ServerState::Disconnected
         ));
         assert!(matches!(
-            studio.snapshot().link.state,
-            LinkState::SelectingProvider { .. }
+            studio.snapshot().flow,
+            ConnectFlowState::SelectingProvider { .. }
         ));
     }
 
@@ -2964,8 +2995,8 @@ mod tests {
             ServerState::Disconnected
         ));
         assert!(matches!(
-            studio.snapshot().link.state,
-            LinkState::SelectingProvider { .. }
+            studio.snapshot().flow,
+            ConnectFlowState::SelectingProvider { .. }
         ));
     }
 
@@ -2988,8 +3019,8 @@ mod tests {
             ServerState::Connected { .. }
         ));
         assert!(matches!(
-            studio.snapshot().link.state,
-            LinkState::Connected { .. }
+            studio.snapshot().flow,
+            ConnectFlowState::Connected { .. }
         ));
     }
 

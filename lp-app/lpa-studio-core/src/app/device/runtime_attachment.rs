@@ -9,8 +9,6 @@
 //!   `lpa_link` [`DeviceSession`] (state machine, hello-first readiness,
 //!   management, reconnect-that-rebuilds).
 //!
-//! `LinkController` is bypassed on every path that lands here (P6 deletes
-//! it).
 
 use std::rc::Rc;
 

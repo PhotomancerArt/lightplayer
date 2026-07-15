@@ -13,7 +13,7 @@ use crate::{
 ///
 /// A connector is created per open flow by [`LinkProviderRegistry::create_connector`]
 /// (or handed in preconfigured by tests) and OWNED by whoever drives the
-/// connection — today `LinkController`, `DeviceSession` in M4 P2. All methods
+/// connection — the studio's `DeviceController`/`DeviceSession` since M4. All methods
 /// take `&self` (each provider keeps its state behind internal `RefCell`s
 /// with borrows scoped to synchronous sections), so the owner can hold
 /// `Rc<LinkConnector>` and hand clones to client I/O adapters without any

@@ -37,7 +37,9 @@ pub struct FakeProvider {
     sessions: RefCell<BTreeMap<LinkSessionId, FakeSessionState>>,
     next_session_index: Cell<u64>,
     discover_error: Option<String>,
-    connect_error: Option<String>,
+    /// Interior-mutable so tests can arm/disarm it MID-SESSION (e.g. make
+    /// only the post-management rebuild's `connect` fail).
+    connect_error: RefCell<Option<String>>,
     connection_error: Option<String>,
     #[cfg(feature = "fake-device")]
     devices: BTreeMap<LinkEndpointId, crate::providers::fake_device::FakeEsp32Device>,
@@ -50,7 +52,7 @@ impl FakeProvider {
             sessions: RefCell::new(BTreeMap::new()),
             next_session_index: Cell::new(1),
             discover_error: None,
-            connect_error: None,
+            connect_error: RefCell::new(None),
             connection_error: None,
             #[cfg(feature = "fake-device")]
             devices: BTreeMap::new(),
@@ -67,9 +69,17 @@ impl FakeProvider {
         self
     }
 
-    pub fn with_connect_error(mut self, message: impl Into<String>) -> Self {
-        self.connect_error = Some(message.into());
+    pub fn with_connect_error(self, message: impl Into<String>) -> Self {
+        self.set_connect_error(Some(message.into()));
         self
+    }
+
+    /// Arm (or clear) the connect failure on a LIVE provider: subsequent
+    /// `connect` calls fail until cleared. Lets tests break only a rebuild
+    /// (`DeviceSession::manage`/`reconnect` reconnect on the same shared
+    /// connector) while the initial connect succeeds.
+    pub fn set_connect_error(&self, message: Option<String>) {
+        *self.connect_error.borrow_mut() = message;
     }
 
     pub fn with_connection_error(mut self, message: impl Into<String>) -> Self {
@@ -215,7 +225,7 @@ impl LinkProvider for FakeProvider {
     }
 
     async fn connect(&self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
-        if let Some(message) = &self.connect_error {
+        if let Some(message) = self.connect_error.borrow().as_ref() {
             return Err(LinkError::ConnectionFailed {
                 message: message.clone(),
             });

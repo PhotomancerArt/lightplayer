@@ -1,5 +1,10 @@
 //! Headless LightPlayer Studio application core.
 
+/// The browser-serial connector's catalog-level granted-ports probe, for
+/// the web shell's "has a device ever been granted here?" gate (the probe
+/// FFI lives in lpa-link; stories stay prop-injected).
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
 pub use lpa_link::{
     DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceSession,
     DeviceSnapshot as LinkDeviceSnapshot, DeviceState, DeviceTimers, LinkEndpointId,
@@ -18,18 +23,16 @@ pub mod core;
 pub use self::core::status::UiStatusKind;
 pub use lpc_history::{ContentHash, SyncRelation};
 
+pub use self::core::issue::UiIssue;
+pub use self::core::view::progress_state::ProgressState;
 pub use app::device::{
-    DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget, DeviceController, DeviceHandle, DeviceOp,
-    DeviceOpenOutcome, DeviceSnapshot, RuntimeAttachment, SimAttachment, UiDeployChoice,
-    UiDeployView,
+    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget,
+    DeviceController, DeviceHandle, DeviceOp, DeviceOpenOutcome, DeviceSnapshot, EndpointChoice,
+    ProviderChoice, RuntimeAttachment, SimAttachment, UiDeployChoice, UiDeployView,
 };
 pub use app::home::{
     HOME_NODE_ID, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceCardState, UiExampleCard,
     UiHomeView, UiPackageCard, ZipBytes,
-};
-pub use app::link::{
-    ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkController, LinkManagementOutcome,
-    LinkOpenOutcome, LinkSnapshot, LinkState, ProgressState, ProviderChoice, UiIssue,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody,

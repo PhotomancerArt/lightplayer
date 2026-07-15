@@ -14,8 +14,8 @@ pub mod stream;
 
 #[cfg(feature = "device-session")]
 pub use device_session::{
-    DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceManageOutcome, DeviceMode, DeviceSession,
-    DeviceSnapshot, DeviceState, DeviceTimers, IncompatibleReason,
+    DeviceDeadlines, DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceManageOutcome,
+    DeviceMode, DeviceSession, DeviceSnapshot, DeviceState, DeviceTimers, IncompatibleReason,
 };
 #[cfg(feature = "device-session-host")]
 pub use provider::connection::{LinkClientTransport, LinkServerConnection};

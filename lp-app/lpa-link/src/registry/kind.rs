@@ -68,6 +68,20 @@ impl LinkProviderKind {
         }
     }
 
+    /// Transport label for UI surfaces that name how a DEVICE is reached.
+    ///
+    /// `None` for runtime providers that are not devices at all (the browser
+    /// worker and host process simulators never show as devices — D22).
+    /// `Fake` is the test double for serial hardware, so it wears the serial
+    /// label and fixtures render like production. Future device classes
+    /// (websocket, network) name themselves here.
+    pub fn transport_label(self) -> Option<&'static str> {
+        match self {
+            Self::HostSerialEsp32 | Self::BrowserSerialEsp32 | Self::Fake => Some("USB"),
+            Self::HostProcess | Self::BrowserWorker => None,
+        }
+    }
+
     /// Baseline provider-class capabilities before endpoint/session specifics.
     pub fn capabilities(self) -> LinkCapabilities {
         match self {

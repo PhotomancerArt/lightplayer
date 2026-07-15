@@ -37,6 +37,9 @@ extern "C" {
     #[wasm_bindgen(js_name = requestPort)]
     fn js_request_port() -> Promise;
 
+    #[wasm_bindgen(js_name = grantedPortsCount)]
+    fn js_granted_ports_count() -> Promise;
+
     #[wasm_bindgen(js_name = openPort)]
     fn js_open(id: u32, baud_rate: u32) -> Promise;
 
@@ -61,6 +64,16 @@ extern "C" {
 
 pub fn is_supported() -> bool {
     js_is_supported()
+}
+
+/// Number of serial ports the user has ALREADY granted this origin
+/// (`navigator.serial.getPorts()` length) — no permission prompt is shown.
+/// `0` when Web Serial is unsupported or the probe fails.
+pub async fn granted_ports_count() -> usize {
+    match JsFuture::from(js_granted_ports_count()).await {
+        Ok(value) => value.as_f64().unwrap_or(0.0) as usize,
+        Err(_) => 0,
+    }
 }
 
 pub async fn request_port() -> Result<BrowserSerialPortHandle, LinkError> {

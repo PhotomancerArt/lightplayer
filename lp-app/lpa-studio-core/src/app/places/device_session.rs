@@ -175,10 +175,15 @@ pub async fn pull_device_copy(
 /// The device's registry entry for this connect, merging what the pull
 /// learned with the caller's clock. Association is preserved by the merge
 /// in [`upsert_device_merged`], so callers pass `None` here.
-pub fn registry_entry_for(identity: &DeviceIdentity, now: f64) -> RegisteredDevice {
+pub fn registry_entry_for(
+    identity: &DeviceIdentity,
+    transport: &str,
+    now: f64,
+) -> RegisteredDevice {
     RegisteredDevice {
         uid: identity.uid.clone(),
         name: identity.name.clone(),
+        transport: transport.to_string(),
         last_seen_at: now,
         association: None,
     }
@@ -192,13 +197,18 @@ pub fn upsert_device_merged(
     mut device: RegisteredDevice,
 ) -> Result<(), LibraryError> {
     let registry = DeviceRegistry::new(store.fs_handle());
-    if device.association.is_none() {
+    if device.association.is_none() || device.transport.is_empty() {
         if let Some(existing) = registry
             .list()?
             .into_iter()
             .find(|entry| entry.uid == device.uid)
         {
-            device.association = existing.association;
+            if device.association.is_none() {
+                device.association = existing.association;
+            }
+            if device.transport.is_empty() {
+                device.transport = existing.transport;
+            }
         }
     }
     registry.upsert(device)
@@ -481,6 +491,7 @@ mod tests {
 
     fn device() -> RegisteredDevice {
         RegisteredDevice {
+            transport: "USB".to_string(),
             uid: PrefixedUid::mint(UidPrefix::Device, &[7u8; 16]).to_string(),
             name: "Porch sign".to_string(),
             last_seen_at: 50.0,

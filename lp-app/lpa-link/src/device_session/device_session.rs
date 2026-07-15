@@ -661,9 +661,8 @@ impl DeviceShared {
 }
 
 /// Open one device link: connector connect → provider protocol open →
-/// connection handoff → wire selection. The canonical home of the flow that
-/// lived in the studio `LinkController`'s `open_connected_provider` (deleted
-/// with it in P6).
+/// connection handoff → wire selection. The canonical home of the studio's
+/// pre-M4 open-connected-provider flow.
 async fn open_device_link(
     connector: &LinkConnector,
     endpoint_id: &LinkEndpointId,

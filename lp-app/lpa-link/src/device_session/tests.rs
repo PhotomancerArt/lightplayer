@@ -552,6 +552,59 @@ async fn scripted_manage_failure_sets_error_status_and_reconnect_recovers() {
 }
 
 #[tokio::test]
+async fn manage_success_with_failed_rebuild_keeps_the_result_and_lands_gone() {
+    // P5 regression: a rebuild failure after a SUCCESSFUL operation must not
+    // swallow the operation's result — the erase happened on the device.
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        Rc::clone(&connector),
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+    // Arm the failure AFTER connect: only the post-management rebuild's
+    // fresh `connect` sees it.
+    let LinkConnector::Fake(provider) = &*connector else {
+        panic!("fake connector");
+    };
+    provider.set_connect_error(Some("port grabbed by another tool".to_string()));
+    let (sink, events) = recording_sink();
+
+    let outcome = session
+        .manage(LinkManagementRequest::EraseDeviceFlash, sink)
+        .await
+        .expect("a successful erase with a failed rebuild is still a result");
+
+    assert!(matches!(
+        outcome.result,
+        LinkManagementResult::EraseDeviceFlash(_)
+    ));
+    assert_eq!(outcome.state, DeviceState::Gone);
+    assert_eq!(session.state(), DeviceState::Gone);
+    assert!(matches!(
+        session.session().status,
+        LinkSessionStatus::Error { ref message } if message.contains("rebuild failed")
+    ));
+    assert!(
+        events.borrow().iter().any(|event| matches!(
+            event,
+            DeviceEvent::LogLine { line, origin: DeviceLineOrigin::Link }
+                if line.contains("rebuild failed after management")
+        )),
+        "the rebuild failure surfaces on the management sink"
+    );
+
+    // Recovery stays the normal reconnect once the port frees up.
+    provider.set_connect_error(None);
+    assert_eq!(session.reconnect().await.unwrap(), DeviceState::BlankFlash);
+}
+
+#[tokio::test]
 async fn reconnect_rebuilds_a_gone_session() {
     let (connector, endpoint_id, device) = fake_device_connector(FakeDeviceScript::new(
         FakeBootState::LightPlayer(FakeLightPlayerState::new()),

@@ -2,14 +2,19 @@
 //!
 //! Unlike `studio_edit_e2e_tests` (which bypasses the link via
 //! `set_device_connection_for_test` + an in-process `ClientIo`), these tests
-//! go `open_provider → discover → connect_endpoint → readiness → attach →
-//! pull` through `LinkController`'s real async seams, against the scripted
-//! byte-level `FakeEsp32Device`: a REAL host `LpServer` behind the REAL `M!`
-//! serial framing, reached through the fake provider in the registry.
+//! go `open_provider → discover → connect_endpoint → DeviceSession →
+//! readiness → attach → pull` through the real async seams, against the
+//! scripted byte-level `FakeEsp32Device`: a REAL host `LpServer` behind the
+//! REAL `M!` serial framing, reached through the fake provider in the
+//! registry.
 //!
 //! This is the seam where both M5 hardware bugs lived
 //! (pull-before-readiness ordering; fresh device classified unreadable), so
-//! rows 2 and 3 of the matrix are wire-level regressions for them.
+//! rows 2 and 3 of the matrix are wire-level regressions for them. Rows
+//! 6–10 cover the M4 DeviceSession states end to end: Incompatible (hello
+//! suppressed / proto mismatch) with the reflash affordance, Unresponsive
+//! with reconnect recovery, reconnect-after-Gone, and erase landing
+//! BlankFlash as success through the deploy dialog.
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -25,7 +30,9 @@ use lpa_link::providers::fake_device::{
     FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device, FakeFailurePlan,
     FakeLightPlayerState,
 };
-use lpa_link::{LinkEndpointId, LinkProviderKind};
+use lpa_link::{
+    DeviceDeadlines, DeviceState, IncompatibleReason, LinkEndpointId, LinkProviderKind,
+};
 use lpfs::LpFsMemory;
 
 use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployState};
@@ -33,7 +40,7 @@ use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
 use crate::app::places::DeviceContent;
 use crate::{
     ControllerId, DeviceController, DeviceOp, ServerFailureKind, ServerState, StudioController,
-    UiAction, UiError,
+    UiAction, UiError, UiNotices,
 };
 
 /// Row 1 (happy path, part 1): a LightPlayer device holding a stamped
@@ -365,6 +372,261 @@ fn stall_during_connect_times_out_with_no_serial_output() {
     );
 }
 
+/// Row 6 (Incompatible: hello suppressed): an `M!`-speaking device whose
+/// firmware predates the wire hello classifies `Incompatible` through the
+/// real path; the deploy dialog surfaces reflash as the affordance; a flash
+/// reboots the device to a compatible build and the session lands `Ready`.
+#[test]
+fn incompatible_no_hello_reflashes_through_the_deploy_dialog() {
+    let (_store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_suppressed_hello(),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    shorten_ready_deadline(&mut studio, Duration::from_millis(700));
+    studio.attach_library(host);
+
+    // The connect resolves Ok with the incompatibility notice (no dead-end).
+    let outcome = connect_through_link(&mut studio, &endpoint_id)
+        .expect("incompatible connect resolves without error");
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("incompatible")),
+        "the connect surfaces the incompatibility notice, got {:?}",
+        outcome.notices
+    );
+    assert!(
+        matches!(
+            studio.device_state_for_test(),
+            Some(DeviceState::Incompatible {
+                reason: IncompatibleReason::NoHello
+            })
+        ),
+        "hello suppression classifies Incompatible(NoHello), got {:?}",
+        studio.device_state_for_test()
+    );
+
+    // Reflash is the ONE affordance: the dialog derives the flash state.
+    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    assert!(
+        matches!(
+            deploy_state(&studio),
+            DeployState::Blank {
+                flashed_once: false
+            }
+        ),
+        "incompatible firmware derives the reflash affordance, got {:?}",
+        deploy_state(&studio)
+    );
+
+    // Flash → reboot → Ready (the flashed build speaks the current proto).
+    drive(studio.dispatch(deploy_action(DeployOp::FlashFirmware))).unwrap();
+    assert!(
+        matches!(
+            studio.device_state_for_test(),
+            Some(DeviceState::Ready { .. })
+        ),
+        "the reflashed device lands Ready, got {:?}",
+        studio.device_state_for_test()
+    );
+    assert!(matches!(
+        studio.snapshot().server.state,
+        ServerState::Connected { .. }
+    ));
+    assert!(
+        matches!(deploy_state(&studio), DeployState::NeedsIdentity { .. }),
+        "the wizard proceeds after the reflash, got {:?}",
+        deploy_state(&studio)
+    );
+}
+
+/// Row 7 (Incompatible: proto mismatch): a hello carrying a foreign wire
+/// proto classifies `Incompatible` immediately (no deadline burn); same
+/// reflash affordance and recovery as the no-hello row.
+#[test]
+fn incompatible_proto_mismatch_reflashes_through_the_deploy_dialog() {
+    let (_store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_proto_override(lpc_wire::WIRE_PROTO_VERSION + 1),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    connect_through_link(&mut studio, &endpoint_id)
+        .expect("incompatible connect resolves without error");
+    assert!(
+        matches!(
+            studio.device_state_for_test(),
+            Some(DeviceState::Incompatible {
+                reason: IncompatibleReason::ProtoMismatch { .. }
+            })
+        ),
+        "a foreign proto hello classifies Incompatible(ProtoMismatch), got {:?}",
+        studio.device_state_for_test()
+    );
+
+    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    assert!(matches!(
+        deploy_state(&studio),
+        DeployState::Blank {
+            flashed_once: false
+        }
+    ));
+
+    drive(studio.dispatch(deploy_action(DeployOp::FlashFirmware))).unwrap();
+    assert!(matches!(
+        studio.device_state_for_test(),
+        Some(DeviceState::Ready { .. })
+    ));
+    assert!(matches!(
+        studio.snapshot().server.state,
+        ServerState::Connected { .. }
+    ));
+}
+
+/// Row 8 (Unresponsive → reconnect): a fully stalled wire surfaces
+/// `Unresponsive` at the readiness deadline; once the device answers again,
+/// `ConnectLightPlayer` reconnects (rebuild) and the session lands `Ready`.
+#[test]
+fn unresponsive_device_reconnects_to_ready_after_unstall() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    shorten_ready_deadline(&mut studio, Duration::from_millis(700));
+    device.set_failure_plan(FakeFailurePlan::none().with_stall_after_bytes(0));
+
+    let error = connect_through_link(&mut studio, &endpoint_id)
+        .expect_err("a fully stalled device cannot attach");
+    assert!(
+        error.to_string().contains("no serial output"),
+        "the diagnosis names the silence: {error}"
+    );
+    assert!(
+        matches!(
+            studio.device_state_for_test(),
+            Some(DeviceState::Unresponsive { .. })
+        ),
+        "the readiness deadline surfaces Unresponsive, got {:?}",
+        studio.device_state_for_test()
+    );
+    assert!(matches!(
+        studio.snapshot().server.state,
+        ServerState::Failed { .. }
+    ));
+
+    // The wire recovers (un-stall) → explicit reconnect rebuilds the link.
+    device.set_failure_plan(FakeFailurePlan::none());
+    drive(studio.dispatch(device_action(DeviceOp::ConnectLightPlayer)))
+        .expect("reconnect after un-stall succeeds");
+
+    assert!(matches!(
+        studio.device_state_for_test(),
+        Some(DeviceState::Ready { .. })
+    ));
+    assert!(matches!(
+        studio.snapshot().server.state,
+        ServerState::Connected { .. }
+    ));
+}
+
+/// Row 9 (reconnect after Gone): the device vanishing mid-session marks the
+/// session `Gone`; `ConnectLightPlayer` reconnects — a rebuilt stream +
+/// transport on the same endpoint — and readiness lands `Ready` again
+/// (finding 8: reopen used to reuse the dead serial thread).
+#[test]
+fn reconnect_after_gone_rebuilds_the_link_to_ready() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("initial connect succeeds");
+    assert!(matches!(
+        studio.device_state_for_test(),
+        Some(DeviceState::Ready { .. })
+    ));
+
+    // Unplug: the stream reports EOF on the next pull and the session goes
+    // Gone (observed via the channel's ConnectionLost).
+    device.set_failure_plan(
+        FakeFailurePlan::none().with_disconnect_after_bytes(device.served_bytes()),
+    );
+    drive(studio.refresh_device_sync());
+    assert!(
+        matches!(studio.device_state_for_test(), Some(DeviceState::Gone)),
+        "a dead stream marks the session Gone, got {:?}",
+        studio.device_state_for_test()
+    );
+
+    // Replug: reconnect rebuilds stream + transport and re-runs readiness.
+    device.set_failure_plan(FakeFailurePlan::none());
+    drive(studio.dispatch(device_action(DeviceOp::ConnectLightPlayer)))
+        .expect("reconnect after Gone succeeds");
+
+    assert!(matches!(
+        studio.device_state_for_test(),
+        Some(DeviceState::Ready { .. })
+    ));
+    assert!(matches!(
+        studio.snapshot().server.state,
+        ServerState::Connected { .. }
+    ));
+}
+
+/// Row 10 (erase lands BlankFlash as success): erasing a healthy device
+/// through the deploy dialog succeeds — the rebuilt link classifies
+/// `BlankFlash`, the server degrades to no-firmware, and the dialog derives
+/// the `Blank` state (flash stays the next step), all without an error.
+#[test]
+fn erase_lands_blank_flash_as_success_through_the_deploy_dialog() {
+    let (_store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+
+    let outcome = drive(studio.dispatch(deploy_action(DeployOp::EraseDevice)))
+        .expect("erase through the dialog is a success");
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("wiped")),
+        "the erase reports its result, got {:?}",
+        outcome.notices
+    );
+    assert!(
+        matches!(
+            studio.device_state_for_test(),
+            Some(DeviceState::BlankFlash)
+        ),
+        "post-erase readiness lands BlankFlash — success for an erase, got {:?}",
+        studio.device_state_for_test()
+    );
+    assert!(
+        matches!(
+            studio.snapshot().server.state,
+            ServerState::Failed {
+                kind: ServerFailureKind::NoFirmware,
+                ..
+            }
+        ),
+        "the server degrades to no-firmware, got {:?}",
+        studio.snapshot().server.state
+    );
+    assert!(
+        matches!(
+            deploy_state(&studio),
+            DeployState::Blank {
+                flashed_once: false
+            }
+        ),
+        "the dialog derives Blank after the erase, got {:?}",
+        deploy_state(&studio)
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
@@ -389,19 +651,31 @@ fn studio_with_fake_device(
 
 /// Drive the REAL connect path: `open_provider` (discover) then
 /// `connect_endpoint` (connect → attach → readiness → pull), both through
-/// the controller's dispatch surface.
+/// the controller's dispatch surface. Returns the connect dispatch's
+/// notices (Incompatible/NoFirmware connects resolve Ok WITH a notice).
 fn connect_through_link(
     studio: &mut StudioController,
     endpoint_id: &LinkEndpointId,
-) -> Result<(), UiError> {
+) -> Result<UiNotices, UiError> {
     drive(studio.dispatch(device_action(DeviceOp::OpenProvider {
         provider_id: LinkProviderKind::Fake,
     })))?;
     drive(studio.dispatch(device_action(DeviceOp::ConnectEndpoint {
         provider_id: LinkProviderKind::Fake,
         endpoint_id: endpoint_id.clone(),
-    })))?;
-    Ok(())
+    })))
+}
+
+/// Install poll timers with a shortened readiness deadline, so
+/// deadline-expiry rows (no hello / stalled wire) do not burn the default
+/// five-second budget per test.
+fn shorten_ready_deadline(studio: &mut StudioController, ready: Duration) {
+    studio.set_device_timers(DeviceController::test_poll_timers().with_deadlines(
+        DeviceDeadlines {
+            ready,
+            ..DeviceDeadlines::default()
+        },
+    ));
 }
 
 fn device_action(op: DeviceOp) -> UiAction {
