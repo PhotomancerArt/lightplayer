@@ -153,6 +153,35 @@ mod tests {
         runtime.close().await.unwrap();
     }
 
+    /// Regression: a failed project load used to log server-side and never
+    /// send a response frame, leaving the client awaiting forever.
+    #[tokio::test]
+    async fn failed_project_load_returns_error_instead_of_hanging() {
+        let mut runtime = HostRuntime::start_memory().unwrap();
+        let client = TokioLpClient::new_shared(runtime.client_transport());
+
+        // Manifest missing `format: 1` fails to load server-side.
+        client
+            .fs_write(
+                "/projects/bad/project.json".as_path(),
+                br#"{ "kind": "Project", "nodes": {} }"#.to_vec(),
+            )
+            .await
+            .unwrap();
+
+        let result =
+            tokio::time::timeout(Duration::from_secs(5), client.project_load("/projects/bad"))
+                .await
+                .expect("load request must be answered, not hang");
+        assert!(result.is_err(), "invalid project load reports an error");
+
+        // The connection stays usable after the failed request.
+        let projects = client.project_list_loaded().await.unwrap();
+        assert!(projects.is_empty());
+
+        runtime.close().await.unwrap();
+    }
+
     #[tokio::test]
     async fn multiple_memory_runtimes_can_run_concurrently() {
         let mut runtime_a = HostRuntime::start_memory().unwrap();
