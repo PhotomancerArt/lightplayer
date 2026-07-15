@@ -22,7 +22,8 @@ pub(crate) fn lower_as_vec(
         return Ok(inner_vs);
     }
     // GLSL 4.x: cast to a *scalar* numeric type from bvecN uses only the first component.
-    // Naga types `Expression::As` as scalar; `lower_expr_vec(inner)` still has N lanes for bvecN.
+    // `lower_expr_vec(inner)` still has N lanes for bvecN; `expr_type_inner` mirrors this
+    // first-component rule for bool→non-bool `As` over vectors.
     let src_regs: &[VReg] =
         if src_k == ScalarKind::Bool && target != ScalarKind::Bool && inner_vs.len() > 1 {
             &inner_vs[..1]

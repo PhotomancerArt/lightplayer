@@ -591,10 +591,43 @@ pub(crate) fn expr_type_inner(
         },
         Expression::Unary { expr: inner, .. } => expr_type_inner(module, func, *inner),
         Expression::Select { accept, .. } => expr_type_inner(module, func, *accept),
-        Expression::As { kind, .. } => Ok(TypeInner::Scalar(Scalar {
-            kind: *kind,
-            width: 4,
-        })),
+        Expression::As {
+            expr: value,
+            kind,
+            convert,
+        } => {
+            let src = expr_type_inner(module, func, *value)?;
+            let cast = |s: Scalar| Scalar {
+                kind: *kind,
+                width: convert.unwrap_or(s.width),
+            };
+            match src {
+                TypeInner::Scalar(s) => Ok(TypeInner::Scalar(cast(s))),
+                // glsl-in emits `As` over a bvecN for GLSL *scalar* constructors like
+                // `float(bvec2)` (first component); `lower_as_vec` yields one lane there.
+                TypeInner::Vector { scalar: s, .. }
+                    if s.kind == ScalarKind::Bool && *kind != ScalarKind::Bool =>
+                {
+                    Ok(TypeInner::Scalar(cast(s)))
+                }
+                TypeInner::Vector { size, scalar: s } => Ok(TypeInner::Vector {
+                    size,
+                    scalar: cast(s),
+                }),
+                TypeInner::Matrix {
+                    columns,
+                    rows,
+                    scalar: s,
+                } => Ok(TypeInner::Matrix {
+                    columns,
+                    rows,
+                    scalar: cast(s),
+                }),
+                other => Err(LowerError::UnsupportedExpression(format!(
+                    "As on unsupported source type {other:?}"
+                ))),
+            }
+        }
         Expression::CallResult(fh) => {
             let ret = module.functions[*fh].result.as_ref().ok_or_else(|| {
                 LowerError::UnsupportedExpression(String::from("CallResult for void function"))
