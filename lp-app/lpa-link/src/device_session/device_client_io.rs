@@ -1,7 +1,7 @@
 //! The readiness-gated app-protocol channel a session hands to consumers.
 //!
-//! The host generalization of what M3's test-edge `FakeLinkClientIo`
-//! proved: nothing is written to the device before it is READY (the M5
+//! The generalization of what M3's test-edge fake io proved: nothing is
+//! written to the device before it is READY (the M5
 //! pull-before-readiness hardware bug), device log lines keep flowing into
 //! the event sink during protocol traffic, and gate failures carry the
 //! classifiable no-firmware prefix. Unlike the M3 edge, readiness here is
@@ -31,11 +31,9 @@ impl DeviceClientIo {
 impl ClientIo for DeviceClientIo {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         self.shared.ensure_app_protocol().await?;
-        let transport = self.shared.transport();
         let result = {
             let _in_flight = self.shared.begin_channel_use();
-            let mut transport = transport.lock().await;
-            lpa_client::ClientTransport::send(&mut **transport, msg).await
+            self.shared.send_frame(msg).await
         };
         if matches!(result, Err(TransportError::ConnectionLost)) {
             self.shared.mark_gone("device stream ended during send");
@@ -46,15 +44,11 @@ impl ClientIo for DeviceClientIo {
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         self.shared.ensure_app_protocol().await?;
         let budget = self.shared.timers().deadlines().request_idle;
-        let transport = self.shared.transport();
         let received = {
             let _in_flight = self.shared.begin_channel_use();
             self.shared
                 .timers()
-                .with_deadline(budget, async {
-                    let mut transport = transport.lock().await;
-                    lpa_client::ClientTransport::receive(&mut **transport).await
-                })
+                .with_deadline(budget, self.shared.recv_frame())
                 .await
         };
         // Keep device log lines flowing into the console feed during pulls.
@@ -78,8 +72,6 @@ impl ClientIo for DeviceClientIo {
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
-        let transport = self.shared.transport();
-        let mut transport = transport.lock().await;
-        lpa_client::ClientTransport::close(&mut **transport).await
+        self.shared.close_wire().await
     }
 }

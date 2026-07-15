@@ -1,6 +1,10 @@
 //! Headless LightPlayer Studio application core.
 
-pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
+pub use lpa_link::{
+    DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceSession,
+    DeviceSnapshot as LinkDeviceSnapshot, DeviceState, DeviceTimers, LinkEndpointId,
+    LinkEndpointStatus, LinkProviderKind,
+};
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, LpValue,
@@ -15,8 +19,9 @@ pub use self::core::status::UiStatusKind;
 pub use lpc_history::{ContentHash, SyncRelation};
 
 pub use app::device::{
-    DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget, DeviceController, DeviceOp,
-    DeviceSnapshot, UiDeployChoice, UiDeployView,
+    DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget, DeviceController, DeviceHandle, DeviceOp,
+    DeviceOpenOutcome, DeviceSnapshot, RuntimeAttachment, SimAttachment, UiDeployChoice,
+    UiDeployView,
 };
 pub use app::home::{
     HOME_NODE_ID, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceCardState, UiExampleCard,

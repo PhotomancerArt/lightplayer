@@ -23,10 +23,24 @@ pub enum DeviceEvent {
     State { state: DeviceState },
     /// One non-protocol serial line from the device (boot output and runtime
     /// logs — the classifier feed doubles as the console feed), or one log
-    /// line from a running management operation.
-    LogLine { line: String },
+    /// line from a running management operation. `origin` says which, so
+    /// consumers can attribute the line (device console vs link machinery).
+    LogLine {
+        line: String,
+        origin: DeviceLineOrigin,
+    },
     /// Progress of a long-running management operation (flash/erase).
     Progress { label: String, percent: Option<u8> },
+}
+
+/// Who produced a [`DeviceEvent::LogLine`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeviceLineOrigin {
+    /// A serial line the DEVICE printed (boot output, runtime logs).
+    Device,
+    /// A line produced by the LINK machinery (management tools, wire
+    /// diagnostics).
+    Link,
 }
 
 /// Cloneable in-process event sink (`Rc`-based, deliberately `!Send` — the

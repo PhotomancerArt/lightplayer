@@ -113,7 +113,11 @@ impl ClientTransport for AsyncSerialClientTransport {
                         "Backend thread did not stop within timeout".to_string(),
                     ));
                 }
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                // Runtime-neutral wait: `close` must work without a tokio
+                // reactor (DeviceSession drives it from single-actor edges).
+                // Blocking briefly is fine — this waits for an OS thread to
+                // exit, bounded by the 1 s timeout above.
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
 

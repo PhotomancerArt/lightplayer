@@ -103,12 +103,21 @@ heartbeat/log handling, or project deploy ordering.
 
 ## DeviceSession
 
-`DeviceSession` (module `device_session`, host features) owns one HARDWARE
-link end to end: it takes an owned `Rc<LinkConnector>`, performs the
-connect/protocol-open/connection flow itself, and exposes an observable
+`DeviceSession` (module `device_session`, feature `device-session`) owns one
+HARDWARE link end to end: it takes an owned `Rc<LinkConnector>`, performs
+the connect/protocol-open/connection flow itself, and exposes an observable
 state machine plus a readiness-gated `lpa_client::ClientIo` channel. Sim
 runtimes (browser worker) bypass it — they have no boot, no hello race, and
 no management plane.
+
+Two wire shapes sit under the channel: host providers hand over a
+`LinkServerConnection` transport (feature `device-session-host`, implied by
+every host provider feature), while the browser serial connector has no
+host transport — the session pumps the provider's observed lines itself
+(`M!` lines ARE the frames there) and writes frames back as `M!{json}`
+lines. Observed non-protocol lines feed the boot classifier and the event
+sink on every wire (`DeviceEvent::LogLine { origin: Device }`; management
+tool output arrives with `origin: Link`).
 
 ```text
 connect() ──▶ Booting ──hello(proto ok)──────────────▶ Ready { hello }

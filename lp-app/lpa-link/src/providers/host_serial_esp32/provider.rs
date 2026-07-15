@@ -131,6 +131,44 @@ impl HostSerialEsp32Provider {
             .cloned()
             .ok_or_else(|| LinkError::endpoint_not_found(endpoint_id.as_str()))
     }
+
+    /// Drain the serial lines observed on a session (every complete line,
+    /// protocol and logs alike) — the host analogue of the browser serial
+    /// provider's `take_lines`, consumed by `DeviceSession` for boot
+    /// diagnosis and the device console feed.
+    pub fn take_lines(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
+        let lines = {
+            let state = self.state();
+            let session = state
+                .sessions
+                .get(session_id)
+                .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+            Arc::clone(&session.observed_lines)
+        };
+        let mut lines = lines
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Ok(core::mem::take(&mut *lines))
+    }
+}
+
+/// Buffers every observed serial line for `take_lines` while forwarding to
+/// an app-supplied observer when one is configured.
+struct TeeLineObserver {
+    buffer: Arc<std::sync::Mutex<Vec<String>>>,
+    inner: Option<Arc<dyn SerialLineObserver>>,
+}
+
+impl SerialLineObserver for TeeLineObserver {
+    fn observe_line(&self, line: &str) {
+        self.buffer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(line.to_string());
+        if let Some(inner) = &self.inner {
+            inner.observe_line(line);
+        }
+    }
 }
 
 impl LinkProvider for HostSerialEsp32Provider {
@@ -159,9 +197,17 @@ impl LinkProvider for HostSerialEsp32Provider {
             .options
             .baud_rate
             .unwrap_or(lpc_model::DEFAULT_SERIAL_BAUD_RATE);
+        // Per-session buffered line tap (mirrors the fake provider's): the
+        // DeviceSession drains it via `take_lines` for boot diagnosis and
+        // the device console feed. An app-supplied observer still sees
+        // every line too.
+        let observed_lines = Arc::new(std::sync::Mutex::new(Vec::new()));
         let serial_options = HardwareSerialOptions {
             reset_after_open: self.options.reset_after_open,
-            line_observer: self.options.line_observer.clone(),
+            line_observer: Some(Arc::new(TeeLineObserver {
+                buffer: Arc::clone(&observed_lines),
+                inner: self.options.line_observer.clone(),
+            })),
         };
         // Port opening happens here (the provider owns the endpoint→port
         // mapping); the transport machinery below the byte-stream seam is
@@ -202,6 +248,7 @@ impl LinkProvider for HostSerialEsp32Provider {
                 endpoint.port_name,
                 baud_rate,
                 server_connection,
+                observed_lines,
             ),
         );
         Ok(session)
@@ -327,6 +374,8 @@ struct HostSerialEsp32SessionState {
     port_name: String,
     baud_rate: u32,
     server_connection: Option<LinkServerConnection>,
+    /// Buffered line tap for `take_lines` (see [`TeeLineObserver`]).
+    observed_lines: Arc<std::sync::Mutex<Vec<String>>>,
     logs: Vec<LinkLogEntry>,
     diagnostics: Vec<LinkDiagnostic>,
 }
@@ -337,6 +386,7 @@ impl HostSerialEsp32SessionState {
         port_name: String,
         baud_rate: u32,
         server_connection: LinkServerConnection,
+        observed_lines: Arc<std::sync::Mutex<Vec<String>>>,
     ) -> Self {
         let logs = vec![LinkLogEntry::new(
             session.endpoint_id.clone(),
@@ -355,6 +405,7 @@ impl HostSerialEsp32SessionState {
             port_name,
             baud_rate,
             server_connection: Some(server_connection),
+            observed_lines,
             logs,
             diagnostics,
         }

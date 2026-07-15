@@ -10,7 +10,10 @@ description = "Headless LightPlayer Studio application core"
 
 [dependencies]
 lpa-client = { path = "../lpa-client", default-features = false }
-lpa-link = { path = "../lpa-link" }
+# device-session everywhere (RuntimeAttachment::Device drives it); the host
+# transport wire arrives via feature unification when a host provider
+# feature is enabled (tests: fake-device below; wasm: the browser features).
+lpa-link = { path = "../lpa-link", features = ["device-session"] }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-view = { path = "../../lp-core/lpc-view" }

@@ -1,10 +1,6 @@
 //! App-side links to LightPlayer runtimes and devices.
 
-#[cfg(any(
-    feature = "host-process",
-    feature = "host-serial-esp32",
-    feature = "fake-device"
-))]
+#[cfg(feature = "device-session")]
 pub mod device_session;
 pub mod provider;
 pub mod providers;
@@ -16,20 +12,12 @@ pub mod registry;
 ))]
 pub mod stream;
 
-#[cfg(any(
-    feature = "host-process",
-    feature = "host-serial-esp32",
-    feature = "fake-device"
-))]
+#[cfg(feature = "device-session")]
 pub use device_session::{
-    DeviceEvent, DeviceEventSink, DeviceManageOutcome, DeviceMode, DeviceSession, DeviceSnapshot,
-    DeviceState, DeviceTimers, IncompatibleReason,
+    DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceManageOutcome, DeviceMode, DeviceSession,
+    DeviceSnapshot, DeviceState, DeviceTimers, IncompatibleReason,
 };
-#[cfg(any(
-    feature = "host-process",
-    feature = "host-serial-esp32",
-    feature = "fake-device"
-))]
+#[cfg(feature = "device-session-host")]
 pub use provider::connection::{LinkClientTransport, LinkServerConnection};
 pub use provider::connection::{LinkConnection, LinkConnectionKind};
 pub use provider::diagnostic::{LinkDiagnostic, LinkDiagnosticSeverity};

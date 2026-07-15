@@ -33,7 +33,7 @@ use crate::provider::management_request::LinkManagementRequest;
 use crate::provider::management_result::LinkManagementResult;
 use crate::{LinkError, LinkProvider};
 
-use super::device_event::{DeviceEvent, DeviceEventSink};
+use super::device_event::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
 use super::device_session::DeviceSession;
 use super::device_state::DeviceState;
 
@@ -109,7 +109,10 @@ impl DeviceSession {
 fn fold_into_device_events(sink: &DeviceEventSink) -> LinkManagementEventSink {
     let sink = sink.clone();
     LinkManagementEventSink::new(move |event| match event {
-        LinkManagementEvent::Log { message } => sink.emit(DeviceEvent::LogLine { line: message }),
+        LinkManagementEvent::Log { message } => sink.emit(DeviceEvent::LogLine {
+            line: message,
+            origin: DeviceLineOrigin::Link,
+        }),
         LinkManagementEvent::Progress(progress) => sink.emit(DeviceEvent::Progress {
             label: progress.label,
             percent: progress

@@ -67,22 +67,12 @@ impl LinkController {
         self.state = state;
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_active_session_for_test(&mut self, session: LinkSession) {
-        self.active_session = Some(session);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_active_connection_for_test(&mut self, connection: LinkConnection) {
-        self.active_connection = Some(connection);
-    }
-
     pub fn snapshot(&self) -> LinkSnapshot {
         LinkSnapshot::new(self.state.clone())
     }
 
     /// The owned provider handle behind the active connection, for handing
-    /// to client I/O adapters (`ServerController::attach_link_connection`).
+    /// to client I/O adapters.
     pub fn active_connector(&self) -> Option<Rc<LinkConnector>> {
         self.active_connector.clone()
     }
@@ -456,7 +446,7 @@ impl Default for LinkController {
     }
 }
 
-fn provider_choices(registry: &LinkProviderRegistry) -> Vec<ProviderChoice> {
+pub(crate) fn provider_choices(registry: &LinkProviderRegistry) -> Vec<ProviderChoice> {
     let descriptors = registry.descriptors();
     let server_descriptors = descriptors
         .iter()
@@ -474,7 +464,7 @@ fn provider_choices(registry: &LinkProviderRegistry) -> Vec<ProviderChoice> {
         .collect()
 }
 
-fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogDraft> {
+pub(crate) fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogDraft> {
     match result {
         LinkManagementResult::FlashFirmware(result) => {
             let mut logs = result
@@ -656,7 +646,7 @@ async fn open_provider_protocol_if_needed(
     Ok(())
 }
 
-fn link_session_logs(
+pub(crate) fn link_session_logs(
     connector: &LinkConnector,
     session_id: &lpa_link::LinkSessionId,
 ) -> Result<Vec<UiLogDraft>, UiError> {
@@ -682,7 +672,7 @@ fn link_session_logs(
     Ok(logs)
 }
 
-fn map_link_error(error: LinkError) -> UiError {
+pub(crate) fn map_link_error(error: LinkError) -> UiError {
     match error {
         LinkError::Cancelled { message } => UiError::Cancelled(message),
         _ => UiError::Link(error.to_string()),

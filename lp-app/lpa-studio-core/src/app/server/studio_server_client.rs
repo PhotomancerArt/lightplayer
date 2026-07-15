@@ -42,24 +42,32 @@ impl StudioServerClient {
         }
     }
 
-    pub fn from_link_connection(
+    /// A client over the simulator's worker io (BrowserWorker only —
+    /// hardware attaches through [`Self::from_device_session`]).
+    pub fn from_sim_connection(
         connector: Rc<LinkConnector>,
         connection: &LinkConnection,
         updates: UxUpdateSink,
     ) -> Result<Self, UiError> {
         let pending_logs = Rc::new(RefCell::new(Vec::new()));
         let protocol = connection_protocol(&connection.kind);
-        let io = server_io_from_link_connection(
-            connector,
-            connection,
-            Rc::clone(&pending_logs),
-            updates,
-        )?;
+        let io = sim_server_io(connector, connection, Rc::clone(&pending_logs), updates)?;
         Ok(Self {
             client: LpClient::new(io),
             protocol,
             pending_logs,
         })
+    }
+
+    /// A client over a hardware [`lpa_link::DeviceSession`]'s
+    /// readiness-gated app-protocol channel. Device console lines flow
+    /// through the session's event sink, not this client's pending logs.
+    pub fn from_device_session(session: &lpa_link::DeviceSession) -> Self {
+        Self {
+            client: LpClient::new(session.client_io()),
+            protocol: connection_protocol(&session.connection().kind),
+            pending_logs: Rc::new(RefCell::new(Vec::new())),
+        }
     }
 
     pub fn protocol(&self) -> &str {
@@ -553,7 +561,11 @@ fn node_def_artifacts(
         .collect()
 }
 
-fn server_io_from_link_connection(
+/// The simulator's server io. Hardware and fake-device links no longer pass
+/// through here — their io IS the device session's channel (M4/P5); the old
+/// per-kind match (browser serial io, test-edge fake io, host holes) is
+/// gone with them.
+fn sim_server_io(
     _connector: Rc<LinkConnector>,
     connection: &LinkConnection,
     _pending_logs: Rc<RefCell<Vec<UiLogDraft>>>,
@@ -572,57 +584,10 @@ fn server_io_from_link_connection(
         LinkConnectionKind::BrowserWorker { .. } => Err(UiError::UnsupportedFeature(
             "browser worker server I/O requires the browser-worker feature on wasm".to_string(),
         )),
-        #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-        LinkConnectionKind::BrowserSerialEsp32 { .. } => Ok(Box::new(
-            super::browser_serial_client_io::BrowserSerialClientIo::new(
-                _connector,
-                connection.session_id.clone(),
-                _pending_logs,
-                _updates,
-            ),
-        )),
-        #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
-        LinkConnectionKind::BrowserSerialEsp32 { .. } => Err(UiError::UnsupportedFeature(
-            "browser serial ESP32 server I/O requires the browser-serial-esp32 feature on wasm"
-                .to_string(),
-        )),
-        LinkConnectionKind::Fake => {
-            // Device-backed fake connections (feature `fake-device` on
-            // lpa-link, enabled by this crate's dev-dependencies) carry a
-            // REAL host protocol channel; the test-edge io speaks it with
-            // the same readiness gating the browser io applies. Record-level
-            // fakes still have no server protocol.
-            #[cfg(all(test, not(target_arch = "wasm32")))]
-            if let Some(transport) = _connection_server_transport(connection) {
-                return Ok(Box::new(super::fake_link_client_io::FakeLinkClientIo::new(
-                    _connector,
-                    connection.session_id.clone(),
-                    transport,
-                    _pending_logs,
-                )));
-            }
-            Err(UiError::UnsupportedFeature(
-                "fake links do not expose a server protocol".to_string(),
-            ))
-        }
-        LinkConnectionKind::HostProcess | LinkConnectionKind::HostSerialEsp32 => {
-            Err(UiError::UnsupportedFeature(format!(
-                "server I/O is not implemented for {:?}",
-                connection.kind
-            )))
-        }
+        kind => Err(UiError::UnsupportedFeature(format!(
+            "sim server I/O over a {kind:?} link; hardware attaches through its device session"
+        ))),
     }
-}
-
-/// The host protocol channel carried by a fake-device link connection.
-/// Test-only: the `server_connection` field itself exists only when
-/// lpa-link's host/fake-device features are enabled (they are, for this
-/// crate's test builds, via dev-dependencies).
-#[cfg(all(test, not(target_arch = "wasm32")))]
-fn _connection_server_transport(
-    connection: &LinkConnection,
-) -> Option<lpa_link::LinkServerConnection> {
-    connection.server_connection()
 }
 
 fn connection_protocol(kind: &LinkConnectionKind) -> String {
@@ -716,7 +681,7 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
 fn map_client_error(error: ClientError) -> UiError {
     match error {
         ClientError::Transport(message)
-            if super::browser_serial_readiness::is_no_firmware_detected_message(&message) =>
+            if lpa_link::device_session::is_no_firmware_detected_message(&message) =>
         {
             UiError::NoFirmwareDetected(message)
         }
@@ -755,8 +720,8 @@ fn wire_log_level(level: UiLogLevel) -> lpc_wire::server::api::LogLevel {
 mod tests {
     use lpc_wire::server::{CrashSummaryWire, RecoveryLevelWire, RecoveryStatus, SampleStats};
 
-    use super::super::browser_serial_readiness::NO_FIRMWARE_DETECTED_PREFIX;
     use super::*;
+    use lpa_link::device_session::NO_FIRMWARE_DETECTED_PREFIX;
 
     #[test]
     fn no_firmware_transport_error_maps_to_no_firmware_ux_error() {

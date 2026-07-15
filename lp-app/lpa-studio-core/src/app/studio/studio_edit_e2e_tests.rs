@@ -379,10 +379,8 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     };
     let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
     let mut controller = StudioController::connected_with_client_for_test(client);
-    controller.set_device_connection_for_test(lpa_link::LinkConnection::fake(
-        "fake-runtime",
-        "fake-session",
-    ));
+    controller
+        .set_stub_device_for_test(crate::app::device::runtime_attachment::ready_state_for_test());
 
     // a library with one pushable project (the edit-e2e node graph)
     let store = LibraryStore::new(

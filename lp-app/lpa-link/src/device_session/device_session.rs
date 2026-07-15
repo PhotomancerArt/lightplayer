@@ -12,26 +12,29 @@
 //! transport, and no `RefCell` borrow is held across either.
 
 use std::cell::{Cell, RefCell};
+#[cfg(feature = "device-session-host")]
 use std::future::Future;
 use std::rc::Rc;
+#[cfg(feature = "device-session-host")]
 use std::sync::Arc;
+#[cfg(feature = "device-session-host")]
 use std::task::{Context, Poll, Wake, Waker};
 
 use lpc_wire::{ServerHello, TransportError, WireServerMessage};
 
 use crate::provider::endpoint::LinkEndpointId;
 use crate::{
-    LinkConnection, LinkConnector, LinkError, LinkProvider, LinkServerConnection, LinkSession,
-    LinkSessionStatus,
+    LinkConnection, LinkConnector, LinkError, LinkProvider, LinkSession, LinkSessionStatus,
 };
 
 use super::device_client_io::DeviceClientIo;
-use super::device_event::{DeviceEvent, DeviceEventSink};
+use super::device_event::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
 use super::device_mode::{ChannelUseGuard, DeviceMode, DeviceModeGuard};
 use super::device_readiness::{BootLineClassifier, HelloGate, gate_first_frame};
 use super::device_snapshot::DeviceSnapshot;
 use super::device_state::{DeviceState, IncompatibleReason};
 use super::device_timers::{DeviceTimers, READINESS_POLL_INTERVAL};
+use super::device_wire::DeviceWire;
 
 /// One owned hardware device link: connector + link session/connection +
 /// state machine + the readiness-gated app-protocol channel.
@@ -55,7 +58,7 @@ impl DeviceSession {
         let opened = timers
             .with_deadline(budget, open_device_link(&connector, endpoint_id))
             .await;
-        let (session, connection, transport) = match opened {
+        let (session, connection, wire) = match opened {
             Some(result) => result?,
             None => {
                 return Err(LinkError::ConnectionFailed {
@@ -70,7 +73,7 @@ impl DeviceSession {
             connector,
             session: RefCell::new(session),
             connection: RefCell::new(connection),
-            transport: RefCell::new(transport),
+            wire: RefCell::new(wire),
             timers,
             sink,
             state: RefCell::new(DeviceState::Booting),
@@ -179,16 +182,16 @@ impl DeviceSession {
 
 /// State shared between the session handle and its channel clones.
 ///
-/// `session`/`connection`/`transport` sit behind `RefCell`s because a
-/// rebuild ([`Self::rebuild_link`]) swaps the whole underlying link in
-/// place: channel clones read the CURRENT transport through the accessor on
-/// every use, so a channel handed out before a management/reconnect cycle
-/// works again after it.
+/// `session`/`connection`/`wire` sit behind `RefCell`s because a rebuild
+/// ([`Self::rebuild_link`]) swaps the whole underlying link in place:
+/// channel clones read the CURRENT wire through the accessors on every use,
+/// so a channel handed out before a management/reconnect cycle works again
+/// after it.
 pub(crate) struct DeviceShared {
     connector: Rc<LinkConnector>,
     session: RefCell<LinkSession>,
     connection: RefCell<LinkConnection>,
-    transport: RefCell<LinkServerConnection>,
+    wire: RefCell<DeviceWire>,
     timers: DeviceTimers,
     sink: DeviceEventSink,
     state: RefCell<DeviceState>,
@@ -208,10 +211,6 @@ impl DeviceShared {
         &self.timers
     }
 
-    pub(crate) fn transport(&self) -> LinkServerConnection {
-        self.transport.borrow().clone()
-    }
-
     pub(super) fn connector(&self) -> &Rc<LinkConnector> {
         &self.connector
     }
@@ -227,8 +226,9 @@ impl DeviceShared {
 
     /// Release the current link: close the provider session so its transport
     /// shuts down (the host serial framing thread ENDS and the port is
-    /// free for a management tool). Best-effort — the link may already be
-    /// dead when this runs (Gone recovery).
+    /// free for a management tool; the browser provider closes its Web
+    /// Serial port). Best-effort — the link may already be dead when this
+    /// runs (Gone recovery).
     pub(super) async fn release_link(&self) {
         let session_id = self.session_id();
         let _ = self.connector.close(&session_id).await;
@@ -248,7 +248,7 @@ impl DeviceShared {
             .timers
             .with_deadline(budget, open_device_link(&self.connector, &endpoint_id))
             .await;
-        let (session, connection, transport) = match opened {
+        let (session, connection, wire) = match opened {
             Some(Ok(opened)) => opened,
             Some(Err(error)) => {
                 self.record_link_failure(&format!("device link rebuild failed: {error}"));
@@ -265,7 +265,7 @@ impl DeviceShared {
         };
         *self.session.borrow_mut() = session;
         *self.connection.borrow_mut() = connection;
-        *self.transport.borrow_mut() = transport;
+        *self.wire.borrow_mut() = wire;
         // Clear the observed-line state: stale lines from the previous
         // link's boot must not classify the new one (the M3 lesson — old
         // blank-flash lines would misclassify a post-flash reconnect).
@@ -376,17 +376,27 @@ impl DeviceShared {
         }
     }
 
-    /// Drain non-protocol serial lines: classifier feed + console feed.
-    /// Protocol (`M!`) lines are skipped — decoded frames arrive through the
-    /// transport.
+    /// Drain observed serial lines: classifier feed + console feed.
+    ///
+    /// `M!` protocol lines depend on the wire: on the host wires they are a
+    /// tap COPY (decoded frames arrive through the transport) and are
+    /// dropped; on the browser line wire they ARE the frames and are decoded
+    /// into the pending queue.
     pub(crate) fn pump_console_lines(&self) {
         for line in self.take_observed_lines() {
-            if line.starts_with("M!") {
+            if let Some(_frame_json) = line.strip_prefix("M!") {
+                #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+                self.queue_browser_frame(_frame_json);
                 continue;
             }
             self.classifier.borrow_mut().observe_line(line.as_str());
-            self.sink.emit(DeviceEvent::LogLine { line });
+            self.sink.emit(DeviceEvent::LogLine {
+                line,
+                origin: DeviceLineOrigin::Device,
+            });
         }
+        #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+        self.surface_browser_errors();
     }
 
     /// Deadline expiry while still `Booting`: a started-but-silent server is
@@ -441,50 +451,237 @@ impl DeviceShared {
         self.sink.emit(DeviceEvent::State { state: next });
     }
 
-    /// Non-blocking poll for one decoded protocol frame from the transport.
-    ///
-    /// `None` means "no frame yet". A single poll with a no-op waker is
-    /// sound here because the transport receive is a cancel-safe channel
-    /// recv: an uncompleted poll consumes nothing, and the engine re-polls
-    /// on its next pass. (Same bridge technique as the fake device's
-    /// server pump; duplicated because that one is feature-private.)
-    fn poll_frame(&self) -> Option<Result<WireServerMessage, TransportError>> {
-        let transport = self.transport();
-        poll_once(async move {
+    /// Send one app-protocol frame on the current wire.
+    pub(crate) async fn send_frame(
+        &self,
+        msg: lpc_wire::ClientMessage,
+    ) -> Result<(), TransportError> {
+        #[cfg(feature = "device-session-host")]
+        if let Some(transport) = self.host_transport() {
             let mut transport = transport.lock().await;
-            lpa_client::ClientTransport::receive(&mut **transport).await
-        })
+            return lpa_client::ClientTransport::send(&mut **transport, msg).await;
+        }
+        #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+        if self.is_browser_wire() {
+            return self.browser_write_frame(&msg).await;
+        }
+        let _ = msg;
+        Err(TransportError::Other(
+            "device session has no app-protocol wire".to_string(),
+        ))
     }
 
-    /// Serial lines observed by connectors that surface them (the fake
-    /// device today; the browser serial provider joins in P5 — host serial
-    /// grows a line surface with it).
-    fn take_observed_lines(&self) -> Vec<String> {
-        #[cfg(feature = "fake-device")]
-        #[allow(
-            irrefutable_let_patterns,
-            reason = "connector variants are feature-gated; with fake-device alone the enum has one variant"
-        )]
-        if let LinkConnector::Fake(provider) = &*self.connector {
-            let session_id = self.session.borrow().id.clone();
-            return provider.take_lines(&session_id).unwrap_or_default();
+    /// Wait for one app-protocol frame on the current wire (no deadline —
+    /// the caller wraps this in the `request_idle` budget).
+    pub(crate) async fn recv_frame(&self) -> Result<WireServerMessage, TransportError> {
+        #[cfg(feature = "device-session-host")]
+        if let Some(transport) = self.host_transport() {
+            let mut transport = transport.lock().await;
+            return lpa_client::ClientTransport::receive(&mut **transport).await;
         }
-        Vec::new()
+        #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+        if self.is_browser_wire() {
+            loop {
+                self.pump_console_lines();
+                if let Some(frame) = self.pop_browser_frame() {
+                    return Ok(frame);
+                }
+                if let Some(message) = self.state().unavailable_message() {
+                    // pump_console_lines surfaced a serial error → Gone
+                    return Err(TransportError::Other(message));
+                }
+                self.timers.sleep(READINESS_POLL_INTERVAL).await;
+            }
+        }
+        Err(TransportError::Other(
+            "device session has no app-protocol wire".to_string(),
+        ))
+    }
+
+    /// Close the current wire (the channel-facing close; the SESSION close
+    /// releases the provider resources).
+    pub(crate) async fn close_wire(&self) -> Result<(), TransportError> {
+        #[cfg(feature = "device-session-host")]
+        if let Some(transport) = self.host_transport() {
+            let mut transport = transport.lock().await;
+            return lpa_client::ClientTransport::close(&mut **transport).await;
+        }
+        // Browser line wire: the provider session owns the port; nothing to
+        // close at the channel level.
+        Ok(())
+    }
+
+    #[cfg(feature = "device-session-host")]
+    fn host_transport(&self) -> Option<crate::LinkServerConnection> {
+        match &*self.wire.borrow() {
+            DeviceWire::Transport(transport) => Some(transport.clone()),
+            #[allow(
+                unreachable_patterns,
+                reason = "wire variants are feature-gated; host-only builds have one variant"
+            )]
+            _ => None,
+        }
+    }
+
+    /// Non-blocking poll for one decoded protocol frame from the wire.
+    ///
+    /// `None` means "no frame yet". For the host transport a single poll
+    /// with a no-op waker is sound because the transport receive is a
+    /// cancel-safe channel recv: an uncompleted poll consumes nothing, and
+    /// the engine re-polls on its next pass. (Same bridge technique as the
+    /// fake device's server pump; duplicated because that one is
+    /// feature-private.) The browser line wire pops the pending queue that
+    /// [`Self::pump_console_lines`] fills.
+    fn poll_frame(&self) -> Option<Result<WireServerMessage, TransportError>> {
+        #[cfg(feature = "device-session-host")]
+        if let Some(transport) = self.host_transport() {
+            return poll_once(async move {
+                let mut transport = transport.lock().await;
+                lpa_client::ClientTransport::receive(&mut **transport).await
+            });
+        }
+        #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+        if self.is_browser_wire() {
+            return self.pop_browser_frame().map(Ok);
+        }
+        None
+    }
+
+    /// Serial lines observed by connectors that surface them: the fake
+    /// device and host serial providers tap the framing thread's line
+    /// splitter; the browser serial provider's JS controller splits lines
+    /// natively.
+    fn take_observed_lines(&self) -> Vec<String> {
+        let _session_id = || self.session.borrow().id.clone();
+        #[allow(
+            unreachable_patterns,
+            irrefutable_let_patterns,
+            reason = "connector variants are feature-gated; some builds have one variant"
+        )]
+        match &*self.connector {
+            #[cfg(feature = "fake-device")]
+            LinkConnector::Fake(provider) => {
+                provider.take_lines(&_session_id()).unwrap_or_default()
+            }
+            #[cfg(feature = "host-serial-esp32")]
+            LinkConnector::HostSerialEsp32(provider) => {
+                provider.take_lines(&_session_id()).unwrap_or_default()
+            }
+            #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+            LinkConnector::BrowserSerialEsp32(provider) => {
+                provider.take_lines(&_session_id()).unwrap_or_default()
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Browser line-wire internals (wasm only): `M!` lines are the protocol
+/// frames, decoded here into the wire's pending queue; serial errors from
+/// the JS controller surface as `Gone`.
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+impl DeviceShared {
+    fn is_browser_wire(&self) -> bool {
+        matches!(&*self.wire.borrow(), DeviceWire::BrowserLines { .. })
+    }
+
+    /// Decode one `M!` frame body into the pending queue. A malformed frame
+    /// is reported as a link log line; when another `M!` marker is embedded
+    /// (interleaved device output corrupted the line) decoding resyncs at
+    /// it, mirroring the retired studio browser io.
+    fn queue_browser_frame(&self, frame_json: &str) {
+        match lpc_wire::json::from_str::<WireServerMessage>(frame_json) {
+            Ok(frame) => {
+                #[allow(
+                    irrefutable_let_patterns,
+                    reason = "wire variants are feature-gated; wasm-only builds have one variant"
+                )]
+                if let DeviceWire::BrowserLines { pending } = &mut *self.wire.borrow_mut() {
+                    pending.push_back(frame);
+                }
+            }
+            Err(error) => {
+                self.sink.emit(DeviceEvent::LogLine {
+                    line: format!("malformed M! frame: {error}"),
+                    origin: DeviceLineOrigin::Link,
+                });
+                if let Some(offset) = frame_json.find("M!").filter(|offset| *offset > 0) {
+                    self.queue_browser_frame(&frame_json[offset + 2..]);
+                }
+            }
+        }
+    }
+
+    fn pop_browser_frame(&self) -> Option<WireServerMessage> {
+        match &mut *self.wire.borrow_mut() {
+            DeviceWire::BrowserLines { pending } => pending.pop_front(),
+            #[allow(
+                unreachable_patterns,
+                reason = "wire variants are feature-gated; wasm-only builds have one variant"
+            )]
+            _ => None,
+        }
+    }
+
+    /// Surface JS serial controller errors: the port died underneath us.
+    fn surface_browser_errors(&self) {
+        let LinkConnector::BrowserSerialEsp32(provider) = &*self.connector else {
+            return;
+        };
+        let session_id = self.session.borrow().id.clone();
+        let Ok(errors) = provider.take_errors(&session_id) else {
+            return;
+        };
+        for error in errors {
+            self.sink.emit(DeviceEvent::LogLine {
+                line: format!("browser serial error: {error}"),
+                origin: DeviceLineOrigin::Link,
+            });
+            self.mark_gone(&format!("browser serial error: {error}"));
+        }
+    }
+
+    async fn browser_write_frame(
+        &self,
+        msg: &lpc_wire::ClientMessage,
+    ) -> Result<(), TransportError> {
+        let frame = lpc_wire::json::to_string(msg)
+            .map_err(|error| TransportError::Serialization(error.to_string()))?;
+        let session_id = self.session.borrow().id.clone();
+        let LinkConnector::BrowserSerialEsp32(provider) = &*self.connector else {
+            return Err(TransportError::Other(
+                "browser line wire holds a non-browser connector".to_string(),
+            ));
+        };
+        provider
+            .write_line(&session_id, &format!("M!{frame}\n"))
+            .await
+            .map_err(|error| TransportError::Other(error.to_string()))
     }
 }
 
 /// Open one device link: connector connect → provider protocol open →
-/// connection handoff. The canonical home of the flow that lived in the
-/// studio `LinkController`'s `open_connected_provider` (the studio copy
-/// remains until P5/P6 rewire and delete it).
+/// connection handoff → wire selection. The canonical home of the flow that
+/// lived in the studio `LinkController`'s `open_connected_provider` (deleted
+/// with it in P6).
 async fn open_device_link(
     connector: &LinkConnector,
     endpoint_id: &LinkEndpointId,
-) -> Result<(LinkSession, LinkConnection, LinkServerConnection), LinkError> {
+) -> Result<(LinkSession, LinkConnection, DeviceWire), LinkError> {
     let session = connector.connect(endpoint_id).await?;
-    // Provider protocol open is a browser-serial concern (baud-rate open);
-    // it moves here with the browser connector in P5. Host connectors open
-    // their protocol inside connect().
+    // Browser serial: the provider needs an explicit protocol open at the
+    // app baud rate before lines flow. Host connectors open their protocol
+    // inside connect().
+    #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+    if let LinkConnector::BrowserSerialEsp32(provider) = connector {
+        if let Err(error) = provider
+            .open_protocol(session.id(), lpc_model::DEFAULT_SERIAL_BAUD_RATE)
+            .await
+        {
+            close_failed_session(connector, &session).await;
+            return Err(error);
+        }
+    }
     let connection = match connector.connection(session.id()).await {
         Ok(connection) => connection,
         Err(error) => {
@@ -492,13 +689,25 @@ async fn open_device_link(
             return Err(error);
         }
     };
-    let Some(transport) = connection.server_connection() else {
-        close_failed_session(connector, &session).await;
-        return Err(LinkError::other(
-            "link connection exposes no host protocol channel; DeviceSession is hardware-only",
+    #[cfg(feature = "device-session-host")]
+    if let Some(transport) = connection.server_connection() {
+        return Ok((session, connection, DeviceWire::Transport(transport)));
+    }
+    #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+    if matches!(connector, LinkConnector::BrowserSerialEsp32(_)) {
+        return Ok((
+            session,
+            connection,
+            DeviceWire::BrowserLines {
+                pending: std::collections::VecDeque::new(),
+            },
         ));
-    };
-    Ok((session, connection, transport))
+    }
+    let _ = &connection;
+    close_failed_session(connector, &session).await;
+    Err(LinkError::other(
+        "link connection exposes no host protocol channel; DeviceSession is hardware-only",
+    ))
 }
 
 async fn close_failed_session(connector: &LinkConnector, session: &LinkSession) {
@@ -506,6 +715,7 @@ async fn close_failed_session(connector: &LinkConnector, session: &LinkSession) 
 }
 
 /// Poll a future exactly once with a no-op waker; `None` when pending.
+#[cfg(feature = "device-session-host")]
 fn poll_once<F: Future>(future: F) -> Option<F::Output> {
     struct NoopWake;
     impl Wake for NoopWake {

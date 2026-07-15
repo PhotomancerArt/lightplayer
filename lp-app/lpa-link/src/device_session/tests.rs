@@ -54,7 +54,7 @@ async fn unsolicited_hello_with_matching_proto_makes_the_session_ready() {
         events
             .borrow()
             .iter()
-            .any(|event| matches!(event, DeviceEvent::LogLine { line } if line.contains("starting server loop"))),
+            .any(|event| matches!(event, DeviceEvent::LogLine { line, origin: DeviceLineOrigin::Device } if line.contains("starting server loop"))),
         "boot lines should flow through the event sink"
     );
 }
@@ -415,7 +415,7 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
     // DeviceEvent vocabulary: logs as LogLine, progress as Progress.
     assert!(
         events.borrow().iter().any(
-            |event| matches!(event, DeviceEvent::LogLine { line } if line.contains("fake flash"))
+            |event| matches!(event, DeviceEvent::LogLine { line, origin: DeviceLineOrigin::Link } if line.contains("fake flash"))
         ),
         "management logs should arrive as LogLine events"
     );

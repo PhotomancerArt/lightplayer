@@ -36,11 +36,12 @@ mod device_session;
 mod device_snapshot;
 mod device_state;
 mod device_timers;
+mod device_wire;
 
 #[cfg(all(test, feature = "fake-device"))]
 mod tests;
 
-pub use device_event::{DeviceEvent, DeviceEventSink};
+pub use device_event::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
 pub use device_manage::DeviceManageOutcome;
 pub use device_mode::{DeviceMode, DeviceModeGuard};
 pub use device_readiness::{

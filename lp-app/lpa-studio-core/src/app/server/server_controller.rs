@@ -86,21 +86,36 @@ impl ServerController {
         };
     }
 
-    pub fn attach_link_connection(
+    /// Attach the simulator's worker io (BrowserWorker keeps its
+    /// post-message channel; hardware goes through
+    /// [`Self::attach_device_session`]).
+    pub fn attach_sim_connection(
         &mut self,
         connector: Rc<LinkConnector>,
         connection: &LinkConnection,
         updates: UxUpdateSink,
     ) -> Result<(), UiError> {
         self.mark_connecting("Opening server protocol");
-        let client = StudioServerClient::from_link_connection(connector, connection, updates)?;
+        let client = StudioServerClient::from_sim_connection(connector, connection, updates)?;
+        self.install_client(client);
+        Ok(())
+    }
+
+    /// Attach a hardware [`lpa_link::DeviceSession`]'s readiness-gated
+    /// app-protocol channel as the server io (M4/P5 — the per-kind client
+    /// io match is gone for hardware).
+    pub fn attach_device_session(&mut self, session: &lpa_link::DeviceSession) {
+        self.mark_connecting("Opening server protocol");
+        self.install_client(StudioServerClient::from_device_session(session));
+    }
+
+    fn install_client(&mut self, client: StudioServerClient) {
         let protocol = client.protocol().to_string();
         self.client = Some(client);
         self.state = ServerState::Connected { protocol };
         // A fresh connection means a fresh server process/boot: its effective
         // log level is back at the init default.
         self.requested_log_level = crate::UiLogLevel::Info;
-        Ok(())
     }
 
     pub fn client_mut(&mut self) -> Result<&mut StudioServerClient, UiError> {
