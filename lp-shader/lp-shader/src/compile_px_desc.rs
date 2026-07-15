@@ -31,6 +31,21 @@ impl ShaderFrontend {
             Self::LpsGlsl => "lps-glsl",
         }
     }
+
+    /// Whether this frontend is compiled into the current binary.
+    ///
+    /// `Naga` is behind the `naga` feature; selecting it without the feature
+    /// fails every compile at runtime with "naga frontend was not built into
+    /// this binary". Hosts that pin a frontend as a const can const-assert
+    /// this so a build whose feature graph dropped the frontend fails at
+    /// compile time instead.
+    #[must_use]
+    pub const fn built_in(self) -> bool {
+        match self {
+            Self::Naga => cfg!(feature = "naga"),
+            Self::LpsGlsl => true,
+        }
+    }
 }
 
 /// GLSL source, output [`TextureStorageFormat`], compiler settings, and optional per-sampler

@@ -16,7 +16,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 fw-core = { path = "../fw-core", features = ["std"] }
-lpa-server = { path = "../../lp-app/lpa-server" }
+# `naga` is required explicitly: the CPU tier pins ShaderFrontend::Naga, and
+# the sidecar builds this crate standalone (no workspace feature unification).
+lpa-server = { path = "../../lp-app/lpa-server", features = ["naga"] }
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm" }
 lp-gfx-wgpu = { path = "../../lp-gfx/lp-gfx-wgpu" }
 lpc-hardware = { path = "../../lp-core/lpc-hardware" }

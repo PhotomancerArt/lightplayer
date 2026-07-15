@@ -30,13 +30,24 @@ use crate::tier::{RuntimeTier, TierSelection};
 
 /// GLSL frontend for the browser runtime's CPU tier.
 ///
-/// Naga: this crate hard-depends on `lp-gfx-wgpu` (which always compiles the
-/// naga frontend in), and the browser CPU tier has compiled through naga
-/// since the GPU tier landed — kept as the explicit choice rather than an
-/// accident of feature unification. The device constant is
-/// [`lpa_server::DEVICE_SHADER_FRONTEND`] (LpsGlsl); converging the browser
-/// tier onto it is a product decision to make deliberately, not here.
+/// Naga: the browser CPU tier has compiled through naga since the GPU tier
+/// landed — kept as the explicit choice rather than an accident of feature
+/// unification. The `lp-shader/naga` frontend it needs is enabled explicitly
+/// via this crate's `lpa-server` dependency (`features = ["naga"]`); the
+/// naga *crate* that `lp-gfx-wgpu` compiles for the GPU tier does not enable
+/// it. The device constant is [`lpa_server::DEVICE_SHADER_FRONTEND`]
+/// (LpsGlsl); converging the browser tier onto it is a product decision to
+/// make deliberately, not here.
 const BROWSER_SHADER_FRONTEND: lpa_server::ShaderFrontend = lpa_server::ShaderFrontend::Naga;
+
+// The sidecar builds this crate standalone (`cargo build -p fw-browser`), so
+// no workspace feature unification supplies the frontend: if the `naga`
+// feature chain breaks, every shader compile fails at runtime and Studio's
+// simulator renders black. Fail the build instead.
+const _: () = assert!(
+    BROWSER_SHADER_FRONTEND.built_in(),
+    "the pinned shader frontend is not compiled in; keep `features = [\"naga\"]` on fw-browser's lpa-server dependency"
+);
 
 /// One in-browser LightPlayer firmware instance.
 ///
