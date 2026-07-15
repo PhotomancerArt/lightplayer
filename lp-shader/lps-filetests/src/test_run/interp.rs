@@ -16,9 +16,11 @@
 use std::sync::Arc;
 
 use lp_collection::VecMap;
-use lpir::{CompilerConfig, LpirModule, Value, interpret_with_vmctx};
+use lpir::{CompilerConfig, FloatMode, LpirModule, Value, interpret_entry};
 use lps_frontend::std_math_handler::StdMathHandler;
-use lps_shared::{LpsModuleSig, LpsType, LpsValueF32, TextureBindingSpec};
+use lps_shared::layout::type_size;
+use lps_shared::{LayoutRules, LpsModuleSig, LpsType, LpsValueF32, TextureBindingSpec};
+use lpvm::{encode_uniform_write, glsl_component_count};
 
 use crate::conformance::oracle::{canonical_unit_source, rename_lpfn_prefix};
 
@@ -28,11 +30,13 @@ pub struct InterpShader {
     sig: Arc<LpsModuleSig>,
 }
 
-/// Per-`// run:` "instance" (the interpreter is stateless; this just shares
-/// the compiled module).
+/// Per-`// run:` "instance": shares the compiled module and owns a VMContext
+/// image (uniforms + globals region, zero-initialized) that `set_uniform`
+/// writes into and every call executes against.
 pub struct InterpInstance {
     ir: Arc<LpirModule>,
     sig: Arc<LpsModuleSig>,
+    vmctx_image: Vec<u8>,
 }
 
 /// True if `src` references an `lpfn_*` identifier (at identifier boundary).
@@ -92,11 +96,13 @@ impl InterpShader {
         &self.sig
     }
 
-    /// Create a per-directive instance (cheap; shares the module).
+    /// Create a per-directive instance (cheap; shares the module). The
+    /// instance owns a fresh zero-initialized VMContext image.
     pub fn instantiate(&self) -> InterpInstance {
         InterpInstance {
             ir: Arc::clone(&self.ir),
             sig: Arc::clone(&self.sig),
+            vmctx_image: vec![0u8; self.sig.vmctx_buffer_size()],
         }
     }
 
@@ -107,7 +113,26 @@ impl InterpShader {
 }
 
 impl InterpInstance {
-    /// Execute `name` with f32 argument marshaling via `lpir::interpret`.
+    /// Write a uniform value into this instance's VMContext image; later
+    /// calls observe it (mirrors the compiled runtimes' `set_uniform`).
+    pub fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), String> {
+        let (off, bytes) = encode_uniform_write(&self.sig, path, value, FloatMode::F32)
+            .map_err(|e| format!("set_uniform `{path}`: {e}"))?;
+        let end = off
+            .checked_add(bytes.len())
+            .filter(|&e| e <= self.vmctx_image.len())
+            .ok_or_else(|| {
+                format!(
+                    "set_uniform `{path}`: write [{off}, {off}+{}) exceeds vmctx image ({})",
+                    bytes.len(),
+                    self.vmctx_image.len()
+                )
+            })?;
+        self.vmctx_image[off..end].copy_from_slice(&bytes);
+        Ok(())
+    }
+
+    /// Execute `name` with f32 argument marshaling via `lpir::interpret_entry`.
     pub fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, String> {
         // Directives may call an `lpfn_*` wrapper directly; the compiled unit
         // renamed those to `lpo_*`.
@@ -133,26 +158,47 @@ impl InterpInstance {
                 .map_err(|e| format!("interp: {name} arg '{}': {e}", p.name))?;
         }
 
-        // Reserve a zero-initialized VMContext region so uniform/global loads
-        // land in real (zeroed) memory instead of reading out of bounds. Zero
-        // is the correct default for the transcendental corpus (uniforms
+        // Aggregate (struct/array) returns use the sret convention: the
+        // callee writes std430 bytes through a hidden destination pointer and
+        // returns no scalars. Size the destination from the return type; the
+        // entry point validates the choice against the function's actual ABI.
+        let sret_size = if type_returns_via_sret(&gfn.return_type) {
+            sret_dense_size(&gfn.return_type)?
+        } else {
+            0
+        };
+
+        // The VMContext image (zero-initialized uniforms + globals, plus any
+        // `set_uniform` writes) backs vmctx-relative loads/stores. Zero is
+        // the correct default for the transcendental corpus (uniforms
         // laundered through `u_runtime_zero`) and for globals written before
-        // being read. Globals with initializers still need the synthesized
-        // init function (not yet run here); `set_uniform` values are applied
-        // separately.
-        let vmctx_bytes = self.sig.vmctx_buffer_size();
+        // being read.
         let mut handler = StdMathHandler::default();
-        let out = interpret_with_vmctx(
+        let out = interpret_entry(
             &self.ir,
             &gfn.name,
             &flat,
             &mut handler,
-            vmctx_bytes,
+            &self.vmctx_image,
+            sret_size,
             lpir::DEFAULT_MAX_DEPTH,
         )
         .map_err(|e| format!("interp: {name}: {e}"))?;
 
-        let mut it = out.iter().copied();
+        let scalars: Vec<Value> = if sret_size > 0 {
+            if !out.values.is_empty() {
+                return Err(format!(
+                    "interp: {name}: sret function also returned {} scalar(s)",
+                    out.values.len()
+                ));
+            }
+            sret_bytes_to_values(&gfn.return_type, &out.sret_bytes)
+                .map_err(|e| format!("interp: {name} sret: {e}"))?
+        } else {
+            out.values
+        };
+
+        let mut it = scalars.iter().copied();
         let v = decode_return(&gfn.return_type, &mut it)
             .map_err(|e| format!("interp: {name} return: {e}"))?;
         if it.next().is_some() {
@@ -241,6 +287,81 @@ fn flatten_arg(ty: &LpsType, v: &LpsValueF32, out: &mut Vec<Value>) -> Result<()
         }
     }
     Ok(())
+}
+
+/// Aggregate returns (struct/array) go through the sret convention.
+fn type_returns_via_sret(ty: &LpsType) -> bool {
+    matches!(ty, LpsType::Array { .. } | LpsType::Struct { .. })
+}
+
+/// std430 byte size of an sret aggregate, requiring the dense layout the
+/// scalar-walk decode assumes (every scalar at a 4-byte stride, no padding).
+/// Mirrors the wasm host marshalling's restriction (`aggregate_abi.rs`).
+fn sret_dense_size(ty: &LpsType) -> Result<usize, String> {
+    let size = type_size(ty, LayoutRules::Std430);
+    let dense = glsl_component_count(ty) * 4;
+    if size != dense {
+        return Err(format!(
+            "sret return `{ty:?}` is not densely packed in std430 \
+             (size {size}, scalars need {dense}); decode unsupported"
+        ));
+    }
+    Ok(size)
+}
+
+/// Reinterpret a dense std430 sret buffer as typed interpreter scalars, in
+/// the same order [`decode_return`] consumes them.
+fn sret_bytes_to_values(ty: &LpsType, bytes: &[u8]) -> Result<Vec<Value>, String> {
+    fn push_scalars(ty: &LpsType, words: &mut impl Iterator<Item = u32>, out: &mut Vec<Value>) -> Result<(), String> {
+        let mut take = |n: usize, float: bool, out: &mut Vec<Value>| -> Result<(), String> {
+            for _ in 0..n {
+                let w = words.next().ok_or("sret buffer exhausted")?;
+                out.push(if float {
+                    Value::F32(f32::from_bits(w))
+                } else {
+                    Value::I32(w as i32)
+                });
+            }
+            Ok(())
+        };
+        match ty {
+            LpsType::Void => Ok(()),
+            LpsType::Float => take(1, true, out),
+            LpsType::Int | LpsType::UInt | LpsType::Bool => take(1, false, out),
+            LpsType::Vec2 => take(2, true, out),
+            LpsType::Vec3 => take(3, true, out),
+            LpsType::Vec4 => take(4, true, out),
+            LpsType::IVec2 | LpsType::UVec2 | LpsType::BVec2 => take(2, false, out),
+            LpsType::IVec3 | LpsType::UVec3 | LpsType::BVec3 => take(3, false, out),
+            LpsType::IVec4 | LpsType::UVec4 | LpsType::BVec4 => take(4, false, out),
+            LpsType::Mat2 => take(4, true, out),
+            LpsType::Mat3 => take(9, true, out),
+            LpsType::Mat4 => take(16, true, out),
+            LpsType::Array { element, len } => {
+                for _ in 0..*len {
+                    push_scalars(element, words, out)?;
+                }
+                Ok(())
+            }
+            LpsType::Struct { members, .. } => {
+                for m in members {
+                    push_scalars(&m.ty, words, out)?;
+                }
+                Ok(())
+            }
+            LpsType::Texture2D => Err("texture in sret return".to_string()),
+        }
+    }
+
+    if bytes.len() % 4 != 0 {
+        return Err(format!("sret buffer length {} not word-aligned", bytes.len()));
+    }
+    let mut words = bytes
+        .chunks_exact(4)
+        .map(|c| u32::from_le_bytes(c.try_into().unwrap()));
+    let mut out = Vec::new();
+    push_scalars(ty, &mut words, &mut out)?;
+    Ok(out)
 }
 
 /// Decode interpreter output scalars into a typed [`LpsValueF32`].

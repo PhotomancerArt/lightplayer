@@ -83,25 +83,6 @@ pub fn interpret_with_depth(
     imports: &mut dyn ImportHandler,
     max_depth: usize,
 ) -> Result<Vec<Value>, InterpError> {
-    interpret_with_vmctx(module, func_name, args, imports, 0, max_depth)
-}
-
-/// Like [`interpret_with_depth`], but reserves a zero-initialized VMContext
-/// region of `vmctx_bytes` at the base of the shared stack. The VMContext
-/// pointer (hidden arg 0) is `0`, so vmctx-relative loads/stores — module
-/// uniforms and globals, sized by `LpsModuleSig::vmctx_buffer_size` — land in
-/// this region instead of reading out of bounds. Call frames begin above it.
-///
-/// `vmctx_bytes == 0` reproduces the plain [`interpret`] behavior (dummy
-/// vmctx, no backing) for modules with no uniforms or globals.
-pub fn interpret_with_vmctx(
-    module: &LpirModule,
-    func_name: &str,
-    args: &[Value],
-    imports: &mut dyn ImportHandler,
-    vmctx_bytes: usize,
-    max_depth: usize,
-) -> Result<Vec<Value>, InterpError> {
     let func = module
         .functions
         .values()
@@ -113,11 +94,74 @@ pub fn interpret_with_vmctx(
     }
     full.extend_from_slice(args);
     // One linear stack shared by all frames so slot addresses stay valid
-    // across calls (out-parameters, sret pointers). The VMContext region, if
-    // any, occupies [0, vmctx_bytes); the first frame's slots start above it.
+    // across calls (out-parameters, sret pointers).
     let mut stack: Vec<u8> = Vec::new();
-    stack.resize(vmctx_bytes, 0);
     exec_func(module, func, &full, imports, 0, max_depth, &mut stack)
+}
+
+/// Result of an [`interpret_entry`] run.
+pub struct EntryOutput {
+    /// Scalar return values (empty for sret functions — read `sret_bytes`).
+    pub values: Vec<Value>,
+    /// Read-back of the sret destination buffer (`sret_size` bytes, std430
+    /// layout); empty when the entry function does not use sret.
+    pub sret_bytes: Vec<u8>,
+}
+
+/// Full-featured host entry point: run `func_name` against a real VMContext
+/// image and (for aggregate-returning functions) a real sret destination.
+///
+/// The shared interpreter stack is laid out `[vmctx image][sret buffer]
+/// [call frames…]`:
+/// - `vmctx_image` is copied to the stack base and the VMContext pointer
+///   (hidden arg 0) is `0`, so vmctx-relative uniform/global loads and
+///   stores (offsets baked in by the frontend, region sized by
+///   `LpsModuleSig::vmctx_buffer_size`) hit real memory. Pass a zeroed
+///   image for default-initialized uniforms/globals, or pre-write uniform
+///   values into it (`encode_uniform_write` offsets are vmctx-relative).
+/// - For a callee with `sret_arg`, `sret_size` bytes are reserved directly
+///   above the image and the hidden sret pointer points at them; after the
+///   run they are returned in [`EntryOutput::sret_bytes`] for the caller to
+///   decode (the callee's aggregate std430 layout).
+///
+/// Errors if `sret_size` disagrees with whether the function actually uses
+/// sret — that is a caller-side signature confusion worth surfacing.
+pub fn interpret_entry(
+    module: &LpirModule,
+    func_name: &str,
+    args: &[Value],
+    imports: &mut dyn ImportHandler,
+    vmctx_image: &[u8],
+    sret_size: usize,
+    max_depth: usize,
+) -> Result<EntryOutput, InterpError> {
+    let func = module
+        .functions
+        .values()
+        .find(|f| f.name == func_name)
+        .ok_or_else(|| InterpError::FunctionNotFound(func_name.to_string()))?;
+    if func.sret_arg.is_some() != (sret_size > 0) {
+        return Err(InterpError::Internal(format!(
+            "sret mismatch for @{func_name}: function {} sret but sret_size is {sret_size}",
+            if func.sret_arg.is_some() {
+                "uses"
+            } else {
+                "does not use"
+            },
+        )));
+    }
+    let sret_base = vmctx_image.len();
+    let mut full = alloc::vec![Value::I32(0); 1];
+    if func.sret_arg.is_some() {
+        full.push(Value::I32(sret_base as i32));
+    }
+    full.extend_from_slice(args);
+    let mut stack: Vec<u8> = Vec::with_capacity(sret_base + sret_size);
+    stack.extend_from_slice(vmctx_image);
+    stack.resize(sret_base + sret_size, 0);
+    let values = exec_func(module, func, &full, imports, 0, max_depth, &mut stack)?;
+    let sret_bytes = stack[sret_base..sret_base + sret_size].to_vec();
+    Ok(EntryOutput { values, sret_bytes })
 }
 
 fn exec_func(

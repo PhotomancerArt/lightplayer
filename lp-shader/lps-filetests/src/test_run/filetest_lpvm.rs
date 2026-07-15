@@ -126,9 +126,7 @@ impl FiletestInstance {
             Self::Emu(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
-            Self::Interp(_) => Err(format!(
-                "interp.f32 does not support set_uniform ('{path}'): the LPIR interpreter has no uniforms region"
-            )),
+            Self::Interp(i) => i.set_uniform(path, value),
         }
     }
 

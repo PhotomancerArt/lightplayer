@@ -25,8 +25,8 @@ pub use compiler_config::{
     CompilerConfig, ConfigError, InlineConfig, InlineMode, TexelFetchBoundsMode, TextureConfig,
 };
 pub use interp::{
-    DEFAULT_MAX_DEPTH, ImportHandler, InterpError, Value, interpret, interpret_with_depth,
-    interpret_with_vmctx,
+    DEFAULT_MAX_DEPTH, EntryOutput, ImportHandler, InterpError, Value, interpret,
+    interpret_entry, interpret_with_depth,
 };
 pub use lpir_module::{ImportDecl, IrFunction, LpirModule, SlotDecl, VMCTX_VREG};
 pub use lpir_op::LpirOp;
