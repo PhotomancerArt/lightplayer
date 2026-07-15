@@ -7,12 +7,11 @@
 //! device is not ready (blank flash, ROM bootloader, known foreign firmware,
 //! silence) and never grants readiness itself.
 //!
-//! The classifier is the canonical copy of
-//! `lpa-studio-core/src/app/server/browser_serial_readiness.rs`, moved here
-//! for M4 P2 and demoted from readiness-granting to diagnosis-only. The
-//! studio copy stays in place (and in use by the browser/fake client-io
-//! adapters) until P6 deletes it together with those adapters — the
-//! duplication is intentional and temporary.
+//! This is the ONLY boot-line classifier in the app layer. It started life
+//! in `lpa-studio-core` as a readiness-granting string grep; the device
+//! session work moved it here and demoted it to diagnosis, and the studio
+//! copy (and the client-io adapters that consumed it) were deleted. See
+//! `docs/adr/2026-07-15-device-session-model.md`.
 
 use lpc_wire::{ServerHello, ServerMsgBody, WIRE_PROTO_VERSION, WireServerMessage};
 

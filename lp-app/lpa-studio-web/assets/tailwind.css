@@ -1063,6 +1063,7 @@
   }
   .tw\:p-5 {
     padding: calc(var(--tw-spacing) * 5);
+  }
   .tw\:p-6 {
     padding: calc(var(--tw-spacing) * 6);
   }

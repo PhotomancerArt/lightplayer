@@ -153,7 +153,10 @@ impl DeviceSession {
         Ok(DeviceModeGuard::new(Rc::clone(&self.shared.mode)))
     }
 
-    /// The connector this session owns (for P3 management operations).
+    /// The connector this session owns. Consumers use it for
+    /// connector-level metadata and log surfaces (labels, capabilities,
+    /// session logs); the wire itself is only reachable through the
+    /// session's own gated surfaces.
     pub fn connector(&self) -> Rc<LinkConnector> {
         Rc::clone(&self.shared.connector)
     }
@@ -552,6 +555,8 @@ impl DeviceShared {
     /// splitter; the browser serial provider's JS controller splits lines
     /// natively.
     fn take_observed_lines(&self) -> Vec<String> {
+        // Underscore-named: unused in feature combinations where every
+        // line-surfacing connector arm below is cfg'd out.
         let _session_id = || self.session.borrow().id.clone();
         #[allow(
             unreachable_patterns,

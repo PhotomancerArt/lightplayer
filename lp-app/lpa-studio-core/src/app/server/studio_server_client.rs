@@ -619,9 +619,10 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
     events
         .into_iter()
         .filter_map(|event| match event {
-            // Wire bootstrap hello (M2): informational only for now — the
-            // mismatch POLICY consumer (Incompatible state, reflash
-            // affordance) is M4.
+            // Wire bootstrap hello: informational here — the mismatch
+            // POLICY lives in lpa-link's DeviceSession (Incompatible state,
+            // reflash affordance); this log line just makes the hello
+            // visible in the console.
             ClientEvent::Hello(hello) => Some(UiLogDraft::new(
                 UiLogLevel::Debug,
                 UiLogOrigin::Server,

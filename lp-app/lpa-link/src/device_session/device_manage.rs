@@ -7,10 +7,9 @@
 //!    mid-flight; the handed-out channel is invalidated by construction
 //!    while the mode is held.
 //! 2. Release the current link: the provider session closes, the old
-//!    transport shuts down (host/fake: the serial framing thread ENDS), and
-//!    the port is free for the management tool. (The browser connector's
-//!    `release_protocol`/`open_protocol` arm joins when this module is
-//!    compiled on wasm — P5.)
+//!    transport shuts down (host/fake: the serial framing thread ENDS; the
+//!    browser connector closes its Web Serial port), and the port is free
+//!    for the management tool.
 //! 3. Run the connector's `manage_with_events`, folding the connector-level
 //!    [`LinkManagementEventSink`] into [`DeviceEvent`] at the studio-facing
 //!    surface (`Log` → `LogLine`, `Progress` → `Progress`).

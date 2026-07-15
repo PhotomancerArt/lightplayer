@@ -60,8 +60,10 @@ preserving the buffering the open-coded loops had), `Cancelled`, `TimedOut`, or
 `Failed(ClientError)`. The two existing clients apply no deadline of their own —
 `LpClient` has no runtime and `TokioLpClient` keeps its outer `tokio::time::timeout`
 as the native timeout owner — so both pass a never-firing deadline into the
-shared loop today; the actor layer (M7/P3) is where a real `ProgressDeadline`,
-`CancelSignal`, and `BackoffPolicy` get wired in.
+shared loop today. Real deadlines live in the callers: the studio actor wires a
+`ProgressDeadline`, `CancelSignal`, and `BackoffPolicy` around its pulls, and
+`lpa-link`'s `DeviceSession` wraps every channel send/receive in its own
+injected request-idle budget (expiry lands the device on `Unresponsive`).
 
 ## Server Hello
 
@@ -77,9 +79,10 @@ via `ClientRequest::Hello`. This crate surfaces it two ways:
   on-request call.
 
 No version policy lives here: absence of a hello from a responding server
-means pre-hello firmware and should be treated as a protocol mismatch by the
-consumer (M4's DeviceSession). See
-`docs/adr/2026-07-14-wire-hello-versioning.md`.
+means pre-hello firmware and is treated as a protocol mismatch by the
+consumer (`lpa-link`'s `DeviceSession`, whose readiness IS the hello). See
+`docs/adr/2026-07-14-wire-hello-versioning.md` and
+`docs/adr/2026-07-15-device-session-model.md`.
 
 ## Overlay In The Pull Contract
 
@@ -139,6 +142,12 @@ The trait is sync by design: the transport already drives the port from a
 dedicated thread with short-timeout reads, so a sync trait driven by that
 thread is the honest seam. The trait lives here (not in `lpa-link`) because
 `lpa-link` depends on `lpa-client`; `lpa_link::stream` re-exports it.
+
+A serial transport instance is one link generation: `close()` ends the
+framing thread (runtime-neutral — it blocks briefly instead of awaiting a
+tokio timer, so single-actor edges without a reactor can drive it), and a
+dead transport is never reopened. Reconnecting means building a NEW stream +
+transport, owned by the layer above (`lpa-link`'s `DeviceSession::reconnect`).
 
 ## Important Types
 

@@ -34,9 +34,8 @@ web-sys = { version = "0.3", optional = true, features = ["Window"] }
 # LightPlayer server (simulator session, no UI). Never built for wasm.
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm" }
 lpa-server = { path = "../lpa-server" }
-# The link e2e tests drive the REAL provider path against the scripted fake
-# device; enabling the feature here (dev-only) also unlocks the test-edge
-# fake_link_client_io in cfg(test) lib builds.
+# The link e2e tests drive the REAL provider path (DeviceSession over the
+# scripted fake device); the feature is dev-only.
 lpa-link = { path = "../lpa-link", features = ["fake-device"] }
 async-trait = { version = "0.1" }
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }

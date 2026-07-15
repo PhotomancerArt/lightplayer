@@ -8,7 +8,8 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpa_server::{DEVICE_IDENTITY_PATH, Graphics, LpGraphics, LpServer};
+use lp_gfx_lpvm::TargetLpvmGraphics;
+use lpa_server::{DEVICE_IDENTITY_PATH, LpGraphics, LpServer};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::messages::{ClientMessage, ClientRequest};
@@ -56,7 +57,7 @@ fn server_with_injected_hello() -> (
 ) {
     let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider.clone(),
         Box::new(LpFsMemory::new()),

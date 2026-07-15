@@ -96,10 +96,14 @@ Browser providers own their browser resource bindings:
 - `browser-serial-esp32` owns Web Serial permission/open/release/close and ESP32
   probe/flash bindings.
 
-`lpa-studio-core` adapts provider send/receive streams into
-`lpa-client::ClientIo`; UI shells should not reimplement provider resource
-ownership, request ids, response correlation, server error handling,
-heartbeat/log handling, or project deploy ordering.
+For hardware links, `DeviceSession` (below) owns the adaptation into
+`lpa-client::ClientIo` — apps consume its readiness-gated channel rather
+than adapting provider streams themselves. The one exception is the sim:
+`lpa-studio-core` adapts the browser-worker connection directly, because a
+sim has no boot, readiness, or management plane. UI shells should never
+reimplement provider resource ownership, request ids, response
+correlation, server error handling, heartbeat/log handling, or project
+deploy ordering.
 
 ## DeviceSession
 
@@ -205,9 +209,10 @@ ordering, and recovery actions.
 
 `LinkConnector` is the enum-dispatched owned handle over one concrete
 provider (used because `LinkProvider` has async methods and is not
-object-safe). The connection OWNER — Studio's link flow today, `DeviceSession`
-next — holds `Rc<LinkConnector>` and hands clones to client I/O adapters;
-nothing borrows a shared mutable registry on hot paths. All `LinkProvider`
+object-safe). The connection OWNER — `DeviceSession` for hardware links,
+the app's sim attach flow for the browser worker — holds
+`Rc<LinkConnector>` and hands clones to client I/O adapters; nothing
+borrows a shared mutable registry on hot paths. All `LinkProvider`
 methods take `&self`: each provider keeps its endpoint/session state behind
 internal `RefCell`s with borrows scoped to synchronous sections, never across
 an `await`. A connector is created per open flow and may discover several
@@ -255,8 +260,8 @@ expose it through the REAL provider path. The point is byte-level fidelity:
 every hardware bug so far (pull-before-readiness ordering, fresh-device
 misclassification) lived below the record level — in framing, boot-output
 classification, and timing — so the fake injects at the byte stream and lets
-the real `M!` parser, the real readiness classifier, and the real
-orchestration run in tests.
+the real `M!` parser, the real hello readiness gate and boot-line
+classifier, and the real orchestration run in tests.
 
 **Boot-state script** (`FakeDeviceScript` / `FakeBootState`): the device is a
 sequence of states; reset-signal dances re-run the current state's boot.
@@ -357,8 +362,9 @@ let device = provider.device(&LinkEndpointId::new("fake-device-0")).unwrap();
   protocol ownership before probe/flash/erase takes exclusive bootloader access.
   Opening the normal serial server protocol opens the port once, starts reading
   immediately, then attempts a best-effort hard reset while boot output is being
-  captured. Reset signal failures are diagnostic; readiness is classified from
-  serial output and protocol frames.
+  captured. Reset signal failures are diagnostic; readiness is the wire hello
+  (owned by `DeviceSession` above), with serial output feeding the
+  diagnosis-only boot classifier.
 - Direct filesystem access means raw/full filesystem image management below the
   running `lp-server`. Normal project upload should use `lpa-client` and the
   server filesystem/project protocol once firmware is running.

@@ -1,7 +1,7 @@
 //! End-to-end StudioController tests through the REAL link path.
 //!
-//! Unlike `studio_edit_e2e_tests` (which bypasses the link via
-//! `set_device_connection_for_test` + an in-process `ClientIo`), these tests
+//! Unlike `studio_edit_e2e_tests` (which bypasses the link via a stubbed
+//! device attachment + an in-process `ClientIo`), these tests
 //! go `open_provider → discover → connect_endpoint → DeviceSession →
 //! readiness → attach → pull` through the real async seams, against the
 //! scripted byte-level `FakeEsp32Device`: a REAL host `LpServer` behind the
@@ -342,13 +342,12 @@ fn disconnect_mid_pull_is_nonfatal_and_erase_stays_reachable() {
 /// produces output times out through the readiness classifier with the
 /// no-serial-output message.
 ///
-/// NOTE (M4 input): the bounded wait lives in the test-edge
-/// `fake_link_client_io` readiness loop, mirroring the browser io's bounded
-/// poll. The layers below it — `AsyncSerialClientTransport::receive`, the
-/// link provider, `LpClient` — have NO timeout of their own today; a
-/// mid-request stall after readiness would hang until the caller gives up.
-/// This test asserts the CURRENT behavior (readiness-level timeout only);
-/// adding a real timeout layer is M4's DeviceSession work, not ad-hoc M3.
+/// NOTE: the bounded wait is `DeviceSession`'s readiness deadline
+/// (`DeviceTimers`); after readiness, mid-request stalls are bounded by the
+/// session channel's request-idle budget. This row pins the connect-time
+/// half: a fully silent device fails the attach with the no-serial-output
+/// diagnosis instead of hanging (row 8 covers the Unresponsive state +
+/// reconnect recovery behind the same silence).
 #[test]
 fn stall_during_connect_times_out_with_no_serial_output() {
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));

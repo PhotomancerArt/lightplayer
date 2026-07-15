@@ -70,7 +70,8 @@ pub struct FakeLightPlayerState {
     pub provenance: lpc_wire::FwProvenance,
     /// Never emit a hello on the wire (unsolicited or requested): mimics
     /// PRE-HELLO firmware whose server loop runs but never identifies
-    /// itself. The M4 hello gate must classify this as `Incompatible`.
+    /// itself. The device session's hello gate classifies this as
+    /// `Incompatible`.
     pub suppress_hello: bool,
     /// Report this wire proto version in the hello instead of the build's
     /// [`lpc_wire::WIRE_PROTO_VERSION`]: mimics firmware built from an

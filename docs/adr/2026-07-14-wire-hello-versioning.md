@@ -80,8 +80,10 @@ No negotiation, no graceful degradation, no per-message compatibility
 matrix (explicitly rejected while the no-wire-compat policy holds). The
 one smooth path is always "upgrade the firmware to match the Studio/client
 in hand" — the client is never expected to speak old protocols. The UX
-consumer of this policy (Incompatible device state, reflash affordance)
-is device-link M4; this ADR fixes the contract it consumes.
+consumer of this policy (the `Incompatible` device state, reflash
+affordance) is `DeviceSession` (device-link M4; see
+`docs/adr/2026-07-15-device-session-model.md`); this ADR fixes the
+contract it consumes.
 
 The Studio firmware manifest records the wire version it would flash
 (`build.wireProto` in `studio-firmware-manifest.mjs` output, extracted
@@ -110,6 +112,10 @@ from the const by the packaging recipe), so "manifest we'd flash" vs
   back to `unknown`/`false` when git is absent).
 - lpa-client exposes the last-seen hello and a typed `hello()` call; no
   policy lives in the client.
-- The string-grep boot classifiers (browser serial readiness, fwcheck)
-  remain temporarily valid — the boot line keeps its marker substring —
-  and are scheduled for deletion in M4 in favor of the hello.
+- The boot line keeps its marker substring, but string-grep readiness is
+  gone from the app layer: device-session M4 deleted the studio's
+  readiness-granting classifier and made the hello the only readiness
+  signal; boot-line classification survives in `lpa-link` as
+  DIAGNOSIS-ONLY (`BootLineClassifier` — see
+  `docs/adr/2026-07-15-device-session-model.md`). The CLI's `fwcheck`
+  grep remains until the CLI adopts `DeviceSession` (device-link M5).
