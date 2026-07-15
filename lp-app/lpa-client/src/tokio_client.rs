@@ -78,6 +78,10 @@ impl ClientIo for TokioClientIo {
 #[derive(Clone)]
 pub struct TokioLpClient {
     state: Arc<Mutex<TokioLpClientState>>,
+    /// Last hello seen from the server — from the unsolicited id-0 boot
+    /// frame and/or an explicit [`TokioLpClient::hello`] call. Shared by
+    /// clones (std mutex: accessed from sync `handle_events`).
+    last_hello: Arc<std::sync::Mutex<Option<lpc_wire::ServerHello>>>,
     request_timeout: Duration,
     display_heartbeats: bool,
 }
@@ -98,8 +102,31 @@ impl TokioLpClient {
                 transport,
                 protocol: ProtocolSession::new(),
             })),
+            last_hello: Arc::new(std::sync::Mutex::new(None)),
             request_timeout: Duration::from_secs(60),
             display_heartbeats: true,
+        }
+    }
+
+    /// The last [`lpc_wire::ServerHello`] observed on this connection
+    /// (unsolicited boot frame or explicit [`TokioLpClient::hello`] call);
+    /// `None` until one arrives. Absence of a hello from a connected,
+    /// responding server means pre-hello firmware — treat as a version
+    /// mismatch (see docs/adr/2026-07-14-wire-hello-versioning.md).
+    pub fn server_hello(&self) -> Option<lpc_wire::ServerHello> {
+        self.last_hello.lock().expect("hello mutex").clone()
+    }
+
+    /// Ask the server for its hello (protocol version + build provenance +
+    /// device uid) and record it as the last-seen hello.
+    pub async fn hello(&self) -> Result<lpc_wire::ServerHello> {
+        let response = self.send_request(ClientRequest::Hello).await?;
+        match response.value.msg {
+            WireServerMsgBody::Hello(hello) => {
+                *self.last_hello.lock().expect("hello mutex") = Some(hello.clone());
+                Ok(hello)
+            }
+            other => Err(unexpected_response("hello", other)),
         }
     }
 
@@ -495,6 +522,9 @@ impl TokioLpClient {
     fn handle_events(&self, events: &[ClientEvent]) {
         for event in events {
             match event {
+                ClientEvent::Hello(hello) => {
+                    *self.last_hello.lock().expect("hello mutex") = Some(hello.clone());
+                }
                 ClientEvent::Heartbeat {
                     fps,
                     frame_count,

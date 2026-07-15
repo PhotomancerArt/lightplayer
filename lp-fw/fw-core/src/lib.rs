@@ -16,7 +16,8 @@ pub mod transport;
 
 pub use message_router::MessageRouter;
 pub use runtime::{
-    DrainedClientMessages, ServerTickOutcome, drain_client_messages, tick_server_frame,
+    DrainedClientMessages, ServerTickOutcome, drain_client_messages, send_unsolicited_hello,
+    tick_server_frame,
 };
 pub use test_messages::{
     TestCommand, TestResponse, deserialize_command, parse_message_line, serialize_command,

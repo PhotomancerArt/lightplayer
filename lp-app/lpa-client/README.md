@@ -60,8 +60,29 @@ preserving the buffering the open-coded loops had), `Cancelled`, `TimedOut`, or
 `Failed(ClientError)`. The two existing clients apply no deadline of their own —
 `LpClient` has no runtime and `TokioLpClient` keeps its outer `tokio::time::timeout`
 as the native timeout owner — so both pass a never-firing deadline into the
-shared loop today; the actor layer (M7/P3) is where a real `ProgressDeadline`,
-`CancelSignal`, and `BackoffPolicy` get wired in.
+shared loop today. Real deadlines live in the callers: the studio actor wires a
+`ProgressDeadline`, `CancelSignal`, and `BackoffPolicy` around its pulls, and
+`lpa-link`'s `DeviceSession` wraps every channel send/receive in its own
+injected request-idle budget (expiry lands the device on `Unresponsive`).
+
+## Server Hello
+
+Servers announce themselves with a `ServerHello` (wire protocol version,
+firmware build provenance, optional stamped `dev_…` uid): once unsolicited
+as the first id-0 frame when the server loop starts serving, and on demand
+via `ClientRequest::Hello`. This crate surfaces it two ways:
+
+- `ClientEvent::Hello(ServerHello)` — the unsolicited frame, delivered with
+  the other side-channel events.
+- `TokioLpClient::server_hello()` — the last-seen hello (from the boot frame
+  or a call), and `TokioLpClient::hello()` / `LpClient::hello()` — the typed
+  on-request call.
+
+No version policy lives here: absence of a hello from a responding server
+means pre-hello firmware and is treated as a protocol mismatch by the
+consumer (`lpa-link`'s `DeviceSession`, whose readiness IS the hello). See
+`docs/adr/2026-07-14-wire-hello-versioning.md` and
+`docs/adr/2026-07-15-device-session-model.md`.
 
 ## Overlay In The Pull Contract
 
@@ -87,7 +108,7 @@ edit buffer, and gating policy live above this crate (in
 |---|---|
 | `default` | Enables `host` for existing native callers. |
 | `host` | Tokio/shared transport adapter, local in-memory transport, host specifier parsing, logging, and `TokioLpClient`. |
-| `serial` | Host serial transport for ESP32/emulator-style JSON-lines links. Implies `host`. |
+| `serial` | Host serial transport for ESP32/emulator-style JSON-lines links, plus the native `SerialPortByteStream`. Implies `host`. |
 | `emu` | Emulator serial transport support. Implies `host`. |
 | `ws` | Host websocket transport. Implies `host`. |
 
@@ -102,6 +123,31 @@ The core compile check is:
 ```bash
 cargo check -p lpa-client --target wasm32-unknown-unknown --no-default-features
 ```
+
+## Byte-Stream Seam (`stream`)
+
+The serial transport runs over a narrow byte-stream seam instead of owning
+ports directly. `stream::DeviceByteStream` models one serial-class device
+attachment as a raw byte pipe (`read_available` / `write_all` /
+`set_signals(dtr, rts)` / `reopen(baud)`); the `M!` framing thread in
+`transport_serial::hardware` drives any implementation of it:
+
+- `stream::SerialPortByteStream` — a native `serialport` port (feature
+  `serial`). Port opening belongs to the CALLER (the `host-serial-esp32`
+  link provider), not the transport.
+- `lpa-link`'s `FakeEsp32Device` — a scripted in-memory device for
+  byte-level tests (feature `fake-device` on `lpa-link`).
+
+The trait is sync by design: the transport already drives the port from a
+dedicated thread with short-timeout reads, so a sync trait driven by that
+thread is the honest seam. The trait lives here (not in `lpa-link`) because
+`lpa-link` depends on `lpa-client`; `lpa_link::stream` re-exports it.
+
+A serial transport instance is one link generation: `close()` ends the
+framing thread (runtime-neutral — it blocks briefly instead of awaiting a
+tokio timer, so single-actor edges without a reactor can drive it), and a
+dead transport is never reopened. Reconnecting means building a NEW stream +
+transport, owned by the layer above (`lpa-link`'s `DeviceSession::reconnect`).
 
 ## Important Types
 

@@ -7,7 +7,7 @@ use lp_gfx::{
     SampleOutHandle, SamplePointsHandle, ShaderCompileOptions, ShaderSemantics, TextureData,
     TextureHandle,
 };
-use lps_shared::TextureStorageFormat;
+use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32, TextureStorageFormat};
 
 use crate::blend::{BlendPipeline, blend_textures_gpu};
 use crate::read_back::read_back_texture;
@@ -16,6 +16,7 @@ use crate::sample_backing::{
     CpuSampleOut, CpuSamplePoints, sample_out, sample_out_mut, sample_points, sample_points_mut,
 };
 use crate::texture_backing::{GpuTexture, gpu_channels, gpu_texture, gpu_texture_mut};
+use crate::texture_registry::{RegisteredTexture, TextureRegistry};
 
 /// GPU shader graphics on a wgpu device at f32 semantics.
 ///
@@ -44,9 +45,33 @@ impl GpuGraphics {
                 queue,
                 blend_pipeline: OnceLock::new(),
                 surface_blit_pipeline: OnceLock::new(),
+                textures: TextureRegistry::new(),
             }),
             compute_delegate,
         }
+    }
+
+    /// The uniform-tree value for a texture input: the engine currency
+    /// (`LpsValueF32::Texture2D`) with this backend's registry id in the
+    /// descriptor's `ptr` lane. The CPU tier's counterpart is
+    /// `LpsTextureBuf::to_texture2d_value()` (a real guest pointer); on the
+    /// GPU tier the descriptor leg resolves to a bind-group entry at render
+    /// time instead.
+    pub fn texture_uniform_value(&self, texture: &TextureHandle) -> Result<LpsValueF32, GfxError> {
+        let backing = gpu_texture(texture)?;
+        let (width, height, format) = (texture.width(), texture.height(), texture.format());
+        let bytes_per_pixel = format.bytes_per_pixel() as u32;
+        let row_stride = width * bytes_per_pixel;
+        Ok(LpsValueF32::Texture2D(LpsTexture2DValue {
+            descriptor: LpsTexture2DDescriptor {
+                ptr: backing.id,
+                width,
+                height,
+                row_stride,
+            },
+            format,
+            byte_len: row_stride as usize * height as usize,
+        }))
     }
 
     /// Raw pre-quantization backing floats behind a texture handle
@@ -120,8 +145,14 @@ impl GpuGraphics {
         width: u32,
         height: u32,
         format: TextureStorageFormat,
-        backing: GpuTexture,
+        mut backing: GpuTexture,
     ) -> TextureHandle {
+        backing.id = self.shared.textures.register(RegisteredTexture {
+            view: backing.view.clone(),
+            width,
+            height,
+            format,
+        });
         TextureHandle::from_backend_parts(
             width,
             height,
@@ -155,7 +186,11 @@ impl LpGraphics for GpuGraphics {
                 options.semantics
             )));
         }
-        Ok(Box::new(GpuShader::new(self.shared.clone(), source)?))
+        Ok(Box::new(GpuShader::new(
+            self.shared.clone(),
+            source,
+            &options.textures,
+        )?))
     }
 
     fn compile_compute_shader(
@@ -171,6 +206,13 @@ impl LpGraphics for GpuGraphics {
 
     fn native_semantics(&self) -> ShaderSemantics {
         ShaderSemantics::F32Gpu
+    }
+
+    /// The GPU tier forks at the GLSL source and always translates through
+    /// naga glsl-in (`compile_shader` ignores `options.frontend`), so the
+    /// advertised frontend is a constant, not a construction-time choice.
+    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
+        lp_shader::ShaderFrontend::Naga
     }
 
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
@@ -327,13 +369,19 @@ pub(crate) struct GpuShared {
     /// Fixed surface-present pipeline, built on first use for the surface
     /// format (one surface format per device).
     pub(crate) surface_blit_pipeline: OnceLock<crate::surface_blit::SurfaceBlitPipeline>,
+    /// Live texture id → view map for texture uniform resolution
+    /// (see [`crate::texture_registry`]).
+    pub(crate) textures: TextureRegistry,
 }
 
 impl HandleAllocator for GpuShared {
     fn free_texture(&self, backing: HandleBacking) {
-        // wgpu resources release on drop; the allocator exists to satisfy
-        // the RAII handle contract and keep the device alive while handles
-        // exist.
+        // wgpu resources release on drop; the allocator drops the registry
+        // entry (ending uniform-value resolution for the id) and keeps the
+        // device alive while handles exist.
+        if let Some(texture) = backing.downcast_ref::<GpuTexture>() {
+            self.textures.unregister(texture.id);
+        }
         drop(backing);
     }
 
@@ -365,7 +413,7 @@ mod tests {
         Some(GpuGraphics::new(
             device,
             queue,
-            Box::new(TargetLpvmGraphics::new()),
+            Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga)),
         ))
     }
 
@@ -388,10 +436,8 @@ mod tests {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options = ShaderCompileOptions {
-            semantics: ShaderSemantics::Q32,
-            ..Default::default()
-        };
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::Naga);
         match graphics.compile_shader("vec4 render(vec2 pos) { return vec4(0.0); }", &options) {
             Err(GfxError::Backend(message)) => {
                 assert!(message.contains("Q32"), "message names the tier: {message}");
@@ -452,10 +498,8 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options = ShaderCompileOptions {
-            semantics: ShaderSemantics::F32Gpu,
-            ..Default::default()
-        };
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
@@ -492,10 +536,8 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options = ShaderCompileOptions {
-            semantics: ShaderSemantics::F32Gpu,
-            ..Default::default()
-        };
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform float time;\n\
@@ -522,7 +564,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let cpu = TargetLpvmGraphics::new();
+        let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga);
 
         // Deterministic pseudo-random u16 channels (2×2 RGBA16).
         let previous: Vec<u16> = (0..16u32)
@@ -570,6 +612,186 @@ void tick() {
                     "alpha {alpha}, channel {i}: gpu {g} vs cpu {c}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn texture_uniform_renders_fetched_texels_exactly() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let texels = rgba16_bytes(&[
+            8192, 16384, 24576, 65535, // (0,0): 0.125, 0.25, 0.375, 1.0
+            65535, 49151, 32768, 16384, // (1,0)
+        ]);
+        let texture = graphics
+            .create_texture(2, 1, TextureStorageFormat::Rgba16Unorm, &texels)
+            .expect("create");
+
+        let mut options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        options.textures.insert(
+            String::from("inputColor"),
+            lp_shader::texture_binding::texture2d(
+                TextureStorageFormat::Rgba16Unorm,
+                lps_shared::TextureFilter::Nearest,
+                lps_shared::TextureWrap::ClampToEdge,
+                lps_shared::TextureWrap::ClampToEdge,
+            ),
+        );
+        let mut shader = graphics
+            .compile_shader(
+                "uniform sampler2D inputColor;\n\
+                 vec4 render(vec2 pos) { return texelFetch(inputColor, ivec2(int(pos.x), 0), 0); }\n",
+                &options,
+            )
+            .expect("compiles");
+
+        let mut target = graphics.create_render_target(2, 1).expect("target");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![(
+                String::from("inputColor"),
+                graphics
+                    .texture_uniform_value(&texture)
+                    .expect("uniform value"),
+            )],
+        };
+        shader.render(&mut target, &uniforms).expect("renders");
+        let data = graphics.read_back(&target).expect("read back");
+        assert_eq!(data.bytes(), &texels[..], "texelFetch is bit-exact");
+    }
+
+    #[test]
+    fn texture_render_validation_errors_match_the_contract() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let texels = rgba16_bytes(&[0, 0, 0, 0]);
+        let texture = graphics
+            .create_texture(1, 1, TextureStorageFormat::Rgba16Unorm, &texels)
+            .expect("create");
+
+        let mut options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        options.textures.insert(
+            String::from("t"),
+            lp_shader::texture_binding::height_one(
+                TextureStorageFormat::Rgba16Unorm,
+                lps_shared::TextureFilter::Nearest,
+                lps_shared::TextureWrap::ClampToEdge,
+            ),
+        );
+        let source = "uniform sampler2D t;\n\
+                      vec4 render(vec2 pos) { return texture(t, pos); }\n";
+        let mut shader = graphics.compile_shader(source, &options).expect("compiles");
+        let mut target = graphics.create_render_target(1, 1).expect("target");
+
+        // Missing texture uniform field.
+        let missing = LpsValueF32::Struct {
+            name: None,
+            fields: vec![],
+        };
+        match shader.render(&mut target, &missing) {
+            Err(GfxError::Render(message)) => assert!(message.contains("t"), "{message}"),
+            other => panic!("expected missing-texture render error, got {other:?}"),
+        }
+
+        // Format mismatch between value and compile-time spec.
+        let mut wrong_format = graphics.texture_uniform_value(&texture).expect("value");
+        if let LpsValueF32::Texture2D(tv) = &mut wrong_format {
+            tv.format = TextureStorageFormat::R16Unorm;
+        }
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![(String::from("t"), wrong_format)],
+        };
+        match shader.render(&mut target, &uniforms) {
+            Err(GfxError::Render(message)) => {
+                assert!(message.contains("format"), "{message}");
+            }
+            other => panic!("expected format-mismatch render error, got {other:?}"),
+        }
+
+        // HeightOne promised but the runtime texture is 2 rows tall.
+        let tall = graphics
+            .create_texture(
+                1,
+                2,
+                TextureStorageFormat::Rgba16Unorm,
+                &rgba16_bytes(&[0; 8]),
+            )
+            .expect("create");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![(
+                String::from("t"),
+                graphics.texture_uniform_value(&tall).expect("value"),
+            )],
+        };
+        match shader.render(&mut target, &uniforms) {
+            Err(GfxError::Render(message)) => {
+                assert!(message.contains("HeightOne"), "{message}");
+            }
+            other => panic!("expected height-one render error, got {other:?}"),
+        }
+
+        // A dropped texture no longer resolves (registry unregistered).
+        let stale = graphics.texture_uniform_value(&texture).expect("value");
+        drop(texture);
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![(String::from("t"), stale)],
+        };
+        match shader.render(&mut target, &uniforms) {
+            Err(GfxError::Render(message)) => {
+                assert!(message.contains("live texture"), "{message}");
+            }
+            other => panic!("expected stale-texture render error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn texture_spec_mismatches_fail_compilation() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        // Declared sampler without a spec.
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        match graphics.compile_shader(
+            "uniform sampler2D mystery;\n\
+             vec4 render(vec2 pos) { return vec4(0.0); }\n",
+            &options,
+        ) {
+            Err(GfxError::Compile(message)) => {
+                assert!(message.contains("mystery"), "{message}");
+            }
+            Err(other) => panic!("expected missing-spec compile error, got {other:?}"),
+            Ok(_) => panic!("missing spec must fail compilation"),
+        }
+
+        // Spec naming a sampler the shader does not declare.
+        let mut options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        options.textures.insert(
+            String::from("ghost"),
+            lp_shader::texture_binding::texture2d(
+                TextureStorageFormat::Rgba16Unorm,
+                lps_shared::TextureFilter::Nearest,
+                lps_shared::TextureWrap::ClampToEdge,
+                lps_shared::TextureWrap::ClampToEdge,
+            ),
+        );
+        match graphics.compile_shader("vec4 render(vec2 pos) { return vec4(0.0); }", &options) {
+            Err(GfxError::Compile(message)) => {
+                assert!(message.contains("ghost"), "{message}");
+            }
+            Err(other) => panic!("expected extra-spec compile error, got {other:?}"),
+            Ok(_) => panic!("extra spec must fail compilation"),
         }
     }
 

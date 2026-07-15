@@ -122,6 +122,18 @@ where
         }
     }
 
+    /// Ask the server for its hello (protocol version + build provenance +
+    /// device uid). The same payload also arrives unsolicited (id 0) when
+    /// the server loop starts serving — see [`ClientEvent::Hello`].
+    pub async fn hello(&mut self) -> ClientResult<ClientOutcome<lpc_wire::ServerHello>> {
+        let response = self.send_request(ClientRequest::Hello).await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::Hello(hello) => Ok(ClientOutcome::new(hello, events)),
+            other => Err(ClientError::unexpected_response("hello", other)),
+        }
+    }
+
     pub async fn fs_read(&mut self, path: &LpPath) -> ClientResult<ClientOutcome<Vec<u8>>> {
         let response = self
             .send_request(ClientRequest::Filesystem(FsRequest::Read {

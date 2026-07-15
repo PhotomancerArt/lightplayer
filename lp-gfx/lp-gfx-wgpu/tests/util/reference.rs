@@ -45,14 +45,12 @@ impl ReferenceRenderer {
         let start = Instant::now();
         let compiled = self
             .engine
-            .compile_px_desc(
-                CompilePxDesc::new(
-                    &source,
-                    TextureStorageFormat::Rgba16Unorm,
-                    lpir::CompilerConfig::default(),
-                )
-                .with_frontend(ShaderFrontend::Naga),
-            )
+            .compile_px_desc(CompilePxDesc::new(
+                &source,
+                TextureStorageFormat::Rgba16Unorm,
+                lpir::CompilerConfig::default(),
+                ShaderFrontend::Naga,
+            ))
             .map_err(|e| format!("{}: reference compile: {e:?}", shader.name))?;
         Ok(ReferenceShader {
             shader: compiled,

@@ -56,11 +56,61 @@ fn needs_device() -> Element {
     dialog(DeployState::NeedsDevice)
 }
 
+/// `NeedsDevice` with the catalog-derived hardware connect actions (the
+/// shape `deploy_connect_actions` emits: connect + recovery open). Props
+/// only — stories never touch `navigator.serial`.
+#[story]
+fn needs_device_with_connect_actions() -> Element {
+    use lpa_studio_core::{
+        ActionPriority, ControllerId, DeviceController, DeviceOp, LinkProviderKind, UiAction,
+    };
+    let device_node = ControllerId::new(DeviceController::NODE_ID);
+    let deploy = UiDeployView {
+        state: DeployState::NeedsDevice,
+        choices: choices(),
+        connect_actions: vec![
+            UiAction::from_op(
+                device_node.clone(),
+                DeviceOp::OpenProvider {
+                    provider_id: LinkProviderKind::Fake,
+                },
+            )
+            .with_label("Connect ESP32")
+            .with_summary("Connect an ESP32 over USB.")
+            .with_icon("usb")
+            .with_priority(ActionPriority::Primary),
+            UiAction::from_op(
+                device_node,
+                DeviceOp::OpenProviderForRecovery {
+                    provider_id: LinkProviderKind::Fake,
+                },
+            )
+            .with_label("Open for flashing")
+            .with_summary("Open the ESP32 connection without attaching LightPlayer.")
+            .with_icon("usb")
+            .with_priority(ActionPriority::Secondary),
+        ],
+    };
+    rsx! {
+        section { class: "tw:relative tw:min-h-[420px] tw:p-4",
+            DeployDialog { deploy, on_action: |_| {} }
+        }
+    }
+}
+
 #[story]
 fn blank_device() -> Element {
     dialog(DeployState::Blank {
         flashed_once: false,
     })
+}
+
+/// The Blank state's second rendering: an Incompatible/Unresponsive device
+/// after one reflash still isn't answering — the dialog keeps flashing as
+/// the way forward with the "still no answer" copy.
+#[story]
+fn blank_after_reflash() -> Element {
+    dialog(DeployState::Blank { flashed_once: true })
 }
 
 #[story]

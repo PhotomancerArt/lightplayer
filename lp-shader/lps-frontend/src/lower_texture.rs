@@ -611,6 +611,13 @@ fn integer_literal_from_expression(
                 _ => None,
             }
         }
+        // Conversion constructors like `int(0)` / `uint(0u)`; value-preserving
+        // for integer literals.
+        Expression::As {
+            expr: inner,
+            kind: ScalarKind::Sint | ScalarKind::Uint,
+            convert: _,
+        } => integer_literal_from_expression(module, func, *inner),
         _ => None,
     }
 }
@@ -882,6 +889,82 @@ vec4 render(vec2 pos) {
             s.contains("call @texture::texture1d_rgba16_unorm"),
             "expected @texture::texture1d_rgba16_unorm in:\n{s}"
         );
+    }
+
+    /// `ivec2(pos)` lowers to naga `As` over a vec2 — the coordinate check must
+    /// accept any ivec2-*typed* expression, not just `Compose`/literal shapes.
+    #[test]
+    fn texel_fetch_accepts_conversion_constructor_coordinate() {
+        let glsl = r#"
+uniform sampler2D tex;
+vec4 render(vec2 pos) {
+    return texelFetch(tex, ivec2(pos), 0);
+}
+"#;
+        let naga = compile(glsl).expect("compile");
+        let mut specs = VecMap::new();
+        specs.insert(String::from("tex"), rgba16_general2d_spec());
+        let opts = LowerOptions {
+            texture_specs: specs,
+            ..Default::default()
+        };
+        let (ir, _) = lower_with_options(&naga, &opts).expect("lower");
+        validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn texel_fetch_accepts_conversion_constructor_lod() {
+        let glsl = r#"
+uniform sampler2D tex;
+vec4 render(vec2 pos) {
+    return texelFetch(tex, ivec2(pos), int(0));
+}
+"#;
+        let naga = compile(glsl).expect("compile");
+        let mut specs = VecMap::new();
+        specs.insert(String::from("tex"), rgba16_general2d_spec());
+        let opts = LowerOptions {
+            texture_specs: specs,
+            ..Default::default()
+        };
+        let (ir, _) = lower_with_options(&naga, &opts).expect("lower");
+        validate_module(&ir).expect("validate");
+    }
+
+    #[test]
+    fn texture_accepts_conversion_constructor_coordinate() {
+        let glsl = r#"
+uniform sampler2D tex;
+vec4 render(vec2 pos) {
+    return texture(tex, vec2(ivec2(pos)));
+}
+"#;
+        let naga = compile(glsl).expect("compile");
+        let mut specs = VecMap::new();
+        specs.insert(String::from("tex"), rgba16_general2d_spec());
+        let opts = LowerOptions {
+            texture_specs: specs,
+            ..Default::default()
+        };
+        let (ir, _) = lower_with_options(&naga, &opts).expect("lower");
+        validate_module(&ir).expect("validate");
+    }
+
+    /// Float coordinates never reach the lowering: glsl-in overload resolution
+    /// rejects `texelFetch(sampler2D, vec2, int)` at parse time.
+    #[test]
+    fn texel_fetch_still_rejects_float_coordinate() {
+        let glsl = r#"
+uniform sampler2D tex;
+vec4 render(vec2 pos) {
+    return texelFetch(tex, pos, 0);
+}
+"#;
+        let Err(err) = compile(glsl) else {
+            panic!("float coordinate must not parse");
+        };
+        let msg = format!("{err:?}");
+        assert!(msg.contains("texelFetch"), "{msg}");
     }
 
     #[test]

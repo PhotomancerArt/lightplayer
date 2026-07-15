@@ -25,6 +25,20 @@ pub struct HostRuntime {
 
 impl HostRuntime {
     pub fn start_memory() -> Result<Self, HostRuntimeError> {
+        Self::start_with_server(create_memory_server)
+    }
+
+    /// Start a server loop over an in-process transport pair, with a
+    /// caller-supplied server factory.
+    ///
+    /// The factory runs *on the server thread* because `LpServer` holds
+    /// non-`Send` state (`Rc` services). This is the reusable
+    /// server-over-memory machinery: `start_memory()` uses it with the
+    /// default host server, and `lpa-link`'s `FakeEsp32Device` uses it with
+    /// a seeded filesystem and a scripted wire hello.
+    pub fn start_with_server(
+        make_server: impl FnOnce() -> LpServer + Send + 'static,
+    ) -> Result<Self, HostRuntimeError> {
         let (client_transport, server_transport) = create_local_transport_pair();
         let client_transport: Arc<Mutex<Box<dyn ClientTransport>>> =
             Arc::new(Mutex::new(Box::new(client_transport)));
@@ -43,7 +57,7 @@ impl HostRuntime {
                     }
                 };
 
-                let server = create_memory_server();
+                let server = make_server();
                 runtime.block_on(async {
                     let local_set = tokio::task::LocalSet::new();
                     let _ = local_set
@@ -116,24 +130,58 @@ impl Drop for HostRuntime {
 }
 
 fn create_memory_server() -> LpServer {
+    // Wire hello payload (sans-IO: injected here, never read ambiently by
+    // the server). Host runtimes carry no git provenance or stamped
+    // identity; fake devices script a uid (see `create_memory_server_with`).
+    create_memory_server_with(
+        LpFsMemory::new(),
+        lpc_wire::ServerHello {
+            proto: lpc_wire::WIRE_PROTO_VERSION,
+            fw: lpc_wire::FwProvenance {
+                package: "fw-host".to_string(),
+                commit: "unknown".to_string(),
+                dirty: false,
+                profile: if cfg!(debug_assertions) {
+                    "debug".to_string()
+                } else {
+                    "release".to_string()
+                },
+            },
+            device_uid: None,
+        },
+    )
+}
+
+/// Build the standard in-memory host server over a caller-supplied
+/// filesystem and wire hello.
+///
+/// This is the single construction point for "a real `LpServer` over
+/// `LpFsMemory` with virtual ESP32-C6 hardware": `HostRuntime::start_memory`
+/// uses it with empty defaults; `lpa-link`'s fake device seeds `fs` with
+/// scripted project files and scripts the hello's device uid.
+pub fn create_memory_server_with(fs: LpFsMemory, hello: lpc_wire::ServerHello) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
     let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
         HwRegistry::new(default_esp32c6_hardware_manifest()),
     )));
     let button_service: Rc<dyn ButtonService> = hardware.clone();
     let radio_service: Rc<dyn RadioService> = hardware;
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    // Host-process fake device: match the device's GLSL frontend.
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
 
-    LpServer::new_with_hardware_services(
+    let mut server = LpServer::new_with_hardware_services(
         output_provider,
-        Box::new(LpFsMemory::new()),
+        Box::new(fs),
         "/projects/".as_path(),
         None,
         None,
         Some(button_service),
         Some(radio_service),
         graphics,
-    )
+    );
+    server.set_hello(hello);
+    server
 }
 
 #[cfg(test)]
@@ -150,6 +198,35 @@ mod tests {
         let projects = client.project_list_available().await.unwrap();
 
         assert!(projects.is_empty());
+        runtime.close().await.unwrap();
+    }
+
+    /// Regression: a failed project load used to log server-side and never
+    /// send a response frame, leaving the client awaiting forever.
+    #[tokio::test]
+    async fn failed_project_load_returns_error_instead_of_hanging() {
+        let mut runtime = HostRuntime::start_memory().unwrap();
+        let client = TokioLpClient::new_shared(runtime.client_transport());
+
+        // Manifest missing `format: 1` fails to load server-side.
+        client
+            .fs_write(
+                "/projects/bad/project.json".as_path(),
+                br#"{ "kind": "Project", "nodes": {} }"#.to_vec(),
+            )
+            .await
+            .unwrap();
+
+        let result =
+            tokio::time::timeout(Duration::from_secs(5), client.project_load("/projects/bad"))
+                .await
+                .expect("load request must be answered, not hang");
+        assert!(result.is_err(), "invalid project load reports an error");
+
+        // The connection stays usable after the failed request.
+        let projects = client.project_list_loaded().await.unwrap();
+        assert!(projects.is_empty());
+
         runtime.close().await.unwrap();
     }
 

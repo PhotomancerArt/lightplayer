@@ -13,6 +13,8 @@ pub enum Backend {
     Rv32fa,
     /// WebAssembly via wasmtime.
     Wasm,
+    /// Host-side LPIR interpreter (`lpir::interpret`), f32 semantics; no codegen.
+    Interp,
 }
 
 /// GLSL frontend used before LPIR backend compilation.
@@ -31,6 +33,8 @@ pub enum Isa {
     Riscv32,
     /// WebAssembly 32-bit.
     Wasm32,
+    /// Host CPU (no guest ISA; LPIR is interpreted directly).
+    Host,
 }
 
 /// Execution mode.
@@ -38,6 +42,8 @@ pub enum Isa {
 pub enum ExecMode {
     /// Emulator (e.g. RISC-V emulator) or wasmtime.
     Emulator,
+    /// Direct LPIR interpretation on the host (no compiled artifact).
+    Interpreter,
 }
 
 /// Floating-point mode (Q32 fixed-point or F32 native).
@@ -65,7 +71,7 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, rv32c, rv32n, rv32lpn — used for error messages and CLI.
+/// Order: wasm, rv32c, rv32n, rv32lpn, interp — used for error messages and CLI.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         frontend: Frontend::Naga,
@@ -95,11 +101,24 @@ pub const ALL_TARGETS: &[Target] = &[
         isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,
     },
+    Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Interp,
+        float_mode: FloatMode::F32,
+        isa: Isa::Host,
+        exec_mode: ExecMode::Interpreter,
+    },
 ];
 
 /// Default targets for local `cargo test` / app runs: rv32n, rv32lpn (lps-glsl
 /// frontend — the primary on-device pipeline), rv32c (Cranelift), wasm (Q32).
-/// CI should run the full [`ALL_TARGETS`] list (see plan README / phase 05).
+///
+/// `interp.f32` (the CI-runnable f32 gate — host LPIR interpretation) is
+/// deliberately NOT in the default set yet: the corpus still carries the
+/// un-triaged f32 divergence tail (per-mode splits and `@unsupported`
+/// annotations land in the corpus-expectations PR, which flips interp.f32
+/// into this list as its final step once the whole corpus is green on it).
+/// Run it explicitly with `--target interp.f32` or the `sweep` subcommand.
 pub const DEFAULT_TARGETS: &[Target] = &[
     ALL_TARGETS[2],
     ALL_TARGETS[3],
@@ -213,6 +232,8 @@ mod tests {
 
     #[test]
     fn test_default_targets_order_matches_const() {
+        // interp.f32 joins this list when the corpus-expectations PR makes
+        // the whole corpus green on it; until then it is explicit-only.
         assert_eq!(DEFAULT_TARGETS.len(), 4);
         assert_eq!(DEFAULT_TARGETS[0].name(), "rv32n.q32");
         assert_eq!(DEFAULT_TARGETS[1].name(), "rv32lpn.q32");

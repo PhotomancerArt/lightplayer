@@ -23,6 +23,11 @@ pub struct RegisteredDevice {
     /// `dev_…` uid (string form; stamped on the device per M5's flow).
     pub uid: String,
     pub name: String,
+    /// Transport label recorded at last sight, from the live session's
+    /// connector class ("USB" for serial). Empty when the registry entry
+    /// predates transport recording; the next sighting fills it.
+    #[serde(default)]
+    pub transport: String,
     /// f64 epoch seconds, caller-supplied.
     pub last_seen_at: f64,
     /// What was last pushed to it, if anything.
@@ -90,6 +95,7 @@ mod tests {
         assert!(registry.list().unwrap().is_empty());
 
         let device = RegisteredDevice {
+            transport: "USB".to_string(),
             uid: "dev_0000000000000001".to_string(),
             name: "Luna's porch sign".to_string(),
             last_seen_at: 1.0,

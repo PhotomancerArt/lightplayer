@@ -1,6 +1,15 @@
 //! Headless LightPlayer Studio application core.
 
-pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
+/// The browser-serial connector's catalog-level granted-ports probe, for
+/// the web shell's "has a device ever been granted here?" gate (the probe
+/// FFI lives in lpa-link; stories stay prop-injected).
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
+pub use lpa_link::{
+    DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceSession,
+    DeviceSnapshot as LinkDeviceSnapshot, DeviceState, DeviceTimers, LinkEndpointId,
+    LinkEndpointStatus, LinkProviderKind,
+};
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, LpValue,
@@ -14,19 +23,17 @@ pub mod core;
 pub use self::core::status::UiStatusKind;
 pub use lpc_history::{ContentHash, SyncRelation};
 
+pub use self::core::issue::UiIssue;
+pub use self::core::view::progress_state::ProgressState;
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
-    DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget, DeviceController, DeviceOp,
-    DeviceSnapshot, UiDeployChoice, UiDeployView,
+    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget,
+    DeviceController, DeviceHandle, DeviceOp, DeviceOpenOutcome, DeviceSnapshot, EndpointChoice,
+    ProviderChoice, RuntimeAttachment, SimAttachment, UiDeployChoice, UiDeployView,
 };
 pub use app::home::{
     HOME_NODE_ID, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceCardState, UiExampleCard,
     UiHomeView, UiPackageCard, ZipBytes,
-};
-pub use app::link::{
-    ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkController, LinkManagementOutcome,
-    LinkOp, LinkOpenOutcome, LinkSnapshot, LinkState, ProgressState, ProviderChoice,
-    SharedLinkRegistry, UiIssue,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,

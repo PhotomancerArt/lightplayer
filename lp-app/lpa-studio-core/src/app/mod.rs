@@ -2,7 +2,6 @@ pub mod bus;
 pub mod device;
 pub mod home;
 pub mod library;
-pub mod link;
 pub mod node;
 pub mod places;
 pub mod project;

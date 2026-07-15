@@ -5,7 +5,7 @@ use crate::{LinkCapabilities, LinkEndpoint, LinkError, LinkManagementRequest, Li
 
 #[tokio::test]
 async fn discover_returns_all_fake_endpoints() {
-    let mut provider = fake_provider();
+    let provider = fake_provider();
 
     let endpoints = provider.discover().await.unwrap();
 
@@ -16,7 +16,7 @@ async fn discover_returns_all_fake_endpoints() {
 
 #[tokio::test]
 async fn sessions_are_scoped_to_endpoint_and_have_stable_ids() {
-    let mut provider = fake_provider();
+    let provider = fake_provider();
     let endpoint_a = LinkEndpointId::new("fake-a");
     let endpoint_b = LinkEndpointId::new("fake-b");
 
@@ -34,7 +34,7 @@ async fn sessions_are_scoped_to_endpoint_and_have_stable_ids() {
 
 #[tokio::test]
 async fn logs_and_diagnostics_are_scoped_to_session() {
-    let mut provider = fake_provider();
+    let provider = fake_provider();
     let session = provider
         .connect(&LinkEndpointId::new("fake-a"))
         .await
@@ -54,7 +54,7 @@ async fn logs_and_diagnostics_are_scoped_to_session() {
 
 #[tokio::test]
 async fn unsupported_management_request_returns_link_error() {
-    let mut provider = fake_provider();
+    let provider = fake_provider();
     let session = provider
         .connect(&LinkEndpointId::new("fake-a"))
         .await

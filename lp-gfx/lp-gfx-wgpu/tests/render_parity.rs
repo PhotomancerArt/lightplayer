@@ -52,10 +52,8 @@ fn corpus_parity_holds_or_beats_m3() {
     let reference = ReferenceRenderer::new().expect("reference renderer");
     let out_dir: PathBuf =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/lp-gfx-wgpu-parity");
-    let options = ShaderCompileOptions {
-        semantics: ShaderSemantics::F32Gpu,
-        ..Default::default()
-    };
+    let options =
+        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
 
     println!("| shader | t (s) | mean |D| (8-bit) | max |D| (8-bit) | px > 8/255 | bound (mean) |");
     println!("|---|---|---|---|---|---|");

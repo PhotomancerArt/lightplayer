@@ -28,6 +28,10 @@ use lps_shared::TextureStorageFormat;
 pub(crate) struct GpuTexture {
     pub(crate) texture: wgpu::Texture,
     pub(crate) view: wgpu::TextureView,
+    /// Registry id minted by [`crate::texture_registry::TextureRegistry`]
+    /// (`0` until registered); carried in the `ptr` lane of the texture's
+    /// uniform descriptor so shaders can resolve the view at render time.
+    pub(crate) id: u32,
 }
 
 impl GpuTexture {
@@ -57,7 +61,11 @@ impl GpuTexture {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self { texture, view }
+        Self {
+            texture,
+            view,
+            id: 0,
+        }
     }
 
     /// Upload logical-format texel bytes (little-endian unorm16 channels)

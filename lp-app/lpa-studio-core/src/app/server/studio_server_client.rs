@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use lpa_client::{
     CancelSignal, ClientError, ClientEvent, ClientIo, LpClient, ProgressDeadline, PullOutcome,
 };
-use lpa_link::{LinkConnection, LinkConnectionKind};
+use lpa_link::{LinkConnection, LinkConnectionKind, LinkConnector};
 use lpc_model::{
     ArtifactLocation, CommitResult, MutationCmdBatch, MutationCmdBatchResult, NodeId,
     ProjectOverlay, Revision, SlotPath,
@@ -22,8 +22,8 @@ use crate::app::project::demo_project::{
     DEMO_PROJECT_ID, DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files,
 };
 use crate::{
-    LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UiError, UiLogDraft,
-    UiLogLevel, UiLogOrigin, UxUpdateSink,
+    LoadedProjectChoice, ProjectInventorySummary, UiError, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UxUpdateSink,
 };
 
 pub struct StudioServerClient {
@@ -42,24 +42,32 @@ impl StudioServerClient {
         }
     }
 
-    pub fn from_link_connection(
-        registry: SharedLinkRegistry,
+    /// A client over the simulator's worker io (BrowserWorker only —
+    /// hardware attaches through [`Self::from_device_session`]).
+    pub fn from_sim_connection(
+        connector: Rc<LinkConnector>,
         connection: &LinkConnection,
         updates: UxUpdateSink,
     ) -> Result<Self, UiError> {
         let pending_logs = Rc::new(RefCell::new(Vec::new()));
         let protocol = connection_protocol(&connection.kind);
-        let io = server_io_from_link_connection(
-            registry,
-            connection,
-            Rc::clone(&pending_logs),
-            updates,
-        )?;
+        let io = sim_server_io(connector, connection, Rc::clone(&pending_logs), updates)?;
         Ok(Self {
             client: LpClient::new(io),
             protocol,
             pending_logs,
         })
+    }
+
+    /// A client over a hardware [`lpa_link::DeviceSession`]'s
+    /// readiness-gated app-protocol channel. Device console lines flow
+    /// through the session's event sink, not this client's pending logs.
+    pub fn from_device_session(session: &lpa_link::DeviceSession) -> Self {
+        Self {
+            client: LpClient::new(session.client_io()),
+            protocol: connection_protocol(&session.connection().kind),
+            pending_logs: Rc::new(RefCell::new(Vec::new())),
+        }
     }
 
     pub fn protocol(&self) -> &str {
@@ -212,25 +220,17 @@ impl StudioServerClient {
         Ok(logs)
     }
 
-    /// Canonical package hash of a project directory (push/pull verify).
-    /// Write one file into a project storage without touching the rest
-    /// (identity stamping: `/.lp/device.json` must survive pushes and be
-    /// writable without one).
-    pub async fn write_project_file(
+    /// Write one file through the server filesystem (`FsRequest::Write`),
+    /// addressed from the fs ROOT — device-scoped files that live outside
+    /// every project storage dir (identity stamping: `/.lp/device.json`).
+    pub async fn fs_write(
         &mut self,
-        project_id: &str,
-        relative_path: &str,
+        path: &lpc_model::LpPath,
         bytes: &[u8],
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let outcome = self
             .client
-            .push_project_files(
-                project_id,
-                [lpa_client::project_deploy::ProjectDeployFile::new(
-                    relative_path,
-                    bytes,
-                )],
-            )
+            .fs_write(path, bytes.to_vec())
             .await
             .map_err(map_client_error)?;
         let mut logs = map_client_events(outcome.events);
@@ -238,6 +238,7 @@ impl StudioServerClient {
         Ok(logs)
     }
 
+    /// Canonical package hash of a project directory (push/pull verify).
     pub async fn hash_package(
         &mut self,
         project_id: &str,
@@ -560,8 +561,12 @@ fn node_def_artifacts(
         .collect()
 }
 
-fn server_io_from_link_connection(
-    _registry: SharedLinkRegistry,
+/// The simulator's server io. Hardware and fake-device links no longer pass
+/// through here — their io IS the device session's channel (M4/P5); the old
+/// per-kind match (browser serial io, test-edge fake io, host holes) is
+/// gone with them.
+fn sim_server_io(
+    _connector: Rc<LinkConnector>,
     connection: &LinkConnection,
     _pending_logs: Rc<RefCell<Vec<UiLogDraft>>>,
     _updates: UxUpdateSink,
@@ -570,7 +575,7 @@ fn server_io_from_link_connection(
         #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
         LinkConnectionKind::BrowserWorker { .. } => Ok(Box::new(
             super::browser_worker_client_io::BrowserWorkerClientIo::new(
-                _registry,
+                _connector,
                 connection.session_id.clone(),
                 _pending_logs,
             ),
@@ -579,28 +584,9 @@ fn server_io_from_link_connection(
         LinkConnectionKind::BrowserWorker { .. } => Err(UiError::UnsupportedFeature(
             "browser worker server I/O requires the browser-worker feature on wasm".to_string(),
         )),
-        #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-        LinkConnectionKind::BrowserSerialEsp32 { .. } => Ok(Box::new(
-            super::browser_serial_client_io::BrowserSerialClientIo::new(
-                _registry,
-                connection.session_id.clone(),
-                _pending_logs,
-                _updates,
-            ),
-        )),
-        #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
-        LinkConnectionKind::BrowserSerialEsp32 { .. } => Err(UiError::UnsupportedFeature(
-            "browser serial ESP32 server I/O requires the browser-serial-esp32 feature on wasm"
-                .to_string(),
-        )),
-        LinkConnectionKind::Fake => Err(UiError::UnsupportedFeature(
-            "fake links do not expose a server protocol".to_string(),
-        )),
-        LinkConnectionKind::HostProcess
-        | LinkConnectionKind::HostSerialEsp32
-        | LinkConnectionKind::PendingImplementation { .. } => Err(UiError::UnsupportedFeature(
-            format!("server I/O is not implemented for {:?}", connection.kind),
-        )),
+        kind => Err(UiError::UnsupportedFeature(format!(
+            "sim server I/O over a {kind:?} link; hardware attaches through its device session"
+        ))),
     }
 }
 
@@ -611,7 +597,6 @@ fn connection_protocol(kind: &LinkConnectionKind) -> String {
         LinkConnectionKind::HostProcess => "host-process".to_string(),
         LinkConnectionKind::HostSerialEsp32 => "host-serial-esp32".to_string(),
         LinkConnectionKind::Fake => "fake".to_string(),
-        LinkConnectionKind::PendingImplementation { kind } => kind.clone(),
     }
 }
 
@@ -634,6 +619,18 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
     events
         .into_iter()
         .filter_map(|event| match event {
+            // Wire bootstrap hello: informational here — the mismatch
+            // POLICY lives in lpa-link's DeviceSession (Incompatible state,
+            // reflash affordance); this log line just makes the hello
+            // visible in the console.
+            ClientEvent::Hello(hello) => Some(UiLogDraft::new(
+                UiLogLevel::Debug,
+                UiLogOrigin::Server,
+                format!(
+                    "server hello: proto={} package={} commit={} dirty={}",
+                    hello.proto, hello.fw.package, hello.fw.commit, hello.fw.dirty
+                ),
+            )),
             ClientEvent::Heartbeat { recovery, .. } => match recovery {
                 Some(recovery)
                     if recovery.safe_mode
@@ -685,7 +682,7 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
 fn map_client_error(error: ClientError) -> UiError {
     match error {
         ClientError::Transport(message)
-            if super::browser_serial_readiness::is_no_firmware_detected_message(&message) =>
+            if lpa_link::device_session::is_no_firmware_detected_message(&message) =>
         {
             UiError::NoFirmwareDetected(message)
         }
@@ -724,8 +721,8 @@ fn wire_log_level(level: UiLogLevel) -> lpc_wire::server::api::LogLevel {
 mod tests {
     use lpc_wire::server::{CrashSummaryWire, RecoveryLevelWire, RecoveryStatus, SampleStats};
 
-    use super::super::browser_serial_readiness::NO_FIRMWARE_DETECTED_PREFIX;
     use super::*;
+    use lpa_link::device_session::NO_FIRMWARE_DETECTED_PREFIX;
 
     #[test]
     fn no_firmware_transport_error_maps_to_no_firmware_ux_error() {

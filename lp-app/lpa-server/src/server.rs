@@ -47,6 +47,12 @@ pub struct LpServer {
     radio_service: Option<Rc<dyn RadioService>>,
     /// Shader backend (Cranelift, WASM, …).
     graphics: Arc<dyn LpGraphics>,
+    /// Identity/version payload answered to `ClientRequest::Hello` and sent
+    /// unsolicited by embedder loops. Injected by the embedder via
+    /// [`LpServer::set_hello`] (sans-IO: the server never reads git/fs/env
+    /// state itself); defaults to an `"unknown"` provenance with the
+    /// compiled-in [`lpc_wire::WIRE_PROTO_VERSION`].
+    hello: lpc_wire::ServerHello,
 }
 
 impl LpServer {
@@ -71,7 +77,9 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsStd::new("/path/to/server/root".into()));
-    /// let graphics = Arc::new(lp_gfx_lpvm::LpvmGraphics::new());
+    /// let graphics = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+    ///     lpa_server::DEVICE_SHADER_FRONTEND,
+    /// ));
     /// let server = LpServer::new(
     ///     output_provider,
     ///     base_fs,
@@ -142,7 +150,31 @@ impl LpServer {
             button_service,
             radio_service,
             graphics,
+            hello: lpc_wire::ServerHello {
+                proto: lpc_wire::WIRE_PROTO_VERSION,
+                fw: lpc_wire::FwProvenance {
+                    package: "unknown".to_string(),
+                    commit: "unknown".to_string(),
+                    dirty: false,
+                    profile: "unknown".to_string(),
+                },
+                device_uid: None,
+            },
         }
+    }
+
+    /// Inject the hello payload this server reports (embedder-supplied
+    /// provenance/uid; the `proto` field should stay
+    /// [`lpc_wire::WIRE_PROTO_VERSION`]). Call once at construction time,
+    /// before the server loop starts serving.
+    pub fn set_hello(&mut self, hello: lpc_wire::ServerHello) {
+        self.hello = hello;
+    }
+
+    /// The hello payload answered to `ClientRequest::Hello` and emitted
+    /// unsolicited (id 0) by embedder loops.
+    pub fn hello(&self) -> &lpc_wire::ServerHello {
+        &self.hello
     }
 
     /// Advance loaded projects by one frame without processing client messages.
@@ -347,7 +379,12 @@ impl LpServer {
                             response_count += 1;
                         }
                         msg => {
-                            let response = handlers::handle_client_message(
+                            // Every request id gets exactly one response even
+                            // when the handler fails — a propagated error here
+                            // would drop the frame and leave the client
+                            // awaiting forever. Only transport-send failures
+                            // abort the tick.
+                            let response = match handlers::handle_client_message(
                                 &mut self.project_manager,
                                 &mut *self.base_fs,
                                 &self.output_provider,
@@ -356,8 +393,22 @@ impl LpServer {
                                 self.button_service.clone(),
                                 self.radio_service.clone(),
                                 self.graphics.clone(),
+                                &self.hello,
                                 lpc_wire::ClientMessage { id: msg_id, msg },
-                            )?;
+                            ) {
+                                Ok(response) => response,
+                                Err(error) => {
+                                    log::warn!(
+                                        "tick_and_send: request id={msg_id} failed: {error}"
+                                    );
+                                    WireServerMessage::new(
+                                        msg_id,
+                                        lpc_wire::server::ServerMsgBody::Error {
+                                            error: format!("{error}"),
+                                        },
+                                    )
+                                }
+                            };
                             transport
                                 .send(response)
                                 .await

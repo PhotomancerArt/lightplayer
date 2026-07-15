@@ -14,6 +14,7 @@ const required = [
   "MANIFEST_PROFILE",
   "MANIFEST_SOURCE_COMMIT",
   "MANIFEST_SOURCE_DIRTY",
+  "MANIFEST_WIRE_PROTO",
   "MANIFEST_GENERATED_AT",
   "MANIFEST_IMAGE_PATH",
   "MANIFEST_IMAGE_SIZE",
@@ -41,6 +42,10 @@ const manifest = {
     features: ["esp32c6", "server"],
     sourceCommit: env.MANIFEST_SOURCE_COMMIT,
     sourceDirty: env.MANIFEST_SOURCE_DIRTY === "true",
+    // Wire protocol version compiled into this image (lpc-wire
+    // WIRE_PROTO_VERSION): lets consumers compare "manifest we'd flash"
+    // against a device's hello without parsing ELFs.
+    wireProto: Number(env.MANIFEST_WIRE_PROTO),
     generatedAt: env.MANIFEST_GENERATED_AT,
   },
   flash: {
@@ -64,6 +69,10 @@ const manifest = {
 
 if (!Number.isSafeInteger(manifest.images[0].sizeBytes)) {
   throw new Error(`invalid image size: ${env.MANIFEST_IMAGE_SIZE}`);
+}
+
+if (!Number.isSafeInteger(manifest.build.wireProto) || manifest.build.wireProto < 1) {
+  throw new Error(`invalid wire protocol version: ${env.MANIFEST_WIRE_PROTO}`);
 }
 
 fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);

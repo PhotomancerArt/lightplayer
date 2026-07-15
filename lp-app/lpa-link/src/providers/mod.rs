@@ -1,9 +1,10 @@
 //! Concrete link provider implementations.
 //!
 //! Each submodule owns one runtime/device integration and its provider-specific
-//! resources. Public callers usually enter through `crate::registry` to obtain
-//! the enabled provider set; these modules are useful when an application or
-//! test wants to construct a specific provider manually.
+//! resources. Public callers usually enter through `crate::registry` to
+//! enumerate the enabled kinds and create owned connectors; these modules are
+//! useful when an application or test wants to construct a specific provider
+//! manually.
 //!
 //! Provider keys use kebab-case and generally follow
 //! `{environment}-{mechanism}-{target?}`:
@@ -24,14 +25,15 @@ pub mod browser_serial_esp32;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub mod browser_worker;
 pub mod fake;
+#[cfg(feature = "fake-device")]
+pub mod fake_device;
 #[cfg(feature = "host-process")]
 pub mod host_process;
 #[cfg(feature = "host-serial-esp32")]
 pub mod host_serial_esp32;
 
-pub use crate::registry::availability::LinkProviderAvailability;
+pub use crate::registry::connector::LinkConnector;
 pub use crate::registry::descriptor::LinkProviderDescriptor;
 pub use crate::registry::env::LinkEnv;
-pub use crate::registry::instance::LinkProviderInstance;
 pub use crate::registry::kind::LinkProviderKind;
 pub use crate::registry::registry::{LinkProviderRegistry, available_provider_descriptors};

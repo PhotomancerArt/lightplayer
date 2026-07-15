@@ -96,34 +96,139 @@ Browser providers own their browser resource bindings:
 - `browser-serial-esp32` owns Web Serial permission/open/release/close and ESP32
   probe/flash bindings.
 
-`lpa-studio-core` adapts provider send/receive streams into
-`lpa-client::ClientIo`; UI shells should not reimplement provider resource
-ownership, request ids, response correlation, server error handling,
-heartbeat/log handling, or project deploy ordering.
+For hardware links, `DeviceSession` (below) owns the adaptation into
+`lpa-client::ClientIo` — apps consume its readiness-gated channel rather
+than adapting provider streams themselves. The one exception is the sim:
+`lpa-studio-core` adapts the browser-worker connection directly, because a
+sim has no boot, readiness, or management plane. UI shells should never
+reimplement provider resource ownership, request ids, response
+correlation, server error handling, heartbeat/log handling, or project
+deploy ordering.
+
+## DeviceSession
+
+`DeviceSession` (module `device_session`, feature `device-session`) owns one
+HARDWARE link end to end: it takes an owned `Rc<LinkConnector>`, performs
+the connect/protocol-open/connection flow itself, and exposes an observable
+state machine plus a readiness-gated `lpa_client::ClientIo` channel. Sim
+runtimes (browser worker) bypass it — they have no boot, no hello race, and
+no management plane.
+
+Two wire shapes sit under the channel: host providers hand over a
+`LinkServerConnection` transport (feature `device-session-host`, implied by
+every host provider feature), while the browser serial connector has no
+host transport — the session pumps the provider's observed lines itself
+(`M!` lines ARE the frames there) and writes frames back as `M!{json}`
+lines. Observed non-protocol lines feed the boot classifier and the event
+sink on every wire (`DeviceEvent::LogLine { origin: Device }`; management
+tool output arrives with `origin: Link`).
+
+```text
+connect() ──▶ Booting ──hello(proto ok)──────────────▶ Ready { hello }
+                │
+                ├─boot lines match no-firmware sig──▶ BlankFlash
+                │                                     Bootloader
+                │                                     ForeignFirmware
+                ├─non-hello frame / wrong proto──────▶ Incompatible
+                ├─deadline, server marker seen───────▶ Incompatible (NoHello)
+                ├─deadline, no classification────────▶ Unresponsive
+                └─stream EOF / transport lost────────▶ Gone
+Ready ──transport lost / close()──────────────────────▶ Gone
+```
+
+Key contracts:
+
+- **Hello-first readiness.** The session is `Ready` ONLY when the
+  unsolicited wire `ServerHello` arrives with a matching
+  `WIRE_PROTO_VERSION`. A wrong-proto hello, a non-hello frame before any
+  hello, or a started-but-silent server (boot marker seen, deadline expired)
+  is `Incompatible` — the single affordance is reflashing. The boot-line
+  classifier (`BootLineClassifier`) is DIAGNOSIS-ONLY: it explains the
+  non-ready states and never grants readiness.
+- **Injected timers.** `DeviceTimers` wraps a caller-supplied sleep factory
+  (tokio on host, gloo on wasm) plus per-operation deadlines
+  (connect / ready / request-idle). `lpa-link` has no executor dependency;
+  readiness runs inside the session's own async methods — `wait_ready()` or
+  the channel's first use — with no background task.
+- **Readiness-gated channel.** `client_io()` returns a `ClientIo` that
+  drives readiness on first use and errors cleanly outside
+  `Ready` + `DeviceMode::AppProtocol`. Nothing is ever written to a device
+  that is not ready, and no-firmware gate errors carry the classifiable
+  `NO_FIRMWARE_DETECTED_PREFIX`.
+- **Mode-exclusive wire.** `DeviceMode` (`AppProtocol` / `Management`) gates
+  access by construction: `try_begin_management()` takes the wire (RAII
+  guard releases it) and the app-protocol channel is invalidated while held.
+  Taking the mode is also refused while an app-protocol request is
+  mid-send/receive, so the wire is never torn down under a request.
+- **Management = release → manage → rebuild → re-ready.** `manage(request,
+  sink)` owns the whole flash/erase/reset cycle: it closes the current
+  provider session (the old transport's serial thread ENDS, freeing the
+  port), runs the connector's `manage_with_events` with events folded into
+  `DeviceEvent` (`Log` → `LogLine`, `Progress` → `Progress`), then rebuilds
+  the link — a NEW provider session and transport on the same endpoint —
+  and re-runs readiness from `Booting`. The outcome carries both the
+  connector result and where readiness landed; post-erase that is
+  `BlankFlash`, which IS success for an erase. Observed-line state is
+  cleared across the rebuild so stale boot lines never classify the new
+  link. On failure the session status becomes `LinkSessionStatus::Error`,
+  the state lands on `Gone`, and the mode is released.
+- **Reconnect = rebuild.** Terminal states are sticky under passive
+  observation; `reconnect()` — the same rebuild path — is the one way out
+  (Gone recovery, retry after a failed management operation). Channels
+  handed out earlier read the current transport through the session, so
+  they work again on the new link generation.
+- **Observation.** Pull `snapshot()` (state + link session record + derived
+  `LinkEndpointStatus` + recent boot lines) or subscribe a `DeviceEventSink`
+  (`Rc`-based, `!Send`) for state transitions, device console lines, and
+  management progress. On `Incompatible`/`Unresponsive`/`Gone` the session
+  record's status becomes `LinkSessionStatus::Error`.
 
 ## Providers
 
-Applications can inspect the providers compiled into `lpa-link` without
-duplicating the feature/target matrix:
+`LinkProviderRegistry` is a **catalog + factory**, not a store of live
+providers. Applications can inspect the provider kinds compiled into
+`lpa-link` without duplicating the feature/target matrix, then create an
+OWNED connector per open flow:
 
 ```rust
 let registry =
     lpa_link::providers::LinkProviderRegistry::from_env(lpa_link::providers::LinkEnv::default());
-let providers = registry.descriptors();
+let providers = registry.descriptors(); // catalog, for picker UI
+let connector = registry.create_connector(kind)?; // Rc<LinkConnector>, per open flow
 ```
 
-The returned `LinkProviderDescriptor` values contain provider kinds, build
-availability, labels, and low-level `LinkCapabilities`. `LinkProviderKind`
-owns the stable kebab-case key used at app boundaries. Product surfaces such as
-Studio should map these descriptors into their own UX-facing provider cards,
-intents, ordering, and recovery actions.
+The returned `LinkProviderDescriptor` values contain provider kinds, labels,
+and low-level `LinkCapabilities`. The registry only catalogs kinds compiled
+for the current feature/target matrix, so every descriptor it returns is
+usable in the current build/runtime. `LinkProviderKind` owns the stable
+kebab-case key used at app boundaries. Product surfaces such as Studio should
+map these descriptors into their own UX-facing provider cards, intents,
+ordering, and recovery actions.
+
+### Connector ownership
+
+`LinkConnector` is the enum-dispatched owned handle over one concrete
+provider (used because `LinkProvider` has async methods and is not
+object-safe). The connection OWNER — `DeviceSession` for hardware links,
+the app's sim attach flow for the browser worker — holds
+`Rc<LinkConnector>` and hands clones to client I/O adapters; nothing
+borrows a shared mutable registry on hot paths. All `LinkProvider`
+methods take `&self`: each provider keeps its endpoint/session state behind
+internal `RefCell`s with borrows scoped to synchronous sections, never across
+an `await`. A connector is created per open flow and may discover several
+endpoints, but once connected it serves that one connection.
+
+Tests preconfigure connectors (`FakeProvider::with_endpoint`,
+`with_device_endpoint`, the `with_*_error` knobs) and hand them to the
+registry with `insert(provider)`; `create_connector` then returns that shared
+preconfigured instance for the kind, so scripted state survives re-opens.
 
 | Provider key | Rust module/type | Runtime or device | Endpoint kind | Management intent | Status |
 |---|---|---|---|---|---|
-| `fake` | `providers::fake::FakeProvider` | none | test endpoint | diagnostics only | implemented |
+| `fake` | `providers::fake::FakeProvider` | none (record-level) or scripted `FakeEsp32Device` (feature `fake-device`) | test endpoint | record-level: diagnostics only; device-backed: full set (reset, flash, erase, logs, diagnostics) as scripted transitions | implemented; device-backed sessions return a real host `LinkServerConnection` |
 | `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented; returns host `LinkServerConnection` |
 | `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | implemented; owns Worker wrapper/lifecycle |
-| `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect, reset-after-open, logs, diagnostics; future flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
+| `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect (optional reset-after-open), logs, diagnostics; future reset/flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
 | `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, provision firmware, erase to blank, reset, logs, diagnostics; future raw filesystem | implemented for browser Web Serial/probe/flash/erase ownership |
 | `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
 | `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |
@@ -144,6 +249,61 @@ cargo check -p lpa-link --features host-serial-esp32
 cargo test -p lpa-link --features host-serial-esp32
 cargo check -p lpa-link --features browser-serial-esp32 --target wasm32-unknown-unknown
 cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknown
+cargo test  -p lpa-link --features fake-device
+```
+
+## Testing with the fake device
+
+The `fake-device` feature (host only) adds a byte-level scriptable device,
+`providers::fake_device::FakeEsp32Device`, and upgrades `FakeProvider` to
+expose it through the REAL provider path. The point is byte-level fidelity:
+every hardware bug so far (pull-before-readiness ordering, fresh-device
+misclassification) lived below the record level — in framing, boot-output
+classification, and timing — so the fake injects at the byte stream and lets
+the real `M!` parser, the real hello readiness gate and boot-line
+classifier, and the real orchestration run in tests.
+
+**Boot-state script** (`FakeDeviceScript` / `FakeBootState`): the device is a
+sequence of states; reset-signal dances re-run the current state's boot.
+
+- `BlankFlash` — repeats the ROM's `invalid header: 0xffffffff` line.
+- `RomDownloadMode` — prints `waiting for download` once.
+- `ForeignFirmware` — prints a known replaceable firmware boot string.
+- `LightPlayer { boot_delay, project_files, identity }` — scripted boot log
+  lines, the real M2-shaped `[INIT] fw-esp32 initialized, starting server
+  loop... proto=… commit=… dirty=…` line, then a REAL host `LpServer` over a
+  seeded `LpFsMemory` (reusing `fw-host`'s machinery) speaking real `M!`
+  frames including the unsolicited wire hello (uid from `identity`). Bytes
+  written before the server loop runs are DISCARDED and counted
+  (`premature_input_bytes()`), like real hardware.
+
+**Reset sequences**: the hardware transport's DTR/RTS hard-reset dance
+replays the current state's boot; the usb-jtag-download dance (the only one
+that raises DTR) transitions to `RomDownloadMode`.
+
+**Failure injection** (`FakeFailurePlan`, composable knobs on the stream,
+not the script): per-direction latency, stall-after-N-bytes (no EOF),
+disconnect (EOF), garble/drop a byte, mid-frame cut (truncate a frame then
+stall), and log-flood interleaving between frames.
+
+**Scripted management**: the fake connector's `manage()` implements
+`FlashFirmware` / `EraseDeviceFlash` / `ResetRuntime` as scripted state
+transitions (`fake_flash` → fresh `LightPlayer` with the image identity in
+its provenance; `fake_erase` → `BlankFlash`) with scripted latency and an
+optional one-shot scripted failure, emitting `LinkManagementEvent`
+logs/progress through the standard result replay.
+
+Typical wiring (see `lpa-studio-core`'s `studio_link_e2e_tests`):
+
+```rust
+let provider = FakeProvider::new().with_device_endpoint(
+    "fake-device-0",
+    "Fake ESP32",
+    FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new())),
+);
+let device = provider.device(&LinkEndpointId::new("fake-device-0")).unwrap();
+// registry.insert(provider); connect through the normal provider path;
+// device.set_failure_plan(...) / device.premature_input_bytes() from tests.
 ```
 
 ## Design Notes
@@ -202,8 +362,9 @@ cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknow
   protocol ownership before probe/flash/erase takes exclusive bootloader access.
   Opening the normal serial server protocol opens the port once, starts reading
   immediately, then attempts a best-effort hard reset while boot output is being
-  captured. Reset signal failures are diagnostic; readiness is classified from
-  serial output and protocol frames.
+  captured. Reset signal failures are diagnostic; readiness is the wire hello
+  (owned by `DeviceSession` above), with serial output feeding the
+  diagnosis-only boot classifier.
 - Direct filesystem access means raw/full filesystem image management below the
   running `lp-server`. Normal project upload should use `lpa-client` and the
   server filesystem/project protocol once firmware is running.

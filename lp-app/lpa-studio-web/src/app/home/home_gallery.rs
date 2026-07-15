@@ -24,7 +24,8 @@ pub fn HomeGallery(
     #[props(default)]
     now_secs: Option<f64>,
     /// Whether a serial device was ever granted (drives the Connected
-    /// section collapse). `None` probes `navigator.serial.getPorts()`.
+    /// section collapse). `None` asks the browser-serial connector's
+    /// granted-ports probe (lpa-link owns the `navigator.serial` FFI).
     #[props(default)]
     has_ever_granted: Option<bool>,
     on_action: EventHandler<UiAction>,
@@ -36,7 +37,7 @@ pub fn HomeGallery(
     let probed_grant = use_resource(move || async move {
         match has_ever_granted {
             Some(granted) => granted,
-            None => probe_granted_serial_ports().await > 0,
+            None => probe_granted_serial_ports().await,
         }
     });
     let device_section_expanded =
@@ -244,44 +245,17 @@ fn import_handler(
     }
 }
 
-/// `navigator.serial.getPorts()` count via reflection (no `web_sys::Serial`
-/// feature plumbing): "has a device ever been granted" for the Connected
-/// section collapse.
+/// "Has a serial device ever been granted here?" for the Connected section
+/// collapse — the browser-serial connector's catalog-level probe (the
+/// `navigator.serial.getPorts()` FFI lives in lpa-link, not here).
 #[cfg(target_arch = "wasm32")]
-async fn probe_granted_serial_ports() -> usize {
-    use wasm_bindgen::JsCast;
-
-    let Some(window) = web_sys::window() else {
-        return 0;
-    };
-    let navigator = window.navigator();
-    let Ok(serial) = js_sys::Reflect::get(&navigator, &"serial".into()) else {
-        return 0;
-    };
-    if serial.is_undefined() || serial.is_null() {
-        return 0;
-    }
-    let Ok(get_ports) = js_sys::Reflect::get(&serial, &"getPorts".into()) else {
-        return 0;
-    };
-    let Ok(get_ports) = get_ports.dyn_into::<js_sys::Function>() else {
-        return 0;
-    };
-    let Ok(promise) = get_ports.call0(&serial) else {
-        return 0;
-    };
-    let Ok(promise) = promise.dyn_into::<js_sys::Promise>() else {
-        return 0;
-    };
-    match wasm_bindgen_futures::JsFuture::from(promise).await {
-        Ok(ports) => js_sys::Array::from(&ports).length() as usize,
-        Err(_) => 0,
-    }
+async fn probe_granted_serial_ports() -> bool {
+    lpa_studio_core::BrowserSerialEsp32Provider::granted_ports_available().await
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn probe_granted_serial_ports() -> usize {
-    0
+async fn probe_granted_serial_ports() -> bool {
+    false
 }
 
 fn section_title_class() -> &'static str {

@@ -154,9 +154,12 @@ fn write_value(
             Ok(())
         }
         (TypeInner::Array { .. }, _) => Err(type_mismatch(path, "array", value)),
+        // Texture uniforms never reach this writer: naga puts sampler2D
+        // globals in the handle address space, so they are reflected as
+        // texture bindings and their `LpsValueF32::Texture2D` values become
+        // bind-group entries (`crate::render`), not uniform-buffer bytes.
         (other, _) => Err(GfxError::Render(format!(
-            "uniform `{path}`: type {other:?} is not supported in a WGSL uniform block \
-             (texture bindings are the sampler2D milestone)"
+            "uniform `{path}`: type {other:?} is not supported in a WGSL uniform block"
         ))),
     }
 }
@@ -274,7 +277,8 @@ mod tests {
         authored: &str,
         uniforms: LpsValueF32,
     ) -> Result<Vec<(u32, Vec<u8>)>, GfxError> {
-        let shader = compile_wgsl(authored).expect("shader compiles");
+        let shader = compile_wgsl(authored, &lp_shader::TextureBindingSpecs::new())
+            .expect("shader compiles");
         let table = reflect_uniforms(&shader.module).expect("uniforms reflect");
         encode_uniforms(&shader.module, &table, &uniforms)
     }
@@ -324,6 +328,7 @@ mod tests {
         let shader = compile_wgsl(
             "layout(binding = 0) uniform Block { vec3 a; vec2 b; } blk;\n\
              vec4 render(vec2 pos) { return vec4(blk.a + vec3(blk.b, 0.0), 1.0); }\n",
+            &lp_shader::TextureBindingSpecs::new(),
         )
         .expect("compiles");
         let table = reflect_uniforms(&shader.module).expect("reflects");
@@ -359,6 +364,7 @@ mod tests {
         let shader = compile_wgsl(
             "layout(binding = 0) uniform Block { mat3 m; float tail; } blk;\n\
              vec4 render(vec2 pos) { return vec4(blk.m * vec3(pos, blk.tail), 1.0); }\n",
+            &lp_shader::TextureBindingSpecs::new(),
         )
         .expect("compiles");
         let table = reflect_uniforms(&shader.module).expect("reflects");
@@ -392,6 +398,7 @@ mod tests {
             "struct Inner { float x; vec3 v; };\n\
              layout(binding = 0) uniform Block { Inner inner; float after; } blk;\n\
              vec4 render(vec2 pos) { return vec4(blk.inner.v * blk.inner.x, blk.after); }\n",
+            &lp_shader::TextureBindingSpecs::new(),
         )
         .expect("compiles");
         let table = reflect_uniforms(&shader.module).expect("reflects");

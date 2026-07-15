@@ -1,8 +1,8 @@
-use crate::{LinkSnapshot, ProjectSnapshot, ServerSnapshot, UiLogEntry};
+use crate::{ConnectFlowState, ProjectSnapshot, ServerSnapshot, UiLogEntry};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StudioSnapshot {
-    pub link: LinkSnapshot,
+    pub flow: ConnectFlowState,
     pub server: ServerSnapshot,
     pub project: ProjectSnapshot,
     pub logs: Vec<UiLogEntry>,
@@ -10,13 +10,13 @@ pub struct StudioSnapshot {
 
 impl StudioSnapshot {
     pub fn new(
-        link: LinkSnapshot,
+        flow: ConnectFlowState,
         server: ServerSnapshot,
         project: ProjectSnapshot,
         logs: Vec<UiLogEntry>,
     ) -> Self {
         Self {
-            link,
+            flow,
             server,
             project,
             logs,

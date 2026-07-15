@@ -133,3 +133,64 @@ pub(crate) fn ready_to_flash() -> Element {
         ],
     ))
 }
+
+/// Incompatible firmware (M4 hello gate): the pane outranks the server
+/// state with "Reflash needed" and explains the incompatibility as an
+/// issue; reflashing is the ONE affordance (firmware section).
+#[story]
+pub(crate) fn reflash_needed() -> Element {
+    story_pane(pane(
+        UiStatus::warning("Reflash needed"),
+        vec![
+            UiStepView::new(
+                DeviceController::SECTION_DEVICE,
+                "Device",
+                UiStepState::NeedsAttention,
+            )
+            .with_body(UiViewContent::Issue(lpa_studio_core::UiIssue::new(
+                "device firmware started its server loop but predates the wire hello; \
+                 reflash the firmware to a compatible build",
+            )))
+            .with_actions(connected_actions()),
+            firmware_section(),
+        ],
+    ))
+}
+
+/// Unresponsive device (readiness deadline expired without a diagnosis):
+/// the server attach failed, so the pane needs attention and carries the
+/// boot diagnosis; recovery stays reachable through the firmware section.
+#[story]
+pub(crate) fn unresponsive() -> Element {
+    story_pane(pane(
+        UiStatus::error("Needs attention"),
+        vec![
+            UiStepView::new(
+                DeviceController::SECTION_DEVICE,
+                "Device",
+                UiStepState::NeedsAttention,
+            )
+            .with_body(UiViewContent::Issue(lpa_studio_core::UiIssue::new(
+                "timed out waiting for device readiness; no serial output was received \
+                 from the device",
+            )))
+            .with_actions(connected_actions()),
+            firmware_section(),
+        ],
+    ))
+}
+
+fn connected_actions() -> Vec<UiAction> {
+    vec![
+        UiAction::from_op(
+            ControllerId::new(DEPLOY_NODE_ID),
+            DeployOp::OpenDialog { target_key: None },
+        )
+        .with_label("Push to device…"),
+        UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::DisconnectDevice,
+        )
+        .with_label("Disconnect"),
+    ]
+}

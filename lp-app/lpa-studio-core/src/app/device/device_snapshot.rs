@@ -1,13 +1,13 @@
-use crate::{LinkSnapshot, ServerSnapshot};
+use crate::{ConnectFlowState, ServerSnapshot};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeviceSnapshot {
-    pub link: LinkSnapshot,
+    pub flow: ConnectFlowState,
     pub server: ServerSnapshot,
 }
 
 impl DeviceSnapshot {
-    pub fn new(link: LinkSnapshot, server: ServerSnapshot) -> Self {
-        Self { link, server }
+    pub fn new(flow: ConnectFlowState, server: ServerSnapshot) -> Self {
+        Self { flow, server }
     }
 }

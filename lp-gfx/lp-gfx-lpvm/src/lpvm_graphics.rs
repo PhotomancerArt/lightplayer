@@ -28,6 +28,7 @@ use crate::lpvm_shader::LpvmShader;
 pub struct LpvmGraphics<B: LpvmEngine> {
     shared: Arc<SharedEngine<B>>,
     backend_name: &'static str,
+    frontend: lp_shader::ShaderFrontend,
 }
 
 impl<B> LpvmGraphics<B>
@@ -36,13 +37,20 @@ where
     B::Module: 'static,
 {
     /// Wrap an LPVM engine. `backend_name` is the log label
-    /// (e.g. `"lpvm-wasm::rt_wasmtime"`).
-    pub fn from_engine(backend: B, backend_name: &'static str) -> Self {
+    /// (e.g. `"lpvm-wasm::rt_wasmtime"`); `frontend` is the GLSL frontend
+    /// this backend advertises via [`LpGraphics::glsl_frontend`] — the
+    /// host's product decision, made here once.
+    pub fn from_engine(
+        backend: B,
+        backend_name: &'static str,
+        frontend: lp_shader::ShaderFrontend,
+    ) -> Self {
         Self {
             shared: Arc::new(SharedEngine {
                 engine: LpsEngine::new(backend),
             }),
             backend_name,
+            frontend,
         }
     }
 
@@ -78,13 +86,17 @@ where
             )));
         }
         let cfg = options.to_compiler_config();
+        let mut desc = CompilePxDesc::new(
+            source,
+            lps_shared::TextureStorageFormat::Rgba16Unorm,
+            cfg,
+            options.frontend,
+        );
+        desc.textures = options.textures.clone();
         let px = self
             .shared
             .engine
-            .compile_px_desc(
-                CompilePxDesc::new(source, lps_shared::TextureStorageFormat::Rgba16Unorm, cfg)
-                    .with_frontend(options.frontend),
-            )
+            .compile_px_desc(desc)
             .map_err(|e| GfxError::Compile(format!("{e}")))?;
 
         let _ = options.max_errors; // TODO: thread max_errors when front-end accepts it
@@ -106,6 +118,10 @@ where
 
     fn backend_name(&self) -> &'static str {
         self.backend_name
+    }
+
+    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
+        self.frontend
     }
 
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {

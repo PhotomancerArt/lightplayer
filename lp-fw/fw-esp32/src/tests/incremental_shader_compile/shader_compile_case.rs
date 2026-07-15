@@ -1,6 +1,6 @@
 //! Representative compile corpus for the incremental shader compile harness.
 
-use lp_shader::{CompilePxDesc, TextureStorageFormat, texture_binding};
+use lp_shader::{CompilePxDesc, ShaderFrontend, TextureStorageFormat, texture_binding};
 
 pub struct ShaderCompileCase {
     pub name: &'static str,
@@ -19,10 +19,13 @@ pub const SHADER_COMPILE_CASES: &[ShaderCompileCase] = &[ShaderCompileCase {
 
 impl ShaderCompileCase {
     pub fn desc(&self) -> CompilePxDesc<'static> {
+        // LpsGlsl: the incremental (stepped) frontend path only exists for
+        // the device pipeline's native frontend; naga completes in one step.
         let desc = CompilePxDesc::new(
             self.glsl,
             TextureStorageFormat::Rgba16Unorm,
             lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         );
         if self.with_input_color {
             desc.with_texture_spec(

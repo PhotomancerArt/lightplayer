@@ -20,6 +20,7 @@ use lpvm_wasm::{
 };
 
 use crate::targets::{Backend, FloatMode as TargetFloatMode, Frontend, Target};
+use crate::test_run::interp::{InterpInstance, InterpShader};
 
 /// Compiled artifact for one test file and target.
 ///
@@ -32,6 +33,8 @@ pub enum CompiledShader {
     NativeFa(FaEmuEngine, FaEmuModule),
     /// wasmtime module (`wasm.q32`).
     Wasm(WasmLpvmEngine, WasmLpvmModule),
+    /// Host LPIR interpreter (`interp.f32`); no codegen, no guest memory.
+    Interp(InterpShader),
 }
 
 /// Per-`// run:` instantiation (mutable VM context / store).
@@ -42,6 +45,8 @@ pub enum FiletestInstance {
     NativeFa(FaEmuInstance),
     /// wasmtime-linked shader instance.
     Wasm(WasmLpvmInstance),
+    /// Host LPIR interpreter execution (`interp.f32`).
+    Interp(InterpInstance),
 }
 
 impl CompiledShader {
@@ -50,6 +55,7 @@ impl CompiledShader {
             Self::Emu(_, m) => m.signatures(),
             Self::NativeFa(_, m) => m.signatures(),
             Self::Wasm(_, m) => m.signatures(),
+            Self::Interp(s) => s.signatures(),
         }
     }
 
@@ -64,6 +70,7 @@ impl CompiledShader {
             Self::Wasm(_, m) => {
                 FiletestInstance::Wasm(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
+            Self::Interp(s) => FiletestInstance::Interp(s.instantiate()),
         })
     }
 
@@ -73,6 +80,11 @@ impl CompiledShader {
             Self::Emu(e, _) => e.memory(),
             Self::NativeFa(e, _) => e.memory(),
             Self::Wasm(e, _) => e.memory(),
+            Self::Interp(_) => {
+                anyhow::bail!(
+                    "interp.f32 has no guest memory; texture fixtures are unsupported on this target"
+                )
+            }
         };
         mem.alloc(size, align)
             .map_err(|e| anyhow::anyhow!("shared memory alloc: {e}"))
@@ -85,6 +97,7 @@ impl FiletestInstance {
             Self::Emu(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call(name, args).map_err(|e| e.to_string()),
+            Self::Interp(i) => i.call(name, args),
         }
     }
 
@@ -102,6 +115,9 @@ impl FiletestInstance {
                 .call_q32_with_cycle_model(name, flat, cycle_model)
                 .map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call_q32(name, flat).map_err(|e| e.to_string()),
+            Self::Interp(_) => {
+                Err("interp.f32 is not a Q32 target (call_q32_flat unsupported)".to_string())
+            }
         }
     }
 
@@ -110,6 +126,7 @@ impl FiletestInstance {
             Self::Emu(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
+            Self::Interp(i) => i.set_uniform(path, value),
         }
     }
 
@@ -127,6 +144,9 @@ impl FiletestInstance {
             Self::Emu(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
             Self::NativeFa(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.set_uniform_q32(path, value).map_err(|e| e.to_string()),
+            Self::Interp(_) => {
+                Err("interp.f32 does not support set_uniform_q32 (not a Q32 target)".to_string())
+            }
         }
     }
 
@@ -134,7 +154,7 @@ impl FiletestInstance {
         match self {
             Self::Emu(i) => i.debug_state(),
             Self::NativeFa(i) => i.debug_state(),
-            Self::Wasm(_) => None,
+            Self::Wasm(_) | Self::Interp(_) => None,
         }
     }
 
@@ -143,6 +163,7 @@ impl FiletestInstance {
             Self::Emu(i) => i.last_guest_instruction_count(),
             Self::NativeFa(i) => i.last_guest_instruction_count(),
             Self::Wasm(i) => i.last_guest_instruction_count(),
+            Self::Interp(_) => None,
         }
     }
 
@@ -151,6 +172,7 @@ impl FiletestInstance {
             Self::Emu(i) => i.last_guest_cycle_count(),
             Self::NativeFa(i) => i.last_guest_cycle_count(),
             Self::Wasm(i) => i.last_guest_cycle_count(),
+            Self::Interp(_) => None,
         }
     }
 }
@@ -176,6 +198,16 @@ impl CompiledShader {
         compiler_config: &CompilerConfig,
         texture_specs: &VecMap<String, TextureBindingSpec>,
     ) -> anyhow::Result<Self> {
+        // interp.f32 lowers through the oracle-style path (canonical lpfn
+        // sources inlined when referenced) and never reaches codegen.
+        if target.backend == Backend::Interp {
+            let (ir, meta) =
+                crate::test_run::interp::lower_for_interp(source, texture_specs, compiler_config)?;
+            lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            return Ok(Self::Interp(InterpShader::new(ir, meta)));
+        }
+
         let (ir, meta) = match target.frontend {
             Frontend::Naga => lower_glsl(
                 source,
@@ -239,6 +271,7 @@ impl CompiledShader {
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
                 Ok(Self::Wasm(engine, module))
             }
+            Backend::Interp => unreachable!("interp.f32 is handled before backend dispatch"),
         }
     }
 }
@@ -254,14 +287,14 @@ impl CompiledShader {
         match self {
             Self::Emu(_, m) => m.debug_info(),
             Self::NativeFa(_, m) => m.debug_info(),
-            Self::Wasm(_, _) => None,
+            Self::Wasm(_, _) | Self::Interp(_) => None,
         }
     }
 
     pub(crate) fn wasm_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Wasm(_, m) => Some(m.wasm_bytes()),
-            Self::Emu(_, _) | Self::NativeFa(_, _) => None,
+            Self::Emu(_, _) | Self::NativeFa(_, _) | Self::Interp(_) => None,
         }
     }
 
@@ -270,6 +303,7 @@ impl CompiledShader {
             Self::Emu(_, m) => m.lpir_module(),
             Self::NativeFa(_, m) => m.lpir_module(),
             Self::Wasm(_, _) => None,
+            Self::Interp(s) => Some(s.lpir_module()),
         }
     }
 }

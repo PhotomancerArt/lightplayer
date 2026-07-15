@@ -46,11 +46,12 @@ impl<E: LpvmEngine> LpsEngine<E> {
         glsl: &str,
         output_format: TextureStorageFormat,
         config: &CompilerConfig,
+        frontend: crate::ShaderFrontend,
     ) -> Result<LpsPxShader, LpsError>
     where
         E::Module: 'static,
     {
-        let desc = CompilePxDesc::new(glsl, output_format, config.clone());
+        let desc = CompilePxDesc::new(glsl, output_format, config.clone(), frontend);
         self.compile_px_desc(desc)
     }
 

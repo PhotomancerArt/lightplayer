@@ -9,6 +9,12 @@ use lps_shared::{TextureBindingSpec, TextureStorageFormat};
 pub type TextureBindingSpecs = VecMap<String, TextureBindingSpec>;
 
 /// Frontend used for GLSL source before LPIR lowering.
+///
+/// Deliberately has no `Default`: which frontend compiles a shader is a
+/// product decision of the host that constructs the engine/backend. A
+/// `cfg!(feature = "naga")` default used to live here, which meant Cargo
+/// feature unification silently changed compile behavior depending on which
+/// packages shared the build graph.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShaderFrontend {
     /// Existing Naga GLSL frontend.
@@ -17,22 +23,27 @@ pub enum ShaderFrontend {
     LpsGlsl,
 }
 
-impl Default for ShaderFrontend {
-    fn default() -> Self {
-        if cfg!(feature = "naga") {
-            Self::Naga
-        } else {
-            Self::LpsGlsl
-        }
-    }
-}
-
 impl ShaderFrontend {
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             Self::Naga => "naga",
             Self::LpsGlsl => "lps-glsl",
+        }
+    }
+
+    /// Whether this frontend is compiled into the current binary.
+    ///
+    /// `Naga` is behind the `naga` feature; selecting it without the feature
+    /// fails every compile at runtime with "naga frontend was not built into
+    /// this binary". Hosts that pin a frontend as a const can const-assert
+    /// this so a build whose feature graph dropped the frontend fails at
+    /// compile time instead.
+    #[must_use]
+    pub const fn built_in(self) -> bool {
+        match self {
+            Self::Naga => cfg!(feature = "naga"),
+            Self::LpsGlsl => true,
         }
     }
 }
@@ -54,21 +65,15 @@ impl<'a> CompilePxDesc<'a> {
         glsl: &'a str,
         output_format: TextureStorageFormat,
         compiler_config: CompilerConfig,
+        frontend: ShaderFrontend,
     ) -> Self {
         Self {
             glsl,
             output_format,
             compiler_config,
             textures: TextureBindingSpecs::new(),
-            frontend: ShaderFrontend::default(),
+            frontend,
         }
-    }
-
-    /// Selects the GLSL frontend for this compile.
-    #[must_use]
-    pub fn with_frontend(mut self, frontend: ShaderFrontend) -> Self {
-        self.frontend = frontend;
-        self
     }
 
     /// Adds or replaces the compile-time [`TextureBindingSpec`] for uniform `name`.

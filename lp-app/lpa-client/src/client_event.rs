@@ -5,12 +5,15 @@
 //! mutating UI state directly.
 
 use lpc_wire::server::api::LogLevel;
-use lpc_wire::server::{LoadedProject, MemoryStats, RecoveryStatus, SampleStats};
+use lpc_wire::server::{LoadedProject, MemoryStats, RecoveryStatus, SampleStats, ServerHello};
 use lpc_wire::{WireServerMessage, WireServerMsgBody};
 
 /// Side-channel protocol event surfaced by `LpClient`.
 #[derive(Debug)]
 pub enum ClientEvent {
+    /// Wire bootstrap hello: protocol version + build provenance + device
+    /// uid, sent unsolicited (id 0) when the server loop starts serving.
+    Hello(ServerHello),
     /// Periodic server health and performance sample.
     Heartbeat {
         fps: SampleStats,
@@ -36,6 +39,7 @@ pub enum ClientEvent {
 impl ClientEvent {
     pub fn from_unsolicited_message(message: WireServerMessage) -> Option<Self> {
         match message.msg {
+            WireServerMsgBody::Hello(hello) => Some(Self::Hello(hello)),
             WireServerMsgBody::Heartbeat {
                 fps,
                 frame_count,

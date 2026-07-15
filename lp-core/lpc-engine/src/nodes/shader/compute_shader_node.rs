@@ -20,7 +20,7 @@ use crate::node::{
     PressureLevel, ProduceResult, TickContext,
 };
 use crate::shader_abi::compute_desc_from_model_def;
-use lp_gfx::{LpComputeShader, ShaderCompileOptions};
+use lp_gfx::LpComputeShader;
 
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
@@ -106,16 +106,18 @@ impl ComputeShaderNode {
         let graphics = ctx
             .graphics()
             .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-        let compile_opts = ShaderCompileOptions {
-            q32_options: map_model_q32_options(&self.def.glsl_opts),
-            max_errors: Some(20),
+        // Compute shaders always lower through lps-glsl
+        // (`LpsEngine::compile_compute_desc`); only the Q32 compiler config
+        // reaches the backend — there is no frontend or semantics choice here.
+        let compiler_config = lpir::CompilerConfig {
+            q32: map_model_q32_options(&self.def.glsl_opts),
             ..Default::default()
         };
         let desc = match compute_desc_from_model_def(
             self.glsl_source.as_str(),
             &self.def,
             ctx.slot_shapes(),
-            compile_opts.to_compiler_config(),
+            compiler_config,
         ) {
             Ok(desc) => desc,
             Err(error) => {
@@ -456,7 +458,9 @@ void tick() {{
         );
 
         let mut engine = Engine::new(TreePath::parse("/compute.show").expect("path"));
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
         let frame = lpc_model::Revision::new(1);
         let root = engine.tree().root();
         let node_id = engine

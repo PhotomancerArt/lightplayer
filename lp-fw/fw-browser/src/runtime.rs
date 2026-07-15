@@ -28,6 +28,27 @@ use crate::preview_surface::PreviewSurface;
 use crate::server_transport::BrowserServerTransport;
 use crate::tier::{RuntimeTier, TierSelection};
 
+/// GLSL frontend for the browser runtime's CPU tier.
+///
+/// Naga: the browser CPU tier has compiled through naga since the GPU tier
+/// landed — kept as the explicit choice rather than an accident of feature
+/// unification. The `lp-shader/naga` frontend it needs is enabled explicitly
+/// via this crate's `lpa-server` dependency (`features = ["naga"]`); the
+/// naga *crate* that `lp-gfx-wgpu` compiles for the GPU tier does not enable
+/// it. The device constant is [`lpa_server::DEVICE_SHADER_FRONTEND`]
+/// (LpsGlsl); converging the browser tier onto it is a product decision to
+/// make deliberately, not here.
+const BROWSER_SHADER_FRONTEND: lpa_server::ShaderFrontend = lpa_server::ShaderFrontend::Naga;
+
+// The sidecar builds this crate standalone (`cargo build -p fw-browser`), so
+// no workspace feature unification supplies the frontend: if the `naga`
+// feature chain breaks, every shader compile fails at runtime and Studio's
+// simulator renders black. Fail the build instead.
+const _: () = assert!(
+    BROWSER_SHADER_FRONTEND.built_in(),
+    "the pinned shader frontend is not compiled in; keep `features = [\"naga\"]` on fw-browser's lpa-server dependency"
+);
+
 /// One in-browser LightPlayer firmware instance.
 ///
 /// The runtime owns the same major pieces as local firmware: server, filesystem,
@@ -85,7 +106,7 @@ impl BrowserFirmwareRuntime {
                     let graphics = Arc::new(GpuGraphics::new(
                         worker_gpu.device.clone(),
                         worker_gpu.queue.clone(),
-                        Box::new(TargetLpvmGraphics::new()),
+                        Box::new(TargetLpvmGraphics::new(BROWSER_SHADER_FRONTEND)),
                     ));
                     (
                         TierSelection::granted(RuntimeTier::Gpu),
@@ -101,11 +122,11 @@ impl BrowserFirmwareRuntime {
         };
         let graphics: Arc<dyn LpGraphics> = match &gpu {
             Some(state) => state.graphics.clone(),
-            None => Arc::new(TargetLpvmGraphics::new()),
+            None => Arc::new(TargetLpvmGraphics::new(BROWSER_SHADER_FRONTEND)),
         };
         let time = ManualTimeProvider::new();
         let time_provider: Rc<dyn TimeProvider> = Rc::new(time.clone());
-        let server = LpServer::new_with_hardware_services(
+        let mut server = LpServer::new_with_hardware_services(
             output_provider,
             Box::new(LpFsMemory::new()),
             "/projects/".as_path(),
@@ -115,12 +136,37 @@ impl BrowserFirmwareRuntime {
             Some(radio_service),
             graphics,
         );
+        // Wire hello payload (sans-IO: injected here). Browser runtimes carry
+        // no git provenance or stamped identity; fake devices script a uid in
+        // M3.
+        server.set_hello(lpc_wire::ServerHello {
+            proto: lpc_wire::WIRE_PROTO_VERSION,
+            fw: lpc_wire::FwProvenance {
+                package: "fw-browser".to_string(),
+                commit: "unknown".to_string(),
+                dirty: false,
+                profile: if cfg!(debug_assertions) {
+                    "debug".to_string()
+                } else {
+                    "release".to_string()
+                },
+            },
+            device_uid: None,
+        });
+
+        let mut transport = BrowserServerTransport::new();
+        // Wire hello: queued before anything else so it flushes as the first
+        // protocol_out frame when the runtime starts serving (the worker
+        // drains outputs right after boot). See
+        // docs/adr/2026-07-14-wire-hello-versioning.md.
+        block_on(fw_core::send_unsolicited_hello(&server, &mut transport))
+            .map_err(|error| format!("queue boot hello: {error}"))?;
 
         let mut runtime = Self {
             id,
             label: label.to_string(),
             server,
-            transport: BrowserServerTransport::new(),
+            transport,
             time,
             last_tick_ms: 0,
             running: false,

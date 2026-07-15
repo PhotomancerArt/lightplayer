@@ -41,9 +41,12 @@ minified).
 
 ## Façade contract
 
-`createEditor(parent, {doc, language, readOnly, onModified, onApplyRequested})`
-returns a handle with `getDoc` / `setDoc` / `markClean` / `isModified` /
-`setReadOnly` / `setDiagnostics` / `clearDiagnostics` / `revealLine` /
-`focus` / `destroy`. Semantics are documented in `entry.mjs`; the Rust
-component's docs describe the ownership rules. Mod-Enter is handled inside
-the editor's own keymap (highest precedence) and calls `onApplyRequested`.
+`createEditor(parent, {doc, language, readOnly, onModified, onChange,
+onApplyRequested, onSaveRequested})` returns a handle with `getDoc` /
+`setDoc` / `markClean` / `isModified` / `setReadOnly` / `setDiagnostics` /
+`clearDiagnostics` / `revealLine` / `focus` / `destroy`. Semantics are
+documented in `entry.mjs`; the Rust component's docs describe the ownership
+rules. Mod-Enter (apply) and Mod-s (save) are handled inside the editor's
+own keymap (highest precedence) and call `onApplyRequested` /
+`onSaveRequested`; both always consume the keystroke, so Mod-s never
+reaches the browser's save dialog while the editor is focused.

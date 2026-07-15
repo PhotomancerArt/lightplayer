@@ -1918,7 +1918,9 @@ mod tests {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -2069,7 +2071,9 @@ mod tests {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -2252,7 +2256,9 @@ mod tests {
     fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();

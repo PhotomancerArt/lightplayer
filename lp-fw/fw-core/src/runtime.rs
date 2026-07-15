@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use lpa_server::{LpServer, ServerError};
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::{TransportError, WireMessage};
+use lpc_wire::{TransportError, WireMessage, WireServerMessage};
 
 /// Result of draining currently available client messages from a transport.
 #[derive(Debug)]
@@ -35,6 +35,24 @@ pub struct ServerTickOutcome {
     pub response_count: usize,
     pub frame_time_us: u64,
     pub server_error: Option<ServerError>,
+}
+
+/// Send the server's unsolicited hello (id 0) through `transport`.
+///
+/// Every embedder loop calls this once, as the first frame it sends when it
+/// starts serving (before/with the first heartbeat). The payload is the
+/// embedder-injected [`LpServer::hello`]; see
+/// `docs/adr/2026-07-14-wire-hello-versioning.md` for the contract.
+pub async fn send_unsolicited_hello<T: ServerTransport>(
+    server: &LpServer,
+    transport: &mut T,
+) -> Result<(), TransportError> {
+    transport
+        .send(WireServerMessage::new(
+            0,
+            lpc_wire::server::ServerMsgBody::Hello(server.hello().clone()),
+        ))
+        .await
 }
 
 /// Drain all currently available client messages from `transport`.
