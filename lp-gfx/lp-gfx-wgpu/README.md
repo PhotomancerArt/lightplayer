@@ -74,7 +74,24 @@ non-finite lanes).
   (compute stays on the CPU tier permanently).
 - `LpShader::sample_rgba16` errors, citing the GPU sample-point-pass
   milestone; sample-point/out buffers are CPU-resident vectors until then.
-- `sampler2D` texture inputs belong to their own milestone.
+
+## Texture inputs (`sampler2D`)
+
+The compile-time `TextureBindingSpec` map arrives through
+`ShaderCompileOptions::textures` (the contract shared with the CPU tier;
+missing/extra specs are compile errors). Sampling call sites are lowered
+at the GLSL source (`src/texture_lowering.rs`): `texelFetch` becomes an
+edge-clamping `textureLoad` helper and `texture()` becomes generated
+nearest/bilinear arithmetic honoring the spec's per-axis wrap policy and
+the `HeightOne` hint (`uv.y` ignored). **Manual sampling is the M5
+filtered-sampling decision**: LightPlayer's index-space wrap semantics
+(notably the period-`2(n-1)` mirror) and the v0 out-of-range `texelFetch`
+clamp are not expressible with WebGPU samplers, and the `textureLoad`-only
+path needs no `float32-filterable` feature. At render time,
+`LpsValueF32::Texture2D` uniform values (minted by
+`GpuGraphics::texture_uniform_value`) resolve through the backend texture
+registry into bind-group entries; format and `HeightOne` promises are
+re-validated per render, CPU parity.
 
 ## Workspace notes
 

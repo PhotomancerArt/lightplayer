@@ -36,6 +36,8 @@ pub mod sample_backing;
 pub mod surface_blit;
 pub mod tanh_pass;
 pub mod texture_backing;
+pub mod texture_lowering;
+pub(crate) mod texture_registry;
 pub mod uniform_layout;
 pub mod uniform_writer;
 pub mod wgsl_compile;
