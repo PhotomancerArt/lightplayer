@@ -188,6 +188,8 @@ function toDiagnostic(state, entry) {
 //   onChange(text)   fired with the full text after every document change
 //                    (user typing and external setDoc alike)
 //   onApplyRequested() fired on Mod-Enter
+//   onSaveRequested()  fired on Mod-s (always swallowed, so the browser's
+//                      save dialog never opens while the editor is focused)
 // Returns the imperative handle the Rust component drives.
 export function createEditor(parent, opts = {}) {
   const readOnly = new Compartment();
@@ -207,12 +209,22 @@ export function createEditor(parent, opts = {}) {
     notifyModified(text !== baseline);
   });
 
-  // Listed first so it out-prioritizes defaultKeymap's own Mod-Enter.
-  const applyKeymap = keymap.of([
+  // Listed first so it out-prioritizes defaultKeymap's own Mod-Enter. The
+  // `run → true` returns also stop the browser: Mod-s in particular must
+  // never fall through to the native save dialog while the editor is
+  // focused, even when the app treats the save request as a no-op.
+  const editorKeymap = keymap.of([
     {
       key: "Mod-Enter",
       run: () => {
         opts.onApplyRequested?.();
+        return true;
+      },
+    },
+    {
+      key: "Mod-s",
+      run: () => {
+        opts.onSaveRequested?.();
         return true;
       },
     },
@@ -221,7 +233,7 @@ export function createEditor(parent, opts = {}) {
   const state = EditorState.create({
     doc: baseline,
     extensions: [
-      applyKeymap,
+      editorKeymap,
       lineNumbers(),
       highlightActiveLineGutter(),
       highlightSpecialChars(),

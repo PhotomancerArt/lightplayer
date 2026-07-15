@@ -77,6 +77,9 @@ pub struct CodeEditorDiagnostic {
 /// - `on_apply` fires on Cmd/Ctrl+Enter with the current editor text; the
 ///   parent decides what "apply" means (the editor never marks itself clean
 ///   on apply — the ack comes back through the `doc` prop).
+/// - `on_save` fires on Cmd/Ctrl+S while the editor is focused; the parent
+///   decides what "save" means (a no-op is fine). The editor always swallows
+///   the keystroke, so the browser's save dialog never opens.
 /// - `reveal_line` scrolls to and selects a 1-based line whenever its value
 ///   changes to `Some(new)` (epoch-style: repeat reveals of the same line
 ///   need a `None` in between).
@@ -91,6 +94,7 @@ pub fn CodeEditor(
     #[props(default = None)] on_modified: Option<EventHandler<bool>>,
     #[props(default = None)] on_change: Option<EventHandler<String>>,
     #[props(default = None)] on_apply: Option<EventHandler<String>>,
+    #[props(default = None)] on_save: Option<EventHandler<()>>,
     #[props(default = String::new())] class: String,
 ) -> Element {
     let container_id = use_hook(|| {
@@ -116,6 +120,7 @@ pub fn CodeEditor(
     // Mirrors written by the JS callbacks, forwarded to the props by effects.
     let modified_mirror = use_signal(|| false);
     let apply_request = use_signal(|| None::<ApplyRequest>);
+    let save_request = use_signal(|| None::<SaveRequest>);
     let change_notice = use_signal(|| None::<ChangeNotice>);
 
     // Keep the shared desired-state current with this render's props, and
@@ -178,6 +183,22 @@ pub fn CodeEditor(
         }
     });
 
+    // Forward save requests (Cmd/Ctrl+S).
+    let save_forward = use_hook(|| Rc::new(RefCell::new(0_u64)));
+    use_effect(move || {
+        let Some(request) = save_request() else {
+            return;
+        };
+        let mut last = save_forward.borrow_mut();
+        if *last == request.epoch {
+            return;
+        }
+        *last = request.epoch;
+        if let Some(handler) = on_save {
+            handler.call(());
+        }
+    });
+
     let shared_for_mount = shared.clone();
     let container_id_for_mount = container_id.clone();
     let onmounted = move |_| {
@@ -191,6 +212,7 @@ pub fn CodeEditor(
                 modified_mirror,
                 change_notice,
                 apply_request,
+                save_request,
             )
             .await;
         });
@@ -237,6 +259,13 @@ struct ApplyRequest {
     text: String,
 }
 
+/// One save request (Cmd/Ctrl+S) from the JS side; epoch-tagged like
+/// [`ApplyRequest`] so the forwarding effect fires exactly once per press.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SaveRequest {
+    epoch: u64,
+}
+
 /// One document-change notification from the JS side, epoch-tagged so the
 /// forwarding effect fires the handler exactly once per change.
 #[derive(Clone, Debug, PartialEq)]
@@ -281,6 +310,7 @@ struct EditorInstance {
     _on_modified: Closure<dyn FnMut(JsValue)>,
     _on_change: Closure<dyn FnMut(JsValue)>,
     _on_apply: Closure<dyn FnMut()>,
+    _on_save: Closure<dyn FnMut()>,
 }
 
 impl EditorInstance {
@@ -327,6 +357,7 @@ async fn initialize_editor(
     mut modified_mirror: Signal<bool>,
     mut change_notice: Signal<Option<ChangeNotice>>,
     mut apply_request: Signal<Option<ApplyRequest>>,
+    mut save_request: Signal<Option<SaveRequest>>,
 ) {
     if shared.borrow().editor.is_some() {
         return;
@@ -385,6 +416,13 @@ async fn initialize_editor(
         }));
     }));
 
+    let save_epoch = Rc::new(RefCell::new(0_u64));
+    let on_save = Closure::<dyn FnMut()>::wrap(Box::new(move || {
+        let mut epoch = save_epoch.borrow_mut();
+        *epoch += 1;
+        save_request.set(Some(SaveRequest { epoch: *epoch }));
+    }));
+
     let (doc, language, read_only) = {
         let desired = &shared.borrow().desired;
         (desired.doc.clone(), desired.language, desired.read_only)
@@ -398,6 +436,7 @@ async fn initialize_editor(
         &on_modified,
         &on_change,
         &on_apply,
+        &on_save,
     ) {
         Ok(handle) => handle,
         Err(message) => {
@@ -417,6 +456,7 @@ async fn initialize_editor(
             _on_modified: on_modified,
             _on_change: on_change,
             _on_apply: on_apply,
+            _on_save: on_save,
         });
         // Props may have moved on while the bundle was loading.
         shared_mut.reconcile();
@@ -465,6 +505,7 @@ impl CmHandle {
         on_modified: &Closure<dyn FnMut(JsValue)>,
         on_change: &Closure<dyn FnMut(JsValue)>,
         on_apply: &Closure<dyn FnMut()>,
+        on_save: &Closure<dyn FnMut()>,
     ) -> Result<Self, String> {
         let create = js_sys::Reflect::get(namespace, &JsValue::from_str("createEditor"))
             .ok()
@@ -482,6 +523,7 @@ impl CmHandle {
         set("onModified", on_modified.as_ref());
         set("onChange", on_change.as_ref());
         set("onApplyRequested", on_apply.as_ref());
+        set("onSaveRequested", on_save.as_ref());
 
         let handle = create
             .call2(namespace, parent, &opts)

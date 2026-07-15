@@ -21,6 +21,11 @@
 //! not a strip inserted above the editor. The editor never changes size or
 //! position. See `../../../Planning/lp2025/2026-07-07-glsl-editor-ux/`.
 //!
+//! **Keyboard.** ⌘↵/Ctrl+Enter applies and ⌘S/Ctrl+S saves while the editor
+//! is focused (both captured in the CodeMirror keymap; ⌘S never reaches the
+//! browser). The bar's Apply/Save affordances carry OS-correct hints via
+//! [`crate::base::keyboard`].
+//!
 //! Resync flows need no logic here: the `doc` prop is the controller's
 //! effective content, and the [`CodeEditor`] reconciliation rules do the
 //! rest (external doc wins while unmodified; a doc that catches up with the
@@ -31,15 +36,15 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAction, UiAssetContentBody, UiAssetEditor as UiAssetEditorData, UiAssetEditorKind,
-    UiShaderError,
+    ControllerId, ProjectController, ProjectOp, UiAction, UiAssetContentBody,
+    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiShaderError,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::base::{
     CodeEditor, CodeEditorDiagnostic, CodeEditorLanguage, DetailPopover, DetailSection,
-    IconMenuTone, StudioIconName,
+    IconMenuTone, Platform, StudioIconName, keyboard,
 };
 
 #[component]
@@ -47,6 +52,10 @@ use crate::base::{
 pub fn AssetEditor(
     editor: UiAssetEditorData,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// Platform for shortcut-hint display (`⌘S` vs `Ctrl+S`). Defaults to
+    /// runtime detection; stories pin it for deterministic captures.
+    #[props(default)]
+    platform: Option<Platform>,
 ) -> Element {
     // Editor-local state (see module docs). `modified` gates the Apply
     // button; `text` carries the current body to the Apply action.
@@ -121,6 +130,7 @@ pub fn AssetEditor(
         dirty,
     );
 
+    let platform = platform.unwrap_or_else(Platform::detect);
     let apply_disabled = !(editable && modified());
     // Apply gate shared by the button and the editor's Cmd/Ctrl+Enter path:
     // only unapplied changes on editable content are worth a mutation. Both
@@ -133,6 +143,18 @@ pub fn AssetEditor(
         }
         if let Some(handler) = on_action {
             handler.call(keymap_editor.apply_action(&current_text));
+        }
+    };
+    // Save gate shared by the bar's Save button and the editor's Cmd/Ctrl+S
+    // path: SaveOverlay is project-level, so only an applied-but-unsaved edit
+    // is worth dispatching — a stray ⌘S is a harmless no-op (the editor
+    // swallows the keystroke either way, so the browser dialog never opens).
+    let on_save = move |_: ()| {
+        if !dirty {
+            return;
+        }
+        if let Some(handler) = on_action {
+            handler.call(save_overlay_action());
         }
     };
 
@@ -157,12 +179,25 @@ pub fn AssetEditor(
                     if let EditorBarState::ApplyFailed { reason } = &bar_state {
                         FullErrorPopover { raw: reason.clone() }
                     }
+                    if bar_state == EditorBarState::Unsaved {
+                        button {
+                            class: bar_button_class(false),
+                            r#type: "button",
+                            title: "Write the applied edits to the project files ({keyboard::SAVE.display(platform)})",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                on_save(());
+                            },
+                            "Save"
+                            ShortcutHint { text: keyboard::SAVE.display(platform) }
+                        }
+                    }
                     if editable {
                         button {
-                            class: apply_button_class(apply_disabled),
+                            class: bar_button_class(apply_disabled),
                             r#type: "button",
                             disabled: apply_disabled,
-                            title: "Apply the edited body to the running project (Cmd/Ctrl+Enter)",
+                            title: "Apply the edited body to the running project ({keyboard::APPLY.display(platform)})",
                             onclick: move |event| {
                                 event.stop_propagation();
                                 if button_editor.editable() && modified() {
@@ -172,6 +207,9 @@ pub fn AssetEditor(
                                 }
                             },
                             "Apply"
+                            if !apply_disabled {
+                                ShortcutHint { text: keyboard::APPLY.display(platform) }
+                            }
                         }
                     }
                 }
@@ -193,6 +231,7 @@ pub fn AssetEditor(
                             on_modified: move |value| modified.set(value),
                             on_change: move |value| text.set(value),
                             on_apply,
+                            on_save,
                         }
                     }
                 },
@@ -345,6 +384,16 @@ fn FullErrorPopover(raw: String) -> Element {
     }
 }
 
+/// The keyboard hint riding a bar affordance (`⌘↵` / `Ctrl+S`), OS-correct
+/// via [`keyboard::Shortcut::display`] (M2 of the editor UX plan).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ShortcutHint(text: String) -> Element {
+    rsx! {
+        span { class: "tw:ml-1.5 tw:font-mono tw:text-[10px] tw:font-normal tw:opacity-60", "{text}" }
+    }
+}
+
 /// Read-only placeholder body for the non-editable states (binary body,
 /// deleted body, content still loading).
 #[component]
@@ -368,6 +417,15 @@ fn shader_error_diagnostics(error: &UiShaderError) -> Vec<CodeEditorDiagnostic> 
     }]
 }
 
+/// The project-level Save action the editor's ⌘S and the bar's Save button
+/// both dispatch — the same `SaveOverlay` op as the project pane's Save.
+fn save_overlay_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::SaveOverlay,
+    )
+}
+
 fn editor_language(kind: UiAssetEditorKind) -> CodeEditorLanguage {
     match kind {
         UiAssetEditorKind::Glsl => CodeEditorLanguage::Glsl,
@@ -376,7 +434,8 @@ fn editor_language(kind: UiAssetEditorKind) -> CodeEditorLanguage {
     }
 }
 
-fn apply_button_class(disabled: bool) -> &'static str {
+/// Shared class for the bar's action buttons (Apply, Save).
+fn bar_button_class(disabled: bool) -> &'static str {
     if disabled {
         "tw:inline-flex tw:flex-none tw:cursor-not-allowed tw:items-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:text-subtle-foreground"
     } else {
@@ -485,6 +544,13 @@ mod tests {
             EditorBarState::compute(None, false, None, false, false),
             EditorBarState::Clean
         );
+    }
+
+    #[test]
+    fn save_action_targets_the_project_controllers_save_overlay() {
+        let action = save_overlay_action();
+        assert!(action.is_for_node(ProjectController::NODE_ID));
+        assert_eq!(action.op_as::<ProjectOp>(), Some(&ProjectOp::SaveOverlay));
     }
 
     #[test]

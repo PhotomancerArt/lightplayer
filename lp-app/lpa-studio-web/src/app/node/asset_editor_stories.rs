@@ -21,6 +21,7 @@ use lpa_studio_core::{
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::AssetEditor;
+use crate::base::Platform;
 
 const STORY_GLSL: &str = "\
 uniform float time;
@@ -50,10 +51,15 @@ fn resolved(dirty: bool) -> Option<UiAssetContent> {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn EditorStoryCard(editor: UiAssetEditorData) -> Element {
+fn EditorStoryCard(
+    editor: UiAssetEditorData,
+    // Pinned (not detected) so the shortcut hints render identically on
+    // every capture host; Mac is the default story platform.
+    #[props(default = Platform::Mac)] platform: Platform,
+) -> Element {
     rsx! {
         div { class: "tw:w-full tw:max-w-2xl tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
-            AssetEditor { editor }
+            AssetEditor { editor, platform }
         }
     }
 }
@@ -65,10 +71,21 @@ fn clean() -> Element {
     }
 }
 
-#[story(description = "Applied but not yet saved: the bar wears the amber Unsaved tone.")]
+#[story(
+    description = "Applied but not yet saved: the bar wears the amber Unsaved tone with a Save affordance and its ⌘S hint."
+)]
 fn unsaved() -> Element {
     rsx! {
         EditorStoryCard { editor: editor_fixture(resolved(true)) }
+    }
+}
+
+#[story(
+    description = "The unsaved bar on a non-Mac platform: the Save hint spells out Ctrl+S instead of ⌘S."
+)]
+fn unsaved_non_mac() -> Element {
+    rsx! {
+        EditorStoryCard { editor: editor_fixture(resolved(true)), platform: Platform::Other }
     }
 }
 
