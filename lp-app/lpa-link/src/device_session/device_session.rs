@@ -117,6 +117,17 @@ impl DeviceSession {
         self.shared.drive_readiness().await
     }
 
+    /// Drain any buffered serial output into the console feed
+    /// ([`DeviceEvent::LogLine`]).
+    ///
+    /// Lines are otherwise surfaced when something drives the session
+    /// (readiness polling, app-protocol traffic); pull-model hosts that idle
+    /// between protocol calls — the CLI watching a device settle, a headless
+    /// runner — call this to flush the gap.
+    pub fn pump_console(&self) {
+        self.shared.pump_console_lines();
+    }
+
     /// The readiness-gated app-protocol channel.
     ///
     /// The first `send` drives readiness if it has not run yet; every use is

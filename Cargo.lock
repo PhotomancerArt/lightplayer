@@ -5176,6 +5176,7 @@ dependencies = [
  "eframe",
  "egui",
  "env_logger 0.11.9",
+ "espflash",
  "futures-util",
  "fw-checks",
  "jsonschema",

@@ -1,22 +1,25 @@
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use fw_checks::{FW_CHECK_JSON_PREFIX, FwCheckConfig, FwCheckTarget, all_checks, find_check};
-use lpa_client::transport_serial::SerialLineObserver;
-use lpa_client::{ClientTransport, TokioLpClient};
-use lpa_link::providers::host_serial_esp32::HostSerialEsp32Options;
+use lpa_client::LpClient;
+use lpa_link::providers::host_serial_esp32::{HostSerialEsp32Options, label_for_port};
+use lpa_link::{
+    DeviceDeadlines, DeviceEvent, DeviceEventSink, DeviceSession, DeviceState, DeviceTimers,
+    LinkConnector,
+};
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use lpfs::{LpFs, LpFsStd};
 use tokio::time::sleep;
 
-use crate::client::host_serial_esp32::connect_host_serial_esp32_with_options;
-use crate::commands::dev::{deploy_project_async, validation};
+use crate::commands::dev::{collect_project_deploy_files, validation};
 
 use super::args::{FwcheckCli, FwcheckCommand, FwcheckDemoArgs, FwcheckRunArgs, FwcheckTargetArg};
-use super::{port, process, report, trace_dir};
+use super::{flash, port, process, report, trace_dir};
 
 struct Style {
     color: bool,
@@ -106,7 +109,7 @@ fn run_esp32c6(check: FwCheckConfig, args: &FwcheckRunArgs) -> Result<()> {
         process::cargo_build_fw_esp32(&root, &features, args.verbose)
     })?;
     let ((), flash_elapsed) = run_step(&style, "Flash firmware", args.verbose, || {
-        process::flash_esp32(&root, &port, args.verbose)
+        flash::flash_esp32(&root, &port, args.verbose)
     })?;
     let (capture, _run_elapsed) = run_step(&style, "Run check", args.verbose, || {
         capture_serial(&port, check, args.timeout_secs, &trace, args.verbose)
@@ -156,7 +159,7 @@ fn run_esp32c6_demo(args: &FwcheckDemoArgs) -> Result<()> {
         process::cargo_build_fw_esp32(&root, &features, args.verbose)
     })?;
     let ((), flash_elapsed) = run_step(&style, "Flash firmware", args.verbose, || {
-        process::flash_esp32_no_reset_erase_lpfs(&root, &port, args.verbose)
+        flash::flash_esp32_no_reset_erase_lpfs(&root, &port, args.verbose)
     })?;
     let (demo, run_elapsed) = run_step(&style, "Boot, push, and verify project", true, || {
         run_demo_capture(
@@ -208,6 +211,11 @@ fn ensure_esp32c6_feature<'a>(features: impl IntoIterator<Item = &'a str>) -> St
     out.join(",")
 }
 
+/// How long the demo waits for the wire hello after the post-flash boot.
+/// First boot after an `lpfs` erase formats the filesystem, so this is
+/// deliberately generous; the whole-run `timeout_secs` still bounds it.
+const DEMO_READY_DEADLINE: Duration = Duration::from_secs(30);
+
 fn run_demo_capture(
     port_name: &str,
     project_dir: &Path,
@@ -216,36 +224,29 @@ fn run_demo_capture(
     settle_secs: u64,
     trace: &trace_dir::TraceDir,
 ) -> Result<DemoResult> {
-    let capture = Arc::new(SerialCapture::new(&trace.trace_txt)?);
-    let observer: Arc<dyn SerialLineObserver> = capture.clone();
-    let options = HostSerialEsp32Options {
-        baud_rate: Some(DEFAULT_SERIAL_BAUD_RATE),
-        reset_after_open: true,
-        line_observer: Some(observer),
-        ..HostSerialEsp32Options::default()
-    };
-    let transport = connect_host_serial_esp32_with_options(port_name, options)
-        .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
-    let transport: Box<dyn ClientTransport> = Box::new(transport);
-    let shared_transport = Arc::new(tokio::sync::Mutex::new(transport));
-    let client = TokioLpClient::new_shared(Arc::clone(&shared_transport));
-    let local_fs: Arc<dyn LpFs + Send + Sync> = Arc::new(LpFsStd::new(project_dir.to_owned()));
-    let runtime = tokio::runtime::Runtime::new()?;
+    let capture = Rc::new(DemoCapture::new(&trace.trace_txt)?);
+    let local_fs = LpFsStd::new(project_dir.to_owned());
 
-    let result = runtime.block_on(async {
+    // DeviceSession is single-actor (`!Send` by design): current-thread
+    // runtime + LocalSet, not the multi-threaded runtime the transport
+    // bundle needed.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let local = tokio::task::LocalSet::new();
+    let result = runtime.block_on(local.run_until(async {
         let run = run_demo_capture_async(
-            &client,
-            &capture,
-            local_fs,
+            port_name,
+            Rc::clone(&capture),
+            &local_fs,
             project_uid,
             settle_secs,
-            shared_transport,
         );
         match tokio::time::timeout(Duration::from_secs(timeout_secs), run).await {
             Ok(result) => result,
             Err(_) => bail!("timed out after {timeout_secs}s waiting for project to run"),
         }
-    });
+    }));
 
     capture.flush()?;
     let report_text = match result {
@@ -263,77 +264,77 @@ fn run_demo_capture(
 }
 
 async fn run_demo_capture_async(
-    client: &TokioLpClient,
-    capture: &Arc<SerialCapture>,
-    local_fs: Arc<dyn LpFs + Send + Sync>,
+    port_name: &str,
+    capture: Rc<DemoCapture>,
+    local_fs: &dyn LpFs,
     project_uid: &str,
     settle_secs: u64,
-    shared_transport: Arc<tokio::sync::Mutex<Box<dyn ClientTransport>>>,
 ) -> Result<String> {
-    wait_for_boot_ready(capture).await?;
+    // Readiness comes from the DeviceSession state machine (wire hello), not
+    // a boot-line grep; the console feed and failure watch ride its events.
+    let provider = lpa_link::providers::host_serial_esp32::HostSerialEsp32Provider::with_options(
+        HostSerialEsp32Options {
+            baud_rate: Some(DEFAULT_SERIAL_BAUD_RATE),
+            reset_after_open: true,
+            ..HostSerialEsp32Options::default()
+        },
+    );
+    let endpoint_id = provider.create_endpoint_for_port(port_name, label_for_port(port_name));
+    let connector = Rc::new(LinkConnector::HostSerialEsp32(provider));
+    let timers = DeviceTimers::new(|duration| Box::pin(tokio::time::sleep(duration)))
+        .with_deadlines(DeviceDeadlines {
+            ready: DEMO_READY_DEADLINE,
+            ..DeviceDeadlines::default()
+        });
+    let sink = DeviceEventSink::new({
+        let capture = Rc::clone(&capture);
+        move |event| capture.observe_event(&event)
+    });
 
-    let handle = run_client_step(
-        capture,
-        "deploy project",
-        deploy_project_async(client, local_fs.as_ref(), project_uid),
-    )
-    .await
-    .with_context(|| format!("deploy projects/{project_uid}"))?;
+    let session = DeviceSession::connect(connector, &endpoint_id, timers, sink)
+        .await
+        .map_err(|error| anyhow::anyhow!("failed to open device session: {error}"))?;
+    let state = session.wait_ready().await;
+    let DeviceState::Ready { hello } = state else {
+        capture.check_failure()?;
+        bail!(
+            "device did not become ready: {}",
+            state
+                .unavailable_message()
+                .unwrap_or_else(|| format!("{state:?}"))
+        );
+    };
 
-    let _ = handle;
+    let mut client = LpClient::new(session.client_io());
+
+    let files = collect_project_deploy_files(local_fs)?;
+    client
+        .deploy_project_files(project_uid, files)
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"))
+        .with_context(|| format!("deploy projects/{project_uid}"))?;
+    capture.check_failure()?;
 
     sleep(Duration::from_secs(settle_secs)).await;
+    session.pump_console();
     capture.check_failure()?;
 
-    let loaded = run_client_step(
-        capture,
-        "list loaded projects",
-        client.project_list_loaded(),
-    )
-    .await?
-    .len();
+    let loaded = client
+        .project_list_loaded()
+        .await
+        .map_err(|error| anyhow::anyhow!("list loaded projects: {error}"))?
+        .value
+        .len();
+    session.pump_console();
     capture.check_failure()?;
 
-    let mut transport = shared_transport.lock().await;
-    let _ = transport.close().await;
+    drop(client);
+    session.close().await.ok();
 
     Ok(format!(
-        "status: ok\nproject: projects/{project_uid}\nloaded_projects: {loaded}\nsettled_for: {settle_secs}s\n",
+        "status: ok\nproject: projects/{project_uid}\ndevice_uid: {}\nloaded_projects: {loaded}\nsettled_for: {settle_secs}s\n",
+        hello.device_uid.as_deref().unwrap_or("-"),
     ))
-}
-
-async fn wait_for_boot_ready(capture: &Arc<SerialCapture>) -> Result<()> {
-    loop {
-        fail_after_grace_if_needed(capture).await?;
-        if capture.boot_ready() {
-            return Ok(());
-        }
-        sleep(Duration::from_millis(50)).await;
-    }
-}
-
-async fn run_client_step<T, F>(capture: &Arc<SerialCapture>, label: &str, future: F) -> Result<T>
-where
-    F: std::future::Future<Output = Result<T>>,
-{
-    tokio::pin!(future);
-    loop {
-        tokio::select! {
-            result = &mut future => return result,
-            _ = sleep(Duration::from_millis(50)) => {
-                fail_after_grace_if_needed(capture).await.with_context(|| format!("{label} failed"))?;
-            }
-        }
-    }
-}
-
-async fn fail_after_grace_if_needed(capture: &Arc<SerialCapture>) -> Result<()> {
-    if let Some(line) = capture.failure_message() {
-        sleep(Duration::from_secs(2)).await;
-        capture.flush()?;
-        bail!("device reported failure: {line}");
-    }
-    Ok(())
 }
 
 fn capture_serial(
@@ -400,25 +401,44 @@ fn capture_serial(
     Ok(CaptureResult { report_text })
 }
 
-struct SerialCapture {
+/// Trace + failure watch over the [`DeviceSession`] event feed. Every
+/// console line and state transition is written to the trace file; failure
+/// lines (panics, OOM, exceptions) latch for `check_failure`.
+struct DemoCapture {
     trace_file: Mutex<std::fs::File>,
     failure: Mutex<Option<String>>,
-    boot_ready: std::sync::atomic::AtomicBool,
 }
 
-impl SerialCapture {
+impl DemoCapture {
     fn new(path: &Path) -> Result<Self> {
         let trace_file = std::fs::File::create(path)
             .with_context(|| format!("create trace {}", path.display()))?;
         Ok(Self {
             trace_file: Mutex::new(trace_file),
             failure: Mutex::new(None),
-            boot_ready: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
-    fn boot_ready(&self) -> bool {
-        self.boot_ready.load(std::sync::atomic::Ordering::Relaxed)
+    fn observe_event(&self, event: &DeviceEvent) {
+        match event {
+            DeviceEvent::LogLine { line, .. } => {
+                if let Ok(mut file) = self.trace_file.lock() {
+                    writeln!(file, "{line}").ok();
+                }
+                if is_device_failure_line(line) {
+                    let mut failure = self.failure.lock().expect("demo failure mutex");
+                    if failure.is_none() {
+                        *failure = Some(line.clone());
+                    }
+                }
+            }
+            DeviceEvent::State { state } => {
+                if let Ok(mut file) = self.trace_file.lock() {
+                    writeln!(file, "[session] state: {state:?}").ok();
+                }
+            }
+            DeviceEvent::Progress { .. } => {}
+        }
     }
 
     fn check_failure(&self) -> Result<()> {
@@ -429,33 +449,15 @@ impl SerialCapture {
     }
 
     fn failure_message(&self) -> Option<String> {
-        self.failure.lock().expect("serial failure mutex").clone()
+        self.failure.lock().expect("demo failure mutex").clone()
     }
 
     fn flush(&self) -> Result<()> {
         self.trace_file
             .lock()
-            .expect("serial trace mutex")
+            .expect("demo trace mutex")
             .flush()
             .context("flush serial trace")
-    }
-}
-
-impl SerialLineObserver for SerialCapture {
-    fn observe_line(&self, line: &str) {
-        if let Ok(mut file) = self.trace_file.lock() {
-            writeln!(file, "{line}").ok();
-        }
-        if line.contains("[INIT] fw-esp32 initialized, starting server loop") {
-            self.boot_ready
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        if is_device_failure_line(line) {
-            let mut failure = self.failure.lock().expect("serial failure mutex");
-            if failure.is_none() {
-                *failure = Some(line.to_owned());
-            }
-        }
     }
 }
 
