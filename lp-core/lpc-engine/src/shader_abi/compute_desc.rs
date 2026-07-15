@@ -207,7 +207,7 @@ void tick() {{
         let desc =
             compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
                 .expect("compute desc");
-        let graphics = LpvmGraphics::new();
+        let graphics = LpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
         let mut shader = graphics
             .compile_compute_shader(desc)
             .expect("compile compute");
@@ -282,7 +282,7 @@ void tick() {{
         let desc =
             compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
                 .expect("compute desc");
-        let graphics = LpvmGraphics::new();
+        let graphics = LpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
         let mut shader = graphics
             .compile_compute_shader(desc)
             .expect("compile compute");

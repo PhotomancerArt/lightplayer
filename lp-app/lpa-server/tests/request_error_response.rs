@@ -104,7 +104,8 @@ fn load_of_nonexistent_project_gets_error_response() {
 
 fn memory_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
     LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),

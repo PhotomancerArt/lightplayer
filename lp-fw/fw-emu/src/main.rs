@@ -130,7 +130,15 @@ pub extern "C" fn _lp_main() -> ! {
 
     // Create server (with time provider for shader comp timing)
     let time_provider_rc = Rc::new(SyscallTimeProvider::new());
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    // GLSL frontend: the emulator matches the device product constant
+    // (LpsGlsl); the crate's own `naga` feature is an explicit builder
+    // opt-in mirroring fw-esp32's.
+    let shader_frontend = if cfg!(feature = "naga") {
+        lpa_server::ShaderFrontend::Naga
+    } else {
+        lpa_server::DEVICE_SHADER_FRONTEND
+    };
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new(shader_frontend));
     let button_service: Rc<dyn lpa_server::ButtonService> = hardware_system.clone();
     let radio_service: Rc<dyn lpa_server::RadioService> = hardware_system.clone();
     let server = LpServer::new_with_hardware_services(

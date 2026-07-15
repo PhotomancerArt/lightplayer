@@ -166,7 +166,9 @@ pub fn create_memory_server_with(fs: LpFsMemory, hello: lpc_wire::ServerHello) -
     )));
     let button_service: Rc<dyn ButtonService> = hardware.clone();
     let radio_service: Rc<dyn RadioService> = hardware;
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    // Host-process fake device: match the device's GLSL frontend.
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
 
     let mut server = LpServer::new_with_hardware_services(
         output_provider,

@@ -92,8 +92,9 @@ fn test_server_startup_with_memory_filesystem() {
     // Create server with memory filesystem
     let fs = LpFsMemory::new();
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: std::sync::Arc<dyn lpa_server::LpGraphics> =
-        std::sync::Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new());
+    let graphics: std::sync::Arc<dyn lpa_server::LpGraphics> = std::sync::Arc::new(
+        lp_gfx_lpvm::TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND),
+    );
     let _server = LpServer::new(
         output_provider,
         Box::new(fs),
