@@ -15,8 +15,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 
+use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_client::ClientIo;
-use lpa_server::{Graphics, LpGraphics, LpServer};
+use lpa_server::{LpGraphics, LpServer};
 use lpc_model::{AsLpPath, LpValue, SlotPath};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::ServerTransport;
@@ -381,6 +382,9 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     let mut controller = StudioController::connected_with_client_for_test(client);
     controller
         .set_stub_device_for_test(crate::app::device::runtime_attachment::ready_state_for_test());
+    // the shell-injected randomness (crypto bytes on the web) is what
+    // mints `dev_` uids — install a fixed generator to pin the wiring
+    controller.set_random(|| [7u8; 16]);
 
     // a library with one pushable project (the edit-e2e node graph)
     let store = LibraryStore::new(
@@ -432,7 +436,11 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
         crate::app::places::DeviceIdentity::from_json_bytes(&bytes).unwrap()
     };
     assert_eq!(stamped_identity.name, "Luna's porch sign");
-    assert!(stamped_identity.uid.starts_with("dev_"));
+    assert_eq!(
+        stamped_identity.uid,
+        lpc_history::PrefixedUid::mint(lpc_history::UidPrefix::Device, &[7u8; 16]).to_string(),
+        "the uid is minted from the injected randomness"
+    );
     let registry = DeviceRegistry::new(store.fs_handle());
     assert_eq!(registry.list().unwrap().len(), 1);
     assert!(matches!(
@@ -1639,7 +1647,7 @@ fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
 
 fn asset_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -1730,7 +1738,7 @@ const PROJECT_DIR: &str = "/projects/edit-e2e";
 /// simulator session runs entirely host-side).
 fn edit_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),

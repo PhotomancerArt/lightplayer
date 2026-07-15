@@ -10,6 +10,7 @@ rust-version.workspace = true
 fw-core = { path = "../fw-core", features = ["std"] }
 lpa-client = { path = "../../lp-app/lpa-client" }
 lpa-server = { path = "../../lp-app/lpa-server" }
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm" }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", features = ["std"] }
 lpc-model = { path = "../../lp-core/lpc-model", features = ["std"] }
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }

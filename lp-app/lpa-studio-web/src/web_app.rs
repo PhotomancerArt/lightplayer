@@ -55,6 +55,17 @@ pub fn App() -> Element {
         };
     }
 
+    // Dev-only measurement page (GPU-preview discovery M1); never linked
+    // from product navigation and absent from non-stories builds.
+    #[cfg(all(feature = "stories", target_arch = "wasm32"))]
+    if crate::exploration::preview_lab::should_show_preview_lab() {
+        return rsx! {
+            style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            crate::exploration::preview_lab::PreviewLabPage {}
+        };
+    }
+
     let mut view = use_signal(UiStudioView::empty);
     // The route: parsed from the URL at boot (with the legacy `?project=`
     // mapping), canonicalized once, then kept in sync bidirectionally —
@@ -88,6 +99,10 @@ pub fn App() -> Element {
         // on browser timers; without this the core default fires every
         // deadline immediately.
         controller.set_device_timers(make_device_timers());
+        // Crypto randomness for identity minting (`dev_` uids). Host
+        // builds keep the core's clock-derived fallback.
+        #[cfg(target_arch = "wasm32")]
+        controller.set_random(crate::library_host_opfs::random_bytes);
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
         spawn(async move {

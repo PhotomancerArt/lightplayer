@@ -11,7 +11,6 @@ use crate::dataflow::resolver::{
     Production, ProductionSource, QueryKey, ResolveError, TickResolver,
 };
 use crate::engine::{ButtonService, RadioService};
-use crate::gfx::LpGraphics;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -20,6 +19,7 @@ use crate::products::visual::{
     VisualSampleTarget,
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
+use lp_gfx::{LpGraphics, TextureHandle};
 use lpc_model::{
     AssetLocation, FromLpValue, NodeId, Revision, SlotAccess, SlotAccessor, SlotPath,
     SlotShapeRegistry, WithRevision, bus::ChannelName, lookup_slot_data_and_shape,
@@ -416,7 +416,7 @@ impl<'a> ControlRenderContext<'a> {
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
     ) -> Result<(), NodeError> {
         self.services.render_texture_into(product, request, target)
     }
@@ -443,7 +443,7 @@ pub trait ControlRenderServices {
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
     ) -> Result<(), NodeError>;
 
     fn sample_visual_into(
@@ -466,7 +466,7 @@ pub trait VisualRenderServices {
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
     ) -> Result<(), NodeError>;
 
     fn sample_visual_into(
@@ -566,7 +566,7 @@ impl<'a> RenderContext<'a> {
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
     ) -> Result<(), NodeError> {
         self.services
             .as_mut()

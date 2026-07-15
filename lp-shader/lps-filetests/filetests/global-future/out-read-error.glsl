@@ -22,7 +22,6 @@ void test_edge_out_read_error_write() {
     fragment_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_edge_out_read_error_write() == 0.0
 
@@ -43,7 +42,6 @@ float test_edge_out_read_error_indirect() {
     return 0.0;  // Placeholder
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_edge_out_read_error_indirect() ~= 0.0
 
@@ -54,7 +52,6 @@ void test_edge_out_read_error_multiple_writes() {
     fragment_color = vec4(0.0, 0.0, 1.0, 1.0);  // Final value
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_edge_out_read_error_multiple_writes() == 0.0
 
@@ -67,6 +64,5 @@ void test_edge_out_read_error_fragment_output() {
     fragment_depth = 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_edge_out_read_error_fragment_output() == 0.0

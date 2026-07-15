@@ -692,6 +692,10 @@ test: test-rust test-filetests
 
 test-rust:
     cargo test
+    # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
+    # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
+    # GPU-adapter tests skip cleanly on runners without a GPU.
+    cargo test -p lp-gfx-wgpu
 
 test-filetests:
     scripts/filetests.sh
@@ -938,8 +942,6 @@ cargo-update:
                  -p cranelift-codegen \
                  -p cranelift-frontend \
                  -p cranelift-module \
-                 -p cranelift-jit \
-                 -p cranelift-native \
                  -p cranelift-object \
                  -p cranelift-reader \
                  -p cranelift-control \

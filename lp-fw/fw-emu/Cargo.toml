@@ -10,6 +10,7 @@ rust-version.workspace = true
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 fw-core = { path = "../fw-core", default-features = false, features = ["emu"] }
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"] }
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }

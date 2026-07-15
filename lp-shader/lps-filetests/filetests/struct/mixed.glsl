@@ -32,7 +32,6 @@ float test_mixed_construct_vertex() {
     return v.position.x + v.u; // 1.0 + 0.5 = 1.5
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_construct_vertex() ~= 1.5
 
 float test_mixed_construct_material_shininess() {
@@ -40,7 +39,6 @@ float test_mixed_construct_material_shininess() {
     return m.shininess + float(m.flags); // 64 + 3 = 67
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_construct_material_shininess() ~= 67.0
 
 vec3 test_mixed_construct_scene_position() {
@@ -52,7 +50,6 @@ vec3 test_mixed_construct_scene_position() {
     return o.position;
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_construct_scene_position() ~= vec3(10.0, 20.0, 30.0)
 
 // --- Mixed read --------------------------------------------------------------
@@ -62,7 +59,6 @@ float test_mixed_read_vertex_normal_y() {
     return v.normal.y; // 0.75
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_read_vertex_normal_y() ~= 0.75
 
 int test_mixed_read_material_flags() {
@@ -70,7 +66,6 @@ int test_mixed_read_material_flags() {
     return m.flags;
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_read_material_flags() == 42
 
 float test_mixed_read_scene_rotation_identity() {
@@ -78,7 +73,6 @@ float test_mixed_read_scene_rotation_identity() {
     return o.rotation[1][1]; // identity
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_read_scene_rotation_identity() ~= 1.0
 
 vec3 test_mixed_read_nested_material_diffuse() {
@@ -90,7 +84,6 @@ vec3 test_mixed_read_nested_material_diffuse() {
     return o.mat.diffuse;
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_read_nested_material_diffuse() ~= vec3(2.0, 3.0, 4.0)
 
 // --- Mixed write -------------------------------------------------------------
@@ -102,7 +95,6 @@ float test_mixed_write_vertex_uv() {
     return v.u + v.v; // 1.0
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_write_vertex_uv() ~= 1.0
 
 float test_mixed_write_material_shininess() {
@@ -111,7 +103,6 @@ float test_mixed_write_material_shininess() {
     return m.shininess;
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_write_material_shininess() ~= 128.0
 
 float test_mixed_write_scene_scale_and_nested() {
@@ -125,7 +116,6 @@ float test_mixed_write_scene_scale_and_nested() {
     return o.scale + o.mat.ambient.x; // 4.0
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_write_scene_scale_and_nested() ~= 4.0
 
 float test_mixed_write_rotation_whole() {
@@ -134,7 +124,6 @@ float test_mixed_write_rotation_whole() {
     return o.rotation[0][0];
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_write_rotation_whole() ~= 5.0
 
 // --- Mixed whole-struct assignment -------------------------------------------
@@ -146,7 +135,6 @@ float test_mixed_assign_vertex() {
     return a.position.x + a.u; // 9 + 2 = 11
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_assign_vertex() ~= 11.0
 
 int test_mixed_assign_material_flags() {
@@ -156,7 +144,6 @@ int test_mixed_assign_material_flags() {
     return a.flags;
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_assign_material_flags() == 99
 
 float test_mixed_assign_scene_object_scale() {
@@ -166,7 +153,6 @@ float test_mixed_assign_scene_object_scale() {
     return a.position.x + a.scale; // 7.5
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_assign_scene_object_scale() ~= 7.5
 
 // --- Complex expressions -----------------------------------------------------
@@ -180,7 +166,6 @@ float test_mixed_complex_expr() {
     return o.position.x * o.scale + o.mat.shininess; // 1.0 * 2.0 + 32.0 = 34.0
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_complex_expr() ~= 34.0
 
 float test_mixed_complex_dot_and_flags() {
@@ -189,7 +174,6 @@ float test_mixed_complex_dot_and_flags() {
     return dot(v.position, v.normal) + float(m.flags); // 1 + 4 = 5
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_complex_dot_and_flags() ~= 5.0
 
 float test_mixed_complex_column_scale_diffuse() {
@@ -201,7 +185,6 @@ float test_mixed_complex_column_scale_diffuse() {
     return o.rotation[0].x * o.scale + o.mat.diffuse.x; // 1*2 + 0.5 = 2.5
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_complex_column_scale_diffuse() ~= 2.5
 
 float test_mixed_game_two_objects_distance_hint() {
@@ -219,5 +202,4 @@ float test_mixed_game_two_objects_distance_hint() {
     return length(d); // 5.0
 }
 
-// @unimplemented(jit.q32)
 // run: test_mixed_game_two_objects_distance_hint() ~= 5.0

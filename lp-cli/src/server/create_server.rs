@@ -1,5 +1,6 @@
 use crate::commands::serve::init::{create_filesystem, initialize_server};
-use lpa_server::{ButtonService, Graphics, LpGraphics, LpServer, RadioService};
+use lp_gfx_lpvm::TargetLpvmGraphics;
+use lpa_server::{ButtonService, LpGraphics, LpServer, RadioService};
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
@@ -56,7 +57,7 @@ pub fn create_server(
     // Since we can't clone Box<dyn LpFs>, we'll return the filesystem that was passed
     // Note: LpServer takes ownership, so we can't return the same instance
     // For now, return a new filesystem instance (caller may not need it)
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,

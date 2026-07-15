@@ -161,6 +161,33 @@ impl Project {
             .map_err(|e| ServerError::Core(format!("{e}")))
     }
 
+    /// Resolve the visual product handle currently carried by a bus channel.
+    ///
+    /// Preview surfaces call this once after load (product handles are stable
+    /// across frames) and then materialize frames with
+    /// [`Self::render_visual_texture`].
+    pub fn resolve_bus_visual_product(
+        &mut self,
+        channel: &str,
+    ) -> Result<lpc_engine::products::visual::VisualProduct, ServerError> {
+        let (engine, registry) = self.runtime_read_parts();
+        engine
+            .resolve_bus_visual_product(registry, channel)
+            .map_err(|e| ServerError::Core(format!("resolve bus visual product: {e}")))
+    }
+
+    /// Materialize a visual product into a CPU texture (preview path).
+    pub fn render_visual_texture(
+        &mut self,
+        product: lpc_engine::products::visual::VisualProduct,
+        request: &lpc_engine::products::visual::RenderTextureRequest,
+    ) -> Result<lpc_engine::products::visual::TextureRenderProduct, ServerError> {
+        let (engine, registry) = self.runtime_read_parts();
+        engine
+            .render_texture_product(registry, product, request)
+            .map_err(|e| ServerError::Core(format!("render visual texture: {e}")))
+    }
+
     pub fn read_overlay(&mut self) -> WireOverlayReadResponse {
         // Base-value display strings ride the read as a parallel list (P2):
         // one base parse per overlaid artifact annotates every pending path,

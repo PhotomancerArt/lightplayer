@@ -1,0 +1,33 @@
+[package]
+name = "lp-gfx-wgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LightPlayer GPU graphics backend: authored GLSL → naga wgsl-out → wgpu render at f32 semantics"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-gfx = { path = "../lp-gfx", default-features = false }
+lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
+lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
+lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
+naga = { version = "29.0.0", default-features = false, features = ["glsl-in", "wgsl-out"] }
+wgpu = "29"
+
+# Single-threaded wasm (fw-browser worker): wgpu types are not Send/Sync on
+# wasm without this feature, but `LpGraphics: Send + Sync` requires them.
+# Safe on non-atomics wasm builds (there is only one thread).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "29", features = ["fragile-send-sync-non-atomic-wasm"] }
+
+[dev-dependencies]
+pollster = "0.3"
+png = "0.18"
+lp-gfx-lpvm = { path = "../lp-gfx-lpvm" }
+lp-shader = { path = "../../lp-shader/lp-shader", features = ["naga"] }
+lpir = { path = "../../lp-shader/lpir" }
+lps-filetests = { path = "../../lp-shader/lps-filetests" }
+lps-frontend = { path = "../../lp-shader/lps-frontend" }
+lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }

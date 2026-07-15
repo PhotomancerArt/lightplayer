@@ -74,13 +74,13 @@ mod texture_spec_compile_tests {
     use lp_riscv_emu::LogLevel;
     use lps_shared::{TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap};
 
-    fn jit_q32_target() -> Target {
+    fn wasm_q32_target() -> Target {
         Target {
             frontend: Frontend::Naga,
-            backend: Backend::Jit,
+            backend: Backend::Wasm,
             float_mode: FloatMode::Q32,
-            isa: Isa::Native,
-            exec_mode: ExecMode::Jit,
+            isa: Isa::Wasm32,
+            exec_mode: ExecMode::Emulator,
         }
     }
 
@@ -100,7 +100,7 @@ mod texture_spec_compile_tests {
 float add(float a, float b) { return a + b; }
 uniform sampler2D tex;
 "#;
-        let target = jit_q32_target();
+        let target = wasm_q32_target();
         let cfg = CompilerConfig::default();
         let empty = VecMap::new();
         let err = match compile_for_target(glsl, &target, "", LogLevel::None, &cfg, &empty) {
@@ -120,7 +120,7 @@ uniform sampler2D tex;
 float add(float a, float b) { return a + b; }
 uniform sampler2D tex;
 "#;
-        let target = jit_q32_target();
+        let target = wasm_q32_target();
         let cfg = CompilerConfig::default();
         let mut specs = VecMap::new();
         specs.insert(String::from("tex"), sample_spec());
@@ -133,7 +133,7 @@ uniform sampler2D tex;
         let glsl = r#"
 float add(float a, float b) { return a + b; }
 "#;
-        let target = jit_q32_target();
+        let target = wasm_q32_target();
         let cfg = CompilerConfig::default();
         let mut specs = VecMap::new();
         specs.insert(String::from("orphanTex"), sample_spec());

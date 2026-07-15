@@ -1,16 +1,28 @@
-//! CPU-backed texture result materialized from a [`super::VisualProduct`].
+//! Texture result materialized from a [`super::VisualProduct`] — host bytes
+//! or a GPU-resident handle.
 
 use core::fmt;
 
+use lp_gfx::TextureHandle;
 use lps_shared::TextureStorageFormat;
 
 use super::{TextureSampleBatch, VisualSample, VisualSampleBatchResult, texture_uv_q16_to_texel};
 
-/// Invalid [`TextureRenderProduct`] construction input.
+/// Invalid [`TextureRenderProduct`] construction input or an operation that
+/// requires host-resident bytes on a GPU-resident product.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextureRenderProductError {
-    ZeroDimension { width: u32, height: u32 },
-    ByteLenMismatch { expected: usize, actual: usize },
+    ZeroDimension {
+        width: u32,
+        height: u32,
+    },
+    ByteLenMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    /// The product is GPU-resident: no host bytes to operate on
+    /// (fidelity-tiers ADR — byte-needing consumers run on the CPU tier).
+    GpuResident,
 }
 
 impl fmt::Display for TextureRenderProductError {
@@ -26,22 +38,41 @@ impl fmt::Display for TextureRenderProductError {
                 f,
                 "texture pixel byte length mismatch: expected {expected} bytes, got {actual}"
             ),
+            Self::GpuResident => write!(
+                f,
+                "texture product is GPU-resident (no host bytes on the GPU tier)"
+            ),
         }
     }
 }
 
 impl core::error::Error for TextureRenderProductError {}
 
-/// Texture-backed visual product with private byte storage (no `LpsTextureBuf` in the public API).
+/// Where a texture product's texels live.
+#[derive(Debug)]
+enum TexturePixels {
+    /// Host-resident tightly packed texel bytes (CPU tier).
+    Host(alloc::vec::Vec<u8>),
+    /// GPU-resident render target (GPU tier). The handle is RAII-owned by
+    /// the product; presentation blits it to a surface without readback.
+    Gpu(TextureHandle),
+}
+
+/// Texture-backed visual product: host bytes on CPU backends, an opaque
+/// [`TextureHandle`] on GPU-resident backends (no `LpsTextureBuf`, no
+/// backend pointers in the public API).
 ///
-/// Sample coordinates in [`TextureSampleBatch`] are interpreted as normalized Q16.16 values
-/// and converted to integer texels with clamp-to-edge behavior.
-#[derive(Debug, Clone)]
+/// Byte consumers use [`Self::try_raw_bytes`] and must handle `None` for
+/// GPU-resident products (the wire probe edge maps it to a structured
+/// answer). Sample coordinates in [`TextureSampleBatch`] are interpreted as
+/// normalized Q16.16 values and converted to integer texels with
+/// clamp-to-edge behavior.
+#[derive(Debug)]
 pub struct TextureRenderProduct {
     width: u32,
     height: u32,
     format: TextureStorageFormat,
-    pixels: alloc::vec::Vec<u8>,
+    pixels: TexturePixels,
 }
 
 impl TextureRenderProduct {
@@ -61,12 +92,30 @@ impl TextureRenderProduct {
     }
 
     /// Raw tightly packed pixel bytes when resident in host memory.
+    ///
+    /// `None` for GPU-resident products.
     #[must_use]
     pub fn try_raw_bytes(&self) -> Option<&[u8]> {
-        Some(self.pixels.as_slice())
+        match &self.pixels {
+            TexturePixels::Host(pixels) => Some(pixels.as_slice()),
+            TexturePixels::Gpu(_) => None,
+        }
     }
 
-    /// Builds a product after validating dimensions and byte length.
+    /// The GPU render target behind a GPU-resident product.
+    ///
+    /// `None` for host-resident products. Presentation edges pass this to
+    /// their backend's surface-present op; the handle is only valid with
+    /// the backend that rendered the product.
+    #[must_use]
+    pub fn gpu_handle(&self) -> Option<&TextureHandle> {
+        match &self.pixels {
+            TexturePixels::Host(_) => None,
+            TexturePixels::Gpu(handle) => Some(handle),
+        }
+    }
+
+    /// Builds a host-resident product after validating dimensions and byte length.
     pub fn new(
         width: u32,
         height: u32,
@@ -91,7 +140,7 @@ impl TextureRenderProduct {
             width,
             height,
             format,
-            pixels,
+            pixels: TexturePixels::Host(pixels),
         })
     }
 
@@ -103,21 +152,51 @@ impl TextureRenderProduct {
     ) -> Result<Self, TextureRenderProductError> {
         Self::new(width, height, TextureStorageFormat::Rgba16Unorm, pixels)
     }
+
+    /// Builds a GPU-resident product around a rendered target handle.
+    ///
+    /// Used by render paths on backends where
+    /// `LpGraphics::supports_read_back()` is `false` (browser GPU tier):
+    /// the product keeps the texture on the GPU and presentation happens
+    /// via surface blit, never bytes.
+    pub fn gpu_resident(handle: TextureHandle) -> Result<Self, TextureRenderProductError> {
+        let (width, height) = (handle.width(), handle.height());
+        if width == 0 || height == 0 {
+            return Err(TextureRenderProductError::ZeroDimension { width, height });
+        }
+        Ok(Self {
+            width,
+            height,
+            format: handle.format(),
+            pixels: TexturePixels::Gpu(handle),
+        })
+    }
 }
 
 impl TextureRenderProduct {
-    pub fn sample_batch(&self, request: &TextureSampleBatch) -> VisualSampleBatchResult {
+    /// Sample texels at normalized Q16.16 UV points.
+    ///
+    /// Errors with [`TextureRenderProductError::GpuResident`] on GPU-resident
+    /// products — sampling sinks run on the CPU tier.
+    pub fn sample_batch(
+        &self,
+        request: &TextureSampleBatch,
+    ) -> Result<VisualSampleBatchResult, TextureRenderProductError> {
+        let pixels = match &self.pixels {
+            TexturePixels::Host(pixels) => pixels,
+            TexturePixels::Gpu(_) => return Err(TextureRenderProductError::GpuResident),
+        };
         let mut samples = alloc::vec::Vec::with_capacity(request.points.len());
         for p in &request.points {
             let tx = texture_uv_q16_to_texel(p.u_q16, self.width);
             let ty = texture_uv_q16_to_texel(p.v_q16, self.height);
             let (tx, ty) = clamp_texel(tx, ty, self.width, self.height);
-            let color = sample_texel(&self.pixels, self.width, self.format, tx, ty);
+            let color = sample_texel(pixels, self.width, self.format, tx, ty);
             samples.push(VisualSample {
                 rgba_unorm16: color,
             });
         }
-        VisualSampleBatchResult { samples }
+        Ok(VisualSampleBatchResult { samples })
     }
 }
 
@@ -221,7 +300,7 @@ mod tests {
             ],
             time_seconds: 0.0,
         };
-        let out = tex.sample_batch(&batch);
+        let out = tex.sample_batch(&batch).expect("host product samples");
         assert_eq!(out.samples.len(), 4);
         assert_eq!(out.samples[0].rgba_unorm16, [65535, 0, 0, 65535]);
         assert_eq!(out.samples[1].rgba_unorm16, [0, 65535, 0, 65535]);
@@ -251,5 +330,55 @@ mod tests {
                 height: 4
             }
         ));
+    }
+
+    #[test]
+    fn gpu_resident_product_has_no_bytes_and_refuses_sampling() {
+        let tex = TextureRenderProduct::gpu_resident(test_handle(3, 2)).expect("gpu product");
+        assert_eq!(tex.width(), 3);
+        assert_eq!(tex.height(), 2);
+        assert_eq!(
+            tex.storage_format(),
+            lps_shared::TextureStorageFormat::Rgba16Unorm
+        );
+        assert!(tex.try_raw_bytes().is_none());
+        assert!(tex.gpu_handle().is_some());
+
+        let batch = TextureSampleBatch {
+            points: vec![TextureUvSamplePoint { u_q16: 0, v_q16: 0 }],
+            time_seconds: 0.0,
+        };
+        assert!(matches!(
+            tex.sample_batch(&batch),
+            Err(TextureRenderProductError::GpuResident)
+        ));
+    }
+
+    #[test]
+    fn host_product_exposes_no_gpu_handle() {
+        let tex = TextureRenderProduct::rgba16_unorm(1, 1, vec![0u8; 8]).expect("host product");
+        assert!(tex.gpu_handle().is_none());
+    }
+
+    fn test_handle(width: u32, height: u32) -> lp_gfx::TextureHandle {
+        struct NoopAllocator;
+        impl lp_gfx::HandleAllocator for NoopAllocator {
+            fn free_texture(&self, backing: lp_gfx::HandleBacking) {
+                drop(backing);
+            }
+            fn free_sample_points(&self, backing: lp_gfx::HandleBacking) {
+                drop(backing);
+            }
+            fn free_sample_out(&self, backing: lp_gfx::HandleBacking) {
+                drop(backing);
+            }
+        }
+        lp_gfx::TextureHandle::from_backend_parts(
+            width,
+            height,
+            lps_shared::TextureStorageFormat::Rgba16Unorm,
+            alloc::boxed::Box::new(()),
+            alloc::sync::Arc::new(NoopAllocator),
+        )
     }
 }

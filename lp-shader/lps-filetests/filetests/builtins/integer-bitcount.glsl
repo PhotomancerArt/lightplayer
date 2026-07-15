@@ -38,7 +38,6 @@ uint test_bitcount_uint_zero() {
     return bitCount(0u);
 }
 
-// @unimplemented(jit.q32)
 // run: test_bitcount_uint_zero() == 0u
 
 uint test_bitcount_uint_one() {
@@ -46,7 +45,6 @@ uint test_bitcount_uint_one() {
     return bitCount(1u);
 }
 
-// @unimplemented(jit.q32)
 // run: test_bitcount_uint_one() == 1u
 
 uint test_bitcount_uint_full() {
@@ -54,7 +52,6 @@ uint test_bitcount_uint_full() {
     return bitCount(4294967295u);
 }
 
-// @unimplemented(jit.q32)
 // run: test_bitcount_uint_full() == 32u
 
 uint test_bitcount_uint_pattern() {
@@ -62,7 +59,6 @@ uint test_bitcount_uint_pattern() {
     return bitCount(170u);
 }
 
-// @unimplemented(jit.q32)
 // run: test_bitcount_uint_pattern() == 4u
 
 ivec2 test_bitcount_ivec2() {

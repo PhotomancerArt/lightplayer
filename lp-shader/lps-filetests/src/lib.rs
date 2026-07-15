@@ -6,6 +6,8 @@
 #![deny(missing_docs)]
 
 pub mod colors;
+#[cfg(test)]
+mod conformance;
 pub mod discovery;
 pub mod mutation;
 pub mod output_mode;

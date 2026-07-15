@@ -93,7 +93,10 @@ pub fn interpret_with_depth(
         full.push(Value::I32(0));
     }
     full.extend_from_slice(args);
-    exec_func(module, func, &full, imports, 0, max_depth)
+    // One linear stack shared by all frames so slot addresses stay valid
+    // across calls (out-parameters, sret pointers).
+    let mut stack: Vec<u8> = Vec::new();
+    exec_func(module, func, &full, imports, 0, max_depth, &mut stack)
 }
 
 fn exec_func(
@@ -103,6 +106,7 @@ fn exec_func(
     imports: &mut dyn ImportHandler,
     depth: usize,
     max_depth: usize,
+    stack: &mut Vec<u8>,
 ) -> Result<Vec<Value>, InterpError> {
     if depth > max_depth {
         return Err(InterpError::StackOverflow);
@@ -129,9 +133,13 @@ fn exec_func(
         regs[vm + h + i] = Some(args[h + i]);
     }
 
-    let slot_off = slot_offsets(func);
+    // This frame's slots live at [frame_base, frame_base + slot_total) in
+    // the shared stack; slot addresses are absolute stack offsets so
+    // callees can dereference caller pointers (out-parameters).
+    let frame_base = stack.len();
+    let slot_off = slot_offsets(func, frame_base as u32);
     let slot_total: usize = func.slots.iter().map(|s| s.size as usize).sum();
-    let mut slot_mem = alloc::vec![0u8; slot_total];
+    stack.resize(frame_base + slot_total, 0);
 
     let mut pc = 0usize;
     let mut ctrl: Vec<Ctrl> = Vec::new();
@@ -157,21 +165,27 @@ fn exec_func(
                         merge: *end_offset as usize,
                     });
                     pc += 1;
+                } else if matches!(func.body.get(*else_offset as usize), Some(LpirOp::Else)) {
+                    // Enter the else arm just past its `Else` marker, with a
+                    // frame so the closing `End` pops it (keeps nesting
+                    // balanced — `Else`/`End` never guess whose frame is on
+                    // top).
+                    ctrl.push(Ctrl::If {
+                        merge: *end_offset as usize,
+                    });
+                    pc = *else_offset as usize + 1;
                 } else {
-                    pc = *else_offset as usize;
+                    // No else arm: skip the whole construct (else_offset
+                    // points at the `End`, end_offset just past it).
+                    pc = *end_offset as usize;
                 }
             }
             LpirOp::Else => {
-                // False-branch entry jumps here from `IfStart` without pushing `Ctrl::If`.
-                // True-branch fall-through pushes `Ctrl::If` first; `Else` then skips the false arm.
-                if matches!(ctrl.last(), Some(Ctrl::If { .. })) {
-                    let merge = match ctrl.pop() {
-                        Some(Ctrl::If { merge }) => merge,
-                        _ => return Err(InterpError::Internal("else without if".into())),
-                    };
-                    pc = merge;
-                } else {
-                    pc += 1;
+                // Only reachable by fall-through from the then-arm (the
+                // false branch enters *past* this marker); skip the else arm.
+                match ctrl.pop() {
+                    Some(Ctrl::If { merge }) => pc = merge,
+                    _ => return Err(InterpError::Internal("else without if".into())),
                 }
             }
             LpirOp::LoopStart {
@@ -284,6 +298,7 @@ fn exec_func(
                 for v in slice {
                     out.push(get_reg(&regs, *v)?);
                 }
+                stack.truncate(frame_base);
                 return Ok(out);
             }
             LpirOp::Call {
@@ -309,7 +324,15 @@ fn exec_func(
                             want
                         )));
                     }
-                    exec_func(module, callee_fn, &call_args, imports, depth + 1, max_depth)?
+                    exec_func(
+                        module,
+                        callee_fn,
+                        &call_args,
+                        imports,
+                        depth + 1,
+                        max_depth,
+                        stack,
+                    )?
                 } else {
                     return Err(InterpError::Internal("bad callee".into()));
                 };
@@ -323,12 +346,13 @@ fn exec_func(
                 pc += 1;
             }
             op => {
-                eval_op(func, op, &mut regs, &slot_off, &mut slot_mem)?;
+                eval_op(func, op, &mut regs, &slot_off, stack)?;
                 pc += 1;
             }
         }
     }
 
+    stack.truncate(frame_base);
     Ok(Vec::new())
 }
 
@@ -364,9 +388,9 @@ fn set_reg(
     Ok(())
 }
 
-fn slot_offsets(func: &IrFunction) -> Vec<u32> {
+fn slot_offsets(func: &IrFunction, frame_base: u32) -> Vec<u32> {
     let mut off = Vec::with_capacity(func.slots.len());
-    let mut cur = 0u32;
+    let mut cur = frame_base;
     for s in &func.slots {
         off.push(cur);
         cur += s.size;
@@ -490,27 +514,31 @@ fn eval_op(
         LpirOp::Isub { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, sub),
         LpirOp::Imul { dst, lhs, rhs } => bin_i!(*dst, *lhs, *rhs, mul),
         LpirOp::IdivS { dst, lhs, rhs } => {
+            // RV32 semantics: x / 0 = -1, i32::MIN / -1 = i32::MIN.
             let a = val_i32(get_reg(regs, *lhs)?)?;
             let b = val_i32(get_reg(regs, *rhs)?)?;
-            let v = if b == 0 { 0 } else { a.wrapping_div(b) };
+            let v = if b == 0 { -1 } else { a.wrapping_div(b) };
             set_reg(regs, *dst, Value::I32(v))?;
         }
         LpirOp::IdivU { dst, lhs, rhs } => {
+            // RV32 semantics: x / 0 = all ones.
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
-            let v = if b == 0 { 0 } else { a.wrapping_div(b) };
+            let v = if b == 0 { u32::MAX } else { a.wrapping_div(b) };
             set_reg(regs, *dst, Value::I32(v as i32))?;
         }
         LpirOp::IremS { dst, lhs, rhs } => {
+            // RV32 semantics: x % 0 = x, i32::MIN % -1 = 0.
             let a = val_i32(get_reg(regs, *lhs)?)?;
             let b = val_i32(get_reg(regs, *rhs)?)?;
-            let v = if b == 0 { 0 } else { a.wrapping_rem(b) };
+            let v = if b == 0 { a } else { a.wrapping_rem(b) };
             set_reg(regs, *dst, Value::I32(v))?;
         }
         LpirOp::IremU { dst, lhs, rhs } => {
+            // RV32 semantics: x % 0 = x.
             let a = val_i32(get_reg(regs, *lhs)?)? as u32;
             let b = val_i32(get_reg(regs, *rhs)?)? as u32;
-            let v = if b == 0 { 0 } else { a.wrapping_rem(b) };
+            let v = if b == 0 { a } else { a.wrapping_rem(b) };
             set_reg(regs, *dst, Value::I32(v as i32))?;
         }
         LpirOp::Ineg { dst, src } => {

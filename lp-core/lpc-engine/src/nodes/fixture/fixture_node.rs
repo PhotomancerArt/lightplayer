@@ -20,13 +20,13 @@ use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators,
 };
+use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureData, TextureHandle};
 use lpc_model::nodes::texture::TextureFormat;
-use lps_shared::TextureBuffer;
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
-    PressureLevel, ProduceResult, RuntimeStateShape, TickContext,
+    PressureLevel, ProduceResult, RuntimeStateShape, TickContext, err_ctx,
 };
 use crate::products::control::{
     ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
@@ -47,9 +47,9 @@ pub struct FixtureNode {
     def_view: Option<FixtureDefView>,
     last_visual_product: Option<VisualProduct>,
     last_settings: Option<FixtureRenderSettings>,
-    render_target: Option<lp_shader::LpsTextureBuf>,
-    sample_points: Option<lp_shader::LpsSamplePointBuf>,
-    sample_target: Option<lp_shader::LpsSampleRgba16Buf>,
+    render_target: Option<TextureHandle>,
+    sample_points: Option<SamplePointsHandle>,
+    sample_target: Option<SampleOutHandle>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     direct_points: Option<(Revision, alloc::vec::Vec<DirectSamplePoint>)>,
@@ -83,7 +83,7 @@ impl FixtureNode {
 
     fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&FixtureDefView, NodeError> {
         FixtureDefView::get_or_compile(&mut self.def_view, ctx.slot_shapes())
-            .map_err(|e| NodeError::msg(format!("compile fixture def view: {e}")))
+            .map_err(err_ctx("compile fixture def view"))
     }
 
     fn ensure_texture_area_mapping(
@@ -516,8 +516,13 @@ impl ControlNode for FixtureNode {
         };
         let texture = ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
         ctx.render_texture_into(visual_product, &texture_request, texture)?;
-        let accumulators = accumulate_fixture_channels_from_texture_buffer(
-            texture,
+        let texture_data = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("fixture texture accumulation requires graphics"))?
+            .read_back(texture)
+            .map_err(err_ctx("fixture render target read back"))?;
+        let accumulators = accumulate_fixture_channels_from_texture_data(
+            &texture_data,
             mapping_entries,
             settings.width,
             settings.height,
@@ -567,10 +572,10 @@ impl ControlNode for FixtureNode {
 }
 
 fn ensure_fixture_render_target<'a>(
-    current: &'a mut Option<lp_shader::LpsTextureBuf>,
+    current: &'a mut Option<TextureHandle>,
     request: &RenderTextureRequest,
     ctx: &ControlRenderContext<'_>,
-) -> Result<&'a mut lp_shader::LpsTextureBuf, NodeError> {
+) -> Result<&'a mut TextureHandle, NodeError> {
     let stale = current.as_ref().is_none_or(|texture| {
         texture.width() != request.width
             || texture.height() != request.height
@@ -580,17 +585,16 @@ fn ensure_fixture_render_target<'a>(
         let graphics = ctx
             .graphics()
             .ok_or_else(|| NodeError::msg("fixture render target allocation requires graphics"))?;
-        if let Some(old) = current.take() {
-            graphics.free_output_buffer(old);
-        }
+        // Drop (free) the stale target before allocating its replacement so
+        // the backend can reuse the memory.
+        drop(current.take());
         let texture = graphics
-            .alloc_output_buffer(request.width, request.height)
-            .map_err(|e| NodeError::msg(format!("fixture render target allocation: {e}")))?;
+            .create_render_target(request.width, request.height)
+            .map_err(err_ctx("fixture render target allocation"))?;
         if texture.format() != request.format {
-            let allocated = texture.format();
-            graphics.free_output_buffer(texture);
             return Err(NodeError::msg(format!(
-                "fixture render target allocated {allocated:?}, requested {:?}",
+                "fixture render target allocated {:?}, requested {:?}",
+                texture.format(),
                 request.format
             )));
         }
@@ -602,10 +606,10 @@ fn ensure_fixture_render_target<'a>(
 }
 
 fn ensure_fixture_sample_target<'a>(
-    current: &'a mut Option<lp_shader::LpsSampleRgba16Buf>,
+    current: &'a mut Option<SampleOutHandle>,
     count: u32,
     ctx: &ControlRenderContext<'_>,
-) -> Result<&'a mut lp_shader::LpsSampleRgba16Buf, NodeError> {
+) -> Result<&'a mut SampleOutHandle, NodeError> {
     let stale = current
         .as_ref()
         .is_none_or(|samples| samples.count() != count);
@@ -613,12 +617,10 @@ fn ensure_fixture_sample_target<'a>(
         let graphics = ctx
             .graphics()
             .ok_or_else(|| NodeError::msg("fixture sample target allocation requires graphics"))?;
-        if let Some(old) = current.take() {
-            graphics.free_sample_rgba16(old);
-        }
+        drop(current.take());
         let samples = graphics
-            .alloc_sample_rgba16(count)
-            .map_err(|e| NodeError::msg(format!("fixture sample target allocation: {e}")))?;
+            .create_sample_out(count)
+            .map_err(err_ctx("fixture sample target allocation"))?;
         *current = Some(samples);
     }
     current
@@ -627,41 +629,43 @@ fn ensure_fixture_sample_target<'a>(
 }
 
 fn ensure_fixture_sample_points<'a>(
-    current: &'a mut Option<lp_shader::LpsSamplePointBuf>,
+    current: &'a mut Option<SamplePointsHandle>,
     points: &[DirectSamplePoint],
     output_width: u32,
     output_height: u32,
     ctx: &ControlRenderContext<'_>,
-) -> Result<&'a mut lp_shader::LpsSamplePointBuf, NodeError> {
+) -> Result<&'a mut SamplePointsHandle, NodeError> {
     let count = points.len() as u32;
     let stale = current
         .as_ref()
         .is_none_or(|buffer| buffer.count() != count);
+    let graphics = ctx
+        .graphics()
+        .ok_or_else(|| NodeError::msg("fixture sample point allocation requires graphics"))?;
     if stale {
-        let graphics = ctx
-            .graphics()
-            .ok_or_else(|| NodeError::msg("fixture sample point allocation requires graphics"))?;
-        if let Some(old) = current.take() {
-            graphics.free_sample_points(old);
-        }
+        drop(current.take());
         let buffer = graphics
-            .alloc_sample_points(count)
-            .map_err(|e| NodeError::msg(format!("fixture sample point allocation: {e}")))?;
+            .create_sample_points(count)
+            .map_err(err_ctx("fixture sample point allocation"))?;
         *current = Some(buffer);
     }
     let buffer = current
         .as_mut()
         .ok_or_else(|| NodeError::msg("fixture sample points missing after allocation"))?;
-    for (dst, point) in buffer.data_mut().chunks_exact_mut(2).zip(points) {
+    let mut coords = vec![0i32; points.len() * 2];
+    for (dst, point) in coords.chunks_exact_mut(2).zip(points) {
         dst[0] = normalized_q16_to_pixel_q16(point.x_norm_q16, output_width);
         dst[1] = normalized_q16_to_pixel_q16(point.y_norm_q16, output_height);
     }
+    graphics
+        .write_sample_points(buffer, &coords)
+        .map_err(err_ctx("fixture sample point write"))?;
     Ok(buffer)
 }
 
 fn render_direct_fixture_control(
-    sample_points: &mut Option<lp_shader::LpsSamplePointBuf>,
-    sample_target: &mut Option<lp_shader::LpsSampleRgba16Buf>,
+    sample_points: &mut Option<SamplePointsHandle>,
+    sample_target: &mut Option<SampleOutHandle>,
     points: &[DirectSamplePoint],
     visual_product: VisualProduct,
     request: &ControlRenderRequest,
@@ -703,11 +707,16 @@ fn render_direct_fixture_control(
             samples: sample_buf,
         },
     )?;
+    let sampled = ctx
+        .graphics()
+        .ok_or_else(|| NodeError::msg("fixture direct sampling requires graphics"))?
+        .read_sample_out(sample_buf)
+        .map_err(err_ctx("fixture sample read"))?;
 
     target.samples.fill(0);
     let brightness = settings.brightness.to_q32() / 255.to_q32();
     let mut written_samples = 0usize;
-    for (point, rgba) in points.iter().zip(sample_buf.data().chunks_exact(4)) {
+    for (point, rgba) in points.iter().zip(sampled.chunks_exact(4)) {
         let base = (point.channel as usize).saturating_mul(3);
         if base + 3 > expected_samples {
             continue;
@@ -911,8 +920,8 @@ fn apply_brightness_unorm16(value: u16, brightness_u8: u8, brightness: Q32) -> u
     Q32((((i64::from(value)) * i64::from(brightness.0)) >> 16) as i32).to_u16_saturating()
 }
 
-fn accumulate_fixture_channels_from_texture_buffer(
-    texture: &lp_shader::LpsTextureBuf,
+fn accumulate_fixture_channels_from_texture_data(
+    texture: &TextureData,
     mapping_entries: &[PixelMappingEntry],
     width: u32,
     height: u32,
@@ -923,7 +932,7 @@ fn accumulate_fixture_channels_from_texture_buffer(
     {
         return Ok(accumulate_from_mapping(
             mapping_entries,
-            texture.data(),
+            texture.bytes(),
             TextureFormat::Rgba16,
             width,
             height,
@@ -934,9 +943,9 @@ fn accumulate_fixture_channels_from_texture_buffer(
         texture.width(),
         texture.height(),
         texture.format(),
-        texture.data().to_vec(),
+        texture.bytes().to_vec(),
     )
-    .map_err(|e| NodeError::msg(format!("fixture render target product: {e}")))?;
+    .map_err(err_ctx("fixture render target product"))?;
     accumulate_fixture_channels_from_texture_product(
         &texture_product,
         mapping_entries,
@@ -966,7 +975,9 @@ fn accumulate_fixture_channels_from_texture_product(
     }
 
     let batch = uv_batch_for_fixture_entries(mapping_entries, width, height);
-    let sample_result = texture.sample_batch(&batch);
+    let sample_result = texture
+        .sample_batch(&batch)
+        .map_err(|error| NodeError::msg(format!("fixture texture sampling: {error}")))?;
     accumulate_fixture_channels_from_texture_samples(mapping_entries, &sample_result.samples)
 }
 
@@ -1322,14 +1333,19 @@ mod tests {
             _product: VisualProduct,
             request: VisualSampleBufferRequest<'_>,
             target: VisualSampleTarget<'_>,
-            _ctx: &mut RenderContext<'_>,
+            ctx: &mut RenderContext<'_>,
         ) -> Result<(), NodeError> {
             if request.points.count() != target.samples.count() {
                 return Err(NodeError::msg("sample point/output count mismatch"));
             }
-            for sample in target.samples.data_mut().chunks_exact_mut(4) {
-                sample.copy_from_slice(&self.color);
+            let graphics = ctx.graphics().expect("test graphics");
+            let mut channels = Vec::with_capacity(target.samples.count() as usize * 4);
+            for _ in 0..target.samples.count() {
+                channels.extend_from_slice(&self.color);
             }
+            graphics
+                .write_sample_out(target.samples, &channels)
+                .expect("write test samples");
             Ok(())
         }
     }
@@ -1400,20 +1416,25 @@ mod tests {
             _product: VisualProduct,
             request: VisualSampleBufferRequest<'_>,
             target: VisualSampleTarget<'_>,
-            _ctx: &mut RenderContext<'_>,
+            ctx: &mut RenderContext<'_>,
         ) -> Result<(), NodeError> {
+            let graphics = ctx.graphics().expect("test graphics");
             assert_eq!(request.output_width, self.expected_width);
             assert_eq!(request.output_height, self.expected_height);
-            assert_eq!(request.points.data(), self.expected_points.as_slice());
+            assert_eq!(
+                graphics
+                    .read_sample_points(request.points)
+                    .expect("read test points"),
+                self.expected_points
+            );
             assert_eq!(target.samples.count() as usize, self.colors.len());
-            for (sample, color) in target
-                .samples
-                .data_mut()
-                .chunks_exact_mut(4)
-                .zip(self.colors.iter())
-            {
-                sample.copy_from_slice(color);
+            let mut channels = Vec::with_capacity(self.colors.len() * 4);
+            for color in &self.colors {
+                channels.extend_from_slice(color);
             }
+            graphics
+                .write_sample_out(target.samples, &channels)
+                .expect("write test samples");
             Ok(())
         }
     }
@@ -1446,8 +1467,7 @@ mod tests {
                 }
             }
         }
-        TextureRenderProduct::new(width, height, format, pixels)
-            .map_err(|e| NodeError::msg(format!("solid texture: {e}")))
+        TextureRenderProduct::new(width, height, format, pixels).map_err(err_ctx("solid texture"))
     }
 
     fn bind_fixture_def_defaults(engine: &mut Engine, fix_id: lpc_model::NodeId, frame: Revision) {
@@ -1898,7 +1918,7 @@ mod tests {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -2049,7 +2069,7 @@ mod tests {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -2232,7 +2252,7 @@ mod tests {
     fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();

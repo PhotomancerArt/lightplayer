@@ -11,7 +11,6 @@ int test_constant_variable() {
     return arr[0] + arr[4];
 }
 
-// @unimplemented(jit.q32)
 // run: test_constant_variable() == 60
 
 int test_constant_expression() {

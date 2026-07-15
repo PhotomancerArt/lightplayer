@@ -23,7 +23,7 @@ wasm_bindgen_test_configure!(run_in_browser);
 fn runtime_serves_protocol_messages_after_tick() {
     fw_browser_init_exports(wasm_bindgen::exports());
 
-    let runtime_id = create_runtime("wasm-bindgen-test").expect("create runtime");
+    let runtime_id = create_cpu_runtime("wasm-bindgen-test");
     let client = ClientMessage {
         id: 7,
         msg: ClientRequest::ListAvailableProjects,
@@ -54,7 +54,7 @@ fn explicit_ticks_advance_the_clock_deterministically() {
     fw_browser_init_exports(wasm_bindgen::exports());
 
     let frame_after_deltas = |label: &str, deltas: &[u32]| -> u64 {
-        let runtime_id = create_runtime(label).expect("create runtime");
+        let runtime_id = create_cpu_runtime(label);
         let project_fs = build_smoke_project();
         let mut next_id = 1;
 
@@ -133,7 +133,7 @@ fn explicit_ticks_advance_the_clock_deterministically() {
 fn runtime_loads_project_and_renders_output_after_ticks() {
     fw_browser_init_exports(wasm_bindgen::exports());
 
-    let runtime_id = create_runtime("project-render-test").expect("create runtime");
+    let runtime_id = create_cpu_runtime("project-render-test");
     let project_fs = build_smoke_project();
     let mut next_id = 1;
 
@@ -543,7 +543,7 @@ fn collect_protocol_out(envelopes_json: &str) -> Vec<WireServerMessage> {
     envelopes
         .into_iter()
         .filter_map(|envelope| match envelope {
-            BrowserOutputEnvelope::ProtocolOut { frame } => {
+            BrowserOutputEnvelope::ProtocolOut { frame, .. } => {
                 Some(json::from_str(&frame).expect("server frame"))
             }
             _ => None,
@@ -675,4 +675,13 @@ struct OutputSample {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum BrowserInputEnvelopeForTest {
     ProtocolIn { frame: String },
+}
+
+/// Create a CPU-tier runtime and return its id (tests never request GPU:
+/// wasm-bindgen-test pages have no guaranteed WebGPU device).
+fn create_cpu_runtime(label: &str) -> u32 {
+    let created = create_runtime(label, "cpu").expect("create runtime");
+    let value: serde_json::Value = serde_json::from_str(&created).expect("creation json");
+    assert_eq!(value["tier"], "cpu");
+    u32::try_from(value["runtime_id"].as_u64().expect("runtime_id")).expect("u32 id")
 }

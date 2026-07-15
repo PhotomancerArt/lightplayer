@@ -18,7 +18,6 @@ void test_declare_out_float() {
     depth = 0.5;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_out_float() == 0.0
 
@@ -27,7 +26,6 @@ void test_declare_out_int() {
     stencil_value = 128;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_out_int() == 0.0
 
@@ -36,7 +34,6 @@ void test_declare_out_uint() {
     object_id = 42u;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_out_uint() == 0.0
 
@@ -45,7 +42,6 @@ void test_declare_out_bool() {
     visible = true;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_out_bool() == 0.0
 
@@ -54,7 +50,6 @@ void test_declare_out_vec2() {
     screen_pos = vec2(0.5, 0.5);
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_out_vec2() == 0.0
 
@@ -63,7 +58,6 @@ void test_declare_out_vec3() {
     normal = vec3(0.0, 1.0, 0.0);
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_out_vec3() == 0.0
 
@@ -72,7 +66,6 @@ void test_declare_out_vec4() {
     frag_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_out_vec4() == 0.0
 
@@ -84,6 +77,5 @@ void test_declare_out_calculate() {
     visible = true;
 }
 
-// @unimplemented(jit.q32)
 // @unsupported(rv32lpn.q32)
 // run: test_declare_out_calculate() == 0.0

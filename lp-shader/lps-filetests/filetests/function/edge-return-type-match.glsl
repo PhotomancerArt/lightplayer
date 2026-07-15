@@ -55,7 +55,6 @@ float test_edge_return_type_mismatch() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_return_type_mismatch() ~= 0.0
@@ -78,7 +77,6 @@ void test_edge_return_value_in_void() {
     bad_void();
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_return_value_in_void() == 0.0
@@ -102,7 +100,6 @@ float test_edge_return_type_array_mismatch() {
     return 0.0;
 }
 
-// @unimplemented(jit.q32)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // run: test_edge_return_type_array_mismatch() ~= 0.0

@@ -1079,91 +1079,6 @@ fn emit_grouped_signature_match_arms(builtins: &[BuiltinInfo]) -> String {
     s
 }
 
-fn append_get_function_pointer_match(output: &mut String, builtins: &[BuiltinInfo]) {
-    let mut glsl_files: BTreeSet<String> = BTreeSet::new();
-    let mut lpir_files: BTreeSet<String> = BTreeSet::new();
-    let mut vm_files: BTreeSet<String> = BTreeSet::new();
-    let mut texture_files: BTreeSet<String> = BTreeSet::new();
-    let mut lpfn_roots: BTreeSet<String> = BTreeSet::new();
-
-    for builtin in builtins {
-        let components: Vec<&str> = builtin.module_path.split("::").collect();
-        match components.first().copied() {
-            Some("glsl") if components.len() >= 2 => {
-                glsl_files.insert(components[1].to_string());
-            }
-            Some("lpir") if components.len() >= 2 => {
-                lpir_files.insert(components[1].to_string());
-            }
-            Some("vm") if components.len() >= 2 => {
-                vm_files.insert(components[1].to_string());
-            }
-            Some("texture") if components.len() >= 2 => {
-                texture_files.insert(components[1].to_string());
-            }
-            Some("lpfn") if components.len() >= 2 => {
-                lpfn_roots.insert(format!("lpfn::{}", components[1]));
-            }
-            _ => {}
-        }
-    }
-
-    let mut import_parts: Vec<String> = Vec::new();
-    if !glsl_files.is_empty() {
-        import_parts.push(format!(
-            "glsl::{{{}}}",
-            glsl_files.into_iter().collect::<Vec<_>>().join(", ")
-        ));
-    }
-    if !lpir_files.is_empty() {
-        import_parts.push(format!(
-            "lpir::{{{}}}",
-            lpir_files.into_iter().collect::<Vec<_>>().join(", ")
-        ));
-    }
-    if !vm_files.is_empty() {
-        import_parts.push(format!(
-            "vm::{{{}}}",
-            vm_files.into_iter().collect::<Vec<_>>().join(", ")
-        ));
-    }
-    if !texture_files.is_empty() {
-        import_parts.push(format!(
-            "texture::{{{}}}",
-            texture_files.into_iter().collect::<Vec<_>>().join(", ")
-        ));
-    }
-    import_parts.extend(lpfn_roots);
-    import_parts.sort();
-
-    if !import_parts.is_empty() {
-        output.push_str(&format!(
-            "    use lps_builtins::builtins::{{{}}};\n",
-            import_parts.join(", ")
-        ));
-    }
-
-    output.push_str("    match builtin {\n");
-    if builtins.is_empty() {
-        output.push_str("        BuiltinId::_Placeholder => core::ptr::null(),\n");
-    } else {
-        for builtin in builtins {
-            let components: Vec<&str> = builtin.module_path.split("::").collect();
-            let usage_path = if components.len() >= 2 {
-                components[1..].join("::")
-            } else {
-                builtin.module_path.clone()
-            };
-
-            output.push_str(&format!(
-                "        BuiltinId::{} => {}::{} as *const u8,\n",
-                builtin.enum_variant, usage_path, builtin.function_name
-            ));
-        }
-    }
-    output.push_str("    }\n");
-}
-
 /// Cranelift signatures derived from each builtin's `rust_signature` strings in `lps-builtins`.
 fn generate_lpvm_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
     let header = r#"//! This file is AUTO-GENERATED. Do not edit manually.
@@ -1202,10 +1117,6 @@ fn generate_lpvm_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
     }
     output.push_str("    }\n");
     output.push_str("    sig\n");
-    output.push_str("}\n\n");
-    output
-        .push_str("pub(crate) fn get_function_pointer_inner(builtin: BuiltinId) -> *const u8 {\n");
-    append_get_function_pointer_match(&mut output, builtins);
     output.push_str("}\n");
 
     if let Some(parent) = path.parent() {

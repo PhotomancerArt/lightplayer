@@ -12,9 +12,29 @@ use crate::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerOptions,
 };
 
+/// One binary preview frame received from the worker.
+///
+/// The pixel payload is a transferable `ArrayBuffer` (sRGB RGBA8, row-major,
+/// `width × height × 4` bytes) that never rode the JSON envelope path. Timing
+/// fields are worker-side `performance.now()` measurements; `posted_epoch_ms`
+/// is `performance.timeOrigin + performance.now()` at post time so the page
+/// can compute transport latency against its own epoch clock.
+pub struct PreviewPixelFrame {
+    pub runtime_id: u32,
+    pub frame_id: u32,
+    pub width: u32,
+    pub height: u32,
+    pub tick_ms: f64,
+    pub render_ms: f64,
+    pub posted_epoch_ms: f64,
+    pub wasm_memory_bytes: f64,
+    pub pixels: js_sys::ArrayBuffer,
+}
+
 pub struct BrowserWorkerHandle {
     worker: Worker,
     outputs: Rc<RefCell<Vec<BrowserOutputEnvelope>>>,
+    preview_frames: Rc<RefCell<Vec<PreviewPixelFrame>>>,
 }
 
 impl BrowserWorkerHandle {
@@ -24,9 +44,26 @@ impl BrowserWorkerHandle {
         let worker = Worker::new_with_options(worker_script_path, &options)
             .map_err(|error| LinkError::other(format!("{error:?}")))?;
         let outputs = Rc::new(RefCell::new(Vec::new()));
+        let preview_frames = Rc::new(RefCell::new(Vec::new()));
         let output_ref = Rc::clone(&outputs);
+        let preview_ref = Rc::clone(&preview_frames);
         let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-            match serde_wasm_bindgen::from_value::<BrowserOutputEnvelope>(event.data()) {
+            let data = event.data();
+            // The binary preview path is intercepted before serde: its pixel
+            // ArrayBuffer must stay a JS object, not become JSON-shaped data.
+            if message_kind(&data).as_deref() == Some("preview_pixels") {
+                match parse_preview_pixels(&data) {
+                    Ok(frame) => preview_ref.borrow_mut().push(frame),
+                    Err(error) => output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
+                        runtime_id: 0,
+                        level: "error".to_string(),
+                        target: "lpa-link".to_string(),
+                        message: format!("failed to parse preview pixel frame: {error}"),
+                    }),
+                }
+                return;
+            }
+            match serde_wasm_bindgen::from_value::<BrowserOutputEnvelope>(data) {
                 Ok(envelope) => output_ref.borrow_mut().push(envelope),
                 Err(error) => output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
                     runtime_id: 0,
@@ -67,7 +104,11 @@ impl BrowserWorkerHandle {
             });
         worker.set_onmessageerror(Some(on_message_error.as_ref().unchecked_ref()));
         on_message_error.forget();
-        Ok(Self { worker, outputs })
+        Ok(Self {
+            worker,
+            outputs,
+            preview_frames,
+        })
     }
 
     pub async fn boot(
@@ -117,13 +158,76 @@ impl BrowserWorkerHandle {
             .map_err(|error| LinkError::other(format!("{error:?}")))
     }
 
+    /// Transfer an `OffscreenCanvas` into the worker as a GPU-tier
+    /// runtime's card surface.
+    ///
+    /// This message cannot ride the serde envelope path: the canvas is a
+    /// transferable JS object that must travel in the `postMessage` transfer
+    /// list (ownership moves to the worker). The worker answers with
+    /// [`BrowserOutputEnvelope::SurfaceAttached`] on success or
+    /// [`BrowserOutputEnvelope::PreviewError`] (`frame_id` 0) on failure.
+    pub fn attach_preview_surface(
+        &self,
+        runtime_id: u32,
+        canvas: web_sys::OffscreenCanvas,
+    ) -> Result<(), LinkError> {
+        let message = js_sys::Object::new();
+        let set = |key: &str, value: &JsValue| -> Result<(), LinkError> {
+            js_sys::Reflect::set(&message, &JsValue::from_str(key), value)
+                .map(|_| ())
+                .map_err(|error| LinkError::other(format!("{error:?}")))
+        };
+        set("kind", &JsValue::from_str("attach_surface"))?;
+        set("runtime_id", &JsValue::from_f64(f64::from(runtime_id)))?;
+        set("canvas", canvas.as_ref())?;
+        let transfer = js_sys::Array::of1(canvas.as_ref());
+        self.worker
+            .post_message_with_transfer(&message, &transfer)
+            .map_err(|error| LinkError::other(format!("{error:?}")))
+    }
+
     pub fn take_outputs(&mut self) -> Vec<BrowserOutputEnvelope> {
         core::mem::take(&mut *self.outputs.borrow_mut())
+    }
+
+    /// Take binary preview frames received since the last call.
+    pub fn take_preview_frames(&mut self) -> Vec<PreviewPixelFrame> {
+        core::mem::take(&mut *self.preview_frames.borrow_mut())
     }
 
     pub fn terminate(&self) {
         self.worker.terminate();
     }
+}
+
+fn message_kind(data: &JsValue) -> Option<String> {
+    js_sys::Reflect::get(data, &JsValue::from_str("kind"))
+        .ok()
+        .and_then(|kind| kind.as_string())
+}
+
+fn parse_preview_pixels(data: &JsValue) -> Result<PreviewPixelFrame, String> {
+    let number = |key: &str| -> Result<f64, String> {
+        js_sys::Reflect::get(data, &JsValue::from_str(key))
+            .map_err(|error| format!("{error:?}"))?
+            .as_f64()
+            .ok_or_else(|| format!("preview pixel frame field {key:?} is not a number"))
+    };
+    let pixels = js_sys::Reflect::get(data, &JsValue::from_str("pixels"))
+        .map_err(|error| format!("{error:?}"))?
+        .dyn_into::<js_sys::ArrayBuffer>()
+        .map_err(|_| "preview pixel frame field \"pixels\" is not an ArrayBuffer".to_string())?;
+    Ok(PreviewPixelFrame {
+        runtime_id: number("runtime_id")? as u32,
+        frame_id: number("frame_id")? as u32,
+        width: number("width")? as u32,
+        height: number("height")? as u32,
+        tick_ms: number("tick_ms")?,
+        render_ms: number("render_ms")?,
+        posted_epoch_ms: number("posted_epoch_ms")?,
+        wasm_memory_bytes: number("wasm_memory_bytes")?,
+        pixels,
+    })
 }
 
 fn resolve_page_url(path: &str) -> Result<String, LinkError> {
@@ -193,6 +297,20 @@ fn boot_output_summary(outputs: &[BrowserOutputEnvelope]) -> String {
         } => format!("; last worker log was {level} from {target}: {message}"),
         BrowserOutputEnvelope::ProtocolOut { .. } => {
             "; last worker output was a protocol frame".to_string()
+        }
+        BrowserOutputEnvelope::RuntimeCreated {
+            runtime_id, label, ..
+        } => {
+            format!("; last worker output created runtime {runtime_id} ({label})")
+        }
+        BrowserOutputEnvelope::SurfaceAttached { runtime_id } => {
+            format!("; last worker output attached a surface to runtime {runtime_id}")
+        }
+        BrowserOutputEnvelope::PreviewPresented { runtime_id, .. } => {
+            format!("; last worker output presented a frame for runtime {runtime_id}")
+        }
+        BrowserOutputEnvelope::PreviewError { message, .. } => {
+            format!("; last worker output was a preview error: {message}")
         }
     }
 }

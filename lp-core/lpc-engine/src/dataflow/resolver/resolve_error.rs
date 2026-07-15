@@ -9,7 +9,7 @@ use alloc::string::String;
 use lpc_model::ChannelName;
 use lpc_model::NodeId;
 
-use crate::gfx::LpsValueToModelConversionError;
+use crate::shader_abi::LpsValueToModelConversionError;
 
 use super::query_key::QueryKey;
 use super::resolve_trace::ResolveTraceError;

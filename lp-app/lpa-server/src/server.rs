@@ -77,7 +77,7 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsStd::new("/path/to/server/root".into()));
-    /// let graphics = Arc::new(lpc_engine::Graphics::new());
+    /// let graphics = Arc::new(lp_gfx_lpvm::LpvmGraphics::new());
     /// let server = LpServer::new(
     ///     output_provider,
     ///     base_fs,
@@ -377,7 +377,12 @@ impl LpServer {
                             response_count += 1;
                         }
                         msg => {
-                            let response = handlers::handle_client_message(
+                            // Every request id gets exactly one response even
+                            // when the handler fails — a propagated error here
+                            // would drop the frame and leave the client
+                            // awaiting forever. Only transport-send failures
+                            // abort the tick.
+                            let response = match handlers::handle_client_message(
                                 &mut self.project_manager,
                                 &mut *self.base_fs,
                                 &self.output_provider,
@@ -388,7 +393,20 @@ impl LpServer {
                                 self.graphics.clone(),
                                 &self.hello,
                                 lpc_wire::ClientMessage { id: msg_id, msg },
-                            )?;
+                            ) {
+                                Ok(response) => response,
+                                Err(error) => {
+                                    log::warn!(
+                                        "tick_and_send: request id={msg_id} failed: {error}"
+                                    );
+                                    WireServerMessage::new(
+                                        msg_id,
+                                        lpc_wire::server::ServerMsgBody::Error {
+                                            error: format!("{error}"),
+                                        },
+                                    )
+                                }
+                            };
                             transport
                                 .send(response)
                                 .await

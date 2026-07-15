@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "preview-lab",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "2861",
+        "--bind",
+        "127.0.0.1",
+        "-d",
+        "target/dx/lpa-studio-web/release/web/public"
+      ],
+      "port": 2861
+    }
+  ]
+}

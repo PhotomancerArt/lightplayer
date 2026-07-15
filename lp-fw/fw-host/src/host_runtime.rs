@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_client::{ClientTransport, create_local_transport_pair};
-use lpa_server::{ButtonService, Graphics, LpGraphics, LpServer, RadioService};
+use lpa_server::{ButtonService, LpGraphics, LpServer, RadioService};
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
@@ -165,7 +166,7 @@ pub fn create_memory_server_with(fs: LpFsMemory, hello: lpc_wire::ServerHello) -
     )));
     let button_service: Rc<dyn ButtonService> = hardware.clone();
     let radio_service: Rc<dyn RadioService> = hardware;
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
 
     let mut server = LpServer::new_with_hardware_services(
         output_provider,
@@ -195,6 +196,35 @@ mod tests {
         let projects = client.project_list_available().await.unwrap();
 
         assert!(projects.is_empty());
+        runtime.close().await.unwrap();
+    }
+
+    /// Regression: a failed project load used to log server-side and never
+    /// send a response frame, leaving the client awaiting forever.
+    #[tokio::test]
+    async fn failed_project_load_returns_error_instead_of_hanging() {
+        let mut runtime = HostRuntime::start_memory().unwrap();
+        let client = TokioLpClient::new_shared(runtime.client_transport());
+
+        // Manifest missing `format: 1` fails to load server-side.
+        client
+            .fs_write(
+                "/projects/bad/project.json".as_path(),
+                br#"{ "kind": "Project", "nodes": {} }"#.to_vec(),
+            )
+            .await
+            .unwrap();
+
+        let result =
+            tokio::time::timeout(Duration::from_secs(5), client.project_load("/projects/bad"))
+                .await
+                .expect("load request must be answered, not hang");
+        assert!(result.is_err(), "invalid project load reports an error");
+
+        // The connection stays usable after the failed request.
+        let projects = client.project_list_loaded().await.unwrap();
+        assert!(projects.is_empty());
+
         runtime.close().await.unwrap();
     }
 

@@ -689,49 +689,53 @@ fn interp_copy() {
 
 #[test]
 fn interp_idiv_s_by_zero() {
+    // RV32 semantics: x / 0 = -1.
     assert_eq!(
         run_i32(
             "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = idiv_s v1, v2\n  return v3\n}\n",
             "f",
             &[Value::I32(42), Value::I32(0)],
         ),
-        0
+        -1
     );
 }
 
 #[test]
 fn interp_idiv_u_by_zero() {
+    // RV32 semantics: x / 0 = all ones.
     assert_eq!(
         run_i32(
             "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = idiv_u v1, v2\n  return v3\n}\n",
             "f",
             &[Value::I32(42), Value::I32(0)],
         ),
-        0
+        -1
     );
 }
 
 #[test]
 fn interp_irem_s_by_zero() {
+    // RV32 semantics: x % 0 = x.
     assert_eq!(
         run_i32(
             "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = irem_s v1, v2\n  return v3\n}\n",
             "f",
             &[Value::I32(42), Value::I32(0)],
         ),
-        0
+        42
     );
 }
 
 #[test]
 fn interp_irem_u_by_zero() {
+    // RV32 semantics: x % 0 = x.
     assert_eq!(
         run_i32(
             "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = irem_u v1, v2\n  return v3\n}\n",
             "f",
             &[Value::I32(42), Value::I32(0)],
         ),
-        0
+        42
     );
 }
 
@@ -744,6 +748,18 @@ fn interp_idiv_s_min_neg1() {
             &[Value::I32(i32::MIN), Value::I32(-1)],
         ),
         i32::MIN.wrapping_div(-1)
+    );
+}
+
+#[test]
+fn interp_irem_s_min_neg1() {
+    assert_eq!(
+        run_i32(
+            "func @f(v1:i32, v2:i32) -> i32 {\n  v3:i32 = irem_s v1, v2\n  return v3\n}\n",
+            "f",
+            &[Value::I32(i32::MIN), Value::I32(-1)],
+        ),
+        0
     );
 }
 
@@ -1143,6 +1159,55 @@ fn interp_if_else_return_max() {
 ";
     assert!((run_f32(ir, "max", &[Value::F32(3.0), Value::F32(2.0)]) - 3.0).abs() < 1e-6);
     assert!((run_f32(ir, "max", &[Value::F32(1.0), Value::F32(4.0)]) - 4.0).abs() < 1e-6);
+}
+
+#[test]
+fn interp_nested_if_else_inside_then_arm() {
+    // Regression: entering a nested `else` arm used to pop the *outer*
+    // if-frame (the `Else` op guessed frame ownership from the ctrl stack)
+    // and jump to the outer merge, skipping the nested else assignments.
+    let ir = "func @pick(v1:i32, v2:i32) -> i32 {
+  v3:i32 = iconst.i32 0
+  if v1 {
+    if v2 {
+      v3 = iconst.i32 1
+    } else {
+      v3 = iconst.i32 2
+    }
+  } else {
+    if v2 {
+      v3 = iconst.i32 3
+    } else {
+      v3 = iconst.i32 4
+    }
+  }
+  return v3
+}
+";
+    assert_eq!(run_i32(ir, "pick", &[Value::I32(1), Value::I32(1)]), 1);
+    assert_eq!(run_i32(ir, "pick", &[Value::I32(1), Value::I32(0)]), 2);
+    assert_eq!(run_i32(ir, "pick", &[Value::I32(0), Value::I32(1)]), 3);
+    assert_eq!(run_i32(ir, "pick", &[Value::I32(0), Value::I32(0)]), 4);
+}
+
+#[test]
+fn interp_nested_if_without_else_inside_if() {
+    // Nested no-else ifs: the false branch must skip the whole construct
+    // without disturbing the outer frame.
+    let ir = "func @f(v1:i32, v2:i32) -> i32 {
+  v3:i32 = iconst.i32 0
+  if v1 {
+    v3 = iconst.i32 10
+    if v2 {
+      v3 = iconst.i32 11
+    }
+  }
+  return v3
+}
+";
+    assert_eq!(run_i32(ir, "f", &[Value::I32(1), Value::I32(1)]), 11);
+    assert_eq!(run_i32(ir, "f", &[Value::I32(1), Value::I32(0)]), 10);
+    assert_eq!(run_i32(ir, "f", &[Value::I32(0), Value::I32(1)]), 0);
 }
 
 // --- Loops ---

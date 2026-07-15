@@ -1,0 +1,33 @@
+[package]
+name = "lp-gfx-lpvm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LightPlayer CPU graphics backend: generic LpvmGraphics over any LPVM engine"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+std = []
+
+[dependencies]
+lp-gfx = { path = "../lp-gfx", default-features = false }
+lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
+lpvm = { path = "../../lp-shader/lpvm", default-features = false }
+lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
+
+# Backend selection: exactly one LPVM engine is wired into the per-target
+# `LpvmGraphics::new()`, chosen by target architecture rather than a Cargo
+# feature.
+#   - riscv32         → lpvm-native (rt_jit)                     — bare-metal firmware
+#   - everything else → lpvm-wasm (rt_wasmtime / rt_browser)     — host or wasm32 guest
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+# Note: lpvm-native's 'debug' feature (interleaved/disasm sections) is disabled
+# for firmware builds to reduce code size and improve compilation performance.
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
+lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
+
+[target.'cfg(not(target_arch = "riscv32"))'.dependencies]
+lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }

@@ -32,6 +32,7 @@ web-sys = { version = "0.3", optional = true, features = ["Window"] }
 [dev-dependencies]
 # Host-only: the studio edit end-to-end tests run against an in-process
 # LightPlayer server (simulator session, no UI). Never built for wasm.
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm" }
 lpa-server = { path = "../lpa-server" }
 # The link e2e tests drive the REAL provider path against the scripted fake
 # device; enabling the feature here (dev-only) also unlocks the test-edge

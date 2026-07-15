@@ -51,7 +51,6 @@ float test_nested_declare_line() {
     return 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_declare_line() ~= 1.0
 
 float test_nested_declare_material() {
@@ -59,7 +58,6 @@ float test_nested_declare_material() {
     return 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_declare_material() ~= 1.0
 
 float test_nested_declare_circle() {
@@ -67,7 +65,6 @@ float test_nested_declare_circle() {
     return 1.0;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_declare_circle() ~= 1.0
 
 // ----------------------------------------------------------------------------
@@ -79,7 +76,6 @@ float test_nested_construct_line_start_x() {
     return l.start.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_construct_line_start_x() ~= 1.0
 
 float test_nested_construct_line_end_y() {
@@ -87,7 +83,6 @@ float test_nested_construct_line_end_y() {
     return l.end.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_construct_line_end_y() ~= 8.0
 
 float test_nested_construct_material_diffuse_r() {
@@ -95,7 +90,6 @@ float test_nested_construct_material_diffuse_r() {
     return m.diffuse.r;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_construct_material_diffuse_r() ~= 0.1
 
 float test_nested_construct_material_shininess() {
@@ -103,7 +97,6 @@ float test_nested_construct_material_shininess() {
     return m.shininess;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_construct_material_shininess() ~= 64.0
 
 float test_nested_construct_circle() {
@@ -111,7 +104,6 @@ float test_nested_construct_circle() {
     return c.center.x + c.radius;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_construct_circle() ~= 7.0
 
 // ----------------------------------------------------------------------------
@@ -123,7 +115,6 @@ float test_nested_deep_read_line_end_x() {
     return l.end.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_deep_read_line_end_x() ~= 9.0
 
 float test_nested_deep_read_material_specular_b() {
@@ -131,7 +122,6 @@ float test_nested_deep_read_material_specular_b() {
     return m.specular.b;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_deep_read_material_specular_b() ~= 0.6
 
 float test_nested_deep_read_circle_center_y() {
@@ -139,7 +129,6 @@ float test_nested_deep_read_circle_center_y() {
     return c.center.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_deep_read_circle_center_y() ~= 2.5
 
 // ----------------------------------------------------------------------------
@@ -152,7 +141,6 @@ float test_nested_deep_write_line_start_x() {
     return l.start.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_deep_write_line_start_x() ~= 5.0
 
 float test_nested_deep_write_material_shininess() {
@@ -161,7 +149,6 @@ float test_nested_deep_write_material_shininess() {
     return m.shininess;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_deep_write_material_shininess() ~= 128.0
 
 float test_nested_deep_write_material_diffuse_r() {
@@ -170,7 +157,6 @@ float test_nested_deep_write_material_diffuse_r() {
     return m.diffuse.r;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_deep_write_material_diffuse_r() ~= 0.25
 
 float test_nested_deep_write_circle_radius() {
@@ -179,7 +165,6 @@ float test_nested_deep_write_circle_radius() {
     return c.radius;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_deep_write_circle_radius() ~= 10.0
 
 // ----------------------------------------------------------------------------
@@ -193,7 +178,6 @@ float test_nested_whole_assign_line() {
     return l1.start.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_whole_assign_line() ~= 5.0
 
 float test_nested_whole_assign_material() {
@@ -203,7 +187,6 @@ float test_nested_whole_assign_material() {
     return m1.diffuse.r;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_whole_assign_material() ~= 0.9
 
 float test_nested_whole_assign_circle() {
@@ -213,7 +196,6 @@ float test_nested_whole_assign_circle() {
     return c1.center.x + c1.center.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_whole_assign_circle() ~= 7.0
 
 // ----------------------------------------------------------------------------
@@ -227,7 +209,6 @@ float test_nested_mixed_line() {
     return l.start.x + l.end.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_mixed_line() ~= 7.0
 
 float test_nested_mixed_material() {
@@ -237,7 +218,6 @@ float test_nested_mixed_material() {
     return m.diffuse.g + m.specular.r;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_mixed_material() ~= 1.2
 
 float test_nested_mixed_circle() {
@@ -248,7 +228,6 @@ float test_nested_mixed_circle() {
     return c.radius;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_mixed_circle() ~= 4.0
 
 // ----------------------------------------------------------------------------
@@ -260,7 +239,6 @@ vec2 test_nested_vpair_construct_a() {
     return p.a.p;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_vpair_construct_a() ~= vec2(1.0, 2.0)
 
 float test_nested_vpair_deep_read_b_x() {
@@ -268,7 +246,6 @@ float test_nested_vpair_deep_read_b_x() {
     return p.b.p.x;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_vpair_deep_read_b_x() ~= 5.0
 
 float test_nested_vpair_deep_write() {
@@ -277,7 +254,6 @@ float test_nested_vpair_deep_write() {
     return p.a.p.x + p.a.p.y;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_vpair_deep_write() ~= 15.0
 
 vec2 test_nested_vpair_whole_assign() {
@@ -287,5 +263,4 @@ vec2 test_nested_vpair_whole_assign() {
     return p1.a.p;
 }
 
-// @unimplemented(jit.q32)
 // run: test_nested_vpair_whole_assign() ~= vec2(2.0, 3.0)

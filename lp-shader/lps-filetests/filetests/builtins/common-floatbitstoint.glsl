@@ -14,7 +14,6 @@ int test_floatbitstoint_zero() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// @unsupported(jit.q32)
 // run: test_floatbitstoint_zero() == 0
 
 int test_floatbitstoint_one() {
@@ -26,7 +25,6 @@ int test_floatbitstoint_one() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// @unsupported(jit.q32)
 // run: test_floatbitstoint_one() == 1065353216
 
 int test_floatbitstoint_neg_one() {
@@ -38,7 +36,6 @@ int test_floatbitstoint_neg_one() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// @unsupported(jit.q32)
 // run: test_floatbitstoint_neg_one() == -1082130432
 
 int test_floatbitstoint_inf() {
@@ -50,7 +47,6 @@ int test_floatbitstoint_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// @unsupported(jit.q32)
 // run: test_floatbitstoint_inf() == 2139095040
 
 int test_floatbitstoint_neg_inf() {
@@ -62,7 +58,6 @@ int test_floatbitstoint_neg_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// @unsupported(jit.q32)
 // run: test_floatbitstoint_neg_inf() == -8388608
 
 ivec2 test_floatbitstoint_vec2() {
@@ -74,7 +69,6 @@ ivec2 test_floatbitstoint_vec2() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// @unsupported(jit.q32)
 // run: test_floatbitstoint_vec2() == ivec2(1065353216, -1082130432)
 
 ivec3 test_floatbitstoint_vec3() {
@@ -86,7 +80,6 @@ ivec3 test_floatbitstoint_vec3() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// @unsupported(jit.q32)
 // run: test_floatbitstoint_vec3() == ivec3(0, 1065353216, 1073741824)
 
 ivec4 test_floatbitstoint_vec4() {
@@ -98,7 +91,6 @@ ivec4 test_floatbitstoint_vec4() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// @unsupported(jit.q32)
 // run: test_floatbitstoint_vec4() == ivec4(1065353216, 0, -1082130432, 2139095040)
 
 
