@@ -145,12 +145,30 @@ Key contracts:
 - **Mode-exclusive wire.** `DeviceMode` (`AppProtocol` / `Management`) gates
   access by construction: `try_begin_management()` takes the wire (RAII
   guard releases it) and the app-protocol channel is invalidated while held.
-  P3's management orchestration builds on this.
-- **Observation.** Pull `snapshot()` (state + link session record + recent
-  boot lines) or subscribe a `DeviceEventSink` (`Rc`-based, `!Send`) for
-  state transitions, device console lines, and progress. On
-  `Incompatible`/`Unresponsive`/`Gone` the session record's status becomes
-  `LinkSessionStatus::Error`.
+  Taking the mode is also refused while an app-protocol request is
+  mid-send/receive, so the wire is never torn down under a request.
+- **Management = release → manage → rebuild → re-ready.** `manage(request,
+  sink)` owns the whole flash/erase/reset cycle: it closes the current
+  provider session (the old transport's serial thread ENDS, freeing the
+  port), runs the connector's `manage_with_events` with events folded into
+  `DeviceEvent` (`Log` → `LogLine`, `Progress` → `Progress`), then rebuilds
+  the link — a NEW provider session and transport on the same endpoint —
+  and re-runs readiness from `Booting`. The outcome carries both the
+  connector result and where readiness landed; post-erase that is
+  `BlankFlash`, which IS success for an erase. Observed-line state is
+  cleared across the rebuild so stale boot lines never classify the new
+  link. On failure the session status becomes `LinkSessionStatus::Error`,
+  the state lands on `Gone`, and the mode is released.
+- **Reconnect = rebuild.** Terminal states are sticky under passive
+  observation; `reconnect()` — the same rebuild path — is the one way out
+  (Gone recovery, retry after a failed management operation). Channels
+  handed out earlier read the current transport through the session, so
+  they work again on the new link generation.
+- **Observation.** Pull `snapshot()` (state + link session record + derived
+  `LinkEndpointStatus` + recent boot lines) or subscribe a `DeviceEventSink`
+  (`Rc`-based, `!Send`) for state transitions, device console lines, and
+  management progress. On `Incompatible`/`Unresponsive`/`Gone` the session
+  record's status becomes `LinkSessionStatus::Error`.
 
 ## Providers
 

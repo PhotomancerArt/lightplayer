@@ -15,8 +15,10 @@
 //! Ready ──transport lost / close()──────────────────────▶ Gone
 //! ```
 //!
-//! Reconnect/reflash flows (P3) are the only way OUT of the terminal
-//! diagnosis states; this type only records where the session landed.
+//! Terminal states are sticky under passive observation; the rebuild flows
+//! (`DeviceSession::manage` / `DeviceSession::reconnect`) are the only way
+//! OUT of them — they replace the link generation and re-enter `Booting`.
+//! This type only records where the session landed.
 
 use lpc_wire::{ServerHello, WIRE_PROTO_VERSION};
 

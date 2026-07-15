@@ -4,7 +4,10 @@
 //! the injected [`DeviceTimers`] factory.
 
 use std::cell::RefCell;
+use std::future::Future;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 
 use lpc_wire::{ClientMessage, ClientRequest, WIRE_PROTO_VERSION};
@@ -12,10 +15,13 @@ use lpc_wire::{ClientMessage, ClientRequest, WIRE_PROTO_VERSION};
 use crate::provider::endpoint::LinkEndpointId;
 use crate::providers::fake::FakeProvider;
 use crate::providers::fake_device::{
-    FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device, FakeFailurePlan,
-    FakeLightPlayerState,
+    FAKE_IMAGE_IDENTITY, FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device,
+    FakeFailurePlan, FakeLightPlayerState,
 };
-use crate::{LinkConnector, LinkSessionStatus};
+use crate::{
+    LinkConnector, LinkEndpointStatus, LinkManagementRequest, LinkManagementResult,
+    LinkSessionStatus,
+};
 
 use super::*;
 
@@ -366,7 +372,308 @@ async fn record_level_fake_endpoint_is_rejected_as_not_hardware() {
     assert!(matches!(result, Err(crate::LinkError::Other { .. })));
 }
 
+// --- P3: management + reconnect ------------------------------------------
+
+#[tokio::test]
+async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance() {
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    let DeviceState::Ready { hello } = session.wait_ready().await else {
+        panic!("expected Ready before flashing");
+    };
+    assert_eq!(hello.fw.commit, "fake-firmware");
+    let (sink, events) = recording_sink();
+
+    let outcome = session
+        .manage(LinkManagementRequest::FlashFirmware, sink)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome.result,
+        LinkManagementResult::FlashFirmware(_)
+    ));
+    let DeviceState::Ready { hello } = outcome.state else {
+        panic!("expected Ready after flash, got {:?}", outcome.state);
+    };
+    assert_eq!(
+        hello.fw.commit, FAKE_IMAGE_IDENTITY,
+        "the rebuilt link's hello carries the flashed image's provenance"
+    );
+    assert_eq!(session.mode(), DeviceMode::AppProtocol);
+    assert_eq!(session.session().status, LinkSessionStatus::Open);
+    // The connector's management events reached the sink FOLDED into the
+    // DeviceEvent vocabulary: logs as LogLine, progress as Progress.
+    assert!(
+        events.borrow().iter().any(
+            |event| matches!(event, DeviceEvent::LogLine { line } if line.contains("fake flash"))
+        ),
+        "management logs should arrive as LogLine events"
+    );
+    assert!(
+        events.borrow().iter().any(|event| matches!(
+            event,
+            DeviceEvent::Progress { label, percent: Some(100) } if label == "Firmware written"
+        )),
+        "management progress should arrive as Progress events"
+    );
+    // The rebuilt channel speaks the app protocol again.
+    let mut client = lpa_client::LpClient::new(session.client_io());
+    assert!(client.hello().await.is_ok());
+}
+
+#[tokio::test]
+async fn erase_lands_blank_flash_and_that_is_success() {
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+
+    let outcome = session
+        .manage(
+            LinkManagementRequest::EraseDeviceFlash,
+            DeviceEventSink::noop(),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome.result,
+        LinkManagementResult::EraseDeviceFlash(_)
+    ));
+    assert_eq!(outcome.state, DeviceState::BlankFlash);
+    // BlankFlash is where a successful erase LANDS — the session record
+    // stays healthy (no Error status) and the mode is released.
+    assert_eq!(session.session().status, LinkSessionStatus::Open);
+    assert_eq!(session.mode(), DeviceMode::AppProtocol);
+}
+
+#[tokio::test]
+async fn reset_replays_the_boot_and_lands_ready_again() {
+    let (connector, endpoint_id, _device) =
+        fake_device_connector(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new()
+                .with_identity(FakeDeviceIdentity::new("dev_fakefakefakefak0", "Bench")),
+        )));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+
+    let outcome = session
+        .manage(LinkManagementRequest::ResetRuntime, DeviceEventSink::noop())
+        .await
+        .unwrap();
+
+    assert!(matches!(outcome.result, LinkManagementResult::ResetRuntime));
+    let DeviceState::Ready { hello } = outcome.state else {
+        panic!("expected Ready after reset, got {:?}", outcome.state);
+    };
+    assert_eq!(hello.device_uid.as_deref(), Some("dev_fakefakefakefak0"));
+}
+
+#[tokio::test]
+async fn scripted_manage_failure_sets_error_status_and_reconnect_recovers() {
+    let (connector, endpoint_id, _device) = fake_device_connector(
+        FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()))
+            .with_manage_failure("scripted flash tool failure"),
+    );
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+
+    let error = session
+        .manage(
+            LinkManagementRequest::FlashFirmware,
+            DeviceEventSink::noop(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("scripted flash tool failure"));
+    // Error statuses populated; the wire was released, so the state is Gone.
+    assert_eq!(session.state(), DeviceState::Gone);
+    assert!(matches!(
+        session.session().status,
+        LinkSessionStatus::Error { ref message } if message.contains("scripted flash tool failure")
+    ));
+    assert!(matches!(
+        session.snapshot().endpoint_status,
+        LinkEndpointStatus::Error { .. }
+    ));
+    // Mode restored; the channel errors cleanly until a reconnect.
+    assert_eq!(session.mode(), DeviceMode::AppProtocol);
+    let mut io = session.client_io();
+    assert!(
+        io.send(ClientMessage {
+            id: 1,
+            msg: ClientRequest::Hello,
+        })
+        .await
+        .is_err()
+    );
+
+    // Reconnect = rebuild: the same handle (and the SAME already-handed-out
+    // channel) becomes usable again on the new link generation.
+    let state = session.reconnect().await.unwrap();
+
+    assert!(state.is_ready());
+    assert_eq!(session.session().status, LinkSessionStatus::Open);
+    let mut client = lpa_client::LpClient::new(session.client_io());
+    assert!(client.hello().await.is_ok());
+}
+
+#[tokio::test]
+async fn reconnect_rebuilds_a_gone_session() {
+    let (connector, endpoint_id, device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    device.set_failure_plan(FakeFailurePlan::none().with_disconnect_after_bytes(5));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(session.wait_ready().await, DeviceState::Gone);
+
+    // The device comes back (unplug/replug): recovery is a plain reconnect.
+    device.set_failure_plan(FakeFailurePlan::none());
+    let state = session.reconnect().await.unwrap();
+
+    assert!(state.is_ready());
+    assert_eq!(session.session().status, LinkSessionStatus::Open);
+}
+
+#[tokio::test]
+async fn manage_is_refused_while_a_request_is_in_flight() {
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new()),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+
+    // Park a receive mid-flight: no response frame is coming, so a single
+    // poll leaves the request pending inside the transport wait.
+    let mut io = session.client_io();
+    let mut receive = Box::pin(io.receive());
+    assert!(
+        poll_once_noop(receive.as_mut()).is_pending(),
+        "receive should be parked waiting for a frame"
+    );
+
+    let error = session
+        .manage(LinkManagementRequest::ResetRuntime, DeviceEventSink::noop())
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("in flight"),
+        "manage must refuse cleanly mid-request: {error}"
+    );
+
+    // Dropping the request releases the wire for management.
+    drop(receive);
+    let guard = session.try_begin_management().unwrap();
+    drop(guard);
+}
+
+#[tokio::test]
+async fn stale_blank_flash_lines_do_not_misclassify_the_post_flash_rebuild() {
+    // The M3 lesson: the blank-flash boot lines observed BEFORE the flash
+    // must not classify the rebuilt link, or a successful flash would read
+    // as still-blank.
+    let (connector, endpoint_id, _device) =
+        fake_device_connector(FakeDeviceScript::new(FakeBootState::BlankFlash));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(session.wait_ready().await, DeviceState::BlankFlash);
+    assert!(
+        session
+            .snapshot()
+            .recent_lines
+            .iter()
+            .any(|line| line.contains("invalid header")),
+        "the blank-flash diagnosis should have observed invalid-header lines"
+    );
+
+    let outcome = session
+        .manage(
+            LinkManagementRequest::FlashFirmware,
+            DeviceEventSink::noop(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        outcome.state.is_ready(),
+        "flash from blank must land Ready, got {:?}",
+        outcome.state
+    );
+    assert!(
+        !session
+            .snapshot()
+            .recent_lines
+            .iter()
+            .any(|line| line.contains("invalid header")),
+        "stale blank-flash lines must be cleared across the rebuild"
+    );
+}
+
 // --- helpers -------------------------------------------------------------
+
+/// Poll a pinned future exactly once with a no-op waker.
+fn poll_once_noop<F: Future>(future: std::pin::Pin<&mut F>) -> Poll<F::Output> {
+    struct NoopWake;
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut context = Context::from_waker(&waker);
+    future.poll(&mut context)
+}
 
 fn fake_device_connector(
     script: FakeDeviceScript,

@@ -27,7 +27,7 @@ use crate::{
 
 use super::device_client_io::DeviceClientIo;
 use super::device_event::{DeviceEvent, DeviceEventSink};
-use super::device_mode::{DeviceMode, DeviceModeGuard};
+use super::device_mode::{ChannelUseGuard, DeviceMode, DeviceModeGuard};
 use super::device_readiness::{BootLineClassifier, HelloGate, gate_first_frame};
 use super::device_snapshot::DeviceSnapshot;
 use super::device_state::{DeviceState, IncompatibleReason};
@@ -36,7 +36,7 @@ use super::device_timers::{DeviceTimers, READINESS_POLL_INTERVAL};
 /// One owned hardware device link: connector + link session/connection +
 /// state machine + the readiness-gated app-protocol channel.
 pub struct DeviceSession {
-    shared: Rc<DeviceShared>,
+    pub(super) shared: Rc<DeviceShared>,
 }
 
 impl DeviceSession {
@@ -69,12 +69,13 @@ impl DeviceSession {
         let shared = Rc::new(DeviceShared {
             connector,
             session: RefCell::new(session),
-            connection,
-            transport,
+            connection: RefCell::new(connection),
+            transport: RefCell::new(transport),
             timers,
             sink,
             state: RefCell::new(DeviceState::Booting),
             mode: Rc::new(Cell::new(DeviceMode::AppProtocol)),
+            channel_busy: Cell::new(0),
             classifier: RefCell::new(BootLineClassifier::new()),
         });
         shared.sink.emit(DeviceEvent::State {
@@ -95,9 +96,12 @@ impl DeviceSession {
 
     /// Point-in-time snapshot for pull-model consumers.
     pub fn snapshot(&self) -> DeviceSnapshot {
+        let state = self.shared.state();
+        let session = self.shared.session.borrow().clone();
         DeviceSnapshot {
-            state: self.shared.state(),
-            session: self.shared.session.borrow().clone(),
+            endpoint_status: DeviceSnapshot::derive_endpoint_status(&state, &session),
+            state,
+            session,
             recent_lines: self.shared.classifier.borrow().recent_lines().to_vec(),
         }
     }
@@ -124,13 +128,22 @@ impl DeviceSession {
         self.shared.mode.get()
     }
 
-    /// Take exclusive management ownership of the wire (P3's `manage()`
+    /// Take exclusive management ownership of the wire ([`Self::manage`]'s
     /// entry point). While the returned guard lives, the app-protocol
     /// channel errors cleanly; dropping it releases the wire.
+    ///
+    /// Refused when a management operation already holds the wire OR an
+    /// app-protocol request is mid-flight on the channel (the wire cannot
+    /// be torn down under a request).
     pub fn try_begin_management(&self) -> Result<DeviceModeGuard, LinkError> {
         if self.shared.mode.get() != DeviceMode::AppProtocol {
             return Err(LinkError::other(
                 "a device management operation is already in progress",
+            ));
+        }
+        if self.shared.channel_busy.get() > 0 {
+            return Err(LinkError::other(
+                "an app-protocol request is in flight on the device wire",
             ));
         }
         self.shared.mode.set(DeviceMode::Management);
@@ -149,7 +162,7 @@ impl DeviceSession {
 
     /// The link connection handoff record.
     pub fn connection(&self) -> LinkConnection {
-        self.shared.connection.clone()
+        self.shared.connection.borrow().clone()
     }
 
     /// Close the link session cleanly: the state becomes
@@ -165,15 +178,24 @@ impl DeviceSession {
 }
 
 /// State shared between the session handle and its channel clones.
+///
+/// `session`/`connection`/`transport` sit behind `RefCell`s because a
+/// rebuild ([`Self::rebuild_link`]) swaps the whole underlying link in
+/// place: channel clones read the CURRENT transport through the accessor on
+/// every use, so a channel handed out before a management/reconnect cycle
+/// works again after it.
 pub(crate) struct DeviceShared {
     connector: Rc<LinkConnector>,
     session: RefCell<LinkSession>,
-    connection: LinkConnection,
-    transport: LinkServerConnection,
+    connection: RefCell<LinkConnection>,
+    transport: RefCell<LinkServerConnection>,
     timers: DeviceTimers,
     sink: DeviceEventSink,
     state: RefCell<DeviceState>,
     mode: Rc<Cell<DeviceMode>>,
+    /// App-protocol requests currently inside a transport send/receive.
+    /// Management refuses to take the wire while this is nonzero.
+    channel_busy: Cell<u32>,
     classifier: RefCell<BootLineClassifier>,
 }
 
@@ -187,7 +209,84 @@ impl DeviceShared {
     }
 
     pub(crate) fn transport(&self) -> LinkServerConnection {
-        self.transport.clone()
+        self.transport.borrow().clone()
+    }
+
+    pub(super) fn connector(&self) -> &Rc<LinkConnector> {
+        &self.connector
+    }
+
+    pub(super) fn session_id(&self) -> crate::LinkSessionId {
+        self.session.borrow().id.clone()
+    }
+
+    /// Mark one app-protocol request as in flight for the guard's lifetime.
+    pub(crate) fn begin_channel_use(&self) -> ChannelUseGuard<'_> {
+        ChannelUseGuard::new(&self.channel_busy)
+    }
+
+    /// Release the current link: close the provider session so its transport
+    /// shuts down (the host serial framing thread ENDS and the port is
+    /// free for a management tool). Best-effort — the link may already be
+    /// dead when this runs (Gone recovery).
+    pub(super) async fn release_link(&self) {
+        let session_id = self.session_id();
+        let _ = self.connector.close(&session_id).await;
+    }
+
+    /// Reconnect = rebuild: open a NEW link (fresh provider session, fresh
+    /// transport/serial thread) on the same endpoint, swap it in for the old
+    /// one, clear the observed-line state, and re-enter `Booting`.
+    ///
+    /// The state machine's terminal states stay sticky under passive
+    /// observation; this is the one deliberate way out — each rebuild starts
+    /// a new link generation whose readiness runs from scratch.
+    pub(super) async fn rebuild_link(&self) -> Result<(), LinkError> {
+        let endpoint_id = self.session.borrow().endpoint_id.clone();
+        let budget = self.timers.deadlines().connect;
+        let opened = self
+            .timers
+            .with_deadline(budget, open_device_link(&self.connector, &endpoint_id))
+            .await;
+        let (session, connection, transport) = match opened {
+            Some(Ok(opened)) => opened,
+            Some(Err(error)) => {
+                self.record_link_failure(&format!("device link rebuild failed: {error}"));
+                return Err(error);
+            }
+            None => {
+                let message = format!(
+                    "timed out reopening the device link after {:.1}s",
+                    budget.as_secs_f64()
+                );
+                self.record_link_failure(&message);
+                return Err(LinkError::ConnectionFailed { message });
+            }
+        };
+        *self.session.borrow_mut() = session;
+        *self.connection.borrow_mut() = connection;
+        *self.transport.borrow_mut() = transport;
+        // Clear the observed-line state: stale lines from the previous
+        // link's boot must not classify the new one (the M3 lesson — old
+        // blank-flash lines would misclassify a post-flash reconnect).
+        *self.classifier.borrow_mut() = BootLineClassifier::new();
+        self.set_state(DeviceState::Booting);
+        Ok(())
+    }
+
+    /// Record a failed management/rebuild: the session record's status
+    /// carries the message and the state lands on `Gone` (the wire was
+    /// released; only [`DeviceSession::reconnect`] re-arms it).
+    pub(super) fn record_link_failure(&self, message: &str) {
+        {
+            let mut session = self.session.borrow_mut();
+            if session.status == LinkSessionStatus::Open {
+                session.status = LinkSessionStatus::Error {
+                    message: message.to_string(),
+                };
+            }
+        }
+        self.set_state(DeviceState::Gone);
     }
 
     /// Gate for the app-protocol channel: drive readiness if it has not
@@ -350,7 +449,7 @@ impl DeviceShared {
     /// on its next pass. (Same bridge technique as the fake device's
     /// server pump; duplicated because that one is feature-private.)
     fn poll_frame(&self) -> Option<Result<WireServerMessage, TransportError>> {
-        let transport = self.transport.clone();
+        let transport = self.transport();
         poll_once(async move {
             let mut transport = transport.lock().await;
             lpa_client::ClientTransport::receive(&mut **transport).await

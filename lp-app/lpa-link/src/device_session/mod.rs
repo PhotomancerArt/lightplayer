@@ -14,6 +14,14 @@
 //! boot, no hello race, and no management plane. `DeviceSession` is
 //! hardware-only by design.
 //!
+//! Management ([`DeviceSession::manage`]) owns the flash/erase/reset cycle
+//! with mode-exclusive wire access: release the link (the old transport's
+//! serial thread ends), run the connector operation, then **reconnect =
+//! rebuild** — a brand-new provider session + transport with readiness
+//! re-run from `Booting`. The same rebuild is [`DeviceSession::reconnect`],
+//! the one way out of the otherwise-sticky terminal states (`Gone`,
+//! `Incompatible`, diagnosis states).
+//!
 //! Runtime neutrality: this module never spawns tasks and never sleeps on a
 //! concrete executor. All timing comes through the injected [`DeviceTimers`]
 //! factory, and readiness is driven on demand from the session's own async
@@ -21,6 +29,7 @@
 
 mod device_client_io;
 mod device_event;
+mod device_manage;
 mod device_mode;
 mod device_readiness;
 mod device_session;
@@ -32,6 +41,7 @@ mod device_timers;
 mod tests;
 
 pub use device_event::{DeviceEvent, DeviceEventSink};
+pub use device_manage::DeviceManageOutcome;
 pub use device_mode::{DeviceMode, DeviceModeGuard};
 pub use device_readiness::{
     BootDiagnosis, BootLineClassifier, NO_FIRMWARE_DETECTED_PREFIX, NoFirmwareReason,

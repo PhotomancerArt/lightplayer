@@ -22,8 +22,8 @@ pub mod stream;
     feature = "fake-device"
 ))]
 pub use device_session::{
-    DeviceEvent, DeviceEventSink, DeviceMode, DeviceSession, DeviceSnapshot, DeviceState,
-    DeviceTimers, IncompatibleReason,
+    DeviceEvent, DeviceEventSink, DeviceManageOutcome, DeviceMode, DeviceSession, DeviceSnapshot,
+    DeviceState, DeviceTimers, IncompatibleReason,
 };
 #[cfg(any(
     feature = "host-process",

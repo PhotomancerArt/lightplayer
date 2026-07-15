@@ -33,6 +33,7 @@ impl ClientIo for DeviceClientIo {
         self.shared.ensure_app_protocol().await?;
         let transport = self.shared.transport();
         let result = {
+            let _in_flight = self.shared.begin_channel_use();
             let mut transport = transport.lock().await;
             lpa_client::ClientTransport::send(&mut **transport, msg).await
         };
@@ -46,14 +47,16 @@ impl ClientIo for DeviceClientIo {
         self.shared.ensure_app_protocol().await?;
         let budget = self.shared.timers().deadlines().request_idle;
         let transport = self.shared.transport();
-        let received = self
-            .shared
-            .timers()
-            .with_deadline(budget, async {
-                let mut transport = transport.lock().await;
-                lpa_client::ClientTransport::receive(&mut **transport).await
-            })
-            .await;
+        let received = {
+            let _in_flight = self.shared.begin_channel_use();
+            self.shared
+                .timers()
+                .with_deadline(budget, async {
+                    let mut transport = transport.lock().await;
+                    lpa_client::ClientTransport::receive(&mut **transport).await
+                })
+                .await
+        };
         // Keep device log lines flowing into the console feed during pulls.
         self.shared.pump_console_lines();
         let result = match received {

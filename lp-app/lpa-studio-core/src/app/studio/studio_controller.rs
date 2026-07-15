@@ -1939,144 +1939,77 @@ impl StudioController {
     }
 
     async fn reset_device(&mut self, updates: UxUpdateSink) -> UiResult {
-        self.project.reset();
-        self.device.server.disconnect();
-        let captured_logs = Rc::new(RefCell::new(Vec::new()));
-        let management_updates = capture_log_updates(
-            retarget_activity_updates(
-                updates.clone(),
-                device_section_target(DeviceController::SECTION_DEVICE),
-            ),
-            Rc::clone(&captured_logs),
-        );
-        let management = match self
-            .device
-            .link
-            .manage_with_updates(
-                LinkManagementRequest::ResetRuntime,
-                "Resetting device",
-                management_updates,
-            )
-            .await
-        {
-            Ok(management) => management,
-            Err(error) => {
-                self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
-                return Err(error);
-            }
-        };
-        self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
-        self.record_logs(management.logs);
-
-        let mut outcome = UiNotices::new().with_notice(UiNotice::info("Device reset"));
-        emit_activity(
-            &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
-            "Reconnecting device",
-            "Connecting",
-            "Waiting for device boot",
-        );
-        match self.device.link.reopen_active_connection().await {
-            Ok(connected) => match self.attach_connected_link(connected, updates).await {
-                Ok(mut attach_outcome) => {
-                    outcome.notices.append(&mut attach_outcome.notices);
-                    Ok(outcome)
-                }
-                Err(error) => {
-                    self.push_log(UiLogDraft::new(
-                        UiLogLevel::Warn,
-                        UiLogOrigin::Studio,
-                        format!("device reset but server reconnect failed: {error}"),
-                    ));
-                    self.device.server.fail(error.to_string());
-                    Ok(outcome.with_notice(UiNotice::info(
-                        "Device reset; reconnect after it finishes booting",
-                    )))
-                }
-            },
-            Err(error) => {
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Warn,
-                    UiLogOrigin::Studio,
-                    format!("device reset but serial reopen failed: {error}"),
-                ));
-                self.device.server.fail(error.to_string());
-                Ok(outcome.with_notice(UiNotice::info(
+        self.run_device_management(
+            ManagementFlowSpec {
+                request: LinkManagementRequest::ResetRuntime,
+                progress_label: "Resetting device",
+                reconnect_detail: "Waiting for device boot",
+                record_captured_logs_on_success: true,
+                done_notice: |_| UiNotice::info("Device reset"),
+                degrade_subject: "device reset",
+                server_reconnect_failed_notice: "Device reset; reconnect after it finishes booting",
+                serial_reopen_failed_notice:
                     "Device reset; reconnect the device after it finishes booting",
-                )))
-            }
-        }
+            },
+            updates,
+        )
+        .await
     }
 
     async fn provision_firmware(&mut self, updates: UxUpdateSink) -> UiResult {
-        self.project.reset();
-        self.device.server.disconnect();
-        let captured_logs = Rc::new(RefCell::new(Vec::new()));
-        let management_updates = capture_log_updates(
-            retarget_activity_updates(
-                updates.clone(),
-                device_section_target(DeviceController::SECTION_DEVICE),
-            ),
-            Rc::clone(&captured_logs),
-        );
-        let management = match self
-            .device
-            .link
-            .manage_with_updates(
-                LinkManagementRequest::FlashFirmware,
-                "Flashing firmware",
-                management_updates,
-            )
-            .await
-        {
-            Ok(management) => management,
-            Err(error) => {
-                self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
-                return Err(error);
-            }
-        };
-        self.record_logs(management.logs);
-        let mut outcome = UiNotices::new().with_notice(provision_notice(&management.result));
-        emit_activity(
-            &updates,
-            device_section_target(DeviceController::SECTION_DEVICE),
-            "Reconnecting device",
-            "Connecting",
-            "Waiting for firmware boot",
-        );
-        match self.device.link.reopen_active_connection().await {
-            Ok(connected) => match self.attach_connected_link(connected, updates).await {
-                Ok(mut attach_outcome) => {
-                    outcome.notices.append(&mut attach_outcome.notices);
-                    Ok(outcome)
-                }
-                Err(error) => {
-                    self.push_log(UiLogDraft::new(
-                        UiLogLevel::Warn,
-                        UiLogOrigin::Studio,
-                        format!("firmware flashed but server reconnect failed: {error}"),
-                    ));
-                    self.device.server.fail(error.to_string());
-                    Ok(outcome.with_notice(UiNotice::info(
-                        "Firmware flashed; reconnect the server after the device finishes booting",
-                    )))
-                }
-            },
-            Err(error) => {
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Warn,
-                    UiLogOrigin::Studio,
-                    format!("firmware flashed but serial reopen failed: {error}"),
-                ));
-                self.device.server.fail(error.to_string());
-                Ok(outcome.with_notice(UiNotice::info(
+        self.run_device_management(
+            ManagementFlowSpec {
+                request: LinkManagementRequest::FlashFirmware,
+                progress_label: "Flashing firmware",
+                reconnect_detail: "Waiting for firmware boot",
+                record_captured_logs_on_success: false,
+                done_notice: provision_notice,
+                degrade_subject: "firmware flashed",
+                server_reconnect_failed_notice:
+                    "Firmware flashed; reconnect the server after the device finishes booting",
+                serial_reopen_failed_notice:
                     "Firmware flashed; reconnect the device after it finishes booting",
-                )))
-            }
-        }
+            },
+            updates,
+        )
+        .await
     }
 
     async fn reset_to_blank(&mut self, updates: UxUpdateSink) -> UiResult {
+        self.run_device_management(
+            ManagementFlowSpec {
+                request: LinkManagementRequest::EraseDeviceFlash,
+                progress_label: "Wiping device",
+                reconnect_detail: "Checking for LightPlayer firmware",
+                record_captured_logs_on_success: false,
+                done_notice: reset_notice,
+                degrade_subject: "device wiped",
+                server_reconnect_failed_notice:
+                    "Device wiped; reconnect after the device finishes booting",
+                serial_reopen_failed_notice:
+                    "Device wiped; reconnect the device after it finishes booting",
+            },
+            updates,
+        )
+        .await
+    }
+
+    /// The shared management orchestration core behind `reset_device` /
+    /// `provision_firmware` / `reset_to_blank`: quiesce project+server, run
+    /// the link management operation with live activity/log capture, then
+    /// reopen the connection and reattach the server — degrading to an
+    /// informational notice when the reconnect half fails.
+    ///
+    /// This is the studio-side twin of `DeviceSession::manage` (release →
+    /// manage → rebuild → re-ready). P5 replaces the
+    /// `manage_with_updates` + `reopen_active_connection` pair here with
+    /// that single DeviceSession operation; the notice/log adaptation in
+    /// this method is what remains.
+    async fn run_device_management(
+        &mut self,
+        spec: ManagementFlowSpec,
+        updates: UxUpdateSink,
+    ) -> UiResult {
         self.project.reset();
         self.device.server.disconnect();
         let captured_logs = Rc::new(RefCell::new(Vec::new()));
@@ -2090,11 +2023,7 @@ impl StudioController {
         let management = match self
             .device
             .link
-            .manage_with_updates(
-                LinkManagementRequest::EraseDeviceFlash,
-                "Wiping device",
-                management_updates,
-            )
+            .manage_with_updates(spec.request, spec.progress_label, management_updates)
             .await
         {
             Ok(management) => management,
@@ -2103,14 +2032,18 @@ impl StudioController {
                 return Err(error);
             }
         };
+        if spec.record_captured_logs_on_success {
+            self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
+        }
         self.record_logs(management.logs);
-        let mut outcome = UiNotices::new().with_notice(reset_notice(&management.result));
+
+        let mut outcome = UiNotices::new().with_notice((spec.done_notice)(&management.result));
         emit_activity(
             &updates,
             device_section_target(DeviceController::SECTION_DEVICE),
             "Reconnecting device",
             "Connecting",
-            "Checking for LightPlayer firmware",
+            spec.reconnect_detail,
         );
         match self.device.link.reopen_active_connection().await {
             Ok(connected) => match self.attach_connected_link(connected, updates).await {
@@ -2122,24 +2055,23 @@ impl StudioController {
                     self.push_log(UiLogDraft::new(
                         UiLogLevel::Warn,
                         UiLogOrigin::Studio,
-                        format!("device wiped but server reconnect failed: {error}"),
+                        format!(
+                            "{} but server reconnect failed: {error}",
+                            spec.degrade_subject
+                        ),
                     ));
                     self.device.server.fail(error.to_string());
-                    Ok(outcome.with_notice(UiNotice::info(
-                        "Device wiped; reconnect after the device finishes booting",
-                    )))
+                    Ok(outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice)))
                 }
             },
             Err(error) => {
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,
                     UiLogOrigin::Studio,
-                    format!("device wiped but serial reopen failed: {error}"),
+                    format!("{} but serial reopen failed: {error}", spec.degrade_subject),
                 ));
                 self.device.server.fail(error.to_string());
-                Ok(outcome.with_notice(UiNotice::info(
-                    "Device wiped; reconnect the device after it finishes booting",
-                )))
+                Ok(outcome.with_notice(UiNotice::info(spec.serial_reopen_failed_notice)))
             }
         }
     }
@@ -2343,6 +2275,29 @@ fn should_reopen_before_server_connect(connection: &LinkConnection) -> bool {
         connection.kind,
         LinkConnectionKind::BrowserSerialEsp32 { .. }
     )
+}
+
+/// The per-operation shape of one device management flow (reset / flash /
+/// wipe): the link request plus the notice/log wording that differs between
+/// them. Everything else — quiesce, capture, manage, reopen, reattach,
+/// degrade — is shared in `StudioController::run_device_management`.
+struct ManagementFlowSpec {
+    request: LinkManagementRequest,
+    /// Activity label while the management operation runs.
+    progress_label: &'static str,
+    /// Activity detail while waiting for the post-operation reconnect.
+    reconnect_detail: &'static str,
+    /// Reset records the live-captured logs on success (its result replay
+    /// is empty); flash/erase rely on the result replay alone, so recording
+    /// the capture too would double every line.
+    record_captured_logs_on_success: bool,
+    /// Success notice derived from the management result.
+    done_notice: fn(&LinkManagementResult) -> UiNotice,
+    /// Log-line subject when the reconnect half degrades, e.g. "device
+    /// reset" → "device reset but serial reopen failed: …".
+    degrade_subject: &'static str,
+    server_reconnect_failed_notice: &'static str,
+    serial_reopen_failed_notice: &'static str,
 }
 
 fn provision_notice(result: &LinkManagementResult) -> UiNotice {
