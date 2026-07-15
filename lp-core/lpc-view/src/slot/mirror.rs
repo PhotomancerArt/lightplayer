@@ -206,6 +206,7 @@ mod tests {
                     },
                     semantics: Default::default(),
                     policy: Default::default(),
+                    default_bind: None,
                 },
                 SlotFieldShape {
                     name: SlotName::parse("compile_error").unwrap(),

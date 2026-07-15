@@ -154,14 +154,15 @@ fn resource_ref_slot_schema() -> Value {
 }
 
 /// `RelativeNodeRef` reads as `LpType::String`, then `from_lp_value` runs
-/// `RelativeNodeRef::parse`: a leading `.` (current) or `..` (parent hop)
-/// followed by optional dot-separated `NodeName` segments
-/// (`[A-Za-z_][A-Za-z0-9_]*`). The pattern mirrors the parser exactly.
+/// `RelativeNodeRef::parse`: `.` alone, an optional leading `./`, then
+/// `..` parent hops (only before any name) followed by slash-separated
+/// `NodeName` segments (`[A-Za-z_][A-Za-z0-9_]*`). The pattern mirrors the
+/// parser exactly except the u8 cap on parent hops.
 fn relative_node_ref_schema() -> Value {
     json!({
         "description": "Relative node reference, e.g. \".\", \"..\", \"../texture\", \"child/grandchild\".",
         "type": "string",
-        "pattern": "^\\.\\.?([A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*)?$",
+        "pattern": "^(\\.|(\\./)?(\\.\\.(/\\.\\.)*(/[A-Za-z_][A-Za-z0-9_]*)*|[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*))$",
     })
 }
 
@@ -356,13 +357,19 @@ mod tests {
                 r#"".""#,
                 r#""..""#,
                 r#""../texture""#,
+                r#""../../aunt/child""#,
+                r#""texture""#,
+                r#""./texture""#,
                 r#""child/grandchild""#,
             ],
             &[
-                // Absolute names must be spelled relative.
-                r#""texture""#,
+                // Absolute paths must be spelled relative.
+                r#""/texture""#,
                 r#""""#,
-                r#""./texture""#,
+                r#""a//b""#,
+                r#""child/""#,
+                // Re-ascending after a name segment is malformed.
+                r#""child/..""#,
                 r#""..a..b""#,
                 r#"".9lives""#,
                 r#"42"#,
