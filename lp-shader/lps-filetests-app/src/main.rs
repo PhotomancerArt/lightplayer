@@ -13,6 +13,17 @@ struct Cli {
 enum Commands {
     /// Run GLSL filetests
     Test(TestOptions),
+    /// Sweep the corpus on one target and emit per-directive JSONL results
+    /// (P2 triage input; never mutates corpus files)
+    Sweep(SweepOptions),
+}
+
+/// Sweep the corpus on a target, emitting JSONL to stdout.
+#[derive(Parser)]
+struct SweepOptions {
+    /// Target to sweep (full canonical name, e.g. `interp.f32`)
+    #[arg(short, long, default_value = "interp.f32")]
+    target: String,
 }
 
 #[derive(Args)]
@@ -155,6 +166,28 @@ fn main() -> anyhow::Result<()> {
                 &force_opts,
                 t.perf,
             )?;
+        }
+        Commands::Sweep(s) => {
+            let target =
+                lps_filetests::targets::Target::from_name(&s.target).map_err(anyhow::Error::msg)?;
+            let records = lps_filetests::sweep::sweep_corpus(target)?;
+            let mut passed = 0usize;
+            let mut failed = 0usize;
+            for r in &records {
+                if r.status == "pass" {
+                    passed += 1;
+                } else {
+                    failed += 1;
+                }
+                println!("{}", r.to_json_line());
+            }
+            eprintln!(
+                "sweep {}: {} directives, {} passed, {} failed",
+                target.name(),
+                records.len(),
+                passed,
+                failed
+            );
         }
     }
 

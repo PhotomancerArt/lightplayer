@@ -10,6 +10,7 @@ impl fmt::Display for Backend {
             Backend::Rv32 => write!(f, "rv32c"),
             Backend::Rv32fa => write!(f, "rv32n"),
             Backend::Wasm => write!(f, "wasm"),
+            Backend::Interp => write!(f, "interp"),
         }
     }
 }
@@ -35,6 +36,7 @@ impl Target {
             (_, Backend::Rv32) => "rv32c",
             (_, Backend::Rv32fa) => "rv32n",
             (_, Backend::Wasm) => "wasm",
+            (_, Backend::Interp) => "interp",
         }
     }
 
@@ -85,7 +87,8 @@ pub fn parse_target_filters(spec: &str) -> Result<Vec<&'static Target>, String> 
         }
         if !any {
             let valid: Vec<String> = ALL_TARGETS.iter().map(|t| t.name()).collect();
-            let backends = "wasm, rv32c, rv32n, rv32lpn (shorthand) or full names like wasm.q32";
+            let backends =
+                "wasm, rv32c, rv32n, rv32lpn, interp (shorthand) or full names like wasm.q32";
             return Err(format!(
                 "unknown target '{token}'. Try {backends}. Known targets: {}",
                 valid.join(", ")

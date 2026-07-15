@@ -6,14 +6,14 @@
 #![deny(missing_docs)]
 
 pub mod colors;
-#[cfg(test)]
-mod conformance;
+pub mod conformance;
 pub mod discovery;
 pub mod mutation;
 pub mod output_mode;
 pub mod parse;
 pub mod perf_model;
 pub mod runner;
+pub mod sweep;
 pub mod targets;
 pub mod test_compile;
 pub mod test_error;
@@ -72,6 +72,7 @@ fn plan_mark_annotations_for_file(
                     .map(|b| directive_has_unimplemented_for(d, b))
                     .unwrap_or(true);
                 baseline_ok
+                    && d.mode_filter.applies_to(target)
                     && matches!(
                         directive_disposition(&d.annotations, target),
                         Disposition::ExpectSuccess
