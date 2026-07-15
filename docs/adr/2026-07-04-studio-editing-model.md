@@ -387,7 +387,10 @@ Four deliberate points:
 - **Explicit Apply, no auto-apply.** A mid-keystroke bad compile currently
   stops the node's rendering (no old-shader-keeps-rendering until the
   compiler-robustness budgeted driver lands); revisit auto-apply after
-  that.
+  that. *Revised by
+  [2026-07-14-shader-auto-apply.md](2026-07-14-shader-auto-apply.md):
+  keep-last-good landed and auto-apply is now always on (no Apply
+  button).*
 - **Client-side size guard, no chunking.** `MAX_ASSET_BODY_BYTES` (10 KB)
   parks oversize applies as failed entries client-side; mutations stay
   single-frame under the 16 KB wire budget (`lpc-wire/src/budget.rs`).
