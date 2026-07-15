@@ -303,6 +303,12 @@ asset slot row (`AssetSlotEditor` in `config_slot_row.rs`) so the output
 stays visible beside it; its text/modified state is component-local (the
 inline Apply button sits right there, so nothing is hoisted to the pane).
 
+While the editor is focused, Cmd/Ctrl+Enter applies and Cmd/Ctrl+S saves
+(both captured in the editor keymap; Cmd/Ctrl+S never reaches the browser's
+save dialog). The status bar's Apply/Save affordances carry OS-correct
+shortcut hints (`⌘↵` on Mac, `Ctrl+Enter` elsewhere) via
+`src/base/keyboard.rs`.
+
 ## Boundary
 
 - `lpa-studio-core` owns Studio product state, `StudioView` panes, stack views,
