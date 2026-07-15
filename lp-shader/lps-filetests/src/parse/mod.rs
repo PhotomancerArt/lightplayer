@@ -16,9 +16,9 @@ pub mod test_type;
 
 // Re-exports
 pub use test_type::{
-    ClifExpectations, ComparisonOp, ErrorExpectation, RunDirective, SetUniform, TestFile, TestType,
-    TextureFixture, TextureFixtureChannel, TextureFixturePixel, TextureFixtures, TextureSpecs,
-    TrapExpectation,
+    ClifExpectations, ComparisonOp, ErrorExpectation, RunDirective, RunModeFilter, SetUniform,
+    TestFile, TestType, TextureFixture, TextureFixtureChannel, TextureFixturePixel,
+    TextureFixtures, TextureSpecs, TrapExpectation,
 };
 
 use anyhow::{Context, Result};
@@ -183,10 +183,11 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
             continue;
         }
 
-        if let Some(run_line) = parse_run::parse_run_directive_line(&logical) {
+        if let Some((run_line, raw_mode)) = parse_run::parse_run_directive_line(&logical) {
             let legacy_expect_fail = run_line.trim_end().ends_with("[expect-fail]");
             let mut directive =
                 parse_run::parse_run_directive(run_line, line_number, legacy_expect_fail)?;
+            directive.mode_filter = parse_run::parse_run_mode_filter(raw_mode, line_number)?;
             directive.annotations = std::mem::take(&mut pending_annotations);
             directive.set_uniforms = std::mem::take(&mut pending_set_uniforms);
             directive.expected_setup_failure = pending_setup_failure.take();
@@ -313,6 +314,49 @@ float f() { return 1.0; }
         let r = parse_test_file(&p);
         let _ = std::fs::remove_file(&p);
         assert!(r.is_err(), "expected duplicate key error");
+    }
+
+    #[test]
+    fn run_mode_channels_parse_and_unknown_mode_errors() {
+        use crate::targets::FloatMode;
+        let p = std::env::temp_dir().join(format!("lps_ft_mode_chan_{}.glsl", std::process::id()));
+        std::fs::write(
+            &p,
+            r"// test run
+float f() { return 1.0; }
+// run: f() ~= 1.0
+// run[q32]: f() ~= 1.0
+// run[f32]: f() ~= 1.0
+",
+        )
+        .unwrap();
+        let tf = parse_test_file(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(tf.run_directives.len(), 3);
+        assert_eq!(tf.run_directives[0].mode_filter, RunModeFilter::All);
+        assert_eq!(
+            tf.run_directives[1].mode_filter,
+            RunModeFilter::Only(FloatMode::Q32)
+        );
+        assert_eq!(
+            tf.run_directives[2].mode_filter,
+            RunModeFilter::Only(FloatMode::F32)
+        );
+
+        let p2 =
+            std::env::temp_dir().join(format!("lps_ft_mode_bogus_{}.glsl", std::process::id()));
+        std::fs::write(
+            &p2,
+            r"// test run
+float f() { return 1.0; }
+// run[bogus]: f() ~= 1.0
+",
+        )
+        .unwrap();
+        let r = parse_test_file(&p2);
+        let _ = std::fs::remove_file(&p2);
+        let err = r.err().expect("unknown mode must error").to_string();
+        assert!(err.contains("bogus"), "unexpected error: {err}");
     }
 
     #[test]

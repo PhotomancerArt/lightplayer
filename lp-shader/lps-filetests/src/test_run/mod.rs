@@ -3,6 +3,7 @@
 pub mod compile;
 pub mod execution;
 pub mod filetest_lpvm;
+pub mod interp;
 pub mod parse_assert;
 pub mod run;
 pub mod run_detail;

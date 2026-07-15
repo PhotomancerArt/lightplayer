@@ -1,15 +1,38 @@
 //! Parse run directives.
 
-use crate::parse::test_type::{ComparisonOp, RunDirective};
+use crate::parse::test_type::{ComparisonOp, RunDirective, RunModeFilter};
 use anyhow::Result;
 
-/// Parse run directive from a line.
-pub fn parse_run_directive_line(line: &str) -> Option<&str> {
+/// Parse run directive from a line: `(body, raw_mode_token)`.
+///
+/// Recognized forms: `// run:`, `// #run:`, and mode-channeled
+/// `// run[MODE]:` / `// #run[MODE]:` (any bracket token is captured here;
+/// [`RunModeFilter::from_token`] validates it so unknown modes error instead
+/// of silently dropping the directive).
+pub fn parse_run_directive_line(line: &str) -> Option<(&str, Option<&str>)> {
     let trimmed = line.trim();
-    trimmed
-        .strip_prefix("// run:")
-        .or_else(|| trimmed.strip_prefix("// #run:"))
-        .map(|s| s.trim())
+    let rest = trimmed
+        .strip_prefix("// run")
+        .or_else(|| trimmed.strip_prefix("// #run"))?;
+    if let Some(body) = rest.strip_prefix(':') {
+        return Some((body.trim(), None));
+    }
+    // `// run[MODE]: …`
+    let bracket = rest.strip_prefix('[')?;
+    let close = bracket.find(']')?;
+    let mode = &bracket[..close];
+    let body = bracket[close + 1..].strip_prefix(':')?;
+    Some((body.trim(), Some(mode)))
+}
+
+/// Validate an optional raw mode token from [`parse_run_directive_line`].
+pub fn parse_run_mode_filter(raw_mode: Option<&str>, line_number: usize) -> Result<RunModeFilter> {
+    match raw_mode {
+        None => Ok(RunModeFilter::All),
+        Some(token) => {
+            RunModeFilter::from_token(token).map_err(|e| anyhow::anyhow!("line {line_number}: {e}"))
+        }
+    }
 }
 
 /// Parse a single `// run:` line into a `RunDirective`.
@@ -90,6 +113,7 @@ pub fn parse_run_directive(
         comparison,
         expected_str: expected.to_string(),
         tolerance,
+        mode_filter: RunModeFilter::All,
         line_number,
         annotations,
         set_uniforms: Vec::new(),
@@ -106,18 +130,76 @@ mod tests {
     fn test_parse_run_directive_line() {
         assert_eq!(
             parse_run_directive_line("// run: add_int(0, 0) == 0"),
-            Some("add_int(0, 0) == 0")
+            Some(("add_int(0, 0) == 0", None))
         );
         assert_eq!(
             parse_run_directive_line("  // run: test() == 1  "),
-            Some("test() == 1")
+            Some(("test() == 1", None))
         );
         assert_eq!(
             parse_run_directive_line("// #run: test() == 1"),
-            Some("test() == 1")
+            Some(("test() == 1", None))
         );
-        assert_eq!(parse_run_directive_line("// run:"), Some(""));
+        assert_eq!(parse_run_directive_line("// run:"), Some(("", None)));
         assert_eq!(parse_run_directive_line("not a run directive"), None);
+    }
+
+    #[test]
+    fn test_parse_run_directive_line_mode_channels() {
+        assert_eq!(
+            parse_run_directive_line("// run[q32]: f() ~= 1.0"),
+            Some(("f() ~= 1.0", Some("q32")))
+        );
+        assert_eq!(
+            parse_run_directive_line("// run[f32]: f() ~= 1.0"),
+            Some(("f() ~= 1.0", Some("f32")))
+        );
+        assert_eq!(
+            parse_run_directive_line("// #run[f32]: f() == 2"),
+            Some(("f() == 2", Some("f32")))
+        );
+        // Unknown tokens are still captured (validation happens later so the
+        // file errors loudly instead of silently dropping the directive).
+        assert_eq!(
+            parse_run_directive_line("// run[bogus]: f() == 1"),
+            Some(("f() == 1", Some("bogus")))
+        );
+        // Malformed bracket forms are not run directives.
+        assert_eq!(parse_run_directive_line("// run[q32: f() == 1"), None);
+        assert_eq!(parse_run_directive_line("// run q32: f() == 1"), None);
+    }
+
+    #[test]
+    fn test_parse_run_mode_filter() {
+        use crate::parse::test_type::RunModeFilter;
+        use crate::targets::FloatMode;
+        assert_eq!(parse_run_mode_filter(None, 1).unwrap(), RunModeFilter::All);
+        assert_eq!(
+            parse_run_mode_filter(Some("q32"), 1).unwrap(),
+            RunModeFilter::Only(FloatMode::Q32)
+        );
+        assert_eq!(
+            parse_run_mode_filter(Some("f32"), 1).unwrap(),
+            RunModeFilter::Only(FloatMode::F32)
+        );
+        let err = parse_run_mode_filter(Some("bogus"), 7)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("line 7") && err.contains("bogus"), "{err}");
+    }
+
+    #[test]
+    fn test_mode_filter_applies_to() {
+        use crate::parse::test_type::RunModeFilter;
+        use crate::targets::{FloatMode, Target};
+        let q32 = Target::from_name("rv32n.q32").unwrap();
+        let f32t = Target::from_name("interp.f32").unwrap();
+        assert!(RunModeFilter::All.applies_to(q32));
+        assert!(RunModeFilter::All.applies_to(f32t));
+        assert!(RunModeFilter::Only(FloatMode::Q32).applies_to(q32));
+        assert!(!RunModeFilter::Only(FloatMode::Q32).applies_to(f32t));
+        assert!(RunModeFilter::Only(FloatMode::F32).applies_to(f32t));
+        assert!(!RunModeFilter::Only(FloatMode::F32).applies_to(q32));
     }
 
     #[test]
