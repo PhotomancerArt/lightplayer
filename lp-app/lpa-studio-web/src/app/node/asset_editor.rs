@@ -26,6 +26,17 @@
 //! browser). The bar's Apply/Save affordances carry OS-correct hints via
 //! [`crate::base::keyboard`].
 //!
+//! **Auto-apply.** With the bar's Auto toggle on (the default), edits apply
+//! themselves [`AUTO_APPLY_DEBOUNCE_MS`] after the last keystroke — the
+//! live-editing loop. The debounce is epoch-guarded (only the newest
+//! keystroke's timer fires), waits politely while an apply is in flight, and
+//! never auto-retries after a failed/oversize apply (the failure would just
+//! repeat; manual Apply is the retry gesture). ⌘↵/Apply stay immediate.
+//! Toggled off, the editor behaves exactly as the manual M2 flow. The engine
+//! keeps the last good program rendering through a bad auto-apply
+//! (keep-last-good), so mid-edit compile errors show in the bar without
+//! blanking the output.
+//!
 //! Resync flows need no logic here: the `doc` prop is the controller's
 //! effective content, and the [`CodeEditor`] reconciliation rules do the
 //! rest (external doc wins while unmodified; a doc that catches up with the
@@ -47,6 +58,11 @@ use crate::base::{
     IconMenuTone, Platform, StudioIconName, keyboard,
 };
 
+/// Quiet period after the last keystroke before an auto-apply fires — long
+/// enough to not race normal typing, short enough to feel live next to the
+/// ~200 ms device compile.
+const AUTO_APPLY_DEBOUNCE_MS: u32 = 500;
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn AssetEditor(
@@ -56,11 +72,26 @@ pub fn AssetEditor(
     /// runtime detection; stories pin it for deterministic captures.
     #[props(default)]
     platform: Option<Platform>,
+    /// Initial state of the Auto toggle (session-local; stories pin the off
+    /// variant). Defaults to on — auto-apply is the normal editing mode.
+    #[props(default = true)]
+    auto_apply_default: bool,
 ) -> Element {
     // Editor-local state (see module docs). `modified` gates the Apply
     // button; `text` carries the current body to the Apply action.
     let mut modified = use_signal(|| false);
     let mut text = use_signal(String::new);
+    // Auto-apply: the session-local toggle, the keystroke epoch (only the
+    // newest keystroke's debounce timer fires), and a non-reactive mirror of
+    // the controller projections the timer must read *at fire time* (the
+    // values captured at spawn time would be half a second stale). The epoch
+    // is deliberately NOT a signal: signal writes inside a keystroke burst
+    // are not observable by the burst's later handler calls (write batching),
+    // which would give every keystroke the same epoch and let timers fire
+    // mid-typing. The RefCell increments immediately.
+    let mut auto_apply = use_signal(|| auto_apply_default);
+    let edit_epoch = use_hook(|| Rc::new(RefCell::new(0_u64)));
+    let auto_apply_gate = use_hook(|| Rc::new(RefCell::new(AutoApplyGate::default())));
     // The last resolved text, kept across renders so a transient
     // `content == None` window (revert/save invalidated the cache) does not
     // unmount the editor and destroy unapplied user text. Non-reactive on
@@ -130,6 +161,12 @@ pub fn AssetEditor(
         dirty,
     );
 
+    // Keep the fire-time gate current with this render's projections.
+    *auto_apply_gate.borrow_mut() = AutoApplyGate {
+        editable,
+        in_flight: editor.in_flight,
+        apply_failed: editor.failure.is_some(),
+    };
     let platform = platform.unwrap_or_else(Platform::detect);
     let apply_disabled = !(editable && modified());
     // Apply gate shared by the button and the editor's Cmd/Ctrl+Enter path:
@@ -157,6 +194,45 @@ pub fn AssetEditor(
             handler.call(save_overlay_action());
         }
     };
+    // Debounced auto-apply: every text change bumps the epoch and arms a
+    // fresh timer; a timer whose epoch was superseded exits silently, so only
+    // the newest keystroke's timer can fire. External resyncs also land here,
+    // but their timers resolve to Skip (nothing is modified). The verdict
+    // re-reads live state at fire time — see [`auto_apply_verdict`].
+    let auto_editor = editor.clone();
+    let auto_gate = auto_apply_gate.clone();
+    let epoch_cell = edit_epoch.clone();
+    let on_change = move |value: String| {
+        text.set(value);
+        let epoch = {
+            let mut cell = epoch_cell.borrow_mut();
+            *cell = cell.wrapping_add(1);
+            *cell
+        };
+        let apply_editor = auto_editor.clone();
+        let gate = auto_gate.clone();
+        let epoch_watch = epoch_cell.clone();
+        spawn(async move {
+            loop {
+                gloo_timers::future::TimeoutFuture::new(AUTO_APPLY_DEBOUNCE_MS).await;
+                if *epoch_watch.borrow() != epoch {
+                    return;
+                }
+                let gate = *gate.borrow();
+                match auto_apply_verdict(*auto_apply.peek(), gate, *modified.peek()) {
+                    AutoApplyVerdict::Fire => {
+                        if let Some(handler) = on_action {
+                            handler.call(apply_editor.apply_action(text.peek().as_str()));
+                        }
+                        return;
+                    }
+                    AutoApplyVerdict::Skip => return,
+                    // An apply is in flight: keep waiting and re-check.
+                    AutoApplyVerdict::Wait => {}
+                }
+            }
+        });
+    };
 
     rsx! {
         section { class: "tw:grid tw:min-w-0 tw:border-t tw:border-border-muted",
@@ -178,6 +254,19 @@ pub fn AssetEditor(
                     }
                     if let EditorBarState::ApplyFailed { reason } = &bar_state {
                         FullErrorPopover { raw: reason.clone() }
+                    }
+                    if editable {
+                        button {
+                            class: auto_toggle_class(auto_apply()),
+                            r#type: "button",
+                            title: "Automatically apply edits about half a second after typing stops",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                let next = !*auto_apply.peek();
+                                auto_apply.set(next);
+                            },
+                            "Auto"
+                        }
                     }
                     if bar_state == EditorBarState::Unsaved {
                         button {
@@ -229,7 +318,7 @@ pub fn AssetEditor(
                             diagnostics,
                             reveal_line: reveal_request,
                             on_modified: move |value| modified.set(value),
-                            on_change: move |value| text.set(value),
+                            on_change,
                             on_apply,
                             on_save,
                         }
@@ -417,6 +506,53 @@ fn shader_error_diagnostics(error: &UiShaderError) -> Vec<CodeEditorDiagnostic> 
     }]
 }
 
+/// The controller-projection inputs an expired auto-apply timer reads at
+/// fire time, mirrored non-reactively each render (values captured when the
+/// timer was armed would be half a second stale).
+#[derive(Clone, Copy, Default)]
+struct AutoApplyGate {
+    editable: bool,
+    in_flight: bool,
+    apply_failed: bool,
+}
+
+/// What an expired auto-apply debounce timer should do.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AutoApplyVerdict {
+    /// Dispatch the apply now.
+    Fire,
+    /// An apply is in flight: keep waiting and re-check.
+    Wait,
+    /// Drop the request: toggle off, nothing applicable, or the last apply
+    /// failed — auto-retrying a failed/oversize apply would just repeat the
+    /// failure, so manual Apply is the retry gesture.
+    Skip,
+}
+
+/// The auto-apply fire decision, pure so the rules unit-test without a DOM.
+/// The failure latch outranks everything but the basic gates: once an apply
+/// parks as Failed, only a manual Apply (which replaces the failed entry)
+/// resumes the automation.
+fn auto_apply_verdict(auto: bool, gate: AutoApplyGate, modified: bool) -> AutoApplyVerdict {
+    if !auto || !gate.editable || !modified || gate.apply_failed {
+        return AutoApplyVerdict::Skip;
+    }
+    if gate.in_flight {
+        return AutoApplyVerdict::Wait;
+    }
+    AutoApplyVerdict::Fire
+}
+
+/// The Auto toggle's treatment: accent while on, muted but clearly
+/// clickable while off.
+fn auto_toggle_class(on: bool) -> &'static str {
+    if on {
+        "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-accent-wash tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:text-accent"
+    } else {
+        "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:opacity-70 tw:hover:opacity-100"
+    }
+}
+
 /// The project-level Save action the editor's ⌘S and the bar's Save button
 /// both dispatch — the same `SaveOverlay` op as the project pane's Save.
 fn save_overlay_action() -> UiAction {
@@ -543,6 +679,47 @@ mod tests {
         assert_eq!(
             EditorBarState::compute(None, false, None, false, false),
             EditorBarState::Clean
+        );
+    }
+
+    #[test]
+    fn auto_apply_fires_only_when_quiet_modified_and_idle() {
+        let gate = |editable: bool, in_flight: bool, apply_failed: bool| AutoApplyGate {
+            editable,
+            in_flight,
+            apply_failed,
+        };
+
+        assert_eq!(
+            auto_apply_verdict(true, gate(true, false, false), true),
+            AutoApplyVerdict::Fire
+        );
+        // Toggle off / not editable / unmodified → Skip.
+        assert_eq!(
+            auto_apply_verdict(false, gate(true, false, false), true),
+            AutoApplyVerdict::Skip
+        );
+        assert_eq!(
+            auto_apply_verdict(true, gate(false, false, false), true),
+            AutoApplyVerdict::Skip
+        );
+        assert_eq!(
+            auto_apply_verdict(true, gate(true, false, false), false),
+            AutoApplyVerdict::Skip
+        );
+        // A parked failure never auto-retries — even outranking in-flight.
+        assert_eq!(
+            auto_apply_verdict(true, gate(true, false, true), true),
+            AutoApplyVerdict::Skip
+        );
+        assert_eq!(
+            auto_apply_verdict(true, gate(true, true, true), true),
+            AutoApplyVerdict::Skip
+        );
+        // In flight (no failure) → Wait and re-check.
+        assert_eq!(
+            auto_apply_verdict(true, gate(true, true, false), true),
+            AutoApplyVerdict::Wait
         );
     }
 

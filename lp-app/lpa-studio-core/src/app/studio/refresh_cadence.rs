@@ -27,6 +27,18 @@ pub const SIMULATOR_REFRESH_INTERVAL: Duration = Duration::from_millis(33);
 /// connected). Retired web constant `DEVICE_PROJECT_REFRESH_INTERVAL_MS`.
 pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(750);
 
+/// Tightened passive-tick interval while an accepted asset-body apply awaits
+/// its compile verdict (the shader auto-apply plan's post-ack refresh): the
+/// device compiles on its next engine frame (~200 ms), so a couple of quick
+/// pulls surface the error/clean verdict without waiting a full
+/// [`DEVICE_REFRESH_INTERVAL`]. Only ever *tightens* the cadence — the
+/// simulator's 33 ms interval stays as-is.
+pub const VERDICT_CHASE_INTERVAL: Duration = Duration::from_millis(250);
+
+/// How many passive ticks run at [`VERDICT_CHASE_INTERVAL`] after an accepted
+/// apply before the cadence relaxes back to the connection policy.
+pub const VERDICT_CHASE_TICKS: u8 = 3;
+
 /// The passive-refresh cadence for a connection: the interval the UI timer waits
 /// between enqueuing refresh ticks.
 ///

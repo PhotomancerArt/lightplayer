@@ -56,10 +56,12 @@ fn EditorStoryCard(
     // Pinned (not detected) so the shortcut hints render identically on
     // every capture host; Mac is the default story platform.
     #[props(default = Platform::Mac)] platform: Platform,
+    // The Auto toggle's initial state (on by default, like the app).
+    #[props(default = true)] auto_apply: bool,
 ) -> Element {
     rsx! {
         div { class: "tw:w-full tw:max-w-2xl tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
-            AssetEditor { editor, platform }
+            AssetEditor { editor, platform, auto_apply_default: auto_apply }
         }
     }
 }
@@ -68,6 +70,15 @@ fn EditorStoryCard(
 fn clean() -> Element {
     rsx! {
         EditorStoryCard { editor: editor_fixture(resolved(false)) }
+    }
+}
+
+#[story(
+    description = "The Auto toggle off: the pill goes muted and edits wait for a manual Apply (the M2 flow)."
+)]
+fn auto_apply_off() -> Element {
+    rsx! {
+        EditorStoryCard { editor: editor_fixture(resolved(false)), auto_apply: false }
     }
 }
 

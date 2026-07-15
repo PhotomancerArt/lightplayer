@@ -69,7 +69,7 @@ pub use app::studio::{
     StudioController, StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver,
     StudioViewSender, UiConsoleView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
     UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
-    ViewPublisher, studio_view_channel,
+    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

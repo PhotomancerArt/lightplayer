@@ -201,11 +201,12 @@ where
     }
 
     /// Refresh the shared next-tick delay the UI timer reads: the connection's
-    /// cadence interval (core policy) plus any active backoff. Called after each
-    /// processed batch so a cadence change (e.g. simulator connects) or a backoff
+    /// cadence interval (core policy, tightened during a post-apply verdict
+    /// chase) plus any active backoff. Called after each processed batch so a
+    /// cadence change (e.g. simulator connects), a chase window, or a backoff
     /// bump takes effect on the next tick.
     fn publish_refresh_delay(&self) {
-        let interval = self.controller.refresh_cadence().interval();
+        let interval = self.controller.next_refresh_interval();
         self.delay
             .set(interval.saturating_add(self.backoff.current_delay()));
     }
