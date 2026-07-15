@@ -5125,6 +5125,7 @@ dependencies = [
  "lp-shader",
  "lpir",
  "lps-builtins",
+ "lps-filetests",
  "lps-frontend",
  "lps-shared",
  "lpvm-wasm",

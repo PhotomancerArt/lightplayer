@@ -16,6 +16,13 @@ pub struct ShaderCompileOptions {
     pub max_errors: Option<usize>,
     /// GLSL frontend used before LPIR lowering.
     pub frontend: lp_shader::ShaderFrontend,
+    /// Compile-time texture binding contract: one [`lps_shared::TextureBindingSpec`]
+    /// per `sampler2D` uniform leaf, keyed by canonical dotted uniform path
+    /// (`docs/design/lp-shader-texture-access.md`). Every backend validates
+    /// this map against the shader's declared samplers and fails compilation
+    /// on a mismatch — missing or extra specs are compile errors on the CPU
+    /// and GPU tiers alike.
+    pub textures: lp_shader::TextureBindingSpecs,
 }
 
 impl Default for ShaderCompileOptions {
@@ -25,6 +32,7 @@ impl Default for ShaderCompileOptions {
             q32_options: lps_q32::q32_options::Q32Options::default(),
             max_errors: Some(20),
             frontend: lp_shader::ShaderFrontend::default(),
+            textures: lp_shader::TextureBindingSpecs::new(),
         }
     }
 }

@@ -28,5 +28,6 @@ png = "0.18"
 lp-gfx-lpvm = { path = "../lp-gfx-lpvm" }
 lp-shader = { path = "../../lp-shader/lp-shader", features = ["naga"] }
 lpir = { path = "../../lp-shader/lpir" }
+lps-filetests = { path = "../../lp-shader/lps-filetests" }
 lps-frontend = { path = "../../lp-shader/lps-frontend" }
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }

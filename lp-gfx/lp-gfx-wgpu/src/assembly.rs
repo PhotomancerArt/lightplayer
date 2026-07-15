@@ -14,7 +14,11 @@
 //!    resolves calls in source order (declaration-before-use), while the
 //!    engine's `lps-glsl` frontend accepts out-of-order definitions, so
 //!    authored content may rely on it;
-//! 3. a **generated fragment `main()`** wrapping
+//! 3. **texture call lowering** ([`crate::texture_lowering`]) — every
+//!    `texture()` / `texelFetch()` site on a spec'd sampler is rewritten to
+//!    a generated helper implementing the CPU tier's sampling semantics
+//!    (index-space wrap, `texelFetch` edge clamp) over `textureLoad`;
+//! 4. a **generated fragment `main()`** wrapping
 //!    `render(floor(gl_FragCoord.xy))` — matching the CPU path's `pos`
 //!    convention (the synthesised render-texture loop passes integer pixel
 //!    coordinates without a half-pixel offset).
@@ -26,23 +30,44 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
+use lp_gfx::GfxError;
+use lp_shader::TextureBindingSpecs;
 use lps_builtins::canonical_glsl::{CANONICAL_GLSL, CanonicalGlsl};
+
+use crate::texture_lowering::lower_texture_calls;
 
 /// Name of the generated fragment output variable.
 const FRAG_OUT: &str = "lp_gfx_frag_color";
 
 /// Assemble the full fragment-stage GLSL for an authored pixel shader.
-pub fn assemble_fragment_glsl(authored: &str) -> String {
+///
+/// `textures` is the compile-time [`lps_shared::TextureBindingSpec`] map
+/// keyed by sampler uniform leaf path; sampling call sites are lowered
+/// against it (a sampled name without a spec is a compile error).
+pub fn assemble_fragment_glsl(
+    authored: &str,
+    textures: &TextureBindingSpecs,
+) -> Result<String, GfxError> {
+    let lowered = lower_texture_calls(authored, textures)?;
+
     let mut out = String::from("#version 450 core\n");
     out.push_str(&assemble_prelude(authored));
+    out.push_str(&lowered.shared_helpers);
+    out.push_str(&lowered.helper_prototypes);
     out.push_str(&authored_prototypes(authored));
-    out.push_str(authored);
+    out.push_str(&lowered.rewritten);
+    // Helper definitions come after the authored text so the sampler
+    // uniform declarations they reference are already in scope for naga's
+    // declaration-before-use resolution (call sites resolve through the
+    // prototypes spliced above).
+    out.push('\n');
+    out.push_str(&lowered.helper_definitions);
     let _ = write!(
         out,
         "\nlayout(location = 0) out vec4 {FRAG_OUT};\n\
          void main() {{\n    {FRAG_OUT} = render(floor(gl_FragCoord.xy));\n}}\n"
     );
-    out
+    Ok(out)
 }
 
 /// Build the canonical lpfn prelude for an authored source: the
@@ -318,7 +343,7 @@ fn function_signature(segment: &str) -> Option<(String, String)> {
 
 /// Blank out `//` and `/* */` comments and `#` preprocessor lines
 /// (byte-for-byte replacement with spaces, newlines preserved).
-fn strip_comments_and_directives(src: &str) -> String {
+pub(crate) fn strip_comments_and_directives(src: &str) -> String {
     let bytes = src.as_bytes();
     let mut out = bytes.to_vec();
     let mut i = 0;
@@ -468,7 +493,8 @@ float f(float x) { return x; }
     fn assembled_unit_has_version_prelude_prototypes_and_wrapper() {
         let authored = "layout(binding = 0) uniform vec2 outputSize;\n\
                         vec4 render(vec2 pos) { return vec4(lpfn_saturate(pos.x)); }\n";
-        let unit = assemble_fragment_glsl(authored);
+        let unit =
+            assemble_fragment_glsl(authored, &TextureBindingSpecs::new()).expect("assembles");
         assert!(unit.starts_with("#version 450 core\n"));
         let saturate_at = unit.find("float lpfn_saturate(").expect("prelude");
         let proto_at = unit.find("vec4 render(vec2 pos);").expect("prototype");

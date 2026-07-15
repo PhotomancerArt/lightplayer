@@ -78,13 +78,14 @@ where
             )));
         }
         let cfg = options.to_compiler_config();
+        let mut desc =
+            CompilePxDesc::new(source, lps_shared::TextureStorageFormat::Rgba16Unorm, cfg)
+                .with_frontend(options.frontend);
+        desc.textures = options.textures.clone();
         let px = self
             .shared
             .engine
-            .compile_px_desc(
-                CompilePxDesc::new(source, lps_shared::TextureStorageFormat::Rgba16Unorm, cfg)
-                    .with_frontend(options.frontend),
-            )
+            .compile_px_desc(desc)
             .map_err(|e| GfxError::Compile(format!("{e}")))?;
 
         let _ = options.max_errors; // TODO: thread max_errors when front-end accepts it
