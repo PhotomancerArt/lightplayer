@@ -120,6 +120,90 @@ jobs:
       - name: Validate
         run: cd lp2025 && just check build-ci test
 
+  # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser, naga-wasm-poc)
+  # are validated in a separate job below. Building `-p lp-gfx-wgpu` unifies
+  # cargo features differently from the default-members build, so folding it
+  # into `just test` recompiled ~25 crates (the naga fork, wgpu-core/hal, and
+  # most of lp-shader) at the tail of every Validate run, and clippy over the
+  # wgpu tree added another ~1.5 min. Splitting it out keeps that work off the
+  # critical path, and the paths gate skips it entirely on PRs that cannot
+  # affect the GPU/wasm-sidecar build (docs, Planning, studio-web, lp-cli).
+  #
+  # The gate is intentionally conservative: it lists the dependency closure of
+  # those crates by directory. Pushes to main always run the job, so anything
+  # a filter miss lets through still surfaces on the very next merge.
+  detect-gfx-changes:
+    name: Detect GFX-relevant changes
+    runs-on: ubuntu-24.04
+    outputs:
+      gfx: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.gfx }}
+    steps:
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            gfx:
+              - 'lp-gfx/**'
+              - 'lp-shader/**'
+              - 'lp-riscv/**'
+              - 'lp-base/**'
+              - 'lp-core/**'
+              - 'lp-fw/**'
+              - 'lp-app/lpa-server/**'
+              - 'lp-app/lpa-client/**'
+              - 'lp-app/lpa-link/**'
+              - 'lp-app/lpa-studio-core/**'
+              - 'lp-app/lpa-fs-opfs/**'
+              - 'spikes/naga-wasm-poc/**'
+              - 'third_party/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+
+  validate-gfx:
+    name: Validate GFX (ARM)
+    runs-on: ubuntu-24.04-arm
+    needs: detect-gfx-changes
+    if: needs.detect-gfx-changes.outputs.gfx == 'true'
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rustfmt, clippy, rust-src
+
+      # rust-cache keys on the job id, so this job's cache (wgpu tree) stays
+      # separate from validate-arm's and neither evicts the other.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Validate GFX
+        run: cd lp2025 && just validate-gfx
+
   # build-esp32-arm:
   #   name: Build ESP32 (ARM)
   #   runs-on: ubuntu-24.04-arm
