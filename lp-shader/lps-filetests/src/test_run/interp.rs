@@ -9,9 +9,12 @@
 //! (see `crate::conformance::oracle`). Transcendental imports (`@glsl::sin`
 //! etc.) are evaluated host-side by `StdMathHandler` (libm).
 //!
-//! Not supported here (fails per directive, surfaced by the P2 sweep):
-//! uniforms (`set_uniform`), texture fixtures (no instance memory), and
-//! trap-code expectations (the interpreter reports errors, not RV32 traps).
+//! Uniforms and module globals execute against a per-instance VMContext
+//! image (zero-initialized; `set_uniform` writes into it), and aggregate
+//! returns are decoded from a real sret buffer. Not supported here (fails
+//! per directive, surfaced by the P2 sweep): texture fixtures (no guest
+//! memory to bind them into) and trap-code expectations (the interpreter
+//! reports errors, not RV32 traps).
 
 use std::sync::Arc;
 
@@ -312,7 +315,11 @@ fn sret_dense_size(ty: &LpsType) -> Result<usize, String> {
 /// Reinterpret a dense std430 sret buffer as typed interpreter scalars, in
 /// the same order [`decode_return`] consumes them.
 fn sret_bytes_to_values(ty: &LpsType, bytes: &[u8]) -> Result<Vec<Value>, String> {
-    fn push_scalars(ty: &LpsType, words: &mut impl Iterator<Item = u32>, out: &mut Vec<Value>) -> Result<(), String> {
+    fn push_scalars(
+        ty: &LpsType,
+        words: &mut impl Iterator<Item = u32>,
+        out: &mut Vec<Value>,
+    ) -> Result<(), String> {
         let mut take = |n: usize, float: bool, out: &mut Vec<Value>| -> Result<(), String> {
             for _ in 0..n {
                 let w = words.next().ok_or("sret buffer exhausted")?;
@@ -354,7 +361,10 @@ fn sret_bytes_to_values(ty: &LpsType, bytes: &[u8]) -> Result<Vec<Value>, String
     }
 
     if bytes.len() % 4 != 0 {
-        return Err(format!("sret buffer length {} not word-aligned", bytes.len()));
+        return Err(format!(
+            "sret buffer length {} not word-aligned",
+            bytes.len()
+        ));
     }
     let mut words = bytes
         .chunks_exact(4)
