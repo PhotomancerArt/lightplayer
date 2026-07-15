@@ -79,6 +79,9 @@ fn flash_esp32_elf(
     )
     .context("prepare flash data")?;
     let mut progress = FlashProgress { verbose };
+    // The flash target's `finish` applies the requested `--after` behavior
+    // (hard-reset into the app, or stay in the bootloader) itself; calling
+    // `reset_after` again would talk to a stub that is already gone.
     flasher
         .load_elf_to_flash(
             &elf,
@@ -87,13 +90,6 @@ fn flash_esp32_elf(
             XtalFrequency::default(CHIP),
         )
         .context("flash firmware ELF")?;
-
-    // Apply the requested post-flash behavior (hard-reset into the app, or
-    // stay in the bootloader), exactly like the espflash CLI's `--after`.
-    flasher
-        .connection()
-        .reset_after(true)
-        .context("post-flash reset")?;
     Ok(())
 }
 

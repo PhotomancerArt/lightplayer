@@ -73,7 +73,10 @@ pub(super) fn flash_firmware(
             .map_err(|error| LinkError::other(format!("flash write failed: {error}")))?;
     }
 
-    reset_into_app(&mut flasher, &mut recorder);
+    // No explicit reset: `write_bin_to_flash`'s flash-target `finish`
+    // already applies the connection's after-operation (HardReset), exactly
+    // like the espflash CLI's flash command. A second `reset_after` would
+    // talk to a stub that is already gone (found on hardware, M5 smoke).
     recorder.log("Flash complete");
 
     Ok(LinkFirmwareFlashResult {
@@ -155,9 +158,11 @@ fn connect(port_name: &str, recorder: &mut EventRecorder) -> Result<Flasher, Lin
 }
 
 /// Apply the connection's `after` operation (HardReset) so the chip leaves
-/// download mode and boots the freshly written (or erased) flash. Best-effort:
-/// a reset failure is logged but not fatal — `DeviceSession` re-runs readiness
-/// on rebuild regardless.
+/// download mode and boots the (now blank) flash. Needed on the ERASE path
+/// only: erase commands have no flash-target `finish`, so nothing else
+/// applies the after-operation (the espflash CLI's erase commands do the
+/// same). Best-effort: a reset failure is logged but not fatal —
+/// `DeviceSession` re-runs readiness on rebuild regardless.
 fn reset_into_app(flasher: &mut Flasher, recorder: &mut EventRecorder) {
     // `is_stub = true` matches the `use_stub = true` passed to `connect`.
     if let Err(error) = flasher.connection().reset_after(true) {
