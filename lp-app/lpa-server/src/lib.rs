@@ -22,7 +22,18 @@ pub mod template;
 
 pub use error::ServerError;
 pub use lpc_engine::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
-pub use lpc_engine::{ButtonService, LpGraphics, LpShader, RadioService, ShaderCompileOptions};
+pub use lpc_engine::{
+    ButtonService, LpGraphics, LpShader, RadioService, ShaderCompileOptions, ShaderFrontend,
+};
 pub use project::Project;
 pub use project_manager::ProjectManager;
 pub use server::{LpServer, MemoryStatsFn};
+
+/// GLSL frontend that ships on LightPlayer devices — the product constant.
+///
+/// Device hosts (`fw-esp32`, `fw-emu`, and device-emulating hosts such as
+/// `fw-host` and `lp-cli`) pass this when constructing their CPU graphics
+/// backend. It is stated exactly once, here: frontend selection is an
+/// explicit host decision, never a Cargo-feature default, so feature
+/// unification can no longer flip which frontend a build compiles with.
+pub const DEVICE_SHADER_FRONTEND: ShaderFrontend = ShaderFrontend::LpsGlsl;

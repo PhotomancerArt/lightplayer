@@ -25,19 +25,28 @@ pub struct ShaderCompileOptions {
     pub textures: lp_shader::TextureBindingSpecs,
 }
 
-impl Default for ShaderCompileOptions {
-    fn default() -> Self {
+impl ShaderCompileOptions {
+    /// Build options from the two per-backend product decisions — semantics
+    /// tier and GLSL frontend — with neutral defaults for the rest (default
+    /// Q32 options, 20 max errors, no texture bindings).
+    ///
+    /// There is deliberately no `Default`: `frontend` used to fall back to a
+    /// `cfg!(feature = "naga")` default, which let Cargo feature unification
+    /// silently change compile behavior with the build graph. Render paths
+    /// take both values from the backend the host constructed
+    /// ([`crate::LpGraphics::native_semantics`] /
+    /// [`crate::LpGraphics::glsl_frontend`]).
+    #[must_use]
+    pub fn new(semantics: ShaderSemantics, frontend: lp_shader::ShaderFrontend) -> Self {
         Self {
-            semantics: ShaderSemantics::default(),
+            semantics,
             q32_options: lps_q32::q32_options::Q32Options::default(),
             max_errors: Some(20),
-            frontend: lp_shader::ShaderFrontend::default(),
+            frontend,
             textures: lp_shader::TextureBindingSpecs::new(),
         }
     }
-}
 
-impl ShaderCompileOptions {
     /// LPIR compiler configuration for the Q32 tier.
     pub fn to_compiler_config(&self) -> lpir::CompilerConfig {
         lpir::CompilerConfig {

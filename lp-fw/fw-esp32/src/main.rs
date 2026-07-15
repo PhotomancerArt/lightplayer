@@ -698,7 +698,17 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Create server (with time provider for shader comp timing). RV32 uses lpvm-native rt_jit.
     esp_println::println!("[INIT] Creating LpServer instance...");
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    // GLSL frontend: the device ships lpa_server::DEVICE_SHADER_FRONTEND
+    // (LpsGlsl). The crate's own `naga` feature is an explicit builder
+    // opt-in (just demo-esp32c6-*-naga) switching this binary to the naga
+    // frontend — a leaf-binary feature the builder chooses, immune to
+    // workspace feature unification.
+    let shader_frontend = if cfg!(feature = "naga") {
+        lpa_server::ShaderFrontend::Naga
+    } else {
+        lpa_server::DEVICE_SHADER_FRONTEND
+    };
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new(shader_frontend));
     let button_service: Rc<dyn ButtonService> = hardware_system.clone();
     let radio_service: Rc<dyn lpa_server::RadioService> = hardware_system.clone();
     let mut server = LpServer::new_with_hardware_services(

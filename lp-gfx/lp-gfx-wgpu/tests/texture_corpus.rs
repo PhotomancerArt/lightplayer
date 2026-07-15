@@ -169,8 +169,8 @@ fn cpu_channels(
         wrapped,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
-    )
-    .with_frontend(ShaderFrontend::Naga);
+        ShaderFrontend::Naga,
+    );
     desc.textures = test_file.texture_specs.clone();
     let shader = engine
         .compile_px_desc(desc)
@@ -217,10 +217,8 @@ fn gpu_channels(
     test_file: &TestFile,
     wrapped: &str,
 ) -> Result<[u16; 4], String> {
-    let mut options = ShaderCompileOptions {
-        semantics: ShaderSemantics::F32Gpu,
-        ..Default::default()
-    };
+    let mut options =
+        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
     options.textures = test_file.texture_specs.clone();
     let mut shader = graphics
         .compile_shader(wrapped, &options)

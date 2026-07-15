@@ -1630,7 +1630,8 @@ fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
 
 fn asset_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -1721,7 +1722,8 @@ const PROJECT_DIR: &str = "/projects/edit-e2e";
 /// simulator session runs entirely host-side).
 fn edit_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
