@@ -57,7 +57,10 @@ pub fn create_server(
     // Since we can't clone Box<dyn LpFs>, we'll return the filesystem that was passed
     // Note: LpServer takes ownership, so we can't return the same instance
     // For now, return a new filesystem instance (caller may not need it)
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    // Desktop dev server emulates the device: same GLSL frontend product
+    // constant (the GPU tier, when it arrives, is a separate backend).
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
     let server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,

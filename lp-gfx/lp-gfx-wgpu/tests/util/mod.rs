@@ -36,6 +36,6 @@ pub fn test_graphics() -> Option<GpuGraphics> {
     Some(GpuGraphics::new(
         device,
         queue,
-        Box::new(TargetLpvmGraphics::new()),
+        Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga)),
     ))
 }

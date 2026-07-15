@@ -77,7 +77,8 @@ fn test_stop_all_projects() {
     // Create output provider
     let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
 
     // Create server with prepared filesystem
     let mut server = LpServer::new(

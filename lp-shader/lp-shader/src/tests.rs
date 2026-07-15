@@ -61,6 +61,7 @@ fn compile_px_desc_with_texture_spec_inserts_named_binding() {
         "vec4 render(vec2 p) { return vec4(0.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("palette", inserted);
     assert_eq!(desc.textures.get("palette"), Some(&inserted));
@@ -473,19 +474,19 @@ fn compile_px_desc_new_has_empty_texture_specs() {
         "vec4 render(vec2 p) { return vec4(0.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     );
     assert!(desc.textures.is_empty());
-    assert_eq!(desc.frontend, ShaderFrontend::default());
 }
 
 #[test]
-fn compile_px_desc_with_frontend_selects_lps_glsl() {
+fn compile_px_desc_new_records_frontend() {
     let desc = CompilePxDesc::new(
         "vec4 render(vec2 p) { return vec4(0.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
-    )
-    .with_frontend(ShaderFrontend::LpsGlsl);
+        ShaderFrontend::LpsGlsl,
+    );
     assert_eq!(desc.frontend, ShaderFrontend::LpsGlsl);
     assert_eq!(desc.frontend.name(), "lps-glsl");
 }
@@ -496,13 +497,19 @@ fn compile_px_wrapper_and_compile_px_desc_empty_textures_match() {
     let engine = test_engine();
     let config = lpir::CompilerConfig::default();
     let via_wrapper = engine
-        .compile_px(glsl, TextureStorageFormat::Rgba16Unorm, &config)
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &config,
+            ShaderFrontend::LpsGlsl,
+        )
         .expect("compile_px");
     let via_desc = engine
         .compile_px_desc(CompilePxDesc::new(
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             config.clone(),
+            ShaderFrontend::LpsGlsl,
         ))
         .expect("compile_px_desc");
     assert_eq!(via_wrapper.output_format(), via_desc.output_format());
@@ -557,6 +564,7 @@ fn compile_px_returns_monomorphic_lps_pxshader() {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px should succeed for trivial shader");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
@@ -578,6 +586,7 @@ fn compile_px_simple_shader() {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
@@ -590,14 +599,12 @@ fn compile_px_desc_lps_glsl_simple_shader() {
     let engine = test_engine();
     let glsl = "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.0, 1.0); }";
     let shader = engine
-        .compile_px_desc(
-            CompilePxDesc::new(
-                glsl,
-                TextureStorageFormat::Rgba16Unorm,
-                lpir::CompilerConfig::default(),
-            )
-            .with_frontend(ShaderFrontend::LpsGlsl),
-        )
+        .compile_px_desc(CompilePxDesc::new(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
+        ))
         .expect("compile_px_desc lps-glsl");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert_eq!(shader.render_sig().name, "render");
@@ -607,14 +614,12 @@ fn compile_px_desc_lps_glsl_simple_shader() {
 fn compile_px_desc_lps_glsl_basic_shader() {
     let engine = test_engine();
     let shader = engine
-        .compile_px_desc(
-            CompilePxDesc::new(
-                include_str!("../../../examples/basic/shader.glsl"),
-                TextureStorageFormat::Rgba16Unorm,
-                lpir::CompilerConfig::default(),
-            )
-            .with_frontend(ShaderFrontend::LpsGlsl),
-        )
+        .compile_px_desc(CompilePxDesc::new(
+            include_str!("../../../examples/basic/shader.glsl"),
+            TextureStorageFormat::Rgba16Unorm,
+            lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
+        ))
         .expect("compile_px_desc lps-glsl basic shader");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert_eq!(shader.render_sig().name, "render");
@@ -634,14 +639,12 @@ vec4 render(vec2 pos) {
 }
 "#;
     let shader = engine
-        .compile_px_desc(
-            CompilePxDesc::new(
-                glsl,
-                TextureStorageFormat::Rgba16Unorm,
-                lpir::CompilerConfig::default(),
-            )
-            .with_frontend(ShaderFrontend::LpsGlsl),
-        )
+        .compile_px_desc(CompilePxDesc::new(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
+        ))
         .expect("compile_px_desc lps-glsl unreachable if/else");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert_eq!(shader.render_sig().name, "render");
@@ -654,8 +657,8 @@ fn start_compile_px_job_lps_glsl_progresses_through_frontend_and_prepare() {
         "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.0, 1.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
-    )
-    .with_frontend(ShaderFrontend::LpsGlsl);
+        ShaderFrontend::LpsGlsl,
+    );
 
     let mut job = engine.start_compile_px_job(desc);
     let mut saw_frontend = false;
@@ -705,8 +708,8 @@ fn start_compile_px_job_wasm_falls_back_without_backend_stage() {
         "vec4 render(vec2 pos) { return vec4(1.0, 0.5, 0.25, 1.0); }",
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
-    )
-    .with_frontend(ShaderFrontend::LpsGlsl);
+        ShaderFrontend::LpsGlsl,
+    );
 
     let mut job = engine.start_compile_px_job(desc);
     let mut saw_backend = false;
@@ -742,6 +745,7 @@ vec4 render(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
     assert!(shader.meta().uniforms_type.is_some());
@@ -754,6 +758,7 @@ fn compile_px_invalid_glsl_returns_parse_error() {
         "not valid glsl {{{",
         TextureStorageFormat::Rgba16Unorm,
         &lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     );
     match result {
         Err(e) => assert!(matches!(e, LpsError::Parse(_))),
@@ -802,6 +807,7 @@ fn render_frame_no_uniforms() {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
     let mut tex = engine
@@ -825,6 +831,7 @@ fn render_samples_no_uniforms_writes_rgba16_points() {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
     let mut points = engine.alloc_sample_points(2).expect("points");
@@ -855,6 +862,7 @@ vec4 render(vec2 pos) { return vec4(u_time, 0.0, 0.0, 1.0); }";
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
     let mut tex = engine
@@ -880,6 +888,7 @@ fn render_frame_r16_constant_writes_expected_bytes() {
             glsl,
             TextureStorageFormat::R16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px R16");
     let mut tex = engine
@@ -913,6 +922,7 @@ fn render_frame_rgb16_constant_writes_expected_bytes() {
             glsl,
             TextureStorageFormat::Rgb16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px Rgb16");
     let mut tex = engine
@@ -949,6 +959,7 @@ fn render_frame_rgba16_constant_writes_expected_bytes() {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px Rgba16");
     let mut tex = engine
@@ -992,6 +1003,7 @@ fn render_frame_rgba16_gradient_verifies_pos_and_enumeration() {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
     let (w, h) = (3u32, 2u32);
@@ -1042,6 +1054,7 @@ fn compile_px_missing_render_returns_validation_error() {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         &lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     );
     match result {
         Err(LpsError::Validation(msg)) => {
@@ -1060,6 +1073,7 @@ fn compile_px_wrong_param_count_returns_validation_error() {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         &lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     );
     match result {
         Err(LpsError::Validation(msg)) => {
@@ -1078,6 +1092,7 @@ fn compile_px_wrong_param_type_returns_validation_error() {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         &lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     );
     match result {
         Err(LpsError::Validation(msg)) => {
@@ -1096,6 +1111,7 @@ fn compile_px_wrong_return_type_returns_validation_error() {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         &lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     );
     match result {
         Err(LpsError::Validation(msg)) => {
@@ -1115,7 +1131,8 @@ fn compile_px_r16_accepts_float_return() {
             .compile_px(
                 glsl,
                 TextureStorageFormat::R16Unorm,
-                &lpir::CompilerConfig::default()
+                &lpir::CompilerConfig::default(),
+                ShaderFrontend::LpsGlsl
             )
             .is_ok()
     );
@@ -1129,6 +1146,7 @@ fn compile_px_r16_rejects_vec4_return() {
         glsl,
         TextureStorageFormat::R16Unorm,
         &lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     ) {
         Err(LpsError::Validation(msg)) => assert!(msg.contains("return"), "{msg}"),
         Err(other) => panic!("wrong error: {other}"),
@@ -1145,7 +1163,8 @@ fn compile_px_rgb16_accepts_vec3_return() {
             .compile_px(
                 glsl,
                 TextureStorageFormat::Rgb16Unorm,
-                &lpir::CompilerConfig::default()
+                &lpir::CompilerConfig::default(),
+                ShaderFrontend::LpsGlsl
             )
             .is_ok()
     );
@@ -1159,6 +1178,7 @@ fn compile_px_rgb16_rejects_vec4_return() {
         glsl,
         TextureStorageFormat::Rgb16Unorm,
         &lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     ) {
         Err(LpsError::Validation(msg)) => assert!(msg.contains("return"), "{msg}"),
         Err(other) => panic!("wrong error: {other}"),
@@ -1182,6 +1202,7 @@ vec4 render(vec2 pos) {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
     assert!(shader.meta().uniforms_type.is_some());
@@ -1200,6 +1221,7 @@ vec4 render(vec2 pos) { return vec4(0.0); }
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
@@ -1217,6 +1239,7 @@ vec4 render(vec2 pos) { return vec4(0.0); }
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     );
     match engine.compile_px_desc(desc) {
         Err(LpsError::Validation(msg)) => {
@@ -1237,6 +1260,7 @@ vec4 render(vec2 pos) { return vec4(0.0); }
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     match engine.compile_px_desc(desc) {
@@ -1257,6 +1281,7 @@ fn compile_px_texture_free_succeeds_without_texture_specs() {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
 }
@@ -1276,6 +1301,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
@@ -1324,9 +1350,9 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
-    .with_texture_spec("inputColor", test_default_texture_binding_spec())
-    .with_frontend(ShaderFrontend::LpsGlsl);
+    .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
 
     let mut input_tex = engine
@@ -1374,6 +1400,7 @@ vec4 render(vec2 pos) {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
 
@@ -1420,6 +1447,7 @@ vec4 render(vec2 pos) {
             glsl,
             TextureStorageFormat::Rgba16Unorm,
             &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
         )
         .expect("compile_px");
 
@@ -1722,6 +1750,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec(
         "palette",
@@ -1779,6 +1808,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
@@ -1812,6 +1842,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
@@ -1848,6 +1879,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
@@ -1890,6 +1922,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec(
         "inputColor",
@@ -1941,6 +1974,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
@@ -1983,6 +2017,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
@@ -2025,6 +2060,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");
@@ -2067,6 +2103,7 @@ vec4 render(vec2 pos) {
         glsl,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
+        ShaderFrontend::LpsGlsl,
     )
     .with_texture_spec("inputColor", test_default_texture_binding_spec());
     let shader = engine.compile_px_desc(desc).expect("compile_px_desc");

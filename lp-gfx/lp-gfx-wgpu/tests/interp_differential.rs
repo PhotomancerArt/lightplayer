@@ -165,10 +165,8 @@ fn logical_and_short_circuits_on_all_tiers() {
 /// Render `probe` over pixels x = 0..N on the GPU and read back unorm16.
 fn gpu_probe_frame(graphics: &lp_gfx_wgpu::GpuGraphics, glsl: &str) -> Vec<u16> {
     let authored = format!("{glsl}\nvec4 render(vec2 pos) {{ return probe(pos.x); }}\n");
-    let options = ShaderCompileOptions {
-        semantics: ShaderSemantics::F32Gpu,
-        ..Default::default()
-    };
+    let options =
+        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
     let mut shader = graphics
         .compile_shader(&authored, &options)
         .expect("gpu probe compiles");

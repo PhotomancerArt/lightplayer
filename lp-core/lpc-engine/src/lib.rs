@@ -29,5 +29,8 @@ pub use engine::{
 };
 // Graphics seam re-exports: the traits/handles live in `lp-gfx`; the
 // cfg-selected CPU implementation is `lp_gfx_lpvm::LpvmGraphics` (constructed
-// by hosts, injected via `Engine::set_graphics`).
+// by hosts, injected via `Engine::set_graphics`). `ShaderFrontend` is the
+// host's explicit GLSL-frontend product decision, passed when constructing
+// the backend.
 pub use lp_gfx::{GfxError, LpGraphics, LpShader, ShaderCompileOptions};
+pub use lp_shader::ShaderFrontend;

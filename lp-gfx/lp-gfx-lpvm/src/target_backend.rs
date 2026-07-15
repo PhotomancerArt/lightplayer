@@ -5,6 +5,8 @@
 //! backends live in their own crates (`lp-gfx-wgpu`) and are selected at
 //! runtime creation, never silently.
 
+use lp_shader::ShaderFrontend;
+
 use crate::lpvm_graphics::LpvmGraphics;
 
 /// The LPVM engine compiled for this target.
@@ -27,8 +29,10 @@ pub type TargetLpvmGraphics = LpvmGraphics<TargetLpvmEngine>;
 /// (`fw-esp32`, `fw-emu`).
 #[cfg(target_arch = "riscv32")]
 impl TargetLpvmGraphics {
+    /// `frontend` is the host's GLSL-frontend product decision (see
+    /// [`lp_gfx::LpGraphics::glsl_frontend`]).
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(frontend: ShaderFrontend) -> Self {
         lps_builtins::ensure_builtins_referenced();
         let mut table = lpvm_native::BuiltinTable::new();
         table.populate();
@@ -36,7 +40,7 @@ impl TargetLpvmGraphics {
             alloc::sync::Arc::new(table),
             lpvm_native::NativeCompileOptions::default(),
         );
-        Self::from_engine(backend, "lpvm-native::rt_jit")
+        Self::from_engine(backend, "lpvm-native::rt_jit", frontend)
     }
 }
 
@@ -44,12 +48,14 @@ impl TargetLpvmGraphics {
 /// host JS `WebAssembly.Module` / `Instance` API.
 #[cfg(target_arch = "wasm32")]
 impl TargetLpvmGraphics {
+    /// `frontend` is the host's GLSL-frontend product decision (see
+    /// [`lp_gfx::LpGraphics::glsl_frontend`]).
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(frontend: ShaderFrontend) -> Self {
         let backend =
             lpvm_wasm::rt_browser::BrowserLpvmEngine::new(lpvm_wasm::WasmOptions::default())
                 .expect("BrowserLpvmEngine::new with default WasmOptions");
-        Self::from_engine(backend, "lpvm-wasm::rt_browser")
+        Self::from_engine(backend, "lpvm-wasm::rt_browser", frontend)
     }
 }
 
@@ -59,17 +65,13 @@ impl TargetLpvmGraphics {
 /// pointers stay valid.
 #[cfg(not(any(target_arch = "riscv32", target_arch = "wasm32")))]
 impl TargetLpvmGraphics {
+    /// `frontend` is the host's GLSL-frontend product decision (see
+    /// [`lp_gfx::LpGraphics::glsl_frontend`]).
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(frontend: ShaderFrontend) -> Self {
         let backend =
             lpvm_wasm::rt_wasmtime::WasmLpvmEngine::new(lpvm_wasm::WasmOptions::default())
                 .expect("WasmLpvmEngine::new with default WasmOptions");
-        Self::from_engine(backend, "lpvm-wasm::rt_wasmtime")
-    }
-}
-
-impl Default for TargetLpvmGraphics {
-    fn default() -> Self {
-        Self::new()
+        Self::from_engine(backend, "lpvm-wasm::rt_wasmtime", frontend)
     }
 }

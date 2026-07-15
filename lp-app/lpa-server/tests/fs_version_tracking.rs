@@ -14,7 +14,8 @@ fn test_fs_changes_not_repeated() {
     // Create server with memory filesystem
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let base_fs = Box::new(LpFsMemory::new());
-    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
     let mut server = LpServer::new(
         output_provider.clone(),
         base_fs,

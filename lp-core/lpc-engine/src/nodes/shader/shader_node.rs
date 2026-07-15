@@ -120,14 +120,14 @@ impl ShaderNode {
         lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         self.compilation_error = None;
         let compile_opts = ShaderCompileOptions {
-            // Visual shaders run on the tier the host selected when it
-            // constructed the backend (fidelity-tiers ADR) — Q32 on CPU
-            // backends, F32Gpu on the GPU tier. `q32_options` only applies
-            // to the Q32 tier; GPU backends never see it.
+            // Visual shaders run on the tier and GLSL frontend the host
+            // selected when it constructed the backend (fidelity-tiers ADR)
+            // — Q32 on CPU backends, F32Gpu on the GPU tier. `q32_options`
+            // only applies to the Q32 tier; GPU backends never see it.
             semantics: graphics.native_semantics(),
             q32_options: map_model_q32_options(&self.glsl_opts),
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
-            ..ShaderCompileOptions::default()
+            ..ShaderCompileOptions::new(graphics.native_semantics(), graphics.glsl_frontend())
         };
 
         let compile_start_ms = ctx.now_ms();
@@ -762,7 +762,9 @@ mod tests {
     {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let tex_invocation = NodeInvocation::new(ArtifactSpec::path("tex.toml"));
@@ -901,7 +903,7 @@ mod tests {
 
     #[test]
     fn shader_direct_sampling_uses_requested_output_size_uniform() {
-        let graphics = Arc::new(TargetLpvmGraphics::new());
+        let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
@@ -949,7 +951,7 @@ mod tests {
 
     #[test]
     fn shader_direct_sampling_matches_rendered_texture_pixel_center() {
-        let graphics = Arc::new(TargetLpvmGraphics::new());
+        let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
@@ -1205,7 +1207,7 @@ mod tests {
     impl CountingGraphics {
         fn new() -> Self {
             Self {
-                inner: TargetLpvmGraphics::new(),
+                inner: TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
                 compile_count: AtomicU32::new(0),
                 fail_compile: false,
             }
@@ -1238,6 +1240,10 @@ mod tests {
 
         fn backend_name(&self) -> &'static str {
             "counting-test"
+        }
+
+        fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
+            self.inner.glsl_frontend()
         }
 
         fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {

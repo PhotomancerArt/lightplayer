@@ -71,7 +71,9 @@ impl LpServer {
     ///
     /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     /// let base_fs = Box::new(LpFsStd::new("/path/to/server/root".into()));
-    /// let graphics = Arc::new(lp_gfx_lpvm::LpvmGraphics::new());
+    /// let graphics = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+    ///     lpa_server::DEVICE_SHADER_FRONTEND,
+    /// ));
     /// let server = LpServer::new(
     ///     output_provider,
     ///     base_fs,

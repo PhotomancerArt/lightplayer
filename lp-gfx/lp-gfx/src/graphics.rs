@@ -65,6 +65,16 @@ pub trait LpGraphics: Send + Sync {
         crate::ShaderSemantics::Q32
     }
 
+    /// The GLSL → LPIR frontend this backend compiles visual shaders with.
+    ///
+    /// Like [`Self::native_semantics`], this is a product decision the host
+    /// makes once when it constructs the backend — never a `cfg!`/feature
+    /// default, which would let Cargo feature unification change compile
+    /// behavior with the build graph. Render paths fill
+    /// [`ShaderCompileOptions::frontend`] by asking the backend. Deliberately
+    /// has no default implementation: every backend must state its choice.
+    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend;
+
     /// Allocate a zeroed RGBA16 render-target texture for
     /// [`LpShader::render`].
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError>;

@@ -28,6 +28,16 @@ use crate::preview_surface::PreviewSurface;
 use crate::server_transport::BrowserServerTransport;
 use crate::tier::{RuntimeTier, TierSelection};
 
+/// GLSL frontend for the browser runtime's CPU tier.
+///
+/// Naga: this crate hard-depends on `lp-gfx-wgpu` (which always compiles the
+/// naga frontend in), and the browser CPU tier has compiled through naga
+/// since the GPU tier landed — kept as the explicit choice rather than an
+/// accident of feature unification. The device constant is
+/// [`lpa_server::DEVICE_SHADER_FRONTEND`] (LpsGlsl); converging the browser
+/// tier onto it is a product decision to make deliberately, not here.
+const BROWSER_SHADER_FRONTEND: lpa_server::ShaderFrontend = lpa_server::ShaderFrontend::Naga;
+
 /// One in-browser LightPlayer firmware instance.
 ///
 /// The runtime owns the same major pieces as local firmware: server, filesystem,
@@ -85,7 +95,7 @@ impl BrowserFirmwareRuntime {
                     let graphics = Arc::new(GpuGraphics::new(
                         worker_gpu.device.clone(),
                         worker_gpu.queue.clone(),
-                        Box::new(TargetLpvmGraphics::new()),
+                        Box::new(TargetLpvmGraphics::new(BROWSER_SHADER_FRONTEND)),
                     ));
                     (
                         TierSelection::granted(RuntimeTier::Gpu),
@@ -101,7 +111,7 @@ impl BrowserFirmwareRuntime {
         };
         let graphics: Arc<dyn LpGraphics> = match &gpu {
             Some(state) => state.graphics.clone(),
-            None => Arc::new(TargetLpvmGraphics::new()),
+            None => Arc::new(TargetLpvmGraphics::new(BROWSER_SHADER_FRONTEND)),
         };
         let time = ManualTimeProvider::new();
         let time_provider: Rc<dyn TimeProvider> = Rc::new(time.clone());
