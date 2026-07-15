@@ -70,7 +70,9 @@ impl CompiledShader {
             Self::Wasm(_, m) => {
                 FiletestInstance::Wasm(m.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
-            Self::Interp(s) => FiletestInstance::Interp(s.instantiate()),
+            Self::Interp(s) => {
+                FiletestInstance::Interp(s.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
+            }
         })
     }
 

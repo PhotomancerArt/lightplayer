@@ -12,6 +12,20 @@ fn trunc_f32(f: f32) -> i64 {
     (f as i32) as i64
 }
 
+/// Evaluate a small constant float expression: literals, unary minus, and
+/// binary division — `1.0 / 0.0` is how directive expectations spell
+/// infinity (f32 semantics give inf/NaN naturally).
+fn eval_const_f32(expr: &Expr) -> Option<f32> {
+    use glsl::syntax::{BinaryOp, UnaryOp};
+    match expr {
+        Expr::FloatConst(f, _) => Some(*f),
+        Expr::IntConst(n, _) => Some(*n as f32),
+        Expr::Unary(UnaryOp::Minus, e, _) => Some(-eval_const_f32(e)?),
+        Expr::Binary(BinaryOp::Div, l, r, _) => Some(eval_const_f32(l)? / eval_const_f32(r)?),
+        _ => None,
+    }
+}
+
 /// Parse a literal value string into [`LpsValueF32`].
 pub fn parse_lps_value_literal(literal_str: &str) -> Result<LpsValueF32, GlslError> {
     // Wrap the literal in a minimal function to parse it
@@ -79,6 +93,13 @@ pub fn parse_lps_value_literal(literal_str: &str) -> Result<LpsValueF32, GlslErr
                             // Not a minus operator, continue
                             continue;
                         }
+                    }
+                    e @ Expr::Binary(..) => {
+                        // Constant division expression (e.g. `1.0 / 0.0` = inf).
+                        if let Some(f) = eval_const_f32(e) {
+                            return Ok(LpsValueF32::F32(f));
+                        }
+                        continue;
                     }
                     Expr::FunCall(func_ident, args, _) => {
                         // Handle vector and matrix constructors
@@ -265,6 +286,18 @@ fn parse_vector_constructor(args: &[Expr], dim: usize) -> Result<Vec<f32>, GlslE
         match arg {
             Expr::FloatConst(f, _) => components.push(*f),
             Expr::IntConst(n, _) => components.push(*n as f32),
+            e @ Expr::Binary(..) => {
+                // Constant division component (e.g. `vec4(…, 1.0 / 0.0)` = inf).
+                match eval_const_f32(e) {
+                    Some(f) => components.push(f),
+                    None => {
+                        return Err(GlslError::new(
+                            ErrorCode::E0400,
+                            "invalid vector constructor argument",
+                        ));
+                    }
+                }
+            }
             Expr::FunCall(func_ident, args, _) => {
                 // Handle nested vector constructors (e.g., vec2(1.0, 2.0))
                 if let glsl::syntax::FunIdentifier::Identifier(ident) = func_ident {
