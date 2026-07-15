@@ -17,6 +17,7 @@ pub mod protocol_session;
 pub mod pull_loop;
 #[cfg(feature = "host")]
 pub mod specifier;
+pub mod stream;
 #[cfg(feature = "host")]
 pub mod tokio_client;
 #[cfg(feature = "host")]
@@ -43,6 +44,9 @@ pub use pull_loop::{
 };
 #[cfg(feature = "host")]
 pub use specifier::HostSpecifier;
+#[cfg(feature = "serial")]
+pub use stream::SerialPortByteStream;
+pub use stream::{ByteStreamError, DeviceByteStream};
 #[cfg(feature = "host")]
 pub use tokio_client::{SharedClientTransport, TokioClientIo, TokioLpClient};
 #[cfg(feature = "host")]

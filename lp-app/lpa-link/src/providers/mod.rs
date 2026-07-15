@@ -24,6 +24,8 @@ pub mod browser_serial_esp32;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub mod browser_worker;
 pub mod fake;
+#[cfg(feature = "fake-device")]
+pub mod fake_device;
 #[cfg(feature = "host-process")]
 pub mod host_process;
 #[cfg(feature = "host-serial-esp32")]

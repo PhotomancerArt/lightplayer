@@ -1,0 +1,484 @@
+//! End-to-end StudioController tests through the REAL link path.
+//!
+//! Unlike `studio_edit_e2e_tests` (which bypasses the link via
+//! `set_device_connection_for_test` + an in-process `ClientIo`), these tests
+//! go `open_provider → discover → connect_endpoint → readiness → attach →
+//! pull` through `LinkController`'s real async seams, against the scripted
+//! byte-level `FakeEsp32Device`: a REAL host `LpServer` behind the REAL `M!`
+//! serial framing, reached through the fake provider in the registry.
+//!
+//! This is the seam where both M5 hardware bugs lived
+//! (pull-before-readiness ordering; fresh device classified unreadable), so
+//! rows 2 and 3 of the matrix are wire-level regressions for them.
+
+use std::cell::RefCell;
+use std::future::Future;
+use std::pin::pin;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
+use std::time::Duration;
+
+use lpa_link::providers::LinkProviderRegistry;
+use lpa_link::providers::fake::FakeProvider;
+use lpa_link::providers::fake_device::{
+    FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device, FakeFailurePlan,
+    FakeLightPlayerState,
+};
+use lpa_link::{LinkEndpointId, LinkProviderKind};
+use lpfs::LpFsMemory;
+
+use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployState};
+use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+use crate::app::places::DeviceContent;
+use crate::{
+    ControllerId, DeviceController, DeviceOp, ServerFailureKind, ServerState, StudioController,
+    UiAction, UiError,
+};
+
+/// Row 1 (happy path, part 1): a LightPlayer device holding a stamped
+/// identity and a project the library knows at head → connect through the
+/// real link → readiness settles → the connect-time pull classifies AtHead.
+#[test]
+fn known_device_connects_and_classifies_at_head_through_the_link() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let library_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_boot_delay(Duration::from_millis(20))
+            .with_project_files(library_files)
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    assert!(
+        matches!(
+            studio.snapshot().server.state,
+            ServerState::Connected { .. }
+        ),
+        "protocol attached"
+    );
+    let sync = studio.device_sync().expect("connect-as-pull landed");
+    assert_eq!(
+        sync.identity
+            .as_ref()
+            .map(|identity| identity.name.as_str()),
+        Some("Bench board")
+    );
+    let DeviceContent::Known { relation, slug, .. } = &sync.content else {
+        panic!("library-known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(*relation, lpc_history::SyncRelation::AtHead);
+    assert_eq!(slug, &summary.slug);
+    assert_eq!(
+        device.premature_input_bytes(),
+        0,
+        "nothing was written to the device before readiness"
+    );
+}
+
+/// Row 1 (happy path, part 2): the stamp→push flow on an empty device —
+/// the deploy dialog's whole wizard, but with every wire operation running
+/// through the real serial framing.
+#[test]
+fn deploy_dialog_stamps_and_pushes_through_the_link() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    let sync = studio.device_sync().expect("pull landed");
+    assert_eq!(sync.content, DeviceContent::Empty, "fresh device is empty");
+
+    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    assert!(
+        matches!(deploy_state(&studio), DeployState::NeedsIdentity { .. }),
+        "empty unstamped device asks for a name, got {:?}",
+        deploy_state(&studio)
+    );
+
+    // Stamp: writes `/.lp/device.json` on the REAL server over the wire.
+    drive(studio.dispatch(deploy_action(DeployOp::StampIdentity {
+        name: "Luna's porch sign".to_string(),
+    })))
+    .unwrap();
+    assert!(matches!(
+        deploy_state(&studio),
+        DeployState::ChoosingPackage { .. }
+    ));
+
+    drive(studio.dispatch(deploy_action(DeployOp::ChoosePackage {
+        key: summary.uid.to_string(),
+    })))
+    .unwrap();
+    assert!(matches!(
+        deploy_state(&studio),
+        DeployState::Reviewing { .. }
+    ));
+
+    // Push: hash-verified replace-and-load + identity re-stamp + re-pull.
+    drive(studio.dispatch(deploy_action(DeployOp::ConfirmPush))).unwrap();
+    let DeployState::Done { device, pushed } = deploy_state(&studio) else {
+        panic!("push completes, got {:?}", deploy_state(&studio));
+    };
+    assert_eq!(device.name, "Luna's porch sign");
+    assert_eq!(pushed.slug, summary.slug);
+
+    let sync = studio.device_sync().expect("re-pulled after push");
+    assert!(
+        matches!(
+            &sync.content,
+            DeviceContent::Known {
+                relation: lpc_history::SyncRelation::AtHead,
+                ..
+            }
+        ),
+        "device is at head after the push, got {:?}",
+        sync.content
+    );
+}
+
+/// Row 2 (pull-before-readiness regression): with a boot delay long enough
+/// that a premature pull would race the server start, the pull must only
+/// happen after the server-started marker + first `M!` frame. The fake
+/// DISCARDS (and counts) bytes written before its server loop runs — real
+/// ESP32 behavior, and the exact M5 hardware bug: a pull sent early was
+/// silently lost and the connect hung.
+#[test]
+fn pull_waits_for_server_started_marker_and_first_frame() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_boot_delay(Duration::from_millis(400)),
+    ));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    assert_eq!(
+        device.premature_input_bytes(),
+        0,
+        "no request bytes reached the wire before the server-started marker \
+         and the first M! frame"
+    );
+    assert_eq!(
+        studio.device_sync().map(|sync| &sync.content),
+        Some(&DeviceContent::Empty),
+        "the pull still ran — after readiness"
+    );
+}
+
+/// Row 3 (fresh device): an empty LpFsMemory behind the real wire pulls as
+/// `DeviceContent::Empty`, NOT `Unreadable` — the second M5 hardware bug
+/// (a never-pushed storage dir misclassified as an unreadable device).
+#[test]
+fn fresh_device_pulls_as_empty_not_unreadable() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync().expect("connect-as-pull landed");
+    assert_eq!(sync.identity, None);
+    assert_eq!(
+        sync.content,
+        DeviceContent::Empty,
+        "a fresh device is EMPTY, not unreadable"
+    );
+}
+
+/// Row 4 (blank flash): boot output classifies as no-firmware
+/// (BlankOrErasedFlash) → the deploy dialog derives `Blank`; a scripted
+/// flash through the real `manage()` path reboots the device as LightPlayer
+/// and the wizard proceeds to NeedsIdentity.
+#[test]
+fn blank_flash_classifies_flashes_and_reaches_needs_identity() {
+    let (_store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::BlankFlash);
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    // Readiness classifies the ROM's invalid-header boot output as
+    // no-firmware; the connect completes Ok (flash must stay reachable).
+    connect_through_link(&mut studio, &endpoint_id)
+        .expect("no-firmware connect resolves without error");
+    assert!(
+        matches!(
+            &studio.snapshot().server.state,
+            ServerState::Failed {
+                kind: ServerFailureKind::NoFirmware,
+                ..
+            }
+        ),
+        "blank flash classifies as no-firmware, got {:?}",
+        studio.snapshot().server.state
+    );
+
+    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    assert!(
+        matches!(
+            deploy_state(&studio),
+            DeployState::Blank {
+                flashed_once: false
+            }
+        ),
+        "deploy environment derives Blank, got {:?}",
+        deploy_state(&studio)
+    );
+
+    // Scripted flash via the real manage() path: the device reboots as
+    // LightPlayer, the controller reconnects, and the wizard lands on
+    // NeedsIdentity (empty, unstamped device).
+    drive(studio.dispatch(deploy_action(DeployOp::FlashFirmware))).unwrap();
+    assert!(
+        matches!(deploy_state(&studio), DeployState::NeedsIdentity { .. }),
+        "flashed empty device asks for a name, got {:?}",
+        deploy_state(&studio)
+    );
+    assert!(matches!(
+        studio.snapshot().server.state,
+        ServerState::Connected { .. }
+    ));
+}
+
+/// Row 5a (failure injection: disconnect mid-pull): the device vanishing
+/// during a pull surfaces as a non-fatal `Unreadable` state — no panic, and
+/// management operations (erase) remain reachable.
+#[test]
+fn disconnect_mid_pull_is_nonfatal_and_erase_stays_reachable() {
+    let (store, host) = library();
+    store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_project_files(project_files("v-device")),
+    ));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("initial connect succeeds");
+
+    // Cut the wire a little into the NEXT pull: some bytes flow, then the
+    // stream reports the device gone mid-transfer.
+    device.set_failure_plan(
+        FakeFailurePlan::none().with_disconnect_after_bytes(device.served_bytes() + 64),
+    );
+    drive(studio.refresh_device_sync());
+
+    let sync = studio.device_sync().expect("failed pull leaves a state");
+    assert!(
+        matches!(sync.content, DeviceContent::Unreadable { .. }),
+        "mid-pull disconnect surfaces as unreadable, got {:?}",
+        sync.content
+    );
+
+    // Erase is still reachable: the scripted transition runs and the
+    // controller degrades gracefully when the (dead) wire cannot reattach.
+    let outcome = drive(studio.dispatch(device_action(DeviceOp::ResetToBlank)));
+    assert!(
+        outcome.is_ok(),
+        "erase after a disconnect must not fail fatally: {outcome:?}"
+    );
+    // The device really was erased: its next boot output is blank-flash ROM
+    // chatter. (Lift the wire failure first — the erased DEVICE is what we
+    // are asserting, not the dead stream.)
+    device.set_failure_plan(FakeFailurePlan::none());
+    let erased_lines = read_device_lines(&device, Duration::from_millis(500));
+    assert!(
+        erased_lines
+            .iter()
+            .any(|line| line.contains("invalid header: 0xffffffff")),
+        "the erase transition landed on the device: {erased_lines:?}"
+    );
+}
+
+/// Row 5b (failure injection: stall during connect): a device that never
+/// produces output times out through the readiness classifier with the
+/// no-serial-output message.
+///
+/// NOTE (M4 input): the bounded wait lives in the test-edge
+/// `fake_link_client_io` readiness loop, mirroring the browser io's bounded
+/// poll. The layers below it — `AsyncSerialClientTransport::receive`, the
+/// link provider, `LpClient` — have NO timeout of their own today; a
+/// mid-request stall after readiness would hang until the caller gives up.
+/// This test asserts the CURRENT behavior (readiness-level timeout only);
+/// adding a real timeout layer is M4's DeviceSession work, not ad-hoc M3.
+#[test]
+fn stall_during_connect_times_out_with_no_serial_output() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    device.set_failure_plan(FakeFailurePlan::none().with_stall_after_bytes(0));
+
+    let outcome = connect_through_link(&mut studio, &endpoint_id);
+
+    let error = outcome.expect_err("a fully stalled device cannot attach");
+    let message = match &error {
+        UiError::Transport(message) => message.clone(),
+        other => other.to_string(),
+    };
+    assert!(
+        message.contains("no serial output"),
+        "stalled connect classifies as no-serial-output: {message}"
+    );
+    assert!(
+        matches!(studio.snapshot().server.state, ServerState::Failed { .. }),
+        "server state reflects the failed attach"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Harness
+// ---------------------------------------------------------------------------
+
+/// A studio whose link registry holds one fake provider with one scripted
+/// device endpoint. Returns the device handle for injection/assertions.
+fn studio_with_fake_device(
+    script: FakeDeviceScript,
+) -> (StudioController, FakeEsp32Device, LinkEndpointId) {
+    let endpoint_id = LinkEndpointId::new("fake-device-0");
+    let provider = FakeProvider::new().with_device_endpoint(
+        endpoint_id.clone(),
+        "Fake ESP32 (scripted)",
+        script,
+    );
+    let device = provider.device(&endpoint_id).expect("device registered");
+    let mut registry = LinkProviderRegistry::new();
+    registry.insert(provider);
+    let studio = StudioController::with_link_registry_for_test(|| 1.0, registry);
+    (studio, device, endpoint_id)
+}
+
+/// Drive the REAL connect path: `open_provider` (discover) then
+/// `connect_endpoint` (connect → attach → readiness → pull), both through
+/// the controller's dispatch surface.
+fn connect_through_link(
+    studio: &mut StudioController,
+    endpoint_id: &LinkEndpointId,
+) -> Result<(), UiError> {
+    drive(studio.dispatch(device_action(DeviceOp::OpenProvider {
+        provider_id: LinkProviderKind::Fake,
+    })))?;
+    drive(studio.dispatch(device_action(DeviceOp::ConnectEndpoint {
+        provider_id: LinkProviderKind::Fake,
+        endpoint_id: endpoint_id.clone(),
+    })))?;
+    Ok(())
+}
+
+fn device_action(op: DeviceOp) -> UiAction {
+    UiAction::from_op(ControllerId::new(DeviceController::NODE_ID), op)
+}
+
+fn deploy_action(op: DeployOp) -> UiAction {
+    UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op)
+}
+
+fn deploy_state(studio: &StudioController) -> DeployState {
+    studio
+        .view()
+        .deploy
+        .as_ref()
+        .expect("deploy dialog open")
+        .state
+        .clone()
+}
+
+fn library() -> (LibraryStore, Rc<MemoryLibraryHost>) {
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [7u8; 16]),
+        Rc::new(|| "2026-07-14-0900".to_string()),
+    );
+    let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 1.0)));
+    (store, host)
+}
+
+fn project_files(marker: &str) -> Vec<(String, Vec<u8>)> {
+    vec![
+        (
+            "project.json".to_string(),
+            format!(r#"{{"kind":"Project","format":1,"name":"Porch {marker}","nodes":{{}}}}"#)
+                .into_bytes(),
+        ),
+        ("shader.glsl".to_string(), marker.as_bytes().to_vec()),
+    ]
+}
+
+/// Read the device's boot output directly (a fresh stream on the same
+/// device), for asserting scripted transitions when the studio's wire is
+/// already dead.
+fn read_device_lines(device: &FakeEsp32Device, timeout: Duration) -> Vec<String> {
+    use lpa_link::providers::fake_device::FakeDeviceByteStream;
+    use lpa_link::stream::DeviceByteStream;
+
+    let mut stream = FakeDeviceByteStream::new(device.clone());
+    let deadline = std::time::Instant::now() + timeout;
+    let mut bytes = Vec::new();
+    while std::time::Instant::now() < deadline {
+        let mut buf = [0u8; 256];
+        match stream.read_available(&mut buf) {
+            Ok(n) => bytes.extend_from_slice(&buf[..n]),
+            Err(_) => break,
+        }
+        if String::from_utf8_lossy(&bytes).contains("invalid header") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    String::from_utf8_lossy(&bytes)
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Drive a future to completion against the fake device's real threads:
+/// poll with a no-op waker, sleeping briefly between polls (channel state
+/// advances on the device/serial threads), bounded so a hang fails the
+/// test instead of the suite.
+fn drive<F: Future>(future: F) -> F::Output {
+    struct NoopWake;
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut context = Context::from_waker(&waker);
+    let mut future = pin!(future);
+    for _ in 0..60_000 {
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => std::thread::sleep(Duration::from_micros(500)),
+        }
+    }
+    panic!("link e2e future did not complete within the poll budget");
+}

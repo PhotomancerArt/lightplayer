@@ -105,7 +105,7 @@ edit buffer, and gating policy live above this crate (in
 |---|---|
 | `default` | Enables `host` for existing native callers. |
 | `host` | Tokio/shared transport adapter, local in-memory transport, host specifier parsing, logging, and `TokioLpClient`. |
-| `serial` | Host serial transport for ESP32/emulator-style JSON-lines links. Implies `host`. |
+| `serial` | Host serial transport for ESP32/emulator-style JSON-lines links, plus the native `SerialPortByteStream`. Implies `host`. |
 | `emu` | Emulator serial transport support. Implies `host`. |
 | `ws` | Host websocket transport. Implies `host`. |
 
@@ -120,6 +120,25 @@ The core compile check is:
 ```bash
 cargo check -p lpa-client --target wasm32-unknown-unknown --no-default-features
 ```
+
+## Byte-Stream Seam (`stream`)
+
+The serial transport runs over a narrow byte-stream seam instead of owning
+ports directly. `stream::DeviceByteStream` models one serial-class device
+attachment as a raw byte pipe (`read_available` / `write_all` /
+`set_signals(dtr, rts)` / `reopen(baud)`); the `M!` framing thread in
+`transport_serial::hardware` drives any implementation of it:
+
+- `stream::SerialPortByteStream` — a native `serialport` port (feature
+  `serial`). Port opening belongs to the CALLER (the `host-serial-esp32`
+  link provider), not the transport.
+- `lpa-link`'s `FakeEsp32Device` — a scripted in-memory device for
+  byte-level tests (feature `fake-device` on `lpa-link`).
+
+The trait is sync by design: the transport already drives the port from a
+dedicated thread with short-timeout reads, so a sync trait driven by that
+thread is the honest seam. The trait lives here (not in `lpa-link`) because
+`lpa-link` depends on `lpa-client`; `lpa_link::stream` re-exports it.
 
 ## Important Types
 

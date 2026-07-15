@@ -10,6 +10,8 @@ rust-version.workspace = true
 fw-host = { path = "../../lp-fw/fw-host", optional = true }
 lpa-client = { path = "../lpa-client", optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
+lpc-wire = { path = "../../lp-core/lpc-wire", optional = true }
+lpfs = { path = "../../lp-base/lpfs", optional = true, features = ["std"] }
 js-sys = { version = "0.3", optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6", optional = true }
@@ -46,6 +48,15 @@ browser-worker = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:web-sys",
+]
+fake-device = [
+    "dep:fw-host",
+    "dep:lpa-client",
+    "lpa-client/serial",
+    "dep:lpc-model",
+    "dep:lpc-wire",
+    "dep:lpfs",
+    "dep:tokio",
 ]
 host-process = ["dep:fw-host", "dep:lpa-client", "dep:tokio"]
 host-serial-esp32 = [

@@ -30,6 +30,11 @@ web-sys = { version = "0.3", optional = true, features = ["Window"] }
 # Host-only: the studio edit end-to-end tests run against an in-process
 # LightPlayer server (simulator session, no UI). Never built for wasm.
 lpa-server = { path = "../lpa-server" }
+# The link e2e tests drive the REAL provider path against the scripted fake
+# device; enabling the feature here (dev-only) also unlocks the test-edge
+# fake_link_client_io in cfg(test) lib builds.
+lpa-link = { path = "../lpa-link", features = ["fake-device"] }
+async-trait = { version = "0.1" }
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 

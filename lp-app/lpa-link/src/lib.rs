@@ -3,8 +3,18 @@
 pub mod provider;
 pub mod providers;
 pub mod registry;
+#[cfg(any(
+    feature = "host-process",
+    feature = "host-serial-esp32",
+    feature = "fake-device"
+))]
+pub mod stream;
 
-#[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
+#[cfg(any(
+    feature = "host-process",
+    feature = "host-serial-esp32",
+    feature = "fake-device"
+))]
 pub use provider::connection::{LinkClientTransport, LinkServerConnection};
 pub use provider::connection::{LinkConnection, LinkConnectionKind};
 pub use provider::diagnostic::{LinkDiagnostic, LinkDiagnosticSeverity};

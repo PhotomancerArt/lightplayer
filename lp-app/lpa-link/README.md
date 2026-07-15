@@ -122,7 +122,7 @@ intents, ordering, and recovery actions.
 
 | Provider key | Rust module/type | Runtime or device | Endpoint kind | Management intent | Status |
 |---|---|---|---|---|---|
-| `fake` | `providers::fake::FakeProvider` | none | test endpoint | diagnostics only | implemented |
+| `fake` | `providers::fake::FakeProvider` | none (record-level) or scripted `FakeEsp32Device` (feature `fake-device`) | test endpoint | record-level: diagnostics only; device-backed: full set (reset, flash, erase, logs, diagnostics) as scripted transitions | implemented; device-backed sessions return a real host `LinkServerConnection` |
 | `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented; returns host `LinkServerConnection` |
 | `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | implemented; owns Worker wrapper/lifecycle |
 | `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect (optional reset-after-open), logs, diagnostics; future reset/flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
@@ -146,6 +146,61 @@ cargo check -p lpa-link --features host-serial-esp32
 cargo test -p lpa-link --features host-serial-esp32
 cargo check -p lpa-link --features browser-serial-esp32 --target wasm32-unknown-unknown
 cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknown
+cargo test  -p lpa-link --features fake-device
+```
+
+## Testing with the fake device
+
+The `fake-device` feature (host only) adds a byte-level scriptable device,
+`providers::fake_device::FakeEsp32Device`, and upgrades `FakeProvider` to
+expose it through the REAL provider path. The point is byte-level fidelity:
+every hardware bug so far (pull-before-readiness ordering, fresh-device
+misclassification) lived below the record level — in framing, boot-output
+classification, and timing — so the fake injects at the byte stream and lets
+the real `M!` parser, the real readiness classifier, and the real
+orchestration run in tests.
+
+**Boot-state script** (`FakeDeviceScript` / `FakeBootState`): the device is a
+sequence of states; reset-signal dances re-run the current state's boot.
+
+- `BlankFlash` — repeats the ROM's `invalid header: 0xffffffff` line.
+- `RomDownloadMode` — prints `waiting for download` once.
+- `ForeignFirmware` — prints a known replaceable firmware boot string.
+- `LightPlayer { boot_delay, project_files, identity }` — scripted boot log
+  lines, the real M2-shaped `[INIT] fw-esp32 initialized, starting server
+  loop... proto=… commit=… dirty=…` line, then a REAL host `LpServer` over a
+  seeded `LpFsMemory` (reusing `fw-host`'s machinery) speaking real `M!`
+  frames including the unsolicited wire hello (uid from `identity`). Bytes
+  written before the server loop runs are DISCARDED and counted
+  (`premature_input_bytes()`), like real hardware.
+
+**Reset sequences**: the hardware transport's DTR/RTS hard-reset dance
+replays the current state's boot; the usb-jtag-download dance (the only one
+that raises DTR) transitions to `RomDownloadMode`.
+
+**Failure injection** (`FakeFailurePlan`, composable knobs on the stream,
+not the script): per-direction latency, stall-after-N-bytes (no EOF),
+disconnect (EOF), garble/drop a byte, mid-frame cut (truncate a frame then
+stall), and log-flood interleaving between frames.
+
+**Scripted management**: the fake connector's `manage()` implements
+`FlashFirmware` / `EraseDeviceFlash` / `ResetRuntime` as scripted state
+transitions (`fake_flash` → fresh `LightPlayer` with the image identity in
+its provenance; `fake_erase` → `BlankFlash`) with scripted latency and an
+optional one-shot scripted failure, emitting `LinkManagementEvent`
+logs/progress through the standard result replay.
+
+Typical wiring (see `lpa-studio-core`'s `studio_link_e2e_tests`):
+
+```rust
+let provider = FakeProvider::new().with_device_endpoint(
+    "fake-device-0",
+    "Fake ESP32",
+    FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new())),
+);
+let device = provider.device(&LinkEndpointId::new("fake-device-0")).unwrap();
+// registry.insert(provider); connect through the normal provider path;
+// device.set_failure_plan(...) / device.premature_input_bytes() from tests.
 ```
 
 ## Design Notes

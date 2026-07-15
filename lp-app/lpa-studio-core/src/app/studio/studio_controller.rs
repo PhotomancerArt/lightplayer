@@ -2157,6 +2157,19 @@ impl StudioController {
         self.device.link.set_active_connection_for_test(connection);
     }
 
+    /// A fresh controller whose link uses the given provider registry — the
+    /// entry point for e2e tests that drive the REAL provider path
+    /// (`open_provider → discover → connect_endpoint → attach`) instead of
+    /// injecting connections.
+    pub(crate) fn with_link_registry_for_test(
+        now_secs: impl Fn() -> f64 + 'static,
+        registry: lpa_link::providers::LinkProviderRegistry,
+    ) -> Self {
+        let mut studio = Self::new(now_secs);
+        studio.device.link = crate::LinkController::with_registry(registry);
+        studio
+    }
+
     pub(crate) fn connected_with_client_for_test(client: crate::StudioServerClient) -> Self {
         use crate::{ConnectedDeviceSummary, LinkState, ProjectInventorySummary};
         use lpa_link::LinkProviderKind;

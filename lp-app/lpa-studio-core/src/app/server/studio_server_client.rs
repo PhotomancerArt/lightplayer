@@ -593,9 +593,25 @@ fn server_io_from_link_connection(
             "browser serial ESP32 server I/O requires the browser-serial-esp32 feature on wasm"
                 .to_string(),
         )),
-        LinkConnectionKind::Fake => Err(UiError::UnsupportedFeature(
-            "fake links do not expose a server protocol".to_string(),
-        )),
+        LinkConnectionKind::Fake => {
+            // Device-backed fake connections (feature `fake-device` on
+            // lpa-link, enabled by this crate's dev-dependencies) carry a
+            // REAL host protocol channel; the test-edge io speaks it with
+            // the same readiness gating the browser io applies. Record-level
+            // fakes still have no server protocol.
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            if let Some(transport) = _connection_server_transport(connection) {
+                return Ok(Box::new(super::fake_link_client_io::FakeLinkClientIo::new(
+                    _registry,
+                    connection.session_id.clone(),
+                    transport,
+                    _pending_logs,
+                )));
+            }
+            Err(UiError::UnsupportedFeature(
+                "fake links do not expose a server protocol".to_string(),
+            ))
+        }
         LinkConnectionKind::HostProcess | LinkConnectionKind::HostSerialEsp32 => {
             Err(UiError::UnsupportedFeature(format!(
                 "server I/O is not implemented for {:?}",
@@ -603,6 +619,17 @@ fn server_io_from_link_connection(
             )))
         }
     }
+}
+
+/// The host protocol channel carried by a fake-device link connection.
+/// Test-only: the `server_connection` field itself exists only when
+/// lpa-link's host/fake-device features are enabled (they are, for this
+/// crate's test builds, via dev-dependencies).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn _connection_server_transport(
+    connection: &LinkConnection,
+) -> Option<lpa_link::LinkServerConnection> {
+    connection.server_connection()
 }
 
 fn connection_protocol(kind: &LinkConnectionKind) -> String {

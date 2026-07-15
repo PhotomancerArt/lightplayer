@@ -9,6 +9,7 @@ use crate::{
     LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkProvider, LinkServerConnection,
     LinkSession, LinkSessionStatus,
 };
+use lpa_client::stream::SerialPortByteStream;
 use lpa_client::transport_serial::{
     HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair_with_options,
 };
@@ -189,9 +190,18 @@ impl LinkProvider for HostSerialEsp32Provider {
             reset_after_open: self.options.reset_after_open,
             line_observer: self.options.line_observer.clone(),
         };
+        // Port opening happens here (the provider owns the endpoint→port
+        // mapping); the transport machinery below the byte-stream seam is
+        // port-agnostic and shared with the fake device.
+        let stream =
+            SerialPortByteStream::open(&endpoint.port_name, baud_rate).map_err(|error| {
+                LinkError::ConnectionFailed {
+                    message: error.to_string(),
+                }
+            })?;
         let transport = create_hardware_serial_transport_pair_with_options(
+            Box::new(stream),
             &endpoint.port_name,
-            baud_rate,
             serial_options,
         )
         .map_err(|error| LinkError::ConnectionFailed {

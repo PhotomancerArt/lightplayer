@@ -5241,6 +5241,8 @@ dependencies = [
  "js-sys",
  "lpa-client",
  "lpc-model",
+ "lpc-wire",
+ "lpfs",
  "serde",
  "serde-wasm-bindgen",
  "serialport",
