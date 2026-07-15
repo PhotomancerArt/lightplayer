@@ -144,7 +144,22 @@ fn exec_func(
         )));
     }
 
-    let mut regs: Vec<Option<Value>> = alloc::vec![None; func.vreg_types.len()];
+    // VRegs read before their first definition yield the type's zero. This is
+    // the semantics the wasm backend already ships (wasm locals are
+    // zero-initialized), and it is load-bearing for GLSL out-parameters: the
+    // caller-side copy-in of a never-assigned local (`float v; f(v);`) reads
+    // the local's vreg before any store defines it. Structural use-before-def
+    // strictness lives in the validator, not here.
+    let mut regs: Vec<Option<Value>> = func
+        .vreg_types
+        .iter()
+        .map(|ty| {
+            Some(match ty {
+                IrType::F32 => Value::F32(0.0),
+                IrType::I32 | IrType::Pointer => Value::I32(0),
+            })
+        })
+        .collect();
     let vm = func.vmctx_vreg.0 as usize;
     regs[vm] = Some(args[0]);
     for k in 1..h {
