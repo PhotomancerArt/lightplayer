@@ -94,6 +94,10 @@ pub fn App() -> Element {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
         controller.set_on_entry(log_to_js_console);
+        // Crypto randomness for identity minting (`dev_` uids). Host
+        // builds keep the core's clock-derived fallback.
+        #[cfg(target_arch = "wasm32")]
+        controller.set_random(crate::library_host_opfs::random_bytes);
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
         spawn(async move {
