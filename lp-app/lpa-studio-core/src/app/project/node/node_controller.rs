@@ -199,13 +199,19 @@ impl NodeController {
                 .iter()
                 .map(|child| child.dirty)
                 .sum::<DirtySummary>();
-        let header = UiNodeHeader::new(
+        let mut header = UiNodeHeader::new(
             self.label.clone(),
             self.kind.clone(),
             self.address.to_string(),
         )
         .with_status(self.ui_status())
         .with_dirty(dirty);
+        // Status detail (error/warning/failure text) rides the header so the
+        // node detail popup can answer "why" — the compact status alone read
+        // as an unexplained Error state (gate follow-up, 2026-07-15).
+        if let Some(detail) = self.status.detail.clone() {
+            header = header.with_detail(detail);
+        }
 
         let mut sections =
             self.ui_sections_with_product_previews(product_preview, edits, extra_config);

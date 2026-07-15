@@ -3339,6 +3339,27 @@ mod tests {
     }
 
     #[test]
+    fn ui_node_header_carries_status_detail() {
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project
+            .apply_project_view(&single_node_view(
+                1,
+                NodeRuntimeStatus::Error("shader compile failed: expected ')'".to_string()),
+            ))
+            .unwrap();
+
+        let nodes = project.ui_nodes();
+        assert_eq!(nodes[0].header.status.label, "Error");
+        // The popup answers "why": the runtime's error text rides the header
+        // detail instead of being dropped at the compact-status boundary.
+        assert_eq!(
+            nodes[0].header.detail.as_deref(),
+            Some("shader compile failed: expected ')'")
+        );
+    }
+
+    #[test]
     fn ui_nodes_project_header_state_and_child_summaries() {
         let mut project = ProjectController::new();
         let mut view = tree_view();

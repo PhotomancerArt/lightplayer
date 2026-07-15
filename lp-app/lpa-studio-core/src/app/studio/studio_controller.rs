@@ -26,8 +26,8 @@ use crate::{
     DeviceController, DeviceOp, NodeRevertOp, ProjectConnectResult, ProjectController,
     ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, SlotEditOp,
     StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiNotice, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent,
-    UxActivityTarget, UxUpdate, UxUpdateSink,
+    UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView,
+    UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
