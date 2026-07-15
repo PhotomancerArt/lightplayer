@@ -18,6 +18,10 @@ pub struct ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ClientRequest {
+    /// Ask the server for its [`crate::server::hello::ServerHello`] (also
+    /// sent unsolicited at boot); answered with
+    /// [`crate::server::ServerMsgBody::Hello`].
+    Hello,
     Filesystem(FsRequest),
     LoadProject {
         path: String,

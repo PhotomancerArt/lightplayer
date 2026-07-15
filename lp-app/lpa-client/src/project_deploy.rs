@@ -118,6 +118,7 @@ pub fn validate_project_deploy_response(
 
 pub fn request_label(request: &ClientRequest) -> &'static str {
     match request {
+        ClientRequest::Hello => "hello",
         ClientRequest::Filesystem(FsRequest::Read { .. }) => "fs.read",
         ClientRequest::Filesystem(FsRequest::Write { .. }) => "fs.write",
         ClientRequest::Filesystem(FsRequest::DeleteFile { .. }) => "fs.delete_file",

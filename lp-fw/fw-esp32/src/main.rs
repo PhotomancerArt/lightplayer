@@ -710,6 +710,21 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         Some(radio_service),
         graphics,
     );
+    // Wire hello payload: compile-time provenance from build.rs, injected
+    // into the server (sans-IO: the server never reads env/git itself).
+    // device_uid stays None: the stamped identity lives in per-project
+    // storage (`projects/<storage>/.lp/device.json`), not at the fs root,
+    // so a boot-time read would be ambiguous — M4 decides where it moves.
+    server.set_hello(lpc_wire::ServerHello {
+        proto: lpc_wire::WIRE_PROTO_VERSION,
+        fw: lpc_wire::FwProvenance {
+            package: alloc::string::String::from("fw-esp32"),
+            commit: alloc::string::String::from(env!("LP_BUILD_COMMIT")),
+            dirty: env!("LP_BUILD_DIRTY") == "true",
+            profile: alloc::string::String::from(env!("LP_BUILD_PROFILE")),
+        },
+        device_uid: None,
+    });
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless
@@ -833,7 +848,16 @@ async fn main(spawner: embassy_executor::Spawner) {
     )))]
     {
         let app = boot_firmware(spawner);
-        esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
+        // Keep the marker substring "fw-esp32 initialized, starting server
+        // loop" intact: two readiness classifiers grep for it
+        // (lpa-studio-core browser_serial_readiness, lp-cli fwcheck). The
+        // version suffix is additive only.
+        esp_println::println!(
+            "[INIT] fw-esp32 initialized, starting server loop... proto={} commit={} dirty={}",
+            lpc_wire::WIRE_PROTO_VERSION,
+            env!("LP_BUILD_COMMIT"),
+            env!("LP_BUILD_DIRTY"),
+        );
 
         // Run server loop (never returns)
         run_server_loop(app.server, app.transport, app.time_provider, app.watchdog).await;

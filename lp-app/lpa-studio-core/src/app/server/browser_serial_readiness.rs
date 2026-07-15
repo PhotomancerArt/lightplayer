@@ -257,6 +257,21 @@ mod tests {
     }
 
     #[test]
+    fn server_loop_start_with_version_suffix_still_marks_server_started() {
+        // M2 extended the boot line with proto/commit/dirty; the marker
+        // substring must keep matching until M4 replaces this classifier
+        // with the wire hello.
+        let mut classifier = BrowserSerialReadinessClassifier::new();
+
+        classifier.observe_line(
+            "[INIT] fw-esp32 initialized, starting server loop... proto=1 commit=abc123456789 dirty=false",
+        );
+
+        assert!(classifier.server_started());
+        assert!(!classifier.no_firmware_detected());
+    }
+
+    #[test]
     fn no_output_classifies_as_no_serial_output() {
         let classifier = BrowserSerialReadinessClassifier::new();
 

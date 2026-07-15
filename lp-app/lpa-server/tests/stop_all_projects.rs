@@ -134,6 +134,7 @@ fn test_stop_all_projects() {
             None,
             None,
             graphics.clone(),
+            (*server_ptr).hello(),
             request,
         )
         .unwrap()

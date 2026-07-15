@@ -123,7 +123,7 @@ fn create_memory_server() -> LpServer {
     let radio_service: Rc<dyn RadioService> = hardware;
     let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
 
-    LpServer::new_with_hardware_services(
+    let mut server = LpServer::new_with_hardware_services(
         output_provider,
         Box::new(LpFsMemory::new()),
         "/projects/".as_path(),
@@ -132,7 +132,25 @@ fn create_memory_server() -> LpServer {
         Some(button_service),
         Some(radio_service),
         graphics,
-    )
+    );
+    // Wire hello payload (sans-IO: injected here, never read ambiently by
+    // the server). Host runtimes carry no git provenance or stamped
+    // identity; fake devices script a uid in M3.
+    server.set_hello(lpc_wire::ServerHello {
+        proto: lpc_wire::WIRE_PROTO_VERSION,
+        fw: lpc_wire::FwProvenance {
+            package: "fw-host".to_string(),
+            commit: "unknown".to_string(),
+            dirty: false,
+            profile: if cfg!(debug_assertions) {
+                "debug".to_string()
+            } else {
+                "release".to_string()
+            },
+        },
+        device_uid: None,
+    });
+    server
 }
 
 #[cfg(test)]

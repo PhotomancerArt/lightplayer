@@ -44,11 +44,13 @@ pub fn handle_client_message(
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
     graphics: Arc<dyn LpGraphics>,
+    hello: &lpc_wire::ServerHello,
     client_msg: ClientMessage,
 ) -> Result<WireServerMessage, ServerError> {
     let ClientMessage { id, msg } = client_msg;
 
     let response = match msg {
+        lpc_wire::ClientRequest::Hello => ServerMessagePayload::Hello(hello.clone()),
         lpc_wire::ClientRequest::Filesystem(fs_request) => {
             ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?)
         }

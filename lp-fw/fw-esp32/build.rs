@@ -9,8 +9,50 @@
 //! (loaded as a supplemental script) captures .eh_frame into ROM instead.
 
 use std::path::PathBuf;
+use std::process::Command;
+
+/// Emit build provenance for the wire hello (`ServerHello.fw`):
+/// `LP_BUILD_COMMIT` (short git commit or "unknown"), `LP_BUILD_DIRTY`
+/// ("true"/"false", false when git is absent so vendored builds still
+/// compile), and `LP_BUILD_PROFILE` (the cargo profile directory name,
+/// e.g. "release-esp32", falling back to the coarse `PROFILE` env).
+fn emit_build_provenance() {
+    let commit =
+        git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let dirty = match git_output(&["status", "--porcelain"]) {
+        Some(status) => !status.is_empty(),
+        None => false,
+    };
+    let profile = profile_dir_name()
+        .or_else(|| std::env::var("PROFILE").ok())
+        .unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=LP_BUILD_COMMIT={commit}");
+    println!("cargo:rustc-env=LP_BUILD_DIRTY={dirty}");
+    println!("cargo:rustc-env=LP_BUILD_PROFILE={profile}");
+}
+
+fn git_output(args: &[&str]) -> Option<String> {
+    let output = Command::new("git").args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// The actual profile directory name from OUT_DIR
+/// (`…/<triple>/<profile>/build/<pkg>-<hash>/out`), which preserves custom
+/// profile names like `release-esp32` that the `PROFILE` env collapses to
+/// "release".
+fn profile_dir_name() -> Option<String> {
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").ok()?);
+    // out -> <pkg>-<hash> -> build -> <profile>
+    let profile = out_dir.parent()?.parent()?.parent()?;
+    Some(profile.file_name()?.to_string_lossy().into_owned())
+}
 
 fn main() {
+    emit_build_provenance();
+
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
     // Patch esp-hal's linker scripts to retain .eh_frame inside .text.

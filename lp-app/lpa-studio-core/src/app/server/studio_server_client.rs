@@ -634,6 +634,17 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
     events
         .into_iter()
         .filter_map(|event| match event {
+            // Wire bootstrap hello (M2): informational only for now — the
+            // mismatch POLICY consumer (Incompatible state, reflash
+            // affordance) is M4.
+            ClientEvent::Hello(hello) => Some(UiLogDraft::new(
+                UiLogLevel::Debug,
+                UiLogOrigin::Server,
+                format!(
+                    "server hello: proto={} package={} commit={} dirty={}",
+                    hello.proto, hello.fw.package, hello.fw.commit, hello.fw.dirty
+                ),
+            )),
             ClientEvent::Heartbeat { recovery, .. } => match recovery {
                 Some(recovery)
                     if recovery.safe_mode

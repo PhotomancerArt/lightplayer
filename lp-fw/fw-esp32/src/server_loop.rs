@@ -61,6 +61,13 @@ pub async fn run_server_loop<T: ServerTransport>(
     time_provider: Esp32TimeProvider,
     mut watchdog: crate::recovery::watchdog::WatchdogFeeder,
 ) -> ! {
+    // Wire hello: the first id-0 frame this loop ever sends, so clients can
+    // check the protocol version before anything else arrives (see
+    // docs/adr/2026-07-14-wire-hello-versioning.md).
+    if let Err(e) = fw_core::send_unsolicited_hello(&server, &mut transport).await {
+        log::warn!("run_server_loop: failed to send hello: {e:?}");
+    }
+
     let mut last_tick = time_provider.now_ms();
     let mut frame_count = 0u32;
     let mut fps_tracker = FpsTracker::new(time_provider.now_ms());

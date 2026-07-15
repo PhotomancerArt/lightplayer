@@ -393,6 +393,13 @@ studio-firmware-package-esp32c6: install-rv32-target
     if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then
         source_dirty=true
     fi
+    # Wire protocol version: grep the hand-bumped const out of its single
+    # source of truth so the manifest can never drift from the built image.
+    wire_proto="$(sed -n 's/^pub const WIRE_PROTO_VERSION: u32 = \([0-9][0-9]*\);$/\1/p' lp-core/lpc-wire/src/server/hello.rs)"
+    if [ -z "${wire_proto}" ]; then
+        echo "could not extract WIRE_PROTO_VERSION from lp-core/lpc-wire/src/server/hello.rs"
+        exit 1
+    fi
 
     MANIFEST_FIRMWARE_ID="${firmware_id}" \
     MANIFEST_DISPLAY_NAME="${display_name}" \
@@ -400,6 +407,7 @@ studio-firmware-package-esp32c6: install-rv32-target
     MANIFEST_PROFILE="{{ fw_esp32_profile }}" \
     MANIFEST_SOURCE_COMMIT="${source_commit}" \
     MANIFEST_SOURCE_DIRTY="${source_dirty}" \
+    MANIFEST_WIRE_PROTO="${wire_proto}" \
     MANIFEST_GENERATED_AT="${generated_at}" \
     MANIFEST_IMAGE_PATH="${image_name}" \
     MANIFEST_IMAGE_SIZE="${size_bytes}" \

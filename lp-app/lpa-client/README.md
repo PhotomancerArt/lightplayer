@@ -63,6 +63,24 @@ as the native timeout owner — so both pass a never-firing deadline into the
 shared loop today; the actor layer (M7/P3) is where a real `ProgressDeadline`,
 `CancelSignal`, and `BackoffPolicy` get wired in.
 
+## Server Hello
+
+Servers announce themselves with a `ServerHello` (wire protocol version,
+firmware build provenance, optional stamped `dev_…` uid): once unsolicited
+as the first id-0 frame when the server loop starts serving, and on demand
+via `ClientRequest::Hello`. This crate surfaces it two ways:
+
+- `ClientEvent::Hello(ServerHello)` — the unsolicited frame, delivered with
+  the other side-channel events.
+- `TokioLpClient::server_hello()` — the last-seen hello (from the boot frame
+  or a call), and `TokioLpClient::hello()` / `LpClient::hello()` — the typed
+  on-request call.
+
+No version policy lives here: absence of a hello from a responding server
+means pre-hello firmware and should be treated as a protocol mismatch by the
+consumer (M4's DeviceSession). See
+`docs/adr/2026-07-14-wire-hello-versioning.md`.
+
 ## Overlay In The Pull Contract
 
 Pending-edit overlay state reaches a client as a **revision-gated
