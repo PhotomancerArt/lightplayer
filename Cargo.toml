@@ -37,6 +37,9 @@ members = [
     # NOT in default-members: wgpu's dependency tree is heavy and the GPU
     # backend is host-optional (build/test it explicitly, like the spike).
     "lp-gfx/lp-gfx-wgpu",
+    # NOT in default-members: dev-only native render-loop harness over
+    # lp-gfx-wgpu (run explicitly: cargo run -p lp-gfx-harness).
+    "lp-gfx/lp-gfx-harness",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",

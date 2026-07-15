@@ -7,6 +7,8 @@ use lp_gfx::{GfxError, LpShader, SampleOutHandle, SamplePointsHandle, TextureHan
 use lps_shared::{LpsValueF32, TextureStorageFormat};
 
 use crate::gpu_graphics::GpuShared;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::sample_pass::SamplePass;
 use crate::texture_backing::{gpu_format, gpu_texture_mut};
 use crate::uniform_layout::{UniformTable, reflect_uniforms};
 use crate::uniform_writer::encode_uniforms;
@@ -33,15 +35,25 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
 /// buffer, rewritten every frame from the engine's `LpsValueF32` tree.
 pub struct GpuShader {
     shared: Arc<GpuShared>,
+    /// Authored GLSL, kept for the lazily-built sample pipeline (the sample
+    /// unit re-assembles from source with a different wrapper `main`).
+    #[cfg(not(target_arch = "wasm32"))]
+    authored: String,
     /// Validated naga module (drives uniform encoding offsets).
     module: naga::Module,
     table: UniformTable,
     pipeline: wgpu::RenderPipeline,
     uniforms: Option<ShaderUniforms>,
+    /// Sample-point pass (native LED-output path), built on the first
+    /// `sample_rgba16` call — render-only consumers never pay for it.
+    #[cfg(not(target_arch = "wasm32"))]
+    sample_pass: Option<SamplePass>,
 }
 
 /// The instance uniform buffer and its per-global slices.
 struct ShaderUniforms {
+    /// Bind group layout shared by the render and sample pipelines.
+    layout: wgpu::BindGroupLayout,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     /// Byte offset of each `table.globals` entry inside `buffer`.
@@ -64,8 +76,8 @@ impl GpuShader {
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(FULLSCREEN_TRIANGLE_WGSL)),
         });
 
-        let (bind_group_layout, uniforms) = if table.globals.is_empty() {
-            (None, None)
+        let uniforms = if table.globals.is_empty() {
+            None
         } else {
             let entries: Vec<wgpu::BindGroupLayoutEntry> = table
                 .globals
@@ -118,18 +130,19 @@ impl GpuShader {
                 layout: &layout,
                 entries: &bind_entries,
             });
-            (
-                Some(layout),
-                Some(ShaderUniforms {
-                    buffer,
-                    bind_group,
-                    offsets,
-                }),
-            )
+            Some(ShaderUniforms {
+                layout,
+                buffer,
+                bind_group,
+                offsets,
+            })
         };
 
-        let layouts: Vec<Option<&wgpu::BindGroupLayout>> =
-            bind_group_layout.iter().map(Some).collect();
+        let layouts: Vec<Option<&wgpu::BindGroupLayout>> = uniforms
+            .as_ref()
+            .map(|shader_uniforms| Some(&shader_uniforms.layout))
+            .into_iter()
+            .collect();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("lp-gfx-wgpu shader"),
             bind_group_layouts: &layouts,
@@ -163,11 +176,66 @@ impl GpuShader {
 
         Ok(Self {
             shared,
+            #[cfg(not(target_arch = "wasm32"))]
+            authored: String::from(authored),
             module: compiled.module,
             table,
             pipeline,
             uniforms,
+            #[cfg(not(target_arch = "wasm32"))]
+            sample_pass: None,
         })
+    }
+
+    /// Encode the engine uniform tree and write it into the instance uniform
+    /// buffer (shared by the render and sample passes).
+    fn write_uniforms(&self, uniforms: &LpsValueF32) -> Result<(), GfxError> {
+        let encoded = encode_uniforms(&self.module, &self.table, uniforms)?;
+        if let Some(shader_uniforms) = &self.uniforms {
+            for ((_, bytes), &offset) in encoded.iter().zip(&shader_uniforms.offsets) {
+                self.shared
+                    .queue
+                    .write_buffer(&shader_uniforms.buffer, offset, bytes);
+            }
+        }
+        Ok(())
+    }
+
+    /// Build the sample-point pipeline on first use: translate the sample
+    /// wrapper unit, check its uniform interface matches the render unit's
+    /// (same authored declarations — a mismatch means the assembler broke),
+    /// and build the point-list pipeline over the shared uniform layout.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn ensure_sample_pass(&mut self) -> Result<&mut SamplePass, GfxError> {
+        if self.sample_pass.is_none() {
+            let compiled = crate::wgsl_compile::compile_sample_wgsl(&self.authored)?;
+            let sample_table = reflect_uniforms(&compiled.module)?;
+            let interface = |table: &UniformTable| -> Vec<(String, u32, u32)> {
+                table
+                    .globals
+                    .iter()
+                    .map(|global| (global.name.clone(), global.binding, global.size))
+                    .collect()
+            };
+            if interface(&sample_table) != interface(&self.table) {
+                return Err(GfxError::Compile(format!(
+                    "sample unit uniform interface {:?} does not match the render unit's {:?}",
+                    interface(&sample_table),
+                    interface(&self.table)
+                )));
+            }
+            self.sample_pass = Some(SamplePass::new(
+                &self.shared,
+                &compiled.wgsl,
+                self.uniforms
+                    .as_ref()
+                    .map(|shader_uniforms| &shader_uniforms.layout),
+            ));
+        }
+        Ok(self
+            .sample_pass
+            .as_mut()
+            .expect("sample pass was just ensured"))
     }
 }
 
@@ -185,14 +253,7 @@ impl LpShader for GpuShader {
         }
         let backing = gpu_texture_mut(target)?;
 
-        let encoded = encode_uniforms(&self.module, &self.table, uniforms)?;
-        if let Some(shader_uniforms) = &self.uniforms {
-            for ((_, bytes), &offset) in encoded.iter().zip(&shader_uniforms.offsets) {
-                self.shared
-                    .queue
-                    .write_buffer(&shader_uniforms.buffer, offset, bytes);
-            }
-        }
+        self.write_uniforms(uniforms)?;
 
         let mut encoder = self
             .shared
@@ -225,6 +286,54 @@ impl LpShader for GpuShader {
         Ok(())
     }
 
+    /// Evaluate the shader at the caller's Q16.16 points via the point-list
+    /// sample pass (see [`crate::sample_pass`]) and quantize into `out` with
+    /// the CPU packing rule. Native only — the LED-output path of the
+    /// non-embedded lp-server.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn sample_rgba16(
+        &mut self,
+        points: &mut SamplePointsHandle,
+        out: &mut SampleOutHandle,
+        uniforms: &LpsValueF32,
+    ) -> Result<(), GfxError> {
+        use crate::sample_backing::{sample_out_mut, sample_points};
+
+        if points.count() != out.count() {
+            return Err(GfxError::Render(format!(
+                "sample_rgba16: point count {} does not match output count {}",
+                points.count(),
+                out.count()
+            )));
+        }
+        self.ensure_sample_pass()?;
+        self.write_uniforms(uniforms)?;
+
+        let point_coords = &sample_points(points)?.0;
+        let out_channels = &mut sample_out_mut(out)?.0;
+        let Self {
+            shared,
+            uniforms: shader_uniforms,
+            sample_pass,
+            ..
+        } = self;
+        sample_pass
+            .as_mut()
+            .expect("sample pass was ensured above")
+            .run(
+                shared,
+                point_coords,
+                shader_uniforms
+                    .as_ref()
+                    .map(|shader_uniforms| &shader_uniforms.bind_group),
+                out_channels,
+            )
+    }
+
+    /// Browser GPU tier: LED output is not a browser product path and the
+    /// blocking readback the sample pass needs is unavailable on wasm32
+    /// (fidelity-tiers ADR) — explicit error, never a silent CPU substitute.
+    #[cfg(target_arch = "wasm32")]
     fn sample_rgba16(
         &mut self,
         _points: &mut SamplePointsHandle,
@@ -232,8 +341,8 @@ impl LpShader for GpuShader {
         _uniforms: &LpsValueF32,
     ) -> Result<(), GfxError> {
         Err(GfxError::Render(String::from(
-            "sample_rgba16 is not implemented on the wgpu backend yet \
-             (GPU sample-point pass milestone); sampling sinks run on the CPU tier",
+            "sample_rgba16 is unavailable on the browser GPU tier (blocking readback is \
+             native-only; LED-output sampling runs on native servers or the CPU tier)",
         )))
     }
 }

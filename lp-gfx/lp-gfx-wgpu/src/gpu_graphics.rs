@@ -589,6 +589,122 @@ void tick() {
     }
 
     #[test]
+    fn sample_rgba16_evaluates_at_fractional_points() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let options = ShaderCompileOptions {
+            semantics: ShaderSemantics::F32Gpu,
+            ..Default::default()
+        };
+        let mut shader = graphics
+            .compile_shader(
+                "layout(binding = 0) uniform vec2 outputSize;\n\
+                 vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.25, 1.0); }\n",
+                &options,
+            )
+            .expect("compiles");
+        // Fractional Q16.16 points: sampling must not floor to pixel centers.
+        let mut points = graphics.create_sample_points(3).expect("points");
+        graphics
+            .write_sample_points(
+                &mut points,
+                &[
+                    0,
+                    0,
+                    (2 << 16) + 32768, // (2.5, 3.5)
+                    (3 << 16) + 32768,
+                    4 << 16, // (4.0, 1.0) — 1.0 in x after outputSize divide
+                    1 << 16,
+                ],
+            )
+            .expect("write points");
+        let mut out = graphics.create_sample_out(3).expect("out");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![(String::from("outputSize"), LpsValueF32::Vec2([4.0, 4.0]))],
+        };
+        shader
+            .sample_rgba16(&mut points, &mut out, &uniforms)
+            .expect("samples");
+        let sampled = graphics.read_sample_out(&out).expect("read out");
+        // Point 0: (0, 0, 0.25, 1.0).
+        assert_eq!(&sampled[0..4], &[0, 0, 16384, 65535]);
+        // Point 1: (2.5/4, 3.5/4, …) = (0.625, 0.875, …).
+        assert_eq!(sampled[4], 40960);
+        assert_eq!(sampled[5], 57344);
+        // Point 2: x = 4.0/4 = 1.0 saturates.
+        assert_eq!(sampled[8], 65535);
+        assert_eq!(sampled[9], 16384);
+    }
+
+    #[test]
+    fn sample_rgba16_count_mismatch_is_an_error() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let options = ShaderCompileOptions {
+            semantics: ShaderSemantics::F32Gpu,
+            ..Default::default()
+        };
+        let mut shader = graphics
+            .compile_shader("vec4 render(vec2 pos) { return vec4(0.5); }", &options)
+            .expect("compiles");
+        let mut points = graphics.create_sample_points(2).expect("points");
+        let mut out = graphics.create_sample_out(3).expect("out");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![],
+        };
+        match shader.sample_rgba16(&mut points, &mut out, &uniforms) {
+            Err(GfxError::Render(message)) => assert!(message.contains("count"), "{message}"),
+            other => panic!("expected count-mismatch render error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sample_rgba16_reuses_the_pass_across_count_changes() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let options = ShaderCompileOptions {
+            semantics: ShaderSemantics::F32Gpu,
+            ..Default::default()
+        };
+        let mut shader = graphics
+            .compile_shader(
+                "vec4 render(vec2 pos) { return vec4(pos.x / 16.0, 0.0, 0.0, 1.0); }",
+                &options,
+            )
+            .expect("compiles");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![],
+        };
+        for count in [4u32, 8, 4] {
+            let mut points = graphics.create_sample_points(count).expect("points");
+            let coords: Vec<i32> = (0..count as i32 * 2)
+                .map(|i| if i % 2 == 0 { (i / 2) << 16 } else { 0 })
+                .collect();
+            graphics
+                .write_sample_points(&mut points, &coords)
+                .expect("write points");
+            let mut out = graphics.create_sample_out(count).expect("out");
+            shader
+                .sample_rgba16(&mut points, &mut out, &uniforms)
+                .expect("samples");
+            let sampled = graphics.read_sample_out(&out).expect("read out");
+            for i in 0..count as usize {
+                let expected = ((i as f64 / 16.0) * 65536.0).floor() as u16;
+                assert_eq!(sampled[i * 4], expected, "count {count}, point {i}");
+            }
+        }
+    }
+
+    #[test]
     fn sample_buffers_round_trip_on_the_cpu_side() {
         let Some(graphics) = test_graphics() else {
             eprintln!("SKIP: no GPU adapter available");

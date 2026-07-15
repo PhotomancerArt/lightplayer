@@ -6,7 +6,7 @@
 
 use lp_gfx::GfxError;
 
-use crate::assembly::assemble_fragment_glsl;
+use crate::assembly::{assemble_fragment_glsl, assemble_sample_fragment_glsl};
 use crate::tanh_pass::bound_tanh;
 
 /// A translated fragment shader: WGSL text plus the validated naga module
@@ -23,10 +23,22 @@ pub struct WgslShader {
     pub info: naga::valid::ModuleInfo,
 }
 
-/// Translate an authored pixel shader to WGSL at f32 semantics.
+/// Translate an authored pixel shader to WGSL at f32 semantics
+/// (fullscreen-triangle wrapper: `render(floor(gl_FragCoord.xy))`).
 pub fn compile_wgsl(authored: &str) -> Result<WgslShader, GfxError> {
-    let assembled_glsl = assemble_fragment_glsl(authored);
+    translate_assembled_glsl(assemble_fragment_glsl(authored))
+}
 
+/// Translate the sample-point variant of an authored pixel shader: the same
+/// unit with a wrapper `main` that evaluates `render` at a caller-provided
+/// position varying (see [`crate::sample_pass`]).
+pub fn compile_sample_wgsl(authored: &str) -> Result<WgslShader, GfxError> {
+    translate_assembled_glsl(assemble_sample_fragment_glsl(authored))
+}
+
+/// naga `glsl-in` → bounded-tanh pass → validation → `wgsl-out` on an
+/// already-assembled fragment compilation unit.
+fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxError> {
     let mut frontend = naga::front::glsl::Frontend::default();
     let options = naga::front::glsl::Options::from(naga::ShaderStage::Fragment);
     let mut module = frontend.parse(&options, &assembled_glsl).map_err(|e| {
@@ -74,6 +86,22 @@ mod tests {
         .expect("translates");
         assert!(shader.wgsl.contains("fn main"), "entry point present");
         assert!(shader.assembled_glsl.contains("void main()"));
+    }
+
+    #[test]
+    fn sample_unit_translates_with_a_location_zero_input() {
+        let shader = compile_sample_wgsl(
+            "layout(binding = 0) uniform vec2 outputSize;\n\
+             vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
+        )
+        .expect("translates");
+        assert!(shader.wgsl.contains("fn main"), "entry point present");
+        assert!(
+            shader.wgsl.contains("@location(0)"),
+            "sample position varying survives to WGSL:\n{}",
+            shader.wgsl
+        );
+        assert!(shader.assembled_glsl.contains("lp_gfx_sample_pos"));
     }
 
     #[test]

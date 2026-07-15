@@ -31,6 +31,9 @@ use lps_builtins::canonical_glsl::{CANONICAL_GLSL, CanonicalGlsl};
 /// Name of the generated fragment output variable.
 const FRAG_OUT: &str = "lp_gfx_frag_color";
 
+/// Name of the generated sample-position varying (sample-point pass).
+const SAMPLE_POS_IN: &str = "lp_gfx_sample_pos";
+
 /// Assemble the full fragment-stage GLSL for an authored pixel shader.
 pub fn assemble_fragment_glsl(authored: &str) -> String {
     let mut out = String::from("#version 450 core\n");
@@ -41,6 +44,27 @@ pub fn assemble_fragment_glsl(authored: &str) -> String {
         out,
         "\nlayout(location = 0) out vec4 {FRAG_OUT};\n\
          void main() {{\n    {FRAG_OUT} = render(floor(gl_FragCoord.xy));\n}}\n"
+    );
+    out
+}
+
+/// Assemble the sample-point fragment-stage GLSL for an authored pixel
+/// shader: identical prelude/prototypes/authored unit, but `main` evaluates
+/// `render` at a caller-provided pixel-space position carried in a varying
+/// (one point primitive per sample — see `crate::sample_pass`) instead of
+/// `gl_FragCoord`. Points may be fractional; no `floor` is applied, matching
+/// the CPU tier's `__render_samples_rgba16` loop, which passes raw Q16.16
+/// coordinates through to `render`.
+pub fn assemble_sample_fragment_glsl(authored: &str) -> String {
+    let mut out = String::from("#version 450 core\n");
+    out.push_str(&assemble_prelude(authored));
+    out.push_str(&authored_prototypes(authored));
+    out.push_str(authored);
+    let _ = write!(
+        out,
+        "\nlayout(location = 0) in vec2 {SAMPLE_POS_IN};\n\
+         layout(location = 0) out vec4 {FRAG_OUT};\n\
+         void main() {{\n    {FRAG_OUT} = render({SAMPLE_POS_IN});\n}}\n"
     );
     out
 }
@@ -476,5 +500,20 @@ float f(float x) { return x; }
         let main_at = unit.find("void main()").expect("wrapper");
         assert!(saturate_at < proto_at && proto_at < authored_at && authored_at < main_at);
         assert!(unit.contains("render(floor(gl_FragCoord.xy))"));
+    }
+
+    #[test]
+    fn sample_unit_reads_the_position_varying_without_flooring() {
+        let authored = "layout(binding = 0) uniform vec2 outputSize;\n\
+                        vec4 render(vec2 pos) { return vec4(lpfn_saturate(pos.x)); }\n";
+        let unit = assemble_sample_fragment_glsl(authored);
+        assert!(unit.starts_with("#version 450 core\n"));
+        assert!(unit.contains("float lpfn_saturate("), "prelude spliced");
+        assert!(unit.contains("layout(location = 0) in vec2 lp_gfx_sample_pos;"));
+        assert!(unit.contains("render(lp_gfx_sample_pos)"));
+        assert!(
+            !unit.contains("gl_FragCoord"),
+            "sample positions come from the varying, not the raster position"
+        );
     }
 }
