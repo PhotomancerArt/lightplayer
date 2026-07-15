@@ -67,6 +67,14 @@ pub struct FakeLightPlayerState {
     /// Firmware provenance for the boot line and the wire hello. Scripted
     /// flash (`fake_flash(image_identity)`) records the image identity here.
     pub provenance: lpc_wire::FwProvenance,
+    /// Never emit a hello on the wire (unsolicited or requested): mimics
+    /// PRE-HELLO firmware whose server loop runs but never identifies
+    /// itself. The M4 hello gate must classify this as `Incompatible`.
+    pub suppress_hello: bool,
+    /// Report this wire proto version in the hello instead of the build's
+    /// [`lpc_wire::WIRE_PROTO_VERSION`]: mimics firmware built from an
+    /// incompatible wire revision.
+    pub proto_override: Option<u32>,
 }
 
 impl FakeLightPlayerState {
@@ -76,6 +84,8 @@ impl FakeLightPlayerState {
             project_files: Vec::new(),
             identity: None,
             provenance: fake_provenance("fake-firmware"),
+            suppress_hello: false,
+            proto_override: None,
         }
     }
 
@@ -91,6 +101,16 @@ impl FakeLightPlayerState {
 
     pub fn with_identity(mut self, identity: FakeDeviceIdentity) -> Self {
         self.identity = Some(identity);
+        self
+    }
+
+    pub fn with_suppressed_hello(mut self) -> Self {
+        self.suppress_hello = true;
+        self
+    }
+
+    pub fn with_proto_override(mut self, proto: u32) -> Self {
+        self.proto_override = Some(proto);
         self
     }
 }

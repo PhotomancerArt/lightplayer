@@ -101,6 +101,57 @@ Browser providers own their browser resource bindings:
 ownership, request ids, response correlation, server error handling,
 heartbeat/log handling, or project deploy ordering.
 
+## DeviceSession
+
+`DeviceSession` (module `device_session`, host features) owns one HARDWARE
+link end to end: it takes an owned `Rc<LinkConnector>`, performs the
+connect/protocol-open/connection flow itself, and exposes an observable
+state machine plus a readiness-gated `lpa_client::ClientIo` channel. Sim
+runtimes (browser worker) bypass it — they have no boot, no hello race, and
+no management plane.
+
+```text
+connect() ──▶ Booting ──hello(proto ok)──────────────▶ Ready { hello }
+                │
+                ├─boot lines match no-firmware sig──▶ BlankFlash
+                │                                     Bootloader
+                │                                     ForeignFirmware
+                ├─non-hello frame / wrong proto──────▶ Incompatible
+                ├─deadline, server marker seen───────▶ Incompatible (NoHello)
+                ├─deadline, no classification────────▶ Unresponsive
+                └─stream EOF / transport lost────────▶ Gone
+Ready ──transport lost / close()──────────────────────▶ Gone
+```
+
+Key contracts:
+
+- **Hello-first readiness.** The session is `Ready` ONLY when the
+  unsolicited wire `ServerHello` arrives with a matching
+  `WIRE_PROTO_VERSION`. A wrong-proto hello, a non-hello frame before any
+  hello, or a started-but-silent server (boot marker seen, deadline expired)
+  is `Incompatible` — the single affordance is reflashing. The boot-line
+  classifier (`BootLineClassifier`) is DIAGNOSIS-ONLY: it explains the
+  non-ready states and never grants readiness.
+- **Injected timers.** `DeviceTimers` wraps a caller-supplied sleep factory
+  (tokio on host, gloo on wasm) plus per-operation deadlines
+  (connect / ready / request-idle). `lpa-link` has no executor dependency;
+  readiness runs inside the session's own async methods — `wait_ready()` or
+  the channel's first use — with no background task.
+- **Readiness-gated channel.** `client_io()` returns a `ClientIo` that
+  drives readiness on first use and errors cleanly outside
+  `Ready` + `DeviceMode::AppProtocol`. Nothing is ever written to a device
+  that is not ready, and no-firmware gate errors carry the classifiable
+  `NO_FIRMWARE_DETECTED_PREFIX`.
+- **Mode-exclusive wire.** `DeviceMode` (`AppProtocol` / `Management`) gates
+  access by construction: `try_begin_management()` takes the wire (RAII
+  guard releases it) and the app-protocol channel is invalidated while held.
+  P3's management orchestration builds on this.
+- **Observation.** Pull `snapshot()` (state + link session record + recent
+  boot lines) or subscribe a `DeviceEventSink` (`Rc`-based, `!Send`) for
+  state transitions, device console lines, and progress. On
+  `Incompatible`/`Unresponsive`/`Gone` the session record's status becomes
+  `LinkSessionStatus::Error`.
+
 ## Providers
 
 `LinkProviderRegistry` is a **catalog + factory**, not a store of live

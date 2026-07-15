@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait = { version = "0.1", optional = true }
 fw-host = { path = "../../lp-fw/fw-host", optional = true }
 lpa-client = { path = "../lpa-client", optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
@@ -33,7 +34,7 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "time"] }
 
 [features]
 default = []
@@ -50,6 +51,7 @@ browser-worker = [
     "dep:web-sys",
 ]
 fake-device = [
+    "dep:async-trait",
     "dep:fw-host",
     "dep:lpa-client",
     "lpa-client/serial",
@@ -58,11 +60,19 @@ fake-device = [
     "dep:lpfs",
     "dep:tokio",
 ]
-host-process = ["dep:fw-host", "dep:lpa-client", "dep:tokio"]
+host-process = [
+    "dep:async-trait",
+    "dep:fw-host",
+    "dep:lpa-client",
+    "dep:lpc-wire",
+    "dep:tokio",
+]
 host-serial-esp32 = [
+    "dep:async-trait",
     "dep:lpa-client",
     "lpa-client/serial",
     "dep:lpc-model",
+    "dep:lpc-wire",
     "dep:serialport",
     "dep:tokio",
 ]

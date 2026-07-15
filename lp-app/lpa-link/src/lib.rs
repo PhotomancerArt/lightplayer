@@ -1,5 +1,11 @@
 //! App-side links to LightPlayer runtimes and devices.
 
+#[cfg(any(
+    feature = "host-process",
+    feature = "host-serial-esp32",
+    feature = "fake-device"
+))]
+pub mod device_session;
 pub mod provider;
 pub mod providers;
 pub mod registry;
@@ -10,6 +16,15 @@ pub mod registry;
 ))]
 pub mod stream;
 
+#[cfg(any(
+    feature = "host-process",
+    feature = "host-serial-esp32",
+    feature = "fake-device"
+))]
+pub use device_session::{
+    DeviceEvent, DeviceEventSink, DeviceMode, DeviceSession, DeviceSnapshot, DeviceState,
+    DeviceTimers, IncompatibleReason,
+};
 #[cfg(any(
     feature = "host-process",
     feature = "host-serial-esp32",

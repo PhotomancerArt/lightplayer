@@ -261,7 +261,7 @@ impl FakeDeviceCore {
         let files = lp.project_files.clone();
         let identity = lp.identity.clone();
         let hello = lpc_wire::ServerHello {
-            proto: lpc_wire::WIRE_PROTO_VERSION,
+            proto: lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION),
             fw: lp.provenance.clone(),
             device_uid: identity.as_ref().map(|identity| identity.uid.clone()),
         };
@@ -321,6 +321,16 @@ impl FakeDeviceCore {
                 Some(Err(_)) => return,
                 None => return,
             };
+            // Scripted pre-hello firmware: swallow every hello at the wire
+            // (unsolicited AND requested) while the rest of the protocol
+            // keeps flowing.
+            let suppress_hello = matches!(
+                &self.script.boot,
+                FakeBootState::LightPlayer(lp) if lp.suppress_hello
+            );
+            if suppress_hello && matches!(frame.msg, lpc_wire::ServerMsgBody::Hello(_)) {
+                continue;
+            }
             let json = match lpc_wire::json::to_string(&frame) {
                 Ok(json) => json,
                 Err(error) => {

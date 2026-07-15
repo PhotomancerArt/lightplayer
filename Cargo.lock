@@ -5237,6 +5237,7 @@ dependencies = [
 name = "lpa-link"
 version = "40.0.0"
 dependencies = [
+ "async-trait",
  "fw-host",
  "js-sys",
  "lpa-client",
