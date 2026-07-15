@@ -123,7 +123,8 @@ fn deploy_dialog_stamps_and_pushes_through_the_link() {
         deploy_state(&studio)
     );
 
-    // Stamp: writes `/.lp/device.json` on the REAL server over the wire.
+    // Stamp: writes `/.lp/device.json` at the REAL server's fs root over
+    // the wire.
     drive(studio.dispatch(deploy_action(DeployOp::StampIdentity {
         name: "Luna's porch sign".to_string(),
     })))
@@ -142,7 +143,8 @@ fn deploy_dialog_stamps_and_pushes_through_the_link() {
         DeployState::Reviewing { .. }
     ));
 
-    // Push: hash-verified replace-and-load + identity re-stamp + re-pull.
+    // Push: hash-verified replace-and-load + re-pull (no re-stamp — the
+    // root identity is outside the replaced storage dir).
     drive(studio.dispatch(deploy_action(DeployOp::ConfirmPush))).unwrap();
     let DeployState::Done { device, pushed } = deploy_state(&studio) else {
         panic!("push completes, got {:?}", deploy_state(&studio));
@@ -151,6 +153,13 @@ fn deploy_dialog_stamps_and_pushes_through_the_link() {
     assert_eq!(pushed.slug, summary.slug);
 
     let sync = studio.device_sync().expect("re-pulled after push");
+    assert_eq!(
+        sync.identity
+            .as_ref()
+            .map(|identity| identity.name.as_str()),
+        Some("Luna's porch sign"),
+        "the root-stamped identity survives the push"
+    );
     assert!(
         matches!(
             &sync.content,

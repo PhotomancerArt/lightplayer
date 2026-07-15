@@ -1,9 +1,14 @@
-//! The on-device identity convention: `/.lp/device.json`.
+//! The on-device identity convention: `/.lp/device.json` at the device's
+//! filesystem ROOT (the lpa-server base fs).
 //!
-//! Stamped at provisioning (M5's flow); USB port metadata can't distinguish
-//! identical boards, so the device filesystem carries its own identity.
-//! Format decided here; M5 wires the stamping and reading over the
-//! protocol's fs requests.
+//! Stamped at provisioning; USB port metadata can't distinguish identical
+//! boards, so the device filesystem carries its own identity. Identity is
+//! DEVICE-scoped: it lives outside every project storage dir, so project
+//! pushes (which replace `projects/<storage>/`) never touch it. Stamping
+//! writes the root path over the wire (`FsRequest::Write`); pulls read it
+//! back the same way, and firmware reads it at boot for the hello's
+//! `device_uid` (the server-side twin of this convention lives in
+//! lpa-server's `device_identity` module).
 
 use serde::{Deserialize, Serialize};
 

@@ -32,10 +32,10 @@ pub struct ServerHello {
     pub fw: FwProvenance,
     /// Device identity uid (`dev_…`) if the device is stamped.
     ///
-    /// Firmware currently ships `None`: the stamped identity lives inside
-    /// per-project storage (`projects/<storage>/.lp/device.json`), which is
-    /// not unambiguously readable from the server's fs root at boot. M4
-    /// decides whether the uid moves to a root path.
+    /// Sourced from `/.lp/device.json` at the device's fs ROOT (the
+    /// lpa-server base fs): embedders read it at boot for the unsolicited
+    /// hello, and `ClientRequest::Hello` answers re-read it, so a
+    /// post-stamp request reports the new uid. `None` means unstamped.
     pub device_uid: Option<String>,
 }
 

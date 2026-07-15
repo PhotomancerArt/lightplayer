@@ -928,12 +928,15 @@ impl StudioController {
     }
 
     /// Stamp a `dev_` identity onto the connected device: mint the uid,
-    /// write `/.lp/device.json` over the wire, register the device, and
-    /// re-pull (adoption may now run for previously-anonymous content).
+    /// write `/.lp/device.json` at the device's fs ROOT over the wire
+    /// (identity is device-scoped, outside every project storage dir),
+    /// register the device, and re-pull (adoption may now run for
+    /// previously-anonymous content).
     async fn run_identity_stamp(
         &mut self,
         name: String,
     ) -> Result<crate::app::places::DeviceIdentity, UiError> {
+        use lpc_model::AsLpPath;
         let identity = crate::app::places::DeviceIdentity {
             uid: lpc_history::PrefixedUid::mint(lpc_history::UidPrefix::Device, &(self.random)())
                 .to_string(),
@@ -942,9 +945,8 @@ impl StudioController {
         {
             let server = self.device.server.client_mut()?;
             let logs = server
-                .write_project_file(
-                    crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
-                    ".lp/device.json",
+                .fs_write(
+                    crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
                     &identity.to_json_bytes(),
                 )
                 .await?;
@@ -957,10 +959,10 @@ impl StudioController {
     }
 
     /// Push a library head to the device: hash-verified replace-and-load,
-    /// identity re-stamp (the replace clears the storage dir), then the
-    /// push event + association. The library side prefers the active
-    /// handle (this tab owns it); otherwise a snapshot read + catalog
-    /// transaction.
+    /// then the push event + association. Identity lives at the device's
+    /// fs root, so the storage-dir replace never touches it. The library
+    /// side prefers the active handle (this tab owns it); otherwise a
+    /// snapshot read + catalog transaction.
     async fn run_device_push(
         &mut self,
         device: &crate::app::places::DeviceIdentity,
@@ -992,23 +994,13 @@ impl StudioController {
             }
         };
 
-        // 2. hash-verified replace + load (the device runs it immediately),
-        //    then re-stamp the identity the replace wiped
+        // 2. hash-verified replace + load (the device runs it immediately)
         {
             let server = self.device.server.client_mut()?;
             let loaded = server
                 .open_library_project(&files, &local_hash.to_string())
                 .await?;
             self.record_logs(loaded.logs);
-            let server = self.device.server.client_mut()?;
-            let logs = server
-                .write_project_file(
-                    crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
-                    ".lp/device.json",
-                    &identity_json(device),
-                )
-                .await?;
-            self.record_logs(logs);
         }
 
         // 3. the push event + association (active handle first — M4b)
@@ -2158,10 +2150,6 @@ fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> Ui
 
 fn deploy_transition_error(error: crate::app::device::InvalidTransition) -> UiError {
     UiError::UnsupportedAction(error.to_string())
-}
-
-fn identity_json(identity: &crate::app::places::DeviceIdentity) -> Vec<u8> {
-    identity.to_json_bytes()
 }
 
 /// Constructor-default randomness: clock-derived bytes. Unique enough

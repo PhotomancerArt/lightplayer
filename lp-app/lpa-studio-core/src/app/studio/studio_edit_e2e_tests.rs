@@ -261,7 +261,8 @@ fn device_connect_pulls_classifies_and_adopts() {
     use lpc_history::SyncRelation;
 
     // a "device": an in-process server whose /projects/studio holds a
-    // project the library does NOT know, plus a stamped identity
+    // project the library does NOT know, plus a stamped identity at the
+    // device's fs ROOT (identity is device-scoped, not project content)
     let server = Rc::new(RefCell::new(edit_e2e_server()));
     let device_project_dir = "/projects/studio";
     {
@@ -278,7 +279,7 @@ fn device_connect_pulls_classifies_and_adopts() {
         )
         .unwrap();
         fs.write_file(
-            format!("{device_project_dir}/.lp/device.json").as_path(),
+            "/.lp/device.json".as_path(),
             br#"{"uid":"dev_aaaaaaaaaaaaaaaa","name":"Bench board"}"#,
         )
         .unwrap();
@@ -418,7 +419,8 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     );
     assert_eq!(deploy.choices.len(), 1, "the picker offers the library");
 
-    // stamp: writes /.lp/device.json on the device + registry entry
+    // stamp: writes /.lp/device.json at the device's fs ROOT + registry
+    // entry
     drive(controller.dispatch(deploy_action(DeployOp::StampIdentity {
         name: "Luna's porch sign".to_string(),
     })))
@@ -427,8 +429,8 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
         let bytes = server
             .borrow()
             .base_fs()
-            .read_file("/projects/studio/.lp/device.json".as_path())
-            .expect("identity stamped on the device");
+            .read_file("/.lp/device.json".as_path())
+            .expect("identity stamped at the device's fs root");
         crate::app::places::DeviceIdentity::from_json_bytes(&bytes).unwrap()
     };
     assert_eq!(stamped_identity.name, "Luna's porch sign");
@@ -450,8 +452,10 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
         DeployState::Reviewing { .. }
     ));
 
-    // push: replace-and-load on the device, hash-verified; identity
-    // survives; history + association recorded; device now AtHead
+    // push: replace-and-load on the device, hash-verified; the ROOT
+    // identity survives untouched (push never re-stamps — the replace
+    // only clears the storage dir); history + association recorded;
+    // device now AtHead
     drive(controller.dispatch(deploy_action(DeployOp::ConfirmPush))).unwrap();
     let view = controller.view();
     let DeployState::Done { device, pushed } = &view.deploy.as_ref().unwrap().state else {
@@ -475,11 +479,26 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
         device_manifest.contains(&summary.uid.to_string()),
         "the device holds the pushed project"
     );
-    let restamped = server
+    let surviving_identity = server
         .borrow()
         .base_fs()
-        .read_file("/projects/studio/.lp/device.json".as_path());
-    assert!(restamped.is_ok(), "identity survives the replace");
+        .read_file("/.lp/device.json".as_path())
+        .expect("root identity survives the push");
+    assert_eq!(
+        crate::app::places::DeviceIdentity::from_json_bytes(&surviving_identity)
+            .unwrap()
+            .uid,
+        stamped_identity.uid,
+        "the push did not re-stamp or alter the identity"
+    );
+    assert!(
+        server
+            .borrow()
+            .base_fs()
+            .read_file("/projects/studio/.lp/device.json".as_path())
+            .is_err(),
+        "no per-project identity copy is written anymore"
+    );
 
     let handle = store.open(summary.uid).unwrap();
     assert!(

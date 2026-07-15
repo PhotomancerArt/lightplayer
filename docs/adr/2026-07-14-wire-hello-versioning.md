@@ -49,7 +49,9 @@ It is delivered two ways, both mandatory for every lpa-server embedder:
 
 The server is sans-IO: the hello payload is injected by the embedder
 (`LpServer::set_hello`) at construction time; the server never reads git,
-env, clocks, or the filesystem to build it. Boot logs carry the same facts
+env, clocks, or ambient state to build it (the one non-ambient exception:
+`device_uid` is re-read from the injected base fs's root identity file
+when answering a hello request). Boot logs carry the same facts
 (`[INIT] fw-esp32 initialized, starting server loop... proto=1 commit=<c>
 dirty=<b>`) so a serial capture is self-describing even without a protocol
 client.
@@ -93,11 +95,10 @@ from the const by the packaging recipe), so "manifest we'd flash" vs
   `ServerHello` deliberately does NOT carry a project-format field today —
   fields are added when they become real, not speculatively. When
   project-data upgrade work lands, the hello is where its version belongs.
-- **device_uid from firmware** is `None` for now: the stamped identity
-  lives in per-project storage (`projects/<storage>/.lp/device.json`),
-  which is not unambiguously readable from the server's fs root at boot.
-  M4 decides whether the uid moves to a root path; until then firmware
-  ships `None` rather than inventing a second identity location.
+- **device_uid from firmware** — resolved by device-session M4/P4: the
+  stamped identity moved to `/.lp/device.json` at the DEVICE FS ROOT, so
+  firmware reads it at boot and `ClientRequest::Hello` answers re-read it
+  (the uid is now root-sourced, never `None` on a stamped device).
 
 ## Consequences
 

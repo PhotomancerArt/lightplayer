@@ -274,10 +274,13 @@ impl FakeDeviceCore {
                 }
             }
             if let Some(identity) = &identity {
-                let path = format!("{FAKE_DEVICE_PROJECT_DIR}/.lp/device.json");
+                // identity is device-scoped: stamped at the fs ROOT, not
+                // inside the project storage dir
                 let json = lpc_wire::json::to_string(identity)
                     .expect("device identity serializes to JSON");
-                if let Err(error) = fs.write_file(path.as_path(), json.as_bytes()) {
+                if let Err(error) =
+                    fs.write_file(fw_host::DEVICE_IDENTITY_PATH.as_path(), json.as_bytes())
+                {
                     eprintln!("[fake-device] failed to stamp identity: {error}");
                 }
             }

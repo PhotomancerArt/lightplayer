@@ -172,6 +172,42 @@ async fn light_player_state_speaks_real_frames_through_the_real_transport() {
     );
 }
 
+#[tokio::test]
+async fn hello_reflects_a_runtime_root_identity_stamp() {
+    use lpc_model::AsLpPath;
+
+    // An unstamped device: no identity file at the fs root.
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new(),
+    )));
+    let stream = FakeDeviceByteStream::new(device);
+    let transport = create_hardware_serial_transport_pair_with_options(
+        Box::new(stream),
+        "fake-device-stamp-test",
+        Default::default(),
+    )
+    .unwrap();
+    let transport: Box<dyn lpa_client::ClientTransport> = Box::new(transport);
+    let client =
+        lpa_client::TokioLpClient::new_shared(Arc::new(tokio::sync::Mutex::new(transport)));
+
+    let hello = client.hello().await.unwrap();
+    assert_eq!(hello.device_uid, None, "unstamped device carries no uid");
+
+    // Stamp over the wire (the studio's flow: a root FsRequest::Write),
+    // then ask again: the server re-reads the root file per request, so
+    // the new uid arrives without a reboot.
+    client
+        .fs_write(
+            fw_host::DEVICE_IDENTITY_PATH.as_path(),
+            br#"{"uid":"dev_stampstampstamp","name":"Freshly named"}"#.to_vec(),
+        )
+        .await
+        .unwrap();
+    let hello = client.hello().await.unwrap();
+    assert_eq!(hello.device_uid.as_deref(), Some("dev_stampstampstamp"));
+}
+
 #[test]
 fn premature_writes_during_boot_are_discarded_and_counted() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(

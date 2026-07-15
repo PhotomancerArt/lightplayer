@@ -33,6 +33,7 @@ lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { workspace = true }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, features = ["std"] }

@@ -694,6 +694,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let output_provider: Rc<RefCell<dyn OutputProvider>> = Rc::new(RefCell::new(output_provider));
     esp_println::println!("[INIT] Output provider created");
 
+    // Stamped device identity: read the fs-root `/.lp/device.json` once at
+    // boot for the hello (missing file → unstamped, `None`). Hello REQUESTS
+    // re-read it inside lpa-server, so a post-stamp hello is fresh anyway.
+    let device_uid = lpa_server::device_identity::read_device_uid(base_fs.as_ref());
+
     // Create server (with time provider for shader comp timing). RV32 uses lpvm-native rt_jit.
     esp_println::println!("[INIT] Creating LpServer instance...");
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
@@ -711,10 +716,8 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         graphics,
     );
     // Wire hello payload: compile-time provenance from build.rs, injected
-    // into the server (sans-IO: the server never reads env/git itself).
-    // device_uid stays None: the stamped identity lives in per-project
-    // storage (`projects/<storage>/.lp/device.json`), not at the fs root,
-    // so a boot-time read would be ambiguous — M4 decides where it moves.
+    // into the server (sans-IO: the server never reads env/git itself),
+    // plus the boot-time read of the root-stamped device identity.
     server.set_hello(lpc_wire::ServerHello {
         proto: lpc_wire::WIRE_PROTO_VERSION,
         fw: lpc_wire::FwProvenance {
@@ -723,7 +726,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             dirty: env!("LP_BUILD_DIRTY") == "true",
             profile: alloc::string::String::from(env!("LP_BUILD_PROFILE")),
         },
-        device_uid: None,
+        device_uid,
     });
     esp_println::println!("[INIT] LpServer created");
 

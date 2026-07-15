@@ -50,7 +50,14 @@ pub fn handle_client_message(
     let ClientMessage { id, msg } = client_msg;
 
     let response = match msg {
-        lpc_wire::ClientRequest::Hello => ServerMessagePayload::Hello(hello.clone()),
+        lpc_wire::ClientRequest::Hello => {
+            // The injected hello's `device_uid` is a boot-time hint; the
+            // root identity file is live truth (stamping happens at
+            // runtime), so answer requests with a fresh read.
+            let mut hello = hello.clone();
+            hello.device_uid = crate::device_identity::read_device_uid(&*base_fs);
+            ServerMessagePayload::Hello(hello)
+        }
         lpc_wire::ClientRequest::Filesystem(fs_request) => {
             ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?)
         }

@@ -12,7 +12,8 @@ pub const FAKE_DEVICE_PROJECT_DIR: &str = "/projects/studio";
 /// into the flashed device's provenance (`commit=` on the boot line).
 pub const FAKE_IMAGE_IDENTITY: &str = "fake-esp32c6-image";
 
-/// Stamped `/.lp/device.json` identity for a scripted LightPlayer state.
+/// Stamped identity for a scripted LightPlayer state, written to
+/// `/.lp/device.json` at the device's fs ROOT.
 ///
 /// Serializes to the same JSON shape the studio writes when stamping
 /// (`{"uid": "dev_…", "name": "…"}`). The uid also rides the wire hello as
@@ -61,8 +62,8 @@ pub struct FakeLightPlayerState {
     /// ([`FAKE_DEVICE_PROJECT_DIR`]), as storage-relative paths
     /// (e.g. `project.json`).
     pub project_files: Vec<(String, Vec<u8>)>,
-    /// Stamped identity: written to `.lp/device.json` in the storage dir and
-    /// reported as the hello's `device_uid`.
+    /// Stamped identity: written to `/.lp/device.json` at the device's fs
+    /// root and reported as the hello's `device_uid`.
     pub identity: Option<FakeDeviceIdentity>,
     /// Firmware provenance for the boot line and the wire hello. Scripted
     /// flash (`fake_flash(image_identity)`) records the image identity here.

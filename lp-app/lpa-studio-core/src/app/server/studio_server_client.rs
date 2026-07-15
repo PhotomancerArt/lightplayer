@@ -212,25 +212,17 @@ impl StudioServerClient {
         Ok(logs)
     }
 
-    /// Canonical package hash of a project directory (push/pull verify).
-    /// Write one file into a project storage without touching the rest
-    /// (identity stamping: `/.lp/device.json` must survive pushes and be
-    /// writable without one).
-    pub async fn write_project_file(
+    /// Write one file through the server filesystem (`FsRequest::Write`),
+    /// addressed from the fs ROOT — device-scoped files that live outside
+    /// every project storage dir (identity stamping: `/.lp/device.json`).
+    pub async fn fs_write(
         &mut self,
-        project_id: &str,
-        relative_path: &str,
+        path: &lpc_model::LpPath,
         bytes: &[u8],
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let outcome = self
             .client
-            .push_project_files(
-                project_id,
-                [lpa_client::project_deploy::ProjectDeployFile::new(
-                    relative_path,
-                    bytes,
-                )],
-            )
+            .fs_write(path, bytes.to_vec())
             .await
             .map_err(map_client_error)?;
         let mut logs = map_client_events(outcome.events);
@@ -238,6 +230,7 @@ impl StudioServerClient {
         Ok(logs)
     }
 
+    /// Canonical package hash of a project directory (push/pull verify).
     pub async fn hash_package(
         &mut self,
         project_id: &str,

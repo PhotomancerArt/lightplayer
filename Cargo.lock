@@ -5271,6 +5271,7 @@ dependencies = [
  "lpc-view",
  "lpc-wire",
  "lpfs",
+ "serde",
 ]
 
 [[package]]
