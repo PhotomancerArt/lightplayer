@@ -15,6 +15,7 @@ pub(crate) fn lower_as_vec(
     ctx: &mut crate::lower_ctx::LowerCtx<'_>,
     inner: Handle<Expression>,
     target: ScalarKind,
+    bitcast: bool,
 ) -> Result<VRegVec, LowerError> {
     let inner_vs = lower_expr_vec(ctx, inner)?;
     let src_k = expr_scalar_kind(ctx.module, ctx.func, inner)?;
@@ -32,17 +33,24 @@ pub(crate) fn lower_as_vec(
         };
     let mut result = VRegVec::new();
     for &src in src_regs {
-        let v = lower_as_scalar(ctx, src, src_k, target)?;
+        let v = lower_as_scalar(ctx, src, src_k, target, bitcast)?;
         result.push(v);
     }
     Ok(result)
 }
 
+/// Lower a single-lane cast. `bitcast` distinguishes naga's two `As` flavors:
+/// a numeric conversion (`convert: Some(width)`, e.g. `float(i)`) from a
+/// bit-reinterpreting cast (`convert: None`, GLSL `intBitsToFloat` /
+/// `uintBitsToFloat`). The bitcast lowers to the mode-aware
+/// [`LpirOp::FfromI32Bits`] (Q32 keeps raw `i32` lanes; native f32 does an
+/// `i32`→`f32` `from_bits`), never a numeric `ItofS`/`ItofU`.
 pub(crate) fn lower_as_scalar(
     ctx: &mut crate::lower_ctx::LowerCtx<'_>,
     v: VReg,
     src_k: ScalarKind,
     target: ScalarKind,
+    bitcast: bool,
 ) -> Result<VReg, LowerError> {
     let dst_ty = match target {
         ScalarKind::Float => IrType::F32,
@@ -54,6 +62,25 @@ pub(crate) fn lower_as_scalar(
         }
     };
     let dst = ctx.fb.alloc_vreg(dst_ty);
+    if bitcast {
+        match (src_k, target) {
+            (ScalarKind::Sint | ScalarKind::Uint, ScalarKind::Float) => {
+                ctx.fb.push(LpirOp::FfromI32Bits { dst, src: v });
+                return Ok(dst);
+            }
+            (ScalarKind::Float, ScalarKind::Sint | ScalarKind::Uint) => {
+                // floatBitsToInt/floatBitsToUint: no reverse (`f32`→`i32`
+                // bits) LPIR op exists yet. The corpus files that need it
+                // (`common-floatbitstoint.glsl`) already fail to compile on
+                // inf literals, so this path is unreached; error honestly
+                // rather than emit a wrong numeric conversion.
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "floatBitsToInt/floatBitsToUint bitcast (no reverse bitcast op)",
+                )));
+            }
+            _ => {}
+        }
+    }
     match (src_k, target) {
         (ScalarKind::Float, ScalarKind::Sint) => ctx.fb.push(LpirOp::FtoiSatS { dst, src: v }),
         (ScalarKind::Float, ScalarKind::Uint) => ctx.fb.push(LpirOp::FtoiSatU { dst, src: v }),
