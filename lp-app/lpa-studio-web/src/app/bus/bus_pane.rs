@@ -12,7 +12,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiBusChannelView, UiBusView};
 
+use crate::app::node::value_display::fixed_decimal_display;
 use crate::app::node::{SlotPane, SlotPaneTreatment};
+use crate::base::StudioIconName;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -63,6 +65,7 @@ pub(crate) fn BusChannelPane(
             aspects,
             initially_open,
             treatment: SlotPaneTreatment::Bound,
+            title_icon: StudioIconName::Bus,
             on_action,
             badges: rsx! {
                 if primary_visual {
@@ -77,7 +80,11 @@ pub(crate) fn BusChannelPane(
                 }
             },
             if let Some(value) = value {
-                code { class: "tw:min-w-0 tw:break-all tw:text-center tw:font-mono tw:text-sm tw:font-bold tw:text-strong-foreground", "{value}" }
+                // Fixed decimals keep live numeric readings from jittering
+                // as they tick (2026-07-15 gate feedback).
+                code { class: "tw:min-w-0 tw:break-all tw:text-center tw:font-mono tw:text-sm tw:font-bold tw:text-strong-foreground",
+                    {fixed_decimal_display(&value, None)}
+                }
             } else if let Some(error) = value_error {
                 span {
                     class: "tw:min-w-0 tw:truncate tw:text-xs tw:text-status-error-foreground",

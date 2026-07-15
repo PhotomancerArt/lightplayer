@@ -51,6 +51,7 @@ mod slot_value_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_value_editor_stories;
 mod slot_vector_fields;
+pub(crate) mod value_display;
 
 pub use asset_editor::AssetEditor;
 pub(crate) use binding_authoring_section::BindingAuthoringSection;

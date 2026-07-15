@@ -1,27 +1,40 @@
-//! Binding authoring inside the slot detail popover (roadmap M4).
+//! The binding block inside the slot detail popover (roadmap M4).
 //!
-//! Bind, retarget, and unbind are ordinary slot edits on the node's
-//! `bindings` map — the section dispatches the same structural gestures the
-//! generic editors use (`EnsurePresent` entry → `EnsurePresent` endpoint
-//! option → `SetValue`; unbind is `RemoveValue` on the entry, which also
-//! re-enables any slot-declared default). The channel picker is seeded from
-//! the shared channel choices (observed ∪ well-known, provided as context by
-//! the project workspace); free-text entry stays legal — the picker teaches
-//! the naming norm, it does not gate (D9).
+//! One coherent section tells the whole binding story: the current wiring
+//! ("Published as bus:time" / "Reading from bus:time"), its origin (a slot-
+//! declared default vs. an authored entry), any secondary routes, and the
+//! authoring affordances — Bind/Edit/Unbind (2026-07-15 gate feedback:
+//! no read-only summary above a disconnected "Bind" section).
+//!
+//! Bind, edit, and unbind are ordinary slot edits on the node's `bindings`
+//! map — the section dispatches the same structural gestures the generic
+//! editors use (`EnsurePresent` entry → `EnsurePresent` endpoint option →
+//! `SetValue`; unbind is `RemoveValue` on the entry, which also re-enables
+//! any slot-declared default). The channel picker is seeded from the shared
+//! channel choices (observed ∪ well-known, provided as context by the
+//! project workspace); free-text entry stays legal — the picker teaches the
+//! naming norm, it does not gate (D9).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{LpValue, UiAction, UiBindingAuthoring, UiChannelChoice};
+use lpa_studio_core::{
+    LpValue, UiAction, UiBindingAuthoring, UiChannelChoice, UiSlotAffordance, UiSlotAspect,
+};
 
+use crate::app::node::slot_detail_button::{SlotDetailRow, aspect_detail_rows, binding_title};
 use crate::app::node::slot_edit_actions::{
     slot_ensure_present_action, slot_remove_value_action, slot_set_value_action,
 };
-use crate::base::{DetailSection, DetailSectionTint};
+use crate::base::{DetailSectionTint, StudioIcon, StudioIconName, detail_popover_section_class};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn BindingAuthoringSection(
     authoring: UiBindingAuthoring,
     on_action: EventHandler<UiAction>,
+    /// The slot's current Binding aspect, folded into this block so wiring
+    /// state and authoring affordances read as one story.
+    #[props(default = None)]
+    current: Option<UiSlotAspect>,
     /// Open the channel picker on first render (story/testing affordance).
     #[props(default = false)]
     initially_picking: bool,
@@ -42,6 +55,40 @@ pub(crate) fn BindingAuthoringSection(
         .and_then(|name| choices.iter().find(|choice| choice.name == name))
         .and_then(|choice| choice.kind.clone());
 
+    // Current-wiring presentation from the folded Binding aspect.
+    let bound = current
+        .as_ref()
+        .is_some_and(|aspect| aspect.affordance == Some(UiSlotAffordance::Bound));
+    let heading = match (&current, bound) {
+        (Some(aspect), true) => binding_title(aspect),
+        _ => "Unbound".to_string(),
+    };
+    let endpoint_code = bound
+        .then(|| {
+            current
+                .as_ref()
+                .and_then(|aspect| aspect.rows.first())
+                .map(|row| row.value.clone())
+                .filter(|value| !value.is_empty())
+        })
+        .flatten();
+    let detail_rows = current.as_ref().map(aspect_detail_rows).unwrap_or_default();
+    let (tint, icon, icon_class, heading_class) = if bound {
+        (
+            DetailSectionTint::Bound,
+            StudioIconName::BoundValue,
+            "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-status-bound-foreground",
+            "tw:m-0 tw:text-xs tw:font-bold tw:text-status-bound-foreground",
+        )
+    } else {
+        (
+            DetailSectionTint::None,
+            StudioIconName::UnboundValue,
+            "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-heading",
+            "tw:m-0 tw:text-xs tw:font-bold tw:text-heading",
+        )
+    };
+
     let bind = {
         let entry_address = entry_address.clone();
         let endpoint_address = endpoint_address.clone();
@@ -61,21 +108,46 @@ pub(crate) fn BindingAuthoringSection(
     let free_text_value = free_text();
     let free_text_trimmed = free_text_value.trim().to_string();
     let free_text_issue = channel_name_issue(&free_text_trimmed);
-    let verb = if authored.is_some() {
-        "Retarget"
-    } else {
-        "Bind"
+    let free_text_ready = !free_text_trimmed.is_empty() && free_text_issue.is_none();
+    // Submit the free-text channel — shared by the Bind button and Enter in
+    // the text field.
+    let submit_free_text = {
+        let bind = bind.clone();
+        let name = free_text_trimmed.clone();
+        move || {
+            bind(&name);
+            picker_open.set(false);
+            free_text.set(String::new());
+        }
     };
 
     rsx! {
-        DetailSection { title: "Bind", tint: DetailSectionTint::Bound,
+        section { class: detail_popover_section_class(tint),
+            header { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:leading-none",
+                span { class: icon_class,
+                    StudioIcon { name: icon, size: 12 }
+                }
+                h3 { class: heading_class, "{heading}" }
+                if let Some(code) = endpoint_code {
+                    code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:text-muted-foreground", "{code}" }
+                }
+            }
+            if !detail_rows.is_empty() {
+                div { class: "tw:grid tw:min-w-0 tw:gap-0.5 tw:pl-[18px] tw:pt-0.5",
+                    for row in detail_rows {
+                        SlotDetailRow { row, on_action }
+                    }
+                }
+            }
             if !picker_open() {
-                div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5 tw:pt-0.5",
+                div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5 tw:pl-[18px] tw:pt-1",
                     button {
                         class: authoring_button_class(),
                         r#type: "button",
                         title: if authored.is_some() {
                             "Point this slot's authored binding at a different channel"
+                        } else if bound {
+                            "The slot declares this default wiring; authoring a binding overrides it"
                         } else {
                             "Author a binding from this slot to a bus channel"
                         },
@@ -83,7 +155,11 @@ pub(crate) fn BindingAuthoringSection(
                             event.stop_propagation();
                             picker_open.set(true);
                         },
-                        "{verb}\u{2026}"
+                        if bound {
+                            "Edit\u{2026}"
+                        } else {
+                            "Bind\u{2026}"
+                        }
                     }
                     if authored.is_some() {
                         button {
@@ -102,7 +178,7 @@ pub(crate) fn BindingAuthoringSection(
                     }
                 }
             } else {
-                div { class: "tw:grid tw:gap-1 tw:pt-0.5",
+                div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:pl-[18px] tw:pt-1",
                     for choice in choices.clone() {
                         BindingChannelChoice {
                             choice: choice.clone(),
@@ -117,7 +193,7 @@ pub(crate) fn BindingAuthoringSection(
                             },
                         }
                     }
-                    div { class: "tw:flex tw:items-center tw:gap-1.5 tw:pt-0.5",
+                    div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:pt-0.5",
                         code { class: "tw:flex-none tw:font-mono tw:text-[11px] tw:text-subtle-foreground", "bus:" }
                         input {
                             class: "tw:min-w-0 tw:flex-1 tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-strong-foreground",
@@ -125,23 +201,29 @@ pub(crate) fn BindingAuthoringSection(
                             placeholder: "channel.name",
                             value: "{free_text_value}",
                             oninput: move |event| free_text.set(event.value()),
+                            onkeydown: {
+                                let mut submit_free_text = submit_free_text.clone();
+                                move |event: Event<KeyboardData>| {
+                                    if event.key() == Key::Enter && free_text_ready {
+                                        event.stop_propagation();
+                                        submit_free_text();
+                                    }
+                                }
+                            },
                         }
                         button {
                             class: authoring_button_class(),
                             r#type: "button",
-                            disabled: free_text_trimmed.is_empty() || free_text_issue.is_some(),
+                            disabled: !free_text_ready,
                             title: "Bind to the entered channel (created lazily by reference)",
                             onclick: {
-                                let bind = bind.clone();
-                                let name = free_text_trimmed.clone();
+                                let mut submit_free_text = submit_free_text.clone();
                                 move |event: Event<MouseData>| {
                                     event.stop_propagation();
-                                    bind(&name);
-                                    picker_open.set(false);
-                                    free_text.set(String::new());
+                                    submit_free_text();
                                 }
                             },
-                            "{verb}"
+                            "Bind"
                         }
                         button {
                             class: authoring_button_class(),
@@ -162,8 +244,8 @@ pub(crate) fn BindingAuthoringSection(
     }
 }
 
-/// One pickable channel row: mono name, kind tag, well-known marker, and the
-/// registry doc as the tooltip.
+/// One pickable channel row: bus glyph, mono name, kind tag, well-known
+/// marker, and the registry doc as the tooltip.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn BindingChannelChoice(
@@ -182,13 +264,17 @@ fn BindingChannelChoice(
 
     rsx! {
         button {
-            class: "tw:flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-left tw:leading-none tw:text-status-bound-foreground tw:transition-colors tw:hover:border-status-bound-foreground",
+            class: "tw:flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:overflow-hidden tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-left tw:leading-none tw:text-status-bound-foreground tw:transition-colors tw:hover:border-status-bound-foreground",
             r#type: "button",
             title,
             onclick: move |event| {
                 event.stop_propagation();
                 on_pick.call(());
             },
+            StudioIcon {
+                name: StudioIconName::Bus,
+                size: 10,
+            }
             code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[11px] tw:font-semibold", "{choice.name}" }
             if let Some(kind) = &choice.kind {
                 span { class: "tw:flex-none tw:text-[9px] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{kind}" }

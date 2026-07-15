@@ -52,6 +52,21 @@ pub fn SlotDetailButton(
     let style = slot_affordance_style(affordance);
     let menu_label = format!("{label} details");
 
+    // When the slot is authorable, its Binding aspect folds INTO the
+    // authoring section — one coherent binding block (current wiring, origin
+    // story, Edit/Unbind) instead of a read-only summary followed by a bare
+    // "Bind" section (2026-07-15 gate feedback). Non-authorable surfaces
+    // (e.g. bus channel wiring) keep the plain section rendering.
+    let fold_binding = authoring.is_some() && on_action.is_some();
+    let current_binding = fold_binding
+        .then(|| {
+            aspects
+                .iter()
+                .find(|aspect| aspect.kind == UiSlotAspectKind::Binding)
+                .cloned()
+        })
+        .flatten();
+
     rsx! {
         span { class: "tw:inline-flex tw:w-8 tw:justify-end",
             DetailPopover {
@@ -63,18 +78,24 @@ pub fn SlotDetailButton(
                 active: style.active,
                 initially_open,
                 for aspect in aspects {
-                    SlotDetailSection {
-                        // The revert lives INSIDE the edited (edit-state)
-                        // section it acts on — no floating popup footer.
-                        revert: (aspect.kind == UiSlotAspectKind::EditState)
-                            .then(|| revert.clone())
-                            .flatten(),
-                        on_action,
-                        aspect,
+                    if !(fold_binding && aspect.kind == UiSlotAspectKind::Binding) {
+                        SlotDetailSection {
+                            // The revert lives INSIDE the edited (edit-state)
+                            // section it acts on — no floating popup footer.
+                            revert: (aspect.kind == UiSlotAspectKind::EditState)
+                                .then(|| revert.clone())
+                                .flatten(),
+                            on_action,
+                            aspect,
+                        }
                     }
                 }
                 if let (Some(authoring), Some(on_action)) = (authoring, on_action) {
-                    crate::app::node::BindingAuthoringSection { authoring, on_action }
+                    crate::app::node::BindingAuthoringSection {
+                        authoring,
+                        on_action,
+                        current: current_binding,
+                    }
                 }
             }
         }
@@ -415,12 +436,12 @@ fn binding_summary(aspect: &UiSlotAspect) -> AspectSummary {
     }
 }
 
-fn binding_title(aspect: &UiSlotAspect) -> String {
+pub(crate) fn binding_title(aspect: &UiSlotAspect) -> String {
     match aspect.rows.first().map(|row| row.label.as_str()) {
         Some(label) if label.eq_ignore_ascii_case("Published") => "Published as".to_string(),
         Some(label) if label.eq_ignore_ascii_case("Bound to") => "Bound to".to_string(),
         Some(label) if label.eq_ignore_ascii_case("Consumed by") => "Consumed by".to_string(),
-        _ => "Bound from".to_string(),
+        _ => "Reading from".to_string(),
     }
 }
 
@@ -435,7 +456,7 @@ fn first_row_label_is(aspect: &UiSlotAspect, label: &str) -> bool {
         .is_some_and(|row| row.label.eq_ignore_ascii_case(label))
 }
 
-fn aspect_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> {
+pub(crate) fn aspect_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> {
     if aspect.kind == UiSlotAspectKind::TypeInfo {
         return Vec::new();
     }
@@ -534,7 +555,7 @@ fn SlotInfoRow(row: UiSlotAspectRow) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotDetailRow(
+pub(crate) fn SlotDetailRow(
     row: UiSlotAspectRow,
     #[props(default = None)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
