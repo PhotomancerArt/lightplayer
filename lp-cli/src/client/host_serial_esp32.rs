@@ -52,7 +52,7 @@ pub fn connect_host_serial_esp32_with_options(
     port_name: &str,
     options: HostSerialEsp32Options,
 ) -> Result<HostSerialEsp32ClientTransport> {
-    let mut provider = HostSerialEsp32Provider::with_options(options);
+    let provider = HostSerialEsp32Provider::with_options(options);
     let endpoint_id = provider.create_endpoint_for_port(port_name, format!("ESP32 ({port_name})"));
     let session = pollster::block_on(provider.connect(&endpoint_id))?;
     let connection = pollster::block_on(provider.connection(session.id()))?;

@@ -7,9 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait = { version = "0.1", optional = true }
 fw-host = { path = "../../lp-fw/fw-host", optional = true }
-lpa-client = { path = "../lpa-client", optional = true }
+lpa-client = { path = "../lpa-client", optional = true, default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
+lpc-wire = { path = "../../lp-core/lpc-wire", optional = true }
+lpfs = { path = "../../lp-base/lpfs", optional = true, features = ["std"] }
 js-sys = { version = "0.3", optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6", optional = true }
@@ -32,12 +35,14 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "time"] }
 
 [features]
 default = []
 browser-serial-esp32 = [
+    "device-session",
     "dep:js-sys",
+    "dep:lpc-model",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
 ]
@@ -48,9 +53,29 @@ browser-worker = [
     "dep:wasm-bindgen-futures",
     "dep:web-sys",
 ]
-host-process = ["dep:fw-host", "dep:lpa-client", "dep:tokio"]
+# DeviceSession (state machine, hello-first readiness, injected timers) with
+# no concrete wire: platform features add their wire below. Runs on wasm
+# (lpa-client stays default-features-off here).
+device-session = ["dep:async-trait", "dep:lpa-client", "dep:lpc-wire"]
+# DeviceSession over the host protocol transport (`LinkServerConnection`).
+# Implied by every host provider feature; never enabled on wasm (it pulls
+# lpa-client's tokio-full host runtime).
+device-session-host = ["device-session", "lpa-client/host"]
+fake-device = [
+    "device-session-host",
+    "dep:fw-host",
+    "lpa-client/serial",
+    "dep:lpc-model",
+    "dep:lpfs",
+    "dep:tokio",
+]
+host-process = [
+    "device-session-host",
+    "dep:fw-host",
+    "dep:tokio",
+]
 host-serial-esp32 = [
-    "dep:lpa-client",
+    "device-session-host",
     "lpa-client/serial",
     "dep:lpc-model",
     "dep:serialport",

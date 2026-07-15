@@ -14,10 +14,15 @@ use crate::{LinkConnection, LinkDiagnostic, LinkEndpoint, LinkError, LinkLogEntr
 /// session records and pass their ids back into the provider for follow-up
 /// operations.
 ///
+/// All methods take `&self`: providers keep their mutable session/endpoint
+/// state behind internal `RefCell`s (with borrows scoped to synchronous
+/// sections, never across an `await`), so a provider can be shared through
+/// `Rc<LinkConnector>` by the connection owner and its client I/O adapters.
+///
 /// The trait is intentionally not used as a trait object today because async
-/// trait methods are not object-safe. `LinkProviderRegistry` stores concrete
-/// providers through `LinkProviderInstance`, an enum-dispatched wrapper that
-/// still exposes this same controller interface.
+/// trait methods are not object-safe. Owners hold providers through
+/// `LinkConnector`, an enum-dispatched wrapper that exposes this same
+/// controller interface.
 #[allow(async_fn_in_trait, reason = "Link providers are not object-safe yet")]
 pub trait LinkProvider {
     /// Stable built-in provider kind, such as `host-process` or `browser-serial-esp32`.
@@ -27,24 +32,20 @@ pub trait LinkProvider {
     ///
     /// Providers may return physical endpoints, such as an ESP32 serial port,
     /// or spawnable endpoints, such as `host-process` memory runtimes.
-    async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError>;
+    async fn discover(&self) -> Result<Vec<LinkEndpoint>, LinkError>;
 
     /// Return the current status for a previously discovered endpoint.
-    async fn status(
-        &mut self,
-        endpoint_id: &LinkEndpointId,
-    ) -> Result<LinkEndpointStatus, LinkError>;
+    async fn status(&self, endpoint_id: &LinkEndpointId) -> Result<LinkEndpointStatus, LinkError>;
 
     /// Open a live session from a discovered endpoint.
     ///
     /// The provider owns the concrete resources behind the returned session
     /// record. Use the session id with `connection`, `logs`, `diagnostics`, and
     /// `close` for provider-owned follow-up operations.
-    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError>;
+    async fn connect(&self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError>;
 
     /// Open or return the client connection associated with a live session.
-    async fn connection(&mut self, session_id: &LinkSessionId)
-    -> Result<LinkConnection, LinkError>;
+    async fn connection(&self, session_id: &LinkSessionId) -> Result<LinkConnection, LinkError>;
 
     /// Link-level logs available through the provider-owned session.
     fn logs(&self, session_id: &LinkSessionId) -> Result<Vec<LinkLogEntry>, LinkError>;
@@ -59,7 +60,7 @@ pub trait LinkProvider {
     /// `lp-server` protocol and may invalidate any server connection opened from
     /// the same session.
     async fn manage(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         request: LinkManagementRequest,
     ) -> Result<LinkManagementResult, LinkError> {
@@ -70,7 +71,7 @@ pub trait LinkProvider {
     /// Execute a low-level management operation and publish live progress where
     /// the provider can observe it.
     async fn manage_with_events(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         request: LinkManagementRequest,
         events: LinkManagementEventSink,
@@ -81,5 +82,5 @@ pub trait LinkProvider {
     }
 
     /// Close provider-owned resources for a live session.
-    async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError>;
+    async fn close(&self, session_id: &LinkSessionId) -> Result<(), LinkError>;
 }

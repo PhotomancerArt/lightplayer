@@ -5278,10 +5278,13 @@ dependencies = [
 name = "lpa-link"
 version = "40.0.0"
 dependencies = [
+ "async-trait",
  "fw-host",
  "js-sys",
  "lpa-client",
  "lpc-model",
+ "lpc-wire",
+ "lpfs",
  "serde",
  "serde-wasm-bindgen",
  "serialport",
@@ -5310,6 +5313,7 @@ dependencies = [
  "lpc-view",
  "lpc-wire",
  "lpfs",
+ "serde",
 ]
 
 [[package]]

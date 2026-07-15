@@ -59,6 +59,7 @@ fn set_log_level_changes_global_max_level_and_acks() {
                 None,
                 None,
                 graphics.clone(),
+                (*server_ptr).hello(),
                 request,
             )
             .unwrap()

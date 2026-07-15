@@ -1,5 +1,8 @@
 use crate::UiProgress;
 
+/// A labeled in-progress step, as controller state (server connecting,
+/// project opening, endpoint discovery…). Converts into the renderable
+/// [`UiProgress`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgressState {
     pub label: String,

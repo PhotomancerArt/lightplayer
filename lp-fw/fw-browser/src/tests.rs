@@ -38,6 +38,9 @@ fn runtime_serves_protocol_messages_after_tick() {
     let output = tick_runtime(runtime_id, 16).expect("tick runtime");
     assert!(output.contains("protocol_out"));
     assert!(output.contains("listAvailableProjects"));
+    // The boot hello (unsolicited id 0) flushes ahead of the first response.
+    assert!(output.contains("\\\"hello\\\""));
+    assert!(output.contains("\\\"proto\\\":1"));
 }
 
 #[wasm_bindgen_test]
@@ -527,6 +530,11 @@ fn send_protocol_request(
 
     handle_envelope_json(runtime_id, &input).expect("handle protocol_in");
     collect_protocol_out(&tick_runtime(runtime_id, delta_ms).expect("tick runtime"))
+        .into_iter()
+        // Drop unsolicited frames (id 0: the boot hello) the way real
+        // clients do, so `responses[0]` stays the correlated response.
+        .filter(|message| message.id != 0)
+        .collect()
 }
 
 fn collect_protocol_out(envelopes_json: &str) -> Vec<WireServerMessage> {

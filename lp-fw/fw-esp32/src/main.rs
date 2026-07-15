@@ -695,6 +695,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let output_provider: Rc<RefCell<dyn OutputProvider>> = Rc::new(RefCell::new(output_provider));
     esp_println::println!("[INIT] Output provider created");
 
+    // Stamped device identity: read the fs-root `/.lp/device.json` once at
+    // boot for the hello (missing file → unstamped, `None`). Hello REQUESTS
+    // re-read it inside lpa-server, so a post-stamp hello is fresh anyway.
+    let device_uid = lpa_server::device_identity::read_device_uid(base_fs.as_ref());
+
     // Create server (with time provider for shader comp timing). RV32 uses lpvm-native rt_jit.
     esp_println::println!("[INIT] Creating LpServer instance...");
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
@@ -721,6 +726,19 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         Some(radio_service),
         graphics,
     );
+    // Wire hello payload: compile-time provenance from build.rs, injected
+    // into the server (sans-IO: the server never reads env/git itself),
+    // plus the boot-time read of the root-stamped device identity.
+    server.set_hello(lpc_wire::ServerHello {
+        proto: lpc_wire::WIRE_PROTO_VERSION,
+        fw: lpc_wire::FwProvenance {
+            package: alloc::string::String::from("fw-esp32"),
+            commit: alloc::string::String::from(env!("LP_BUILD_COMMIT")),
+            dirty: env!("LP_BUILD_DIRTY") == "true",
+            profile: alloc::string::String::from(env!("LP_BUILD_PROFILE")),
+        },
+        device_uid,
+    });
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless
@@ -844,7 +862,16 @@ async fn main(spawner: embassy_executor::Spawner) {
     )))]
     {
         let app = boot_firmware(spawner);
-        esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
+        // Keep the marker substring "fw-esp32 initialized, starting server
+        // loop" intact: two readiness classifiers grep for it
+        // (lpa-studio-core browser_serial_readiness, lp-cli fwcheck). The
+        // version suffix is additive only.
+        esp_println::println!(
+            "[INIT] fw-esp32 initialized, starting server loop... proto={} commit={} dirty={}",
+            lpc_wire::WIRE_PROTO_VERSION,
+            env!("LP_BUILD_COMMIT"),
+            env!("LP_BUILD_DIRTY"),
+        );
 
         // Run server loop (never returns)
         run_server_loop(app.server, app.transport, app.time_provider, app.watchdog).await;

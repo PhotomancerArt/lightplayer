@@ -1,106 +1,145 @@
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
-use crate::LinkProvider;
-use crate::providers::{LinkEnv, LinkProviderDescriptor, LinkProviderInstance, LinkProviderKind};
+use crate::providers::{LinkConnector, LinkEnv, LinkProviderDescriptor, LinkProviderKind};
+use crate::{LinkError, LinkProvider};
 
-/// Runtime collection of provider implementations compiled into `lpa-link`.
+/// Catalog + factory for the link providers compiled into `lpa-link`.
 ///
-/// The registry owns provider instances keyed by `LinkProviderKind`. It is the
-/// high-level entry point for applications that want to enumerate available
-/// providers from the same feature/target matrix that compiled `lpa-link`,
-/// without duplicating provider availability logic in the application crate.
+/// The registry answers "which provider kinds exist in this build?" (the
+/// catalog: [`Self::descriptors`], [`Self::kinds`], for picker UI) and builds
+/// an owned [`LinkConnector`] on demand ([`Self::create_connector`]) from the
+/// per-kind options stored at construction ([`LinkEnv`]). It does NOT hold
+/// live provider state: a connector is created per open flow and owned by the
+/// connection owner, so nothing borrows a shared registry on hot paths.
 #[derive(Default)]
 pub struct LinkProviderRegistry {
-    providers: BTreeMap<LinkProviderKind, LinkProviderInstance>,
+    env: LinkEnv,
+    catalog: Vec<LinkProviderKind>,
+    /// Preconfigured connectors, keyed by kind. Tests insert record-level or
+    /// device-backed fakes here; `create_connector` returns the SAME shared
+    /// instance for the kind so a test's scripted state survives re-opens.
+    prebuilt: BTreeMap<LinkProviderKind, Rc<LinkConnector>>,
 }
 
 impl LinkProviderRegistry {
-    /// Create an empty registry for manual provider insertion.
+    /// Create an empty registry for manual connector insertion.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Construct the default registry for the current build and target.
     ///
-    /// Providers are inserted only when their crate feature and target
-    /// conditions are satisfied. App-owned configuration is read from `env`
-    /// through feature-gated fields.
+    /// Kinds are cataloged only when their crate feature and target
+    /// conditions are satisfied. App-owned configuration is stored from `env`
+    /// and consumed when `create_connector` builds a provider.
     pub fn from_env(env: LinkEnv) -> Self {
-        let mut registry = Self::new();
-        let _ = &env;
-
-        registry.insert(crate::providers::fake::FakeProvider::new());
+        let mut catalog = vec![LinkProviderKind::Fake];
 
         #[cfg(feature = "host-process")]
-        {
-            let mut provider = crate::providers::host_process::HostProcessProvider::new();
-            provider.create_memory_endpoint("Host process runtime");
-            registry.insert(provider);
-        }
+        catalog.push(LinkProviderKind::HostProcess);
 
         #[cfg(feature = "host-serial-esp32")]
-        registry.insert(
-            crate::providers::host_serial_esp32::HostSerialEsp32Provider::with_options(
-                env.host_serial_esp32,
-            ),
-        );
+        catalog.push(LinkProviderKind::HostSerialEsp32);
 
         #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
-        {
-            let mut provider =
-                crate::providers::browser_worker::BrowserWorkerProvider::with_options(
-                    env.browser_worker,
-                );
-            provider.create_worker_endpoint("Browser firmware runtime");
-            registry.insert(provider);
-        }
+        catalog.push(LinkProviderKind::BrowserWorker);
 
         #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-        registry.insert(
-            crate::providers::browser_serial_esp32::BrowserSerialEsp32Provider::with_options(
-                env.browser_serial_esp32,
+        catalog.push(LinkProviderKind::BrowserSerialEsp32);
+
+        catalog.sort();
+        Self {
+            env,
+            catalog,
+            prebuilt: BTreeMap::new(),
+        }
+    }
+
+    /// Insert or replace a preconfigured connector by its `LinkProviderKind`.
+    ///
+    /// This is the test-construction seam: record-level `FakeProvider`
+    /// endpoints and scripted fake devices are built by the test and handed
+    /// to the registry, which then serves them from `create_connector`.
+    pub fn insert(&mut self, provider: impl Into<LinkConnector>) {
+        let connector = provider.into();
+        let kind = connector.kind();
+        if !self.catalog.contains(&kind) {
+            self.catalog.push(kind);
+            self.catalog.sort();
+        }
+        self.prebuilt.insert(kind, Rc::new(connector));
+    }
+
+    /// Build (or return the preconfigured) connector for a kind.
+    ///
+    /// Each call for a factory-built kind constructs a FRESH provider from
+    /// the stored `LinkEnv`; a preconfigured kind returns its shared
+    /// instance. Kinds absent from this build's catalog are an error.
+    pub fn create_connector(&self, kind: LinkProviderKind) -> Result<Rc<LinkConnector>, LinkError> {
+        if let Some(connector) = self.prebuilt.get(&kind) {
+            return Ok(Rc::clone(connector));
+        }
+        if !self.catalog.contains(&kind) {
+            return Err(LinkError::other(format!(
+                "provider {} is not available",
+                kind.key()
+            )));
+        }
+        let _ = &self.env;
+        let connector = match kind {
+            LinkProviderKind::Fake => {
+                LinkConnector::Fake(crate::providers::fake::FakeProvider::new())
+            }
+            #[cfg(feature = "host-process")]
+            LinkProviderKind::HostProcess => {
+                let provider = crate::providers::host_process::HostProcessProvider::new();
+                provider.create_memory_endpoint("Host process runtime");
+                LinkConnector::HostProcess(provider)
+            }
+            #[cfg(feature = "host-serial-esp32")]
+            LinkProviderKind::HostSerialEsp32 => LinkConnector::HostSerialEsp32(
+                crate::providers::host_serial_esp32::HostSerialEsp32Provider::with_options(
+                    self.env.host_serial_esp32.clone(),
+                ),
             ),
-        );
-
-        registry
+            #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+            LinkProviderKind::BrowserWorker => {
+                let provider =
+                    crate::providers::browser_worker::BrowserWorkerProvider::with_options(
+                        self.env.browser_worker.clone(),
+                    );
+                provider.create_worker_endpoint("Browser firmware runtime");
+                LinkConnector::BrowserWorker(provider)
+            }
+            #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+            LinkProviderKind::BrowserSerialEsp32 => LinkConnector::BrowserSerialEsp32(
+                crate::providers::browser_serial_esp32::BrowserSerialEsp32Provider::with_options(
+                    self.env.browser_serial_esp32.clone(),
+                ),
+            ),
+            #[allow(
+                unreachable_patterns,
+                reason = "kinds outside the feature/target matrix are caught by the catalog check above"
+            )]
+            _ => {
+                return Err(LinkError::other(format!(
+                    "provider {} is not available",
+                    kind.key()
+                )));
+            }
+        };
+        Ok(Rc::new(connector))
     }
 
-    /// Insert or replace a provider by its `LinkProviderKind`.
-    pub fn insert(&mut self, provider: impl Into<LinkProviderInstance>) {
-        let provider = provider.into();
-        self.providers.insert(provider.kind(), provider);
-    }
-
-    /// Iterate over provider instances in key order.
-    pub fn providers(&self) -> impl Iterator<Item = &LinkProviderInstance> {
-        self.providers.values()
-    }
-
-    /// Mutably iterate over provider instances in key order.
-    pub fn providers_mut(&mut self) -> impl Iterator<Item = &mut LinkProviderInstance> {
-        self.providers.values_mut()
-    }
-
-    /// Return the provider for a kind, if it is available in this registry.
-    pub fn provider(&self, kind: LinkProviderKind) -> Option<&LinkProviderInstance> {
-        self.providers.get(&kind)
-    }
-
-    /// Return the mutable provider for a kind, if it is available in this registry.
-    pub fn provider_mut(&mut self, kind: LinkProviderKind) -> Option<&mut LinkProviderInstance> {
-        self.providers.get_mut(&kind)
-    }
-
-    /// Return descriptors for all providers currently owned by the registry.
+    /// Return descriptors for all provider kinds in this registry's catalog.
     pub fn descriptors(&self) -> Vec<LinkProviderDescriptor> {
-        self.providers()
-            .map(LinkProviderInstance::descriptor)
-            .collect()
+        self.catalog.iter().map(|kind| kind.descriptor()).collect()
     }
 
-    /// Return all provider kinds currently owned by the registry.
+    /// Return all provider kinds in this registry's catalog.
     pub fn kinds(&self) -> Vec<LinkProviderKind> {
-        self.providers.keys().copied().collect()
+        self.catalog.clone()
     }
 }
 
@@ -123,7 +162,8 @@ mod tests {
     fn default_registry_includes_fake_provider() {
         let registry = LinkProviderRegistry::from_env(LinkEnv::default());
 
-        assert!(registry.provider(LinkProviderKind::Fake).is_some());
+        assert!(registry.kinds().contains(&LinkProviderKind::Fake));
+        assert!(registry.create_connector(LinkProviderKind::Fake).is_ok());
     }
 
     #[cfg(feature = "host-process")]
@@ -131,7 +171,12 @@ mod tests {
     fn host_process_feature_adds_host_process_provider() {
         let registry = LinkProviderRegistry::from_env(LinkEnv::default());
 
-        assert!(registry.provider(LinkProviderKind::HostProcess).is_some());
+        assert!(registry.kinds().contains(&LinkProviderKind::HostProcess));
+        assert!(
+            registry
+                .create_connector(LinkProviderKind::HostProcess)
+                .is_ok()
+        );
     }
 
     #[cfg(feature = "host-serial-esp32")]
@@ -141,8 +186,8 @@ mod tests {
 
         assert!(
             registry
-                .provider(LinkProviderKind::HostSerialEsp32)
-                .is_some()
+                .kinds()
+                .contains(&LinkProviderKind::HostSerialEsp32)
         );
     }
 
@@ -151,7 +196,12 @@ mod tests {
     fn browser_worker_feature_does_not_add_host_provider() {
         let registry = LinkProviderRegistry::from_env(LinkEnv::default());
 
-        assert!(registry.provider(LinkProviderKind::BrowserWorker).is_none());
+        assert!(!registry.kinds().contains(&LinkProviderKind::BrowserWorker));
+        assert!(
+            registry
+                .create_connector(LinkProviderKind::BrowserWorker)
+                .is_err()
+        );
     }
 
     #[cfg(all(feature = "browser-serial-esp32", not(target_arch = "wasm32")))]
@@ -160,10 +210,29 @@ mod tests {
         let registry = LinkProviderRegistry::from_env(LinkEnv::default());
 
         assert!(
-            registry
-                .provider(LinkProviderKind::BrowserSerialEsp32)
-                .is_none()
+            !registry
+                .kinds()
+                .contains(&LinkProviderKind::BrowserSerialEsp32)
         );
+    }
+
+    #[test]
+    fn preconfigured_connector_is_returned_shared() {
+        use crate::providers::fake::FakeProvider;
+        use crate::{LinkEndpoint, LinkProvider};
+
+        let mut registry = LinkProviderRegistry::new();
+        registry.insert(FakeProvider::new().with_endpoint(LinkEndpoint::new(
+            "fake-runtime",
+            LinkProviderKind::Fake,
+            "Fake runtime",
+        )));
+
+        let first = registry.create_connector(LinkProviderKind::Fake).unwrap();
+        let second = registry.create_connector(LinkProviderKind::Fake).unwrap();
+
+        assert_eq!(first.kind(), LinkProviderKind::Fake);
+        assert!(std::rc::Rc::ptr_eq(&first, &second));
     }
 
     #[test]

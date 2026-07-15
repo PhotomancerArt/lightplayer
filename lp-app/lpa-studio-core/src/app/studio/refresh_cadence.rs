@@ -4,8 +4,9 @@
 //! interval. That interval used to be a `LinkProviderKind` match in the web
 //! crate (the retired `ProjectRefreshCadence` enum + `project_refresh_interval_ms`
 //! functions); P4 moves it here so the view layer holds no transport-sniffing
-//! policy. It is expressed as data on the connection state ([`LinkState`]):
-//! `for_link_state` does the one legitimate provider match, in core.
+//! policy. It is expressed as data on the connection state
+//! ([`ConnectFlowState`]): `for_flow_state` does the one legitimate
+//! provider match, in core.
 //!
 //! Per M7 Q3 the default is a single uniform cadence; the browser simulator keeps
 //! a faster interval only because it self-ticks and the UI re-reads previews at
@@ -15,7 +16,7 @@ use core::time::Duration;
 
 use lpa_link::LinkProviderKind;
 
-use crate::LinkState;
+use crate::ConnectFlowState;
 
 /// Fast interval for the self-ticking browser simulator: the UI re-reads preview
 /// state at ~30 Hz so self-ticked previews stay visibly fresh. Retired web
@@ -29,8 +30,8 @@ pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(750);
 /// The passive-refresh cadence for a connection: the interval the UI timer waits
 /// between enqueuing refresh ticks.
 ///
-/// This is data, not behaviour: [`Self::for_link_state`] derives it from the
-/// current [`LinkState`] in core, and the UI timer just reads
+/// This is data, not behaviour: [`Self::for_flow_state`] derives it from the
+/// current [`ConnectFlowState`] in core, and the UI timer just reads
 /// [`Self::interval`]. There is no `LinkProviderKind` match left in the view
 /// layer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,9 +57,9 @@ impl RefreshCadence {
     /// Derive the cadence from the current connection state. The browser-worker
     /// simulator gets the fast interval; everything else gets the device
     /// interval.
-    pub fn for_link_state(state: &LinkState) -> Self {
+    pub fn for_flow_state(state: &ConnectFlowState) -> Self {
         match state {
-            LinkState::Connected { device } | LinkState::Managing { device, .. }
+            ConnectFlowState::Connected { device }
                 if device.provider_id == LinkProviderKind::BrowserWorker =>
             {
                 Self::simulator()
@@ -82,17 +83,17 @@ impl Default for RefreshCadence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ConnectedDeviceSummary, ProgressState};
+    use crate::ConnectedDeviceSummary;
 
-    fn connected(provider: LinkProviderKind) -> LinkState {
-        LinkState::Connected {
+    fn connected(provider: LinkProviderKind) -> ConnectFlowState {
+        ConnectFlowState::Connected {
             device: ConnectedDeviceSummary::new(provider, "endpoint", "session", "label"),
         }
     }
 
     #[test]
     fn browser_worker_link_uses_simulator_cadence() {
-        let cadence = RefreshCadence::for_link_state(&connected(LinkProviderKind::BrowserWorker));
+        let cadence = RefreshCadence::for_flow_state(&connected(LinkProviderKind::BrowserWorker));
 
         assert_eq!(cadence.interval(), SIMULATOR_REFRESH_INTERVAL);
     }
@@ -100,27 +101,9 @@ mod tests {
     #[test]
     fn serial_link_uses_device_cadence() {
         let cadence =
-            RefreshCadence::for_link_state(&connected(LinkProviderKind::BrowserSerialEsp32));
+            RefreshCadence::for_flow_state(&connected(LinkProviderKind::BrowserSerialEsp32));
 
         assert_eq!(cadence.interval(), DEVICE_REFRESH_INTERVAL);
-    }
-
-    #[test]
-    fn managing_browser_worker_keeps_simulator_cadence() {
-        let state = LinkState::Managing {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::BrowserWorker,
-                "endpoint",
-                "session",
-                "Simulator",
-            ),
-            progress: ProgressState::new("Resetting simulator"),
-        };
-
-        assert_eq!(
-            RefreshCadence::for_link_state(&state).interval(),
-            SIMULATOR_REFRESH_INTERVAL
-        );
     }
 
     #[test]

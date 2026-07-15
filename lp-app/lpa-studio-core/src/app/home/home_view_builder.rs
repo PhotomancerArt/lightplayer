@@ -82,11 +82,15 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
 /// result; D24 unification happens here: a connected device holding a
 /// locally-known project becomes an indication on that project's card,
 /// not a second card.
+/// `live_transport` is the LIVE device's transport label, read from its
+/// connector class metadata by the controller ("USB" for serial classes);
+/// registry cards carry the label recorded at last sight instead.
 pub fn build_home_view(
     inputs: Option<&HomeInputs>,
     opening: Option<String>,
     issue: Option<UiIssue>,
     device_sync: Option<&DeviceSyncState>,
+    live_transport: Option<&str>,
 ) -> UiHomeView {
     let examples = embedded_examples()
         .iter()
@@ -99,7 +103,7 @@ pub fn build_home_view(
 
     let Some(inputs) = inputs else {
         return UiHomeView {
-            devices: unify_devices(&[], device_sync).1,
+            devices: unify_devices(&[], device_sync, live_transport).1,
             projects: Vec::new(),
             examples,
             library_available: false,
@@ -109,7 +113,8 @@ pub fn build_home_view(
     };
 
     let mut projects = inputs.projects.clone();
-    let (unified_onto_project, mut devices) = unify_devices(&inputs.devices, device_sync);
+    let (unified_onto_project, mut devices) =
+        unify_devices(&inputs.devices, device_sync, live_transport);
     if let Some((project_uid, connection)) = unified_onto_project {
         match projects.iter_mut().find(|card| card.uid == project_uid) {
             Some(card) => card.connected_device = Some(connection),
@@ -122,7 +127,7 @@ pub fn build_home_view(
                         sync.identity.as_ref().map(|identity| identity.uid.clone())
                     }),
                     name: connection.device_name,
-                    transport: "USB".to_string(),
+                    transport: live_transport.unwrap_or_default().to_string(),
                     state: UiDeviceCardState::ConnectedRunning { project: None },
                 });
             }
@@ -147,6 +152,7 @@ pub fn build_home_view(
 fn unify_devices(
     registry_cards: &[UiDeviceCard],
     device_sync: Option<&DeviceSyncState>,
+    live_transport: Option<&str>,
 ) -> (
     Option<(String, crate::app::home::UiCardConnection)>,
     Vec<UiDeviceCard>,
@@ -154,6 +160,7 @@ fn unify_devices(
     let Some(sync) = device_sync else {
         return (None, registry_cards.to_vec());
     };
+    let transport = live_transport.unwrap_or_default().to_string();
     let live_name = sync
         .identity
         .as_ref()
@@ -200,13 +207,13 @@ fn unify_devices(
         DeviceContent::Empty => devices.push(UiDeviceCard {
             uid: sync.identity.as_ref().map(|identity| identity.uid.clone()),
             name: live_name,
-            transport: "USB".to_string(),
+            transport,
             state: UiDeviceCardState::Blank,
         }),
         DeviceContent::PendingIdentity { .. } => devices.push(UiDeviceCard {
             uid: None,
             name: live_name,
-            transport: "USB".to_string(),
+            transport,
             state: UiDeviceCardState::ConnectedUnknown {
                 detail: "Holds a project — name this device to keep it".to_string(),
             },
@@ -214,7 +221,7 @@ fn unify_devices(
         DeviceContent::Unreadable { detail } => devices.push(UiDeviceCard {
             uid: sync.identity.as_ref().map(|identity| identity.uid.clone()),
             name: live_name,
-            transport: "USB".to_string(),
+            transport,
             state: UiDeviceCardState::ConnectedUnknown {
                 detail: detail.clone(),
             },
@@ -307,7 +314,8 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
     UiDeviceCard {
         uid: Some(device.uid.clone()),
         name: device.name.clone(),
-        transport: "USB".to_string(),
+        // recorded at last sight from the live session's connector class
+        transport: device.transport.clone(),
         state: UiDeviceCardState::RememberedOffline {
             last_seen_at: device.last_seen_at,
             last_known,
@@ -339,12 +347,12 @@ mod tests {
 
     fn view_of(store: &LibraryStore) -> UiHomeView {
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
-        build_home_view(Some(&inputs), None, None, None)
+        build_home_view(Some(&inputs), None, None, None, None)
     }
 
     #[test]
     fn no_library_still_lists_examples() {
-        let view = build_home_view(None, None, None, None);
+        let view = build_home_view(None, None, None, None, None);
         assert!(!view.library_available);
         assert!(view.projects.is_empty());
         assert_eq!(view.examples.len(), embedded_examples().len());
@@ -434,6 +442,7 @@ mod tests {
             .upsert(crate::app::places::RegisteredDevice {
                 uid: device_uid.to_string(),
                 name: "Luna's porch sign".to_string(),
+                transport: "USB".to_string(),
                 last_seen_at: 5.0,
                 association: Some(DeviceAssociation {
                     device: device_uid,
@@ -474,6 +483,7 @@ mod tests {
             .upsert(RegisteredDevice {
                 uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
                 name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
                 last_seen_at: 5.0,
                 association: None,
             })
@@ -492,7 +502,7 @@ mod tests {
                 relation: SyncRelation::Behind,
             },
         };
-        let view = build_home_view(Some(&inputs), None, None, Some(&sync));
+        let view = build_home_view(Some(&inputs), None, None, Some(&sync), Some("USB"));
 
         assert!(view.devices.is_empty(), "one card, not two (D24)");
         let card = view
@@ -519,7 +529,7 @@ mod tests {
             }),
             content: DeviceContent::Empty,
         };
-        let view = build_home_view(Some(&inputs), None, None, Some(&blank));
+        let view = build_home_view(Some(&inputs), None, None, Some(&blank), Some("USB"));
         assert_eq!(view.devices.len(), 1);
         assert_eq!(view.devices[0].state, UiDeviceCardState::Blank);
 
@@ -529,7 +539,7 @@ mod tests {
                 observed: lpc_history::ContentHash::of(b"x"),
             },
         };
-        let view = build_home_view(Some(&inputs), None, None, Some(&anonymous));
+        let view = build_home_view(Some(&inputs), None, None, Some(&anonymous), Some("USB"));
         assert_eq!(view.devices.len(), 1);
         assert!(matches!(
             view.devices[0].state,
@@ -544,6 +554,7 @@ mod tests {
             None,
             Some("prj_x".to_string()),
             Some(UiIssue::new("boom")),
+            None,
             None,
         );
         assert_eq!(view.opening.as_deref(), Some("prj_x"));

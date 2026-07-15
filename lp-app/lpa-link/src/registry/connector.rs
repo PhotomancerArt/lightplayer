@@ -9,13 +9,22 @@ use crate::{
     LinkSession,
 };
 
-/// Enum-dispatched owner for concrete provider implementations.
+/// Owned, enum-dispatched provider handle for one connection flow.
 ///
-/// `LinkProvider` is not object-safe because it has async methods, so the
-/// registry cannot store `Box<dyn LinkProvider>` today. This enum gives the
-/// registry a single stored type while preserving concrete provider ownership
-/// and forwarding the shared controller interface.
-pub enum LinkProviderInstance {
+/// A connector is created per open flow by [`LinkProviderRegistry::create_connector`]
+/// (or handed in preconfigured by tests) and OWNED by whoever drives the
+/// connection — the studio's `DeviceController`/`DeviceSession` since M4. All methods
+/// take `&self` (each provider keeps its state behind internal `RefCell`s
+/// with borrows scoped to synchronous sections), so the owner can hold
+/// `Rc<LinkConnector>` and hand clones to client I/O adapters without any
+/// shared mutable registry.
+///
+/// `LinkProvider` is not object-safe because it has async methods, so this
+/// enum gives owners a single stored type while preserving concrete provider
+/// ownership and forwarding the shared controller interface.
+///
+/// [`LinkProviderRegistry::create_connector`]: crate::providers::LinkProviderRegistry::create_connector
+pub enum LinkConnector {
     Fake(crate::providers::fake::FakeProvider),
     #[cfg(feature = "host-process")]
     HostProcess(crate::providers::host_process::HostProcessProvider),
@@ -27,14 +36,14 @@ pub enum LinkProviderInstance {
     BrowserSerialEsp32(crate::providers::browser_serial_esp32::BrowserSerialEsp32Provider),
 }
 
-impl LinkProviderInstance {
+impl LinkConnector {
     /// Descriptor for the concrete provider's kind.
     pub fn descriptor(&self) -> LinkProviderDescriptor {
         self.kind().descriptor()
     }
 }
 
-impl LinkProvider for LinkProviderInstance {
+impl LinkProvider for LinkConnector {
     fn kind(&self) -> LinkProviderKind {
         match self {
             Self::Fake(provider) => provider.kind(),
@@ -49,7 +58,7 @@ impl LinkProvider for LinkProviderInstance {
         }
     }
 
-    async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
+    async fn discover(&self) -> Result<Vec<LinkEndpoint>, LinkError> {
         match self {
             Self::Fake(provider) => provider.discover().await,
             #[cfg(feature = "host-process")]
@@ -63,10 +72,7 @@ impl LinkProvider for LinkProviderInstance {
         }
     }
 
-    async fn status(
-        &mut self,
-        endpoint_id: &LinkEndpointId,
-    ) -> Result<LinkEndpointStatus, LinkError> {
+    async fn status(&self, endpoint_id: &LinkEndpointId) -> Result<LinkEndpointStatus, LinkError> {
         match self {
             Self::Fake(provider) => provider.status(endpoint_id).await,
             #[cfg(feature = "host-process")]
@@ -80,7 +86,7 @@ impl LinkProvider for LinkProviderInstance {
         }
     }
 
-    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
+    async fn connect(&self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
         match self {
             Self::Fake(provider) => provider.connect(endpoint_id).await,
             #[cfg(feature = "host-process")]
@@ -94,10 +100,7 @@ impl LinkProvider for LinkProviderInstance {
         }
     }
 
-    async fn connection(
-        &mut self,
-        session_id: &LinkSessionId,
-    ) -> Result<LinkConnection, LinkError> {
+    async fn connection(&self, session_id: &LinkSessionId) -> Result<LinkConnection, LinkError> {
         match self {
             Self::Fake(provider) => provider.connection(session_id).await,
             #[cfg(feature = "host-process")]
@@ -140,7 +143,7 @@ impl LinkProvider for LinkProviderInstance {
     }
 
     async fn manage(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         request: LinkManagementRequest,
     ) -> Result<LinkManagementResult, LinkError> {
@@ -158,7 +161,7 @@ impl LinkProvider for LinkProviderInstance {
     }
 
     async fn manage_with_events(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         request: LinkManagementRequest,
         events: LinkManagementEventSink,
@@ -196,7 +199,7 @@ impl LinkProvider for LinkProviderInstance {
         }
     }
 
-    async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+    async fn close(&self, session_id: &LinkSessionId) -> Result<(), LinkError> {
         match self {
             Self::Fake(provider) => provider.close(session_id).await,
             #[cfg(feature = "host-process")]
@@ -211,37 +214,35 @@ impl LinkProvider for LinkProviderInstance {
     }
 }
 
-impl From<crate::providers::fake::FakeProvider> for LinkProviderInstance {
+impl From<crate::providers::fake::FakeProvider> for LinkConnector {
     fn from(provider: crate::providers::fake::FakeProvider) -> Self {
         Self::Fake(provider)
     }
 }
 
 #[cfg(feature = "host-process")]
-impl From<crate::providers::host_process::HostProcessProvider> for LinkProviderInstance {
+impl From<crate::providers::host_process::HostProcessProvider> for LinkConnector {
     fn from(provider: crate::providers::host_process::HostProcessProvider) -> Self {
         Self::HostProcess(provider)
     }
 }
 
 #[cfg(feature = "host-serial-esp32")]
-impl From<crate::providers::host_serial_esp32::HostSerialEsp32Provider> for LinkProviderInstance {
+impl From<crate::providers::host_serial_esp32::HostSerialEsp32Provider> for LinkConnector {
     fn from(provider: crate::providers::host_serial_esp32::HostSerialEsp32Provider) -> Self {
         Self::HostSerialEsp32(provider)
     }
 }
 
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
-impl From<crate::providers::browser_worker::BrowserWorkerProvider> for LinkProviderInstance {
+impl From<crate::providers::browser_worker::BrowserWorkerProvider> for LinkConnector {
     fn from(provider: crate::providers::browser_worker::BrowserWorkerProvider) -> Self {
         Self::BrowserWorker(provider)
     }
 }
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-impl From<crate::providers::browser_serial_esp32::BrowserSerialEsp32Provider>
-    for LinkProviderInstance
-{
+impl From<crate::providers::browser_serial_esp32::BrowserSerialEsp32Provider> for LinkConnector {
     fn from(provider: crate::providers::browser_serial_esp32::BrowserSerialEsp32Provider) -> Self {
         Self::BrowserSerialEsp32(provider)
     }

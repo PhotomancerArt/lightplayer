@@ -115,7 +115,7 @@ impl BrowserFirmwareRuntime {
         };
         let time = ManualTimeProvider::new();
         let time_provider: Rc<dyn TimeProvider> = Rc::new(time.clone());
-        let server = LpServer::new_with_hardware_services(
+        let mut server = LpServer::new_with_hardware_services(
             output_provider,
             Box::new(LpFsMemory::new()),
             "/projects/".as_path(),
@@ -125,12 +125,37 @@ impl BrowserFirmwareRuntime {
             Some(radio_service),
             graphics,
         );
+        // Wire hello payload (sans-IO: injected here). Browser runtimes carry
+        // no git provenance or stamped identity; fake devices script a uid in
+        // M3.
+        server.set_hello(lpc_wire::ServerHello {
+            proto: lpc_wire::WIRE_PROTO_VERSION,
+            fw: lpc_wire::FwProvenance {
+                package: "fw-browser".to_string(),
+                commit: "unknown".to_string(),
+                dirty: false,
+                profile: if cfg!(debug_assertions) {
+                    "debug".to_string()
+                } else {
+                    "release".to_string()
+                },
+            },
+            device_uid: None,
+        });
+
+        let mut transport = BrowserServerTransport::new();
+        // Wire hello: queued before anything else so it flushes as the first
+        // protocol_out frame when the runtime starts serving (the worker
+        // drains outputs right after boot). See
+        // docs/adr/2026-07-14-wire-hello-versioning.md.
+        block_on(fw_core::send_unsolicited_hello(&server, &mut transport))
+            .map_err(|error| format!("queue boot hello: {error}"))?;
 
         let mut runtime = Self {
             id,
             label: label.to_string(),
             server,
-            transport: BrowserServerTransport::new(),
+            transport,
             time,
             last_tick_ms: 0,
             running: false,

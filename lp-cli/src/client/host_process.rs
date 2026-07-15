@@ -37,7 +37,7 @@ impl HostProcessClientTransport {
 
 /// Start a new host-process runtime and return a CLI-compatible transport.
 pub fn connect_host_process() -> Result<HostProcessClientTransport> {
-    let mut provider = HostProcessProvider::new();
+    let provider = HostProcessProvider::new();
     let endpoint_id = provider.create_memory_endpoint("Host Process");
     let session = pollster::block_on(provider.connect(&endpoint_id))?;
     let connection = pollster::block_on(provider.connection(session.id()))?;

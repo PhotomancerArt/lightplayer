@@ -6,6 +6,19 @@ export function isSupported() {
   return Boolean(globalThis.navigator?.serial);
 }
 
+export async function grantedPortsCount() {
+  const serial = globalThis.navigator?.serial;
+  if (!serial?.getPorts) {
+    return 0;
+  }
+  try {
+    const ports = await serial.getPorts();
+    return ports.length;
+  } catch {
+    return 0;
+  }
+}
+
 export async function requestPort() {
   const { BrowserEsp32DeviceController } = await loadControllerModule();
   const { port, label } = await BrowserEsp32DeviceController.requestPort();

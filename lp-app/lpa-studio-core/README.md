@@ -41,7 +41,7 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `core/` contains reusable data-driven app substrate: action metadata, generic
   pane/stack/activity/status view data, and UX node routing primitives.
 - `app/` contains the actual Studio product ownership areas: `studio`,
-  `device`, `link`, `server`, and `project`.
+  `device`, `server`, and `project`.
 - A future `base/` layer can hold truly primitive app-core concepts if one
   emerges. It is intentionally not present until there is a clean need for it.
 
@@ -63,8 +63,9 @@ does not blur into a larger API rename.
 - Device exposes the open-project step only after LightPlayer is connected. That
   step offers running-project attach and demo-load actions until a project is
   loaded.
-- `LinkUx` owns link-provider selection, the `LinkProviderRegistry`, and the
-  active link session. It remains an implementation detail below `DeviceUx`.
+- `DeviceController` also owns the connect flow: the `LinkProviderRegistry`
+  catalog, the picker view state (`ConnectFlowState`), and the runtime
+  attachment (a hardware `DeviceSession` or the simulator's worker session).
 - `ServerUx` owns the connected `lpa-client` protocol client once a link exposes
   server I/O. It remains an implementation detail below `DeviceUx`.
 - `ProjectUx` owns Studio's view of the loaded project and is shown only after a
@@ -159,7 +160,7 @@ it enqueues commands and renders change-gated snapshots. The pieces:
   long action are applied to the live view (`UiStudioView::apply_activity`) and
   republished through the same channel.
 - **Cadence is data (`RefreshCadence`).** The refresh interval the UI timer waits
-  is derived in core from the connection's `LinkState` (`RefreshCadence::for_link_state`)
+  is derived in core from the connection's `ConnectFlowState` (`RefreshCadence::for_flow_state`)
   and surfaced through `StudioHandle::next_refresh_delay` (interval + backoff), so
   no `LinkProviderKind` transport-sniffing lives in the view layer. The simulator
   keeps a faster interval only because it self-ticks and the UI re-reads previews
@@ -299,15 +300,15 @@ loading when nothing is running.
 ## Feedback And Recovery
 
 Recoverable connection problems are modeled in the same view/action language as
-the rest of Studio. If opening a device fails, `LinkUx` returns to provider
+the rest of Studio. If opening a device fails, the connect flow returns to provider
 selection with an inline `UxIssue` and the normal provider actions still
 available. Retrying is therefore the same operation as choosing a connection
 again; `Refresh connections` is reserved for rebuilding the provider catalog.
 
 Canceling the browser Web Serial chooser is a normal UX outcome, not a failed
 link. `lpa-link` preserves chooser cancellation as a typed cancellation error,
-`LinkUx` returns to provider selection without an issue, and `StudioUx` reports
-only a low-key notice suitable for a console or activity log.
+the connect flow returns to provider selection without an issue, and `StudioUx`
+reports only a low-key notice suitable for a console or activity log.
 
 Generic notices and action failures are expected to flow into recent activity
 logs. Actionable issues that affect the next user choice should live inline in

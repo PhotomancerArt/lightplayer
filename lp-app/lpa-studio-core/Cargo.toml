@@ -10,7 +10,10 @@ description = "Headless LightPlayer Studio application core"
 
 [dependencies]
 lpa-client = { path = "../lpa-client", default-features = false }
-lpa-link = { path = "../lpa-link" }
+# device-session everywhere (RuntimeAttachment::Device drives it); the host
+# transport wire arrives via feature unification when a host provider
+# feature is enabled (tests: fake-device below; wasm: the browser features).
+lpa-link = { path = "../lpa-link", features = ["device-session"] }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-view = { path = "../../lp-core/lpc-view" }
@@ -31,6 +34,10 @@ web-sys = { version = "0.3", optional = true, features = ["Window"] }
 # LightPlayer server (simulator session, no UI). Never built for wasm.
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm" }
 lpa-server = { path = "../lpa-server" }
+# The link e2e tests drive the REAL provider path (DeviceSession over the
+# scripted fake device); the feature is dev-only.
+lpa-link = { path = "../lpa-link", features = ["fake-device"] }
+async-trait = { version = "0.1" }
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 

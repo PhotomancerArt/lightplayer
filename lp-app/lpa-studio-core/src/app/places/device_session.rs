@@ -2,8 +2,8 @@
 //! attaches to a real device.
 //!
 //! On attach the studio pulls the device's project copy, reads its
-//! identity (`/.lp/device.json`) and manifest, and relates the content to
-//! the library:
+//! identity (`/.lp/device.json` at the device's fs ROOT) and manifest,
+//! and relates the content to the library:
 //!
 //! - **Known uid, known hash** → nothing to store (the library already
 //!   knows this version); a `Connected` observation is still recorded.
@@ -25,7 +25,7 @@
 //! reaches the UI; the lock, not the badge, is the truth).
 
 use lpc_history::{ContentHash, EventLog, PrefixedUid, SnapshotStore, SyncRelation};
-use lpfs::{LpFs, LpFsMemory, LpPath};
+use lpfs::{AsLpPath, LpFs, LpFsMemory, LpPath};
 
 use crate::app::library::{LibraryError, LibraryStore, PackageHandle, PackageProvenance};
 use crate::app::places::{DEVICE_IDENTITY_PATH, DeviceIdentity, DeviceRegistry, RegisteredDevice};
@@ -71,7 +71,8 @@ pub enum DeviceContent {
 }
 
 /// The raw pull: every file in the device's project storage, plus the
-/// pieces read out of it. Pure wire work — no library access.
+/// pieces read out of it — and the device-scoped identity read from the
+/// fs root. Pure wire work — no library access.
 pub struct PulledDeviceCopy {
     /// Relative path → bytes (tombstones dropped; a full pull has none).
     pub files: Vec<(String, Vec<u8>)>,
@@ -81,17 +82,32 @@ pub struct PulledDeviceCopy {
     pub has_manifest: bool,
     pub manifest_uid: Option<String>,
     pub manifest_name: Option<String>,
+    /// Root-level `/.lp/device.json`, read live off the device (NOT part
+    /// of the pulled project files — identity is device-scoped).
     pub identity: Option<DeviceIdentity>,
     pub logs: Vec<UiLogDraft>,
 }
 
 /// Pull the device's project copy over the wire (full pull from version
-/// zero on the single project storage id).
+/// zero on the single project storage id), plus the root identity read.
 pub async fn pull_device_copy(
     server: &mut StudioServerClient,
     storage_id: &str,
 ) -> Result<PulledDeviceCopy, UiError> {
     let mut logs = Vec::new();
+
+    // Identity first, from the device's fs ROOT: it exists (or not)
+    // independently of any project content. A server-reported read error
+    // is "no stamped identity"; transport failures still fail the pull.
+    let identity = match server.fs_read(DEVICE_IDENTITY_PATH.as_path()).await {
+        Ok(read) => {
+            logs.extend(read.logs);
+            DeviceIdentity::from_json_bytes(&read.data).ok()
+        }
+        Err(UiError::Protocol(_)) => None,
+        Err(error) => return Err(error),
+    };
+
     let pulled = match server
         .pull_changed_files(storage_id, lpc_model::FsVersion::new(0))
         .await
@@ -107,7 +123,7 @@ pub async fn pull_device_copy(
                 has_manifest: false,
                 manifest_uid: None,
                 manifest_name: None,
-                identity: None,
+                identity,
                 logs,
             });
         }
@@ -145,11 +161,6 @@ pub async fn pull_device_copy(
         .and_then(|v| v.as_str())
         .map(str::to_string);
 
-    let identity = files
-        .iter()
-        .find(|(path, _)| format!("/{path}") == DEVICE_IDENTITY_PATH)
-        .and_then(|(_, bytes)| DeviceIdentity::from_json_bytes(bytes).ok());
-
     Ok(PulledDeviceCopy {
         files,
         observed,
@@ -164,10 +175,15 @@ pub async fn pull_device_copy(
 /// The device's registry entry for this connect, merging what the pull
 /// learned with the caller's clock. Association is preserved by the merge
 /// in [`upsert_device_merged`], so callers pass `None` here.
-pub fn registry_entry_for(identity: &DeviceIdentity, now: f64) -> RegisteredDevice {
+pub fn registry_entry_for(
+    identity: &DeviceIdentity,
+    transport: &str,
+    now: f64,
+) -> RegisteredDevice {
     RegisteredDevice {
         uid: identity.uid.clone(),
         name: identity.name.clone(),
+        transport: transport.to_string(),
         last_seen_at: now,
         association: None,
     }
@@ -181,13 +197,18 @@ pub fn upsert_device_merged(
     mut device: RegisteredDevice,
 ) -> Result<(), LibraryError> {
     let registry = DeviceRegistry::new(store.fs_handle());
-    if device.association.is_none() {
+    if device.association.is_none() || device.transport.is_empty() {
         if let Some(existing) = registry
             .list()?
             .into_iter()
             .find(|entry| entry.uid == device.uid)
         {
-            device.association = existing.association;
+            if device.association.is_none() {
+                device.association = existing.association;
+            }
+            if device.transport.is_empty() {
+                device.transport = existing.transport;
+            }
         }
     }
     registry.upsert(device)
@@ -470,6 +491,7 @@ mod tests {
 
     fn device() -> RegisteredDevice {
         RegisteredDevice {
+            transport: "USB".to_string(),
             uid: PrefixedUid::mint(UidPrefix::Device, &[7u8; 16]).to_string(),
             name: "Porch sign".to_string(),
             last_seen_at: 50.0,

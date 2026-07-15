@@ -47,6 +47,12 @@ pub struct LpServer {
     radio_service: Option<Rc<dyn RadioService>>,
     /// Shader backend (Cranelift, WASM, …).
     graphics: Arc<dyn LpGraphics>,
+    /// Identity/version payload answered to `ClientRequest::Hello` and sent
+    /// unsolicited by embedder loops. Injected by the embedder via
+    /// [`LpServer::set_hello`] (sans-IO: the server never reads git/fs/env
+    /// state itself); defaults to an `"unknown"` provenance with the
+    /// compiled-in [`lpc_wire::WIRE_PROTO_VERSION`].
+    hello: lpc_wire::ServerHello,
 }
 
 impl LpServer {
@@ -144,7 +150,31 @@ impl LpServer {
             button_service,
             radio_service,
             graphics,
+            hello: lpc_wire::ServerHello {
+                proto: lpc_wire::WIRE_PROTO_VERSION,
+                fw: lpc_wire::FwProvenance {
+                    package: "unknown".to_string(),
+                    commit: "unknown".to_string(),
+                    dirty: false,
+                    profile: "unknown".to_string(),
+                },
+                device_uid: None,
+            },
         }
+    }
+
+    /// Inject the hello payload this server reports (embedder-supplied
+    /// provenance/uid; the `proto` field should stay
+    /// [`lpc_wire::WIRE_PROTO_VERSION`]). Call once at construction time,
+    /// before the server loop starts serving.
+    pub fn set_hello(&mut self, hello: lpc_wire::ServerHello) {
+        self.hello = hello;
+    }
+
+    /// The hello payload answered to `ClientRequest::Hello` and emitted
+    /// unsolicited (id 0) by embedder loops.
+    pub fn hello(&self) -> &lpc_wire::ServerHello {
+        &self.hello
     }
 
     /// Advance loaded projects by one frame without processing client messages.
@@ -363,6 +393,7 @@ impl LpServer {
                                 self.button_service.clone(),
                                 self.radio_service.clone(),
                                 self.graphics.clone(),
+                                &self.hello,
                                 lpc_wire::ClientMessage { id: msg_id, msg },
                             ) {
                                 Ok(response) => response,

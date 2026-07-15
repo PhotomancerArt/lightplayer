@@ -29,8 +29,9 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    ConsoleCommand, DeviceController, DeviceOp, HOME_NODE_ID, HomeOp, STUDIO_LOG_SINK, StudioActor,
-    StudioCommand, StudioController, UiAction, UiLogEntry, UiLogLevel, UiStudioView,
+    ConsoleCommand, DeviceController, DeviceOp, DeviceTimers, HOME_NODE_ID, HomeOp,
+    STUDIO_LOG_SINK, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
+    UiLogLevel, UiStudioView,
 };
 
 const STYLE: &str = include_str!("style.css");
@@ -94,6 +95,10 @@ pub fn App() -> Element {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
         controller.set_on_entry(log_to_js_console);
+        // Device-session deadlines (connect / readiness / request-idle) run
+        // on browser timers; without this the core default fires every
+        // deadline immediately.
+        controller.set_device_timers(make_device_timers());
         // Crypto randomness for identity minting (`dev_` uids). Host
         // builds keep the core's clock-derived fallback.
         #[cfg(target_arch = "wasm32")]
@@ -307,6 +312,12 @@ pub fn App() -> Element {
 /// deadline; native callers would pass a `sleep`-backed factory instead.
 fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
+}
+
+/// DeviceSession timers on wasm: the same `setTimeout` future, boxed for
+/// the session's injected factory (the `make_pull_timer` pattern).
+fn make_device_timers() -> DeviceTimers {
+    DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
 }
 
 /// Wire the cross-tab library refresh triggers (M4b): a BroadcastChannel

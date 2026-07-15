@@ -1,7 +1,10 @@
 //! Hardware serial transport factory
 //!
-//! Creates async serial transport that communicates with hardware serial port.
-//! The serial I/O runs on a separate thread that loops continuously.
+//! Creates an async serial transport that speaks the `M!` line protocol over
+//! a [`DeviceByteStream`]. The byte-level I/O runs on a separate thread that
+//! loops continuously; port opening belongs to the caller (the
+//! `host-serial-esp32` link provider opens native ports, the fake device
+//! provides an in-memory stream).
 
 use log;
 use lpc_wire::WireServerMessage;
@@ -10,6 +13,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
+
+use crate::stream::{ByteStreamError, DeviceByteStream};
 
 /// Optional observer for complete serial lines.
 pub trait SerialLineObserver: Send + Sync + 'static {
@@ -28,29 +33,19 @@ pub struct HardwareSerialOptions {
 
 /// Serial I/O thread loop
 ///
-/// Runs continuously, reading from serial port and writing messages.
+/// Runs continuously, reading from the byte stream and writing messages.
 /// Filters for M! prefix, logs non-M! lines, and parses JSON messages.
 fn serial_thread_loop(
-    port_name: String,
-    baud_rate: u32,
+    mut stream: Box<dyn DeviceByteStream>,
+    stream_label: String,
     mut client_rx: mpsc::UnboundedReceiver<ClientMessage>,
     server_tx: mpsc::UnboundedSender<WireServerMessage>,
     mut shutdown_rx: oneshot::Receiver<()>,
     options: HardwareSerialOptions,
 ) {
-    // Open serial port
-    let mut port = match open_serial_port(&port_name, baud_rate) {
-        Ok(p) => p,
-        Err(e) => {
-            log::error!("Failed to open serial port {port_name}: {e}");
-            drop(server_tx); // Signal connection lost
-            return;
-        }
-    };
-
     if options.reset_after_open {
-        if let Err(e) = reset_after_open(port.as_mut()) {
-            log::error!("Serial thread: Failed to reset device after opening {port_name}: {e}");
+        if let Err(e) = reset_after_open(stream.as_mut()) {
+            log::error!("Serial thread: Failed to reset device after opening {stream_label}: {e}");
             drop(server_tx);
             return;
         }
@@ -91,24 +86,17 @@ fn serial_thread_loop(
                 data.len()
             );
 
-            // Write to serial port
-            if let Err(e) = port.write_all(&data) {
+            // Write to the stream (implementations flush internally)
+            if let Err(e) = stream.write_all(&data) {
                 log::error!("Serial thread: Write error: {e}");
-                connection_lost = true;
-                break;
-            }
-
-            // Flush to ensure data is sent
-            if let Err(e) = port.flush() {
-                log::error!("Serial thread: Flush error: {e}");
                 connection_lost = true;
                 break;
             }
         }
 
-        // Read available data from serial port (non-blocking with timeout)
+        // Read available data from the stream (non-blocking / short timeout)
         let mut temp_buf = [0u8; 256];
-        match port.read(&mut temp_buf) {
+        match stream.read_available(&mut temp_buf) {
             Ok(0) => {
                 // No data available - small delay to avoid busy loop
                 std::thread::sleep(Duration::from_millis(10));
@@ -118,15 +106,9 @@ fn serial_thread_loop(
                 read_buffer.extend_from_slice(&temp_buf[..n]);
             }
             Err(e) => {
-                if e.kind() == std::io::ErrorKind::TimedOut {
-                    // No data available - continue
-                    std::thread::sleep(Duration::from_millis(10));
-                    continue;
-                } else {
-                    log::error!("Serial thread: Read error: {e}");
-                    connection_lost = true;
-                    break;
-                }
+                log::error!("Serial thread: Read error: {e}");
+                connection_lost = true;
+                break;
             }
         }
 
@@ -188,66 +170,52 @@ fn serial_thread_loop(
     log::debug!("Serial thread: Exiting");
 }
 
-fn reset_after_open(port: &mut dyn serialport::SerialPort) -> serialport::Result<()> {
-    // Same USB-JTAG-serial reset sequence espflash uses after flashing ESP32-C6.
-    port.write_data_terminal_ready(false)?;
+/// The USB-JTAG-serial reset dance espflash performs after flashing an
+/// ESP32-C6, expressed as single-pin [`DeviceByteStream::set_signals`] writes
+/// so the pin-write sequence is identical to the pre-seam code.
+fn reset_after_open(stream: &mut dyn DeviceByteStream) -> Result<(), ByteStreamError> {
+    stream.set_signals(Some(false), None)?;
     thread::sleep(Duration::from_millis(100));
-    port.write_request_to_send(true)?;
-    port.write_data_terminal_ready(false)?;
-    port.write_request_to_send(true)?;
+    stream.set_signals(None, Some(true))?;
+    stream.set_signals(Some(false), None)?;
+    stream.set_signals(None, Some(true))?;
     thread::sleep(Duration::from_millis(100));
-    port.write_request_to_send(false)?;
+    stream.set_signals(None, Some(false))?;
     Ok(())
 }
 
-/// Open serial port with specified settings
-fn open_serial_port(
-    port_name: &str,
-    baud_rate: u32,
-) -> Result<Box<dyn serialport::SerialPort>, TransportError> {
-    let port = serialport::new(port_name, baud_rate)
-        .data_bits(serialport::DataBits::Eight)
-        .stop_bits(serialport::StopBits::One)
-        .parity(serialport::Parity::None)
-        .flow_control(serialport::FlowControl::None)
-        .timeout(Duration::from_millis(100))
-        .open()
-        .map_err(|e| {
-            TransportError::Other(format!("Failed to open serial port {port_name}: {e}"))
-        })?;
-
-    Ok(port)
-}
-
-/// Create hardware serial transport pair
+/// Create a hardware serial transport pair over a native serial port.
 ///
-/// Creates an async serial transport that communicates with hardware serial port.
-/// The serial I/O runs on a separate thread that loops continuously.
+/// Convenience wrapper that opens `port_name` itself; the transport machinery
+/// underneath is byte-stream neutral (see
+/// [`create_hardware_serial_transport_pair_with_options`]).
 ///
 /// # Arguments
 ///
 /// * `port_name` - Serial port name (e.g., "/dev/cu.usbmodem2101")
 /// * `baud_rate` - Baud rate (e.g., 115200)
-///
-/// # Returns
-///
-/// * `Ok(AsyncSerialClientTransport)` - The async serial transport
-/// * `Err(TransportError)` - If channel creation or thread spawning fails
 pub fn create_hardware_serial_transport_pair(
     port_name: &str,
     baud_rate: u32,
 ) -> Result<super::AsyncSerialClientTransport, TransportError> {
+    let stream = crate::stream::SerialPortByteStream::open(port_name, baud_rate)
+        .map_err(|error| TransportError::Other(error.to_string()))?;
     create_hardware_serial_transport_pair_with_options(
+        Box::new(stream),
         port_name,
-        baud_rate,
         HardwareSerialOptions::default(),
     )
 }
 
-/// Create a hardware serial transport pair with boot reset/capture options.
+/// Create a serial transport pair over an already-opened [`DeviceByteStream`].
+///
+/// The caller owns port opening (the `host-serial-esp32` provider opens
+/// native ports; `lpa-link`'s fake device supplies a scripted stream). The
+/// returned transport speaks the `M!` JSON line protocol over the stream from
+/// a dedicated I/O thread. `stream_label` only names the stream in logs.
 pub fn create_hardware_serial_transport_pair_with_options(
-    port_name: &str,
-    baud_rate: u32,
+    stream: Box<dyn DeviceByteStream>,
+    stream_label: &str,
     options: HardwareSerialOptions,
 ) -> Result<super::AsyncSerialClientTransport, TransportError> {
     use super::AsyncSerialClientTransport;
@@ -258,13 +226,13 @@ pub fn create_hardware_serial_transport_pair_with_options(
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
     // Spawn serial thread
-    let port_name = port_name.to_string();
+    let stream_label = stream_label.to_string();
     let thread_handle = thread::Builder::new()
         .name("lp-hardware-serial".to_string())
         .spawn(move || {
             serial_thread_loop(
-                port_name,
-                baud_rate,
+                stream,
+                stream_label,
                 client_rx,
                 server_tx,
                 shutdown_rx,

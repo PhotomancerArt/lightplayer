@@ -308,6 +308,9 @@ async fn timed_write_full_server_msg<W: Write>(
 #[cfg(feature = "server")]
 fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
     match &msg.msg {
+        lpc_wire::server::ServerMsgBody::Hello(hello) => {
+            format!("Hello proto={}", hello.proto)
+        }
         lpc_wire::server::ServerMsgBody::Filesystem(_) => "Filesystem".into(),
         lpc_wire::server::ServerMsgBody::LoadProject { .. } => "LoadProject".into(),
         lpc_wire::server::ServerMsgBody::UnloadProject => "UnloadProject".into(),

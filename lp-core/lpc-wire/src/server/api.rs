@@ -43,6 +43,12 @@ pub enum ClientMsgBody {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ServerMsgBody {
+    /// Wire bootstrap: protocol version + build provenance + device uid.
+    ///
+    /// Sent unsolicited (id 0) as the first frame when the server loop
+    /// starts serving, and as the response to [`crate::ClientRequest::Hello`].
+    /// See [`crate::server::hello`] for the contract and version policy.
+    Hello(crate::server::hello::ServerHello),
     /// Filesystem operation response
     Filesystem(FsResponse),
     /// Response to LoadProject

@@ -68,6 +68,20 @@ impl LinkProviderKind {
         }
     }
 
+    /// Transport label for UI surfaces that name how a DEVICE is reached.
+    ///
+    /// `None` for runtime providers that are not devices at all (the browser
+    /// worker and host process simulators never show as devices — D22).
+    /// `Fake` is the test double for serial hardware, so it wears the serial
+    /// label and fixtures render like production. Future device classes
+    /// (websocket, network) name themselves here.
+    pub fn transport_label(self) -> Option<&'static str> {
+        match self {
+            Self::HostSerialEsp32 | Self::BrowserSerialEsp32 | Self::Fake => Some("USB"),
+            Self::HostProcess | Self::BrowserWorker => None,
+        }
+    }
+
     /// Baseline provider-class capabilities before endpoint/session specifics.
     pub fn capabilities(self) -> LinkCapabilities {
         match self {
@@ -75,13 +89,15 @@ impl LinkProviderKind {
             Self::HostProcess | Self::BrowserWorker => LinkCapabilities::default()
                 .with(LinkOperation::ReadLogs)
                 .with(LinkOperation::ReadDiagnostics),
-            Self::HostSerialEsp32 => LinkCapabilities::esp32_serial_base(),
+            // Logs + diagnostics only until the host provider grows a real
+            // `manage()` implementation (M5 restores Reset with Flash/Erase).
+            Self::HostSerialEsp32 => LinkCapabilities::diagnostics_and_logs(),
             Self::BrowserSerialEsp32 => LinkCapabilities::esp32_serial_base().with_flash(),
         }
     }
 
     /// Static provider descriptor for this built-in kind.
     pub fn descriptor(self) -> crate::providers::LinkProviderDescriptor {
-        crate::providers::LinkProviderDescriptor::available(self, self.label(), self.capabilities())
+        crate::providers::LinkProviderDescriptor::new(self, self.label(), self.capabilities())
     }
 }

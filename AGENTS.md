@@ -94,9 +94,13 @@ The core is IO-free state machines; async belongs to platform edges. See
   the same change. A single canonical encoding is easier to reason about and
   keeps the serializers honest.
 - This policy will be revisited once devices are fielded and can no longer be
-  upgraded in lockstep. The intended future mechanism is an explicit
-  capability/version handshake negotiated at connect time — **never**
-  error-text sniffing or silent format probing.
+  upgraded in lockstep. The explicit version handshake now exists: servers
+  send a `ServerHello` (id-0 boot frame + `ClientRequest::Hello`) carrying
+  the hand-bumped `WIRE_PROTO_VERSION` from `lpc-wire` — **bump that const
+  on every breaking wire change**. Absence of a hello from a responding
+  server means pre-hello firmware and is itself the mismatch signal. Never
+  use error-text sniffing or silent format probing. See
+  `docs/adr/2026-07-14-wire-hello-versioning.md`.
 
 ## Architecture Quick Reference
 
