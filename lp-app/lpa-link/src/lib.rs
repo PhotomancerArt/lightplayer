@@ -37,4 +37,4 @@ pub use provider::provider::LinkProvider;
 pub use provider::session::LinkSession;
 pub use provider::session::LinkSessionId;
 pub use provider::session::LinkSessionStatus;
-pub use providers::LinkProviderKind;
+pub use providers::{LinkConnector, LinkProviderKind};

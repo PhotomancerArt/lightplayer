@@ -114,16 +114,12 @@ fn auto_detect_port(baud_rate: u32) -> Result<SerialPortConfig> {
 /// Shared enumeration for CLI port resolution: the interactive path here and
 /// the non-interactive fwcheck path both go through lpa-link discovery.
 pub(crate) fn list_host_serial_esp32_ports() -> Result<Vec<String>> {
-    let mut provider = HostSerialEsp32Provider::new();
+    let provider = HostSerialEsp32Provider::new();
     let endpoints =
         pollster::block_on(provider.discover()).context("Failed to list serial ports")?;
     let mut ports: Vec<String> = endpoints
         .iter()
-        .filter_map(|endpoint| {
-            provider
-                .port_name_for_endpoint(&endpoint.id)
-                .map(ToOwned::to_owned)
-        })
+        .filter_map(|endpoint| provider.port_name_for_endpoint(&endpoint.id))
         .collect();
 
     ports.sort();

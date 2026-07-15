@@ -1,9 +1,11 @@
-use lpa_link::LinkConnection;
+use std::rc::Rc;
+
+use lpa_link::{LinkConnection, LinkConnector};
 
 use crate::{
     Controller, ControllerId, ProgressState, ServerFailureKind, ServerOp, ServerSnapshot,
-    ServerState, SharedLinkRegistry, StudioServerClient, UiAction, UiError, UiIssue, UiMetric,
-    UiPaneView, UiStatus, UiViewContent, UxUpdateSink,
+    ServerState, StudioServerClient, UiAction, UiError, UiIssue, UiMetric, UiPaneView, UiStatus,
+    UiViewContent, UxUpdateSink,
 };
 
 pub struct ServerController {
@@ -86,12 +88,12 @@ impl ServerController {
 
     pub fn attach_link_connection(
         &mut self,
-        registry: SharedLinkRegistry,
+        connector: Rc<LinkConnector>,
         connection: &LinkConnection,
         updates: UxUpdateSink,
     ) -> Result<(), UiError> {
         self.mark_connecting("Opening server protocol");
-        let client = StudioServerClient::from_link_connection(registry, connection, updates)?;
+        let client = StudioServerClient::from_link_connection(connector, connection, updates)?;
         let protocol = client.protocol().to_string();
         self.client = Some(client);
         self.state = ServerState::Connected { protocol };

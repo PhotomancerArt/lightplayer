@@ -4,10 +4,10 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use lpa_client::ClientIo;
 use lpa_client::project_deploy::request_label;
+use lpa_link::LinkConnector;
+use lpa_link::LinkProvider;
 use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
-use lpa_link::providers::{LinkProviderInstance, LinkProviderRegistry};
-use lpa_link::{LinkProvider, LinkProviderKind};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
@@ -19,8 +19,8 @@ use super::device_log_line::parse_device_log_line;
 use super::pending_server_messages::{BatchItem, PendingServerMessages};
 use crate::core::view::activity_view::{UiActivityStep, UiActivityStepState};
 use crate::{
-    ControllerId, ServerController, SharedLinkRegistry, UiActivityView, UiLogDraft, UiLogLevel,
-    UiLogOrigin, UiLogSource, UiStatus, UxActivityTarget, UxUpdate, UxUpdateSink,
+    ControllerId, ServerController, UiActivityView, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UiLogSource, UiStatus, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 const RESPONSE_POLL_LIMIT: usize = 500;
@@ -40,7 +40,7 @@ pub struct BrowserSerialClientIo {
 
 impl BrowserSerialClientIo {
     pub fn new(
-        registry: SharedLinkRegistry,
+        connector: Rc<LinkConnector>,
         session_id: LinkSessionId,
         logs: Rc<RefCell<Vec<UiLogDraft>>>,
         updates: UxUpdateSink,
@@ -53,7 +53,7 @@ impl BrowserSerialClientIo {
         });
         Self {
             state: Rc::new(RefCell::new(BrowserSerialClientState {
-                registry,
+                connector,
                 session_id,
                 logs,
                 updates,
@@ -77,14 +77,13 @@ impl BrowserSerialClientIo {
             .emit_readiness_activity(UiStatus::working("Connecting"));
 
         for _ in 0..READINESS_POLL_LIMIT {
-            let (registry, session_id) = {
+            let (connector, session_id) = {
                 let state = self.state.borrow();
-                (Rc::clone(&state.registry), state.session_id.clone())
+                (Rc::clone(&state.connector), state.session_id.clone())
             };
 
             let (errors, lines) = {
-                let mut registry = registry.borrow_mut();
-                let provider = browser_serial_provider_mut(&mut registry)?;
+                let provider = browser_serial_provider(&connector)?;
                 let errors = provider
                     .take_errors(&session_id)
                     .map_err(link_error_to_transport)?;
@@ -266,13 +265,14 @@ impl ClientIo for BrowserSerialClientIo {
             frame.len()
         );
 
-        let (registry, session_id) = {
+        // Copy the connector handle out of the state so the write await runs
+        // with no RefCell borrow held (the provider itself scopes its
+        // internal borrows to synchronous sections).
+        let (connector, session_id) = {
             let state = self.state.borrow();
-            (Rc::clone(&state.registry), state.session_id.clone())
+            (Rc::clone(&state.connector), state.session_id.clone())
         };
-        let mut registry = registry.borrow_mut();
-        let provider = browser_serial_provider_mut(&mut registry)?;
-        provider
+        browser_serial_provider(&connector)?
             .write_line(&session_id, &format!("M!{frame}\n"))
             .await
             .map_err(link_error_to_transport)
@@ -284,14 +284,13 @@ impl ClientIo for BrowserSerialClientIo {
         }
 
         for _ in 0..RESPONSE_POLL_LIMIT {
-            let (registry, session_id) = {
+            let (connector, session_id) = {
                 let state = self.state.borrow();
-                (Rc::clone(&state.registry), state.session_id.clone())
+                (Rc::clone(&state.connector), state.session_id.clone())
             };
 
             let (errors, lines) = {
-                let mut registry = registry.borrow_mut();
-                let provider = browser_serial_provider_mut(&mut registry)?;
+                let provider = browser_serial_provider(&connector)?;
                 let errors = provider
                     .take_errors(&session_id)
                     .map_err(link_error_to_transport)?;
@@ -350,12 +349,11 @@ impl ClientIo for BrowserSerialClientIo {
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
-        let (registry, session_id) = {
+        let (connector, session_id) = {
             let state = self.state.borrow();
-            (Rc::clone(&state.registry), state.session_id.clone())
+            (Rc::clone(&state.connector), state.session_id.clone())
         };
-        let mut registry = registry.borrow_mut();
-        browser_serial_provider_mut(&mut registry)?
+        browser_serial_provider(&connector)?
             .close(&session_id)
             .await
             .map_err(link_error_to_transport)
@@ -363,7 +361,7 @@ impl ClientIo for BrowserSerialClientIo {
 }
 
 struct BrowserSerialClientState {
-    registry: SharedLinkRegistry,
+    connector: Rc<LinkConnector>,
     session_id: LinkSessionId,
     logs: Rc<RefCell<Vec<UiLogDraft>>>,
     updates: UxUpdateSink,
@@ -483,17 +481,15 @@ struct BrowserSerialRequest {
     label: &'static str,
 }
 
-fn browser_serial_provider_mut(
-    registry: &mut LinkProviderRegistry,
-) -> Result<&mut BrowserSerialEsp32Provider, TransportError> {
-    match registry.provider_mut(LinkProviderKind::BrowserSerialEsp32) {
-        Some(LinkProviderInstance::BrowserSerialEsp32(provider)) => Ok(provider),
-        Some(_) => Err(TransportError::Other(
-            "browser-serial-esp32 registry entry has the wrong provider type".to_string(),
-        )),
-        None => Err(TransportError::Other(
-            "browser-serial-esp32 provider is not available".to_string(),
-        )),
+fn browser_serial_provider(
+    connector: &LinkConnector,
+) -> Result<&BrowserSerialEsp32Provider, TransportError> {
+    match connector {
+        LinkConnector::BrowserSerialEsp32(provider) => Ok(provider),
+        other => Err(TransportError::Other(format!(
+            "browser-serial-esp32 client io holds a {} connector",
+            other.kind().key()
+        ))),
     }
 }
 

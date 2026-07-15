@@ -1,9 +1,10 @@
 //! Concrete link provider implementations.
 //!
 //! Each submodule owns one runtime/device integration and its provider-specific
-//! resources. Public callers usually enter through `crate::registry` to obtain
-//! the enabled provider set; these modules are useful when an application or
-//! test wants to construct a specific provider manually.
+//! resources. Public callers usually enter through `crate::registry` to
+//! enumerate the enabled kinds and create owned connectors; these modules are
+//! useful when an application or test wants to construct a specific provider
+//! manually.
 //!
 //! Provider keys use kebab-case and generally follow
 //! `{environment}-{mechanism}-{target?}`:
@@ -31,8 +32,8 @@ pub mod host_process;
 #[cfg(feature = "host-serial-esp32")]
 pub mod host_serial_esp32;
 
+pub use crate::registry::connector::LinkConnector;
 pub use crate::registry::descriptor::LinkProviderDescriptor;
 pub use crate::registry::env::LinkEnv;
-pub use crate::registry::instance::LinkProviderInstance;
 pub use crate::registry::kind::LinkProviderKind;
 pub use crate::registry::registry::{LinkProviderRegistry, available_provider_descriptors};

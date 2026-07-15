@@ -1601,11 +1601,15 @@ impl StudioController {
             updates.clone(),
             device_section_target(DeviceController::SECTION_DEVICE),
         );
-        match self.device.server.attach_link_connection(
-            self.device.link.registry_handle(),
-            connection,
-            server_updates,
-        ) {
+        let connector =
+            self.device.link.active_connector().ok_or_else(|| {
+                UiError::MissingSession("link connector is not active".to_string())
+            })?;
+        match self
+            .device
+            .server
+            .attach_link_connection(connector, connection, server_updates)
+        {
             Ok(()) => {
                 let mut outcome =
                     UiNotices::new().with_notice(UiNotice::info("Server protocol connected"));

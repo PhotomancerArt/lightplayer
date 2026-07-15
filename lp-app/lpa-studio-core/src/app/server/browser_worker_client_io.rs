@@ -3,19 +3,19 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use lpa_client::ClientIo;
+use lpa_link::LinkConnector;
+use lpa_link::LinkProvider;
 use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerProvider,
 };
-use lpa_link::providers::{LinkProviderInstance, LinkProviderRegistry};
-use lpa_link::{LinkProvider, LinkProviderKind};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 use super::browser_worker_log::{worker_log_draft, worker_status_draft};
 use super::pending_server_messages::{BatchItem, PendingServerMessages};
-use crate::{SharedLinkRegistry, UiLogDraft};
+use crate::UiLogDraft;
 
 const RESPONSE_POLL_LIMIT: usize = 240;
 
@@ -26,13 +26,13 @@ pub struct BrowserWorkerClientIo {
 
 impl BrowserWorkerClientIo {
     pub fn new(
-        registry: SharedLinkRegistry,
+        connector: Rc<LinkConnector>,
         session_id: LinkSessionId,
         logs: Rc<RefCell<Vec<UiLogDraft>>>,
     ) -> Self {
         Self {
             state: Rc::new(RefCell::new(BrowserWorkerClientState {
-                registry,
+                connector,
                 session_id,
                 logs,
             })),
@@ -84,12 +84,13 @@ impl ClientIo for BrowserWorkerClientIo {
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
-        let (registry, session_id) = {
+        // Copy the connector handle and session id out of the state so no
+        // RefCell borrow is held across the close await.
+        let (connector, session_id) = {
             let state = self.state.borrow();
-            (Rc::clone(&state.registry), state.session_id.clone())
+            (Rc::clone(&state.connector), state.session_id.clone())
         };
-        let mut registry = registry.borrow_mut();
-        let provider = browser_worker_provider_mut(&mut registry)?;
+        let provider = browser_worker_provider(&connector)?;
         provider
             .close(&session_id)
             .await
@@ -98,22 +99,20 @@ impl ClientIo for BrowserWorkerClientIo {
 }
 
 struct BrowserWorkerClientState {
-    registry: SharedLinkRegistry,
+    connector: Rc<LinkConnector>,
     session_id: LinkSessionId,
     logs: Rc<RefCell<Vec<UiLogDraft>>>,
 }
 
 impl BrowserWorkerClientState {
     fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), TransportError> {
-        let mut registry = self.registry.borrow_mut();
-        browser_worker_provider_mut(&mut registry)?
+        browser_worker_provider(&self.connector)?
             .post(&self.session_id, envelope)
             .map_err(|error| TransportError::Other(error.to_string()))
     }
 
     fn take_outputs(&self) -> Result<Vec<BrowserOutputEnvelope>, TransportError> {
-        let mut registry = self.registry.borrow_mut();
-        browser_worker_provider_mut(&mut registry)?
+        browser_worker_provider(&self.connector)?
             .take_outputs(&self.session_id)
             .map_err(|error| TransportError::Other(error.to_string()))
     }
@@ -125,17 +124,15 @@ impl BrowserWorkerClientState {
     }
 }
 
-fn browser_worker_provider_mut(
-    registry: &mut LinkProviderRegistry,
-) -> Result<&mut BrowserWorkerProvider, TransportError> {
-    match registry.provider_mut(LinkProviderKind::BrowserWorker) {
-        Some(LinkProviderInstance::BrowserWorker(provider)) => Ok(provider),
-        Some(_) => Err(TransportError::Other(
-            "browser-worker registry entry has the wrong provider type".to_string(),
-        )),
-        None => Err(TransportError::Other(
-            "browser-worker provider is not available".to_string(),
-        )),
+fn browser_worker_provider(
+    connector: &LinkConnector,
+) -> Result<&BrowserWorkerProvider, TransportError> {
+    match connector {
+        LinkConnector::BrowserWorker(provider) => Ok(provider),
+        other => Err(TransportError::Other(format!(
+            "browser-worker client io holds a {} connector",
+            other.kind().key()
+        ))),
     }
 }
 

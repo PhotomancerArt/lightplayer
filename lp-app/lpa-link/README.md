@@ -103,22 +103,42 @@ heartbeat/log handling, or project deploy ordering.
 
 ## Providers
 
-Applications can inspect the providers compiled into `lpa-link` without
-duplicating the feature/target matrix:
+`LinkProviderRegistry` is a **catalog + factory**, not a store of live
+providers. Applications can inspect the provider kinds compiled into
+`lpa-link` without duplicating the feature/target matrix, then create an
+OWNED connector per open flow:
 
 ```rust
 let registry =
     lpa_link::providers::LinkProviderRegistry::from_env(lpa_link::providers::LinkEnv::default());
-let providers = registry.descriptors();
+let providers = registry.descriptors(); // catalog, for picker UI
+let connector = registry.create_connector(kind)?; // Rc<LinkConnector>, per open flow
 ```
 
 The returned `LinkProviderDescriptor` values contain provider kinds, labels,
-and low-level `LinkCapabilities`. The registry only constructs providers
-compiled for the current feature/target matrix, so every descriptor it returns
-is usable in the current build/runtime. `LinkProviderKind`
-owns the stable kebab-case key used at app boundaries. Product surfaces such as
-Studio should map these descriptors into their own UX-facing provider cards,
-intents, ordering, and recovery actions.
+and low-level `LinkCapabilities`. The registry only catalogs kinds compiled
+for the current feature/target matrix, so every descriptor it returns is
+usable in the current build/runtime. `LinkProviderKind` owns the stable
+kebab-case key used at app boundaries. Product surfaces such as Studio should
+map these descriptors into their own UX-facing provider cards, intents,
+ordering, and recovery actions.
+
+### Connector ownership
+
+`LinkConnector` is the enum-dispatched owned handle over one concrete
+provider (used because `LinkProvider` has async methods and is not
+object-safe). The connection OWNER — Studio's link flow today, `DeviceSession`
+next — holds `Rc<LinkConnector>` and hands clones to client I/O adapters;
+nothing borrows a shared mutable registry on hot paths. All `LinkProvider`
+methods take `&self`: each provider keeps its endpoint/session state behind
+internal `RefCell`s with borrows scoped to synchronous sections, never across
+an `await`. A connector is created per open flow and may discover several
+endpoints, but once connected it serves that one connection.
+
+Tests preconfigure connectors (`FakeProvider::with_endpoint`,
+`with_device_endpoint`, the `with_*_error` knobs) and hand them to the
+registry with `insert(provider)`; `create_connector` then returns that shared
+preconfigured instance for the kind, so scripted state survives re-opens.
 
 | Provider key | Rust module/type | Runtime or device | Endpoint kind | Management intent | Status |
 |---|---|---|---|---|---|

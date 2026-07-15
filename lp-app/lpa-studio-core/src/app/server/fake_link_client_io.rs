@@ -17,14 +17,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use lpa_client::ClientIo;
-use lpa_link::LinkProviderKind;
+use lpa_link::LinkConnector;
 use lpa_link::provider::session::LinkSessionId;
-use lpa_link::providers::LinkProviderInstance;
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
 
 use super::browser_serial_readiness::BrowserSerialReadinessClassifier;
 use super::device_log_line::parse_device_log_line;
-use crate::{SharedLinkRegistry, UiLogDraft, UiLogOrigin, UiLogSource};
+use crate::{UiLogDraft, UiLogOrigin, UiLogSource};
 
 /// Bounded readiness wait: POLL_LIMIT polls × POLL_SLEEP. Mirrors the
 /// browser io's bounded poll loop; the product layers below still have NO
@@ -33,7 +32,7 @@ const READINESS_POLL_LIMIT: usize = 1500;
 const READINESS_POLL_SLEEP: Duration = Duration::from_millis(2);
 
 pub(crate) struct FakeLinkClientIo {
-    registry: SharedLinkRegistry,
+    connector: Rc<LinkConnector>,
     session_id: LinkSessionId,
     transport: lpa_link::LinkServerConnection,
     logs: Rc<RefCell<Vec<UiLogDraft>>>,
@@ -44,13 +43,13 @@ pub(crate) struct FakeLinkClientIo {
 
 impl FakeLinkClientIo {
     pub(crate) fn new(
-        registry: SharedLinkRegistry,
+        connector: Rc<LinkConnector>,
         session_id: LinkSessionId,
         transport: lpa_link::LinkServerConnection,
         logs: Rc<RefCell<Vec<UiLogDraft>>>,
     ) -> Self {
         Self {
-            registry,
+            connector,
             session_id,
             transport,
             logs,
@@ -98,13 +97,9 @@ impl FakeLinkClientIo {
     /// provider's line buffer): feed the readiness classifier, note `M!`
     /// frames, and turn device log lines into pending console drafts.
     fn drain_lines(&mut self) -> Result<(), TransportError> {
-        let lines = {
-            let mut registry = self.registry.borrow_mut();
-            let provider = fake_provider_mut(&mut registry)?;
-            provider
-                .take_lines(&self.session_id)
-                .map_err(|error| TransportError::Other(error.to_string()))?
-        };
+        let lines = fake_provider(&self.connector)?
+            .take_lines(&self.session_id)
+            .map_err(|error| TransportError::Other(error.to_string()))?;
         for line in lines {
             if line.starts_with("M!") {
                 self.protocol_frame_seen = true;
@@ -149,24 +144,21 @@ impl ClientIo for FakeLinkClientIo {
     }
 }
 
-fn fake_provider_mut(
-    registry: &mut lpa_link::providers::LinkProviderRegistry,
-) -> Result<&mut lpa_link::providers::fake::FakeProvider, TransportError> {
-    match registry.provider_mut(LinkProviderKind::Fake) {
-        Some(LinkProviderInstance::Fake(provider)) => Ok(provider),
+fn fake_provider(
+    connector: &LinkConnector,
+) -> Result<&lpa_link::providers::fake::FakeProvider, TransportError> {
+    match connector {
+        LinkConnector::Fake(provider) => Ok(provider),
         // Reachable only when other lpa-link provider features are unified
         // into the test build (e.g. a full-workspace test compiles lp-cli's
         // host providers in); with fake-device alone the enum has one
         // variant and this arm is dead.
         #[allow(
             unreachable_patterns,
-            reason = "provider variants are feature-gated; this arm exists for feature-unified builds"
+            reason = "connector variants are feature-gated; this arm exists for feature-unified builds"
         )]
-        Some(_) => Err(TransportError::Other(
-            "fake registry entry has the wrong provider type".to_string(),
-        )),
-        None => Err(TransportError::Other(
-            "fake provider is not available".to_string(),
+        _ => Err(TransportError::Other(
+            "fake link connector has the wrong provider type".to_string(),
         )),
     }
 }

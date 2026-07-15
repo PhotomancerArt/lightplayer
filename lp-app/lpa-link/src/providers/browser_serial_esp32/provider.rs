@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
@@ -25,12 +26,18 @@ pub fn descriptor() -> LinkProviderDescriptor {
     LinkProviderKind::BrowserSerialEsp32.descriptor()
 }
 
+/// Browser Web Serial ESP32 provider.
+///
+/// Endpoint and session state live behind internal `RefCell`s. Every JS
+/// future (`browser_serial::*`, `browser_esp32_flash::*`) is awaited with the
+/// needed values (`port_id`, ids) copied OUT of the borrow first — no
+/// internal borrow spans an await.
 pub struct BrowserSerialEsp32Provider {
-    endpoints: BTreeMap<LinkEndpointId, BrowserSerialEndpointState>,
-    sessions: BTreeMap<LinkSessionId, BrowserSerialSessionState>,
+    endpoints: RefCell<BTreeMap<LinkEndpointId, BrowserSerialEndpointState>>,
+    sessions: RefCell<BTreeMap<LinkSessionId, BrowserSerialSessionState>>,
     options: BrowserSerialEsp32Options,
-    next_endpoint_index: u64,
-    next_session_index: u64,
+    next_endpoint_index: Cell<u64>,
+    next_session_index: Cell<u64>,
 }
 
 impl BrowserSerialEsp32Provider {
@@ -40,11 +47,11 @@ impl BrowserSerialEsp32Provider {
 
     pub fn with_options(options: BrowserSerialEsp32Options) -> Self {
         Self {
-            endpoints: BTreeMap::new(),
-            sessions: BTreeMap::new(),
+            endpoints: RefCell::new(BTreeMap::new()),
+            sessions: RefCell::new(BTreeMap::new()),
             options,
-            next_endpoint_index: 1,
-            next_session_index: 1,
+            next_endpoint_index: Cell::new(1),
+            next_session_index: Cell::new(1),
         }
     }
 
@@ -53,16 +60,14 @@ impl BrowserSerialEsp32Provider {
     }
 
     pub fn create_granted_endpoint(
-        &mut self,
+        &self,
         label: impl Into<String>,
         port_id: u32,
     ) -> LinkEndpointId {
-        let endpoint_id = LinkEndpointId::new(format!(
-            "{}-port-{}",
-            self.kind().key(),
-            self.next_endpoint_index
-        ));
-        self.next_endpoint_index += 1;
+        let endpoint_index = self.next_endpoint_index.get();
+        self.next_endpoint_index.set(endpoint_index + 1);
+        let endpoint_id =
+            LinkEndpointId::new(format!("{}-port-{}", self.kind().key(), endpoint_index));
 
         let mut capabilities = LinkCapabilities::esp32_serial_base();
         if self.is_flash_supported() {
@@ -70,7 +75,7 @@ impl BrowserSerialEsp32Provider {
         }
         let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
             .with_capabilities(capabilities);
-        self.endpoints.insert(
+        self.endpoints.borrow_mut().insert(
             endpoint_id.clone(),
             BrowserSerialEndpointState { endpoint, port_id },
         );
@@ -85,24 +90,22 @@ impl BrowserSerialEsp32Provider {
         browser_esp32_flash::is_supported()
     }
 
-    pub async fn request_access(&mut self) -> Result<LinkEndpoint, LinkError> {
+    pub async fn request_access(&self) -> Result<LinkEndpoint, LinkError> {
         let port = browser_serial::request_port().await?;
         let endpoint_id = self.create_granted_endpoint(port.label, port.id);
-        Ok(self.endpoint(&endpoint_id)?.clone())
+        self.endpoint(&endpoint_id)
     }
 
     pub async fn open_protocol(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         baud_rate: u32,
     ) -> Result<(), LinkError> {
-        let (endpoint_id, port_id) = {
-            let state = self.session(session_id)?;
-            (state.session.endpoint_id.clone(), state.port_id)
-        };
+        let (endpoint_id, port_id) = self.session_endpoint_and_port(session_id)?;
         let result = browser_serial::open(port_id, baud_rate).await?;
         let logs = protocol_open_result_logs(endpoint_id, session_id.clone(), result);
-        let state = self.session_mut(session_id)?;
+        let mut sessions = self.sessions.borrow_mut();
+        let state = session_state_mut(&mut sessions, session_id)?;
         state.logs.extend(logs);
         state.protocol_open = true;
         Ok(())
@@ -113,33 +116,35 @@ impl BrowserSerialEsp32Provider {
         session_id: &LinkSessionId,
         line: &str,
     ) -> Result<(), LinkError> {
-        let state = self.session(session_id)?;
-        browser_serial::write_line(state.port_id, line).await
+        let port_id = self.session_port_id(session_id)?;
+        browser_serial::write_line(port_id, line).await
     }
 
     pub fn take_lines(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
-        let state = self.session(session_id)?;
-        Ok(browser_serial::take_lines(state.port_id))
+        let port_id = self.session_port_id(session_id)?;
+        Ok(browser_serial::take_lines(port_id))
     }
 
     pub fn take_errors(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
-        let state = self.session(session_id)?;
-        Ok(browser_serial::take_errors(state.port_id))
+        let port_id = self.session_port_id(session_id)?;
+        Ok(browser_serial::take_errors(port_id))
     }
 
-    pub async fn release_protocol(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {
-        let state = self.session_mut(session_id)?;
-        browser_serial::release(state.port_id).await?;
+    pub async fn release_protocol(&self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+        let port_id = self.session_port_id(session_id)?;
+        browser_serial::release(port_id).await?;
+        let mut sessions = self.sessions.borrow_mut();
+        let state = session_state_mut(&mut sessions, session_id)?;
         state.protocol_open = false;
         Ok(())
     }
 
     pub async fn release_session_for_management(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
     ) -> Result<(), LinkError> {
         self.release_protocol(session_id).await?;
-        self.sessions.remove(session_id);
+        self.sessions.borrow_mut().remove(session_id);
         Ok(())
     }
 
@@ -148,15 +153,15 @@ impl BrowserSerialEsp32Provider {
     }
 
     pub async fn probe_target(
-        &mut self,
+        &self,
         endpoint_id: &LinkEndpointId,
     ) -> Result<BrowserEsp32ProbeResult, LinkError> {
-        let port_id = self.endpoint_state(endpoint_id)?.port_id;
+        let port_id = self.endpoint_port_id(endpoint_id)?;
         browser_esp32_flash::probe_target(port_id, self.options.esptool_module_path()).await
     }
 
     pub async fn flash_firmware(
-        &mut self,
+        &self,
         endpoint_id: &LinkEndpointId,
     ) -> Result<BrowserEsp32FlashResult, LinkError> {
         self.flash_firmware_with_events(endpoint_id, LinkManagementEventSink::noop())
@@ -164,11 +169,11 @@ impl BrowserSerialEsp32Provider {
     }
 
     pub async fn flash_firmware_with_events(
-        &mut self,
+        &self,
         endpoint_id: &LinkEndpointId,
         events: LinkManagementEventSink,
     ) -> Result<BrowserEsp32FlashResult, LinkError> {
-        let port_id = self.endpoint_state(endpoint_id)?.port_id;
+        let port_id = self.endpoint_port_id(endpoint_id)?;
         browser_esp32_flash::flash_firmware_with_events(
             port_id,
             &self.options.firmware_manifest_path,
@@ -179,7 +184,7 @@ impl BrowserSerialEsp32Provider {
     }
 
     pub async fn erase_device_flash(
-        &mut self,
+        &self,
         endpoint_id: &LinkEndpointId,
     ) -> Result<BrowserEsp32EraseResult, LinkError> {
         self.erase_device_flash_with_events(endpoint_id, LinkManagementEventSink::noop())
@@ -187,11 +192,11 @@ impl BrowserSerialEsp32Provider {
     }
 
     pub async fn erase_device_flash_with_events(
-        &mut self,
+        &self,
         endpoint_id: &LinkEndpointId,
         events: LinkManagementEventSink,
     ) -> Result<BrowserEsp32EraseResult, LinkError> {
-        let port_id = self.endpoint_state(endpoint_id)?.port_id;
+        let port_id = self.endpoint_port_id(endpoint_id)?;
         browser_esp32_flash::erase_device_flash_with_events(
             port_id,
             self.options.esptool_module_path(),
@@ -201,14 +206,13 @@ impl BrowserSerialEsp32Provider {
     }
 
     async fn manage_inner(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         request: LinkManagementRequest,
         events: LinkManagementEventSink,
     ) -> Result<LinkManagementResult, LinkError> {
         self.session_capabilities_support(session_id, &request)?;
-        let endpoint_id = self.session(session_id)?.session.endpoint_id.clone();
-        let port_id = self.session(session_id)?.port_id;
+        let (endpoint_id, port_id) = self.session_endpoint_and_port(session_id)?;
         self.release_protocol_if_open(session_id).await?;
         match request {
             LinkManagementRequest::FlashFirmware => {
@@ -227,7 +231,7 @@ impl BrowserSerialEsp32Provider {
                         )
                     })
                     .collect::<Vec<_>>();
-                self.session_mut(session_id)?.logs.extend(logs);
+                self.extend_session_logs(session_id, logs)?;
                 Ok(LinkManagementResult::FlashFirmware(
                     map_firmware_flash_result(result),
                 ))
@@ -248,7 +252,7 @@ impl BrowserSerialEsp32Provider {
                         )
                     })
                     .collect::<Vec<_>>();
-                self.session_mut(session_id)?.logs.extend(logs);
+                self.extend_session_logs(session_id, logs)?;
                 Ok(LinkManagementResult::EraseDeviceFlash(
                     map_erase_device_result(result),
                 ))
@@ -273,7 +277,7 @@ impl BrowserSerialEsp32Provider {
                         )
                     })
                     .collect::<Vec<_>>();
-                self.session_mut(session_id)?.logs.extend(logs);
+                self.extend_session_logs(session_id, logs)?;
                 Ok(LinkManagementResult::ResetRuntime)
             }
             LinkManagementRequest::EraseRawFilesystem => {
@@ -282,11 +286,12 @@ impl BrowserSerialEsp32Provider {
         }
     }
 
-    async fn release_protocol_if_open(
-        &mut self,
-        session_id: &LinkSessionId,
-    ) -> Result<(), LinkError> {
-        if self.session(session_id)?.protocol_open {
+    async fn release_protocol_if_open(&self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+        let protocol_open = {
+            let sessions = self.sessions.borrow();
+            session_state(&sessions, session_id)?.protocol_open
+        };
+        if protocol_open {
             self.release_protocol(session_id).await?;
         }
         Ok(())
@@ -297,7 +302,8 @@ impl BrowserSerialEsp32Provider {
         session_id: &LinkSessionId,
         request: &LinkManagementRequest,
     ) -> Result<(), LinkError> {
-        let session = &self.session(session_id)?.session;
+        let sessions = self.sessions.borrow();
+        let session = &session_state(&sessions, session_id)?.session;
         let operation = request.operation();
         if session.capabilities.supports(operation) {
             Ok(())
@@ -306,32 +312,49 @@ impl BrowserSerialEsp32Provider {
         }
     }
 
-    fn endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<&LinkEndpoint, LinkError> {
-        Ok(&self.endpoint_state(endpoint_id)?.endpoint)
+    fn endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<LinkEndpoint, LinkError> {
+        Ok(self.endpoint_state(endpoint_id)?.endpoint)
     }
 
     fn endpoint_state(
         &self,
         endpoint_id: &LinkEndpointId,
-    ) -> Result<&BrowserSerialEndpointState, LinkError> {
+    ) -> Result<BrowserSerialEndpointState, LinkError> {
         self.endpoints
+            .borrow()
             .get(endpoint_id)
+            .cloned()
             .ok_or_else(|| LinkError::endpoint_not_found(endpoint_id.as_str()))
     }
 
-    fn session(&self, session_id: &LinkSessionId) -> Result<&BrowserSerialSessionState, LinkError> {
-        self.sessions
-            .get(session_id)
-            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
+    fn endpoint_port_id(&self, endpoint_id: &LinkEndpointId) -> Result<u32, LinkError> {
+        Ok(self.endpoint_state(endpoint_id)?.port_id)
     }
 
-    fn session_mut(
-        &mut self,
+    fn session_port_id(&self, session_id: &LinkSessionId) -> Result<u32, LinkError> {
+        let sessions = self.sessions.borrow();
+        Ok(session_state(&sessions, session_id)?.port_id)
+    }
+
+    fn session_endpoint_and_port(
+        &self,
         session_id: &LinkSessionId,
-    ) -> Result<&mut BrowserSerialSessionState, LinkError> {
-        self.sessions
-            .get_mut(session_id)
-            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
+    ) -> Result<(LinkEndpointId, u32), LinkError> {
+        let sessions = self.sessions.borrow();
+        let state = session_state(&sessions, session_id)?;
+        Ok((state.session.endpoint_id.clone(), state.port_id))
+    }
+
+    fn extend_session_logs(
+        &self,
+        session_id: &LinkSessionId,
+        logs: Vec<LinkLogEntry>,
+    ) -> Result<(), LinkError> {
+        let mut sessions = self.sessions.borrow_mut();
+        session_state_mut(&mut sessions, session_id)?
+            .logs
+            .extend(logs);
+        Ok(())
     }
 }
 
@@ -340,29 +363,24 @@ impl LinkProvider for BrowserSerialEsp32Provider {
         LinkProviderKind::BrowserSerialEsp32
     }
 
-    async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
+    async fn discover(&self) -> Result<Vec<LinkEndpoint>, LinkError> {
         Ok(self
             .endpoints
+            .borrow()
             .values()
             .map(|state| state.endpoint.clone())
             .collect())
     }
 
-    async fn status(
-        &mut self,
-        endpoint_id: &LinkEndpointId,
-    ) -> Result<LinkEndpointStatus, LinkError> {
-        Ok(self.endpoint(endpoint_id)?.status.clone())
+    async fn status(&self, endpoint_id: &LinkEndpointId) -> Result<LinkEndpointStatus, LinkError> {
+        Ok(self.endpoint(endpoint_id)?.status)
     }
 
-    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
-        let endpoint_state = self.endpoint_state(endpoint_id)?.clone();
-        let session_id = LinkSessionId::new(format!(
-            "{}:{}",
-            endpoint_id.as_str(),
-            self.next_session_index
-        ));
-        self.next_session_index += 1;
+    async fn connect(&self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
+        let endpoint_state = self.endpoint_state(endpoint_id)?;
+        let session_index = self.next_session_index.get();
+        self.next_session_index.set(session_index + 1);
+        let session_id = LinkSessionId::new(format!("{}:{}", endpoint_id.as_str(), session_index));
         let session = LinkSession::new(
             session_id.clone(),
             self.kind(),
@@ -372,18 +390,16 @@ impl LinkProvider for BrowserSerialEsp32Provider {
             },
             endpoint_state.endpoint.capabilities.clone(),
         );
-        self.sessions.insert(
+        self.sessions.borrow_mut().insert(
             session_id,
             BrowserSerialSessionState::new(session.clone(), endpoint_state.port_id),
         );
         Ok(session)
     }
 
-    async fn connection(
-        &mut self,
-        session_id: &LinkSessionId,
-    ) -> Result<LinkConnection, LinkError> {
-        let state = self.session(session_id)?;
+    async fn connection(&self, session_id: &LinkSessionId) -> Result<LinkConnection, LinkError> {
+        let sessions = self.sessions.borrow();
+        let state = session_state(&sessions, session_id)?;
         if state.session.status == LinkSessionStatus::Closed {
             return Err(LinkError::Closed);
         }
@@ -394,15 +410,17 @@ impl LinkProvider for BrowserSerialEsp32Provider {
     }
 
     fn logs(&self, session_id: &LinkSessionId) -> Result<Vec<LinkLogEntry>, LinkError> {
-        Ok(self.session(session_id)?.logs.clone())
+        let sessions = self.sessions.borrow();
+        Ok(session_state(&sessions, session_id)?.logs.clone())
     }
 
     fn diagnostics(&self, session_id: &LinkSessionId) -> Result<Vec<LinkDiagnostic>, LinkError> {
-        Ok(self.session(session_id)?.diagnostics.clone())
+        let sessions = self.sessions.borrow();
+        Ok(session_state(&sessions, session_id)?.diagnostics.clone())
     }
 
     async fn manage(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         request: LinkManagementRequest,
     ) -> Result<LinkManagementResult, LinkError> {
@@ -411,7 +429,7 @@ impl LinkProvider for BrowserSerialEsp32Provider {
     }
 
     async fn manage_with_events(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         request: LinkManagementRequest,
         events: LinkManagementEventSink,
@@ -419,13 +437,21 @@ impl LinkProvider for BrowserSerialEsp32Provider {
         self.manage_inner(session_id, request, events).await
     }
 
-    async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {
-        let state = self.session_mut(session_id)?;
-        if state.session.status == LinkSessionStatus::Closed {
-            return Ok(());
-        }
-        state.session.status = LinkSessionStatus::Closed;
-        browser_serial::close(state.port_id).await?;
+    async fn close(&self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+        // Mark the session closed and copy the port id out BEFORE awaiting
+        // the JS close: no internal borrow may span the await.
+        let port_id = {
+            let mut sessions = self.sessions.borrow_mut();
+            let state = session_state_mut(&mut sessions, session_id)?;
+            if state.session.status == LinkSessionStatus::Closed {
+                return Ok(());
+            }
+            state.session.status = LinkSessionStatus::Closed;
+            state.port_id
+        };
+        browser_serial::close(port_id).await?;
+        let mut sessions = self.sessions.borrow_mut();
+        let state = session_state_mut(&mut sessions, session_id)?;
         state.protocol_open = false;
         state.logs.push(LinkLogEntry::new(
             state.session.endpoint_id.clone(),
@@ -435,6 +461,24 @@ impl LinkProvider for BrowserSerialEsp32Provider {
         ));
         Ok(())
     }
+}
+
+fn session_state<'a>(
+    sessions: &'a BTreeMap<LinkSessionId, BrowserSerialSessionState>,
+    session_id: &LinkSessionId,
+) -> Result<&'a BrowserSerialSessionState, LinkError> {
+    sessions
+        .get(session_id)
+        .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
+}
+
+fn session_state_mut<'a>(
+    sessions: &'a mut BTreeMap<LinkSessionId, BrowserSerialSessionState>,
+    session_id: &LinkSessionId,
+) -> Result<&'a mut BrowserSerialSessionState, LinkError> {
+    sessions
+        .get_mut(session_id)
+        .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
 }
 
 fn map_firmware_flash_result(result: BrowserEsp32FlashResult) -> LinkFirmwareFlashResult {

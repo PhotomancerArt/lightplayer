@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lpa_link::providers::{LinkEnv, LinkProviderInstance, LinkProviderRegistry};
+use lpa_link::providers::{LinkConnector, LinkEnv, LinkProviderRegistry};
 use lpa_link::{
     LinkConnection, LinkDiagnosticSeverity, LinkEndpointId, LinkError, LinkLogLevel,
     LinkManagementRequest, LinkManagementResult, LinkProvider, LinkProviderKind, LinkSession,
@@ -17,11 +17,15 @@ use crate::{
 };
 use lpa_link::{LinkManagementEvent, LinkManagementEventSink};
 
-pub type SharedLinkRegistry = Rc<RefCell<LinkProviderRegistry>>;
-
 pub struct LinkController {
     state: LinkState,
-    registry: SharedLinkRegistry,
+    /// Catalog + factory: consulted only when a flow needs the picker list
+    /// or a fresh connector; never borrowed across an await (its methods are
+    /// synchronous and it is owned by value).
+    registry: LinkProviderRegistry,
+    /// The connection's owned provider handle. Created per open flow from
+    /// the registry factory; client I/O adapters hold clones of this `Rc`.
+    active_connector: Option<Rc<LinkConnector>>,
     active_provider: Option<LinkProviderKind>,
     active_endpoint: Option<LinkEndpointId>,
     active_session: Option<LinkSession>,
@@ -40,14 +44,14 @@ impl LinkController {
     }
 
     pub fn with_registry(registry: LinkProviderRegistry) -> Self {
-        let registry = Rc::new(RefCell::new(registry));
-        let providers = provider_choices(&registry.borrow());
+        let providers = provider_choices(&registry);
         Self {
             state: LinkState::SelectingProvider {
                 providers,
                 issue: None,
             },
             registry,
+            active_connector: None,
             active_provider: None,
             active_endpoint: None,
             active_session: None,
@@ -77,8 +81,10 @@ impl LinkController {
         LinkSnapshot::new(self.state.clone())
     }
 
-    pub fn registry_handle(&self) -> SharedLinkRegistry {
-        Rc::clone(&self.registry)
+    /// The owned provider handle behind the active connection, for handing
+    /// to client I/O adapters (`ServerController::attach_link_connection`).
+    pub fn active_connector(&self) -> Option<Rc<LinkConnector>> {
+        self.active_connector.clone()
     }
 
     pub fn active_connection(&self) -> Option<LinkConnection> {
@@ -90,16 +96,36 @@ impl LinkController {
     }
 
     fn reset_to_provider_selection(&mut self, issue: Option<UiIssue>) {
+        self.active_connector = None;
         self.active_provider = None;
         self.active_endpoint = None;
         self.active_session = None;
         self.active_connection = None;
-        let providers = provider_choices(&self.registry.borrow());
+        let providers = provider_choices(&self.registry);
         self.state = LinkState::SelectingProvider { providers, issue };
     }
 
     fn recover_to_provider_selection(&mut self, message: impl Into<String>) {
         self.reset_to_provider_selection(Some(UiIssue::new(message)));
+    }
+
+    /// The active connector if it serves `provider_id`, otherwise a fresh
+    /// one from the registry factory (stored as active).
+    fn connector_for(
+        &mut self,
+        provider_id: LinkProviderKind,
+    ) -> Result<Rc<LinkConnector>, UiError> {
+        if let Some(connector) = &self.active_connector {
+            if connector.kind() == provider_id {
+                return Ok(Rc::clone(connector));
+            }
+        }
+        let connector = self
+            .registry
+            .create_connector(provider_id)
+            .map_err(map_link_error)?;
+        self.active_connector = Some(Rc::clone(&connector));
+        Ok(connector)
     }
 
     pub async fn disconnect(&mut self) -> Result<(), UiError> {
@@ -110,11 +136,8 @@ impl LinkController {
             .map(|session| session.id.clone());
         let result = match (provider_id, session_id) {
             (Some(provider_id), Some(session_id)) => {
-                let mut registry = self.registry.borrow_mut();
-                let provider = registry
-                    .provider_mut(provider_id)
-                    .ok_or_else(|| missing_provider(provider_id))?;
-                provider.close(&session_id).await.map_err(map_link_error)
+                let connector = self.connector_for(provider_id)?;
+                connector.close(&session_id).await.map_err(map_link_error)
             }
             _ => Ok(()),
         };
@@ -157,6 +180,7 @@ impl LinkController {
         &mut self,
         provider_id: LinkProviderKind,
     ) -> Result<(), UiError> {
+        self.active_connector = None;
         self.active_provider = Some(provider_id);
         self.active_endpoint = None;
         self.active_session = None;
@@ -166,12 +190,9 @@ impl LinkController {
             progress: ProgressState::new("Discovering endpoints"),
         };
 
-        let result = {
-            let mut registry = self.registry.borrow_mut();
-            match registry.provider_mut(provider_id) {
-                Some(provider) => provider.discover().await.map_err(map_link_error),
-                None => Err(missing_provider(provider_id)),
-            }
+        let result = match self.connector_for(provider_id) {
+            Ok(connector) => connector.discover().await.map_err(map_link_error),
+            Err(error) => Err(error),
         };
         let endpoints = match result {
             Ok(endpoints) => endpoints,
@@ -198,6 +219,7 @@ impl LinkController {
 
     #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
     async fn open_browser_serial_provider(&mut self) -> Result<LinkOpenOutcome, UiError> {
+        self.active_connector = None;
         self.active_provider = Some(LinkProviderKind::BrowserSerialEsp32);
         self.active_endpoint = None;
         self.active_session = None;
@@ -207,17 +229,16 @@ impl LinkController {
             progress: ProgressState::new("Requesting browser serial access"),
         };
 
-        let result = {
-            let mut registry = self.registry.borrow_mut();
-            match registry.provider_mut(LinkProviderKind::BrowserSerialEsp32) {
-                Some(LinkProviderInstance::BrowserSerialEsp32(provider)) => {
+        let result = match self.connector_for(LinkProviderKind::BrowserSerialEsp32) {
+            Ok(connector) => match &*connector {
+                LinkConnector::BrowserSerialEsp32(provider) => {
                     provider.request_access().await.map_err(map_link_error)
                 }
-                Some(_) => Err(UiError::Link(
-                    "browser serial registry entry has the wrong provider type".to_string(),
+                _ => Err(UiError::Link(
+                    "browser serial connector has the wrong provider type".to_string(),
                 )),
-                None => Err(missing_provider(LinkProviderKind::BrowserSerialEsp32)),
-            }
+            },
+            Err(error) => Err(error),
         };
         let endpoint = match result {
             Ok(endpoint) => endpoint,
@@ -268,14 +289,9 @@ impl LinkController {
             progress: ProgressState::new("Opening link session"),
         };
 
-        let result = {
-            let mut registry = self.registry.borrow_mut();
-            match registry.provider_mut(provider_id) {
-                Some(provider) => {
-                    open_connected_provider(provider_id, provider, &endpoint_id).await
-                }
-                None => Err(missing_provider(provider_id)),
-            }
+        let result = match self.connector_for(provider_id) {
+            Ok(connector) => open_connected_provider(provider_id, &connector, &endpoint_id).await,
+            Err(error) => Err(error),
         };
         let (session, connection, logs) = match result {
             Ok(result) => result,
@@ -345,15 +361,12 @@ impl LinkController {
         });
         let event_sink = management_activity_sink(node_id, activity, updates);
 
-        let result = {
-            let mut registry = self.registry.borrow_mut();
-            match registry.provider_mut(provider_id) {
-                Some(provider) => provider
-                    .manage_with_events(&session_id, request, event_sink)
-                    .await
-                    .map_err(map_link_error),
-                None => Err(missing_provider(provider_id)),
-            }
+        let result = match self.connector_for(provider_id) {
+            Ok(connector) => connector
+                .manage_with_events(&session_id, request, event_sink)
+                .await
+                .map_err(map_link_error),
+            Err(error) => Err(error),
         };
         self.state = LinkState::Connected { device };
         let result = result?;
@@ -370,19 +383,13 @@ impl LinkController {
             .as_ref()
             .map(|session| session.id.clone())
             .ok_or_else(|| UiError::MissingSession("link session is not open".to_string()))?;
-        let (connection, logs) = {
-            let mut registry = self.registry.borrow_mut();
-            let provider = registry
-                .provider_mut(provider_id)
-                .ok_or_else(|| missing_provider(provider_id))?;
-            open_provider_protocol_if_needed(provider_id, provider, &session_id).await?;
-            let connection = provider
-                .connection(&session_id)
-                .await
-                .map_err(map_link_error)?;
-            let logs = link_session_logs(provider, &session_id)?;
-            (connection, logs)
-        };
+        let connector = self.connector_for(provider_id)?;
+        open_provider_protocol_if_needed(provider_id, &connector, &session_id).await?;
+        let connection = connector
+            .connection(&session_id)
+            .await
+            .map_err(map_link_error)?;
+        let logs = link_session_logs(&connector, &session_id)?;
         self.active_connection = Some(connection.clone());
         Ok(ConnectedLink { connection, logs })
     }
@@ -586,51 +593,51 @@ fn provider_auto_connects(kind: LinkProviderKind) -> bool {
 
 async fn open_connected_provider(
     provider_id: LinkProviderKind,
-    provider: &mut LinkProviderInstance,
+    connector: &LinkConnector,
     endpoint_id: &LinkEndpointId,
 ) -> Result<(LinkSession, LinkConnection, Vec<UiLogDraft>), UiError> {
-    let session = provider
+    let session = connector
         .connect(endpoint_id)
         .await
         .map_err(map_link_error)?;
-    if let Err(error) = open_provider_protocol_if_needed(provider_id, provider, session.id()).await
+    if let Err(error) = open_provider_protocol_if_needed(provider_id, connector, session.id()).await
     {
-        close_failed_session(provider, session.id()).await;
+        close_failed_session(connector, session.id()).await;
         return Err(error);
     }
-    let connection = match provider.connection(session.id()).await {
+    let connection = match connector.connection(session.id()).await {
         Ok(connection) => connection,
         Err(error) => {
-            close_failed_session(provider, session.id()).await;
+            close_failed_session(connector, session.id()).await;
             return Err(map_link_error(error));
         }
     };
-    let logs = match link_session_logs(provider, session.id()) {
+    let logs = match link_session_logs(connector, session.id()) {
         Ok(logs) => logs,
         Err(error) => {
-            close_failed_session(provider, session.id()).await;
+            close_failed_session(connector, session.id()).await;
             return Err(error);
         }
     };
     Ok((session, connection, logs))
 }
 
-async fn close_failed_session(provider: &mut LinkProviderInstance, session_id: &LinkSessionId) {
-    let _ = provider.close(session_id).await;
+async fn close_failed_session(connector: &LinkConnector, session_id: &LinkSessionId) {
+    let _ = connector.close(session_id).await;
 }
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 async fn open_provider_protocol_if_needed(
     provider_id: LinkProviderKind,
-    provider: &mut LinkProviderInstance,
+    connector: &LinkConnector,
     session_id: &LinkSessionId,
 ) -> Result<(), UiError> {
     if provider_id != LinkProviderKind::BrowserSerialEsp32 {
         return Ok(());
     }
-    let LinkProviderInstance::BrowserSerialEsp32(provider) = provider else {
+    let LinkConnector::BrowserSerialEsp32(provider) = connector else {
         return Err(UiError::Link(
-            "browser serial registry entry has the wrong provider type".to_string(),
+            "browser serial connector has the wrong provider type".to_string(),
         ));
     };
     provider
@@ -642,7 +649,7 @@ async fn open_provider_protocol_if_needed(
 #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
 async fn open_provider_protocol_if_needed(
     provider_id: LinkProviderKind,
-    _provider: &mut LinkProviderInstance,
+    _connector: &LinkConnector,
     _session_id: &LinkSessionId,
 ) -> Result<(), UiError> {
     let _ = provider_id;
@@ -650,17 +657,17 @@ async fn open_provider_protocol_if_needed(
 }
 
 fn link_session_logs(
-    provider: &lpa_link::providers::LinkProviderInstance,
+    connector: &LinkConnector,
     session_id: &lpa_link::LinkSessionId,
 ) -> Result<Vec<UiLogDraft>, UiError> {
-    let mut logs = provider
+    let mut logs = connector
         .logs(session_id)
         .map_err(map_link_error)?
         .into_iter()
         .map(link_log_draft)
         .collect::<Vec<_>>();
     logs.extend(
-        provider
+        connector
             .diagnostics(session_id)
             .map_err(map_link_error)?
             .into_iter()
@@ -673,10 +680,6 @@ fn link_session_logs(
             }),
     );
     Ok(logs)
-}
-
-fn missing_provider(provider_id: LinkProviderKind) -> UiError {
-    UiError::Link(format!("provider {} is not available", provider_id.key()))
 }
 
 fn map_link_error(error: LinkError) -> UiError {

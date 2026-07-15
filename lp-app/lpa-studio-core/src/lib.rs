@@ -24,8 +24,7 @@ pub use app::home::{
 };
 pub use app::link::{
     ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkController, LinkManagementOutcome,
-    LinkOpenOutcome, LinkSnapshot, LinkState, ProgressState, ProviderChoice, SharedLinkRegistry,
-    UiIssue,
+    LinkOpenOutcome, LinkSnapshot, LinkState, ProgressState, ProviderChoice, UiIssue,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody,

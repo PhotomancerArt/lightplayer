@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
@@ -26,11 +27,15 @@ pub fn descriptor() -> LinkProviderDescriptor {
 ///   [`LinkConnection`] carrying a real `LinkServerConnection`. `manage()`
 ///   implements Flash/Erase/Reset as scripted device transitions.
 ///
+/// Session state lives behind an internal `RefCell` (borrows scoped to
+/// synchronous sections), so the provider serves `&self` callers through a
+/// shared `LinkConnector`.
+///
 /// [`FakeEsp32Device`]: crate::providers::fake_device::FakeEsp32Device
 pub struct FakeProvider {
     endpoints: Vec<LinkEndpoint>,
-    sessions: BTreeMap<LinkSessionId, FakeSessionState>,
-    next_session_index: u64,
+    sessions: RefCell<BTreeMap<LinkSessionId, FakeSessionState>>,
+    next_session_index: Cell<u64>,
     discover_error: Option<String>,
     connect_error: Option<String>,
     connection_error: Option<String>,
@@ -42,8 +47,8 @@ impl FakeProvider {
     pub fn new() -> Self {
         Self {
             endpoints: Vec::new(),
-            sessions: BTreeMap::new(),
-            next_session_index: 1,
+            sessions: RefCell::new(BTreeMap::new()),
+            next_session_index: Cell::new(1),
             discover_error: None,
             connect_error: None,
             connection_error: None,
@@ -112,10 +117,16 @@ impl FakeProvider {
     /// complete line, protocol and logs alike) — the host analogue of the
     /// browser serial provider's `take_lines`.
     #[cfg(feature = "fake-device")]
-    pub fn take_lines(&mut self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
-        let state = self.session_mut(session_id)?;
-        let Some(lines) = &state.observed_lines else {
-            return Ok(Vec::new());
+    pub fn take_lines(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
+        let lines = {
+            let sessions = self.sessions.borrow();
+            let state = sessions
+                .get(session_id)
+                .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+            match &state.observed_lines {
+                Some(lines) => std::sync::Arc::clone(lines),
+                None => return Ok(Vec::new()),
+            }
         };
         let mut lines = lines
             .lock()
@@ -130,28 +141,13 @@ impl FakeProvider {
             .ok_or_else(|| LinkError::endpoint_not_found(endpoint_id.as_str()))
     }
 
-    fn session(&self, session_id: &LinkSessionId) -> Result<&FakeSessionState, LinkError> {
-        self.sessions
-            .get(session_id)
-            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
-    }
-
-    fn session_mut(
-        &mut self,
-        session_id: &LinkSessionId,
-    ) -> Result<&mut FakeSessionState, LinkError> {
-        self.sessions
-            .get_mut(session_id)
-            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
-    }
-
     /// Open the real serial transport machinery over the device's byte
     /// stream: the same framing thread the hardware path uses, with a
     /// reset-after-open so the boot output is captured, and a line buffer
     /// standing in for the browser provider's observed-line surface.
     #[cfg(feature = "fake-device")]
     fn open_device_transport(
-        &mut self,
+        &self,
         endpoint_id: &LinkEndpointId,
     ) -> Result<Option<FakeDeviceSessionResources>, LinkError> {
         use std::sync::Arc;
@@ -191,7 +187,7 @@ impl FakeProvider {
         })?;
         let transport: Box<dyn lpa_client::ClientTransport> = Box::new(transport);
         let server_connection: crate::LinkServerConnection =
-            Arc::new(tokio::sync::Mutex::new(transport));
+            std::sync::Arc::new(tokio::sync::Mutex::new(transport));
         Ok(Some(FakeDeviceSessionResources {
             device,
             server_connection,
@@ -205,7 +201,7 @@ impl LinkProvider for FakeProvider {
         LinkProviderKind::Fake
     }
 
-    async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
+    async fn discover(&self) -> Result<Vec<LinkEndpoint>, LinkError> {
         if let Some(message) = &self.discover_error {
             return Err(LinkError::ConnectionFailed {
                 message: message.clone(),
@@ -214,26 +210,20 @@ impl LinkProvider for FakeProvider {
         Ok(self.endpoints.clone())
     }
 
-    async fn status(
-        &mut self,
-        endpoint_id: &LinkEndpointId,
-    ) -> Result<LinkEndpointStatus, LinkError> {
+    async fn status(&self, endpoint_id: &LinkEndpointId) -> Result<LinkEndpointStatus, LinkError> {
         Ok(self.endpoint(endpoint_id)?.status.clone())
     }
 
-    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
+    async fn connect(&self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
         if let Some(message) = &self.connect_error {
             return Err(LinkError::ConnectionFailed {
                 message: message.clone(),
             });
         }
         let endpoint = self.endpoint(endpoint_id)?.clone();
-        let session_id = LinkSessionId::new(format!(
-            "{}:{}",
-            endpoint_id.as_str(),
-            self.next_session_index
-        ));
-        self.next_session_index += 1;
+        let session_index = self.next_session_index.get();
+        self.next_session_index.set(session_index + 1);
+        let session_id = LinkSessionId::new(format!("{}:{}", endpoint_id.as_str(), session_index));
 
         let session = LinkSession::new(
             session_id.clone(),
@@ -254,20 +244,20 @@ impl LinkProvider for FakeProvider {
             }
             None => state,
         };
-        self.sessions.insert(session_id, state);
+        self.sessions.borrow_mut().insert(session_id, state);
         Ok(session)
     }
 
-    async fn connection(
-        &mut self,
-        session_id: &LinkSessionId,
-    ) -> Result<LinkConnection, LinkError> {
+    async fn connection(&self, session_id: &LinkSessionId) -> Result<LinkConnection, LinkError> {
         if let Some(message) = &self.connection_error {
             return Err(LinkError::ConnectionFailed {
                 message: message.clone(),
             });
         }
-        let state = self.session(session_id)?;
+        let sessions = self.sessions.borrow();
+        let state = sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
         if state.session.status == LinkSessionStatus::Closed {
             return Err(LinkError::Closed);
         }
@@ -286,11 +276,19 @@ impl LinkProvider for FakeProvider {
     }
 
     fn logs(&self, session_id: &LinkSessionId) -> Result<Vec<LinkLogEntry>, LinkError> {
-        Ok(self.session(session_id)?.logs.clone())
+        let sessions = self.sessions.borrow();
+        let state = sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        Ok(state.logs.clone())
     }
 
     fn diagnostics(&self, session_id: &LinkSessionId) -> Result<Vec<LinkDiagnostic>, LinkError> {
-        Ok(self.session(session_id)?.diagnostics.clone())
+        let sessions = self.sessions.borrow();
+        let state = sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        Ok(state.diagnostics.clone())
     }
 
     /// Scripted management transitions on device-backed sessions
@@ -300,14 +298,20 @@ impl LinkProvider for FakeProvider {
     /// progress into the sink — the same event surface the browser provider
     /// feeds live.
     async fn manage(
-        &mut self,
+        &self,
         session_id: &LinkSessionId,
         request: crate::LinkManagementRequest,
     ) -> Result<crate::LinkManagementResult, LinkError> {
         #[cfg(feature = "fake-device")]
         {
-            let state = self.session(session_id)?;
-            if let Some(device) = state.device.clone() {
+            let (device, observed_lines) = {
+                let sessions = self.sessions.borrow();
+                let state = sessions
+                    .get(session_id)
+                    .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+                (state.device.clone(), state.observed_lines.clone())
+            };
+            if let Some(device) = device {
                 if let Some(message) = device.take_manage_failure() {
                     return Err(LinkError::other(message));
                 }
@@ -319,7 +323,7 @@ impl LinkProvider for FakeProvider {
                 // observed before it (the browser provider clears buffered
                 // input on reset the same way), so the next readiness pass
                 // classifies the NEW state's boot, not stale lines.
-                if let Some(lines) = &self.session(session_id)?.observed_lines {
+                if let Some(lines) = &observed_lines {
                     lines
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -332,16 +336,34 @@ impl LinkProvider for FakeProvider {
         Err(LinkError::unsupported(format!("{:?}", request.operation())))
     }
 
-    async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {
-        let state = self.session_mut(session_id)?;
-        state.session.status = LinkSessionStatus::Closed;
+    async fn close(&self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+        // Mark the session closed and take the transport out of the state
+        // BEFORE awaiting the transport close: no internal borrow may span
+        // the await.
         #[cfg(feature = "fake-device")]
-        if let Some(server_connection) = state.server_connection.take() {
+        let server_connection;
+        {
+            let mut sessions = self.sessions.borrow_mut();
+            let state = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+            state.session.status = LinkSessionStatus::Closed;
+            #[cfg(feature = "fake-device")]
+            {
+                server_connection = state.server_connection.take();
+            }
+        }
+        #[cfg(feature = "fake-device")]
+        if let Some(server_connection) = server_connection {
             let mut transport = server_connection.lock().await;
             lpa_client::ClientTransport::close(&mut **transport)
                 .await
                 .map_err(|error| LinkError::other(error.to_string()))?;
         }
+        let mut sessions = self.sessions.borrow_mut();
+        let state = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
         state.logs.push(LinkLogEntry::new(
             state.endpoint_id.clone(),
             Some(state.session.id.clone()),

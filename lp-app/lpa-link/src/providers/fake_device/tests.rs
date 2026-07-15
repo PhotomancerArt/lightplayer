@@ -285,7 +285,7 @@ async fn log_flood_interleaves_device_lines_between_frames() {
 #[tokio::test]
 async fn provider_manage_runs_scripted_flash_and_erase_transitions() {
     let endpoint_id = LinkEndpointId::new("fake-device-0");
-    let mut provider = FakeProvider::new().with_device_endpoint(
+    let provider = FakeProvider::new().with_device_endpoint(
         endpoint_id.clone(),
         "Fake ESP32",
         FakeDeviceScript::new(FakeBootState::BlankFlash),
@@ -338,7 +338,7 @@ async fn provider_manage_runs_scripted_flash_and_erase_transitions() {
 #[tokio::test]
 async fn scripted_manage_failure_fails_the_next_operation_once() {
     let endpoint_id = LinkEndpointId::new("fake-device-0");
-    let mut provider = FakeProvider::new().with_device_endpoint(
+    let provider = FakeProvider::new().with_device_endpoint(
         endpoint_id.clone(),
         "Fake ESP32",
         FakeDeviceScript::new(FakeBootState::BlankFlash)

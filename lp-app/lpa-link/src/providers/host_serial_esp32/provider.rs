@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
 
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::provider::session::LinkSessionId;
@@ -19,10 +19,20 @@ pub fn descriptor() -> LinkProviderDescriptor {
     LinkProviderKind::HostSerialEsp32.descriptor()
 }
 
+/// ESP32-over-host-serial provider.
+///
+/// Endpoint and session state live behind an internal `Mutex` with lock
+/// scopes confined to synchronous sections (never across an `await`), so the
+/// provider serves `&self` callers through a shared `LinkConnector` while its
+/// futures stay `Send` for host consumers such as `lp-cli`.
 pub struct HostSerialEsp32Provider {
+    state: std::sync::Mutex<HostSerialEsp32State>,
+    options: HostSerialEsp32Options,
+}
+
+struct HostSerialEsp32State {
     endpoints: Vec<HostSerialEsp32Endpoint>,
     sessions: BTreeMap<LinkSessionId, HostSerialEsp32SessionState>,
-    options: HostSerialEsp32Options,
     next_session_index: u64,
 }
 
@@ -40,10 +50,12 @@ impl HostSerialEsp32Provider {
 
     pub fn with_options(options: HostSerialEsp32Options) -> Self {
         Self {
-            endpoints: Vec::new(),
-            sessions: BTreeMap::new(),
+            state: std::sync::Mutex::new(HostSerialEsp32State {
+                endpoints: Vec::new(),
+                sessions: BTreeMap::new(),
+                next_session_index: 1,
+            }),
             options,
-            next_session_index: 1,
         }
     }
 
@@ -56,24 +68,31 @@ impl HostSerialEsp32Provider {
     }
 
     pub fn create_endpoint_for_port(
-        &mut self,
+        &self,
         port_name: impl Into<String>,
         label: impl Into<String>,
     ) -> LinkEndpointId {
         let port_name = port_name.into();
         let endpoint_id = endpoint_id_for_port(&port_name);
-        self.upsert_port_endpoint(endpoint_id.clone(), port_name, label.into());
+        upsert_port_endpoint(
+            &mut self.state(),
+            self.kind(),
+            endpoint_id.clone(),
+            port_name,
+            label.into(),
+        );
         endpoint_id
     }
 
-    pub fn port_name_for_endpoint(&self, endpoint_id: &LinkEndpointId) -> Option<&str> {
-        self.endpoints
+    pub fn port_name_for_endpoint(&self, endpoint_id: &LinkEndpointId) -> Option<String> {
+        self.state()
+            .endpoints
             .iter()
             .find(|entry| entry.endpoint.id == *endpoint_id)
-            .map(|entry| entry.port_name.as_str())
+            .map(|entry| entry.port_name.clone())
     }
 
-    fn refresh_discovered_endpoints(&mut self) -> Result<(), LinkError> {
+    fn refresh_discovered_endpoints(&self) -> Result<(), LinkError> {
         let mut ports = serialport::available_ports()
             .map_err(|error| LinkError::other(format!("failed to list serial ports: {error}")))?
             .into_iter()
@@ -81,74 +100,36 @@ impl HostSerialEsp32Provider {
             .collect::<Vec<_>>();
         ports.sort();
 
-        self.endpoints.clear();
+        let mut state = self.state();
+        state.endpoints.clear();
         for port_name in ports {
             let label = label_for_port(&port_name);
-            self.create_endpoint_for_port(port_name, label);
+            let endpoint_id = endpoint_id_for_port(&port_name);
+            upsert_port_endpoint(&mut state, self.kind(), endpoint_id, port_name, label);
         }
         Ok(())
     }
 
-    pub fn endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<&LinkEndpoint, LinkError> {
-        Ok(&self.endpoint_entry(endpoint_id)?.endpoint)
+    pub fn endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<LinkEndpoint, LinkError> {
+        Ok(self.endpoint_entry(endpoint_id)?.endpoint)
+    }
+
+    fn state(&self) -> MutexGuard<'_, HostSerialEsp32State> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn endpoint_entry(
         &self,
         endpoint_id: &LinkEndpointId,
-    ) -> Result<&HostSerialEsp32Endpoint, LinkError> {
-        self.endpoints
+    ) -> Result<HostSerialEsp32Endpoint, LinkError> {
+        self.state()
+            .endpoints
             .iter()
             .find(|entry| entry.endpoint.id == *endpoint_id)
+            .cloned()
             .ok_or_else(|| LinkError::endpoint_not_found(endpoint_id.as_str()))
-    }
-
-    fn session(
-        &self,
-        session_id: &LinkSessionId,
-    ) -> Result<&HostSerialEsp32SessionState, LinkError> {
-        self.sessions
-            .get(session_id)
-            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
-    }
-
-    fn session_mut(
-        &mut self,
-        session_id: &LinkSessionId,
-    ) -> Result<&mut HostSerialEsp32SessionState, LinkError> {
-        self.sessions
-            .get_mut(session_id)
-            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
-    }
-
-    fn upsert_port_endpoint(
-        &mut self,
-        endpoint_id: LinkEndpointId,
-        port_name: String,
-        label: String,
-    ) {
-        // Only logs + diagnostics: this provider implements no `manage()`, so
-        // advertising Reset would lie (`ResetRuntime` would return
-        // `OperationUnsupported`). Reset/Flash/Erase return together with a
-        // real management implementation (M5, espflash-lib).
-        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
-            .with_capabilities(LinkCapabilities::diagnostics_and_logs());
-
-        if let Some(existing) = self
-            .endpoints
-            .iter_mut()
-            .find(|entry| entry.endpoint.id == endpoint_id)
-        {
-            *existing = HostSerialEsp32Endpoint {
-                endpoint,
-                port_name,
-            };
-        } else {
-            self.endpoints.push(HostSerialEsp32Endpoint {
-                endpoint,
-                port_name,
-            });
-        }
     }
 }
 
@@ -157,30 +138,22 @@ impl LinkProvider for HostSerialEsp32Provider {
         LinkProviderKind::HostSerialEsp32
     }
 
-    async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
+    async fn discover(&self) -> Result<Vec<LinkEndpoint>, LinkError> {
         self.refresh_discovered_endpoints()?;
         Ok(self
+            .state()
             .endpoints
             .iter()
             .map(|entry| entry.endpoint.clone())
             .collect())
     }
 
-    async fn status(
-        &mut self,
-        endpoint_id: &LinkEndpointId,
-    ) -> Result<LinkEndpointStatus, LinkError> {
-        Ok(self.endpoint(endpoint_id)?.status.clone())
+    async fn status(&self, endpoint_id: &LinkEndpointId) -> Result<LinkEndpointStatus, LinkError> {
+        Ok(self.endpoint(endpoint_id)?.status)
     }
 
-    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
-        let endpoint = self.endpoint_entry(endpoint_id)?.clone();
-        let session_id = LinkSessionId::new(format!(
-            "{}:{}",
-            endpoint_id.as_str(),
-            self.next_session_index
-        ));
-        self.next_session_index += 1;
+    async fn connect(&self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
+        let endpoint = self.endpoint_entry(endpoint_id)?;
 
         let baud_rate = self
             .options
@@ -210,6 +183,11 @@ impl LinkProvider for HostSerialEsp32Provider {
         let transport: Box<dyn lpa_client::ClientTransport> = Box::new(transport);
         let server_connection: LinkServerConnection = Arc::new(Mutex::new(transport));
 
+        let mut state = self.state();
+        let session_index = state.next_session_index;
+        state.next_session_index += 1;
+        let session_id = LinkSessionId::new(format!("{}:{}", endpoint_id.as_str(), session_index));
+
         let session = LinkSession::new(
             session_id.clone(),
             self.kind(),
@@ -217,7 +195,7 @@ impl LinkProvider for HostSerialEsp32Provider {
             LinkConnectionKind::HostSerialEsp32,
             endpoint.endpoint.capabilities.clone(),
         );
-        self.sessions.insert(
+        state.sessions.insert(
             session_id,
             HostSerialEsp32SessionState::new(
                 session.clone(),
@@ -229,54 +207,112 @@ impl LinkProvider for HostSerialEsp32Provider {
         Ok(session)
     }
 
-    async fn connection(
-        &mut self,
-        session_id: &LinkSessionId,
-    ) -> Result<LinkConnection, LinkError> {
-        let state = self.session(session_id)?;
-        if state.session.status == LinkSessionStatus::Closed {
+    async fn connection(&self, session_id: &LinkSessionId) -> Result<LinkConnection, LinkError> {
+        let state = self.state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        if session.session.status == LinkSessionStatus::Closed {
             return Err(LinkError::Closed);
         }
-        let Some(server_connection) = &state.server_connection else {
+        let Some(server_connection) = &session.server_connection else {
             return Err(LinkError::Closed);
         };
         Ok(LinkConnection::host_serial_esp32(
-            state.session.endpoint_id.clone(),
-            state.session.id.clone(),
+            session.session.endpoint_id.clone(),
+            session.session.id.clone(),
             server_connection.clone(),
         ))
     }
 
     fn logs(&self, session_id: &LinkSessionId) -> Result<Vec<LinkLogEntry>, LinkError> {
-        Ok(self.session(session_id)?.logs.clone())
+        let state = self.state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        Ok(session.logs.clone())
     }
 
     fn diagnostics(&self, session_id: &LinkSessionId) -> Result<Vec<LinkDiagnostic>, LinkError> {
-        Ok(self.session(session_id)?.diagnostics.clone())
+        let state = self.state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        Ok(session.diagnostics.clone())
     }
 
-    async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {
-        let state = self.session_mut(session_id)?;
-        if state.session.status == LinkSessionStatus::Closed {
-            return Ok(());
-        }
-        state.session.status = LinkSessionStatus::Closed;
-        if let Some(server_connection) = state.server_connection.take() {
+    async fn close(&self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+        // Mark the session closed and take the transport out of the state
+        // BEFORE awaiting the transport close: no internal lock may span
+        // the await.
+        let server_connection = {
+            let mut state = self.state();
+            let session = state
+                .sessions
+                .get_mut(session_id)
+                .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+            if session.session.status == LinkSessionStatus::Closed {
+                return Ok(());
+            }
+            session.session.status = LinkSessionStatus::Closed;
+            session.server_connection.take()
+        };
+        if let Some(server_connection) = server_connection {
             let mut transport = server_connection.lock().await;
             lpa_client::ClientTransport::close(&mut **transport)
                 .await
                 .map_err(|error| LinkError::other(error.to_string()))?;
         }
-        state.logs.push(LinkLogEntry::new(
-            state.session.endpoint_id.clone(),
-            Some(state.session.id.clone()),
+        let mut state = self.state();
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        let log = LinkLogEntry::new(
+            session.session.endpoint_id.clone(),
+            Some(session.session.id.clone()),
             LinkLogLevel::Info,
             format!(
                 "host serial ESP32 session closed on {} at {} baud",
-                state.port_name, state.baud_rate
+                session.port_name, session.baud_rate
             ),
-        ));
+        );
+        session.logs.push(log);
         Ok(())
+    }
+}
+
+fn upsert_port_endpoint(
+    state: &mut HostSerialEsp32State,
+    kind: LinkProviderKind,
+    endpoint_id: LinkEndpointId,
+    port_name: String,
+    label: String,
+) {
+    // Only logs + diagnostics: this provider implements no `manage()`, so
+    // advertising Reset would lie (`ResetRuntime` would return
+    // `OperationUnsupported`). Reset/Flash/Erase return together with a
+    // real management implementation (M5, espflash-lib).
+    let endpoint = LinkEndpoint::new(endpoint_id.clone(), kind, label)
+        .with_capabilities(LinkCapabilities::diagnostics_and_logs());
+
+    if let Some(existing) = state
+        .endpoints
+        .iter_mut()
+        .find(|entry| entry.endpoint.id == endpoint_id)
+    {
+        *existing = HostSerialEsp32Endpoint {
+            endpoint,
+            port_name,
+        };
+    } else {
+        state.endpoints.push(HostSerialEsp32Endpoint {
+            endpoint,
+            port_name,
+        });
     }
 }
 

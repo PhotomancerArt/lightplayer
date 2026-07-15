@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use lpa_client::{
     CancelSignal, ClientError, ClientEvent, ClientIo, LpClient, ProgressDeadline, PullOutcome,
 };
-use lpa_link::{LinkConnection, LinkConnectionKind};
+use lpa_link::{LinkConnection, LinkConnectionKind, LinkConnector};
 use lpc_model::{
     ArtifactLocation, CommitResult, MutationCmdBatch, MutationCmdBatchResult, NodeId,
     ProjectOverlay, Revision, SlotPath,
@@ -22,8 +22,8 @@ use crate::app::project::demo_project::{
     DEMO_PROJECT_ID, DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files,
 };
 use crate::{
-    LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UiError, UiLogDraft,
-    UiLogLevel, UiLogOrigin, UxUpdateSink,
+    LoadedProjectChoice, ProjectInventorySummary, UiError, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UxUpdateSink,
 };
 
 pub struct StudioServerClient {
@@ -43,14 +43,14 @@ impl StudioServerClient {
     }
 
     pub fn from_link_connection(
-        registry: SharedLinkRegistry,
+        connector: Rc<LinkConnector>,
         connection: &LinkConnection,
         updates: UxUpdateSink,
     ) -> Result<Self, UiError> {
         let pending_logs = Rc::new(RefCell::new(Vec::new()));
         let protocol = connection_protocol(&connection.kind);
         let io = server_io_from_link_connection(
-            registry,
+            connector,
             connection,
             Rc::clone(&pending_logs),
             updates,
@@ -561,7 +561,7 @@ fn node_def_artifacts(
 }
 
 fn server_io_from_link_connection(
-    _registry: SharedLinkRegistry,
+    _connector: Rc<LinkConnector>,
     connection: &LinkConnection,
     _pending_logs: Rc<RefCell<Vec<UiLogDraft>>>,
     _updates: UxUpdateSink,
@@ -570,7 +570,7 @@ fn server_io_from_link_connection(
         #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
         LinkConnectionKind::BrowserWorker { .. } => Ok(Box::new(
             super::browser_worker_client_io::BrowserWorkerClientIo::new(
-                _registry,
+                _connector,
                 connection.session_id.clone(),
                 _pending_logs,
             ),
@@ -582,7 +582,7 @@ fn server_io_from_link_connection(
         #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
         LinkConnectionKind::BrowserSerialEsp32 { .. } => Ok(Box::new(
             super::browser_serial_client_io::BrowserSerialClientIo::new(
-                _registry,
+                _connector,
                 connection.session_id.clone(),
                 _pending_logs,
                 _updates,
@@ -602,7 +602,7 @@ fn server_io_from_link_connection(
             #[cfg(all(test, not(target_arch = "wasm32")))]
             if let Some(transport) = _connection_server_transport(connection) {
                 return Ok(Box::new(super::fake_link_client_io::FakeLinkClientIo::new(
-                    _registry,
+                    _connector,
                     connection.session_id.clone(),
                     transport,
                     _pending_logs,
