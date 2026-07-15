@@ -66,5 +66,7 @@ float test_float_divide_large_numbers() {
     return a / b;
 }
 
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
 // @unsupported(rv32c.q32)
-// run: test_float_divide_large_numbers() ~= 31.999985 (tolerance: 0.001)
+// run[q32]: test_float_divide_large_numbers() ~= 31.999985 (tolerance: 0.001)
+// run[f32]: test_float_divide_large_numbers() ~= 1000.0 (tolerance: 0.001)

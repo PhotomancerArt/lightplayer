@@ -34,11 +34,8 @@ uint test_declare_in_uint() {
     return int(instance_id + 1u);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// run: test_declare_in_uint() == 1
+// run: test_declare_in_uint() == 1u
 
 bool test_declare_in_bool() {
     // Input global bool declaration

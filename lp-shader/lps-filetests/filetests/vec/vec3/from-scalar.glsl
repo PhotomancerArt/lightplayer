@@ -55,7 +55,9 @@ vec3 test_vec3_from_scalar_large_value() {
     return vec3(100000.0);
 }
 
-// run: test_vec3_from_scalar_large_value() ~= vec3(32768.0, 32768.0, 32768.0)
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_vec3_from_scalar_large_value() ~= vec3(32768.0, 32768.0, 32768.0)
+// run[f32]: test_vec3_from_scalar_large_value() ~= vec3(100000.0, 100000.0, 100000.0)
 
 vec3 test_vec3_from_scalar_fractional() {
     return vec3(0.5);

@@ -79,8 +79,10 @@ vec2 b = vec2(3000.0, 1000.0);
 return a * b;
 }
 
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
 // @unsupported(rv32c.q32)
-// run: test_vec2_multiply_large_numbers() ~= vec2(-14656.0, -31616.0)
+// run[q32]: test_vec2_multiply_large_numbers() ~= vec2(-14656.0, -31616.0)
+// run[f32]: test_vec2_multiply_large_numbers() ~= vec2(3000000.0, 2000000.0)
 
 vec2 test_vec2_multiply_mixed_components() {
 vec2 a = vec2(2.0, -3.0);

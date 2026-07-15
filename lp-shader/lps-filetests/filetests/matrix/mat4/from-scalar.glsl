@@ -60,7 +60,9 @@ mat4 test_mat4_from_scalar_large_value() {
     return mat4(1000000.0);
 }
 
-// run: test_mat4_from_scalar_large_value() ~= mat4(32768.0, 0.0, 0.0, 0.0, 0.0, 32768.0, 0.0, 0.0, 0.0, 0.0, 32768.0, 0.0, 0.0, 0.0, 0.0, 32768.0)
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_mat4_from_scalar_large_value() ~= mat4(32768.0, 0.0, 0.0, 0.0, 0.0, 32768.0, 0.0, 0.0, 0.0, 0.0, 32768.0, 0.0, 0.0, 0.0, 0.0, 32768.0)
+// run[f32]: test_mat4_from_scalar_large_value() ~= mat4(vec4(1000000.0, 0.0, 0.0, 0.0), vec4(0.0, 1000000.0, 0.0, 0.0), vec4(0.0, 0.0, 1000000.0, 0.0), vec4(0.0, 0.0, 0.0, 1000000.0))
 
 mat4 test_mat4_from_scalar_fractional() {
     return mat4(0.5);

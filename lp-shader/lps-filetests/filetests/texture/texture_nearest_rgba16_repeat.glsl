@@ -14,4 +14,6 @@ vec4 wraps_to_left() {
 }
 
 // u=1.25, w=2 → repeat → same texel as column 0
+// interp.f32: no guest memory to bind texture fixtures into
+// @unsupported(interp.f32)
 // run: wraps_to_left() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0003)

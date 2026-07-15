@@ -14,4 +14,6 @@ vec4 repeat_blend() {
     return texture(inputColor, vec2(1.375, 0.5));
 }
 
+// interp.f32: no guest memory to bind texture fixtures into
+// @unsupported(interp.f32)
 // run: repeat_blend() ~= vec4(0.75, 0.25, 0.0, 1.0) (tolerance: 0.005)

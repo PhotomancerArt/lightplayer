@@ -37,26 +37,20 @@ int test_findmsb_int_neg_one() {
 // run: test_findmsb_int_neg_one() == -1
 
 int test_findmsb_int_negative() {
-    // findMSB(-2) should be 30 (most significant zero bit in two's complement)
+    // findMSB(-2) should be 0 (bit 0 is the most significant zero bit in ...11111110)
     return findMSB(-2);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(rv32lpn.q32)
-// run: test_findmsb_int_negative() == 30
+// run: test_findmsb_int_negative() == 0
 
 int test_findmsb_int_large() {
-    // findMSB(2147483648) should be 31 (bit 31 is set: 2^31)
+    // 2147483648 overflows int to INT_MIN (0x80000000); findMSB of a negative
+    // value is its most significant zero bit: 30
     return findMSB(2147483648);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(rv32lpn.q32)
-// run: test_findmsb_int_large() == 31
+// findMSB(-2)==0 / findMSB(int 2^31)==30 per GLSL semantics (naga const-eval agrees); prior expectations were wrong, the Q32 @broken lines masked correct results.
+// run: test_findmsb_int_large() == 30
 
 uint test_findmsb_uint_zero() {
     // findMSB(uint(0)) should be -1, but returns uint so check against 4294967295u (-1 as uint)

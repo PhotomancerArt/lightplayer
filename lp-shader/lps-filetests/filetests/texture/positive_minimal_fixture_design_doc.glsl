@@ -17,5 +17,8 @@ vec4 texel_right() {
     return texelFetch(inputColor, ivec2(1, 0), 0);
 }
 
+// @unsupported(interp.f32)
 // run: texel_left() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0002)
+// interp.f32: no guest memory to bind texture fixtures into
+// @unsupported(interp.f32)
 // run: texel_right() ~= vec4(0.0, 1.0, 0.0, 1.0) (tolerance: 0.0002)

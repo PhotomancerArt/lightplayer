@@ -33,6 +33,11 @@ vec4 worley_demo(vec2 scaledCoord, float time) {
     return vec4(rgb, 1.0);
 }
 // test run
+// per-mode: Q32 sin/interp precision shifts the hue slightly vs IEEE f32 (M6 triage).
+// set_uniform lines attach to the next run directive only, so each mode channel repeats them.
 // set_uniform: outputSize = vec2(32.0, 32.0)
 // set_uniform: time = 1.25
-// run: render(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14434814, 1.0, 1.0) (tolerance: 0.002)
+// run[q32]: render(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14434814, 1.0, 1.0) (tolerance: 0.002)
+// set_uniform: outputSize = vec2(32.0, 32.0)
+// set_uniform: time = 1.25
+// run[f32]: render(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14105844, 1.0, 1.0) (tolerance: 0.002)

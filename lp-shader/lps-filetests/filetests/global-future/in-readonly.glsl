@@ -33,11 +33,8 @@ uint test_in_readonly_uint() {
     return int(instance_id + 50u);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
-// run: test_in_readonly_uint() == 50
+// run: test_in_readonly_uint() == 50u
 
 bool test_in_readonly_bool() {
     // Input bool is read-only
