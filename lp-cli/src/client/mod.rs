@@ -9,6 +9,7 @@ pub use lpa_client::{
 };
 
 // CLI-specific modules
+pub mod cli_connect;
 pub mod client_connect;
 pub mod host_process;
 pub mod host_serial_esp32;
