@@ -46,5 +46,8 @@ pub(crate) enum BrowserOutputEnvelope {
         message: String,
     },
     /// One complete `lpc_wire::WireServerMessage` JSON frame.
-    ProtocolOut { frame: String },
+    ///
+    /// `runtime_id` demultiplexes protocol streams when one worker hosts
+    /// several runtimes (e.g. the Studio preview lab).
+    ProtocolOut { runtime_id: u32, frame: String },
 }

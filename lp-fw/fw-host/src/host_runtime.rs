@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_client::{ClientTransport, create_local_transport_pair};
-use lpa_server::{ButtonService, Graphics, LpGraphics, LpServer, RadioService};
+use lpa_server::{ButtonService, LpGraphics, LpServer, RadioService};
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
@@ -121,7 +122,7 @@ fn create_memory_server() -> LpServer {
     )));
     let button_service: Rc<dyn ButtonService> = hardware.clone();
     let radio_service: Rc<dyn RadioService> = hardware;
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
 
     LpServer::new_with_hardware_services(
         output_provider,

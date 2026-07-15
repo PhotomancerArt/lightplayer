@@ -2736,7 +2736,7 @@ mod tests {
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
         let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let node = node_for_def_path(&rt, "/compute.json").expect("compute node");
 
         let production = rt
@@ -2762,7 +2762,7 @@ mod tests {
         let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = rt.tree().root();
 
         let compute = rt
@@ -2902,7 +2902,7 @@ mod tests {
         let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/events.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load events example");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = rt.tree().root();
 
         let shader = rt
@@ -2957,7 +2957,7 @@ mod tests {
 
         let mut rt =
             ProjectLoader::load_from_root(fs, services).expect("load button playlist example");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = rt.tree().root();
         let playlist = rt
             .tree()
@@ -3075,7 +3075,7 @@ mod tests {
         services.set_radio_service(Some(radio_service));
 
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load button sign example");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
 
         rt.tick(16).expect("tick button-sign without radio cycle");
     }
@@ -3093,7 +3093,7 @@ mod tests {
         services.set_radio_service(Some(radio_service));
 
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign example");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
 
         rt.tick(16).expect("tick fyeah-sign without radio cycle");
     }
@@ -3113,7 +3113,7 @@ mod tests {
 
         let mut rt =
             ProjectLoader::load_from_root(fs, services).expect("load fyeah button example");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
 
         rt.tick(16).expect("tick fyeah-button without radio cycle");
     }

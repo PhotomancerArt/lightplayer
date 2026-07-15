@@ -31,6 +31,12 @@ members = [
     "lp-core/lpc-slot-macros",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    # lp-gfx workspace members
+    "lp-gfx/lp-gfx",
+    "lp-gfx/lp-gfx-lpvm",
+    # NOT in default-members: wgpu's dependency tree is heavy and the GPU
+    # backend is host-optional (build/test it explicitly, like the spike).
+    "lp-gfx/lp-gfx-wgpu",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
@@ -58,7 +64,8 @@ members = [
     "lp-shader/lps-builtins-emu-app",
     "lp-shader/lps-filetests-app",
     "lp-app/web-demo",
-    "spikes/naga-wasm-poc", "lp-shader/lps-q32",
+    "spikes/naga-wasm-poc",
+    "lp-shader/lps-q32",
 ]
 resolver = "2"
 
@@ -87,6 +94,9 @@ default-members = [
     "lp-core/lpc-model",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
+    # lp-gfx workspace members
+    "lp-gfx/lp-gfx",
+    "lp-gfx/lp-gfx-lpvm",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",

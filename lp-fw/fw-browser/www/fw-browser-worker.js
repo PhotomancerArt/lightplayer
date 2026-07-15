@@ -50,7 +50,8 @@ async function boot(label) {
     self.postMessage({ kind: 'status', status: 'booting' });
     const exports = await init();
     fw_browser_init_exports(exports);
-    runtimeId = create_runtime(label);
+    // Smoke page runs the CPU tier (the authoritative sim tier).
+    runtimeId = JSON.parse(create_runtime(label, 'cpu')).runtime_id;
     booted = true;
     postMany(drain_output_json(runtimeId));
   }

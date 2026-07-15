@@ -1,13 +1,13 @@
 //! Optional runtime capability for nodes that can materialize visual products.
 
-use lps_shared::TextureBuffer;
+use lp_gfx::TextureHandle;
 
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
     VisualSampleTarget,
 };
 
-use super::{NodeError, RenderContext};
+use super::{NodeError, RenderContext, err_ctx};
 
 /// Node capability for materializing graph-level [`VisualProduct`] values.
 pub trait RenderNode {
@@ -21,14 +21,14 @@ pub trait RenderNode {
     /// Render a visual product into a caller-owned texture target.
     ///
     /// The default implementation materializes an owned texture product and
-    /// copies it into `target`. Shader nodes should override this so fixture and
-    /// output callers can own and reuse render targets without transient
+    /// uploads it into `target`. Shader nodes should override this so fixture
+    /// and output callers can own and reuse render targets without transient
     /// allocation.
     fn render_texture_into(
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
+        target: &mut TextureHandle,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         let texture = self.render_texture(product, request, ctx)?;
@@ -41,11 +41,10 @@ pub trait RenderNode {
         let bytes = texture
             .try_raw_bytes()
             .ok_or_else(|| NodeError::msg("render texture product has no raw bytes"))?;
-        if bytes.len() != target.data().len() {
-            return Err(NodeError::msg("render texture target byte length mismatch"));
-        }
-        target.data_mut().copy_from_slice(bytes);
-        Ok(())
+        ctx.graphics()
+            .ok_or_else(|| NodeError::msg("render context has no graphics backend"))?
+            .write_texture(target, bytes)
+            .map_err(err_ctx("render texture target write"))
     }
 
     /// Sample a visual product at caller-provided points into caller-owned RGBA16 storage.

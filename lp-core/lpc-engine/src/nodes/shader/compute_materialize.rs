@@ -10,7 +10,7 @@ use lpc_model::{
 };
 use lps_shared::LpsValueF32;
 
-use crate::gfx::lps_value_f32_to_model_value;
+use crate::shader_abi::lps_value_f32_to_model_value;
 
 /// Convert one produced shader ABI output into the semantic slot data shape.
 pub fn materialize_produced_slot(
