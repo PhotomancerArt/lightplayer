@@ -6,12 +6,13 @@
 //! `AssetEditor` over a controller-shaped `UiAssetEditor` fixture — the same
 //! DTO the project controller embeds on an asset slot.
 //!
-//! These cover the fixed-height status bar's states. The **no-reflow**
-//! guarantee is what to look for: the editor body sits at the same geometry
-//! in every state (clean, unsaved, applying, compile error, apply failed) —
-//! the bar changes tone/content without moving the editor. The bar's
-//! `Modified` state is editor-local (driven by typing), so it is covered by
-//! unit tests + live sim rather than a fixture story.
+//! These cover the gentle two-half status bar. What to look for: the bar's
+//! **geometry is identical in every state** — same plain background, the
+//! Revert/Save buttons always present (disabled vs enabled in place), the
+//! applying dot's slot always reserved — and the error state (left half)
+//! coexists with the Unsaved state (right half) instead of hiding it. The
+//! applying dot's fade and the editor-local modified window are covered by
+//! unit tests + live sim rather than fixture stories.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -56,34 +57,25 @@ fn EditorStoryCard(
     // Pinned (not detected) so the shortcut hints render identically on
     // every capture host; Mac is the default story platform.
     #[props(default = Platform::Mac)] platform: Platform,
-    // The Auto toggle's initial state (on by default, like the app).
-    #[props(default = true)] auto_apply: bool,
 ) -> Element {
     rsx! {
         div { class: "tw:w-full tw:max-w-2xl tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
-            AssetEditor { editor, platform, auto_apply_default: auto_apply }
+            AssetEditor { editor, platform }
         }
     }
 }
 
-#[story(description = "Clean, compiling: the status bar shows only the identity; editor at rest.")]
-fn clean() -> Element {
+#[story(
+    description = "Saved and compiling: identity on the left, muted Saved + disabled Revert/Save on the right — the buttons are present in every state."
+)]
+fn saved() -> Element {
     rsx! {
         EditorStoryCard { editor: editor_fixture(resolved(false)) }
     }
 }
 
 #[story(
-    description = "The Auto toggle off: the pill goes muted and edits wait for a manual Apply (the M2 flow)."
-)]
-fn auto_apply_off() -> Element {
-    rsx! {
-        EditorStoryCard { editor: editor_fixture(resolved(false)), auto_apply: false }
-    }
-}
-
-#[story(
-    description = "Applied but not yet saved: the bar wears the amber Unsaved tone with a Save affordance and its ⌘S hint."
+    description = "Applied but not yet saved: amber Unsaved with live Revert and Save (⌘S) — same geometry as the saved state."
 )]
 fn unsaved() -> Element {
     rsx! {
@@ -100,7 +92,9 @@ fn unsaved_non_mac() -> Element {
     }
 }
 
-#[story(description = "An apply awaiting its ack: the bar shows the working Applying… state.")]
+#[story(
+    description = "An apply awaiting its ack: the subtle applying dot is lit; nothing else about the bar changes."
+)]
 fn applying() -> Element {
     let mut editor = editor_fixture(resolved(true));
     editor.in_flight = true;
@@ -110,7 +104,7 @@ fn applying() -> Element {
 }
 
 #[story(
-    description = "A failed apply (size guard): the bar goes error-toned with a full-error popup; editor unmoved."
+    description = "A failed apply (size guard): the left half carries the reason + full-error popup; the right half keeps Unsaved/Revert/Save live."
 )]
 fn apply_failed() -> Element {
     let mut editor = editor_fixture(resolved(true));
@@ -121,7 +115,7 @@ fn apply_failed() -> Element {
 }
 
 #[story(
-    description = "A located compile error: the bar shows message + clickable line:col + full-error popup; the editor does not move, and the errored line gets a gutter marker."
+    description = "A located compile error: error text + clickable line:col + popup on the LEFT while Unsaved/Revert/Save stay live on the RIGHT — the error does not hide the persistence state, and Revert works from here."
 )]
 fn compile_error() -> Element {
     let mut editor = editor_fixture(resolved(true));
@@ -134,7 +128,7 @@ fn compile_error() -> Element {
 }
 
 #[story(
-    description = "A location-less compile error (recovery-blocked): the bar carries the message with no line:col; full-error popup available."
+    description = "A location-less compile error (recovery-blocked): the message with no line:col; full-error popup available."
 )]
 fn compile_error_no_location() -> Element {
     let mut editor = editor_fixture(resolved(true));
@@ -146,7 +140,9 @@ fn compile_error_no_location() -> Element {
     }
 }
 
-#[story(description = "A binary asset body: read-only note under a clean identity bar.")]
+#[story(
+    description = "A binary asset body: read-only note under a plain identity bar; the persistence buttons stay mounted but disabled."
+)]
 fn binary_read_only() -> Element {
     let editor = editor_fixture(Some(UiAssetContent::from_bytes(
         &[0xff, 0xfe, 0x00, 0x01],
