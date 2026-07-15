@@ -89,9 +89,11 @@ impl LinkProviderKind {
             Self::HostProcess | Self::BrowserWorker => LinkCapabilities::default()
                 .with(LinkOperation::ReadLogs)
                 .with(LinkOperation::ReadDiagnostics),
-            // Logs + diagnostics only until the host provider grows a real
-            // `manage()` implementation (M5 restores Reset with Flash/Erase).
-            Self::HostSerialEsp32 => LinkCapabilities::diagnostics_and_logs(),
+            // Native espflash-lib management (M5): reset, flash, and device
+            // erase are all served in-process.
+            Self::HostSerialEsp32 => LinkCapabilities::esp32_serial_base()
+                .with_flash()
+                .with_device_erase(),
             Self::BrowserSerialEsp32 => LinkCapabilities::esp32_serial_base().with_flash(),
         }
     }

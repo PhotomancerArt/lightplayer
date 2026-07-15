@@ -16,16 +16,27 @@ fn explicit_port_endpoint_records_metadata() {
         Some("/dev/cu.usbmodem2101")
     );
     let endpoint = provider.endpoint(&endpoint_id).unwrap();
-    // No Reset: the host provider implements no manage() yet, so it must not
-    // advertise management operations (M5 restores Reset with Flash/Erase).
-    assert!(!endpoint.capabilities.supports(LinkOperation::Reset));
+    // Full management surface: manage() drives espflash natively (M5), so
+    // Reset/Flash/Erase are advertised alongside logs + diagnostics.
+    assert!(endpoint.capabilities.supports(LinkOperation::Reset));
     assert!(endpoint.capabilities.supports(LinkOperation::ReadLogs));
     assert!(
         endpoint
             .capabilities
             .supports(LinkOperation::ReadDiagnostics)
     );
-    assert!(!endpoint.capabilities.supports(LinkOperation::FlashFirmware));
+    assert!(endpoint.capabilities.supports(LinkOperation::FlashFirmware));
+    assert!(
+        endpoint
+            .capabilities
+            .supports(LinkOperation::EraseDeviceFlash)
+    );
+    // Raw-filesystem access stays off: manage() rejects it as unsupported.
+    assert!(
+        !endpoint
+            .capabilities
+            .supports(LinkOperation::WriteRawFilesystem)
+    );
 }
 
 #[test]

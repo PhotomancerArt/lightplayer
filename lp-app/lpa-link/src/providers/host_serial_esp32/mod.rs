@@ -1,3 +1,4 @@
+mod host_esp32_flash;
 mod provider;
 
 pub use provider::{

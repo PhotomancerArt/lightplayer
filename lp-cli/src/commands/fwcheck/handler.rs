@@ -222,6 +222,7 @@ fn run_demo_capture(
         baud_rate: Some(DEFAULT_SERIAL_BAUD_RATE),
         reset_after_open: true,
         line_observer: Some(observer),
+        ..HostSerialEsp32Options::default()
     };
     let transport = connect_host_serial_esp32_with_options(port_name, options)
         .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
