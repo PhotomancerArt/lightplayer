@@ -453,7 +453,10 @@ fn now_secs() -> f64 {
     js_sys::Date::now() / 1000.0
 }
 
-fn random_bytes() -> [u8; 16] {
+/// Crypto-quality bytes for uid minting — the library store's generator
+/// here, and installed on the `StudioController` by the web shell for
+/// `dev_` device identities.
+pub(crate) fn random_bytes() -> [u8; 16] {
     let mut bytes = [0u8; 16];
     let filled = web_sys::window()
         .and_then(|w| w.crypto().ok())
