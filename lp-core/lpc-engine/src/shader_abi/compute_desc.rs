@@ -11,7 +11,7 @@ use lpc_model::{
 use lpir::CompilerConfig;
 use lps_shared::LpsType;
 
-use crate::gfx::model_type_to_lps_type;
+use crate::shader_abi::model_type_to_lps_type;
 
 /// Convert an authored compute shader definition into a shader runtime descriptor.
 ///
@@ -154,13 +154,13 @@ mod tests {
     use alloc::format;
     use lp_collection::VecMap;
 
+    use lp_gfx::LpGraphics;
+    use lp_gfx_lpvm::LpvmGraphics;
     use lpc_model::{
         BindingDefs, CONTROL_MESSAGE_SHAPE_NAME, MapSlot, ShaderSlotMappingDef, ValueSlot,
         generate_compute_shader_header,
     };
     use lps_shared::LpsValueF32;
-    use lpvm_wasm::WasmOptions;
-    use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
     #[test]
     fn compute_def_header_and_runtime_descriptor_execute() {
@@ -207,10 +207,10 @@ void tick() {{
         let desc =
             compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
                 .expect("compute desc");
-        let engine = lp_shader::LpsEngine::new(
-            WasmLpvmEngine::new(WasmOptions::default()).expect("wasm engine"),
-        );
-        let shader = engine.compile_compute_desc(desc).expect("compile compute");
+        let graphics = LpvmGraphics::new();
+        let mut shader = graphics
+            .compile_compute_shader(desc)
+            .expect("compile compute");
 
         shader
             .tick(&[("time", LpsValueF32::F32(0.25))])
@@ -283,10 +283,10 @@ void tick() {{
         let desc =
             compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
                 .expect("compute desc");
-        let engine = lp_shader::LpsEngine::new(
-            WasmLpvmEngine::new(WasmOptions::default()).expect("wasm engine"),
-        );
-        let shader = engine.compile_compute_desc(desc).expect("compile compute");
+        let graphics = LpvmGraphics::new();
+        let mut shader = graphics
+            .compile_compute_shader(desc)
+            .expect("compile compute");
 
         shader
             .tick(&[(

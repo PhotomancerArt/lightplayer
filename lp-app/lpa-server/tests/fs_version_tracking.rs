@@ -3,7 +3,8 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
-use lpa_server::{Graphics, LpGraphics, LpServer};
+use lp_gfx_lpvm::TargetLpvmGraphics;
+use lpa_server::{LpGraphics, LpServer};
 use lpc_model::{AsLpPath, AsLpPathBuf};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
@@ -13,7 +14,7 @@ fn test_fs_changes_not_repeated() {
     // Create server with memory filesystem
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let base_fs = Box::new(LpFsMemory::new());
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider.clone(),
         base_fs,

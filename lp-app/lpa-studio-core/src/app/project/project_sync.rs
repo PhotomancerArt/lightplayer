@@ -663,6 +663,17 @@ fn product_preview_from_probe(
                 reason: format!("visual preview format {format:?} is not supported by Studio"),
             },
         )),
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::GpuResident {
+            product,
+            ..
+        }) => Some((
+            UiProductRef::from_visual_product(*product),
+            UiProductPreview::Unsupported {
+                reason: "product is GPU-resident on this runtime (no byte readback on the GPU \
+                         tier); probe a CPU-tier runtime for byte previews"
+                    .to_string(),
+            },
+        )),
         ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported {
             product,
             reason,

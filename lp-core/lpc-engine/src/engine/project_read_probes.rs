@@ -40,9 +40,15 @@ impl Engine {
         match self.render_texture_product(registry, product, &texture_request) {
             Ok(texture) => {
                 let Some(bytes) = texture.try_raw_bytes() else {
-                    return RenderProductProbeResult::Error {
+                    // GPU tier: the product stayed GPU-resident (no readback
+                    // in the browser). Structured answer, not an error — the
+                    // runtime is healthy, bytes are simply not available on
+                    // this tier (fidelity-tiers ADR).
+                    return RenderProductProbeResult::GpuResident {
                         product,
-                        message: format!("render product probe returned non-resident texture"),
+                        revision,
+                        width: texture.width(),
+                        height: texture.height(),
                     };
                 };
                 let bytes = match request.format {

@@ -4,17 +4,18 @@ use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use lp_gfx::TextureHandle;
 use lpc_model::{
     Dim2u, FluidDefView, FluidEmitter, FluidState, FromLpValue, NodeId, SlotAccess, SlotData,
     SlotMapKey, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, VisualProduct,
 };
 use lps_q32::Q32;
-use lps_shared::{TextureBuffer, TextureStorageFormat};
+use lps_shared::TextureStorageFormat;
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, RuntimeStateShape, TickContext,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext, err_ctx,
 };
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
@@ -45,7 +46,7 @@ impl FluidNode {
 
     fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&FluidDefView, NodeError> {
         FluidDefView::get_or_compile(&mut self.def_view, ctx.slot_shapes())
-            .map_err(|e| NodeError::msg(format!("compile fluid def view: {e}")))
+            .map_err(err_ctx("compile fluid def view"))
     }
 
     fn ensure_solver(
@@ -168,15 +169,15 @@ impl RenderNode for FluidNode {
             write_texture_pixels(solver, request.width, request.height, &mut pixels);
         }
         TextureRenderProduct::rgba16_unorm(request.width, request.height, pixels)
-            .map_err(|e| NodeError::msg(format!("fluid texture product: {e}")))
+            .map_err(err_ctx("fluid texture product"))
     }
 
     fn render_texture_into(
         &mut self,
         _product: VisualProduct,
         request: &RenderTextureRequest,
-        target: &mut lp_shader::LpsTextureBuf,
-        _ctx: &mut RenderContext<'_>,
+        target: &mut TextureHandle,
+        ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         if request.format != TextureStorageFormat::Rgba16Unorm
             || target.format() != TextureStorageFormat::Rgba16Unorm
@@ -185,11 +186,16 @@ impl RenderNode for FluidNode {
         {
             return Err(NodeError::msg("fluid texture target shape mismatch"));
         }
-        target.data_mut().fill(0);
+        // Texel-upload path: fluid frames are CPU-produced, so build the
+        // texel bytes and upload them into the target in one write.
+        let mut pixels = vec![0u8; request.width as usize * request.height as usize * 8];
         if let Some(solver) = &self.solver {
-            write_texture_pixels(solver, request.width, request.height, target.data_mut());
+            write_texture_pixels(solver, request.width, request.height, &mut pixels);
         }
-        Ok(())
+        ctx.graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?
+            .write_texture(target, &pixels)
+            .map_err(err_ctx("fluid texture upload"))
     }
 
     fn sample_visual_into(
@@ -197,27 +203,32 @@ impl RenderNode for FluidNode {
         _product: VisualProduct,
         request: VisualSampleBufferRequest<'_>,
         target: VisualSampleTarget<'_>,
-        _ctx: &mut RenderContext<'_>,
+        ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         let point_count = request.points.count();
         if target.samples.count() != point_count {
             return Err(NodeError::msg("fluid sample target count mismatch"));
         }
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
         let Some(solver) = &self.solver else {
-            target.samples.data_mut().fill(0);
-            return Ok(());
+            return graphics
+                .clear_sample_out(target.samples)
+                .map_err(err_ctx("fluid clear samples"));
         };
-        for (point, sample) in request
-            .points
-            .data()
-            .chunks_exact(2)
-            .zip(target.samples.data_mut().chunks_exact_mut(4))
-        {
+        let points = graphics
+            .read_sample_points(request.points)
+            .map_err(err_ctx("fluid sample point read"))?;
+        let mut channels = vec![0u16; point_count as usize * 4];
+        for (point, sample) in points.chunks_exact(2).zip(channels.chunks_exact_mut(4)) {
             let x = pixel_q16_to_normalized_q16(point[0], request.output_width);
             let y = pixel_q16_to_normalized_q16(point[1], request.output_height);
             sample.copy_from_slice(&sample_rgba16_bilinear_q16(solver, x, y));
         }
-        Ok(())
+        graphics
+            .write_sample_out(target.samples, &channels)
+            .map_err(err_ctx("fluid sample write"))
     }
 }
 
@@ -530,7 +541,7 @@ void tick() {
 
         let services = EngineServices::new(TreePath::parse("/fluid.show").unwrap());
         let mut engine = ProjectLoader::load_from_root(&fs, services).expect("load");
-        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = engine.tree().root();
         let fluid = engine
             .tree()

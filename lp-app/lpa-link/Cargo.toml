@@ -23,6 +23,7 @@ web-sys = { version = "0.3", optional = true, features = [
     "ErrorEvent",
     "Location",
     "MessageEvent",
+    "OffscreenCanvas",
     "Url",
     "Window",
     "Worker",

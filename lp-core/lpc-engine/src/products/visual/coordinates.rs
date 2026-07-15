@@ -7,7 +7,7 @@
 //!   with pixel centers at `x + 0.5`, `y + 0.5`.
 //! - Texture UV: normalized coordinates used to sample a materialized texture.
 //!
-//! The direct-sampling buffer (`LpsSamplePointBuf`) carries shader pixel-space
+//! The direct-sampling buffer (`lp_gfx::SamplePointsHandle`) carries shader pixel-space
 //! coordinates encoded as Q16.16 integers. Texture sample batches carry texture UV
 //! coordinates encoded as Q16.16 integers.
 

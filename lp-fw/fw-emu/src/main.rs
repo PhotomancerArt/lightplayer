@@ -23,8 +23,9 @@ use core::cell::RefCell;
 
 use fw_core::log::init_emu_logger;
 use fw_core::transport::SerialTransport;
+use lp_gfx_lpvm::TargetLpvmGraphics;
 use lp_riscv_emu_guest::allocator;
-use lpa_server::{Graphics, LpGraphics, LpServer};
+use lpa_server::{LpGraphics, LpServer};
 use lpc_hardware::{HardwareSystem, HwManifest, HwRegistry};
 use lpc_model::AsLpPath;
 use lpc_shared::output::OutputProvider;
@@ -129,7 +130,7 @@ pub extern "C" fn _lp_main() -> ! {
 
     // Create server (with time provider for shader comp timing)
     let time_provider_rc = Rc::new(SyscallTimeProvider::new());
-    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let button_service: Rc<dyn lpa_server::ButtonService> = hardware_system.clone();
     let radio_service: Rc<dyn lpa_server::RadioService> = hardware_system.clone();
     let server = LpServer::new_with_hardware_services(

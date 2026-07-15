@@ -19,6 +19,7 @@ server = [
     "lpc-hardware",
     "lpc-model",
     "lpc-wire",
+    "lp-gfx-lpvm",
     "lpa-server",
     "lpc-shared",
     "lpfs",
@@ -73,6 +74,7 @@ lps-shared = { path = "../../lp-shader/lps-shared", default-features = false, op
 libm = "0.2"
 # Graphics backend is selected automatically by target architecture
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"], optional = true }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }

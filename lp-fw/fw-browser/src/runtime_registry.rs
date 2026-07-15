@@ -6,18 +6,26 @@
 use std::cell::RefCell;
 
 use crate::runtime::BrowserFirmwareRuntime;
+use crate::tier::{RuntimeTier, TierSelection};
 
 thread_local! {
     static RUNTIMES: RefCell<Vec<BrowserFirmwareRuntime>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Create a runtime and return its stable id for later wasm calls.
-pub(crate) fn create_runtime(label: &str) -> Result<u32, String> {
+/// Create a runtime on the requested tier; returns its stable id plus the
+/// recorded tier selection (which may be CPU with a reason when a GPU
+/// request could not be granted — fidelity-tiers ADR).
+pub(crate) fn create_runtime(
+    label: &str,
+    requested: RuntimeTier,
+) -> Result<(u32, TierSelection), String> {
     RUNTIMES.with(|runtimes| {
         let mut runtimes = runtimes.borrow_mut();
         let id = runtimes.len() as u32 + 1;
-        runtimes.push(BrowserFirmwareRuntime::new(id, label)?);
-        Ok(id)
+        let runtime = BrowserFirmwareRuntime::new(id, label, requested)?;
+        let selection = runtime.tier().clone();
+        runtimes.push(runtime);
+        Ok((id, selection))
     })
 }
 
