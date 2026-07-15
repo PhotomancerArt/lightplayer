@@ -64,7 +64,7 @@ impl fmt::Display for InterpError {
 
 impl core::error::Error for InterpError {}
 
-const DEFAULT_MAX_DEPTH: usize = 256;
+pub const DEFAULT_MAX_DEPTH: usize = 256;
 
 /// Run `func_name` on `module` with `args`.
 pub fn interpret(
@@ -83,6 +83,25 @@ pub fn interpret_with_depth(
     imports: &mut dyn ImportHandler,
     max_depth: usize,
 ) -> Result<Vec<Value>, InterpError> {
+    interpret_with_vmctx(module, func_name, args, imports, 0, max_depth)
+}
+
+/// Like [`interpret_with_depth`], but reserves a zero-initialized VMContext
+/// region of `vmctx_bytes` at the base of the shared stack. The VMContext
+/// pointer (hidden arg 0) is `0`, so vmctx-relative loads/stores — module
+/// uniforms and globals, sized by `LpsModuleSig::vmctx_buffer_size` — land in
+/// this region instead of reading out of bounds. Call frames begin above it.
+///
+/// `vmctx_bytes == 0` reproduces the plain [`interpret`] behavior (dummy
+/// vmctx, no backing) for modules with no uniforms or globals.
+pub fn interpret_with_vmctx(
+    module: &LpirModule,
+    func_name: &str,
+    args: &[Value],
+    imports: &mut dyn ImportHandler,
+    vmctx_bytes: usize,
+    max_depth: usize,
+) -> Result<Vec<Value>, InterpError> {
     let func = module
         .functions
         .values()
@@ -94,8 +113,10 @@ pub fn interpret_with_depth(
     }
     full.extend_from_slice(args);
     // One linear stack shared by all frames so slot addresses stay valid
-    // across calls (out-parameters, sret pointers).
+    // across calls (out-parameters, sret pointers). The VMContext region, if
+    // any, occupies [0, vmctx_bytes); the first frame's slots start above it.
     let mut stack: Vec<u8> = Vec::new();
+    stack.resize(vmctx_bytes, 0);
     exec_func(module, func, &full, imports, 0, max_depth, &mut stack)
 }
 

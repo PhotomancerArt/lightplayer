@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use lp_collection::VecMap;
-use lpir::{CompilerConfig, LpirModule, Value, interpret};
+use lpir::{CompilerConfig, LpirModule, Value, interpret_with_vmctx};
 use lps_frontend::std_math_handler::StdMathHandler;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueF32, TextureBindingSpec};
 
@@ -133,9 +133,24 @@ impl InterpInstance {
                 .map_err(|e| format!("interp: {name} arg '{}': {e}", p.name))?;
         }
 
+        // Reserve a zero-initialized VMContext region so uniform/global loads
+        // land in real (zeroed) memory instead of reading out of bounds. Zero
+        // is the correct default for the transcendental corpus (uniforms
+        // laundered through `u_runtime_zero`) and for globals written before
+        // being read. Globals with initializers still need the synthesized
+        // init function (not yet run here); `set_uniform` values are applied
+        // separately.
+        let vmctx_bytes = self.sig.vmctx_buffer_size();
         let mut handler = StdMathHandler::default();
-        let out = interpret(&self.ir, &gfn.name, &flat, &mut handler)
-            .map_err(|e| format!("interp: {name}: {e}"))?;
+        let out = interpret_with_vmctx(
+            &self.ir,
+            &gfn.name,
+            &flat,
+            &mut handler,
+            vmctx_bytes,
+            lpir::DEFAULT_MAX_DEPTH,
+        )
+        .map_err(|e| format!("interp: {name}: {e}"))?;
 
         let mut it = out.iter().copied();
         let v = decode_return(&gfn.return_type, &mut it)
