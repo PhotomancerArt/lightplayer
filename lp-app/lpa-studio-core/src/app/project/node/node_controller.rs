@@ -292,14 +292,40 @@ impl NodeController {
     /// they name: consumed/config slots on the def root and produced slots
     /// on the state root (bindings live at node-def roots since M0).
     fn apply_binding_facts(&mut self) {
-        let facts = self
-            .slots
+        let facts = self.authored_binding_facts();
+        for slot in &mut self.slots {
+            slot.apply_binding_facts(&facts);
+        }
+    }
+
+    /// Authored binding facts as the synced def root currently tells them.
+    fn authored_binding_facts(&self) -> Vec<crate::app::project::slot::SlotBindingFact> {
+        self.slots
             .iter()
             .find(|slot| matches!(slot.address().root, ProjectSlotRoot::Def))
             .map(SlotController::binding_facts)
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    /// Re-derive and re-apply binding facts for this subtree, reading the
+    /// synced facts *through* the pending-edit mirror: `overrides` carries
+    /// the buffered/acked `bindings[…]` edits the synced view has not caught
+    /// up with yet, so an authored bind/unbind presents immediately instead
+    /// of lagging the passive read cadence. Callers follow up with the
+    /// graph-default overlay (`ProjectController::
+    /// apply_default_binding_overlay`), since this resets every slot's
+    /// binding state before re-filling.
+    pub(in crate::app::project) fn refresh_binding_facts(
+        &mut self,
+        overrides: &crate::app::project::slot::BindingFactOverrides,
+    ) {
+        let mut facts = self.authored_binding_facts();
+        overrides.apply_to(&self.address, &mut facts);
         for slot in &mut self.slots {
             slot.apply_binding_facts(&facts);
+        }
+        for child in &mut self.children {
+            child.refresh_binding_facts(overrides);
         }
     }
 

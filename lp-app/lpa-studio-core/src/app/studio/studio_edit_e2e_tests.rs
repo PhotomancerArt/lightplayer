@@ -1182,6 +1182,94 @@ fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
 }
 
 #[test]
+fn bind_and_unbind_gestures_present_authored_state_from_acks_alone() {
+    // The slot detail popover's binding story (D26 follow-up): the bind
+    // gesture (EnsurePresent entry → EnsurePresent endpoint option →
+    // SetValue) and the unbind gesture (RemoveValue on the entry) must flip
+    // the per-slot binding presentation — authored endpoint, Unbind
+    // affordance — from the mutation acks alone. No RefreshProject runs in
+    // this test: before the ack-time re-derivation, the presentation lagged
+    // the passive read cadence by up to tens of seconds.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let color_order = find_slot(&snapshot, "color_order");
+    let authoring = color_order
+        .authoring
+        .as_ref()
+        .expect("bindable def row carries authoring");
+    assert!(authoring.authored.is_none(), "nothing is bound yet");
+    let color_order_address = color_order
+        .address
+        .clone()
+        .expect("color order slot carries an address");
+
+    // The popover's bind gesture, exactly as BindingAuthoringSection
+    // dispatches it.
+    let entry_address = child_address(&color_order_address, "bindings[color_order]");
+    let endpoint_address = child_address(&color_order_address, "bindings[color_order].source.some");
+    handle.tx.send(ensure_present_action(entry_address.clone()));
+    handle
+        .tx
+        .send(ensure_present_action(endpoint_address.clone()));
+    handle.tx.send(set_value_action(
+        endpoint_address,
+        LpValue::String("bus:wave".to_string()),
+    ));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("bind gesture emits a snapshot");
+
+    let color_order = find_slot(&snapshot, "color_order");
+    let authoring = color_order.authoring.as_ref().expect("authoring");
+    assert_eq!(
+        authoring.authored.as_ref().map(|e| e.label.as_str()),
+        Some("bus:wave"),
+        "the acked bind reads authored (Retarget/Unbind) with no refresh in between"
+    );
+    assert!(
+        matches!(&color_order.source, crate::UiSlotSourceState::Bound(endpoint)
+            if endpoint.label == "bus:wave" && !endpoint.default_origin),
+        "the row presents the authored wiring, not default-origin: {:?}",
+        color_order.source
+    );
+
+    // Unbind from the same popover: the entry removal must clear the
+    // authored presentation from its ack alone as well.
+    handle.tx.send(remove_value_action(entry_address));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("unbind emits a snapshot");
+
+    let color_order = find_slot(&snapshot, "color_order");
+    assert!(
+        color_order
+            .authoring
+            .as_ref()
+            .expect("authoring")
+            .authored
+            .is_none(),
+        "the acked unbind drops the authored entry with no refresh in between"
+    );
+    assert!(
+        matches!(color_order.source, crate::UiSlotSourceState::Direct),
+        "with no declared default, the slot reads direct again: {:?}",
+        color_order.source
+    );
+}
+
+#[test]
 fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
     // Mirror fidelity for the subtree-clearing structural remove: add a map
     // entry, edit a leaf under it, remove the entry again. The remove
