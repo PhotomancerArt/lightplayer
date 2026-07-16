@@ -25,7 +25,15 @@ const configs = {
   studio: {
     app: "lightplayer-studio",
     sourceDir: path.join(repoRoot, "target/dx/lpa-studio-web/release/web/public"),
-    entries: ["index.html", "assets", "pkg", "lpa-link", "firmware", "serial-debug.html"],
+    entries: [
+      "index.html",
+      "assets",
+      "pkg",
+      "lpa-link",
+      "firmware",
+      "serial-debug.html",
+      "vendor",
+    ],
     required: [
       "index.html",
       { prefix: "assets/tailwind-", suffix: ".css" },
@@ -35,6 +43,10 @@ const configs = {
       "pkg/fw_browser_bg.wasm",
       "lpa-link/browser_esp32_device_controller.js",
       "firmware/esp32c6/manifest.json",
+      // The committed CodeMirror bundle (the code editor hard-fails without
+      // it — index.html loads it with a plain <script> tag, so it is
+      // invisible to dx's asset graph and must ride the entries list above).
+      "vendor/codemirror/codemirror.js",
     ],
   },
   "web-demo": {
