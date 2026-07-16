@@ -1152,6 +1152,17 @@ impl RectSnapshot {
     fn is_empty(self) -> bool {
         self.width < 1.0 || self.height < 1.0
     }
+
+    /// Grow the rect on all sides (the trigger's visible footprint while the
+    /// popover is open, matching `OutlineRect::inflate`).
+    fn inflate(self, by: f64) -> Self {
+        Self {
+            x: self.x - by,
+            y: self.y - by,
+            width: self.width + 2.0 * by,
+            height: self.height + 2.0 * by,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1209,7 +1220,16 @@ impl PopoverPosition {
         let (viewport_width, viewport_height) = viewport_size();
         let side = placement.side().resolve(anchor, panel, viewport_height);
         let top = side.panel_top(anchor, panel, viewport_height);
-        let left = panel_left(anchor, panel, placement.align(), viewport_width);
+        // Horizontal alignment targets the trigger's VISIBLE edge — the
+        // outline swells by TRIGGER_INFLATE_PX while open, and aligning to
+        // the raw rect left a small stepped shelf where a welded edge was
+        // expected.
+        let left = panel_left(
+            anchor.inflate(TRIGGER_INFLATE_PX),
+            panel,
+            placement.align(),
+            viewport_width,
+        );
 
         Self {
             left,
@@ -1228,10 +1248,15 @@ impl PopoverPosition {
     }
 }
 
-/// Panel left edge: the aligned position, clamped inside the viewport margin.
-/// Any trigger/panel alignment produces a valid merged outline (aligned edges
-/// weld; offsets get concave fillets), so no corner-visibility logic is
-/// needed here anymore.
+/// A shelf narrower than the corner radius reads as a rendering mistake, so
+/// panel edges within this distance of a trigger edge snap to weld exactly.
+const EDGE_SNAP_PX: f64 = POPOVER_CORNER_RADIUS_PX;
+
+/// Panel left edge: the aligned position, clamped inside the viewport margin,
+/// then magnetically snapped to the trigger's visible edges. `anchor` is the
+/// trigger's VISIBLE rect (inflated while open). Aligned edges weld in the
+/// outline; genuinely offset edges (beyond the snap band) get proper concave
+/// fillets.
 fn panel_left(
     anchor: RectSnapshot,
     panel: SizeSnapshot,
@@ -1244,7 +1269,28 @@ fn panel_left(
         PopoverAlign::End => anchor.x + anchor.width - panel.width,
     };
     let max_left = (viewport_width - panel.width - POPOVER_MARGIN_PX).max(POPOVER_MARGIN_PX);
-    desired.clamp(POPOVER_MARGIN_PX, max_left)
+    let clamped = desired.clamp(POPOVER_MARGIN_PX, max_left);
+    snap_to_trigger_edges(clamped, anchor, panel)
+}
+
+/// If the panel's left or right edge lands within [`EDGE_SNAP_PX`] of the
+/// trigger's corresponding edge (e.g. after viewport clamping), shift the
+/// panel so the edges weld instead of leaving a sub-radius shelf. The nearer
+/// edge wins when both are in range. The shift may exceed the viewport-margin
+/// clamp by up to the snap distance — a clean weld beats a strict margin.
+fn snap_to_trigger_edges(left: f64, anchor: RectSnapshot, panel: SizeSnapshot) -> f64 {
+    let shift_for_left = anchor.x - left;
+    let shift_for_right = (anchor.x + anchor.width) - (left + panel.width);
+    let shift = if shift_for_left.abs() <= shift_for_right.abs() {
+        shift_for_left
+    } else {
+        shift_for_right
+    };
+    if shift.abs() <= EDGE_SNAP_PX {
+        left + shift
+    } else {
+        left
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1322,4 +1368,85 @@ fn viewport_size() -> (f64, f64) {
         .and_then(|value| value.as_f64())
         .unwrap_or(768.0);
     (width, height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn anchor(x: f64, width: f64) -> RectSnapshot {
+        RectSnapshot {
+            x,
+            y: 10.0,
+            width,
+            height: 24.0,
+        }
+    }
+
+    fn panel(width: f64) -> SizeSnapshot {
+        SizeSnapshot {
+            width,
+            height: 100.0,
+        }
+    }
+
+    #[test]
+    fn end_alignment_welds_to_visible_trigger_edge() {
+        let visible = anchor(500.0, 32.0).inflate(TRIGGER_INFLATE_PX);
+        let left = panel_left(visible, panel(300.0), PopoverAlign::End, 1024.0);
+        assert_eq!(
+            left + 300.0,
+            visible.x + visible.width,
+            "panel right edge must weld to the inflated trigger edge"
+        );
+    }
+
+    #[test]
+    fn start_alignment_welds_to_visible_trigger_edge() {
+        let visible = anchor(500.0, 32.0).inflate(TRIGGER_INFLATE_PX);
+        let left = panel_left(visible, panel(300.0), PopoverAlign::Start, 1024.0);
+        assert_eq!(left, visible.x);
+    }
+
+    #[test]
+    fn small_clamp_offset_snaps_back_to_weld() {
+        // Viewport clamp (max_left = 1024 - 300 - 12 = 712) pushes the panel
+        // 6px short of the trigger edge; the snap band welds it anyway.
+        let visible = anchor(985.0, 30.0).inflate(TRIGGER_INFLATE_PX); // right = 1018
+        let left = panel_left(visible, panel(300.0), PopoverAlign::End, 1024.0);
+        assert_eq!(
+            left + 300.0,
+            visible.x + visible.width,
+            "sub-radius shelf from clamping must snap to a weld"
+        );
+    }
+
+    #[test]
+    fn large_offsets_keep_their_fillets() {
+        // Clamped 20px short of the trigger edge: beyond the snap band, the
+        // ledge is wide enough for proper fillets and must stay put.
+        let visible = anchor(1002.0, 30.0).inflate(TRIGGER_INFLATE_PX); // right = 1035
+        let left = panel_left(visible, panel(300.0), PopoverAlign::End, 1024.0);
+        assert_eq!(left, 712.0, "clamped position beyond the snap band is kept");
+    }
+
+    #[test]
+    fn middle_alignment_of_wide_panel_is_untouched() {
+        let visible = anchor(500.0, 32.0).inflate(TRIGGER_INFLATE_PX);
+        let left = panel_left(visible, panel(300.0), PopoverAlign::Middle, 1024.0);
+        let expected = visible.x + (visible.width - 300.0) / 2.0;
+        assert_eq!(
+            left, expected,
+            "wide centered panels have no edge in snap range"
+        );
+    }
+
+    #[test]
+    fn snap_shifts_by_the_nearer_edge() {
+        // Panel barely wider than the trigger, offset so the left edge is the
+        // closer weld: it wins.
+        let visible = anchor(100.0, 40.0);
+        let left = snap_to_trigger_edges(98.0, visible, panel(46.0));
+        assert_eq!(left, 100.0);
+    }
 }
