@@ -310,12 +310,34 @@ impl ProjectController {
                     .and_then(|value| value.value.as_ref())
                     .map(format_lp_value),
                 value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
-                primary_visual: channel.name == "visual.out",
+                primary_visual: channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL,
                 writers: channel.providers.iter().filter_map(site).collect(),
                 readers: channel.consumers.iter().filter_map(site).collect(),
             })
             .collect();
         Some(crate::UiBusView { channels })
+    }
+
+    /// The project's **primary visual product**: the resolved value of
+    /// `bus:visual.out` (ADR 2026-07-16-primary-visual-product).
+    ///
+    /// Reads the engine's answer off the cached binding graph — the probe
+    /// already resolves the channel by provider priority, so this never
+    /// re-derives precedence client-side. `None` is the defined empty
+    /// state: no graph yet, no provider, an unresolved value, or a
+    /// non-visual product on the channel.
+    pub fn primary_visual_product(&self) -> Option<UiProductRef> {
+        let graph = self.binding_graph()?;
+        let channel = graph
+            .channels
+            .iter()
+            .find(|channel| channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL)?;
+        let value = channel.value.as_ref()?.value.as_ref()?;
+        let lpc_model::LpValue::Product(product) = value else {
+            return None;
+        };
+        matches!(product, lpc_model::ProductRef::Visual(_))
+            .then(|| UiProductRef::from_product_ref(product.clone()))
     }
 
     /// Channels the binding picker offers: every channel observed in the
@@ -4036,6 +4058,73 @@ mod tests {
                 .to_string(),
             "bindings[seconds].target.some"
         );
+    }
+
+    fn primary_visual_graph(value: Option<lpc_model::LpValue>) -> lpc_wire::WireBindingGraph {
+        lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: Vec::new(),
+            channels: vec![lpc_wire::WireBusChannel {
+                name: lpc_model::PRIMARY_VISUAL_CHANNEL.to_string(),
+                kind: Some(lpc_model::Kind::Color),
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value,
+                    error: None,
+                }),
+            }],
+        }
+    }
+
+    fn project_with_graph(graph: lpc_wire::WireBindingGraph) -> ProjectController {
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project
+            .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
+            .unwrap();
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+        project
+    }
+
+    #[test]
+    fn primary_visual_product_reads_the_resolved_channel_value() {
+        // The engine already resolved visual.out by provider priority; the
+        // helper reads that answer (ADR 2026-07-16-primary-visual-product).
+        let product = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(5),
+            0,
+        ));
+        let project = project_with_graph(primary_visual_graph(Some(lpc_model::LpValue::Product(
+            product,
+        ))));
+        assert_eq!(
+            project.primary_visual_product(),
+            Some(UiProductRef::Visual {
+                node_id: 5,
+                output: 0
+            })
+        );
+    }
+
+    #[test]
+    fn primary_visual_product_empty_states_are_none() {
+        // No graph yet.
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        assert_eq!(project.primary_visual_product(), None);
+
+        // Channel present but unresolved (no provider produced a value).
+        let project = project_with_graph(primary_visual_graph(None));
+        assert_eq!(project.primary_visual_product(), None);
+
+        // Channel resolved to a non-product value: defined empty, not a guess.
+        let project = project_with_graph(primary_visual_graph(Some(lpc_model::LpValue::F32(1.0))));
+        assert_eq!(project.primary_visual_product(), None);
     }
 
     #[test]

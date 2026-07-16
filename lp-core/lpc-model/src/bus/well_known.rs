@@ -9,6 +9,16 @@
 
 use crate::Kind;
 
+/// The channel whose resolved value is the project's **primary visual** —
+/// "the project's face" for previews, gallery cards, and thumbnailers
+/// (ADR 2026-07-16-primary-visual-product). The one place this name is
+/// written; every consumer references the constant.
+pub const PRIMARY_VISUAL_CHANNEL: &str = "visual.out";
+
+/// The analogous convention for control-first projects (declared for
+/// symmetry by the same ADR; no preview surface consumes it yet).
+pub const PRIMARY_CONTROL_CHANNEL: &str = "control.out";
+
 /// One well-known channel: canonical name, semantic kind, and the docs the
 /// picker surfaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,12 +45,12 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         doc: "Control events (button presses, remote triggers); map readers merge by message id.",
     },
     WellKnownChannel {
-        name: "visual.out",
+        name: PRIMARY_VISUAL_CHANNEL,
         kind: Kind::Color,
         doc: "The project's primary visual output; fixtures sample it.",
     },
     WellKnownChannel {
-        name: "control.out",
+        name: PRIMARY_CONTROL_CHANNEL,
         kind: Kind::Color,
         doc: "Rendered control samples; hardware outputs drive from it.",
     },
