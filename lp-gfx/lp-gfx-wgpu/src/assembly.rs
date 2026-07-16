@@ -10,15 +10,22 @@
 //!    (dependency) order. Driving naga `glsl-in` directly means `lpfn_` is
 //!    not a reserved prefix here, so the prelude functions resolve as plain
 //!    local GLSL functions with canonical float semantics;
-//! 2. **generated prototypes** for every authored function — naga `glsl-in`
+//! 2. **hoisted signature dependencies** ([`hoist_declarations`]) — the
+//!    authored top-level `struct` definitions and `const` declarations,
+//!    moved above the generated prototypes so signatures referencing them
+//!    (`Point make_point(float)`, `float f(float a[N])`) resolve; authored
+//!    function prototypes are stripped in the same pass (the generated
+//!    prototype set below covers every defined function, and naga rejects
+//!    duplicate prototypes);
+//! 3. **generated prototypes** for every authored function — naga `glsl-in`
 //!    resolves calls in source order (declaration-before-use), while the
 //!    engine's `lps-glsl` frontend accepts out-of-order definitions, so
 //!    authored content may rely on it;
-//! 3. **texture call lowering** ([`crate::texture_lowering`]) — every
+//! 4. **texture call lowering** ([`crate::texture_lowering`]) — every
 //!    `texture()` / `texelFetch()` site on a spec'd sampler is rewritten to
 //!    a generated helper implementing the CPU tier's sampling semantics
 //!    (index-space wrap, `texelFetch` edge clamp) over `textureLoad`;
-//! 4. a **generated fragment `main()`** wrapping
+//! 5. a **generated fragment `main()`** wrapping
 //!    `render(floor(gl_FragCoord.xy))` — matching the CPU path's `pos`
 //!    convention (the synthesised render-texture loop passes integer pixel
 //!    coordinates without a half-pixel offset).
@@ -49,13 +56,15 @@ pub fn assemble_fragment_glsl(
     textures: &TextureBindingSpecs,
 ) -> Result<String, GfxError> {
     let lowered = lower_texture_calls(authored, textures)?;
+    let (hoisted, remainder) = hoist_declarations(&lowered.rewritten);
 
     let mut out = String::from("#version 450 core\n");
     out.push_str(&assemble_prelude(authored));
+    out.push_str(&hoisted);
     out.push_str(&lowered.shared_helpers);
     out.push_str(&lowered.helper_prototypes);
     out.push_str(&authored_prototypes(authored));
-    out.push_str(&lowered.rewritten);
+    out.push_str(&remainder);
     // Helper definitions come after the authored text so the sampler
     // uniform declarations they reference are already in scope for naga's
     // declaration-before-use resolution (call sites resolve through the
@@ -176,6 +185,110 @@ pub fn authored_prototypes(authored: &str) -> String {
         );
     }
     out
+}
+
+/// Split out the top-level declarations that must precede the generated
+/// prototypes: `struct` definitions and `const` declarations (prototype
+/// signatures may reference the types and array sizes they define).
+/// Authored function prototypes are stripped in the same pass — the
+/// generated prototype set covers every defined function in callee-first
+/// order, and naga rejects duplicate prototypes. (Merely *skipping*
+/// generation for authored-prototyped functions would not do: their arena
+/// slot would then be assigned at the authored prototype's position, after
+/// every generated prototype, breaking callee-first order for their
+/// callers.)
+///
+/// Returns `(hoisted, remainder)`: the hoisted declarations concatenated in
+/// source order, and `src` with the hoisted and stripped spans blanked
+/// (newlines preserved, so diagnostics keep their line numbers).
+pub fn hoist_declarations(src: &str) -> (String, String) {
+    let clean = strip_comments_and_directives(src);
+    let (hoist, strip) = hoist_and_strip_spans(&clean);
+
+    let mut hoisted = String::new();
+    for span in &hoist {
+        hoisted.push_str(src[span.clone()].trim_end());
+        hoisted.push('\n');
+    }
+    let mut remainder = src.as_bytes().to_vec();
+    for span in hoist.iter().chain(strip.iter()) {
+        for b in &mut remainder[span.clone()] {
+            if *b != b'\n' {
+                *b = b' ';
+            }
+        }
+    }
+    let remainder =
+        String::from_utf8(remainder).expect("blanking replaces bytes with ASCII spaces");
+    (hoisted, remainder)
+}
+
+/// Scan comment-stripped source for top-level spans to hoist (struct/const
+/// declarations) and to strip (authored function prototypes). Spans are
+/// byte ranges valid in the original source (comment stripping is
+/// byte-for-byte).
+fn hoist_and_strip_spans(
+    clean: &str,
+) -> (Vec<core::ops::Range<usize>>, Vec<core::ops::Range<usize>>) {
+    let bytes = clean.as_bytes();
+    let mut hoist = Vec::new();
+    let mut strip = Vec::new();
+    let mut depth = 0usize;
+    let mut stmt_start = 0usize;
+    // Start of a struct/const statement whose terminating `;` is pending
+    // (its braced body — struct members or an initializer list — spans one
+    // or more `{}` groups before the semicolon).
+    let mut hoist_pending: Option<usize> = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'{' => {
+                if depth == 0 && hoist_pending.is_none() {
+                    let raw = &clean[stmt_start..i];
+                    let segment = raw.trim_start();
+                    if starts_with_keyword(segment, "struct")
+                        || starts_with_keyword(segment, "const")
+                    {
+                        hoist_pending = Some(stmt_start + (raw.len() - segment.len()));
+                    }
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && hoist_pending.is_none() {
+                    stmt_start = i + 1;
+                }
+            }
+            b';' if depth == 0 => {
+                if let Some(start) = hoist_pending.take() {
+                    hoist.push(start..i + 1);
+                } else {
+                    let raw = &clean[stmt_start..i];
+                    let start = stmt_start + (raw.len() - raw.trim_start().len());
+                    let segment = raw.trim();
+                    if starts_with_keyword(segment, "struct")
+                        || starts_with_keyword(segment, "const")
+                    {
+                        hoist.push(start..i + 1);
+                    } else if !segment.contains('=') && function_signature(segment).is_some() {
+                        // A `;`-terminated function signature with no
+                        // initializer is an authored prototype (the `=`
+                        // guard keeps globals like `float x = f(1.0);`).
+                        strip.push(start..i + 1);
+                    }
+                }
+                stmt_start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    (hoist, strip)
+}
+
+/// True when `s` starts with `keyword` at an identifier boundary.
+fn starts_with_keyword(s: &str, keyword: &str) -> bool {
+    s.strip_prefix(keyword)
+        .is_some_and(|rest| rest.as_bytes().first().is_none_or(|&b| !is_ident_byte(b)))
 }
 
 /// One top-level function definition found in comment-stripped source.
@@ -487,6 +600,67 @@ float f(float x) { return x; }
             authored_prototypes(authored),
             "vec4 render(vec2 pos, float t);\n"
         );
+    }
+
+    #[test]
+    fn hoists_structs_and_consts_above_prototypes() {
+        let authored = r#"
+const int N = 2;
+vec4 render(vec2 pos) { Point p = make_point(pos.x); return vec4(p.x); }
+struct Point { float x; float y; };
+Point make_point(float x) { return Point(x, x); }
+float sum(float arr[N]) { return arr[0] + arr[1]; }
+"#;
+        let unit =
+            assemble_fragment_glsl(authored, &TextureBindingSpecs::new()).expect("assembles");
+        let struct_at = unit.find("struct Point").expect("struct hoisted");
+        let const_at = unit.find("const int N = 2;").expect("const hoisted");
+        let proto_at = unit.find("Point make_point(float x);").expect("prototype");
+        assert!(struct_at < proto_at && const_at < proto_at);
+        assert!(unit.contains("float sum(float arr[N]);"));
+        // Hoisted, not duplicated.
+        assert_eq!(unit.matches("struct Point").count(), 1);
+        assert_eq!(unit.matches("const int N").count(), 1);
+    }
+
+    #[test]
+    fn strips_authored_prototypes_but_not_globals() {
+        let authored = "float helper(float x);\n\
+                        float scale = 2.0;\n\
+                        vec4 render(vec2 pos) { return vec4(helper(pos.x)); }\n\
+                        float helper(float x) { return x * scale; }\n";
+        let unit =
+            assemble_fragment_glsl(authored, &TextureBindingSpecs::new()).expect("assembles");
+        // Only the generated prototype survives (naga rejects duplicates),
+        // and it precedes render's per callee-first ordering.
+        assert_eq!(unit.matches("float helper(float x);").count(), 1);
+        let helper_proto = unit.find("float helper(float x);").expect("prototype");
+        let render_proto = unit.find("vec4 render(vec2 pos);").expect("prototype");
+        assert!(helper_proto < render_proto);
+        assert!(unit.contains("float scale = 2.0;"));
+    }
+
+    #[test]
+    fn hoist_preserves_line_count_in_remainder() {
+        let src = "struct P { float x; };\nconst int N = 1;\nfloat f(float a);\nfloat f(float a) { return a; }\n";
+        let (hoisted, remainder) = hoist_declarations(src);
+        assert!(hoisted.contains("struct P"));
+        assert!(hoisted.contains("const int N = 1;"));
+        assert!(!remainder.contains("struct P"));
+        assert!(!remainder.contains("float f(float a);"));
+        assert!(remainder.contains("float f(float a) { return a; }"));
+        assert_eq!(src.lines().count(), remainder.lines().count());
+    }
+
+    #[test]
+    fn hoist_strips_struct_returning_prototypes() {
+        let src = "struct Point { float x; };\n\
+                   Point make_point(float x);\n\
+                   Point make_point(float x) { return Point(x); }\n";
+        let (hoisted, remainder) = hoist_declarations(src);
+        assert!(hoisted.contains("struct Point"));
+        assert!(!remainder.contains("Point make_point(float x);"));
+        assert!(remainder.contains("Point make_point(float x) {"));
     }
 
     #[test]

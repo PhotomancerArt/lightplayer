@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use lp_gfx_wgpu::assembly::authored_prototypes;
+use lp_gfx_wgpu::assembly::{authored_prototypes, hoist_declarations};
 use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, ShaderFrontend, TextureBuffer};
 use lps_shared::{LpsValueF32, TextureStorageFormat};
 use lpvm_wasm::WasmOptions;
@@ -36,12 +36,14 @@ impl ReferenceRenderer {
     /// the device compile path: `lpfn_*` calls resolve to the Q32 builtin
     /// impls) at the default device Q32 config.
     ///
-    /// Prototypes are spliced ahead of the source for the same reason as on
-    /// the GPU path: naga glsl-in resolves calls in source order (the spike
-    /// hand-declared `worley_demo` for basic2; here the production
-    /// prototype generator covers every authored function).
+    /// Struct/const declarations are hoisted and prototypes spliced ahead
+    /// of the source for the same reason as on the GPU path: naga glsl-in
+    /// resolves calls in source order (the spike hand-declared
+    /// `worley_demo` for basic2; here the production hoist + prototype
+    /// generator covers every authored declaration).
     pub fn compile(&self, shader: &CorpusShader) -> Result<ReferenceShader, String> {
-        let source = format!("{}{}", authored_prototypes(shader.source), shader.source);
+        let (hoisted, remainder) = hoist_declarations(shader.source);
+        let source = format!("{hoisted}{}{remainder}", authored_prototypes(shader.source));
         let start = Instant::now();
         let compiled = self
             .engine

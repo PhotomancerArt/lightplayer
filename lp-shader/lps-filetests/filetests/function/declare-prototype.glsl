@@ -18,7 +18,6 @@ float test_declare_prototype_simple() {
     return add_two_floats(3.0, 4.0);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_declare_prototype_simple() ~= 7.0
 
 void test_declare_prototype_void();
@@ -29,7 +28,6 @@ void test_declare_prototype_void() {
     void_func();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_declare_prototype_void() == 0.0
 
 vec4 test_declare_prototype_vector(vec4 a, vec4 b);
@@ -39,7 +37,6 @@ vec4 test_declare_prototype_vector(vec4 a, vec4 b) {
     return add_vectors(a, b);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_declare_prototype_vector(vec4(1.0), vec4(2.0)) ~= vec4(3.0)
 
 float test_declare_prototype_multiple();
@@ -51,8 +48,6 @@ float test_declare_prototype_multiple() {
     return multiply_by_two(5.0);
 }
 
-// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
-// @unsupported(wgpu.f32)
 // run: test_declare_prototype_multiple() ~= 10.0
 
 // ============================================================================

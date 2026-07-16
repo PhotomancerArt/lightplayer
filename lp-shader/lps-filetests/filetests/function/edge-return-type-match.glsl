@@ -13,7 +13,6 @@ float test_edge_return_type_match_float() {
     return get_pi();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_match_float() ~= 3.14159
 
 int get_answer() {
@@ -25,7 +24,6 @@ int test_edge_return_type_match_int() {
     return get_answer();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_match_int() == 42
 
 vec2 get_origin() {
@@ -37,7 +35,6 @@ vec2 test_edge_return_type_match_vector() {
     return get_origin();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_match_vector() ~= vec2(0.0, 0.0)
 
 void do_nothing() {
@@ -49,7 +46,6 @@ void test_edge_return_type_match_void() {
     do_nothing();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_match_void() == 0.0
 
 /*
@@ -73,7 +69,6 @@ float test_edge_return_type_convertible() {
     return int_to_float();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_convertible() ~= 42.0
 
 /*
@@ -97,7 +92,6 @@ float test_edge_return_type_array() {
     return arr[0] + arr[1] + arr[2];
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_array() ~= 6.0
 
 /*
@@ -125,7 +119,6 @@ Point test_edge_return_type_struct() {
     return p;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_struct() ~= Point(1.0, 2.0)
 
 mat2 get_identity() {
@@ -137,7 +130,6 @@ mat2 test_edge_return_type_matrix() {
     return get_identity();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_matrix() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 bool is_even(int x) {
@@ -149,7 +141,6 @@ bool test_edge_return_type_bool() {
     return is_even(4);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_bool() == true
 
 float absolute_value(float x) {
@@ -165,6 +156,4 @@ float test_edge_return_type_multiple_returns() {
     return absolute_value(-5.0);
 }
 
-// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
-// @unsupported(wgpu.f32)
 // run: test_edge_return_type_multiple_returns() ~= 5.0

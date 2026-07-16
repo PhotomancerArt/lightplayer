@@ -20,6 +20,7 @@ float test_edge_const_out_error() {
     return 1.0;
 }
 
+// wgpu.f32: naga glsl-in rejects the `const in` parameter qualifier ("Expected Void, Struct or a type, found In"); the probe compiles the whole file per directive, so every directive fails (tracked follow-up)
 // @unsupported(wgpu.f32)
 // run: test_edge_const_out_error() ~= 1.0
 
@@ -113,6 +114,5 @@ float test_edge_const_struct() {
     return 5.0;
 }
 
-// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
 // @unsupported(wgpu.f32)
 // run: test_edge_const_struct() ~= 5.0

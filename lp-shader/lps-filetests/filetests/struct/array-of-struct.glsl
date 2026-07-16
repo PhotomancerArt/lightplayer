@@ -30,7 +30,6 @@ float test_arrstruct_declare() {
     return 1.0;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_declare() == 1.0
 
 float test_arrstruct_construct_literal() {
@@ -38,7 +37,6 @@ float test_arrstruct_construct_literal() {
     return points[0].x;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_construct_literal() ~= 1.0
 
 float test_arrstruct_construct_element_access() {
@@ -46,7 +44,6 @@ float test_arrstruct_construct_element_access() {
     return points[2].y;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_construct_element_access() ~= 6.0
 
 // ============================================================================
@@ -60,7 +57,6 @@ float test_arrstruct_read_scalar_member() {
     return points[1].x;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_read_scalar_member() ~= 30.0
 
 float test_arrstruct_read_vector_member() {
@@ -70,7 +66,6 @@ float test_arrstruct_read_vector_member() {
     return mats[0].shininess;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_read_vector_member() ~= 32.0
 
 vec3 test_arrstruct_read_vec3_member() {
@@ -79,7 +74,6 @@ vec3 test_arrstruct_read_vec3_member() {
     return mats[0].ambient;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_read_vec3_member() ~= vec3(0.1, 0.2, 0.3)
 
 // ============================================================================
@@ -94,7 +88,6 @@ float test_arrstruct_write_scalar_member() {
     return points[1].x;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_write_scalar_member() ~= 99.0
 
 float test_arrstruct_write_vector_component() {
@@ -105,7 +98,6 @@ float test_arrstruct_write_vector_component() {
     return mats[0].ambient.x;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_write_vector_component() ~= 0.5
 
 // ============================================================================
@@ -121,7 +113,6 @@ float test_arrstruct_element_assign() {
     return points[0].x;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_element_assign() ~= 3.0
 
 // ============================================================================
@@ -136,11 +127,8 @@ float test_arrstruct_dynamic_index(int idx) {
     return points[idx].x;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_dynamic_index(0) ~= 10.0
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_dynamic_index(1) ~= 20.0
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_dynamic_index(2) ~= 30.0
 
 // ============================================================================
@@ -160,7 +148,6 @@ float test_arrstruct_loop_sum() {
     return sum;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_loop_sum() ~= 6.0
 
 // ============================================================================
@@ -179,7 +166,6 @@ float test_arrstruct_param_byval() {
     return sum_point_x_vals(points);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_param_byval() ~= 6.0
 
 // ============================================================================
@@ -200,7 +186,6 @@ float test_arrstruct_return() {
     return pts[2].y;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_return() ~= 6.0
 
 // ============================================================================
@@ -223,7 +208,6 @@ float test_arrstruct_inout() {
     return points[1].x;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_inout() ~= 6.0
 
 // ============================================================================
@@ -245,7 +229,6 @@ float test_arrstruct_nested_struct_member() {
     return lines[1].by;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_nested_struct_member() ~= 8.0
 
 float test_arrstruct_nested_deep_access() {
@@ -256,7 +239,6 @@ float test_arrstruct_nested_deep_access() {
     return lines[1].bx;
 }
 
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_nested_deep_access() ~= 99.0
 
 // ============================================================================
@@ -268,6 +250,4 @@ float test_arrstruct_zerofill() {
     return points[0].x;
 }
 
-// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
-// @unsupported(wgpu.f32)
 // run: test_arrstruct_zerofill() ~= 0.0

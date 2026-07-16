@@ -18,6 +18,4 @@ vec2 test_aos_inout_param() {
     return vec2(ps[0].x, ps[0].y);
 }
 
-// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
-// @unsupported(wgpu.f32)
 // run: test_aos_inout_param() ~= vec2(10.0, 20.0)

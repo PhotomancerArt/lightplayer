@@ -16,7 +16,6 @@ float test_scope_local_simple() {
     return local_func();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_simple() ~= 42.0
 
 float access_global() {
@@ -29,7 +28,6 @@ float test_scope_local_shadow_global() {
     return access_global();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_shadow_global() ~= 200.0
 
 float process_locals() {
@@ -44,7 +42,6 @@ float test_scope_local_multiple() {
     return process_locals();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_multiple() ~= 3.0
 
 float sum_loop(int n) {
@@ -61,7 +58,6 @@ float test_scope_local_in_loop() {
     return sum_loop(5);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_in_loop() ~= 10.0
 
 float inner_func() {
@@ -79,7 +75,6 @@ float test_scope_local_nested() {
     return outer_func();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_nested() ~= 30.0
 
 float use_params(float param1, float param2) {
@@ -92,7 +87,6 @@ float test_scope_local_parameters() {
     return use_params(2.0, 3.0);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_parameters() ~= 13.0
 
 float mixed_types() {
@@ -109,7 +103,6 @@ float test_scope_local_types() {
     return mixed_types();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_types() ~= 12.14
 
 float sum_local_array() {
@@ -122,7 +115,6 @@ float test_scope_local_arrays() {
     return sum_local_array();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_arrays() ~= 6.0
 
 struct LocalStruct {
@@ -139,7 +131,6 @@ LocalStruct test_scope_local_struct() {
     return create_local_struct();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_scope_local_struct() ~= LocalStruct(5.0, 10.0)
 
 float modify_local() {
@@ -154,6 +145,4 @@ float test_scope_local_modification() {
     return modify_local();
 }
 
-// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
-// @unsupported(wgpu.f32)
 // run: test_scope_local_modification() ~= 13.0
