@@ -83,7 +83,9 @@ pub fn HomeGallery(
                     div { class: card_grid_class(),
                         for card in home.devices.clone() {
                             DeviceCard {
-                                key: "{card.name}",
+                                // uid-based: device NAMES repeat (re-provisioned
+                                // boards), and duplicate keys panic the diff
+                                key: "{card.render_key()}",
                                 card,
                                 now_secs,
                                 on_action,

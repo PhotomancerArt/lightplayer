@@ -103,7 +103,11 @@ pub fn build_home_view(
 
     let Some(inputs) = inputs else {
         return UiHomeView {
-            devices: unify_devices(&[], device_sync, live_transport).1,
+            devices: dedupe_by_key(
+                unify_devices(&[], device_sync, live_transport).1,
+                |card| card.render_key().to_string(),
+                "device",
+            ),
             projects: Vec::new(),
             examples,
             library_available: false,
@@ -135,13 +139,32 @@ pub fn build_home_view(
     }
 
     UiHomeView {
-        devices,
-        projects,
+        devices: dedupe_by_key(devices, |card| card.render_key().to_string(), "device"),
+        projects: dedupe_by_key(projects, |card| card.uid.clone(), "project"),
         examples,
         library_available: true,
         opening,
         issue: issue.or_else(|| inputs.issue.clone()),
     }
+}
+
+/// Drop cards whose render key repeats (keeping the first), warning loudly.
+/// Keyed lists with duplicate keys PANIC the renderer and kill the whole
+/// app (2026-07-15 home-gallery crash) — a corrupt registry or store must
+/// degrade to a missing card, never to a dead UI.
+fn dedupe_by_key<T>(cards: Vec<T>, key: impl Fn(&T) -> String, what: &'static str) -> Vec<T> {
+    let mut seen = std::collections::HashSet::new();
+    cards
+        .into_iter()
+        .filter(|card| {
+            let card_key = key(card);
+            let fresh = seen.insert(card_key.clone());
+            if !fresh {
+                log::warn!("home: dropping {what} card with duplicate key {card_key:?}");
+            }
+            fresh
+        })
+        .collect()
 }
 
 /// The D24 device-section shape: registry cards minus the live device
@@ -432,6 +455,59 @@ mod tests {
             copy.provenance.as_deref(),
             Some("Forked from 2026-07-09-1421-original")
         );
+    }
+
+    #[test]
+    fn same_named_registered_devices_keep_unique_render_keys() {
+        // Erasing and re-provisioning a board registers a NEW dev_… uid
+        // under the SAME name. Duplicate render keys panic the keyed diff
+        // and kill the whole app (2026-07-15 crash) — uid-based keys must
+        // stay unique, and both cards must survive.
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        for seed in [7u8, 8u8] {
+            registry
+                .upsert(crate::app::places::RegisteredDevice {
+                    uid: PrefixedUid::mint(UidPrefix::Device, &[seed; 16]).to_string(),
+                    name: "lp-c6".to_string(),
+                    transport: "USB".to_string(),
+                    last_seen_at: 5.0,
+                    association: None,
+                })
+                .unwrap();
+        }
+
+        let view = view_of(&store);
+        assert_eq!(view.devices.len(), 2);
+        let keys: std::collections::HashSet<_> = view
+            .devices
+            .iter()
+            .map(|card| card.render_key().to_string())
+            .collect();
+        assert_eq!(keys.len(), 2, "render keys must be unique: {keys:?}");
+    }
+
+    #[test]
+    fn duplicate_card_keys_degrade_to_a_dropped_card_not_a_dead_ui() {
+        // A corrupt registry/store that repeats an identity must lose the
+        // duplicate card (with a warning), never poison the keyed list.
+        let cards = vec![
+            UiDeviceCard {
+                uid: Some("dev_a".to_string()),
+                name: "one".to_string(),
+                transport: "USB".to_string(),
+                state: UiDeviceCardState::Blank,
+            },
+            UiDeviceCard {
+                uid: Some("dev_a".to_string()),
+                name: "two".to_string(),
+                transport: "USB".to_string(),
+                state: UiDeviceCardState::Blank,
+            },
+        ];
+        let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].name, "one");
     }
 
     #[test]

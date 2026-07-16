@@ -14,6 +14,17 @@ pub struct UiDeviceCard {
     pub state: UiDeviceCardState,
 }
 
+impl UiDeviceCard {
+    /// Stable identity for keyed rendering. Names are NOT unique — erasing
+    /// and re-provisioning a board registers a new `dev_…` uid under the
+    /// same name, and a keyed list with duplicate keys panics Dioxus (the
+    /// 2026-07-15 home-gallery crash). Registered cards key by uid; only
+    /// the (single) identity-less live card falls back to its name.
+    pub fn render_key(&self) -> &str {
+        self.uid.as_deref().unwrap_or(&self.name)
+    }
+}
+
 /// The device card state chart (O2, settled in M5). Under D24
 /// unification, a connected device holding a LOCALLY-KNOWN project has
 /// no device card at all — the project card carries the connected
