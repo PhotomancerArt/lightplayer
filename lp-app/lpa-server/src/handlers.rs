@@ -235,10 +235,52 @@ fn handle_load_project(
     )?;
     backtrace::set_oom_context("server handler: load project memory log");
     log_memory(memory_stats, "load_project after");
+    persist_startup_project(base_fs, path);
     backtrace::set_oom_context("server handler: load project response");
     let response = ServerMessagePayload::LoadProject { handle };
     backtrace::clear_oom_context();
     Ok(response)
+}
+
+/// Remember the loaded project as the boot default: a device that
+/// power-cycles resumes the last project it was told to show. Best-effort —
+/// a config write failure must never fail the load itself.
+fn persist_startup_project(fs: &dyn LpFs, path: &LpPath) {
+    use alloc::string::ToString;
+    use lpc_model::server::server_config::ServerConfig;
+
+    let Some(name) = path
+        .as_str()
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+    else {
+        return;
+    };
+
+    let mut config = fs
+        .read_file(ServerConfig::PATH.as_path())
+        .ok()
+        .and_then(|data| lpc_wire::json::from_slice::<ServerConfig>(&data).ok())
+        .unwrap_or_default();
+    if config.startup_project.as_deref() == Some(name) {
+        return;
+    }
+    config.startup_project = Some(name.to_string());
+
+    match lpc_wire::json::to_string(&config) {
+        Ok(json) => {
+            if let Err(error) = fs.write_file(ServerConfig::PATH.as_path(), json.as_bytes()) {
+                log::warn!("load_project: failed to persist startup_project: {error}");
+            } else {
+                log::info!("load_project: startup_project set to {name}");
+            }
+        }
+        Err(error) => {
+            log::warn!("load_project: failed to serialize server config: {error}");
+        }
+    }
 }
 
 /// Handle an UnloadProject request
