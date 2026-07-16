@@ -424,7 +424,93 @@ fn parse_glsl(source: &str) -> Result<Module, CompileError> {
     let options = naga::front::glsl::Options::from(ShaderStage::Vertex);
     frontend
         .parse(&options, source)
-        .map_err(|e| CompileError::Parse(e.emit_to_string(source)))
+        .map_err(|e| CompileError::Parse(render_parse_errors_at_user_lines(&e, source)))
+}
+
+/// Render Naga parse errors with line/column numbers in user-snippet coordinates.
+///
+/// The `#line 1` directive in [`LPFX_PREFIX`] does not reach Naga's diagnostics:
+/// error spans are byte offsets into the parsed source and `emit_to_string`
+/// counts physical lines, so an error on user line 8 would render as line 48.
+/// Shift every span past the prefix and render against the source tail (the
+/// user snippet plus any synthesized `main`). A span inside the prefix itself
+/// becomes undefined: the message is kept, the misleading location dropped.
+fn render_parse_errors_at_user_lines(
+    errors: &naga::front::glsl::ParseErrors,
+    source: &str,
+) -> String {
+    let Some(user_source) = source.strip_prefix(LPFX_PREFIX) else {
+        return errors.emit_to_string(source);
+    };
+    let prefix_len = LPFX_PREFIX.len();
+    let remapped: Vec<naga::front::glsl::Error> = errors
+        .errors
+        .iter()
+        .map(|e| {
+            let meta = match e.meta.to_range() {
+                Some(r) if r.end > prefix_len => naga::Span::new(
+                    r.start.saturating_sub(prefix_len) as u32,
+                    (r.end - prefix_len) as u32,
+                ),
+                _ => naga::Span::UNDEFINED,
+            };
+            naga::front::glsl::Error {
+                kind: e.kind.clone(),
+                meta,
+            }
+        })
+        .collect();
+    naga::front::glsl::ParseErrors::from(remapped).emit_to_string(user_source)
+}
+
+#[cfg(test)]
+mod error_line_remap_tests {
+    use alloc::vec;
+
+    use super::*;
+
+    #[test]
+    fn parse_error_reports_user_snippet_line() {
+        let src = "vec4 render(vec2 pos) {\n    return vec4(pos, 0.0, 1.0);\n}\nfloat bad = ;\n";
+        let Err(err) = compile(src) else {
+            panic!("`= ;` must not parse");
+        };
+        let CompileError::Parse(msg) = err else {
+            panic!("expected Parse error, got {err:?}");
+        };
+        assert!(msg.contains("glsl:4:"), "user line expected:\n{msg}");
+        let physical = user_snippet_first_physical_line() + 3;
+        assert!(
+            !msg.contains(&format!("glsl:{physical}:")),
+            "physical line must not leak:\n{msg}"
+        );
+    }
+
+    #[test]
+    fn error_span_inside_prefix_drops_the_location() {
+        let composed = prepared_glsl_for_compile("float ok = 1.0;\n");
+        let errors = naga::front::glsl::ParseErrors::from(vec![naga::front::glsl::Error {
+            kind: naga::front::glsl::ErrorKind::SemanticError("boom".into()),
+            meta: naga::Span::new(2, 6),
+        }]);
+        let msg = render_parse_errors_at_user_lines(&errors, &composed);
+        assert!(msg.contains("boom"), "{msg}");
+        assert!(
+            !msg.contains("glsl:"),
+            "no location marker expected:\n{msg}"
+        );
+    }
+
+    #[test]
+    fn non_prefixed_source_renders_unchanged() {
+        let src = "float bad = ;\n";
+        let errors = naga::front::glsl::ParseErrors::from(vec![naga::front::glsl::Error {
+            kind: naga::front::glsl::ErrorKind::SemanticError("boom".into()),
+            meta: naga::Span::new(0, 5),
+        }]);
+        let msg = render_parse_errors_at_user_lines(&errors, src);
+        assert!(msg.contains("glsl:1:"), "{msg}");
+    }
 }
 
 #[cfg(test)]

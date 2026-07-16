@@ -41,6 +41,10 @@ pub struct ComputeShaderNode {
     def: ComputeShaderDef,
     source_asset: Option<RuntimeSourceAsset>,
     glsl_source: String,
+    /// Lines the generated uniform header occupies before the user's source
+    /// in `glsl_source` (see [`compute_glsl_source`]); compile diagnostics
+    /// get shifted back by this many lines to point at the user's lines.
+    header_lines: usize,
     /// The last successfully compiled program (keep-last-good; see the
     /// `shader_node.rs` field docs — same contract).
     shader: Option<Box<dyn LpComputeShader>>,
@@ -64,6 +68,7 @@ impl ComputeShaderNode {
             def,
             source_asset: None,
             glsl_source,
+            header_lines: 0,
             shader: None,
             compilation_error: None,
             needs_compile: true,
@@ -78,8 +83,9 @@ impl ComputeShaderNode {
         slot_shapes: &SlotShapeRegistry,
         revision: Revision,
     ) -> Result<Self, ShaderHeaderGenError> {
-        let glsl_source = compute_glsl_source(&def, &source.text, slot_shapes)?;
+        let (glsl_source, header_lines) = compute_glsl_source(&def, &source.text, slot_shapes)?;
         let mut node = Self::new(node_id, def, glsl_source, revision);
+        node.header_lines = header_lines;
         node.source_asset = Some(RuntimeSourceAsset {
             location: source.location,
             revision: source.revision,
@@ -96,7 +102,8 @@ impl ComputeShaderNode {
         source: AssetText,
         slot_shapes: &SlotShapeRegistry,
     ) -> Result<(), ShaderHeaderGenError> {
-        self.glsl_source = compute_glsl_source(&self.def, &source.text, slot_shapes)?;
+        (self.glsl_source, self.header_lines) =
+            compute_glsl_source(&self.def, &source.text, slot_shapes)?;
         self.source_asset = Some(RuntimeSourceAsset {
             location: source.location,
             revision: source.revision,
@@ -176,6 +183,7 @@ impl ComputeShaderNode {
             Err(error) => {
                 // Keep-last-good: the previous program keeps ticking while
                 // the error rides the node status.
+                let error = shift_diagnostic_lines_to_user_source(&error, self.header_lines);
                 self.compilation_error = Some(format!("compute shader compile: {error}"));
                 if let Some(compile_elapsed_ms) = compile_elapsed_ms {
                     log::warn!(
@@ -361,13 +369,83 @@ struct RuntimeSourceAsset {
     revision: Revision,
 }
 
+/// Compose the compiler input (generated uniform header + user source) and
+/// return it with the number of lines the header prefix occupies before the
+/// user's line 1.
 fn compute_glsl_source(
     def: &ComputeShaderDef,
     source: &str,
     slot_shapes: &SlotShapeRegistry,
-) -> Result<String, ShaderHeaderGenError> {
+) -> Result<(String, usize), ShaderHeaderGenError> {
     let header = generate_compute_shader_header(def, slot_shapes)?;
-    Ok(format!("{header}\n{source}"))
+    let prefix = format!("{header}\n");
+    let header_lines = prefix.lines().count();
+    Ok((format!("{prefix}{source}"), header_lines))
+}
+
+/// Shift the line numbers in a rendered compile diagnostic (lps-glsl's
+/// rustc-style ` --> <shader>:L:C` marker and its `L | <source>` gutter; see
+/// `lp-shader/lps-glsl/src/diagnostic.rs`) from composed-source lines back to
+/// user-source lines. Text without such markers passes through unchanged. A
+/// diagnostic pointing inside the generated header itself (an engine bug, not
+/// a user error) also passes through unchanged rather than being renumbered
+/// onto an unrelated user line.
+fn shift_diagnostic_lines_to_user_source(text: &str, header_lines: usize) -> String {
+    if header_lines == 0 {
+        return String::from(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    for chunk in text.split_inclusive('\n') {
+        let (line, nl) = match chunk.strip_suffix('\n') {
+            Some(s) => (s, "\n"),
+            None => (chunk, ""),
+        };
+        match shift_one_diagnostic_line(line, header_lines) {
+            Some(Some(rewritten)) => out.push_str(&rewritten),
+            Some(None) => return String::from(text),
+            None => out.push_str(line),
+        }
+        out.push_str(nl);
+    }
+    out
+}
+
+/// `None`: not a line-referencing diagnostic line. `Some(None)`: references a
+/// line inside the header (caller keeps the whole text unchanged).
+/// `Some(Some(_))`: the rewritten line.
+fn shift_one_diagnostic_line(line: &str, header_lines: usize) -> Option<Option<String>> {
+    let head = line.trim_start();
+    let indent = &line[..line.len() - head.len()];
+    if let Some(rest) = head.strip_prefix("--> <shader>:") {
+        let (n, tail) = split_leading_number(rest)?;
+        if n <= header_lines {
+            return Some(None);
+        }
+        return Some(Some(format!(
+            "{indent}--> <shader>:{}{tail}",
+            n - header_lines
+        )));
+    }
+    // Gutter line: `{line:>2} | {source text}`.
+    let (n, tail) = split_leading_number(head)?;
+    if !tail.starts_with(" | ") {
+        return None;
+    }
+    if n <= header_lines {
+        return Some(None);
+    }
+    Some(Some(format!("{:>2}{tail}", n - header_lines)))
+}
+
+fn split_leading_number(s: &str) -> Option<(usize, &str)> {
+    let end = s
+        .bytes()
+        .position(|b| !b.is_ascii_digit())
+        .unwrap_or(s.len());
+    if end == 0 {
+        return None;
+    }
+    Some((s.get(..end)?.parse().ok()?, s.get(end..)?))
 }
 
 fn resolve_or_default_input(
@@ -409,6 +487,29 @@ mod tests {
     use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
     use crate::engine::{Engine, resolve_with_engine_host};
     use crate::node::NodeEntryState;
+
+    #[test]
+    fn diagnostic_lines_shift_back_to_user_source() {
+        let text = "parse: error: expected ';', found '}'\n --> <shader>:7:5\n  |\n 7 | float wave\n  |     ^";
+        let shifted = shift_diagnostic_lines_to_user_source(text, 2);
+        assert_eq!(
+            shifted,
+            "parse: error: expected ';', found '}'\n --> <shader>:5:5\n  |\n 5 | float wave\n  |     ^"
+        );
+    }
+
+    #[test]
+    fn diagnostic_inside_generated_header_is_not_renumbered() {
+        let text = "parse: error: boom\n --> <shader>:2:1\n  |\n 2 | uniform float time;\n  | ^";
+        assert_eq!(shift_diagnostic_lines_to_user_source(text, 2), text);
+    }
+
+    #[test]
+    fn text_without_line_markers_passes_through() {
+        let text = "compute descriptor: no tick() found";
+        assert_eq!(shift_diagnostic_lines_to_user_source(text, 5), text);
+        assert_eq!(shift_diagnostic_lines_to_user_source(text, 0), text);
+    }
 
     #[test]
     fn compute_node_executes_and_publishes_dynamic_state() {
