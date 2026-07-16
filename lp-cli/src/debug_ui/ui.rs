@@ -330,7 +330,7 @@ fn render_product_probe(probe: &ProjectProbeResult) -> Option<&RenderProductProb
     match probe {
         ProjectProbeResult::RenderProduct(probe) => Some(probe),
         ProjectProbeResult::ControlProduct(_) => None,
-        ProjectProbeResult::ExplainSlot(_) => None,
+        ProjectProbeResult::BindingGraph(_) => None,
     }
 }
 

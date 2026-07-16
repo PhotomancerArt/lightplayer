@@ -5,17 +5,18 @@
 //! every slot surface carries, and the value itself is centered in the body.
 //!
 //! It is deliberately lighter and tighter than the top-level [`PaneFrame`] node
-//! chrome. Produced products and produced values are the first consumers; the
-//! binding/bus surfaces will reuse it to show bound values, which is why the
-//! [`SlotPaneTreatment`] variants exist even though today's callers only pass
-//! `Neutral`.
+//! chrome. Produced products and produced values are the first consumers;
+//! bus-published ones wear [`SlotPaneTreatment::Bound`] (the violet
+//! status-bound family — binding state is never green, which is reserved for
+//! good/valid).
 //!
 //! [`PaneFrame`]: crate::app::PaneFrame
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiSlotAspect;
+use lpa_studio_core::{UiAction, UiSlotAspect};
 
 use crate::app::node::SlotDetailButton;
+use crate::base::{StudioIcon, StudioIconName};
 
 /// Visual treatment for a [`SlotPane`], mirroring the slot-affordance language
 /// used elsewhere so a bound value on the bus reads the same as a bound slot.
@@ -62,6 +63,23 @@ pub fn SlotPane(
     /// values that want breathing room.
     #[props(default = false)]
     flush: bool,
+    /// Optional glyph rendered before the title — e.g. the bus icon on bus
+    /// channel panes, so "this is a bus channel" reads without the `bus:`
+    /// prefix.
+    #[props(default)]
+    title_icon: Option<StudioIconName>,
+    /// Optional small annotations rendered beside the title (kind tags,
+    /// PRIMARY badges) — the shared title-bar extra every binding surface
+    /// uses so badges read the same everywhere.
+    #[props(default)]
+    badges: Option<Element>,
+    /// Dispatch conduit for detail-popup rows that carry actions (D11
+    /// navigation affordances); plain informational panes omit it.
+    #[props(default)]
+    on_action: Option<EventHandler<UiAction>>,
+    /// Binding authoring surface for the detail popup (M4).
+    #[props(default)]
+    authoring: Option<lpa_studio_core::UiBindingAuthoring>,
     /// The value display rendered, centered, in the pane body.
     children: Element,
 ) -> Element {
@@ -73,13 +91,25 @@ pub fn SlotPane(
     rsx! {
         section { class: slot_pane_frame_class(treatment, fit),
             header { class: slot_pane_header_class(treatment),
-                strong { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
-                    "{title}"
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-1.5",
+                    if let Some(icon) = title_icon {
+                        span { class: "tw:inline-flex tw:flex-none tw:items-center tw:self-center tw:text-status-bound-foreground",
+                            StudioIcon { name: icon, size: 12 }
+                        }
+                    }
+                    strong { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-bold tw:leading-tight tw:text-strong-foreground",
+                        "{title}"
+                    }
+                    if let Some(badges) = badges {
+                        {badges}
+                    }
                 }
                 SlotDetailButton {
                     label: title.clone(),
                     aspects,
                     initially_open,
+                    on_action,
+                    authoring,
                 }
             }
             div { class: body_class,
@@ -99,7 +129,7 @@ fn slot_pane_frame_class(treatment: SlotPaneTreatment, fit: bool) -> String {
     };
     let border = match treatment {
         SlotPaneTreatment::Neutral => "tw:border-border",
-        SlotPaneTreatment::Bound => "tw:border-accent-border",
+        SlotPaneTreatment::Bound => "tw:border-status-bound-border",
         SlotPaneTreatment::Unsaved => "tw:border-status-warning-border",
         SlotPaneTreatment::Saving => "tw:border-status-working-border",
         SlotPaneTreatment::Invalid | SlotPaneTreatment::Error => "tw:border-status-error-border",
@@ -115,7 +145,7 @@ fn slot_pane_header_class(treatment: SlotPaneTreatment) -> &'static str {
             "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:border-b tw:border-border-muted tw:bg-card-muted tw:py-1 tw:pl-2.5 tw:pr-1"
         }
         SlotPaneTreatment::Bound => {
-            "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:border-b tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_72%)] tw:py-1 tw:pl-2.5 tw:pr-1"
+            "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:border-b tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-bound-bg),transparent_72%)] tw:py-1 tw:pl-2.5 tw:pr-1"
         }
         SlotPaneTreatment::Unsaved => {
             "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:border-b tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg),transparent_72%)] tw:py-1 tw:pl-2.5 tw:pr-1"

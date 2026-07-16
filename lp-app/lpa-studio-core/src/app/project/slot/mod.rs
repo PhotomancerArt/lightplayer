@@ -8,6 +8,7 @@
 pub mod pending_edit;
 pub mod project_slot_address;
 pub mod project_slot_root;
+pub mod slot_binding_fact;
 pub mod slot_controller;
 pub mod slot_edit_join;
 pub mod slot_edit_op;
@@ -15,6 +16,7 @@ pub mod slot_edit_op;
 pub use pending_edit::{PendingEdit, PendingEditOp, PendingEditPhase};
 pub use project_slot_address::ProjectSlotAddress;
 pub use project_slot_root::ProjectSlotRoot;
+pub use slot_binding_fact::{SlotBindingFact, SlotBindingFactKind};
 pub use slot_controller::{SlotController, SlotControllerState, SlotKind};
 pub(in crate::app::project) use slot_edit_join::{
     AssetEditEntry, AssetEditKey, AssetEditState, PrefixEditState, SlotEditEntry,

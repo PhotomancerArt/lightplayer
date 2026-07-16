@@ -144,6 +144,7 @@ pub(crate) fn derive_enum(
                             shape: #static_shape_binding,
                             semantics: ::lpc_model::SlotSemantics::local(),
                             policy: ::lpc_model::SlotPolicy::writable_persisted(),
+                        default_bind: None,
                         }
                     });
                     static_shape_bindings.push(static_shape_binding);

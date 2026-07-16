@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn reports_bound_source() {
-        let source = UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds"));
+        let source = UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time"));
 
         assert!(source.is_bound());
     }

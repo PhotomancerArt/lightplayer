@@ -1734,7 +1734,7 @@ fn asset_e2e_server() -> LpServer {
   "kind": "Shader",
   "source": "shader.glsl",
   "bindings": {
-    "output": { "target": "bus#visual.out" }
+    "output": { "target": "bus:visual.out" }
   },
   "consumed": {
     "time": {
@@ -1750,8 +1750,8 @@ fn asset_e2e_server() -> LpServer {
   "kind": "Fixture",
   "render_size": { "width": 4, "height": 4 },
   "bindings": {
-    "input": { "source": "bus#visual.out" },
-    "output": { "target": "bus#control.out" }
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
   }
 }"#;
     // The output node drives the demand chain (output pulls control →
@@ -1761,7 +1761,7 @@ fn asset_e2e_server() -> LpServer {
   "kind": "Output",
   "endpoint": "ws281x:rmt:D10",
   "bindings": {
-    "input": { "source": "bus#control.out" }
+    "input": { "source": "bus:control.out" }
   }
 }"#;
     let project_json = r#"{
@@ -1861,8 +1861,8 @@ fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
   "kind": "Fixture",
   "render_size": { "width": 10, "height": 10 },
   "bindings": {
-    "input": { "source": "bus#visual.out" },
-    "output": { "target": "bus#control.out" }
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
   }
 }"#,
         ),

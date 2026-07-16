@@ -2,6 +2,7 @@
   "record": {
     "fields": [
       {
+        "default_bind": "bus:time",
         "name": "seconds",
         "policy": {
           "persistence": "transient",

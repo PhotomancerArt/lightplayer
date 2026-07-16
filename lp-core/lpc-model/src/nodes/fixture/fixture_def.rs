@@ -7,11 +7,17 @@ use crate::{
     OptionSlot, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted,
     StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
     StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    VisualProductSlot,
 };
 
 /// Authored fixture node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct FixtureDef {
+    /// Visual product this fixture samples each frame. Runtime dataflow
+    /// input — resolved through the binding graph, never authored as a
+    /// value (declared so the wiring is first-class schema, roadmap D8).
+    #[slot(consumed, default_bind = "bus:visual.out")]
+    pub input: VisualProductSlot,
     /// Full-frame render size used when materializing the fixture input.
     pub render_size: Dim2uSlot,
     /// Authored slot bindings for fixture inputs.
@@ -35,6 +41,7 @@ pub struct FixtureDef {
 impl Default for FixtureDef {
     fn default() -> Self {
         Self {
+            input: VisualProductSlot::default(),
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
             sampling: ValueSlot::new(FixtureSamplingConfig::default()),
@@ -337,6 +344,7 @@ mod tests {
             )),
         );
         let def = FixtureDef {
+            input: VisualProductSlot::default(),
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),

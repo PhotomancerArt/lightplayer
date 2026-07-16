@@ -3,8 +3,8 @@
 use alloc::vec::Vec;
 
 use super::{
-    ControlProductProbeRequest, ControlProductProbeResult, ExplainSlotProbeRequest,
-    ExplainSlotProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
+    ControlProductProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
 };
 
 /// Request-scoped diagnostic work attached to a project read.
@@ -14,7 +14,7 @@ use super::{
 pub enum ProjectProbeRequest {
     RenderProduct(RenderProductProbeRequest),
     ControlProduct(ControlProductProbeRequest),
-    ExplainSlot(ExplainSlotProbeRequest),
+    BindingGraph(BindingGraphProbeRequest),
     // Future: ShaderPixel(ShaderPixelProbeRequest),
     // Future: ShaderTrace(ShaderTraceProbeRequest),
     // Future: ControlBuffer(ControlBufferProbeRequest),
@@ -29,7 +29,7 @@ pub enum ProjectProbeRequest {
 pub enum ProjectProbeResult {
     RenderProduct(RenderProductProbeResult),
     ControlProduct(ControlProductProbeResult),
-    ExplainSlot(ExplainSlotProbeResult),
+    BindingGraph(BindingGraphProbeResult),
     // Future: ShaderPixel(ShaderPixelProbeResult),
     // Future: ShaderTrace(ShaderTraceProbeResult),
     // Future: ControlBuffer(ControlBufferProbeResult),
@@ -79,7 +79,7 @@ impl ProjectProbeResult {
                 }
                 Err(result) => Err(Self::ControlProduct(result)),
             },
-            Self::ExplainSlot(_) => Err(self),
+            Self::BindingGraph(_) => Err(self),
         }
     }
 }

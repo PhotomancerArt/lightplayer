@@ -138,12 +138,6 @@
     "lpc_model::nodes::playlist::playlist_entry::PlaylistEntry": {
       "additionalProperties": false,
       "properties": {
-        "bindings": {
-          "additionalProperties": {
-            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
-          },
-          "type": "object"
-        },
         "duration": {
           "description": "Intended non-negative float (not enforced on read).",
           "type": "number"
@@ -184,14 +178,13 @@
             }
           ]
         },
-        "trigger": {
-          "additionalProperties": {
-            "$ref": "#/$defs/lp::control::Message"
+        "trigger_ids": {
+          "items": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
           },
-          "propertyNames": {
-            "pattern": "^\\+?[0-9]+$"
-          },
-          "type": "object"
+          "type": "array"
         }
       },
       "type": "object"
@@ -248,6 +241,9 @@
       "properties": {
         "default": {
           "type": "number"
+        },
+        "default_bind": {
+          "type": "string"
         },
         "description": {
           "type": "string"
@@ -696,6 +692,15 @@
         },
         "time": {
           "type": "number"
+        },
+        "trigger": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lp::control::Message"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
         }
       },
       "required": [
@@ -760,6 +765,41 @@
         "endpoint": {
           "type": "string"
         },
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "control"
+            },
+            "node": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preferred_extent": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "samples_per_row": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
         "kind": {
           "const": "Output"
         },
@@ -794,6 +834,41 @@
         },
         "gamma_correction": {
           "type": "boolean"
+        },
+        "input": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "visual"
+            },
+            "node": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "output": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preferred_extent": {
+              "additionalProperties": false,
+              "properties": {
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "samples_per_row": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
         },
         "kind": {
           "const": "Fixture"

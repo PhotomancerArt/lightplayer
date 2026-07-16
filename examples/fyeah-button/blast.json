@@ -4,10 +4,10 @@
   "render_order": 0,
   "bindings": {
     "progress": {
-      "source": "..#entry_progress"
+      "source": "node:..#entry_progress"
     },
     "time": {
-      "source": "..#entry_time"
+      "source": "node:..#entry_time"
     }
   },
   "glsl_opts": {

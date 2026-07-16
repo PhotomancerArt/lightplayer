@@ -13,6 +13,7 @@
 //! component tree respectively.
 
 mod ui_asset_editor;
+mod ui_binding_authoring;
 mod ui_config_slot;
 mod ui_node_binding;
 mod ui_node_child;
@@ -36,6 +37,7 @@ mod ui_slot_unit;
 mod ui_slot_value;
 
 pub use ui_asset_editor::UiAssetEditor;
+pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};
 pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody, UiSlotOptionality};
 pub use ui_node_binding::{UiBindingEndpoint, UiProducedBinding, UiProducedBindings};
 pub use ui_node_child::UiNodeChild;

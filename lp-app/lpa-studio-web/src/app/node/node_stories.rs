@@ -154,6 +154,24 @@ pub(crate) fn nested_dirty_children() -> Element {
 }
 
 #[story(
+    description = "The node detail popup on an erroring node: the status pill plus the runtime's error text — the popup answers WHY a node is in the error state (the compact status alone doesn't)."
+)]
+pub(crate) fn error_detail_popup() -> Element {
+    let view = error_node_view();
+
+    rsx! {
+        div { class: "tw:flex tw:min-h-[320px] tw:justify-end",
+            NodeDetailPopover {
+                header: view.header,
+                pending_edits: vec![],
+                on_action: move |_| {},
+                initially_open: true,
+            }
+        }
+    }
+}
+
+#[story(
     description = "The merged node detail popup open: status content plus the per-bucket dirty sections as tinted-title change lists — the node's OWN pending edits with per-entry reverts (subtree counts ride the title rows; the other node's edit in the threaded list is filtered out)."
 )]
 pub(crate) fn dirty_detail_popup() -> Element {

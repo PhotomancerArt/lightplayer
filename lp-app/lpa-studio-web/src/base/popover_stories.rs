@@ -83,7 +83,7 @@ fn PopoverStoryButton(
             div { class: "ux-node-ui-binding-section ux-node-ui-bus-binding-section",
                 div { class: "ux-node-ui-binding-heading", "example binding" }
                 div { class: "ux-node-ui-bus-binding-row",
-                    span { "bus#" }
+                    span { "bus:" }
                     code { "visual.out" }
                     button { r#type: "button", "del" }
                 }

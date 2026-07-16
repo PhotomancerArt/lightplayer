@@ -7,11 +7,12 @@ use lpc_model::{
 };
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
-    ControlProductProbeResult, NodeReadQuery, NodeReadSelection, ProjectProbeRequest,
-    ProjectProbeResult, ProjectReadEvent, ProjectReadQuery, ProjectReadRequest, ReadLevel,
-    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
-    RuntimeReadQuery, ShapeReadQuery, WireChannelSampleFormat, WireTextureFormat,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
+    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult, NodeReadQuery,
+    NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
+    ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
+    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery, WireBindingGraph,
+    WireChannelSampleFormat, WireTextureFormat,
 };
 
 use crate::{
@@ -25,6 +26,11 @@ pub struct ProjectSync {
     view: ProjectView,
     phase: ProjectSyncPhase,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
+    /// Latest binding-graph snapshot, kept while a consumer subscribes.
+    binding_graph: Option<WireBindingGraph>,
+    /// Whether reads should carry the binding-graph probe (bus pane visible,
+    /// binding popover open, …).
+    binding_graph_subscribed: bool,
     issue: Option<UiIssue>,
     /// Client mirror of the server's pending-edit overlay.
     overlay: ProjectOverlay,
@@ -46,6 +52,8 @@ impl ProjectSync {
             view: ProjectView::new(),
             phase: ProjectSyncPhase::Empty,
             product_previews: BTreeMap::new(),
+            binding_graph: None,
+            binding_graph_subscribed: false,
             issue: None,
             overlay: ProjectOverlay::new(),
             base_values: BTreeMap::new(),
@@ -54,8 +62,16 @@ impl ProjectSync {
     }
 
     pub fn begin_initial_sync(&mut self) {
+        // Reset per-read data (mirror, previews, overlay) but preserve the
+        // binding-graph subscription: it is a UI preference (the bus pane
+        // ships with every loaded project, set at `mark_ready`), not
+        // per-read state. Without this, the reset here wipes the
+        // subscription that `mark_ready` just set, and the bus pane never
+        // gets its probe — showing "Reading" forever.
+        let binding_graph_subscribed = self.binding_graph_subscribed;
         *self = Self {
             phase: ProjectSyncPhase::SyncingProject,
+            binding_graph_subscribed,
             ..Self::new()
         };
     }
@@ -270,7 +286,7 @@ impl ProjectSync {
         products: Vec<UiProductRef>,
     ) -> ProjectReadRequest {
         self.phase = ProjectSyncPhase::SyncingProject;
-        project_read_request(None, true, self.product_probe_requests(products))
+        project_read_request(None, true, self.probe_requests(products))
     }
 
     pub fn refresh_project_read_request(
@@ -282,7 +298,7 @@ impl ProjectSync {
         // Runtime state slots carry live values/products, so refresh snapshots
         // include slots even when the tree itself only changes by revision.
         let include_slots = true;
-        project_read_request(since, include_slots, self.product_probe_requests(products))
+        project_read_request(since, include_slots, self.probe_requests(products))
     }
 
     pub fn apply_project_read_events(
@@ -308,9 +324,18 @@ impl ProjectSync {
         };
         let probe_refs: Vec<&ProjectProbeResult> = probes.iter().collect();
         self.apply_product_probe_results(&probe_refs);
+        self.apply_binding_graph_probe_results(&probe_refs);
         self.phase = ProjectSyncPhase::Ready;
         self.issue = None;
         Ok(())
+    }
+
+    fn apply_binding_graph_probe_results(&mut self, probes: &[&ProjectProbeResult]) {
+        for probe in probes {
+            if let ProjectProbeResult::BindingGraph(BindingGraphProbeResult::Graph(graph)) = probe {
+                self.binding_graph = Some(graph.clone());
+            }
+        }
     }
 
     pub fn fail(&mut self, issue: impl Into<String>) {
@@ -330,6 +355,39 @@ impl ProjectSync {
     pub fn reset_view(&mut self) {
         self.view = ProjectView::new();
         self.product_previews.clear();
+        self.binding_graph = None;
+    }
+
+    /// Latest binding-graph snapshot, when a consumer subscribes.
+    pub fn binding_graph(&self) -> Option<&WireBindingGraph> {
+        self.binding_graph.as_ref()
+    }
+
+    /// Inject a binding-graph snapshot directly (test fixture path).
+    #[cfg(test)]
+    pub(crate) fn set_binding_graph_for_test(&mut self, graph: WireBindingGraph) {
+        self.binding_graph = Some(graph);
+    }
+
+    /// Toggle the binding-graph probe on project reads. Unsubscribing drops
+    /// the cached snapshot so stale topology never renders.
+    pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
+        self.binding_graph_subscribed = subscribed;
+        if !subscribed {
+            self.binding_graph = None;
+        }
+    }
+
+    fn probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
+        let mut probes = self.product_probe_requests(products);
+        if self.binding_graph_subscribed {
+            probes.push(ProjectProbeRequest::BindingGraph(
+                BindingGraphProbeRequest {
+                    include_values: true,
+                },
+            ));
+        }
+        probes
     }
 
     fn product_probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
@@ -634,7 +692,7 @@ fn product_preview_from_probe(
             ))
         }
         ProjectProbeResult::ControlProduct(_) => None,
-        ProjectProbeResult::ExplainSlot(_) => None,
+        ProjectProbeResult::BindingGraph(_) => None,
     }
 }
 
@@ -718,6 +776,70 @@ mod tests {
             ProjectReadQuery::Runtime(RuntimeReadQuery)
         );
         assert!(request.probes.is_empty());
+    }
+
+    #[test]
+    fn binding_graph_subscription_requests_and_caches_the_snapshot() {
+        let mut sync = ProjectSync::new();
+
+        // Unsubscribed reads carry no binding-graph probe.
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert!(request.probes.is_empty());
+
+        sync.set_binding_graph_subscribed(true);
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::BindingGraph(
+                BindingGraphProbeRequest {
+                    include_values: true,
+                }
+            )]
+        );
+
+        let graph = WireBindingGraph {
+            revision: Revision::new(4),
+            bindings: Vec::new(),
+            channels: Vec::new(),
+        };
+        sync.apply_project_read_events(probe_events(
+            4,
+            vec![ProjectProbeResult::BindingGraph(
+                BindingGraphProbeResult::Graph(graph.clone()),
+            )],
+        ))
+        .expect("apply events");
+        assert_eq!(sync.binding_graph(), Some(&graph));
+
+        // Unsubscribing drops the cached snapshot.
+        sync.set_binding_graph_subscribed(false);
+        assert_eq!(sync.binding_graph(), None);
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert!(request.probes.is_empty());
+    }
+
+    #[test]
+    fn binding_graph_subscription_survives_begin_initial_sync() {
+        // Regression: the demo flow sets the subscription at `mark_ready`,
+        // then `sync_loaded_project` calls `begin_initial_sync`, which resets
+        // per-read state. The subscription is a UI preference, not read data,
+        // so it must survive — otherwise the initial read omits the probe and
+        // the bus pane shows "Reading" forever.
+        let mut sync = ProjectSync::new();
+        sync.set_binding_graph_subscribed(true);
+
+        sync.begin_initial_sync();
+
+        let request = sync.initial_project_read_request(Vec::new());
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::BindingGraph(
+                BindingGraphProbeRequest {
+                    include_values: true,
+                }
+            )],
+            "binding-graph probe must ride the initial read after begin_initial_sync"
+        );
     }
 
     #[test]

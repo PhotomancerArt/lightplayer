@@ -16,6 +16,7 @@ pub(crate) struct FieldAttrs {
     pub(crate) direction: FieldDirectionAttr,
     pub(crate) merge: FieldMergeAttr,
     pub(crate) policy: Option<SlotPolicyAttr>,
+    pub(crate) default_bind: Option<LitStr>,
 }
 
 pub(crate) struct VariantAttrs {
@@ -111,9 +112,24 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
     let mut direction = FieldDirectionAttr::Local;
     let mut merge = FieldMergeAttr::Latest;
     let mut policy = None;
+    let mut default_bind: Option<LitStr> = None;
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("name") {
+            if meta.path.is_ident("default_bind") {
+                let value = meta.value()?;
+                let value: LitStr = value.parse()?;
+                // Only bus endpoints may be defaults (ADR 2026-07-09); the
+                // full grammar is validated by the model's shape-walk test —
+                // this macro cannot depend on lpc-model (cycle).
+                if !value.value().starts_with("bus:") {
+                    return Err(syn::Error::new(
+                        value.span(),
+                        "default_bind must be a `bus:<channel>` endpoint",
+                    ));
+                }
+                default_bind = Some(value);
+                Ok(())
+            } else if meta.path.is_ident("name") {
                 let value = meta.value()?;
                 name = Some(value.parse()?);
                 Ok(())
@@ -174,6 +190,7 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
         direction,
         merge,
         policy,
+        default_bind,
     })
 }
 

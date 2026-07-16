@@ -272,6 +272,115 @@ impl ProjectController {
         self.sync.as_ref().map(ProjectSync::summary)
     }
 
+    /// Latest binding-graph snapshot, when a consumer subscribes.
+    pub fn binding_graph(&self) -> Option<&lpc_wire::WireBindingGraph> {
+        self.sync.as_ref()?.binding_graph()
+    }
+
+    /// Project the binding-graph snapshot into the bus pane view.
+    ///
+    /// `None` before the first snapshot arrives; the pane shows its loading/
+    /// empty state. Node labels and focus actions come from the same node
+    /// controllers the project pane renders, so clicking a site lands on
+    /// exactly that node (D7 linked navigation).
+    pub fn ui_bus_view(&self) -> Option<crate::UiBusView> {
+        let graph = self.binding_graph()?;
+        let site = |index: &u32| -> Option<crate::UiBusSiteView> {
+            let binding = graph.bindings.get(*index as usize)?;
+            let node = self.node_by_runtime_id(binding.node);
+            Some(crate::UiBusSiteView {
+                node_label: node
+                    .map(|node| node.label().to_string())
+                    .unwrap_or_else(|| format!("node {}", binding.node.0)),
+                slot: binding.slot.as_ref().map(|slot| format!("{slot}")),
+                default_origin: binding.origin == lpc_wire::WireBindingOrigin::Default,
+                focus: node.map(node_focus_action),
+            })
+        };
+        let channels = graph
+            .channels
+            .iter()
+            .map(|channel| crate::UiBusChannelView {
+                name: channel.name.clone(),
+                kind: channel.kind.map(|kind| format!("{kind:?}")),
+                value: channel
+                    .value
+                    .as_ref()
+                    .and_then(|value| value.value.as_ref())
+                    .map(format_lp_value),
+                value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
+                primary_visual: channel.name == "visual.out",
+                writers: channel.providers.iter().filter_map(site).collect(),
+                readers: channel.consumers.iter().filter_map(site).collect(),
+            })
+            .collect();
+        Some(crate::UiBusView { channels })
+    }
+
+    /// Channels the binding picker offers: every channel observed in the
+    /// effective binding graph plus the well-known registry, well-known
+    /// first (M4). Kinds come from the registry, falling back to the wire
+    /// graph's established kind.
+    pub fn ui_channel_choices(&self) -> Vec<crate::UiChannelChoice> {
+        let observed: Vec<(String, Option<String>)> = self
+            .binding_graph()
+            .map(|graph| {
+                graph
+                    .channels
+                    .iter()
+                    .map(|channel| {
+                        (
+                            channel.name.clone(),
+                            channel.kind.map(|kind| format!("{kind:?}")),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut choices: Vec<crate::UiChannelChoice> = lpc_model::WELL_KNOWN_CHANNELS
+            .iter()
+            .map(|channel| crate::UiChannelChoice {
+                name: channel.name.to_string(),
+                kind: Some(format!("{:?}", channel.kind)),
+                doc: Some(channel.doc),
+                well_known: true,
+                observed: observed.iter().any(|(name, _)| name == channel.name),
+            })
+            .collect();
+        for (name, kind) in observed {
+            if choices.iter().any(|choice| choice.name == name) {
+                continue;
+            }
+            choices.push(crate::UiChannelChoice {
+                name,
+                kind,
+                doc: None,
+                well_known: false,
+                observed: true,
+            });
+        }
+        choices
+    }
+
+    /// Find the node controller currently carrying a runtime node id.
+    fn node_by_runtime_id(&self, id: lpc_model::NodeId) -> Option<&NodeController> {
+        fn walk(node: &NodeController, id: lpc_model::NodeId) -> Option<&NodeController> {
+            if node.target().node_id == id {
+                return Some(node);
+            }
+            node.children().iter().find_map(|child| walk(child, id))
+        }
+        self.root_nodes.iter().find_map(|node| walk(node, id))
+    }
+
+    /// Toggle the binding-graph probe on project reads (bus pane visible,
+    /// binding detail open, …).
+    pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
+        if let Some(sync) = self.sync.as_mut() {
+            sync.set_binding_graph_subscribed(subscribed);
+        }
+    }
+
     /// Root node controllers in project tree order.
     pub fn root_nodes(&self) -> &[NodeController] {
         &self.root_nodes
@@ -284,10 +393,115 @@ impl ProjectController {
         let asset_editor =
             |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
         let edits = self.slot_edit_join();
+        let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         self.root_nodes
             .iter()
-            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits, &asset_editor))
+            .map(|node| {
+                node.ui_node_with_product_previews(
+                    &product_preview,
+                    &edits,
+                    &extra_config,
+                    &asset_editor,
+                )
+            })
             .collect()
+    }
+
+    /// Read-only rows for wiring with no backing slot row: effective
+    /// bindings (binding-graph snapshot) anchored to slots the node's roots
+    /// do not carry — implicit runtime consumed slots like `fixture.input`.
+    /// A node's visible surface is its authored slots, its runtime state
+    /// slots, and what it is wired to (roadmap M3).
+    fn binding_derived_config_slots(&self, node_id: NodeId) -> Vec<crate::UiConfigSlot> {
+        let Some(graph) = self.binding_graph() else {
+            return Vec::new();
+        };
+        let Some(node) = self.node_by_runtime_id(node_id) else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        for binding in graph
+            .bindings
+            .iter()
+            .filter(|binding| binding.node == node_id)
+        {
+            let Some(slot) = binding.slot.as_ref() else {
+                continue;
+            };
+            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+                continue;
+            };
+            let name = name.as_str();
+            if node.has_slot_root_field(name) {
+                continue;
+            }
+            // Literal-sourced wiring (the output demand slot's constant) is
+            // loader plumbing, not a user-facing route — no row.
+            if matches!(
+                binding.endpoint,
+                lpc_wire::WireBindingEndpoint::Literal { .. }
+            ) {
+                continue;
+            }
+            let mut endpoint = self.ui_binding_endpoint(&binding.endpoint);
+            if binding.origin == lpc_wire::WireBindingOrigin::Default {
+                endpoint = endpoint.with_default_origin();
+            }
+            let authoring = crate::UiBindingAuthoring {
+                key: name.to_string(),
+                direction: match binding.direction {
+                    lpc_wire::WireBindingDirection::Consumes => {
+                        crate::UiBindingAuthoringDirection::Source
+                    }
+                    lpc_wire::WireBindingDirection::Publishes => {
+                        crate::UiBindingAuthoringDirection::Target
+                    }
+                },
+                bindings_map: crate::ProjectSlotAddress::new(
+                    node.address().clone(),
+                    crate::ProjectSlotRoot::Def,
+                    lpc_model::SlotPath::root()
+                        .child(lpc_model::SlotName::parse("bindings").expect("valid slot name")),
+                ),
+                authored: (binding.origin == lpc_wire::WireBindingOrigin::Authored)
+                    .then(|| endpoint.clone()),
+            };
+            let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
+                .with_description("Runtime slot wired by binding; it has no authored value here.")
+                .with_state(crate::UiSlotFieldState::readonly())
+                .with_authoring(authoring);
+            row = match binding.direction {
+                lpc_wire::WireBindingDirection::Consumes => {
+                    row.with_source(crate::UiSlotSourceState::Bound(endpoint))
+                }
+                lpc_wire::WireBindingDirection::Publishes => row.with_publish(endpoint),
+            };
+            rows.push(row);
+        }
+        rows
+    }
+
+    /// Display endpoint for a wire binding endpoint, resolving node labels
+    /// from the controllers when the endpoint names another node.
+    fn ui_binding_endpoint(
+        &self,
+        endpoint: &lpc_wire::WireBindingEndpoint,
+    ) -> crate::UiBindingEndpoint {
+        match endpoint {
+            lpc_wire::WireBindingEndpoint::Bus { channel } => {
+                crate::UiBindingEndpoint::new(format!("bus:{channel}"))
+            }
+            lpc_wire::WireBindingEndpoint::NodeSlot { node, slot } => {
+                let label = self
+                    .node_by_runtime_id(*node)
+                    .map(|node| node.label().to_string())
+                    .unwrap_or_else(|| format!("node {}", node.0));
+                crate::UiBindingEndpoint::new(format!("{label}#{slot}"))
+            }
+            lpc_wire::WireBindingEndpoint::Literal { value } => {
+                crate::UiBindingEndpoint::new(format_lp_value(value)).with_detail("literal value")
+            }
+        }
     }
 
     /// Resolve one node's asset slot into its editor-tab DTO, or `None` when
@@ -676,11 +890,60 @@ impl ProjectController {
         self.slot_shapes = view.slots.registry.clone();
         self.root_shape_ids = view.slots.root_shapes.clone();
         reconcile_root_nodes(&mut self.root_nodes, view);
+        self.apply_default_binding_overlay();
         if let Some(target) = self.active_editor_target.clone() {
             self.focus_editor_target(&target);
         }
         ensure_default_node_focus(&mut self.root_nodes);
         Ok(())
+    }
+
+    /// Overlay graph-derived default bindings onto per-slot indicators: every
+    /// effective binding with `origin: default` marks its owning slot as
+    /// bound/publishing with a default-origin endpoint (DEF badge, popover
+    /// explanation). The authored facts applied during the tree walk always
+    /// win — defaults only fill slots the authored pass left direct or
+    /// unpublished (M5 honest indicator, ADR 2026-07-09).
+    fn apply_default_binding_overlay(&mut self) {
+        use crate::app::project::slot::{SlotBindingFact, SlotBindingFactKind};
+        let Some(graph) = self.binding_graph() else {
+            return;
+        };
+        let mut facts: Vec<(NodeId, SlotBindingFact)> = Vec::new();
+        for binding in &graph.bindings {
+            if binding.origin != lpc_wire::WireBindingOrigin::Default {
+                continue;
+            }
+            let Some(slot) = binding.slot.as_ref() else {
+                continue;
+            };
+            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+                continue;
+            };
+            let endpoint = self
+                .ui_binding_endpoint(&binding.endpoint)
+                .with_default_origin();
+            let kind = match binding.direction {
+                lpc_wire::WireBindingDirection::Consumes => SlotBindingFactKind::Source(endpoint),
+                lpc_wire::WireBindingDirection::Publishes => SlotBindingFactKind::Target(endpoint),
+            };
+            facts.push((
+                binding.node,
+                SlotBindingFact {
+                    slot: name.as_str().to_string(),
+                    kind,
+                },
+            ));
+        }
+        for (node_id, fact) in facts {
+            if let Some(node) = self
+                .root_nodes
+                .iter_mut()
+                .find_map(|node| node.node_by_runtime_id_mut(node_id))
+            {
+                node.apply_default_binding_fact(&fact);
+            }
+        }
     }
 
     pub fn actions(&self, server_connected: bool) -> Vec<UiAction> {
@@ -754,11 +1017,19 @@ impl ProjectController {
         let asset_editor =
             |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
         let edits = self.slot_edit_join();
+        let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         let nodes = self
             .root_nodes
             .iter()
             .flat_map(NodeController::children)
-            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits, &asset_editor))
+            .map(|node| {
+                node.ui_node_with_product_previews(
+                    &product_preview,
+                    &edits,
+                    &extra_config,
+                    &asset_editor,
+                )
+            })
             .collect::<Vec<_>>();
         // Node dirty covers slot + node-mapped asset edits across the subtree;
         // asset edits whose artifact maps to no node (a shader's `.glsl`) are
@@ -783,6 +1054,7 @@ impl ProjectController {
             nodes,
         )
         .with_project_name(self.project_name(project_id))
+        .with_channel_choices(self.ui_channel_choices())
         .with_root_slots(root_slots)
         .with_dirty(dirty)
         .with_pending_edits(self.pending_edits())
@@ -834,7 +1106,12 @@ impl ProjectController {
             handle_id,
             inventory,
         };
-        self.sync = Some(ProjectSync::new());
+        // The bus pane ships with every loaded project, so its probe rides
+        // along from the first read (unsubscribing stays available for
+        // consumers without the pane).
+        let mut sync = ProjectSync::new();
+        sync.set_binding_graph_subscribed(true);
+        self.sync = Some(sync);
         self.root_nodes.clear();
     }
 
@@ -1543,6 +1820,9 @@ impl ProjectController {
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
         let result = self.apply_project_view(sync.project_view());
         self.sync = Some(sync);
+        // The overlay reads the binding graph through `self.sync`, which was
+        // taken out during the view apply — run it now that it is restored.
+        self.apply_default_binding_overlay();
         result
     }
 
@@ -2415,6 +2695,15 @@ fn count_nodes(node: &NodeController) -> usize {
     1 + node.children().iter().map(count_nodes).sum::<usize>()
 }
 
+/// Humanize a slot field name for display (`entry_time` → `Entry time`).
+fn human_field_label(name: &str) -> String {
+    let mut label = name.replace('_', " ");
+    if let Some(first) = label.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    label
+}
+
 fn node_focus_action(node: &NodeController) -> UiAction {
     UiAction::from_op(
         ProjectEditorTarget::addressed_node(node.target().clone()).node_id(),
@@ -3141,6 +3430,27 @@ mod tests {
     }
 
     #[test]
+    fn ui_node_header_carries_status_detail() {
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project
+            .apply_project_view(&single_node_view(
+                1,
+                NodeRuntimeStatus::Error("shader compile failed: expected ')'".to_string()),
+            ))
+            .unwrap();
+
+        let nodes = project.ui_nodes();
+        assert_eq!(nodes[0].header.status.label, "Error");
+        // The popup answers "why": the runtime's error text rides the header
+        // detail instead of being dropped at the compact-status boundary.
+        assert_eq!(
+            nodes[0].header.detail.as_deref(),
+            Some("shader compile failed: expected ')'")
+        );
+    }
+
+    #[test]
     fn ui_nodes_project_header_state_and_child_summaries() {
         let mut project = ProjectController::new();
         let mut view = tree_view();
@@ -3335,6 +3645,469 @@ mod tests {
     }
 
     #[test]
+    fn authored_bindings_populate_source_and_publish() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let sections = node_sections(&nodes[0]);
+
+        // Consumed slot with an authored source binding reads as bound; the
+        // internal `bindings` map itself stays hidden from config rows.
+        let config = section_config_slots(sections);
+        assert_eq!(
+            config
+                .iter()
+                .map(|slot| slot.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Time"]
+        );
+        let UiSlotSourceState::Bound(endpoint) = &config[0].source else {
+            panic!("expected time slot to be bound, got {:?}", config[0].source);
+        };
+        assert_eq!(endpoint.label, "bus:time");
+        let binding_aspect = config[0]
+            .visible_aspects()
+            .into_iter()
+            .find(|aspect| aspect.kind == crate::UiSlotAspectKind::Binding)
+            .expect("binding aspect");
+        assert_eq!(binding_aspect.rows[0].label, "Bound");
+        assert_eq!(binding_aspect.rows[0].value, "bus:time");
+
+        // Produced slot with an authored target binding publishes to the bus.
+        let produced = section_produced_values(sections);
+        assert_eq!(produced.len(), 1);
+        assert_eq!(produced[0].label, "Seconds");
+        let bus_target = produced[0]
+            .binding
+            .bindings
+            .bus_target
+            .as_ref()
+            .expect("seconds should publish to the bus");
+        assert_eq!(bus_target.label, "bus:time");
+    }
+
+    #[test]
+    fn ui_bus_view_projects_channels_with_labels_and_focus() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![
+                lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("input").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Consumes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        channel: "visual.out".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Authored,
+                    priority: 0,
+                    kind: lpc_model::Kind::Color,
+                },
+                lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("output").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Publishes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        channel: "visual.out".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Default,
+                    priority: -1000,
+                    kind: lpc_model::Kind::Color,
+                },
+            ],
+            channels: vec![lpc_wire::WireBusChannel {
+                name: "visual.out".to_string(),
+                kind: Some(lpc_model::Kind::Color),
+                providers: vec![1],
+                consumers: vec![0],
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::F32(0.5)),
+                    error: None,
+                }),
+            }],
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+
+        let bus = project.ui_bus_view().expect("bus view");
+        assert_eq!(bus.channels.len(), 1);
+        let channel = &bus.channels[0];
+        assert_eq!(channel.name, "visual.out");
+        assert!(channel.primary_visual);
+        assert_eq!(channel.value.as_deref(), Some("0.5"));
+        assert_eq!(channel.writers.len(), 1);
+        assert_eq!(channel.readers.len(), 1);
+        assert!(channel.writers[0].default_origin);
+        assert!(!channel.readers[0].default_origin);
+        assert_eq!(channel.readers[0].slot.as_deref(), Some("input"));
+        // Sites resolve to the node controller's label and carry a focus
+        // action (D7 linked navigation).
+        assert_eq!(channel.readers[0].node_label, "Orbit");
+        assert!(channel.readers[0].focus.is_some());
+    }
+
+    #[test]
+    fn default_binding_overlay_fills_unbound_slots_with_def_endpoints() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots_without_bindings(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![
+                lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("seconds").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Publishes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        channel: "time".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Default,
+                    priority: -1000,
+                    kind: lpc_model::Kind::Instant,
+                },
+                lpc_wire::WireEffectiveBinding {
+                    owner: node,
+                    node,
+                    slot: Some(SlotPath::parse("time").unwrap()),
+                    direction: lpc_wire::WireBindingDirection::Consumes,
+                    endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                        channel: "time".to_string(),
+                    },
+                    origin: lpc_wire::WireBindingOrigin::Default,
+                    priority: -1000,
+                    kind: lpc_model::Kind::Instant,
+                },
+            ],
+            channels: Vec::new(),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+        project.apply_default_binding_overlay();
+
+        let nodes = project.ui_nodes();
+        let sections = node_sections(&nodes[0]);
+        let produced = section_produced_values(sections);
+        assert_eq!(produced[0].label, "Seconds");
+        let bus_target = produced[0]
+            .binding
+            .bindings
+            .bus_target
+            .as_ref()
+            .expect("default publish overlays the unbound produced value");
+        assert_eq!(bus_target.label, "bus:time");
+        assert!(bus_target.default_origin, "overlay wiring is DEF-flagged");
+
+        // The consumed slot's default fills the config row the same way and
+        // carries the popover origin explanation.
+        let config = section_config_slots(sections);
+        let time = config.iter().find(|slot| slot.label == "Time").unwrap();
+        let UiSlotSourceState::Bound(endpoint) = &time.source else {
+            panic!("expected DEF-bound time slot, got {:?}", time.source);
+        };
+        assert_eq!(endpoint.label, "bus:time");
+        assert!(endpoint.default_origin);
+        let aspects = time.visible_aspects();
+        let binding_aspect = aspects
+            .iter()
+            .find(|aspect| aspect.kind == crate::UiSlotAspectKind::Binding)
+            .expect("binding aspect");
+        assert!(
+            binding_aspect
+                .rows
+                .iter()
+                .any(|row| row.label == "Origin" && row.value == "default binding"),
+            "popover explains the default origin"
+        );
+    }
+
+    #[test]
+    fn default_binding_overlay_never_overwrites_authored_facts() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse("seconds").unwrap()),
+                direction: lpc_wire::WireBindingDirection::Publishes,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: "other".to_string(),
+                },
+                origin: lpc_wire::WireBindingOrigin::Default,
+                priority: -1000,
+                kind: lpc_model::Kind::Instant,
+            }],
+            channels: Vec::new(),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+        project.apply_default_binding_overlay();
+
+        let nodes = project.ui_nodes();
+        let produced = section_produced_values(node_sections(&nodes[0]));
+        assert_eq!(produced[0].label, "Seconds");
+        let bus_target = produced[0]
+            .binding
+            .bindings
+            .bus_target
+            .as_ref()
+            .expect("authored publish stays");
+        assert_eq!(
+            bus_target.label, "bus:time",
+            "authored endpoint wins over the default overlay"
+        );
+        assert!(!bus_target.default_origin);
+    }
+
+    #[test]
+    fn binding_authoring_rides_config_and_produced_rows() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let sections = node_sections(&nodes[0]);
+
+        // Consumed config row: source direction, authored endpoint enables
+        // retarget/unbind, addresses point into the bindings map.
+        let config = section_config_slots(sections);
+        let time = config.iter().find(|slot| slot.label == "Time").unwrap();
+        let authoring = time.authoring.as_ref().expect("config row authoring");
+        assert_eq!(authoring.key, "time");
+        assert_eq!(
+            authoring.direction,
+            crate::UiBindingAuthoringDirection::Source
+        );
+        assert_eq!(
+            authoring.authored.as_ref().map(|e| e.label.as_str()),
+            Some("bus:time")
+        );
+        let endpoint = authoring
+            .endpoint_value_address()
+            .expect("endpoint address");
+        assert_eq!(endpoint.root, ProjectSlotRoot::Def);
+        assert_eq!(endpoint.path.to_string(), "bindings[time].source.some");
+
+        // Produced value: target direction, authored publish present.
+        let produced = section_produced_values(sections);
+        let authoring = produced[0].authoring.as_ref().expect("produced authoring");
+        assert_eq!(authoring.key, "seconds");
+        assert_eq!(
+            authoring.direction,
+            crate::UiBindingAuthoringDirection::Target
+        );
+        assert!(authoring.authored.is_some());
+        assert_eq!(
+            authoring
+                .endpoint_value_address()
+                .expect("endpoint address")
+                .path
+                .to_string(),
+            "bindings[seconds].target.some"
+        );
+    }
+
+    #[test]
+    fn default_wiring_offers_bind_not_retarget() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots_without_bindings(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse("time").unwrap()),
+                direction: lpc_wire::WireBindingDirection::Consumes,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: "time".to_string(),
+                },
+                origin: lpc_wire::WireBindingOrigin::Default,
+                priority: -1000,
+                kind: lpc_model::Kind::Instant,
+            }],
+            channels: Vec::new(),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+        project.apply_default_binding_overlay();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let time = config.iter().find(|slot| slot.label == "Time").unwrap();
+        let authoring = time.authoring.as_ref().expect("authoring");
+        // Default wiring is not an authored entry: Bind (not Retarget), and
+        // there is nothing to unbind.
+        assert!(authoring.authored.is_none());
+    }
+
+    #[test]
+    fn channel_choices_merge_observed_and_well_known() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let graph = lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: Vec::new(),
+            channels: vec![
+                lpc_wire::WireBusChannel {
+                    name: "time".to_string(),
+                    kind: Some(lpc_model::Kind::Instant),
+                    providers: vec![0],
+                    consumers: vec![1],
+                    value: None,
+                },
+                lpc_wire::WireBusChannel {
+                    name: "wobble".to_string(),
+                    kind: None,
+                    providers: vec![0],
+                    consumers: Vec::new(),
+                    value: None,
+                },
+            ],
+        };
+        let _ = node;
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+
+        let choices = project.ui_channel_choices();
+        // Well-known first, observed flags merged, ad-hoc channels appended.
+        assert_eq!(choices[0].name, "time");
+        assert!(choices[0].well_known);
+        assert!(choices[0].observed);
+        let wobble = choices.iter().find(|c| c.name == "wobble").unwrap();
+        assert!(!wobble.well_known);
+        assert!(wobble.observed);
+        assert!(
+            choices
+                .iter()
+                .any(|c| c.name == "visual.out" && c.well_known)
+        );
+    }
+
+    #[test]
+    fn binding_derived_rows_surface_wiring_without_backing_slots() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let binding = |slot: &str,
+                       direction: lpc_wire::WireBindingDirection|
+         -> lpc_wire::WireEffectiveBinding {
+            lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse(slot).unwrap()),
+                direction,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: "visual.out".to_string(),
+                },
+                origin: lpc_wire::WireBindingOrigin::Authored,
+                priority: 0,
+                kind: lpc_model::Kind::Color,
+            }
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: vec![
+                    // No backing row: an implicit runtime consumed slot.
+                    binding("wired_in", lpc_wire::WireBindingDirection::Consumes),
+                    // Backing row exists: must not synthesize a duplicate.
+                    binding("brightness", lpc_wire::WireBindingDirection::Consumes),
+                ],
+                channels: Vec::new(),
+            });
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let labels: Vec<&str> = config.iter().map(|slot| slot.label.as_str()).collect();
+        assert_eq!(labels, vec!["Input", "Brightness", "Wired in"]);
+
+        let wired = config.last().unwrap();
+        assert!(!wired.state.editable);
+        let UiSlotSourceState::Bound(endpoint) = &wired.source else {
+            panic!("expected wired row to be bound, got {:?}", wired.source);
+        };
+        assert_eq!(endpoint.label, "bus:visual.out");
+    }
+
+    #[test]
+    fn binding_removal_clears_bound_state_on_refresh() {
+        let node = node_address("/demo.project/orbit.shader");
+        let time = ProjectSlotAddress::new(
+            node.clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("time").unwrap(),
+        );
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+        let _ = time;
+
+        // Re-sync with the bindings map emptied: bound state must clear.
+        install_bound_slots_without_bindings(&mut view, 1, Revision::new(5));
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        assert_eq!(config[0].label, "Time");
+        assert_eq!(config[0].source, UiSlotSourceState::Direct);
+        let produced = section_produced_values(node_sections(&nodes[0]));
+        assert!(produced[0].binding.bindings.bus_target.is_none());
+    }
+
+    #[test]
     fn focused_default_node_subscribes_product_preview_probes() {
         let node = node_address("/demo.project/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
@@ -3395,14 +4168,19 @@ mod tests {
             .refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
         assert_eq!(
             request.probes,
-            vec![ProjectProbeRequest::RenderProduct(
-                RenderProductProbeRequest {
+            vec![
+                ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
                     product,
                     width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
                     height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
-                },
-            )]
+                }),
+                // The bus pane's binding-graph probe rides along on every
+                // loaded-project read.
+                ProjectProbeRequest::BindingGraph(lpc_wire::BindingGraphProbeRequest {
+                    include_values: true,
+                }),
+            ]
         );
         project
             .sync_mut()
@@ -3806,6 +4584,148 @@ mod tests {
                 vec![SlotData::Value(WithRevision::new(
                     revision,
                     LpValue::F32(1.0),
+                ))],
+            )),
+        );
+    }
+
+    /// Def root with a consumed `time` slot bound from the bus, a `bindings`
+    /// map (BindingDefs-shaped), and a state root whose `seconds` produced
+    /// slot publishes to the bus.
+    fn install_bound_slots(view: &mut ProjectView, node_id: u32, revision: Revision) {
+        install_bound_slots_with(view, node_id, revision, true);
+    }
+
+    /// Same shape as [`install_bound_slots`] but with an empty bindings map.
+    fn install_bound_slots_without_bindings(
+        view: &mut ProjectView,
+        node_id: u32,
+        revision: Revision,
+    ) {
+        install_bound_slots_with(view, node_id, revision, false);
+    }
+
+    fn install_bound_slots_with(
+        view: &mut ProjectView,
+        node_id: u32,
+        revision: Revision,
+        with_bindings: bool,
+    ) {
+        view.slots.root_shapes.clear();
+        view.slots.roots.clear();
+        view.slots.registry = Default::default();
+        let def_shape = SlotShapeId::new(400);
+        let state_shape = SlotShapeId::new(401);
+
+        let endpoint_option = || SlotShape::Option {
+            meta: SlotMeta::empty(),
+            some: Box::new(SlotShape::value(LpType::String)),
+        };
+        let binding_def_shape = SlotShape::Record {
+            meta: SlotMeta::empty(),
+            fields: vec![
+                SlotFieldShape::new(
+                    "value",
+                    SlotShape::Option {
+                        meta: SlotMeta::empty(),
+                        some: Box::new(SlotShape::value(LpType::F32)),
+                    },
+                )
+                .unwrap(),
+                SlotFieldShape::new("source", endpoint_option()).unwrap(),
+                SlotFieldShape::new("target", endpoint_option()).unwrap(),
+            ],
+        };
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                def_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new("time", SlotShape::value(LpType::F32)).unwrap(),
+                        SlotFieldShape::new(
+                            "bindings",
+                            SlotShape::Map {
+                                meta: SlotMeta::empty(),
+                                key: SlotMapKeyShape::String,
+                                value: Box::new(binding_def_shape),
+                            },
+                        )
+                        .unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                state_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new("seconds", SlotShape::value(LpType::F32)).unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+
+        let endpoint_some = |endpoint: &str| {
+            SlotData::Option(SlotOptionDyn::some_with_version(
+                revision,
+                SlotData::Value(WithRevision::new(
+                    revision,
+                    LpValue::String(endpoint.to_string()),
+                )),
+            ))
+        };
+        let option_none = || SlotData::Option(SlotOptionDyn::none_with_version(revision));
+        let binding_entry = |source: Option<&str>, target: Option<&str>| {
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![
+                    option_none(),
+                    source.map(endpoint_some).unwrap_or_else(option_none),
+                    target.map(endpoint_some).unwrap_or_else(option_none),
+                ],
+            ))
+        };
+
+        let mut bindings = SlotMapDyn::with_revision(revision, Default::default());
+        if with_bindings {
+            bindings.entries.insert(
+                SlotMapKey::String("time".to_string()),
+                binding_entry(Some("bus:time"), None),
+            );
+            bindings.entries.insert(
+                SlotMapKey::String("seconds".to_string()),
+                binding_entry(None, Some("bus:time")),
+            );
+        }
+
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.def"), def_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.def"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![
+                    SlotData::Value(WithRevision::new(revision, LpValue::F32(0.0))),
+                    SlotData::Map(bindings),
+                ],
+            )),
+        );
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.state"), state_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.state"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![SlotData::Value(WithRevision::new(
+                    revision,
+                    LpValue::F32(3.25),
                 ))],
             )),
         );

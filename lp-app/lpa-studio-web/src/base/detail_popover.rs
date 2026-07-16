@@ -85,7 +85,7 @@ pub enum DetailSectionTint {
     /// Plain section: divider and padding only.
     #[default]
     None,
-    /// Good/bound (green) wash.
+    /// Good/valid (green) wash.
     Good,
     /// In-progress (working) wash.
     Working,
@@ -95,6 +95,8 @@ pub enum DetailSectionTint {
     Error,
     /// Live/transient (blue) wash.
     Live,
+    /// Bound/bus-linked (violet) wash.
+    Bound,
 }
 
 /// Section styling hook: standard section padding and top divider, optionally
@@ -120,6 +122,9 @@ pub fn detail_popover_section_class(tint: DetailSectionTint) -> &'static str {
         DetailSectionTint::Live => {
             "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-live-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
         }
+        DetailSectionTint::Bound => {
+            "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-bound-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
+        }
     }
 }
 
@@ -143,6 +148,9 @@ fn detail_section_title_class(tint: DetailSectionTint) -> &'static str {
         }
         DetailSectionTint::Live => {
             "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-live-foreground"
+        }
+        DetailSectionTint::Bound => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-bound-foreground"
         }
     }
 }

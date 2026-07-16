@@ -51,6 +51,7 @@ fn icon_menu_chrome_class(tone: IconMenuTone) -> &'static str {
         IconMenuTone::Live => "ux-popover-chrome-live",
         IconMenuTone::Warning => "ux-popover-chrome-warning",
         IconMenuTone::Error => "ux-popover-chrome-error",
+        IconMenuTone::Bound => "ux-popover-chrome-bound",
     }
 }
 
@@ -65,6 +66,8 @@ pub enum IconMenuTone {
     Live,
     Warning,
     Error,
+    /// Bound/bus-linked state, violet.
+    Bound,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -121,6 +124,9 @@ fn icon_menu_class(tone: IconMenuTone, active: bool) -> &'static str {
         (IconMenuTone::Error, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-0 tw:text-status-error-foreground tw:transition-colors tw:hover:border-status-error-foreground"
         }
+        (IconMenuTone::Bound, _) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-status-bound-bg tw:p-0 tw:text-status-bound-foreground tw:transition-colors tw:hover:border-status-bound-foreground"
+        }
     }
 }
 
@@ -156,6 +162,9 @@ fn icon_menu_hover_class(tone: IconMenuTone, active: bool) -> &'static str {
         (IconMenuTone::Error, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-error-foreground tw:bg-status-error-bg tw:p-0 tw:text-status-error-foreground tw:transition-colors"
         }
+        (IconMenuTone::Bound, _) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-bound-foreground tw:bg-status-bound-bg tw:p-0 tw:text-status-bound-foreground tw:transition-colors"
+        }
     }
 }
 
@@ -184,6 +193,9 @@ fn icon_menu_open_class(tone: IconMenuTone) -> &'static str {
         }
         IconMenuTone::Error => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-0 tw:text-status-error-foreground"
+        }
+        IconMenuTone::Bound => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-status-bound-bg tw:p-0 tw:text-status-bound-foreground"
         }
     }
 }

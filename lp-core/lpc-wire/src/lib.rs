@@ -23,11 +23,10 @@ pub mod slot;
 pub mod transport_error;
 pub mod tree;
 
-pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use messages::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
-    ControlProductProbeResult, ControlProductProbeResultHeader, ExplainSlotProbeRequest,
-    ExplainSlotProbeResult, NodeReadQuery, NodeReadResult, NodeReadSelection,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
+    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
+    ControlProductProbeResultHeader, NodeReadQuery, NodeReadResult, NodeReadSelection,
     PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES,
     PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest,
     ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent, ProjectReadNodeEvent,
@@ -35,8 +34,11 @@ pub use messages::{
     ProjectReadResourceEvent, ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
     ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
-    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, SlotExplanation,
+    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, WireBindingDirection,
+    WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireEffectiveBinding,
 };
+pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use project::{
     NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,
     WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,

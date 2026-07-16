@@ -9,7 +9,7 @@ use lpa_studio_core::{
     UiProductTrackingState,
 };
 
-use crate::app::node::{SlotPane, SlotPaneTreatment};
+use crate::app::node::{BindingChip, BindingChipDirection, SlotPane, SlotPaneTreatment};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -25,15 +25,23 @@ pub fn ProducedProductView(
     // only frame. Empty/other placeholders have no intrinsic size and keep the
     // padded, full-width treatment.
     let media = matches!(product.kind, UiProductKind::Visual | UiProductKind::Control);
+    let bus_target = product.binding.bindings.bus_target.clone();
+    let treatment = if bus_target.is_some() {
+        SlotPaneTreatment::Bound
+    } else {
+        SlotPaneTreatment::Neutral
+    };
 
     rsx! {
         SlotPane {
             title: product.name.clone(),
             aspects,
             initially_open,
-            treatment: SlotPaneTreatment::Neutral,
+            treatment,
             fit: media,
             flush: media,
+            on_action,
+            authoring: product.authoring.clone(),
             ProductPreview {
                 kind: product.kind,
                 preview: product.preview.clone(),
@@ -41,6 +49,14 @@ pub fn ProducedProductView(
                 frame: product.frame,
                 focus_action,
                 on_action,
+            }
+            if let Some(endpoint) = bus_target {
+                div { class: "tw:flex tw:min-w-0 tw:justify-center tw:p-1.5",
+                    BindingChip {
+                        endpoint,
+                        direction: BindingChipDirection::Publishes,
+                    }
+                }
             }
         }
     }

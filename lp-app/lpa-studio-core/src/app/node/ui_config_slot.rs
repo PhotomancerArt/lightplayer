@@ -6,6 +6,8 @@ use crate::{
     UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotValue,
 };
 
+use super::ui_node_binding::default_origin_row;
+
 /// The renderable body of a config slot row.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiConfigSlotBody {
@@ -83,6 +85,8 @@ pub struct UiConfigSlot {
     pub composite: Option<UiSlotComposite>,
     /// Whether the visible value is direct, bound, or unset.
     pub source: UiSlotSourceState,
+    /// Endpoint this slot publishes to via an authored target binding.
+    pub publish: Option<UiBindingEndpoint>,
     /// Value or record body for the row.
     pub body: UiConfigSlotBody,
     /// Interaction, dirty, and validation state for the field.
@@ -91,6 +95,8 @@ pub struct UiConfigSlot {
     pub issues: Vec<String>,
     /// Stable popup sections and row-level presentation affordances.
     pub aspects: Vec<UiSlotAspect>,
+    /// Binding authoring surface when this row is bindable (M4).
+    pub authoring: Option<crate::UiBindingAuthoring>,
 }
 
 impl UiConfigSlot {
@@ -135,11 +141,19 @@ impl UiConfigSlot {
             optionality: None,
             composite: None,
             source: UiSlotSourceState::Direct,
+            publish: None,
             body,
             state: UiSlotFieldState::editable(),
             issues: Vec::new(),
             aspects: Vec::new(),
+            authoring: None,
         }
+    }
+
+    /// Attach the binding authoring surface (M4).
+    pub fn with_authoring(mut self, authoring: crate::UiBindingAuthoring) -> Self {
+        self.authoring = Some(authoring);
+        self
     }
 
     /// Attach the stable slot address edits should target.
@@ -188,6 +202,12 @@ impl UiConfigSlot {
     /// Set the visible value source state.
     pub fn with_source(mut self, source: UiSlotSourceState) -> Self {
         self.source = source;
+        self
+    }
+
+    /// Set the endpoint this slot publishes to via a target binding.
+    pub fn with_publish(mut self, publish: UiBindingEndpoint) -> Self {
+        self.publish = Some(publish);
         self
     }
 
@@ -242,7 +262,7 @@ fn default_aspects(slot: &UiConfigSlot) -> Vec<UiSlotAspect> {
     aspects.extend([
         validation_aspect(slot),
         edit_state_aspect(&slot.state, slot.old_value.as_deref()),
-        binding_aspect(&slot.source),
+        binding_aspect(&slot.source, slot.publish.as_ref()),
     ]);
     aspects
 }
@@ -305,12 +325,11 @@ fn edit_state_aspect(state: &UiSlotFieldState, old_value: Option<&str>) -> UiSlo
     }
 }
 
-fn binding_aspect(source: &UiSlotSourceState) -> UiSlotAspect {
-    match source {
-        UiSlotSourceState::Direct => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
-            .with_row(UiSlotAspectRow::new("Unbound", "")),
-        UiSlotSourceState::Bound(endpoint) => bound_binding_aspect(endpoint),
-        UiSlotSourceState::Unset => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+fn binding_aspect(source: &UiSlotSourceState, publish: Option<&UiBindingEndpoint>) -> UiSlotAspect {
+    match (source, publish) {
+        (UiSlotSourceState::Bound(endpoint), _) => bound_binding_aspect(endpoint),
+        (_, Some(endpoint)) => published_binding_aspect(endpoint),
+        _ => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
             .with_row(UiSlotAspectRow::new("Unbound", "")),
     }
 }
@@ -320,9 +339,27 @@ fn bound_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
     if let Some(detail) = endpoint.detail.as_ref() {
         row = row.with_detail(detail.clone());
     }
-    UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+    let mut aspect = UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
         .with_row(row)
-        .with_affordance(UiSlotAffordance::Bound)
+        .with_affordance(UiSlotAffordance::Bound);
+    if endpoint.default_origin {
+        aspect = aspect.with_row(default_origin_row());
+    }
+    aspect
+}
+
+fn published_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
+    let mut row = UiSlotAspectRow::new("Published", endpoint.label.clone());
+    if let Some(detail) = endpoint.detail.as_ref() {
+        row = row.with_detail(detail.clone());
+    }
+    let mut aspect = UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+        .with_row(row)
+        .with_affordance(UiSlotAffordance::Bound);
+    if endpoint.default_origin {
+        aspect = aspect.with_row(default_origin_row());
+    }
+    aspect
 }
 
 fn type_info_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
@@ -417,9 +454,7 @@ mod tests {
     #[test]
     fn primary_affordance_uses_highest_aspect_affordance() {
         let slot = UiConfigSlot::value("fade", "Fade", UiSlotValue::f32(-1.0))
-            .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-                "bus#time.seconds",
-            )))
+            .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time")))
             .with_state(
                 UiSlotFieldState::editable()
                     .with_dirty(UiNodeDirtyState::Dirty)
@@ -470,9 +505,8 @@ mod tests {
 
     #[test]
     fn bound_source_provides_bound_affordance() {
-        let slot = UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333)).with_source(
-            UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds")),
-        );
+        let slot = UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333))
+            .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time")));
 
         assert_eq!(slot.primary_affordance(), UiSlotAffordance::Bound);
     }

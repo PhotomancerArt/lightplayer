@@ -73,7 +73,7 @@ pub use binding::{
     BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
-pub use bus::ChannelName;
+pub use bus::{ChannelName, WELL_KNOWN_CHANNELS, WellKnownChannel, well_known_channel};
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 /// Legacy semantic value kind used by the pre-slot property model.
 ///
@@ -144,7 +144,8 @@ pub use slot::{
     ColorOrderSlot, ColorOrderValue, ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32,
     PositiveF32, PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder,
     RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
-    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
+    SlotValueShape, ToLpValue, U32List, U32ListSlot, ValueEditorHint, ValueRootError,
+    VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,

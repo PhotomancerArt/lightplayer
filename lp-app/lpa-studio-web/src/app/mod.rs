@@ -5,6 +5,7 @@
 //! controls and `base` primitives into app-specific workflows.
 
 pub(crate) mod affordance;
+pub mod bus;
 pub mod deploy;
 pub mod device;
 pub mod home;
@@ -14,6 +15,7 @@ pub mod project;
 #[cfg(feature = "stories")]
 pub(crate) mod story_fixtures;
 
+pub use bus::BusPaneBody;
 pub use deploy::DeployDialog;
 pub use device::RuntimeLog;
 pub use home::{HomeGallery, ProjectOpeningFrame};

@@ -90,9 +90,9 @@ pub use slot_value::{
 };
 pub mod shape {
     pub use super::slot_shape_builder::{
-        custom, enum_external, enum_tagged, enum_with_encoding, field, field_with_policy,
-        field_with_semantics, field_with_semantics_and_policy, id, leaf, map, option, record,
-        reference, unit, value, variant,
+        custom, enum_external, enum_tagged, enum_with_encoding, field, field_with_dataflow,
+        field_with_policy, field_with_semantics, field_with_semantics_and_policy, id, leaf, map,
+        option, record, reference, unit, value, variant,
     };
 }
 pub use slot_shape_registry::{
@@ -111,7 +111,7 @@ pub use crate::slots::{
     Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, AssetSlot, AssetSlotValue,
     ColorOrderSlot, ColorOrderValue, ControlProductSlot, Dim2u, Dim2uSlot, PositiveF32,
     PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder, RenderOrderSlot,
-    ResourceRefSlot, VisualProductSlot, Xy, XySlot,
+    ResourceRefSlot, U32List, U32ListSlot, VisualProductSlot, Xy, XySlot,
 };
 pub use value_ref::ValueRef;
 pub use value_slot::{MapSlot, MapSlotKeyLike, OptionSlot, SlotMapValueAccess, ValueSlot};

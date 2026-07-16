@@ -341,6 +341,9 @@ mod tests {
   "kind": "Project",
   "format": 1,
   "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
     "fluid": {
       "ref": "./fluid.json"
     }
@@ -349,6 +352,8 @@ mod tests {
 "#,
         )
         .expect("project");
+        fs.write_file("/clock.json".as_path(), br#"{ "kind": "Clock" }"#)
+            .expect("clock");
         fs.write_file(
             "/fluid.json".as_path(),
             br#"
@@ -443,6 +448,9 @@ mod tests {
   "kind": "Project",
   "format": 1,
   "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
     "compute": {
       "ref": "./compute.json"
     },
@@ -454,6 +462,8 @@ mod tests {
 "#,
         )
         .expect("project");
+        fs.write_file("/clock.json".as_path(), br#"{ "kind": "Clock" }"#)
+            .expect("clock");
         fs.write_file(
             "/compute.json".as_path(),
             br#"
@@ -464,7 +474,7 @@ mod tests {
   },
   "bindings": {
     "emitters": {
-      "target": "bus#fluid.emitters"
+      "target": "bus:fluid.emitters"
     }
   },
   "consumed": {
@@ -521,7 +531,7 @@ void tick() {
   "viscosity": 3e-05,
   "bindings": {
     "emitters": {
-      "source": "bus#fluid.emitters"
+      "source": "bus:fluid.emitters"
     }
   }
 }

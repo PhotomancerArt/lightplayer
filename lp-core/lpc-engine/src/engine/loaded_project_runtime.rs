@@ -41,6 +41,11 @@ impl LoadedProjectRuntime {
         (self.engine, self.registry)
     }
 
+    /// Disjoint borrows for read paths that resolve against the registry.
+    pub fn read_parts(&mut self) -> (&mut Engine, &ProjectRegistry) {
+        (&mut self.engine, &self.registry)
+    }
+
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
         self.engine.tick(&self.registry, delta_ms)
     }

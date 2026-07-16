@@ -2,7 +2,10 @@
   "kind": "Playlist",
   "bindings": {
     "time": {
-      "source": "bus#time.seconds"
+      "source": "bus:time"
+    },
+    "trigger": {
+      "source": "bus:trigger"
     }
   },
   "time": 0,
@@ -17,12 +20,10 @@
       }
     },
     "2": {
-      "bindings": {
-        "trigger": {
-          "source": "bus#trigger"
-        }
-      },
       "name": "blast",
+      "trigger_ids": [
+        1
+      ],
       "duration": 6,
       "fade_after": 2,
       "node": {

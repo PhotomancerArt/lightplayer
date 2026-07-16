@@ -1,9 +1,28 @@
 use crate::{
     FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError,
+    ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use serde::{Deserialize, Serialize};
+
+/// Ordered list of u32 identifiers (JSON: a plain number array).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, SlotValue)]
+pub struct U32List(pub Vec<u32>);
+
+impl From<Vec<u32>> for U32List {
+    fn from(value: Vec<u32>) -> Self {
+        Self(value)
+    }
+}
+
+impl U32List {
+    pub fn contains(&self, value: u32) -> bool {
+        self.0.contains(&value)
+    }
+}
+
+pub type U32ListSlot = ValueSlot<U32List>;
 
 impl ToLpValue for Vec<u32> {
     fn to_lp_value(&self) -> LpValue {

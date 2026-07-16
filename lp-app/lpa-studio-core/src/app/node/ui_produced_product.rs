@@ -226,6 +226,8 @@ pub struct UiProducedProduct {
     pub detail: Option<String>,
     /// Binding and revision metadata for the product.
     pub binding: UiProducedBinding,
+    /// Binding authoring surface when this product is bindable (M4).
+    pub authoring: Option<crate::UiBindingAuthoring>,
     /// Edited-state affordance for authored product metadata.
     pub dirty: UiNodeDirtyState,
 }
@@ -243,6 +245,7 @@ impl UiProducedProduct {
             detail: None,
             binding: UiProducedBinding::none(),
             dirty: UiNodeDirtyState::Clean,
+            authoring: None,
         }
     }
 

@@ -18,6 +18,9 @@ pub struct ProjectEditorView {
     /// never a card — its child panes are the top-level entries, and the
     /// root's own slots live in [`Self::root_slots`].
     pub nodes: Vec<UiNodeView>,
+    /// Channels the binding picker offers (observed ∪ well-known), shared by
+    /// every bindable row in the workspace (M4).
+    pub channel_choices: Vec<crate::UiChannelChoice>,
     /// The workspace root's own config slot rows (`name` / `format` /
     /// `nodes` for a project root), rendered as the "Project settings"
     /// section of the project pane's detail popup.
@@ -59,6 +62,7 @@ impl ProjectEditorView {
             stats,
             tree,
             nodes,
+            channel_choices: Vec::new(),
             root_slots: Vec::new(),
             dirty: DirtySummary::clean(),
             pending_edits: Vec::new(),
@@ -75,6 +79,12 @@ impl ProjectEditorView {
 
     /// Attach the workspace root's own config slot rows (project popup's
     /// settings section).
+    /// Attach the binding picker's channel choices (M4).
+    pub fn with_channel_choices(mut self, choices: Vec<crate::UiChannelChoice>) -> Self {
+        self.channel_choices = choices;
+        self
+    }
+
     pub fn with_root_slots(mut self, root_slots: Vec<UiConfigSlot>) -> Self {
         self.root_slots = root_slots;
         self
