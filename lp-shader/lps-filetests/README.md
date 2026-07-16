@@ -4,6 +4,25 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 
 **Location:** `lp-shader/lps-filetests/` (this is the canonical test suite)
 
+## Targets
+
+| target | semantics | how it runs | in `DEFAULT_TARGETS` |
+|---|---|---|---|
+| `rv32n.q32` | Q32 fixed-point | `lpvm-native` → RV32 emulator + linked builtins | yes |
+| `rv32lpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → RV32 emulator | yes |
+| `rv32c.q32` | Q32 fixed-point | Cranelift → RV32 emulator + linked builtins | yes |
+| `wasm.q32` | Q32 fixed-point | wasmtime | yes |
+| `interp.f32` | IEEE f32 | host LPIR interpreter (`lpir::interpret`) — the CI f32 gate | yes |
+| `wgpu.f32` | IEEE f32 (GPU) | per-directive fragment probe on a wgpu device | no — explicit `--target wgpu.f32`; needs a GPU adapter |
+
+**Q32 is the primary tier**: the four Q32 targets assert exact on-device
+semantics and their expectations are the ground truth. `interp.f32` asserts
+canonical IEEE f32 results (the GPU-preview semantics contract); where the two
+tiers legitimately diverge, directives split into `run[q32]:` / `run[f32]:`
+channels. `wgpu.f32` re-runs the f32 expectations on real GPU hardware —
+adapter-gated and slower (one GPU pipeline per directive), so it is not in the
+default set; run it explicitly when touching the GPU tier.
+
 ## Running tests
 
 ### Recommended: script (matches CI)
@@ -11,7 +30,7 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 From the repository root:
 
 ```bash
-# Default targets (rv32n, rv32c, wasm)
+# Default targets (rv32n, rv32lpn, rv32c, wasm, interp)
 scripts/filetests.sh
 
 # One backend
@@ -125,7 +144,7 @@ Semantics and supported `texture()` / `texelFetch` formats:
 ## Unsupported vs failed (especially `wasm.q32`)
 
 Summary lines like `0/10 … (10 unsupported)` mean the file or directive has
-`// @unsupported(backend=wasm)` (or another target filter): the test is **not run** for that
+`// @unsupported(wasm.q32)` (or another target name): the test is **not run** for that
 target because the case is **not applicable by design** on that backend (e.g. NaN semantics on
 Q32, or a path we do not intend to implement there). This is not an assertion failure.
 
@@ -166,13 +185,37 @@ int add_int(int a, int b) {
 - `// target <backend>.<format>` — file-level default target (e.g. `wasm.q32`, `rv32c.q32`).
 - Per-directive filters: `// @wasm`, `// @rv32c` (see parser / plan docs).
 
-**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): **`rv32n.q32` + `rv32c.q32` +
-`wasm.q32`**. CI runs the full target list via `just test-filetests`.
+**`DEFAULT_TARGETS`** (when the runner does not pass `--target`): `rv32n.q32`,
+`rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`. CI runs this list via
+`just test-filetests`; `wgpu.f32` is explicit-only (see Targets above).
 
 ### Run directives
 
 - `// run: <expression> == <expected>` — exact equality (`int`, `bool`).
-- `// run: <expression> ~= <expected>` — approximate float compare (default tolerance `1e-4`).
+- `// run: <expression> ~= <expected>` — approximate float compare (default
+  tolerance `5e-3`; override with a `(tolerance: <x>)` suffix).
+
+### Float-mode channels (`run[q32]:` / `run[f32]:`)
+
+A bare `// run:` asserts on **every** target. Where Q32 and IEEE f32 results
+legitimately diverge (saturation vs the true value, division by zero,
+round-half-to-even), split the directive per mode:
+
+```glsl
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation expectation.
+// run[q32]: float_from_int_large() ~= 32767.5 (tolerance: 1.5)
+// run[f32]: float_from_int_large() ~= 2147483648.0 (tolerance: 1.5)
+```
+
+`run[q32]:` runs only on Q32 targets, `run[f32]:` only on f32 targets. Files
+that exist purely to pin Q32 semantics (`q32-*`, `q32fast-*`) use `run[q32]:`
+for the whole directive instead of adding an f32 channel. Every per-mode split
+carries a one-line rationale comment. Expected values may spell infinity as
+`1.0 / 0.0` (constant division is evaluated with f32 semantics).
+
+**Gotcha:** `// set_uniform:` lines attach to the *next* run directive only —
+when splitting a directive that uses uniforms, repeat the `set_uniform` block
+before each channel.
 
 ### Comparison operators
 

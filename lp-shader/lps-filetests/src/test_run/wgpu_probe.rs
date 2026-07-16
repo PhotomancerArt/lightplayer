@@ -28,7 +28,7 @@
 //! texture fixtures (not yet bound through the lp-gfx texture registry) and
 //! trap-code expectations.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use lp_collection::VecMap;
 use lp_gfx_lpvm::TargetLpvmGraphics;
@@ -41,6 +41,13 @@ use crate::test_run::interp::decode_return;
 /// Process-wide adapter-gated GPU context (device creation is expensive and
 /// wgpu devices are internally synchronized).
 static PROBE_GRAPHICS: OnceLock<Option<GpuGraphics>> = OnceLock::new();
+
+/// Serializes compile+render+readback across the harness's parallel file
+/// workers. Concurrent probe pipelines on one device deadlocked inside the
+/// Metal backend (`Device::wait` never returning under simultaneous
+/// submitters); the probe is not throughput-sensitive, so one directive on
+/// the GPU at a time is the robust choice.
+static PROBE_SERIAL: Mutex<()> = Mutex::new(());
 
 /// The shared probe `GpuGraphics`, or `None` when the host has no adapter.
 pub fn probe_graphics() -> Option<&'static GpuGraphics> {
@@ -206,6 +213,7 @@ impl WgpuProbeInstance {
 
         let probe_source = format!("{authored}\n{wrapper}");
 
+        let _gpu_turn = PROBE_SERIAL.lock().expect("probe serial lock poisoned");
         let mut shader = graphics
             .compile_probe_shader(&probe_source, &self.texture_specs)
             .map_err(|e| format!("wgpu probe compile: {e}"))?;

@@ -288,6 +288,9 @@ impl GpuShader {
         }
         self.shared.queue.submit([encoder.finish()]);
 
+        // Bounded wait: corpus shaders may not terminate (CPU targets rely
+        // on fuel exhaustion; the GPU has none). A hung submission surfaces
+        // as PollError::Timeout instead of hanging the harness forever.
         read_back_f32(
             &self.shared.device,
             &self.shared.queue,
@@ -295,6 +298,7 @@ impl GpuShader {
             width,
             1,
             TextureStorageFormat::Rgba16Unorm,
+            Some(core::time::Duration::from_secs(20)),
         )
     }
 

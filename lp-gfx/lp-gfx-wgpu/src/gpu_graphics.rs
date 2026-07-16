@@ -89,6 +89,7 @@ impl GpuGraphics {
             texture.width(),
             texture.height(),
             texture.format(),
+            None,
         )
     }
 
