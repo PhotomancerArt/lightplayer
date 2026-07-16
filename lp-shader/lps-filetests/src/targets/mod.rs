@@ -15,6 +15,8 @@ pub enum Backend {
     Wasm,
     /// Host-side LPIR interpreter (`lpir::interpret`), f32 semantics; no codegen.
     Interp,
+    /// GPU probe via lp-gfx-wgpu (naga glsl-in -> wgsl-out, fragment render).
+    Wgpu,
 }
 
 /// GLSL frontend used before LPIR backend compilation.
@@ -44,6 +46,8 @@ pub enum ExecMode {
     Emulator,
     /// Direct LPIR interpretation on the host (no compiled artifact).
     Interpreter,
+    /// Fragment render on a wgpu device (adapter-gated).
+    Gpu,
 }
 
 /// Floating-point mode (Q32 fixed-point or F32 native).
@@ -71,7 +75,7 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, rv32c, rv32n, rv32lpn, interp — used for error messages and CLI.
+/// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu — used for error messages and CLI.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         frontend: Frontend::Naga,
@@ -107,6 +111,13 @@ pub const ALL_TARGETS: &[Target] = &[
         float_mode: FloatMode::F32,
         isa: Isa::Host,
         exec_mode: ExecMode::Interpreter,
+    },
+    Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Wgpu,
+        float_mode: FloatMode::F32,
+        isa: Isa::Host,
+        exec_mode: ExecMode::Gpu,
     },
 ];
 

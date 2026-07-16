@@ -213,6 +213,91 @@ impl GpuShader {
         })
     }
 
+    /// Filetest probe render: draw into a fresh `width`×1 target and return
+    /// the **raw f32 backing texels** (4 floats per pixel, row order). The
+    /// GPU backing for render targets is `Rgba32Float` (quantization to
+    /// unorm16 only happens in `read_back`), so scalar bit patterns encoded
+    /// by a probe wrapper survive readback exactly. Native-only, like
+    /// `read_back`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn probe_f32(&mut self, width: u32, uniforms: &LpsValueF32) -> Result<Vec<f32>, GfxError> {
+        use crate::read_back::read_back_f32;
+        use crate::texture_backing::GpuTexture;
+
+        let backing = GpuTexture::new(
+            &self.shared.device,
+            width,
+            1,
+            TextureStorageFormat::Rgba16Unorm,
+            "lp-gfx-wgpu probe target",
+        );
+
+        let encoded = encode_uniforms(&self.module, &self.table, uniforms)?;
+        let texture_views = self.resolve_texture_views(uniforms)?;
+
+        let mut per_render_bind_group = None;
+        if let Some(bindings) = &self.bindings {
+            if let Some(shader_uniforms) = &bindings.uniforms {
+                for ((_, bytes), &offset) in encoded.iter().zip(&shader_uniforms.offsets) {
+                    self.shared
+                        .queue
+                        .write_buffer(&shader_uniforms.buffer, offset, bytes);
+                }
+            }
+            if bindings.static_bind_group.is_none() {
+                per_render_bind_group = Some(build_bind_group(
+                    &self.shared.device,
+                    &bindings.layout,
+                    &self.table,
+                    bindings.uniforms.as_ref(),
+                    &texture_views,
+                ));
+            }
+        }
+
+        let mut encoder = self
+            .shared
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("lp-gfx-wgpu probe render"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &backing.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            if let Some(bindings) = &self.bindings {
+                let bind_group = per_render_bind_group
+                    .as_ref()
+                    .or(bindings.static_bind_group.as_ref())
+                    .expect("bindings imply a static or per-render bind group");
+                pass.set_bind_group(0, bind_group, &[]);
+            }
+            pass.draw(0..3, 0..1);
+        }
+        self.shared.queue.submit([encoder.finish()]);
+
+        read_back_f32(
+            &self.shared.device,
+            &self.shared.queue,
+            &backing,
+            width,
+            1,
+            TextureStorageFormat::Rgba16Unorm,
+        )
+    }
+
     /// Resolve the shader's texture bindings from the uniform tree: each
     /// `LpsValueF32::Texture2D` value is validated against the compile-time
     /// spec (format, `HeightOne` promise) and its registry id resolved to

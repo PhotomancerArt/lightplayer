@@ -135,6 +135,19 @@ impl GpuGraphics {
         self.shared.clone()
     }
 
+    /// Compile authored GLSL as a **filetest probe**: same pipeline as
+    /// [`lp_gfx::LpGraphics::compile_shader`] (naga glsl-in → wgsl-out,
+    /// F32Gpu semantics) but returns the concrete [`crate::render::GpuShader`]
+    /// so the caller can use [`crate::render::GpuShader::probe_f32`] for
+    /// bit-exact f32 readback. Test/diagnostic surface, not a product path.
+    pub fn compile_probe_shader(
+        &self,
+        source: &str,
+        textures: &lp_shader::TextureBindingSpecs,
+    ) -> Result<crate::render::GpuShader, GfxError> {
+        crate::render::GpuShader::new(self.shared.clone(), source, textures)
+    }
+
     #[cfg(test)]
     pub(crate) fn shared_for_tests(&self) -> &GpuShared {
         &self.shared

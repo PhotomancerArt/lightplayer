@@ -398,7 +398,7 @@ fn sret_bytes_to_values(ty: &LpsType, bytes: &[u8]) -> Result<Vec<Value>, String
 }
 
 /// Decode interpreter output scalars into a typed [`LpsValueF32`].
-fn decode_return(
+pub(crate) fn decode_return(
     ty: &LpsType,
     it: &mut impl Iterator<Item = Value>,
 ) -> Result<LpsValueF32, String> {

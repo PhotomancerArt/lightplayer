@@ -21,6 +21,7 @@ use lpvm_wasm::{
 
 use crate::targets::{Backend, FloatMode as TargetFloatMode, Frontend, Target};
 use crate::test_run::interp::{InterpInstance, InterpShader};
+use crate::test_run::wgpu_probe::{WgpuProbeInstance, WgpuProbeShader};
 
 /// Compiled artifact for one test file and target.
 ///
@@ -35,6 +36,8 @@ pub enum CompiledShader {
     Wasm(WasmLpvmEngine, WasmLpvmModule),
     /// Host LPIR interpreter (`interp.f32`); no codegen, no guest memory.
     Interp(InterpShader),
+    /// GPU probe (`wgpu.f32`): per-directive fragment renders on wgpu.
+    WgpuProbe(WgpuProbeShader),
 }
 
 /// Per-`// run:` instantiation (mutable VM context / store).
@@ -47,6 +50,8 @@ pub enum FiletestInstance {
     Wasm(WasmLpvmInstance),
     /// Host LPIR interpreter execution (`interp.f32`).
     Interp(InterpInstance),
+    /// GPU probe (`wgpu.f32`).
+    WgpuProbe(WgpuProbeInstance),
 }
 
 impl CompiledShader {
@@ -56,6 +61,7 @@ impl CompiledShader {
             Self::NativeFa(_, m) => m.signatures(),
             Self::Wasm(_, m) => m.signatures(),
             Self::Interp(s) => s.signatures(),
+            Self::WgpuProbe(s) => s.signatures(),
         }
     }
 
@@ -73,6 +79,7 @@ impl CompiledShader {
             Self::Interp(s) => {
                 FiletestInstance::Interp(s.instantiate().map_err(|e| anyhow::anyhow!("{e}"))?)
             }
+            Self::WgpuProbe(s) => FiletestInstance::WgpuProbe(s.instantiate()),
         })
     }
 
@@ -85,6 +92,12 @@ impl CompiledShader {
             Self::Interp(_) => {
                 anyhow::bail!(
                     "interp.f32 has no guest memory; texture fixtures are unsupported on this target"
+                )
+            }
+            Self::WgpuProbe(_) => {
+                anyhow::bail!(
+                    "wgpu.f32 probe does not expose guest memory; texture fixtures are not yet \
+                     bound through the GPU texture registry"
                 )
             }
         };
@@ -100,6 +113,7 @@ impl FiletestInstance {
             Self::NativeFa(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.call(name, args).map_err(|e| e.to_string()),
             Self::Interp(i) => i.call(name, args),
+            Self::WgpuProbe(i) => i.call(name, args),
         }
     }
 
@@ -120,6 +134,9 @@ impl FiletestInstance {
             Self::Interp(_) => {
                 Err("interp.f32 is not a Q32 target (call_q32_flat unsupported)".to_string())
             }
+            Self::WgpuProbe(_) => {
+                Err("wgpu.f32 is not a Q32 target (call_q32_flat unsupported)".to_string())
+            }
         }
     }
 
@@ -129,6 +146,7 @@ impl FiletestInstance {
             Self::NativeFa(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::Wasm(i) => i.set_uniform(path, value).map_err(|e| e.to_string()),
             Self::Interp(i) => i.set_uniform(path, value),
+            Self::WgpuProbe(i) => i.set_uniform(path, value),
         }
     }
 
@@ -149,6 +167,9 @@ impl FiletestInstance {
             Self::Interp(_) => {
                 Err("interp.f32 does not support set_uniform_q32 (not a Q32 target)".to_string())
             }
+            Self::WgpuProbe(_) => {
+                Err("wgpu.f32 does not support set_uniform_q32 (not a Q32 target)".to_string())
+            }
         }
     }
 
@@ -156,7 +177,7 @@ impl FiletestInstance {
         match self {
             Self::Emu(i) => i.debug_state(),
             Self::NativeFa(i) => i.debug_state(),
-            Self::Wasm(_) | Self::Interp(_) => None,
+            Self::Wasm(_) | Self::Interp(_) | Self::WgpuProbe(_) => None,
         }
     }
 
@@ -165,7 +186,7 @@ impl FiletestInstance {
             Self::Emu(i) => i.last_guest_instruction_count(),
             Self::NativeFa(i) => i.last_guest_instruction_count(),
             Self::Wasm(i) => i.last_guest_instruction_count(),
-            Self::Interp(_) => None,
+            Self::Interp(_) | Self::WgpuProbe(_) => None,
         }
     }
 
@@ -174,7 +195,7 @@ impl FiletestInstance {
             Self::Emu(i) => i.last_guest_cycle_count(),
             Self::NativeFa(i) => i.last_guest_cycle_count(),
             Self::Wasm(i) => i.last_guest_cycle_count(),
-            Self::Interp(_) => None,
+            Self::Interp(_) | Self::WgpuProbe(_) => None,
         }
     }
 }
@@ -210,6 +231,24 @@ impl CompiledShader {
             return Ok(Self::Interp(InterpShader::new(ir, meta)));
         }
 
+        if target.backend == Backend::Wgpu {
+            // Signature comes from the naga lowering (arg/return types for
+            // the probe wrapper + decode); the render pipeline is compiled
+            // per directive from the authored source on the GPU.
+            let (_ir, meta) = lower_glsl(
+                source,
+                texture_specs,
+                compiler_config.texture.texel_fetch_bounds,
+            )?;
+            lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            return Ok(Self::WgpuProbe(WgpuProbeShader::new(
+                source,
+                meta,
+                texture_specs,
+            )));
+        }
+
         let (ir, meta) = match target.frontend {
             Frontend::Naga => lower_glsl(
                 source,
@@ -239,6 +278,7 @@ impl CompiledShader {
             ..Default::default()
         };
         match target.backend {
+            Backend::Wgpu => unreachable!("wgpu.f32 returns early above (no LPIR codegen)"),
             Backend::Rv32 => {
                 let engine = EmuEngine::new(opts);
                 let module = engine
@@ -289,14 +329,14 @@ impl CompiledShader {
         match self {
             Self::Emu(_, m) => m.debug_info(),
             Self::NativeFa(_, m) => m.debug_info(),
-            Self::Wasm(_, _) | Self::Interp(_) => None,
+            Self::Wasm(_, _) | Self::Interp(_) | Self::WgpuProbe(_) => None,
         }
     }
 
     pub(crate) fn wasm_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Wasm(_, m) => Some(m.wasm_bytes()),
-            Self::Emu(_, _) | Self::NativeFa(_, _) | Self::Interp(_) => None,
+            Self::Emu(_, _) | Self::NativeFa(_, _) | Self::Interp(_) | Self::WgpuProbe(_) => None,
         }
     }
 
@@ -304,7 +344,7 @@ impl CompiledShader {
         match self {
             Self::Emu(_, m) => m.lpir_module(),
             Self::NativeFa(_, m) => m.lpir_module(),
-            Self::Wasm(_, _) => None,
+            Self::Wasm(_, _) | Self::WgpuProbe(_) => None,
             Self::Interp(s) => Some(s.lpir_module()),
         }
     }
