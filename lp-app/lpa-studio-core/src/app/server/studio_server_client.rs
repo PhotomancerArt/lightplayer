@@ -171,10 +171,27 @@ impl StudioServerClient {
             .await
             .map_err(map_client_error)?;
         logs.extend(map_client_events(inventory.events));
+
+        // Resolve the server filesystem root by handle (same as the demo
+        // path): the library slug is a display identity, not a server path,
+        // and server-root file reads (asset editor base bodies) need the
+        // real root.
+        let loaded = self
+            .client
+            .project_list_loaded()
+            .await
+            .map_err(map_client_error)?;
+        let fs_root = loaded
+            .value
+            .iter()
+            .find(|project| project.handle == handle)
+            .map(|project| project.path.clone());
+        logs.extend(map_client_events(loaded.events));
         logs.extend(self.take_pending_logs());
 
         Ok(LoadedLibraryProject {
             handle_id: handle.id(),
+            fs_root,
             inventory: ProjectInventorySummary::from(&inventory.value),
             node_def_artifacts: node_def_artifacts(&inventory.value),
             synced_version,
@@ -257,6 +274,10 @@ impl StudioServerClient {
 /// Result of opening a library project on the runtime.
 pub struct LoadedLibraryProject {
     pub handle_id: u32,
+    /// The project's server filesystem root (resolved from the
+    /// loaded-projects list by handle; `None` if unexpectedly absent).
+    /// Server-root file reads (asset base bodies) resolve against this.
+    pub fs_root: Option<lpc_model::LpPathBuf>,
     pub inventory: ProjectInventorySummary,
     /// Runtime node id → containing def artifact (see
     /// [`LoadedDemoProject::node_def_artifacts`]).

@@ -8,6 +8,7 @@ use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
 };
+use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
@@ -51,6 +52,11 @@ pub struct ProjectController {
     /// [`Self::edit_buffer`] with the same ack lifecycle (state machine on
     /// [`PendingAssetEdit`]).
     asset_edit_buffer: BTreeMap<ArtifactLocation, PendingAssetEdit>,
+    /// Passive ticks left at the tightened verdict-chase interval. Set after
+    /// an accepted asset-body apply so the node's compile verdict (error or
+    /// clean) is pulled promptly instead of waiting a full device cadence;
+    /// each gated refresh consumes one.
+    verdict_chase_ticks: u8,
     /// Base file bodies fetched through the server filesystem for asset
     /// editor content ([`Self::asset_content`]), fetched on demand and
     /// invalidated after commit acks (save rewrites files) and overlay
@@ -115,6 +121,7 @@ impl ProjectController {
             root_nodes: Vec::new(),
             edit_buffer: BTreeMap::new(),
             asset_edit_buffer: BTreeMap::new(),
+            verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
             project_fs_root: None,
             def_artifacts: BTreeMap::new(),
@@ -1238,6 +1245,10 @@ impl ProjectController {
             last_synced: loaded.synced_version,
         });
         self.mark_ready(title, loaded.handle_id, loaded.inventory);
+        // Without this, library/example-opened projects could not fetch
+        // asset bodies ("filesystem root is unknown") — the inline editor's
+        // content fetch resolves against the server fs root.
+        self.project_fs_root = loaded.fs_root;
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
     }
@@ -1352,6 +1363,9 @@ impl ProjectController {
         server: &mut StudioServerClient,
     ) -> Result<ProjectSyncRun, UiError> {
         let handle_id = self.ready_handle_id()?;
+        // Any full pull consumes one verdict-chase tick (see
+        // [`Self::verdict_chase_interval`]).
+        self.verdict_chase_ticks = self.verdict_chase_ticks.saturating_sub(1);
         self.sync
             .get_or_insert_with(ProjectSync::new)
             .begin_refresh();
@@ -1382,6 +1396,9 @@ impl ProjectController {
         Cancel: CancelSignal + ?Sized,
     {
         let handle_id = self.ready_handle_id()?;
+        // Each passive pull consumes one verdict-chase tick (see
+        // [`Self::verdict_chase_interval`]).
+        self.verdict_chase_ticks = self.verdict_chase_ticks.saturating_sub(1);
         self.sync
             .get_or_insert_with(ProjectSync::new)
             .begin_refresh();
@@ -2340,10 +2357,22 @@ impl ProjectController {
             }
         };
         let rejections = self.apply_asset_mutation_acks(&batch, &mutation, &[(cmd_id, artifact)]);
+        if rejections.is_empty() {
+            // The applied body reached the engine; chase its compile verdict
+            // with a few tightened passive ticks instead of waiting a full
+            // device cadence (auto-apply liveness).
+            self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+        }
         Ok(ProjectEditRun {
             notices: rejection_notices(&rejections),
             logs: mutation.logs,
         })
+    }
+
+    /// The tightened passive-tick interval while an accepted asset apply
+    /// awaits its compile verdict; `None` outside the chase window.
+    pub(crate) fn verdict_chase_interval(&self) -> Option<Duration> {
+        (self.verdict_chase_ticks > 0).then_some(VERDICT_CHASE_INTERVAL)
     }
 
     /// Discard the pending asset edit for `artifact`: the local entry clears

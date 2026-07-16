@@ -63,4 +63,6 @@ float test_float_add_large_numbers() {
     return 1000000.0 + 2000000.0;
 }
 
-// run: test_float_add_large_numbers() ~= 32768.0
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_float_add_large_numbers() ~= 32768.0
+// run[f32]: test_float_add_large_numbers() ~= 3000000.0

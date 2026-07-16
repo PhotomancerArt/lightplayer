@@ -300,14 +300,19 @@ runtime, and the container carries `data-story-wait` until CodeMirror has
 initialized so story PNG capture waits for it. The inline asset editor
 (`src/app/node/asset_editor.rs`) builds on it, rendered in place inside the
 asset slot row (`AssetSlotEditor` in `config_slot_row.rs`) so the output
-stays visible beside it; its text/modified state is component-local (the
-inline Apply button sits right there, so nothing is hoisted to the pane).
+stays visible beside it; its text/modified state is component-local.
 
-While the editor is focused, Cmd/Ctrl+Enter applies and Cmd/Ctrl+S saves
-(both captured in the editor keymap; Cmd/Ctrl+S never reaches the browser's
-save dialog). The status bar's Apply/Save affordances carry OS-correct
-shortcut hints (`⌘↵` on Mac, `Ctrl+Enter` elsewhere) via
-`src/base/keyboard.rs`.
+Editing is **auto-apply**: edits reach the running project ~0.5 s after
+typing stops (the engine keeps the last good program rendering through a
+bad compile, so mid-edit errors never blank the output). The editor's
+status bar is deliberately gentle — fixed geometry, plain background,
+color-only transitions — split into a left half for the compile/apply
+truth (identity, a subtle applying dot, the truncated error) and a right
+half for persistence (`Saved`/`Unsaved` plus always-mounted Revert and
+Save buttons). While the editor is focused, Cmd/Ctrl+Enter applies
+immediately and Cmd/Ctrl+S saves (both captured in the editor keymap;
+Cmd/Ctrl+S never reaches the browser's save dialog); the Save button
+carries the OS-correct hint via `src/base/keyboard.rs`.
 
 ## Boundary
 

@@ -111,19 +111,16 @@ pub const ALL_TARGETS: &[Target] = &[
 ];
 
 /// Default targets for local `cargo test` / app runs: rv32n, rv32lpn (lps-glsl
-/// frontend — the primary on-device pipeline), rv32c (Cranelift), wasm (Q32).
-///
-/// `interp.f32` (the CI-runnable f32 gate — host LPIR interpretation) is
-/// deliberately NOT in the default set yet: the corpus still carries the
-/// un-triaged f32 divergence tail (per-mode splits and `@unsupported`
-/// annotations land in the corpus-expectations PR, which flips interp.f32
-/// into this list as its final step once the whole corpus is green on it).
-/// Run it explicitly with `--target interp.f32` or the `sweep` subcommand.
+/// frontend — the primary on-device pipeline), rv32c (Cranelift), wasm (Q32),
+/// plus interp.f32 (the CI-runnable f32 gate — host LPIR interpretation; the
+/// whole corpus carries triaged f32 expectations via `run[q32]:`/`run[f32]:`
+/// channels and per-target annotations).
 pub const DEFAULT_TARGETS: &[Target] = &[
     ALL_TARGETS[2],
     ALL_TARGETS[3],
     ALL_TARGETS[1],
     ALL_TARGETS[0],
+    ALL_TARGETS[4],
 ];
 
 /// Annotation kind for test directives.
@@ -232,12 +229,11 @@ mod tests {
 
     #[test]
     fn test_default_targets_order_matches_const() {
-        // interp.f32 joins this list when the corpus-expectations PR makes
-        // the whole corpus green on it; until then it is explicit-only.
-        assert_eq!(DEFAULT_TARGETS.len(), 4);
+        assert_eq!(DEFAULT_TARGETS.len(), 5);
         assert_eq!(DEFAULT_TARGETS[0].name(), "rv32n.q32");
         assert_eq!(DEFAULT_TARGETS[1].name(), "rv32lpn.q32");
         assert_eq!(DEFAULT_TARGETS[2].name(), "rv32c.q32");
         assert_eq!(DEFAULT_TARGETS[3].name(), "wasm.q32");
+        assert_eq!(DEFAULT_TARGETS[4].name(), "interp.f32");
     }
 }

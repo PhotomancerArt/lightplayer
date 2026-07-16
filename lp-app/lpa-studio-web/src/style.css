@@ -706,78 +706,6 @@ label:has(> input:not(:disabled)) {
         var(--studio-color-terminal);
 }
 
-.ux-popover-trigger-attached.ux-attached-popover-story-button,
-.ux-popover-panel.ux-attached-popover-story-panel,
-.ux-popover-bridge.ux-attached-popover-story-bridge {
-    position: absolute;
-}
-
-.ux-popover-trigger-attached.ux-attached-popover-story-button {
-    z-index: 90;
-}
-
-.ux-popover-panel.ux-attached-popover-story-panel {
-    z-index: 20;
-    width: min(320px, calc(100% - 36px));
-    max-width: none;
-}
-
-.ux-popover-bridge.ux-attached-popover-story-bridge {
-    z-index: 95;
-    width: 24px;
-    height: 1px;
-}
-
-.ux-popover-trigger-attached.ux-attached-popover-story-button-below {
-    top: 46px;
-    bottom: auto;
-}
-
-.ux-popover-trigger-attached.ux-attached-popover-story-button-above {
-    top: auto;
-    bottom: 46px;
-}
-
-.ux-popover-panel.ux-attached-popover-story-panel-below,
-.ux-popover-bridge.ux-attached-popover-story-bridge-below {
-    top: 69px;
-    bottom: auto;
-}
-
-.ux-popover-panel.ux-attached-popover-story-panel-above {
-    top: auto;
-    bottom: 69px;
-}
-
-.ux-popover-bridge.ux-attached-popover-story-bridge-above {
-    top: auto;
-    bottom: 69px;
-}
-
-.ux-popover-trigger-attached.ux-attached-popover-story-start,
-.ux-popover-panel.ux-attached-popover-story-start,
-.ux-popover-bridge.ux-attached-popover-story-start {
-    left: 18px;
-    right: auto;
-    transform: none;
-}
-
-.ux-popover-trigger-attached.ux-attached-popover-story-middle,
-.ux-popover-panel.ux-attached-popover-story-middle,
-.ux-popover-bridge.ux-attached-popover-story-middle {
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
-}
-
-.ux-popover-trigger-attached.ux-attached-popover-story-end,
-.ux-popover-panel.ux-attached-popover-story-end,
-.ux-popover-bridge.ux-attached-popover-story-end {
-    left: auto;
-    right: 18px;
-    transform: none;
-}
-
 .ux-attached-popover-story-canvas-below-start,
 .ux-attached-popover-story-canvas-below-middle,
 .ux-attached-popover-story-canvas-below-end {
@@ -1450,184 +1378,55 @@ label:has(> input:not(:disabled)) {
     --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
 }
 
-.ux-popover-trigger-attached {
-    position: relative;
-    z-index: 90;
-    border-color: var(--ux-popover-border-color, var(--studio-color-border-strong));
-    color: var(--ux-popover-icon-color, var(--studio-color-text-strong));
-    background: linear-gradient(
-        180deg,
-        var(--ux-popover-trigger-fill-top, var(--studio-color-surface-raised)),
-        var(--ux-popover-trigger-fill-bottom, var(--studio-color-surface-raised)) 95%
-    );
-    box-shadow: none;
-}
+/* Contiguous popover chrome: one SVG path (see base/outline.rs) draws the
+   merged trigger+panel fill, border, and shadow. The tone variables above
+   (.ux-popover-chrome-*) are consumed by the path's gradient and stroke. */
 
-.ux-popover-trigger-attached.ux-popover-trigger-attached-below {
-    border-bottom-right-radius: 0;
-    border-bottom-left-radius: 0;
-}
-
-.ux-popover-trigger-attached.ux-popover-trigger-attached-above {
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-}
-
-.ux-popover-panel.ux-attached-popover-panel {
-    --ux-popover-radius: var(--studio-radius-md);
-    --ux-popover-border-width: 1px;
-    overflow: hidden;
-    border-color: var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-radius: var(--ux-popover-radius);
-    background: linear-gradient(
-        180deg,
-        var(--ux-popover-seam-fill, var(--studio-color-surface-raised)),
-        var(--ux-popover-panel-fill-away, var(--studio-color-surface-raised)) 95%
-    );
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.34);
-}
-
-.ux-popover-panel.ux-attached-popover-panel-below {
-    --ux-popover-seam-fill: var(--ux-popover-trigger-fill-bottom, var(--studio-color-surface-raised));
-}
-
-.ux-popover-panel.ux-attached-popover-panel-above {
-    --ux-popover-seam-fill: var(--ux-popover-trigger-fill-top, var(--studio-color-surface-raised));
-    background: linear-gradient(
-        180deg,
-        var(--ux-popover-panel-fill-away, var(--studio-color-surface-raised)),
-        var(--ux-popover-seam-fill, var(--studio-color-surface-raised)) 95%
-    );
-}
-
-.ux-popover-panel.ux-attached-popover-panel-square-top-left {
-    border-top-left-radius: 0;
-}
-
-.ux-popover-panel.ux-attached-popover-panel-square-top-right {
-    border-top-right-radius: 0;
-}
-
-.ux-popover-panel.ux-attached-popover-panel-square-bottom-left {
-    border-bottom-left-radius: 0;
-}
-
-.ux-popover-panel.ux-attached-popover-panel-square-bottom-right {
-    border-bottom-right-radius: 0;
-}
-
-.ux-popover-bridge {
-    --ux-popover-radius: var(--studio-radius-md);
-    --ux-popover-border-width: 1px;
+.ux-popover-outline-svg {
     position: fixed;
-    z-index: 95;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: visible;
     pointer-events: none;
-    background: var(--ux-popover-seam-fill, var(--studio-color-surface-raised));
 }
 
-.ux-popover-bridge-below {
-    --ux-popover-seam-fill: var(--ux-popover-trigger-fill-bottom, var(--studio-color-surface-raised));
+.ux-popover-outline-path {
+    stroke: var(--ux-popover-border-color, var(--studio-color-border-strong));
+    stroke-width: 1;
+    filter: drop-shadow(0 16px 40px rgba(0, 0, 0, 0.34));
 }
 
-.ux-popover-bridge-above {
-    --ux-popover-seam-fill: var(--ux-popover-trigger-fill-top, var(--studio-color-surface-raised));
+/* The in-flow trigger while its content is re-parented into the top layer:
+   an invisible placeholder pinned (inline style) to the measured size. */
+.ux-popover-trigger-placeholder {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: transparent;
 }
 
-.ux-popover-bridge-corner {
-    position: absolute;
-    width: var(--ux-popover-radius);
-    height: var(--ux-popover-radius);
+/* The trigger's visual in the top layer, painted above the outline fill. */
+.ux-popover-layer .ux-popover-open-trigger {
+    position: fixed;
+    z-index: 96;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--ux-popover-icon-color, var(--studio-color-text-strong));
+    cursor: pointer;
 }
 
-.ux-popover-bridge-corner::before {
-    position: absolute;
-    z-index: -1;
-    content: "";
-}
-
-.ux-popover-bridge-below .ux-popover-bridge-corner {
-    bottom: 0;
-}
-
-.ux-popover-bridge-below .ux-popover-bridge-corner-left {
-    left: calc(-1 * var(--ux-popover-radius) + var(--ux-popover-border-width));
-    border-right: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-bottom: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-bottom-right-radius: var(--ux-popover-radius);
-}
-
-.ux-popover-bridge-below .ux-popover-bridge-corner-left::before {
-    inset: 0 calc(-1 * var(--ux-popover-border-width)) calc(-1 * var(--ux-popover-border-width)) 0;
-    background: radial-gradient(
-        circle at top left,
-        transparent 0 calc(var(--ux-popover-radius) - var(--ux-popover-border-width)),
-        var(--ux-popover-seam-fill, var(--studio-color-surface-raised)) calc(var(--ux-popover-radius) - var(--ux-popover-border-width) + 0.5px)
-    );
-}
-
-.ux-popover-bridge-below .ux-popover-bridge-corner-right {
-    right: calc(-1 * var(--ux-popover-radius) + var(--ux-popover-border-width));
-    border-bottom: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-left: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-bottom-left-radius: var(--ux-popover-radius);
-}
-
-.ux-popover-bridge-below .ux-popover-bridge-corner-right::before {
-    inset: 0 0 calc(-1 * var(--ux-popover-border-width)) calc(-1 * var(--ux-popover-border-width));
-    background: radial-gradient(
-        circle at top right,
-        transparent 0 calc(var(--ux-popover-radius) - var(--ux-popover-border-width)),
-        var(--ux-popover-seam-fill, var(--studio-color-surface-raised)) calc(var(--ux-popover-radius) - var(--ux-popover-border-width) + 0.5px)
-    );
-}
-
-.ux-popover-bridge-above .ux-popover-bridge-corner {
-    top: 0;
-}
-
-.ux-popover-bridge-above .ux-popover-bridge-corner-left {
-    left: calc(-1 * var(--ux-popover-radius) + var(--ux-popover-border-width));
-    border-top: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-right: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-top-right-radius: var(--ux-popover-radius);
-}
-
-.ux-popover-bridge-above .ux-popover-bridge-corner-left::before {
-    inset: calc(-1 * var(--ux-popover-border-width)) calc(-1 * var(--ux-popover-border-width)) 0 0;
-    background: radial-gradient(
-        circle at bottom left,
-        transparent 0 calc(var(--ux-popover-radius) - var(--ux-popover-border-width)),
-        var(--ux-popover-seam-fill, var(--studio-color-surface-raised)) calc(var(--ux-popover-radius) - var(--ux-popover-border-width) + 0.5px)
-    );
-}
-
-.ux-popover-bridge-above .ux-popover-bridge-corner-right {
-    right: calc(-1 * var(--ux-popover-radius) + var(--ux-popover-border-width));
-    border-top: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-left: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-    border-top-left-radius: var(--ux-popover-radius);
-}
-
-.ux-popover-bridge-above .ux-popover-bridge-corner-right::before {
-    inset: calc(-1 * var(--ux-popover-border-width)) 0 0 calc(-1 * var(--ux-popover-border-width));
-    background: radial-gradient(
-        circle at bottom right,
-        transparent 0 calc(var(--ux-popover-radius) - var(--ux-popover-border-width)),
-        var(--ux-popover-seam-fill, var(--studio-color-surface-raised)) calc(var(--ux-popover-radius) - var(--ux-popover-border-width) + 0.5px)
-    );
-}
-
-.ux-popover-bridge-no-left-corner .ux-popover-bridge-corner-left,
-.ux-popover-bridge-no-right-corner .ux-popover-bridge-corner-right {
-    display: none;
-}
-
-.ux-popover-bridge-no-left-corner {
-    border-left: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
-}
-
-.ux-popover-bridge-no-right-corner {
-    border-right: var(--ux-popover-border-width) solid var(--ux-popover-border-color, var(--studio-color-border-strong));
+/* The panel keeps its layout (incl. border width) but paints no chrome of
+   its own; the outline path owns background, border, and shadow. */
+.ux-popover-panel.ux-svg-popover-panel {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
 }
 
 .ux-node-ui-popup strong,

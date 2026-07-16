@@ -18,6 +18,7 @@ bool test_isnan_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_isnan_inf() == false
 
 bool test_isnan_neg_inf() {
@@ -29,6 +30,7 @@ bool test_isnan_neg_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_isnan_neg_inf() == false
 
 bool test_isinf_inf() {
@@ -40,6 +42,7 @@ bool test_isinf_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_isinf_inf() == true
 
 bool test_isinf_neg_inf() {
@@ -51,6 +54,7 @@ bool test_isinf_neg_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_isinf_neg_inf() == true
 
 float test_sin_inf() {
@@ -62,6 +66,7 @@ float test_sin_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_sin_inf() ~= 0.0
 
 float test_cos_inf() {
@@ -73,6 +78,7 @@ float test_cos_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_cos_inf() ~= 0.0
 
 float test_log_inf() {
@@ -84,6 +90,7 @@ float test_log_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_log_inf() ~= 0.0
 
 float test_exp_inf() {
@@ -95,6 +102,7 @@ float test_exp_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_exp_inf() ~= 0.0
 
 float test_sqrt_inf() {
@@ -106,6 +114,7 @@ float test_sqrt_inf() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_sqrt_inf() ~= 0.0
 
 vec2 test_nan_propagation() {
@@ -118,6 +127,7 @@ vec2 test_nan_propagation() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_nan_propagation() ~= vec2(0.0, 0.0)
 
 vec2 test_inf_propagation() {
@@ -130,6 +140,7 @@ vec2 test_inf_propagation() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_inf_propagation() ~= vec2(0.0, 0.0)
 
 

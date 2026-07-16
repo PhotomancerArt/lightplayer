@@ -26,7 +26,10 @@ pub use crate::core::log::{
 pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
 pub use console_command::ConsoleCommand;
-pub use refresh_cadence::{DEVICE_REFRESH_INTERVAL, RefreshCadence, SIMULATOR_REFRESH_INTERVAL};
+pub use refresh_cadence::{
+    DEVICE_REFRESH_INTERVAL, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, VERDICT_CHASE_INTERVAL,
+    VERDICT_CHASE_TICKS,
+};
 pub use studio_actor::{StudioActor, StudioHandle};
 pub use studio_command::StudioCommand;
 pub use studio_controller::StudioController;

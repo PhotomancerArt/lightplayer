@@ -63,7 +63,8 @@ float test_q32fast_div_const_zero_saturates() {
     return a / 0.0;
 }
 
-// run: test_q32fast_div_const_zero_saturates() ~= 32768.0 (tolerance: 0.02)
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_q32fast_div_const_zero_saturates() ~= 32768.0 (tolerance: 0.02)
 
 float test_q32fast_div_dynamic_stays_dynamic() {
     float a = 10.0;

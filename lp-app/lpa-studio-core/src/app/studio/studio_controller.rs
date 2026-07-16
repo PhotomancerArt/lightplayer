@@ -193,6 +193,17 @@ impl StudioController {
         RefreshCadence::for_flow_state(&self.device.snapshot().flow)
     }
 
+    /// The delay before the next passive tick: the connection cadence,
+    /// tightened to the verdict-chase interval while a just-accepted asset
+    /// apply awaits its compile verdict (the auto-apply post-ack refresh).
+    pub fn next_refresh_interval(&self) -> core::time::Duration {
+        let cadence = self.refresh_cadence().interval();
+        match self.project.verdict_chase_interval() {
+            Some(chase) => cadence.min(chase),
+            None => cadence,
+        }
+    }
+
     pub fn actions(&self) -> UiActions {
         UiActions::new(view_actions(&self.view()))
     }

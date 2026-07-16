@@ -111,27 +111,32 @@ impl LpsValueF32 {
     }
 
     /// Approximate equality comparison (~=) with tolerance
-    /// For floats: checks if values are within tolerance
+    /// For floats: checks if values are within tolerance. Bit-equal values
+    /// compare equal first, so identical infinities pass (`inf - inf` is NaN
+    /// and would otherwise fail every tolerance).
     /// For integers and booleans: falls back to exact equality
     /// For vectors/matrices: checks each component within tolerance
     pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
+        fn approx_f32(a: f32, b: f32, tolerance: f32) -> bool {
+            a == b || (a - b).abs() <= tolerance
+        }
         match (self, other) {
             (LpsValueF32::I32(a), LpsValueF32::I32(b)) => a == b, // Exact for ints
             (LpsValueF32::U32(a), LpsValueF32::U32(b)) => a == b, // Exact for uints
-            (LpsValueF32::F32(a), LpsValueF32::F32(b)) => (a - b).abs() <= tolerance,
+            (LpsValueF32::F32(a), LpsValueF32::F32(b)) => approx_f32(*a, *b, tolerance),
             (LpsValueF32::Bool(a), LpsValueF32::Bool(b)) => a == b, // Exact for bools
             (LpsValueF32::Vec2(a), LpsValueF32::Vec2(b)) => a
                 .iter()
                 .zip(b.iter())
-                .all(|(x, y)| (x - y).abs() <= tolerance),
+                .all(|(x, y)| approx_f32(*x, *y, tolerance)),
             (LpsValueF32::Vec3(a), LpsValueF32::Vec3(b)) => a
                 .iter()
                 .zip(b.iter())
-                .all(|(x, y)| (x - y).abs() <= tolerance),
+                .all(|(x, y)| approx_f32(*x, *y, tolerance)),
             (LpsValueF32::Vec4(a), LpsValueF32::Vec4(b)) => a
                 .iter()
                 .zip(b.iter())
-                .all(|(x, y)| (x - y).abs() <= tolerance),
+                .all(|(x, y)| approx_f32(*x, *y, tolerance)),
             (LpsValueF32::IVec2(a), LpsValueF32::IVec2(b)) => a == b, // Exact for ints
             (LpsValueF32::IVec3(a), LpsValueF32::IVec3(b)) => a == b, // Exact for ints
             (LpsValueF32::IVec4(a), LpsValueF32::IVec4(b)) => a == b, // Exact for ints
@@ -145,17 +150,17 @@ impl LpsValueF32 {
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
-                .all(|(x, y)| (x - y).abs() <= tolerance),
+                .all(|(x, y)| approx_f32(*x, *y, tolerance)),
             (LpsValueF32::Mat3x3(a), LpsValueF32::Mat3x3(b)) => a
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
-                .all(|(x, y)| (x - y).abs() <= tolerance),
+                .all(|(x, y)| approx_f32(*x, *y, tolerance)),
             (LpsValueF32::Mat4x4(a), LpsValueF32::Mat4x4(b)) => a
                 .iter()
                 .flatten()
                 .zip(b.iter().flatten())
-                .all(|(x, y)| (x - y).abs() <= tolerance),
+                .all(|(x, y)| approx_f32(*x, *y, tolerance)),
             (LpsValueF32::Array(a), LpsValueF32::Array(b)) => {
                 a.len() == b.len()
                     && a.iter()

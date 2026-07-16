@@ -15,4 +15,6 @@ vec4 mirror_sample() {
 }
 
 // coord_x = 1.15*3 - 0.5 = 2.95 → nearest 3 → mirror maps to column 1 (green)
+// interp.f32: no guest memory to bind texture fixtures into
+// @unsupported(interp.f32)
 // run: mirror_sample() ~= vec4(0.0, 1.0, 0.0, 1.0) (tolerance: 0.0004)

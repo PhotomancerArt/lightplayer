@@ -79,8 +79,10 @@ vec3 b = vec3(3000.0, 1000.0, 2000.0);
 return a * b;
 }
 
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
 // @unsupported(rv32c.q32)
-// run: test_vec3_multiply_large_numbers() ~= vec3(-14656.0, -31616.0, -29312.0)
+// run[q32]: test_vec3_multiply_large_numbers() ~= vec3(-14656.0, -31616.0, -29312.0)
+// run[f32]: test_vec3_multiply_large_numbers() ~= vec3(3000000.0, 2000000.0, 6000000.0)
 
 vec3 test_vec3_multiply_mixed_components() {
 vec3 a = vec3(2.0, -3.0, 4.0);

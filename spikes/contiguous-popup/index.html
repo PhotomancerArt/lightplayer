@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contiguous popup — SVG outline prototype</title>
+<style>
+  :root {
+    --bg: #141519;
+    --panel: #1e2026;
+    --border: #40455a;
+    --text: #e6e8ef;
+    --muted: #9aa0b0;
+    --accent: #8b95ff;
+    --btn-fill: #262933;
+    --btn-fill-hover: #2e3342;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 32px clamp(16px, 6vw, 80px) 120px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 40px 0 8px; color: var(--accent); }
+  p.note { color: var(--muted); max-width: 640px; margin: 0 0 20px; }
+
+  /* ---- hero stage ---- */
+  .stage {
+    position: relative;
+    border: 1px solid #2a2d38;
+    border-radius: 12px;
+    background: #17181d;
+    min-height: 380px;
+    overflow: hidden;
+  }
+  .outline-svg {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    overflow: visible;
+  }
+  .toolbar {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    gap: 18px;
+    padding: 18px;
+  }
+  .pbtn {
+    /* participants have NO css border/background — the SVG paints them */
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font: inherit;
+    padding: 7px 16px;
+    cursor: pointer;
+    position: relative;
+    z-index: 2;
+  }
+  .pbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+  .filler {
+    position: relative;
+    z-index: 0;
+    color: #4d5261;
+    padding: 6px 18px;
+    max-width: 720px;
+  }
+  .popup {
+    position: absolute;
+    z-index: 2;
+    visibility: hidden;
+  }
+  .popup-inner { padding: 14px 16px; }
+  .popup-inner h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+  .popup-inner p { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+  .popup-inner .row { display: flex; gap: 8px; }
+  .popup-inner .chip {
+    background: #2a2e3a; border-radius: 6px; padding: 4px 10px; font-size: 12px;
+  }
+
+  /* svg paint states */
+  path.group-outline {
+    fill: url(#gradBtn);
+    stroke: var(--border);
+    stroke-width: 1;
+  }
+  path.group-outline.hover { fill: url(#gradBtnHover); }
+  path.group-outline.open { fill: url(#gradPanel); }
+  path.group-outline, .pbtn { transition: opacity 160ms ease; }
+  path.group-outline.dim, .pbtn.dim { opacity: 0.55; }
+  rect.debug-rect { fill: none; stroke: #e5484d; stroke-width: 1; stroke-dasharray: 4 3; }
+
+  /* ---- controls ---- */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 14px 22px;
+    align-items: center;
+    padding: 14px 2px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+  .controls label { display: flex; align-items: center; gap: 7px; }
+  .controls input[type=range] { width: 110px; accent-color: var(--accent); }
+  .controls select {
+    background: var(--panel); color: var(--text);
+    border: 1px solid #333744; border-radius: 6px; padding: 3px 6px; font: inherit;
+  }
+  .controls .val { min-width: 34px; color: var(--text); font-variant-numeric: tabular-nums; }
+  #scrub { width: 220px; }
+
+  /* ---- playground ---- */
+  .sandbox {
+    position: relative;
+    height: 340px;
+    border: 1px solid #2a2d38;
+    border-radius: 12px;
+    background: #17181d;
+    overflow: hidden;
+    touch-action: none;
+  }
+  .drag {
+    position: absolute;
+    z-index: 2;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 12px;
+    cursor: grab; user-select: none;
+  }
+  .drag:active { cursor: grabbing; }
+  kbd {
+    background: #2a2e3a; border-radius: 4px; padding: 1px 5px;
+    font: 11px ui-monospace, monospace; color: var(--text);
+  }
+</style>
+</head>
+<body>
+
+<!-- shared paint servers: because each group is ONE path, a single gradient
+     flows continuously across button + popup — impossible with two elements -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gradBtn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d3140"/>
+      <stop offset="1" stop-color="#23262f"/>
+    </linearGradient>
+    <linearGradient id="gradBtnHover" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#363b4e"/>
+      <stop offset="1" stop-color="#282c38"/>
+    </linearGradient>
+    <linearGradient id="gradPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#282c38"/>
+      <stop offset="1" stop-color="#191b22"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<h1>Contiguous popup — SVG merged-outline prototype</h1>
+<p class="note">One SVG path per group: the union of the participants' rects, corners rounded
+(convex and concave use the same arc emission). The popup opens by animating its
+<em>input rect</em>; the outline is recomputed each frame, so the border visibly grows around it.</p>
+
+<div class="stage" id="stage">
+  <svg class="outline-svg" id="heroSvg"></svg>
+  <div class="toolbar">
+    <button class="pbtn" data-btn="0">⚙&nbsp; Settings</button>
+    <button class="pbtn" data-btn="1">◉&nbsp; Detail</button>
+    <button class="pbtn" data-btn="2">✦&nbsp; Effects</button>
+  </div>
+  <p class="filler">
+    Content beneath the popup, to show that the merged shape overlays it with a single
+    unified fill, border and shadow. Aliquam erat volutpat: nulla facilisi, sed ut
+    perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque
+    laudantium, totam rem aperiam.
+  </p>
+  <div class="popup" id="popup">
+    <div class="popup-inner" id="popupInner">
+      <h3>Node detail</h3>
+      <p>This panel and its trigger are two plain DOM elements. The enclosure you see
+      is one SVG path.</p>
+      <div class="row">
+        <span class="chip">produces: color</span>
+        <span class="chip">bus: main</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="controls">
+  <label>ease <select id="easeSel">
+    <option value="subtle" selected>subtle (fast, calm)</option>
+    <option value="grow">grow (quint, staggered)</option>
+    <option value="bouncy">bouncy (back on height)</option>
+    <option value="linear">linear (debug)</option>
+  </select></label>
+  <label>align <select id="alignSel">
+    <option value="left">left</option>
+    <option value="center" selected>center</option>
+    <option value="right">right</option>
+  </select></label>
+  <label>place <select id="placeSel">
+    <option value="below" selected>below</option>
+    <option value="above">above</option>
+  </select></label>
+  <label>width <input type="range" id="widthSl" min="120" max="460" value="300"><span class="val" id="widthVal">300</span></label>
+  <label>radius <input type="range" id="radiusSl" min="0" max="24" value="10"><span class="val" id="radiusVal">10</span></label>
+  <label>speed <select id="speedSel">
+    <option value="1">1×</option>
+    <option value="0.25">¼×</option>
+    <option value="0.06">slow-mo</option>
+  </select></label>
+  <label>scrub <input type="range" id="scrub" min="0" max="1" step="0.001" value="0"><span class="val" id="scrubVal">0.00</span></label>
+  <label><input type="checkbox" id="debugCb"> show input rects</label>
+</div>
+
+<h2>Playground — arbitrary rect unions</h2>
+<p class="note">Drag to move, <kbd>shift</kbd>-drag to resize. Same geometry function; every
+convex corner gets a normal arc, every concave corner an inverted one, radii clamp on short edges.</p>
+
+<div class="sandbox" id="sandbox">
+  <svg class="outline-svg" id="sandSvg"></svg>
+</div>
+
+<script>
+'use strict';
+
+/* ================================================================
+ * PORTABLE CORE — pure geometry, no DOM. Port target: Rust + TS.
+ * rects in, SVG path string out.
+ * ================================================================ */
+
+const EPS = 1e-4;
+// Coords closer than this are welded together. Deliberately generous: edges
+// that ALMOST line up (sub-1.5px steps from layout rounding) would otherwise
+// render as hairline jogs in the outline.
+const COORD_TOL = 1.25;
+
+function dedupeSorted(arr, tol) {
+  const out = [];
+  for (const v of arr) {
+    if (!out.length || v - out[out.length - 1] > tol) out.push(v);
+  }
+  return out;
+}
+
+/** Union of axis-aligned rects -> list of closed loops (rectilinear polygons).
+ *  rects: [{x, y, w, h}] */
+function unionLoops(rects) {
+  rects = rects.filter(r => r.w > EPS && r.h > EPS);
+  if (!rects.length) return [];
+
+  const xs = dedupeSorted(rects.flatMap(r => [r.x, r.x + r.w]).sort((a, b) => a - b), COORD_TOL);
+  const ys = dedupeSorted(rects.flatMap(r => [r.y, r.y + r.h]).sort((a, b) => a - b), COORD_TOL);
+  const nx = xs.length - 1, ny = ys.length - 1;
+
+  // coverage of each grid cell (cell centers vs rects)
+  const cov = [];
+  for (let i = 0; i < nx; i++) {
+    cov.push([]);
+    const cx = (xs[i] + xs[i + 1]) / 2;
+    for (let j = 0; j < ny; j++) {
+      const cy = (ys[j] + ys[j + 1]) / 2;
+      cov[i].push(rects.some(r => cx > r.x && cx < r.x + r.w && cy > r.y && cy < r.y + r.h));
+    }
+  }
+  const C = (i, j) => (i >= 0 && i < nx && j >= 0 && j < ny) ? cov[i][j] : false;
+
+  // boundary segments: grid edges where coverage flips
+  const segs = [];
+  for (let i = 0; i <= nx; i++)
+    for (let j = 0; j < ny; j++)
+      if (C(i - 1, j) !== C(i, j)) segs.push([[xs[i], ys[j]], [xs[i], ys[j + 1]]]);
+  for (let j = 0; j <= ny; j++)
+    for (let i = 0; i < nx; i++)
+      if (C(i, j - 1) !== C(i, j)) segs.push([[xs[i], ys[j]], [xs[i + 1], ys[j]]]);
+
+  // chain segments into closed loops
+  const key = p => p[0].toFixed(2) + ',' + p[1].toFixed(2);
+  const adj = new Map();
+  segs.forEach((s, idx) => {
+    for (const p of [s[0], s[1]]) {
+      const k = key(p);
+      if (!adj.has(k)) adj.set(k, []);
+      adj.get(k).push(idx);
+    }
+  });
+
+  const used = new Array(segs.length).fill(false);
+  const loops = [];
+  for (let s0 = 0; s0 < segs.length; s0++) {
+    if (used[s0]) continue;
+    used[s0] = true;
+    const loop = [segs[s0][0], segs[s0][1]];
+    for (;;) {
+      const cur = loop[loop.length - 1];
+      const prev = loop[loop.length - 2];
+      const k = key(cur);
+      const cands = (adj.get(k) || []).filter(i => !used[i]);
+      if (!cands.length) break;
+      // at degree-4 junctions (two rects touching corner to corner) prefer turning
+      let pick = cands[0];
+      if (cands.length > 1) {
+        const din = [cur[0] - prev[0], cur[1] - prev[1]];
+        const turning = cands.find(i => {
+          const s = segs[i];
+          const other = key(s[0]) === k ? s[1] : s[0];
+          const dout = [other[0] - cur[0], other[1] - cur[1]];
+          return Math.abs(din[0] * dout[1] - din[1] * dout[0]) > EPS;
+        });
+        if (turning !== undefined) pick = turning;
+      }
+      used[pick] = true;
+      const s = segs[pick];
+      const next = key(s[0]) === k ? s[1] : s[0];
+      if (key(next) === key(loop[0])) break; // closed
+      loop.push(next);
+    }
+    // drop collinear midpoints (merges runs of grid edges into single segments)
+    const simp = [];
+    const n = loop.length;
+    for (let i = 0; i < n; i++) {
+      const a = loop[(i - 1 + n) % n], b = loop[i], c = loop[(i + 1) % n];
+      const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+      if (Math.abs(cross) > EPS) simp.push(b);
+    }
+    if (simp.length >= 3) loops.push(simp);
+  }
+  return loops;
+}
+
+/** Loops -> SVG path string with rounded corners.
+ *  Convex and concave corners use the same construction: trim both segments
+ *  by r, join with an arc whose sweep follows the turn direction. Radii are
+ *  clamped per-vertex to half of each adjacent segment, so the shape stays
+ *  valid (and animates continuously) as segments shrink. */
+function roundedPath(loops, radius) {
+  const f = v => Math.round(v * 100) / 100;
+  let d = '';
+  for (const pts of loops) {
+    const n = pts.length;
+    const rad = [];
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], a = pts[(i - 1 + n) % n], c = pts[(i + 1) % n];
+      const lp = Math.hypot(p[0] - a[0], p[1] - a[1]);
+      const ln = Math.hypot(c[0] - p[0], c[1] - p[1]);
+      rad.push(Math.max(0, Math.min(radius, lp / 2, ln / 2)));
+    }
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], a = pts[(i - 1 + n) % n], c = pts[(i + 1) % n];
+      const lin = Math.hypot(p[0] - a[0], p[1] - a[1]);
+      const lout = Math.hypot(c[0] - p[0], c[1] - p[1]);
+      const din = [(p[0] - a[0]) / lin, (p[1] - a[1]) / lin];
+      const dout = [(c[0] - p[0]) / lout, (c[1] - p[1]) / lout];
+      const r = rad[i];
+      const p1 = [p[0] - din[0] * r, p[1] - din[1] * r];
+      const p2 = [p[0] + dout[0] * r, p[1] + dout[1] * r];
+      // screen coords (y down): cross > 0 = clockwise turn = sweep 1
+      const sweep = (din[0] * dout[1] - din[1] * dout[0]) > 0 ? 1 : 0;
+      d += (i === 0 ? 'M' : 'L') + f(p1[0]) + ' ' + f(p1[1]);
+      if (r > 0.05) d += 'A' + f(r) + ' ' + f(r) + ' 0 0 ' + sweep + ' ' + f(p2[0]) + ' ' + f(p2[1]);
+    }
+    d += 'Z';
+  }
+  return d;
+}
+
+/** Snap to device pixels so 1px strokes stay crisp (the +0.5 keeps odd-width
+ *  strokes on pixel centers at dpr 1). */
+const DPR = window.devicePixelRatio || 1;
+const snap = v => Math.round(v * DPR) / DPR + (DPR === 1 ? 0.5 : 0);
+const snapRect = r => {
+  const x = snap(r.x), y = snap(r.y);
+  return { x, y, w: snap(r.x + r.w) - x, h: snap(r.y + r.h) - y };
+};
+
+function mergedOutline(rects, radius) {
+  return roundedPath(unionLoops(rects.map(snapRect)), radius);
+}
+
+/* ================================================================
+ * Demo glue (DOM measurement, animation driver, controls)
+ * ================================================================ */
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp01 = t => Math.min(1, Math.max(0, t));
+const easeOutQuint = t => 1 - Math.pow(1 - t, 5);
+const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+const easeOutBack = t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+const delayed = (fn, dl) => t => fn(clamp01((t - dl) / (1 - dl)));
+
+const PRESETS = {
+  subtle: { x: easeOutCubic, y: easeOutCubic, open: 160, close: 120, content: delayed(easeOutCubic, 0.10) },
+  grow:   { x: easeOutQuint, y: delayed(easeOutQuint, 0.10), open: 300, close: 190, content: delayed(easeOutCubic, 0.25) },
+  bouncy: { x: easeOutQuint, y: delayed(easeOutBack, 0.12), open: 340, close: 190, content: delayed(easeOutCubic, 0.25) },
+  linear: { x: t => t, y: t => t, open: 300, close: 190, content: t => t },
+};
+const preset = () => PRESETS[ctl.ease.value];
+
+const OVERLAP = 1;          // popup rect overlaps trigger by >= stroke width
+const MARGIN = 12;          // popup clamp margin inside the stage
+const ACTIVE_INFLATE = 3;   // outline swells around the trigger when open
+const inflate = (r, p) => ({ x: r.x - p, y: r.y - p, w: r.w + 2 * p, h: r.h + 2 * p });
+
+const stage = document.getElementById('stage');
+const heroSvg = document.getElementById('heroSvg');
+const popup = document.getElementById('popup');
+const popupInner = document.getElementById('popupInner');
+const buttons = [...document.querySelectorAll('.pbtn')];
+
+const ctl = {
+  ease: document.getElementById('easeSel'),
+  align: document.getElementById('alignSel'),
+  place: document.getElementById('placeSel'),
+  width: document.getElementById('widthSl'),
+  radius: document.getElementById('radiusSl'),
+  speed: document.getElementById('speedSel'),
+  scrub: document.getElementById('scrub'),
+  debug: document.getElementById('debugCb'),
+};
+
+// one outline path per button-group
+const paths = buttons.map(() => {
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('class', 'group-outline');
+  p.setAttribute('fill-rule', 'evenodd');
+  heroSvg.appendChild(p);
+  return p;
+});
+const debugLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+heroSvg.appendChild(debugLayer);
+
+const hero = {
+  active: -1,          // which button owns the popup
+  progress: 0,         // raw 0..1 timeline
+  target: 0,
+  scrubbing: false,
+  hovered: -1,
+  lastTs: null,
+};
+
+function stageRect(el) {
+  const s = stage.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height };
+}
+
+function finalPopupRect(btnRect) {
+  const w = +ctl.width.value;
+  const stageW = stage.clientWidth;
+  const measured = popup.getBoundingClientRect();
+  const h = popup.offsetHeight || measured.height || 120;
+  let x;
+  if (ctl.align.value === 'left') x = btnRect.x;
+  else if (ctl.align.value === 'right') x = btnRect.x + btnRect.w - w;
+  else x = btnRect.x + btnRect.w / 2 - w / 2;
+  x = Math.max(MARGIN, Math.min(x, stageW - MARGIN - w));
+  const y = ctl.place.value === 'below'
+    ? btnRect.y + btnRect.h - OVERLAP
+    : btnRect.y + OVERLAP - h;
+  return { x, y, w, h };
+}
+
+/** The heart of the animation: interpolate the popup INPUT rect from a sliver
+ *  inside the trigger out to its final rect, then re-union every frame. */
+function popupRectAt(t, btnRect, fin) {
+  const e = preset();
+  const tx = e.x(t), ty = e.y(t);
+  const left = lerp(btnRect.x, fin.x, tx);
+  const right = lerp(btnRect.x + btnRect.w, fin.x + fin.w, tx);
+  if (ctl.place.value === 'below') {
+    const top = btnRect.y + btnRect.h - OVERLAP;
+    const bottom = lerp(btnRect.y + btnRect.h, fin.y + fin.h, ty);
+    return { x: left, y: top, w: right - left, h: bottom - top };
+  } else {
+    const bottom = btnRect.y + OVERLAP;
+    const top = lerp(btnRect.y, fin.y, ty);
+    return { x: left, y: top, w: right - left, h: bottom - top };
+  }
+}
+
+function renderHero() {
+  heroSvg.setAttribute('width', stage.clientWidth);
+  heroSvg.setAttribute('height', stage.clientHeight);
+  const R = +ctl.radius.value;
+  const t = hero.progress;
+  debugLayer.innerHTML = '';
+
+  buttons.forEach((btn, i) => {
+    const bRect = stageRect(btn);
+    // the outline swells slightly around the trigger while open ("diving in")
+    const inf = (i === hero.active && t > 0) ? ACTIVE_INFLATE * easeOutCubic(clamp01(t / 0.5)) : 0;
+    const drawRect = inflate(bRect, inf);
+    const rects = [drawRect];
+    let pRect = null;
+    if (i === hero.active && t > 0) {
+      const fin = finalPopupRect(inflate(bRect, ACTIVE_INFLATE));
+      pRect = popupRectAt(t, drawRect, fin);
+      rects.push(pRect);
+
+      // position + clip the real popup content to the animated rect
+      popup.style.visibility = 'visible';
+      popup.style.left = fin.x + 'px';
+      popup.style.top = fin.y + 'px';
+      popup.style.width = fin.w + 'px';
+      const ct = Math.max(0, pRect.y - fin.y);
+      const cr = Math.max(0, (fin.x + fin.w) - (pRect.x + pRect.w));
+      const cb = Math.max(0, (fin.y + fin.h) - (pRect.y + pRect.h));
+      const cl = Math.max(0, pRect.x - fin.x);
+      popup.style.clipPath = `inset(${ct}px ${cr}px ${cb}px ${cl}px round ${R}px)`;
+      const ce = preset().content(t);
+      popupInner.style.opacity = ce;
+      popupInner.style.transform = `translateY(${(1 - ce) * -6}px)`;
+
+      paths[i].style.filter = `drop-shadow(0 6px 22px rgba(0,0,0,${0.35 * t}))`;
+    } else if (i === hero.active) {
+      popup.style.visibility = 'hidden';
+      paths[i].style.filter = '';
+    } else {
+      paths[i].style.filter = '';
+    }
+
+    const isOpen = i === hero.active && t > 0;
+    const anyOpen = hero.active >= 0 && t > 0;
+    paths[i].setAttribute('d', mergedOutline(rects, R));
+    paths[i].classList.toggle('open', isOpen);
+    paths[i].classList.toggle('hover', i === hero.hovered && !isOpen);
+    paths[i].classList.toggle('dim', anyOpen && !isOpen);
+    btn.classList.toggle('dim', anyOpen && !isOpen);
+    if (isOpen && paths[i].nextElementSibling !== debugLayer) {
+      heroSvg.insertBefore(paths[i], debugLayer); // paint the open group above its siblings
+    }
+
+    if (ctl.debug.checked) {
+      for (const r of rects) {
+        const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        el.setAttribute('class', 'debug-rect');
+        el.setAttribute('x', r.x); el.setAttribute('y', r.y);
+        el.setAttribute('width', r.w); el.setAttribute('height', r.h);
+        debugLayer.appendChild(el);
+      }
+    }
+  });
+  ctl.scrub.value = t;
+  document.getElementById('scrubVal').textContent = t.toFixed(2);
+}
+
+function tick(ts) {
+  if (!hero.scrubbing && hero.progress !== hero.target) {
+    const dt = hero.lastTs == null ? 16 : ts - hero.lastTs;
+    const speed = +ctl.speed.value;
+    const dur = hero.target > hero.progress ? preset().open : preset().close;
+    const step = (dt / dur) * speed;
+    hero.progress = hero.target > hero.progress
+      ? Math.min(hero.target, hero.progress + step)
+      : Math.max(hero.target, hero.progress - step);
+  }
+  hero.lastTs = ts;
+  renderHero();
+  requestAnimationFrame(tick);
+}
+
+buttons.forEach((btn, i) => {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    hero.scrubbing = false;
+    if (hero.active === i && hero.target === 1) {
+      hero.target = 0;
+    } else {
+      if (hero.active !== i) hero.progress = 0;
+      hero.active = i;
+      hero.target = 1;
+    }
+  });
+  btn.addEventListener('mouseenter', () => { hero.hovered = i; });
+  btn.addEventListener('mouseleave', () => { hero.hovered = -1; });
+});
+document.addEventListener('click', e => {
+  if (hero.target === 1 && !popup.contains(e.target)) { hero.target = 0; hero.scrubbing = false; }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { hero.target = 0; hero.scrubbing = false; }
+});
+ctl.scrub.addEventListener('input', () => {
+  hero.scrubbing = true;
+  if (hero.active < 0) hero.active = 1; // default to middle button
+  hero.progress = +ctl.scrub.value;
+  hero.target = hero.progress > 0 ? 1 : 0;
+});
+ctl.width.addEventListener('input', () => document.getElementById('widthVal').textContent = ctl.width.value);
+ctl.radius.addEventListener('input', () => document.getElementById('radiusVal').textContent = ctl.radius.value);
+
+requestAnimationFrame(tick);
+
+/* ================================================================
+ * Playground: draggable rects through the same core
+ * ================================================================ */
+
+const sandbox = document.getElementById('sandbox');
+const sandSvg = document.getElementById('sandSvg');
+const sandPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+sandPath.setAttribute('class', 'group-outline open');
+sandPath.setAttribute('fill-rule', 'evenodd');
+sandSvg.appendChild(sandPath);
+
+const sandRects = [
+  { x: 60,  y: 40,  w: 180, h: 60,  label: 'A' },
+  { x: 140, y: 99,  w: 300, h: 140, label: 'B' },
+  { x: 380, y: 60,  w: 120, h: 180, label: 'C' },
+];
+const dragEls = sandRects.map(r => {
+  const el = document.createElement('div');
+  el.className = 'drag';
+  el.textContent = r.label + ' — drag me';
+  sandbox.appendChild(el);
+  return el;
+});
+
+function renderSandbox() {
+  sandSvg.setAttribute('width', sandbox.clientWidth);
+  sandSvg.setAttribute('height', sandbox.clientHeight);
+  sandPath.setAttribute('d', mergedOutline(sandRects, +ctl.radius.value));
+  sandRects.forEach((r, i) => {
+    const el = dragEls[i];
+    el.style.left = r.x + 'px';
+    el.style.top = r.y + 'px';
+    el.style.width = r.w + 'px';
+    el.style.height = r.h + 'px';
+  });
+}
+ctl.radius.addEventListener('input', renderSandbox);
+
+dragEls.forEach((el, i) => {
+  el.addEventListener('pointerdown', e => {
+    el.setPointerCapture(e.pointerId);
+    const r0 = { ...sandRects[i] };
+    const sx = e.clientX, sy = e.clientY;
+    const resize = e.shiftKey;
+    const move = ev => {
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      if (resize) {
+        sandRects[i].w = Math.max(40, r0.w + dx);
+        sandRects[i].h = Math.max(30, r0.h + dy);
+      } else {
+        sandRects[i].x = r0.x + dx;
+        sandRects[i].y = r0.y + dy;
+      }
+      renderSandbox();
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  });
+});
+
+new ResizeObserver(() => { renderHero(); renderSandbox(); }).observe(document.body);
+renderSandbox();
+</script>
+</body>
+</html>

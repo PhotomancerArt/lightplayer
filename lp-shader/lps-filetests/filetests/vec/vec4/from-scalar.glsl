@@ -55,7 +55,9 @@ vec4 test_vec4_from_scalar_large_value() {
     return vec4(100000.0);
 }
 
-// run: test_vec4_from_scalar_large_value() ~= vec4(32768.0, 32768.0, 32768.0, 32768.0)
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_vec4_from_scalar_large_value() ~= vec4(32768.0, 32768.0, 32768.0, 32768.0)
+// run[f32]: test_vec4_from_scalar_large_value() ~= vec4(100000.0, 100000.0, 100000.0, 100000.0)
 
 vec4 test_vec4_from_scalar_fractional() {
     return vec4(0.5);

@@ -15,6 +15,7 @@ uint test_packunorm2x16_zeros() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_packunorm2x16_zeros() == 0u
 
 uint test_packunorm2x16_ones() {
@@ -26,6 +27,7 @@ uint test_packunorm2x16_ones() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_packunorm2x16_ones() == 4294967295u
 
 uint test_packunorm2x16_half() {
@@ -37,6 +39,7 @@ uint test_packunorm2x16_half() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_packunorm2x16_half() == 2147516416u
 
 uint test_packunorm4x8_zeros() {
@@ -48,6 +51,7 @@ uint test_packunorm4x8_zeros() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_packunorm4x8_zeros() == 0u
 
 uint test_packunorm4x8_ones() {
@@ -59,6 +63,7 @@ uint test_packunorm4x8_ones() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_packunorm4x8_ones() == 4294967295u
 
 uint test_packunorm4x8_quarters() {
@@ -70,6 +75,7 @@ uint test_packunorm4x8_quarters() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_packunorm4x8_quarters() == 67372036u
 
 

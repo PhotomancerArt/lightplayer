@@ -79,6 +79,24 @@ impl UiAssetEditor {
         ))
     }
 
+    /// The Revert action: discards the pending/applied body edit for this
+    /// artifact ([`AssetEditOp::Revert`]), returning the running project to
+    /// the saved file body. Available whenever the content is dirty —
+    /// including while the applied body fails to compile (keep-last-good
+    /// renders through the recompile of the restored source).
+    pub fn revert_action(&self) -> UiAction {
+        UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            AssetEditOp::Revert {
+                artifact: self.artifact.clone(),
+            },
+        )
+        .with_summary(format!(
+            "Discard the applied edit of {} and return to the saved file.",
+            self.source
+        ))
+    }
+
     /// Action resolving the effective content when [`Self::content`] is
     /// `None` (fetches and caches the base file body; the refreshed view
     /// then carries the content).
@@ -139,6 +157,20 @@ mod tests {
         );
         assert!(!editor(None).editable());
         assert!(!editor(Some(UiAssetContent::from_bytes(&[0xff, 0xfe], false, 0))).editable());
+    }
+
+    #[test]
+    fn revert_action_targets_the_artifacts_pending_edit() {
+        let editor = editor(Some(UiAssetContent::from_bytes(b"void main() {}", true, 0)));
+        let action = editor.revert_action();
+
+        assert!(action.is_for_node(ProjectController::NODE_ID));
+        assert_eq!(
+            action.op_as::<AssetEditOp>(),
+            Some(&AssetEditOp::Revert {
+                artifact: ArtifactLocation::file("/shader.glsl"),
+            })
+        );
     }
 
     #[test]

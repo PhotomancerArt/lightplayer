@@ -27,6 +27,10 @@ use lpvm::{encode_uniform_write, glsl_component_count};
 
 use crate::conformance::oracle::{canonical_unit_source, rename_lpfn_prefix};
 
+/// Synthesized by `lps-frontend` when globals/uniforms carry declaration
+/// initializers; writes them into the VMContext.
+const SHADER_INIT_FN: &str = "__shader_init";
+
 /// Compiled interp module: LPIR + signatures for one test file.
 pub struct InterpShader {
     ir: Arc<LpirModule>,
@@ -100,13 +104,32 @@ impl InterpShader {
     }
 
     /// Create a per-directive instance (cheap; shares the module). The
-    /// instance owns a fresh zero-initialized VMContext image.
-    pub fn instantiate(&self) -> InterpInstance {
-        InterpInstance {
+    /// instance owns a fresh zero-initialized VMContext image; if the module
+    /// carries the synthesized `__shader_init` (globals/uniforms with
+    /// declaration initializers), it runs once here — before any
+    /// `set_uniform` writes, matching the compiled runtimes' instantiation
+    /// order — and the initialized image is kept.
+    pub fn instantiate(&self) -> Result<InterpInstance, String> {
+        let mut vmctx_image = vec![0u8; self.sig.vmctx_buffer_size()];
+        if self.ir.functions.values().any(|f| f.name == SHADER_INIT_FN) {
+            let mut handler = StdMathHandler::default();
+            let out = interpret_entry(
+                &self.ir,
+                SHADER_INIT_FN,
+                &[],
+                &mut handler,
+                &vmctx_image,
+                0,
+                lpir::DEFAULT_MAX_DEPTH,
+            )
+            .map_err(|e| format!("interp: {SHADER_INIT_FN}: {e}"))?;
+            vmctx_image = out.vmctx_bytes;
+        }
+        Ok(InterpInstance {
             ir: Arc::clone(&self.ir),
             sig: Arc::clone(&self.sig),
-            vmctx_image: vec![0u8; self.sig.vmctx_buffer_size()],
-        }
+            vmctx_image,
+        })
     }
 
     /// Borrow the LPIR module (debug printing).
@@ -505,7 +528,7 @@ mod tests {
         )
         .expect("lower");
         let shader = InterpShader::new(ir, sig);
-        let mut inst = shader.instantiate();
+        let mut inst = shader.instantiate().expect("instantiate");
         let out = inst
             .call("add", &[LpsValueF32::F32(1.5), LpsValueF32::F32(2.25)])
             .expect("call");
@@ -521,7 +544,7 @@ mod tests {
         )
         .expect("lower");
         let shader = InterpShader::new(ir, sig);
-        let mut inst = shader.instantiate();
+        let mut inst = shader.instantiate().expect("instantiate");
         let out = inst.call("f", &[LpsValueF32::F32(1.5)]).expect("call");
         assert!(matches!(out, LpsValueF32::F32(x) if x == 1.0));
     }
@@ -535,7 +558,7 @@ mod tests {
         )
         .expect("lower");
         let shader = InterpShader::new(ir, sig);
-        let mut inst = shader.instantiate();
+        let mut inst = shader.instantiate().expect("instantiate");
         let out = inst.call("mk", &[LpsValueF32::F32(1.0)]).expect("call");
         assert!(matches!(out, LpsValueF32::Vec3(a) if a == [1.0, 2.0, 3.0]));
     }

@@ -35,9 +35,16 @@ vec4 texel_far_t() {
     return texelFetch(inputColor, ivec2(1, 0), 0);
 }
 
+// @unsupported(interp.f32)
 // run: sample_r_corner() ~= 0.125 (tolerance: 0.0002)
+// @unsupported(interp.f32)
 // run: sample_g_corner() ~= 0.25 (tolerance: 0.0002)
+// @unsupported(interp.f32)
 // run: sample_b_corner() ~= 0.375 (tolerance: 0.0002)
+// @unsupported(interp.f32)
 // run: sample_a_corner() ~= 1.0 (tolerance: 0.0002)
+// @unsupported(interp.f32)
 // run: sample_x1_r() ~= 1.0 (tolerance: 0.0002)
+// interp.f32: no guest memory to bind texture fixtures into
+// @unsupported(interp.f32)
 // run: texel_far_t() ~= vec4(1.0, 0.75, 0.5, 0.25) (tolerance: 0.0002)

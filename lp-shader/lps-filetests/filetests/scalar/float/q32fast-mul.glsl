@@ -13,5 +13,6 @@ float test_q32fast_wrap_mul_large_square() {
     return a * b;
 }
 
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
 // @unsupported(rv32c.q32)
-// run: test_q32fast_wrap_mul_large_square() ~= 1.0 (tolerance: 0.02)
+// run[q32]: test_q32fast_wrap_mul_large_square() ~= 1.0 (tolerance: 0.02)

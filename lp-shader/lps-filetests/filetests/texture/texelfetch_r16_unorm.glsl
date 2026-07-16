@@ -32,8 +32,14 @@ float fetch_a() {
     return texelFetch(t, ivec2(0, 0), 0).a;
 }
 
+// @unsupported(interp.f32)
 // run: fetch_r() ~= 0.625 (tolerance: 0.0002)
+// @unsupported(interp.f32)
 // run: fetch_g() ~= 0.0 (tolerance: 0.0002)
+// @unsupported(interp.f32)
 // run: fetch_b() ~= 0.0 (tolerance: 0.0002)
+// @unsupported(interp.f32)
 // run: fetch_a() ~= 1.0 (tolerance: 0.0002)
+// interp.f32: no guest memory to bind texture fixtures into
+// @unsupported(interp.f32)
 // run: fetch_center() ~= vec4(0.625, 0.0, 0.0, 1.0) (tolerance: 0.00025)

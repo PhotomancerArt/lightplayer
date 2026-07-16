@@ -1,4 +1,14 @@
 //! Core shader node: owns GLSL compilation/rendering and exposes output as a visual product value.
+//!
+//! **Keep-last-good:** when the source (or a compile-affecting config) changes,
+//! the previously compiled program keeps rendering until the replacement
+//! compiles; a failed compile keeps the old program running while the error
+//! is reported through the node status. A failed source/config state compiles
+//! at most once (the `needs_compile` latch) — it is retried only when the
+//! source or config changes again. This is what makes live editing safe: a
+//! mid-edit bad apply shows its error without blanking the output. See
+//! `docs/adr/2026-07-04-studio-editing-model.md` (revised by the shader
+//! auto-apply plan).
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -41,8 +51,18 @@ pub struct ShaderNode {
     glsl_opts: GlslOpts,
     visual_uniforms: Vec<VisualUniform>,
     config_accessors: Option<ShaderConfigAccessors>,
+    /// The last successfully compiled program. Kept through source/config
+    /// refreshes and failed recompiles (keep-last-good); replaced only by
+    /// the next successful compile.
     shader: Option<Box<dyn LpShader>>,
+    /// The newest compile attempt's failure, if any. May coexist with a
+    /// running `shader` — the status reports the error while the last good
+    /// program keeps rendering.
     compilation_error: Option<String>,
+    /// True when the current source/config has not been compile-attempted
+    /// yet. Cleared after one attempt regardless of outcome, so a broken
+    /// source never recompiles per frame.
+    needs_compile: bool,
     state: ShaderState,
 }
 
@@ -60,6 +80,7 @@ impl ShaderNode {
             config_accessors: None,
             shader: None,
             compilation_error: None,
+            needs_compile: true,
             state: ShaderState::new(VisualProduct::new(node_id, 0)),
         }
     }
@@ -79,16 +100,18 @@ impl ShaderNode {
     fn refresh_source(&mut self, source: AssetText) {
         self.source_revision = source.revision;
         self.glsl_source = source.text;
-        self.shader = None;
+        // Keep-last-good: the old program keeps rendering until the new
+        // source compiles; only the stale error is cleared.
+        self.needs_compile = true;
         self.compilation_error = None;
     }
 
+    /// Compile the current source/config if it has not been attempted yet.
+    /// Returns whether there is a runnable program — which may be the
+    /// previous one when the newest attempt failed (keep-last-good).
     fn ensure_compiled(&mut self, ctx: &RenderContext<'_>) -> Result<bool, NodeError> {
-        if self.shader.is_some() {
-            return Ok(true);
-        }
-        if self.compilation_error.is_some() {
-            return Ok(false);
+        if !self.needs_compile {
+            return Ok(self.shader.is_some());
         }
 
         let graphics = ctx
@@ -112,11 +135,13 @@ impl ShaderNode {
                     self.node_id
                 );
                 self.compilation_error = Some(format!("shader compile: {denied}"));
-                self.shader = None;
-                return Ok(false);
+                self.needs_compile = false;
+                return Ok(self.shader.is_some());
             }
         };
 
+        // One attempt per source/config state, whatever the outcome.
+        self.needs_compile = false;
         lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         self.compilation_error = None;
         let compile_opts = ShaderCompileOptions {
@@ -143,6 +168,9 @@ impl ShaderNode {
         match compile_result {
             Ok(shader) => {
                 let stats = shader.compile_stats();
+                // Swap: the old program (if any) is dropped only now that
+                // the replacement exists. Old + new coexist for the compile
+                // duration — the transient memory cost of keep-last-good.
                 self.shader = Some(shader);
                 log::info!(
                     "[shader-node] compilation succeeded (node={:?}, {})",
@@ -152,8 +180,9 @@ impl ShaderNode {
                 Ok(true)
             }
             Err(error) => {
+                // Keep-last-good: the previous program keeps rendering while
+                // the error rides the node status.
                 self.compilation_error = Some(format!("shader compile: {error}"));
-                self.shader = None;
                 if let Some(compile_elapsed_ms) = compile_elapsed_ms {
                     log::warn!(
                         "[shader-node] compilation failed (node={:?}, elapsed={}ms): {error}",
@@ -166,7 +195,7 @@ impl ShaderNode {
                         self.node_id
                     );
                 }
-                Ok(false)
+                Ok(self.shader.is_some())
             }
         }
     }
@@ -187,7 +216,7 @@ impl ShaderNode {
                 mul: lpc_model::ValueSlot::with_version(ctx.revision(), next_mul),
                 div: lpc_model::ValueSlot::with_version(ctx.revision(), next_div),
             };
-            self.shader = None;
+            self.needs_compile = true;
             self.compilation_error = None;
         }
         Ok(())
@@ -207,7 +236,7 @@ impl ShaderNode {
                 sync_shader_slot_def_from_authored(ctx, &alloc::format!("consumed[{key}]"), slot)?;
         }
         if compile_changed {
-            self.shader = None;
+            self.needs_compile = true;
             self.compilation_error = None;
         }
         Ok(())
@@ -251,7 +280,9 @@ impl NodeRuntime for ShaderNode {
             Ok(Some(source)) => source,
             Ok(None) => return Ok(AssetRefreshResult::Unchanged),
             Err(err) => {
-                self.shader = None;
+                // Keep-last-good: report the read failure but keep the old
+                // program rendering; there is no new source to compile.
+                self.needs_compile = false;
                 self.compilation_error = Some(format!("read shader source: {err:?}"));
                 return Ok(AssetRefreshResult::Refreshed);
             }
@@ -711,7 +742,7 @@ mod tests {
     use alloc::string::String;
     use alloc::sync::Arc;
     use alloc::vec;
-    use core::sync::atomic::{AtomicU32, Ordering};
+    use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use lp_collection::VecMap;
 
     use super::*;
@@ -732,6 +763,8 @@ mod tests {
     };
     use lpc_registry::{AssetText, ProjectRegistry};
     use lpc_wire::{WireChildKind, WireSlotIndex};
+    // `data_mut` on the counting stub's downcast `LpsTextureBuf` backing.
+    use lps_shared::TextureBuffer as _;
     use lps_shared::TextureStorageFormat;
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
@@ -1131,6 +1164,92 @@ mod tests {
     }
 
     #[test]
+    fn failed_recompile_keeps_last_good_shader_and_reports_error() {
+        let graphics = Arc::new(CountingGraphics::new());
+        let mut node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef::default(),
+            shader_asset_text(DEMO_GLSL, Revision::new(1)),
+        );
+        let product = VisualProduct::new(NodeId::new(1), 0);
+        let mut ctx = crate::node::RenderContext::new(
+            NodeId::new(1),
+            Revision::new(1),
+            Some(graphics.clone()),
+            None,
+            0.0,
+        );
+        let request = crate::products::visual::RenderTextureRequest {
+            width: 4,
+            height: 4,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.0,
+        };
+        let mut texture = graphics.create_render_target(4, 4).expect("texture");
+
+        node.render_texture_into(product, &request, &mut texture, &mut ctx)
+            .expect("initial render");
+        assert_eq!(graphics.compile_count(), 1);
+        assert!(node.compilation_error().is_none());
+        assert!(
+            graphics
+                .read_back(&texture)
+                .expect("read back")
+                .bytes()
+                .iter()
+                .all(|byte| *byte == 1)
+        );
+
+        // A new revision arrives while the compiler rejects it: the old
+        // program keeps rendering and the failure rides the status.
+        graphics.set_fail(true);
+        node.refresh_source(shader_asset_text("broken {", Revision::new(2)));
+        node.render_texture_into(product, &request, &mut texture, &mut ctx)
+            .expect("render after failed recompile");
+        assert_eq!(graphics.compile_count(), 2);
+        assert!(
+            node.compilation_error()
+                .expect("compile error reported")
+                .contains("test compile failure")
+        );
+        assert!(matches!(
+            node.runtime_status(),
+            Some(NodeRuntimeStatus::Error(_))
+        ));
+        assert!(
+            graphics
+                .read_back(&texture)
+                .expect("read back")
+                .bytes()
+                .iter()
+                .all(|byte| *byte == 1),
+            "last good program keeps rendering"
+        );
+
+        // The failed revision compiles at most once (the latch).
+        node.render_texture_into(product, &request, &mut texture, &mut ctx)
+            .expect("latched render");
+        assert_eq!(graphics.compile_count(), 2);
+
+        // A fixed revision compiles and swaps in.
+        graphics.set_fail(false);
+        node.refresh_source(shader_asset_text(DEMO_GLSL, Revision::new(3)));
+        node.render_texture_into(product, &request, &mut texture, &mut ctx)
+            .expect("render after fix");
+        assert_eq!(graphics.compile_count(), 3);
+        assert!(node.compilation_error().is_none());
+        assert!(
+            graphics
+                .read_back(&texture)
+                .expect("read back")
+                .bytes()
+                .iter()
+                .all(|byte| *byte == 3),
+            "fixed program swapped in"
+        );
+    }
+
+    #[test]
     fn shader_compile_failure_is_cached_and_renders_fallback() {
         let graphics = Arc::new(CountingGraphics::failing());
         let mut node = ShaderNode::new(
@@ -1201,7 +1320,7 @@ mod tests {
     struct CountingGraphics {
         inner: TargetLpvmGraphics,
         compile_count: AtomicU32,
-        fail_compile: bool,
+        fail_compile: AtomicBool,
     }
 
     impl CountingGraphics {
@@ -1209,15 +1328,18 @@ mod tests {
             Self {
                 inner: TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
                 compile_count: AtomicU32::new(0),
-                fail_compile: false,
+                fail_compile: AtomicBool::new(false),
             }
         }
 
         fn failing() -> Self {
-            Self {
-                fail_compile: true,
-                ..Self::new()
-            }
+            let graphics = Self::new();
+            graphics.set_fail(true);
+            graphics
+        }
+
+        fn set_fail(&self, fail: bool) {
+            self.fail_compile.store(fail, Ordering::Relaxed);
         }
 
         fn compile_count(&self) -> u32 {
@@ -1231,11 +1353,13 @@ mod tests {
             _source: &str,
             _options: &ShaderCompileOptions,
         ) -> Result<Box<dyn LpShader>, GfxError> {
-            self.compile_count.fetch_add(1, Ordering::Relaxed);
-            if self.fail_compile {
+            let count = self.compile_count.fetch_add(1, Ordering::Relaxed) + 1;
+            if self.fail_compile.load(Ordering::Relaxed) {
                 return Err(GfxError::Compile(String::from("test compile failure")));
             }
-            Ok(Box::new(CountingShader))
+            // Each successful compile fills its ordinal, so tests can tell
+            // WHICH program rendered (keep-last-good vs swapped).
+            Ok(Box::new(CountingShader(count as u8)))
         }
 
         fn backend_name(&self) -> &'static str {
@@ -1323,16 +1447,23 @@ mod tests {
         }
     }
 
-    struct CountingShader;
+    struct CountingShader(u8);
 
     impl LpShader for CountingShader {
         fn render(
             &mut self,
-            _target: &mut TextureHandle,
+            target: &mut TextureHandle,
             _uniforms: &LpsValueF32,
         ) -> Result<(), GfxError> {
-            // Render targets from `create_render_target` are freshly zeroed,
-            // so "render black" is a no-op for this counting stub.
+            // Fill the target with this program's ordinal so tests can tell
+            // WHICH program rendered (keep-last-good vs swapped). The
+            // counting backend allocates lpvm targets, so the backing is
+            // always an `LpsTextureBuf`.
+            let buffer = target
+                .backing_mut()
+                .downcast_mut::<lp_shader::LpsTextureBuf>()
+                .expect("counting stub renders into lpvm-backed targets");
+            buffer.data_mut().fill(self.0);
             Ok(())
         }
     }

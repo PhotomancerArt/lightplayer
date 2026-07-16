@@ -1,4 +1,9 @@
 //! Serial compute shader runtime node.
+//!
+//! **Keep-last-good:** like the visual shader node, the previously compiled
+//! program keeps ticking while a newer source/config revision compiles or
+//! fails; the failure rides the node status. See the module docs on
+//! `shader_node.rs`.
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -36,8 +41,13 @@ pub struct ComputeShaderNode {
     def: ComputeShaderDef,
     source_asset: Option<RuntimeSourceAsset>,
     glsl_source: String,
+    /// The last successfully compiled program (keep-last-good; see the
+    /// `shader_node.rs` field docs — same contract).
     shader: Option<Box<dyn LpComputeShader>>,
+    /// The newest compile attempt's failure; may coexist with `shader`.
     compilation_error: Option<String>,
+    /// True until the current source/config gets its one compile attempt.
+    needs_compile: bool,
     state: ComputeShaderState,
 }
 
@@ -56,6 +66,7 @@ impl ComputeShaderNode {
             glsl_source,
             shader: None,
             compilation_error: None,
+            needs_compile: true,
             state,
         }
     }
@@ -90,17 +101,19 @@ impl ComputeShaderNode {
             location: source.location,
             revision: source.revision,
         });
-        self.shader = None;
+        // Keep-last-good: the old program keeps ticking until the new
+        // source compiles; only the stale error is cleared.
+        self.needs_compile = true;
         self.compilation_error = None;
         Ok(())
     }
 
+    /// Compile the current source/config if it has not been attempted yet.
+    /// Returns whether there is a runnable program — which may be the
+    /// previous one when the newest attempt failed (keep-last-good).
     fn ensure_compiled(&mut self, ctx: &TickContext<'_>) -> Result<bool, NodeError> {
-        if self.shader.is_some() {
-            return Ok(true);
-        }
-        if self.compilation_error.is_some() {
-            return Ok(false);
+        if !self.needs_compile {
+            return Ok(self.shader.is_some());
         }
 
         let graphics = ctx
@@ -123,11 +136,12 @@ impl ComputeShaderNode {
             Err(error) => {
                 let error = format!("compute descriptor: {error}");
                 self.compilation_error = Some(error.clone());
+                self.needs_compile = false;
                 log::warn!(
                     "[compute-shader-node] descriptor generation failed (node={:?}): {error}",
                     self.node_id
                 );
-                return Ok(false);
+                return Ok(self.shader.is_some());
             }
         };
 
@@ -136,6 +150,8 @@ impl ComputeShaderNode {
             self.node_id,
             self.glsl_source.len()
         );
+        // One attempt per source/config state, whatever the outcome.
+        self.needs_compile = false;
         self.compilation_error = None;
         let compile_start_ms = ctx.now_ms();
         lpc_shared::backtrace::set_oom_context("compute shader node: compile");
@@ -158,8 +174,9 @@ impl ComputeShaderNode {
                 Ok(true)
             }
             Err(error) => {
+                // Keep-last-good: the previous program keeps ticking while
+                // the error rides the node status.
                 self.compilation_error = Some(format!("compute shader compile: {error}"));
-                self.shader = None;
                 if let Some(compile_elapsed_ms) = compile_elapsed_ms {
                     log::warn!(
                         "[compute-shader-node] compilation failed (node={:?}, elapsed={}ms): {error}",
@@ -172,7 +189,7 @@ impl ComputeShaderNode {
                         self.node_id
                     );
                 }
-                Ok(false)
+                Ok(self.shader.is_some())
             }
         }
     }
@@ -238,7 +255,7 @@ impl ComputeShaderNode {
         }
 
         if compile_changed {
-            self.shader = None;
+            self.needs_compile = true;
             self.compilation_error = None;
         }
         Ok(())
@@ -287,7 +304,9 @@ impl NodeRuntime for ComputeShaderNode {
             Ok(Some(source)) => source,
             Ok(None) => return Ok(AssetRefreshResult::Unchanged),
             Err(err) => {
-                self.shader = None;
+                // Keep-last-good: report the read failure but keep the old
+                // program ticking; there is no new source to compile.
+                self.needs_compile = false;
                 self.compilation_error = Some(format!("read compute shader source: {err:?}"));
                 return Ok(AssetRefreshResult::Refreshed);
             }
@@ -295,7 +314,9 @@ impl NodeRuntime for ComputeShaderNode {
 
         let slot_shapes = ctx.slot_shapes();
         if let Err(err) = self.refresh_source_asset(source, slot_shapes) {
-            self.shader = None;
+            // Header generation failed for the new source: keep the old
+            // program ticking and surface the failure like a compile error.
+            self.needs_compile = false;
             self.compilation_error = Some(format!("generate compute shader header: {err}"));
         }
         Ok(AssetRefreshResult::Refreshed)
