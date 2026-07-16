@@ -1,13 +1,15 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, MutexGuard};
 
+use super::host_esp32_flash;
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::provider::session::LinkSessionId;
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
     LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
-    LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkProvider, LinkServerConnection,
-    LinkSession, LinkSessionStatus,
+    LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkManagementEventSink,
+    LinkManagementRequest, LinkManagementResult, LinkProvider, LinkServerConnection, LinkSession,
+    LinkSessionStatus,
 };
 use lpa_client::stream::SerialPortByteStream;
 use lpa_client::transport_serial::{
@@ -41,6 +43,11 @@ pub struct HostSerialEsp32Options {
     pub baud_rate: Option<u32>,
     pub reset_after_open: bool,
     pub line_observer: Option<Arc<dyn SerialLineObserver>>,
+    /// Path to the firmware package `manifest.json` (the artifact of
+    /// `just studio-firmware-package-esp32c6`). `FlashFirmware` fails with a
+    /// configuration error when unset; the host has no meaningful
+    /// cwd-relative default, so the embedder locates the package.
+    pub firmware_manifest_path: Option<String>,
 }
 
 impl HostSerialEsp32Provider {
@@ -149,6 +156,110 @@ impl HostSerialEsp32Provider {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Ok(core::mem::take(&mut *lines))
+    }
+
+    /// Capability-gate a management request and resolve the session's port.
+    fn session_manage_port(
+        &self,
+        session_id: &LinkSessionId,
+        request: &LinkManagementRequest,
+    ) -> Result<String, LinkError> {
+        let state = self.state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        let operation = request.operation();
+        if !session.session.capabilities.supports(operation) {
+            return Err(LinkError::unsupported(format!("{operation:?}")));
+        }
+        Ok(session.port_name.clone())
+    }
+
+    /// Release the app-protocol transport when it is still open: management
+    /// needs exclusive ownership of the OS serial port. `DeviceSession`
+    /// closes the link before calling `manage()`, so this is a no-op on that
+    /// path; direct callers get the same exclusivity for free.
+    async fn release_transport_if_open(&self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+        let transport_open = {
+            let state = self.state();
+            let session = state
+                .sessions
+                .get(session_id)
+                .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+            session.server_connection.is_some()
+        };
+        if transport_open {
+            self.close(session_id).await?;
+        }
+        Ok(())
+    }
+
+    fn extend_session_logs(
+        &self,
+        session_id: &LinkSessionId,
+        messages: &[String],
+    ) -> Result<(), LinkError> {
+        let mut state = self.state();
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        let endpoint_id = session.session.endpoint_id.clone();
+        let session_ref = session.session.id.clone();
+        session.logs.extend(messages.iter().map(|message| {
+            LinkLogEntry::new(
+                endpoint_id.clone(),
+                Some(session_ref.clone()),
+                LinkLogLevel::Info,
+                message.clone(),
+            )
+        }));
+        Ok(())
+    }
+
+    /// Shared body of `manage`/`manage_with_events`.
+    ///
+    /// The espflash operations are synchronous serial I/O and block the
+    /// calling task for the duration (tens of seconds for a full flash);
+    /// progress is emitted live through `events`. That matches the
+    /// single-actor `DeviceSession` model — the wire is mode-exclusive during
+    /// management anyway, and lp-cli drives one device at a time.
+    async fn manage_inner(
+        &self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+        events: LinkManagementEventSink,
+    ) -> Result<LinkManagementResult, LinkError> {
+        let port_name = self.session_manage_port(session_id, &request)?;
+        self.release_transport_if_open(session_id).await?;
+        match request {
+            LinkManagementRequest::FlashFirmware => {
+                let manifest_path =
+                    self.options.firmware_manifest_path.clone().ok_or_else(|| {
+                        LinkError::other(
+                            "no firmware manifest configured for the host serial ESP32 provider \
+                             (set HostSerialEsp32Options::firmware_manifest_path)",
+                        )
+                    })?;
+                let result = host_esp32_flash::flash_firmware(&port_name, &manifest_path, &events)?;
+                self.extend_session_logs(session_id, &result.logs)?;
+                Ok(LinkManagementResult::FlashFirmware(result))
+            }
+            LinkManagementRequest::EraseDeviceFlash => {
+                let result = host_esp32_flash::erase_device_flash(&port_name, &events)?;
+                self.extend_session_logs(session_id, &result.logs)?;
+                Ok(LinkManagementResult::EraseDeviceFlash(result))
+            }
+            LinkManagementRequest::ResetRuntime => {
+                let logs = host_esp32_flash::reset_runtime(&port_name, &events)?;
+                self.extend_session_logs(session_id, &logs)?;
+                Ok(LinkManagementResult::ResetRuntime)
+            }
+            LinkManagementRequest::EraseRawFilesystem => {
+                Err(LinkError::unsupported(format!("{:?}", request.operation())))
+            }
+        }
     }
 }
 
@@ -273,6 +384,24 @@ impl LinkProvider for HostSerialEsp32Provider {
         ))
     }
 
+    async fn manage(
+        &self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+    ) -> Result<LinkManagementResult, LinkError> {
+        self.manage_inner(session_id, request, LinkManagementEventSink::noop())
+            .await
+    }
+
+    async fn manage_with_events(
+        &self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+        events: LinkManagementEventSink,
+    ) -> Result<LinkManagementResult, LinkError> {
+        self.manage_inner(session_id, request, events).await
+    }
+
     fn logs(&self, session_id: &LinkSessionId) -> Result<Vec<LinkLogEntry>, LinkError> {
         let state = self.state();
         let session = state
@@ -339,12 +468,13 @@ fn upsert_port_endpoint(
     port_name: String,
     label: String,
 ) {
-    // Only logs + diagnostics: this provider implements no `manage()`, so
-    // advertising Reset would lie (`ResetRuntime` would return
-    // `OperationUnsupported`). Reset/Flash/Erase return together with a
-    // real management implementation (M5, espflash-lib).
-    let endpoint = LinkEndpoint::new(endpoint_id.clone(), kind, label)
-        .with_capabilities(LinkCapabilities::diagnostics_and_logs());
+    // Full serial-ESP32 management surface: `manage()` drives espflash as a
+    // library (M5), so Reset/Flash/Erase are real capabilities, not lies.
+    let endpoint = LinkEndpoint::new(endpoint_id.clone(), kind, label).with_capabilities(
+        LinkCapabilities::esp32_serial_base()
+            .with_flash()
+            .with_device_erase(),
+    );
 
     if let Some(existing) = state
         .endpoints
