@@ -6,7 +6,8 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
-    AssetEditEntry, AssetEditKey, AssetEditState, SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
+    AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
+    SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
 };
 use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS};
 use crate::core::notice::UiNotices;
@@ -890,12 +891,70 @@ impl ProjectController {
         self.slot_shapes = view.slots.registry.clone();
         self.root_shape_ids = view.slots.root_shapes.clone();
         reconcile_root_nodes(&mut self.root_nodes, view);
-        self.apply_default_binding_overlay();
+        self.refresh_binding_presentation();
         if let Some(target) = self.active_editor_target.clone() {
             self.focus_editor_target(&target);
         }
         ensure_default_node_focus(&mut self.root_nodes);
         Ok(())
+    }
+
+    /// Re-derive every node's per-slot binding presentation: authored facts
+    /// from the synced def roots, read *through* the pending-edit mirror
+    /// ([`Self::binding_fact_overrides`]), then the graph-default overlay on
+    /// whatever the authored pass left unwired.
+    ///
+    /// Runs after every applied project view and after every acked
+    /// `bindings[…]` mutation — the synced view only reflects a binding edit
+    /// on the next passive read, so without the ack-time refresh an authored
+    /// bind/unbind would present stale (default origin, no Unbind) for up to
+    /// a full read cycle.
+    fn refresh_binding_presentation(&mut self) {
+        let overrides = self.binding_fact_overrides();
+        for node in &mut self.root_nodes {
+            node.refresh_binding_facts(&overrides);
+        }
+        self.apply_default_binding_overlay();
+    }
+
+    /// The pending `bindings[…]` edits fact derivation must read through:
+    /// the overlay mirror's acked edits (reverse-mapped to slot addresses
+    /// like [`Self::slot_edit_join`] does) shadowed by the local edit buffer
+    /// (whose entries are newer; `Failed` entries changed nothing on the
+    /// server and are skipped).
+    fn binding_fact_overrides(&self) -> BindingFactOverrides {
+        let mut overrides = BindingFactOverrides::default();
+        if let Some(sync) = &self.sync {
+            let nodes_by_artifact = self.nodes_by_def_artifact();
+            for (artifact, path, op) in sync.overlay_slot_edits() {
+                let op = match op {
+                    lpc_model::SlotEditOp::AssignValue(value) => {
+                        BindingFactEditOp::Assign(value.clone())
+                    }
+                    lpc_model::SlotEditOp::Remove => BindingFactEditOp::Remove,
+                    // Structural creation carries no endpoint: no fact yet.
+                    lpc_model::SlotEditOp::EnsurePresent => continue,
+                };
+                let Some(nodes) = nodes_by_artifact.get(artifact) else {
+                    continue;
+                };
+                for node in nodes {
+                    overrides.insert(node.clone(), path.clone(), op.clone());
+                }
+            }
+        }
+        for (address, edit) in &self.edit_buffer {
+            if edit.is_failed() || address.root != ProjectSlotRoot::Def {
+                continue;
+            }
+            let op = match &edit.op {
+                PendingEditOp::SetValue { value } => BindingFactEditOp::Assign(value.clone()),
+                PendingEditOp::RemoveValue => BindingFactEditOp::Remove,
+                PendingEditOp::EnsurePresent | PendingEditOp::MoveEntry { .. } => continue,
+            };
+            overrides.insert(address.node.clone(), address.path.clone(), op);
+        }
+        overrides
     }
 
     /// Overlay graph-derived default bindings onto per-slot indicators: every
@@ -1820,9 +1879,10 @@ impl ProjectController {
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
         let result = self.apply_project_view(sync.project_view());
         self.sync = Some(sync);
-        // The overlay reads the binding graph through `self.sync`, which was
-        // taken out during the view apply — run it now that it is restored.
-        self.apply_default_binding_overlay();
+        // The binding presentation reads the overlay mirror and the binding
+        // graph through `self.sync`, which was taken out during the view
+        // apply — run it now that it is restored.
+        self.refresh_binding_presentation();
         result
     }
 
@@ -2256,6 +2316,16 @@ impl ProjectController {
         {
             sync.apply_acked_edits(&accepted, mutation.overlay_revision);
         }
+        // A stored `bindings[…]` edit changes which facts read as authored,
+        // and the synced slot tree only learns that on the next passive read
+        // — re-derive the per-slot binding presentation from the updated
+        // mirror now so the popover flips immediately.
+        if accepted
+            .iter()
+            .any(|(command, _)| mutation_touches_bindings(&command.mutation))
+        {
+            self.refresh_binding_presentation();
+        }
         rejections
     }
 
@@ -2457,6 +2527,15 @@ impl ProjectController {
         {
             sync.apply_acked_edits(&accepted, mutation.overlay_revision);
         }
+        // A `ClearArtifact` drops the artifact's whole mirror entry — slot
+        // edits included when the artifact carried them — so binding
+        // presentation re-derives here exactly like on slot-edit acks.
+        if accepted
+            .iter()
+            .any(|(command, _)| mutation_touches_bindings(&command.mutation))
+        {
+            self.refresh_binding_presentation();
+        }
         rejections
     }
 
@@ -2606,6 +2685,26 @@ impl ProjectAssetContentRun {
 
 /// Human-readable text for a rejection: the server message when present,
 /// else the stable reason category.
+/// True when an accepted mutation may have changed the stored `bindings[…]`
+/// edits somewhere — the trigger for re-deriving per-slot binding
+/// presentation from the mirror. Whole-overlay/artifact clears cannot name a
+/// path, so they count conservatively.
+fn mutation_touches_bindings(mutation: &MutationOp) -> bool {
+    fn under_bindings(path: &lpc_model::SlotPath) -> bool {
+        matches!(
+            path.segments().first(),
+            Some(SlotPathSegment::Field(name)) if name.as_str() == "bindings"
+        )
+    }
+    match mutation {
+        MutationOp::PutSlotEdit { edit, .. } => under_bindings(&edit.path),
+        MutationOp::RemoveSlotEdit { path, .. } => under_bindings(path),
+        MutationOp::MoveSlotEntry { from, to, .. } => under_bindings(from) || under_bindings(to),
+        MutationOp::ClearArtifact { .. } | MutationOp::Clear => true,
+        MutationOp::SetArtifactBody { .. } => false,
+    }
+}
+
 fn rejection_text(rejection: &MutationRejection) -> String {
     if rejection.message.is_empty() {
         format!("{:?}", rejection.reason)
@@ -3977,6 +4076,150 @@ mod tests {
         // Default wiring is not an authored entry: Bind (not Retarget), and
         // there is nothing to unbind.
         assert!(authoring.authored.is_none());
+    }
+
+    /// The graph fixture behind the declared-default binding tests: `time`
+    /// consumes `bus:time` as a slot-declared default.
+    fn default_time_wiring_graph() -> lpc_wire::WireBindingGraph {
+        let node = lpc_model::NodeId::new(1);
+        lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: vec![lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse("time").unwrap()),
+                direction: lpc_wire::WireBindingDirection::Consumes,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: "time".to_string(),
+                },
+                origin: lpc_wire::WireBindingOrigin::Default,
+                priority: -1000,
+                kind: lpc_model::Kind::Instant,
+            }],
+            channels: Vec::new(),
+        }
+    }
+
+    fn orbit_def_address(path: &str) -> crate::ProjectSlotAddress {
+        crate::ProjectSlotAddress::new(
+            node_address("/demo.project/orbit.shader"),
+            ProjectSlotRoot::def(),
+            SlotPath::parse(path).unwrap(),
+        )
+    }
+
+    #[test]
+    fn acked_bind_gesture_reads_authored_before_any_refresh() {
+        // The popover's bind gesture on a slot whose wiring is a declared
+        // default, targeting the SAME channel the default names: the graph
+        // looks unchanged, only the origin flips. The synced view and the
+        // graph snapshot lag on the passive read cadence, so the acked
+        // `bindings[…]` edits alone must flip the presentation (authored
+        // origin, Unbind affordance) — no refresh runs in this test.
+        let (mut project, mut client, _sent) = ready_project_with_scripted_client(vec![
+            mutation_response(1, vec![accepted(1)], 3),
+            mutation_response(2, vec![accepted(2)], 4),
+            mutation_response(3, vec![accepted(3)], 5),
+        ]);
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots_without_bindings(&mut view, 1, Revision::new(2));
+        project.apply_project_view(&view).unwrap();
+        project.set_node_def_artifacts(BTreeMap::from([(NodeId::new(1), edit_artifact())]));
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(default_time_wiring_graph());
+        project.apply_default_binding_overlay();
+
+        let nodes = project.ui_nodes();
+        let time = config_slot(&nodes, "Time");
+        assert!(time.authoring.as_ref().unwrap().authored.is_none());
+        let crate::UiSlotSourceState::Bound(endpoint) = &time.source else {
+            panic!("default wiring reads bound");
+        };
+        assert!(endpoint.default_origin);
+
+        // The popover's gesture sequence: entry, endpoint option, endpoint.
+        let endpoint_address = orbit_def_address("bindings[time].source.some");
+        for op in [
+            crate::SlotEditOp::EnsurePresent {
+                address: orbit_def_address("bindings[time]"),
+            },
+            crate::SlotEditOp::EnsurePresent {
+                address: endpoint_address.clone(),
+            },
+            crate::SlotEditOp::SetValue {
+                address: endpoint_address,
+                value: LpValue::String("bus:time".to_string()),
+            },
+        ] {
+            block_on_ready(project.apply_slot_edit(&mut client, op)).unwrap();
+        }
+
+        let nodes = project.ui_nodes();
+        let time = config_slot(&nodes, "Time");
+        let authoring = time.authoring.as_ref().expect("authoring");
+        assert_eq!(
+            authoring.authored.as_ref().map(|e| e.label.as_str()),
+            Some("bus:time"),
+            "the acked bind reads authored (Retarget/Unbind) immediately"
+        );
+        let crate::UiSlotSourceState::Bound(endpoint) = &time.source else {
+            panic!("time stays bound");
+        };
+        assert!(
+            !endpoint.default_origin,
+            "origin flips to authored without waiting for a passive refresh"
+        );
+    }
+
+    #[test]
+    fn acked_unbind_restores_default_presentation_before_any_refresh() {
+        // The reverse gesture: unbinding an authored entry the synced view
+        // still carries must drop the authored presentation on the ack and
+        // let the declared default (graph overlay) take over immediately.
+        let (mut project, mut client, _sent) =
+            ready_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 3)]);
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(2));
+        project.apply_project_view(&view).unwrap();
+        project.set_node_def_artifacts(BTreeMap::from([(NodeId::new(1), edit_artifact())]));
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(default_time_wiring_graph());
+        project.apply_default_binding_overlay();
+
+        let nodes = project.ui_nodes();
+        let time = config_slot(&nodes, "Time");
+        assert!(
+            time.authoring.as_ref().unwrap().authored.is_some(),
+            "the synced bindings entry reads authored"
+        );
+
+        // Unbind: RemoveValue on the bindings entry, exactly as the popover
+        // dispatches it.
+        block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::RemoveValue {
+                address: orbit_def_address("bindings[time]"),
+            },
+        ))
+        .unwrap();
+
+        let nodes = project.ui_nodes();
+        let time = config_slot(&nodes, "Time");
+        assert!(
+            time.authoring.as_ref().unwrap().authored.is_none(),
+            "the acked unbind drops the authored entry immediately"
+        );
+        let crate::UiSlotSourceState::Bound(endpoint) = &time.source else {
+            panic!("the declared default takes over, so the slot stays bound");
+        };
+        assert!(
+            endpoint.default_origin,
+            "presentation falls back to the declared default on the ack"
+        );
     }
 
     #[test]
