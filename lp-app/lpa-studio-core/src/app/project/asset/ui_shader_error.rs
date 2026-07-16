@@ -51,12 +51,14 @@ impl UiShaderError {
 }
 
 /// Strip the wrapper prefixes down to the human message: the engine's
-/// `shader compile:`, generic `Error:`/`error:` wrappers, and the
-/// `LpsError` stage tag (`parse:`, `lower:`, ...; see
-/// `lp-shader/src/error.rs`). Observed live wrappings include
-/// `shader compile: Error: validation: ...` and
-/// `shader compile: parse: error: ...` — the pieces interleave, so peel
-/// case-insensitive `error:` around the stage tag on both sides.
+/// `shader compile:`, generic `Error:`/`error:` wrappers, the `LpsError`
+/// stage tag (`parse:`, `lower:`, ...; see `lp-shader/src/error.rs`), and
+/// the naga frontend's `GLSL parse error:` (`lps-frontend`'s
+/// `CompileError::Parse` display). Observed live wrappings include
+/// `shader compile: Error: validation: ...`,
+/// `shader compile: parse: error: ...`, and
+/// `shader compile: parse: GLSL parse error: error: ...` — the pieces
+/// interleave, so peel case-insensitive `error:` around each tag.
 fn strip_error_prefixes(line: &str) -> &str {
     const STAGE_PREFIXES: [&str; 5] = ["parse:", "lower:", "compile:", "render:", "validation:"];
 
@@ -72,6 +74,10 @@ fn strip_error_prefixes(line: &str) -> &str {
             break;
         }
     }
+    line = line
+        .strip_prefix("GLSL parse error:")
+        .unwrap_or(line)
+        .trim_start();
     strip_error_word(line)
 }
 
@@ -83,13 +89,16 @@ fn strip_error_word(line: &str) -> &str {
     }
 }
 
-/// Find the first ` --> <shader>:LINE:COL` marker at the start of a line.
-/// Requiring line-start anchoring keeps a `-->` inside a string literal on
-/// the message line from matching.
+/// Find the first location marker at the start of a line: the lps-glsl
+/// frontend's rustc-style ` --> <shader>:LINE:COL`, or the naga frontend's
+/// codespan-style `┌─ glsl:LINE:COL`. Requiring line-start anchoring keeps
+/// a marker fragment inside a string literal on the message line from
+/// matching.
 fn parse_location_marker(text: &str) -> Option<(u32, u32)> {
-    const MARKER: &str = "--> <shader>:";
+    const MARKERS: [&str; 2] = ["--> <shader>:", "┌─ glsl:"];
     for line in text.lines() {
-        let Some(rest) = line.trim_start().strip_prefix(MARKER) else {
+        let head = line.trim_start();
+        let Some(rest) = MARKERS.iter().find_map(|m| head.strip_prefix(m)) else {
             continue;
         };
         let mut parts = rest.split(':');
@@ -136,6 +145,18 @@ mod tests {
         let parsed = UiShaderError::parse(text);
         assert_eq!(parsed.message, "unknown identifier 'wav'");
         assert_eq!(parsed.line_col, Some((6, 20)));
+    }
+
+    #[test]
+    fn parses_the_naga_codespan_diagnostic() {
+        // The naga-frontend wrapping: ShaderNode's `shader compile:` +
+        // `LpsError::Parse`'s `parse:` + `CompileError::Parse`'s
+        // `GLSL parse error:` + naga's codespan render (`error:` headline,
+        // `┌─ glsl:L:C` marker).
+        let text = "shader compile: parse: GLSL parse error: error: Expected ';', found '}'\n  ┌─ glsl:4:13\n  │\n4 │ float bad = ;\n  │             ^";
+        let parsed = UiShaderError::parse(text);
+        assert_eq!(parsed.message, "Expected ';', found '}'");
+        assert_eq!(parsed.line_col, Some((4, 13)));
     }
 
     #[test]
