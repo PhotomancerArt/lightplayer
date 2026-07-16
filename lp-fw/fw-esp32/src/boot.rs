@@ -3,20 +3,17 @@
 //! Reads lightplayer.json for startup_project, or falls back to lexical-first
 //! project artifact directory in projects/.
 
-use lpa_server::LpServer;
+use lpa_server::{LpServer, is_project_dir};
 use lpc_model::LpPathBuf;
 use lpc_model::server::server_config::ServerConfig;
 use lpfs::LpFs;
 use lpfs::lp_path::AsLpPath;
 
-/// Config file path at filesystem root
-const CONFIG_PATH: &str = "/lightplayer.json";
-
 /// Read LightplayerConfig from /lightplayer.json.
 ///
 /// Returns None if file is missing, unreadable, or invalid JSON.
 pub fn read_config(fs: &dyn LpFs) -> Option<ServerConfig> {
-    let data = fs.read_file(CONFIG_PATH.as_path()).ok()?;
+    let data = fs.read_file(ServerConfig::PATH.as_path()).ok()?;
     lpc_wire::json::from_slice(&data).ok()
 }
 
@@ -93,11 +90,6 @@ pub fn auto_load_project(server: &mut LpServer) {
         log_memory(server, "boot auto_load after");
         log::info!("Boot: auto-loaded project {}", project_path.as_str());
     }
-}
-
-fn is_project_dir(fs: &dyn LpFs, path: &LpPathBuf) -> bool {
-    let project_toml_path = path.join("project.toml");
-    fs.file_exists(project_toml_path.as_path()).unwrap_or(false)
 }
 
 fn log_memory(server: &LpServer, label: &str) {
