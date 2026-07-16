@@ -162,6 +162,8 @@ pub fn lpfn_worley2_value(p: Vec2Q32, seed: u32) -> Q32 {
     normalized * TWO - Q32::ONE
 }
 
+/// Worley value noise (2D)
+///
 /// 2D Worley noise function value variant (extern C wrapper for compiler).
 ///
 /// # Arguments

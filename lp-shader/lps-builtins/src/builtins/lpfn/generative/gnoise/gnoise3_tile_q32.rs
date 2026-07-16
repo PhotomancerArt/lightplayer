@@ -106,6 +106,8 @@ pub fn lpfn_gnoise3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Q32 {
     result * Q32::HALF + Q32::HALF
 }
 
+/// Gradient noise tileable (3D)
+///
 /// 3D Tilable Gradient Noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

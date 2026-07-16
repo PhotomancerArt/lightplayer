@@ -314,6 +314,14 @@ immediately and Cmd/Ctrl+S saves (both captured in the editor keymap;
 Cmd/Ctrl+S never reaches the browser's save dialog); the Save button
 carries the OS-correct hint via `src/base/keyboard.rs`.
 
+GLSL sources get **autocomplete**: builtins from the generated
+`lps-builtin-completions` manifest (LPFN with full typed signatures and
+descriptions, standard GLSL with name+arity snippets — never
+hand-authored), plus this shader's consumed uniforms (typed as the
+generated uniform header declares them) and the `render` entry snippet.
+Accepting inserts a snippet with navigable placeholders; non-GLSL editors
+pass no completions and never grow a popup.
+
 ## Boundary
 
 - `lpa-studio-core` owns Studio product state, `StudioView` panes, stack views,

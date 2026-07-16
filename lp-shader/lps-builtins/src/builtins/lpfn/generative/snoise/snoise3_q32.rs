@@ -257,6 +257,8 @@ pub fn lpfn_snoise3(p: Vec3Q32, seed: u32) -> Q32 {
     corner0 + corner1 + corner2 + corner3
 }
 
+/// Simplex noise (3D)
+///
 /// 3D Simplex noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

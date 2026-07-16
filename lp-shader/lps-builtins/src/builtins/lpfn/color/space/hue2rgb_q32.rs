@@ -43,6 +43,8 @@ pub fn lpfn_hue2rgb_q32(hue: Q32) -> Vec3Q32 {
     lpfn_saturate_vec3_q32(rgb)
 }
 
+/// Hue to RGB
+///
 /// Convert hue value to RGB color (extern C wrapper for compiler).
 ///
 /// Uses result pointer parameter to return vec3: writes all components to memory.

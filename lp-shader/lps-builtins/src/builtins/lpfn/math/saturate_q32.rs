@@ -56,6 +56,8 @@ pub fn lpfn_saturate_vec4_q32(v: Vec4Q32) -> Vec4Q32 {
     )
 }
 
+/// Clamp to [0,1]
+///
 /// Saturate function for Q32 (extern C wrapper for compiler).
 ///
 /// # Arguments
@@ -69,6 +71,8 @@ pub extern "C" fn __lp_lpfn_saturate_q32(value: i32) -> i32 {
     lpfn_saturate_q32(Q32::from_fixed(value)).to_fixed()
 }
 
+/// Clamp to [0,1] (vec3)
+///
 /// Saturate function for vec3 (extern C wrapper for compiler).
 ///
 /// Uses result pointer parameter to return vec3: writes all components to memory.
@@ -90,6 +94,8 @@ pub extern "C" fn __lp_lpfn_saturate_vec3_q32(result_ptr: *mut i32, x: i32, y: i
     result[2] = saturated.z.to_fixed();
 }
 
+/// Clamp to [0,1] (vec4)
+///
 /// Saturate function for vec4 (extern C wrapper for compiler).
 ///
 /// Uses result pointer parameter to return vec4: writes all components to memory.

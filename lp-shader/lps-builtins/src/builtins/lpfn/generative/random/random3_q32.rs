@@ -42,6 +42,8 @@ pub fn lpfn_random3(p: Vec3Q32, seed: u32) -> Q32 {
     Q32::from_fixed(multiplied).frac()
 }
 
+/// Pseudo-random [0,1] (3D)
+///
 /// 3D Random function (extern C wrapper for compiler).
 ///
 /// # Arguments

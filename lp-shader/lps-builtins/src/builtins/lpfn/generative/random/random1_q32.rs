@@ -30,6 +30,8 @@ pub fn lpfn_random1(x: Q32, seed: u32) -> Q32 {
     Q32::from_fixed(multiplied).frac()
 }
 
+/// Pseudo-random [0,1] (1D)
+///
 /// 1D Random function (extern C wrapper for compiler).
 ///
 /// # Arguments

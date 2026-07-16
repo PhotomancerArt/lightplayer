@@ -14,6 +14,9 @@ name = "lp_builtin_gen"
 path = "src/lib.rs"
 
 [dependencies]
+# The inlined-builtin inventory (mix/clamp/dot/... — no BuiltinId) feeds the
+# completion manifest straight from the compiler crate.
+lps-glsl = { path = "../lps-glsl" }
 syn = { version = "2.0", features = ["full", "parsing"] }
 quote = "1.0"
 walkdir = "2.5"

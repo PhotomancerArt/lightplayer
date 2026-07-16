@@ -10,7 +10,7 @@ use super::coerce::{
 use super::scalar::{scalar_base_type, scalar_lane_count};
 use super::types::BuiltinKind;
 
-pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
+pub(crate) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
     Some(match name {
         "abs" => BuiltinKind::Abs,
         "all" => BuiltinKind::All,
@@ -67,7 +67,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
     })
 }
 
-pub(super) fn builtin_has_out_args(kind: BuiltinKind) -> bool {
+pub(crate) fn builtin_has_out_args(kind: BuiltinKind) -> bool {
     matches!(
         kind,
         BuiltinKind::ImulExtended
@@ -78,7 +78,7 @@ pub(super) fn builtin_has_out_args(kind: BuiltinKind) -> bool {
     )
 }
 
-pub(super) fn is_glsl_import(name: &str) -> bool {
+pub(crate) fn is_glsl_import(name: &str) -> bool {
     matches!(
         name,
         "sin"
@@ -239,7 +239,11 @@ pub(super) fn type_builtin_args(
     }
 }
 
-fn check_builtin_arity(span: Span, kind: BuiltinKind, actual: usize) -> Result<(), Diagnostic> {
+pub(crate) fn check_builtin_arity(
+    span: Span,
+    kind: BuiltinKind,
+    actual: usize,
+) -> Result<(), Diagnostic> {
     let arity = match kind {
         BuiltinKind::Abs
         | BuiltinKind::All

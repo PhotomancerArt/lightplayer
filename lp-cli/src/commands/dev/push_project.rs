@@ -55,7 +55,7 @@ pub async fn deploy_project_async(
         .with_context(|| format!("Failed to deploy project {project_uid}"))
 }
 
-fn collect_project_deploy_files(local_fs: &dyn LpFs) -> Result<Vec<ProjectDeployFile>> {
+pub fn collect_project_deploy_files(local_fs: &dyn LpFs) -> Result<Vec<ProjectDeployFile>> {
     // List all files recursively in the project directory
     let entries = local_fs
         .list_dir("/".as_path(), true)

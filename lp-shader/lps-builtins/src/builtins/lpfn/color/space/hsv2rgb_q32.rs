@@ -47,6 +47,8 @@ pub fn lpfn_hsv2rgb_vec4_q32(hsv: Vec4Q32) -> Vec4Q32 {
     Vec4Q32::new(rgb_vec3.x, rgb_vec3.y, rgb_vec3.z, hsv.w)
 }
 
+/// HSV to RGB
+///
 /// Convert HSV color to RGB color (extern C wrapper for compiler).
 ///
 /// Uses result pointer parameter to return vec3: writes all components to memory.
@@ -68,6 +70,8 @@ pub extern "C" fn __lp_lpfn_hsv2rgb_q32(result_ptr: *mut i32, x: i32, y: i32, z:
     result[2] = rgb.z.to_fixed();
 }
 
+/// HSV to RGB (vec4)
+///
 /// Convert HSV color to RGB color with alpha (extern C wrapper for compiler).
 ///
 /// Uses result pointer parameter to return vec4: writes all components to memory.

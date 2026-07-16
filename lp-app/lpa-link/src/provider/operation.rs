@@ -50,14 +50,6 @@ impl LinkCapabilities {
         Self::default().with(LinkOperation::ReadDiagnostics)
     }
 
-    /// Logs + diagnostics: the truthful set for links that can observe a
-    /// device but implement no management operations yet.
-    pub fn diagnostics_and_logs() -> Self {
-        Self::default()
-            .with(LinkOperation::ReadLogs)
-            .with(LinkOperation::ReadDiagnostics)
-    }
-
     pub fn supports(&self, operation: LinkOperation) -> bool {
         self.operations.contains(&operation)
     }

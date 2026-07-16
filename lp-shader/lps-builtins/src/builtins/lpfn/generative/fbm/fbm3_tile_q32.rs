@@ -41,6 +41,8 @@ pub fn lpfn_fbm3_tile(p: Vec3Q32, tile_length: Q32, octaves: i32, seed: u32) -> 
     total / normalization
 }
 
+/// FBM tileable (3D)
+///
 /// 3D Tilable Fractal Brownian Motion noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

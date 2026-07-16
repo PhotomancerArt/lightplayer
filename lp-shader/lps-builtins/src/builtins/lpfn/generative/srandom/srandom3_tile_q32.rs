@@ -37,6 +37,8 @@ pub fn lpfn_srandom3_tile(p: Vec3Q32, tile_length: Q32, seed: u32) -> Vec3Q32 {
     lpfn_srandom3_vec(p_mod, seed)
 }
 
+/// Signed random vec3 tileable
+///
 /// 3D Signed Random function with tiling (extern C wrapper for compiler).
 ///
 /// # Arguments
