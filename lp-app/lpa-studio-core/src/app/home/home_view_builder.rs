@@ -92,14 +92,18 @@ pub fn build_home_view(
     device_sync: Option<&DeviceSyncState>,
     live_transport: Option<&str>,
 ) -> UiHomeView {
-    let examples = embedded_examples()
-        .iter()
-        .map(|example| UiExampleCard {
-            id: example.id.to_string(),
-            name: example.name.to_string(),
-            kind: example.kind.to_string(),
-        })
-        .collect();
+    let examples = dedupe_by_key(
+        embedded_examples()
+            .iter()
+            .map(|example| UiExampleCard {
+                id: example.id.to_string(),
+                name: example.name.to_string(),
+                kind: example.kind.to_string(),
+            })
+            .collect(),
+        |card| card.id.clone(),
+        "example",
+    );
 
     let Some(inputs) = inputs else {
         return UiHomeView {
