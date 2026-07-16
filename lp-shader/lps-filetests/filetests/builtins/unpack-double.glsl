@@ -14,6 +14,7 @@ dvec2 test_unpackdouble2x32_zero() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_unpackdouble2x32_zero() ~= dvec2(0.0, 0.0)
 
 dvec2 test_unpackdouble2x32_ones() {
@@ -25,6 +26,7 @@ dvec2 test_unpackdouble2x32_ones() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_unpackdouble2x32_ones() ~= dvec2(1.0, 1.0)
 
 dvec2 test_unpackdouble2x32_half() {
@@ -36,6 +38,7 @@ dvec2 test_unpackdouble2x32_half() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_unpackdouble2x32_half() ~= dvec2(0.5, 0.5)
 
 dvec2 test_unpackdouble2x32_neg_one() {
@@ -47,6 +50,7 @@ dvec2 test_unpackdouble2x32_neg_one() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_unpackdouble2x32_neg_one() ~= dvec2(-1.0, 1.0)
 
 dvec2 test_unpackdouble2x32_two() {
@@ -58,6 +62,7 @@ dvec2 test_unpackdouble2x32_two() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_unpackdouble2x32_two() ~= dvec2(2.0, 2.0)
 
 dvec2 test_unpackdouble2x32_small() {
@@ -69,6 +74,7 @@ dvec2 test_unpackdouble2x32_small() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(interp.f32)
 // run: test_unpackdouble2x32_small() ~= dvec2(0.1, 0.1)
 
 

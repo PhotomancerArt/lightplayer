@@ -106,6 +106,11 @@ pub struct EntryOutput {
     /// Read-back of the sret destination buffer (`sret_size` bytes, std430
     /// layout); empty when the entry function does not use sret.
     pub sret_bytes: Vec<u8>,
+    /// Read-back of the VMContext region after the run (same length as the
+    /// input `vmctx_image`). Lets callers observe global writes — e.g. run
+    /// the synthesized `__shader_init` once and carry the initialized image
+    /// into subsequent calls.
+    pub vmctx_bytes: Vec<u8>,
 }
 
 /// Full-featured host entry point: run `func_name` against a real VMContext
@@ -161,7 +166,12 @@ pub fn interpret_entry(
     stack.resize(sret_base + sret_size, 0);
     let values = exec_func(module, func, &full, imports, 0, max_depth, &mut stack)?;
     let sret_bytes = stack[sret_base..sret_base + sret_size].to_vec();
-    Ok(EntryOutput { values, sret_bytes })
+    let vmctx_bytes = stack[..vmctx_image.len()].to_vec();
+    Ok(EntryOutput {
+        values,
+        sret_bytes,
+        vmctx_bytes,
+    })
 }
 
 fn exec_func(

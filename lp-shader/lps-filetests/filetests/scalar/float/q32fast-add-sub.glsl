@@ -17,8 +17,9 @@ float test_q32fast_wrap_add_max_plus_one() {
 }
 
 // Cranelift RV32 path does not yet thread `CompilerConfig::q32` (saturating add here).
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
 // @unsupported(rv32c.q32)
-// run: test_q32fast_wrap_add_max_plus_one() ~= -32768.0 (tolerance: 0.02)
+// run[q32]: test_q32fast_wrap_add_max_plus_one() ~= -32768.0 (tolerance: 0.02)
 
 float test_q32fast_wrap_sub_one_minus_max() {
     float a = 1.0;

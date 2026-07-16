@@ -70,4 +70,6 @@ bool test_float_less_than_large_numbers() {
     return a < b;
 }
 
-// run: test_float_less_than_large_numbers() == false
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_float_less_than_large_numbers() == false
+// run[f32]: test_float_less_than_large_numbers() == true

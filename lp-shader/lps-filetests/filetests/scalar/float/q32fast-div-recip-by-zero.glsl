@@ -11,7 +11,7 @@ float test_q32fast_recip_div_pos_by_zero() {
     return a / b;
 }
 
-// run: test_q32fast_recip_div_pos_by_zero() ~= 32768.0 (tolerance: 0.02)
+// run[q32]: test_q32fast_recip_div_pos_by_zero() ~= 32768.0 (tolerance: 0.02)
 
 float test_q32fast_recip_div_neg_by_zero() {
     float a = -1.0;
@@ -19,7 +19,7 @@ float test_q32fast_recip_div_neg_by_zero() {
     return a / b;
 }
 
-// run: test_q32fast_recip_div_neg_by_zero() ~= -32768.0 (tolerance: 0.01)
+// run[q32]: test_q32fast_recip_div_neg_by_zero() ~= -32768.0 (tolerance: 0.01)
 
 float test_q32fast_recip_div_zero_by_zero() {
     float a = 0.0;
@@ -27,4 +27,5 @@ float test_q32fast_recip_div_zero_by_zero() {
     return a / b;
 }
 
-// run: test_q32fast_recip_div_zero_by_zero() ~= 0.0
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_q32fast_recip_div_zero_by_zero() ~= 0.0

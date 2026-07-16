@@ -58,5 +58,7 @@ float test_float_from_uint_large() {
     return float(u);
 }
 
-// run: test_float_from_uint_large() ~= 32767.0
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_float_from_uint_large() ~= 32767.0
+// run[f32]: test_float_from_uint_large() ~= 4294967296.0
 

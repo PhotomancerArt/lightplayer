@@ -71,12 +71,15 @@ float test_float_from_int_large() {
     return float(i);
 }
 
-// run: test_float_from_int_large() ~= 32767.5 (tolerance: 1.5)
+// run[q32]: test_float_from_int_large() ~= 32767.5 (tolerance: 1.5)
+// run[f32]: test_float_from_int_large() ~= 2147483648.0 (tolerance: 1.5)
 
 float test_float_from_int_min() {
     int i = -2147483648;  // INT_MIN - clamped to fixed16x16 min
     return float(i);
 }
 
-// run: test_float_from_int_min() ~= -32768.0
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_float_from_int_min() ~= -32768.0
+// run[f32]: test_float_from_int_min() ~= -2147483648.0
 

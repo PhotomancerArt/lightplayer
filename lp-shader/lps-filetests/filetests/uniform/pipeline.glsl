@@ -27,7 +27,8 @@ vec3 test_shared_globals_light() {
     return normalize(shared_light_direction);
 }
 
-// run: test_shared_globals_light() ~= vec3(0.0, 0.0, 0.0)
+// run[q32]-only: normalize(vec3(0.0)) is undefined in GLSL; f32 yields NaN, Q32 pins 0.
+// run[q32]: test_shared_globals_light() ~= vec3(0.0, 0.0, 0.0)
 
 mat4 test_shared_globals_view() {
     // Shared view matrix uniform

@@ -10,4 +10,6 @@ float fixture_bound_scalar_return() {
     return 1.0;
 }
 
+// interp.f32: no guest memory to bind texture fixtures into
+// @unsupported(interp.f32)
 // run: fixture_bound_scalar_return() ~= 1.0

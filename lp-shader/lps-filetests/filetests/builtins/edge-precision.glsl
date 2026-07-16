@@ -14,7 +14,8 @@ float test_round_half_up() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
-// run: test_round_half_up() ~= 3.0
+// run[q32]: test_round_half_up() ~= 3.0
+// run[f32]: test_round_half_up() ~= 2.0
 
 float test_round_half_down() {
     // round(3.5) - implementation-defined behavior
@@ -28,11 +29,13 @@ float test_roundeven_half_up() {
     return roundEven(2.5);
 }
 
+// per-mode: canonical f32 rounding is round-half-to-even (IEEE, user decision 2026-07-15); Q32 rounds half away from zero.
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
-// run: test_roundeven_half_up() ~= 3.0
+// run[q32]: test_roundeven_half_up() ~= 3.0
+// run[f32]: test_roundeven_half_up() ~= 2.0
 
 float test_roundeven_half_down() {
     // roundEven(3.5) - should round to even (4.0)

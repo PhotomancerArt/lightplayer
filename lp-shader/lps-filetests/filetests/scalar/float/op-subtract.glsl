@@ -65,4 +65,6 @@ float test_float_subtract_large_numbers() {
     return a - b;
 }
 
-// run: test_float_subtract_large_numbers() ~= 0.0
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// run[q32]: test_float_subtract_large_numbers() ~= 0.0
+// run[f32]: test_float_subtract_large_numbers() ~= 2000000.0

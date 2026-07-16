@@ -71,8 +71,10 @@ vec4 b = vec4(200000.0, 30000.0, 15000.0, 5000.0);
 return a + b;
 }
 
+// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
 // @unsupported(rv32c.q32)
-// run: test_vec4_add_large_numbers() ~= vec4(-0.000030517578, -2768.0, -25536.0, 15000.0)
+// run[q32]: test_vec4_add_large_numbers() ~= vec4(-0.000030517578, -2768.0, -25536.0, 15000.0)
+// run[f32]: test_vec4_add_large_numbers() ~= vec4(300000.0, 80000.0, 40000.0, 15000.0)
 
 vec4 test_vec4_add_mixed_components() {
 vec4 a = vec4(1.0, -2.0, 3.0, -4.0);
