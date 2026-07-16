@@ -5504,6 +5504,7 @@ dependencies = [
  "lpa-studio-web-story-macros",
  "lpc-wire",
  "lpfs",
+ "lps-builtin-completions",
  "serde",
  "serde_json",
  "syn 2.0.117",
@@ -5687,6 +5688,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lps-builtin-completions"
+version = "40.0.0"
+dependencies = [
+ "lps-builtin-ids",
+ "lps-glsl",
+]
+
+[[package]]
 name = "lps-builtin-ids"
 version = "40.0.0"
 
@@ -5715,6 +5724,7 @@ name = "lps-builtins-gen-app"
 version = "40.0.0"
 dependencies = [
  "glsl",
+ "lps-glsl",
  "proc-macro2",
  "quote",
  "syn 2.0.117",

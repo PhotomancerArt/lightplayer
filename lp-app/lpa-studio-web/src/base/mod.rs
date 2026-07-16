@@ -22,7 +22,10 @@ pub mod popover;
 pub(crate) mod popover_stories;
 pub mod tabs;
 
-pub use code_editor::{CodeEditor, CodeEditorDiagnostic, CodeEditorLanguage};
+pub use code_editor::{
+    CodeEditor, CodeEditorCompletion, CodeEditorCompletionKind, CodeEditorDiagnostic,
+    CodeEditorLanguage,
+};
 pub use detail_popover::{
     DetailPopover, DetailSection, DetailSectionTint, detail_popover_section_class,
 };

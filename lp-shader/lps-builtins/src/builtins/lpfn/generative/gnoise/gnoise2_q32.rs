@@ -45,6 +45,8 @@ pub fn lpfn_gnoise2(p: Vec2Q32, seed: u32) -> Q32 {
     ab + ca * u.y * one_minus_ux + db * u.x * u.y
 }
 
+/// Gradient noise (2D)
+///
 /// 2D Gradient Noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

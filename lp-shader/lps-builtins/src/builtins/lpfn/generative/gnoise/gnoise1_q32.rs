@@ -31,6 +31,8 @@ pub fn lpfn_gnoise1(x: Q32, seed: u32) -> Q32 {
     mix_q32(a, b, u)
 }
 
+/// Gradient noise (1D)
+///
 /// 1D Gradient Noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

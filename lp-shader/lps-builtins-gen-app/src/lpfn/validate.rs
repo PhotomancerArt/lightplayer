@@ -16,6 +16,8 @@ pub struct ParsedLpfnFunction {
     pub attribute: LpfnAttribute,
     /// Parsed GLSL signature
     pub glsl_sig: FunctionSignature,
+    /// First non-empty `///` doc-comment line on the extern fn (completion description).
+    pub doc_summary: String,
 }
 
 /// Validate all discovered LPFX functions

@@ -45,6 +45,8 @@ pub fn lpfn_random2(p: Vec2Q32, seed: u32) -> Q32 {
     Q32::from_fixed(multiplied).frac()
 }
 
+/// Pseudo-random [0,1] (2D)
+///
 /// 2D Random function (extern C wrapper for compiler).
 ///
 /// # Arguments

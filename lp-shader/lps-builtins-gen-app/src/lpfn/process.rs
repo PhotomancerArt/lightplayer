@@ -76,10 +76,30 @@ pub fn process_lpfn_functions(
             info: info.clone(),
             attribute: parsed_attr,
             glsl_sig,
+            doc_summary: extract_doc_summary(func),
         });
     }
 
     Ok(parsed)
+}
+
+/// First non-empty `///` doc-comment line on the function (used as completion description).
+fn extract_doc_summary(func: &ItemFn) -> String {
+    for attr in &func.attrs {
+        if !attr.path().is_ident("doc") {
+            continue;
+        }
+        if let syn::Meta::NameValue(name_value) = &attr.meta
+            && let syn::Expr::Lit(expr_lit) = &name_value.value
+            && let syn::Lit::Str(lit_str) = &expr_lit.lit
+        {
+            let line = lit_str.value().trim().to_string();
+            if !line.is_empty() {
+                return line;
+            }
+        }
+    }
+    String::new()
 }
 
 /// Find a function by name in the AST

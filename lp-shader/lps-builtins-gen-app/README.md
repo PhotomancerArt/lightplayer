@@ -9,6 +9,7 @@ stubs so the compiler and tests stay in sync.
 | Output                                           | Purpose                                                          |
 |--------------------------------------------------|------------------------------------------------------------------|
 | `lps-builtin-ids/src/glsl_builtin_mapping.rs`    | GLSL / LPIR / LPFX name → `BuiltinId` (WASM Q32 overloads, etc.) |
+| `lps-builtin-completions/src/lib.rs`             | Editor completion manifest (`COMPLETIONS` table for autocomplete) |
 | `lps-builtin-ids/src/lib.rs`                     | `BuiltinId` enum and helpers                                     |
 | `lpvm-cranelift/src/generated_builtin_abi.rs`    | Cranelift backend: symbol names and signatures                   |
 | `lps-builtins-emu-app/src/builtin_refs.rs`       | Force-link all builtins for RV32 emu                             |

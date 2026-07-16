@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use syn::{Item, ItemFn, parse_file};
 use walkdir::WalkDir;
 
+mod completions_codegen;
 mod discovery;
 mod lpfn;
 mod native_dispatch_codegen;
@@ -28,6 +29,8 @@ pub(crate) struct BuiltinInfo {
     file_name: String,
     /// Rust function signature types as strings (e.g., "extern \"C\" fn(f32, u32) -> f32")
     rust_signature: String,
+    /// Rust parameter names in order (e.g. `["x", "seed"]`; out-pointers keep their Rust names).
+    param_names: Vec<String>,
     /// Module path relative to builtins/ directory (e.g., "glsl::sin_q32", "lpir::fsqrt_q32", "lpfn::hash")
     module_path: String,
     /// `lpir`, `glsl`, or `lpfn`
@@ -71,6 +74,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("src")
         .join("glsl_builtin_mapping.rs");
     generate_glsl_builtin_mapping(&glsl_map_path, &builtins, &lpfn_dir)?;
+
+    // Generate the editor completion manifest (lps-builtin-completions)
+    let completions_path = workspace_root
+        .join("lps-builtin-completions")
+        .join("src")
+        .join("lib.rs");
+    completions_codegen::generate_builtin_completions(&completions_path, &builtins, &lpfn_dir)?;
 
     // Generate builtin-ids lib.rs (after `glsl_builtin_mapping.rs` for consistent partial runs)
     let builtin_ids_path = workspace_root
@@ -180,6 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &lpir_mod_rs_path,
             &vm_mod_rs_path,
             &glsl_map_path,
+            &completions_path,
             &wasm_import_types_path,
             &native_dispatch_path,
         ],
@@ -414,7 +425,7 @@ pub fn glsl_q32_math_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinI
 }
 
 /// `@glsl::*` import keys for Naga lowering and WASM (`name`, arg count).
-fn q32_glsl_import_keys(builtin: &BuiltinInfo) -> Vec<(String, usize)> {
+pub(crate) fn q32_glsl_import_keys(builtin: &BuiltinInfo) -> Vec<(String, usize)> {
     if builtin.builtin_module != "glsl" {
         return Vec::new();
     }
@@ -623,6 +634,19 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
     };
 
     let param_count = func.sig.inputs.len();
+    let param_names: Vec<String> = func
+        .sig
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| match input {
+            syn::FnArg::Typed(pat_type) => match &*pat_type.pat {
+                syn::Pat::Ident(pat_ident) => pat_ident.ident.to_string(),
+                _ => format!("arg{}", i + 1),
+            },
+            syn::FnArg::Receiver(_) => "self".to_string(),
+        })
+        .collect();
     let rust_signature = format_rust_function_signature(func);
     let needs_vmctx = rust_signature_contains_vmcontext(&rust_signature) || builtin_module == "vm";
     let user_visible_param_count = param_count.saturating_sub(usize::from(needs_vmctx));
@@ -636,6 +660,7 @@ fn extract_builtin(func: &ItemFn, file_name: &str, module_path: &str) -> Option<
         needs_vmctx,
         file_name: file_name.to_string(),
         rust_signature,
+        param_names,
         module_path: module_path.to_string(),
         builtin_module,
         builtin_fn_name,

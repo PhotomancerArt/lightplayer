@@ -27,6 +27,11 @@ mod typing;
 
 pub(crate) use arena::{ExprId, ExprList, HirArena, PlaceId};
 use array_size::{ArraySizeConsts, eval_array_size_expr};
+// The builtin checks double as the test-only ground truth for the
+// editor-facing [`crate::builtin_inventory`] (its drift tests tie the
+// inventory to them).
+#[cfg(test)]
+pub(crate) use builtin::{builtin_has_out_args, builtin_kind, check_builtin_arity, is_glsl_import};
 use function::{FunctionSig, GlobalConst, ImportRegistry};
 pub(crate) use place::{HirPlace, PlaceRoot, PlaceSegment};
 pub(crate) use shape::TypeShape;

@@ -68,6 +68,8 @@ pub fn lpfn_srandom3_vec(p: Vec3Q32, _seed: u32) -> Vec3Q32 {
     Vec3Q32::new(result_x, result_y, result_z)
 }
 
+/// Signed random vec3
+///
 /// 3D Signed Random function returning Vec3Q32 (extern C wrapper for compiler).
 ///
 /// # Arguments
