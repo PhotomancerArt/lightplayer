@@ -136,6 +136,8 @@ pub fn lpfn_snoise2(p: Vec2Q32, seed: u32) -> Q32 {
     corner0 + corner1 + corner2
 }
 
+/// Simplex noise (2D)
+///
 /// 2D Simplex noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

@@ -197,6 +197,8 @@ pub fn lpfn_worley2(p: Vec2Q32, seed: u32) -> Q32 {
     (distance / TWO) * TWO - Q32::ONE
 }
 
+/// Worley (cellular) noise (2D)
+///
 /// 2D Worley noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

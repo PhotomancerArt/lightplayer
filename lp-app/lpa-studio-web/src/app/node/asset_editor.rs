@@ -54,14 +54,15 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, ProjectController, ProjectOp, UiAction, UiAssetContentBody,
-    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiShaderError,
+    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiShaderError, UiShaderUniform,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::base::{
-    CodeEditor, CodeEditorDiagnostic, CodeEditorLanguage, DetailPopover, DetailSection,
-    IconMenuTone, Platform, StudioIconName, keyboard,
+    CodeEditor, CodeEditorCompletion, CodeEditorCompletionKind, CodeEditorDiagnostic,
+    CodeEditorLanguage, DetailPopover, DetailSection, IconMenuTone, Platform, StudioIconName,
+    keyboard,
 };
 
 /// Quiet period after the last keystroke before an auto-apply fires — long
@@ -138,6 +139,12 @@ pub fn AssetEditor(
         .as_ref()
         .map(|error| shader_error_diagnostics(error))
         .unwrap_or_default();
+    // Builtin + uniform completions for GLSL sources; other editor kinds
+    // pass an empty list and never grow a popup.
+    let completions = match editor.kind {
+        UiAssetEditorKind::Glsl => glsl_completions(&editor.uniforms),
+        _ => Vec::new(),
+    };
     // `None` between reveals so clicking the same line twice still scrolls
     // (the editor acts on `reveal_line` transitions, not values).
     let mut reveal_line = use_signal(|| None::<u32>);
@@ -331,6 +338,7 @@ pub fn AssetEditor(
                             doc: doc.clone(),
                             language,
                             diagnostics,
+                            completions,
                             reveal_line: reveal_request,
                             on_modified: move |value| modified.set(value),
                             on_change,
@@ -430,6 +438,68 @@ fn AssetEditorNote(note: String) -> Element {
     rsx! {
         p { class: "tw:m-0 tw:px-3 tw:py-4 tw:text-sm tw:text-subtle-foreground", "{note}" }
     }
+}
+
+/// The GLSL editor's completion list: this shader's consumed uniforms
+/// first (typed as the generated uniform header declares them), then the
+/// `render` entry snippet, then the vector/matrix constructors, then every
+/// builtin from the generated manifest (`lps-builtin-completions` — LPFN
+/// with full typed signatures and descriptions, standard GLSL with
+/// name+arity snippets; never hand-authored, see that crate's drift
+/// tests).
+fn glsl_completions(uniforms: &[UiShaderUniform]) -> Vec<CodeEditorCompletion> {
+    let mut completions: Vec<CodeEditorCompletion> = uniforms
+        .iter()
+        .map(|uniform| CodeEditorCompletion {
+            label: uniform.name.clone(),
+            detail: format!("uniform {}", uniform.glsl_type),
+            kind: CodeEditorCompletionKind::Variable,
+            snippet: None,
+            info: None,
+        })
+        .collect();
+    completions.push(CodeEditorCompletion {
+        label: "render".to_string(),
+        detail: "vec4 render(vec2 pos)".to_string(),
+        kind: CodeEditorCompletionKind::Keyword,
+        snippet: Some("vec4 render(vec2 ${pos}) {\n\t${}\n}".to_string()),
+        info: Some(
+            "The shader entry point: called per pixel with continuous pixel coordinates."
+                .to_string(),
+        ),
+    });
+    // Vector/matrix constructors: language-level (GLSL-spec, no drift risk
+    // — unlike builtins these are grammar, not a generated set), offered
+    // with their most common construction shape.
+    const CONSTRUCTORS: &[(&str, &str)] = &[
+        ("vec2", "vec2(${x}, ${y})"),
+        ("vec3", "vec3(${x}, ${y}, ${z})"),
+        ("vec4", "vec4(${x}, ${y}, ${z}, ${w})"),
+        ("mat2", "mat2(${diagonal})"),
+        ("mat3", "mat3(${diagonal})"),
+        ("mat4", "mat4(${diagonal})"),
+    ];
+    completions.extend(
+        CONSTRUCTORS
+            .iter()
+            .map(|(name, snippet)| CodeEditorCompletion {
+                label: (*name).to_string(),
+                detail: snippet.replace("${", "").replace('}', ""),
+                kind: CodeEditorCompletionKind::Type,
+                snippet: Some((*snippet).to_string()),
+                info: None,
+            }),
+    );
+    completions.extend(lps_builtin_completions::COMPLETIONS.iter().map(|entry| {
+        CodeEditorCompletion {
+            label: entry.name.to_string(),
+            detail: entry.detail.to_string(),
+            kind: CodeEditorCompletionKind::Function,
+            snippet: Some(entry.snippet.to_string()),
+            info: (!entry.description.is_empty()).then(|| entry.description.to_string()),
+        }
+    }));
+    completions
 }
 
 /// The strip's location as editor lint chrome (one diagnostic today — the
@@ -543,6 +613,52 @@ mod tests {
 
     fn err() -> UiShaderError {
         UiShaderError::parse("shader compile: parse: error: bad\n --> <shader>:4:7")
+    }
+
+    #[test]
+    fn glsl_completions_lead_with_uniforms_then_render_then_builtins() {
+        let uniforms = vec![UiShaderUniform {
+            name: "time".to_string(),
+            glsl_type: "float".to_string(),
+        }];
+        let completions = glsl_completions(&uniforms);
+
+        assert_eq!(completions[0].label, "time");
+        assert_eq!(completions[0].detail, "uniform float");
+        assert_eq!(completions[0].kind, CodeEditorCompletionKind::Variable);
+        assert_eq!(completions[1].label, "render");
+        assert!(
+            completions[1]
+                .snippet
+                .as_deref()
+                .unwrap()
+                .contains("vec4 render(vec2")
+        );
+
+        // The generated manifest rides along in full: LPFN entries carry
+        // typed detail + description, standard GLSL carries a snippet.
+        let fbm = completions
+            .iter()
+            .find(|c| c.label == "lpfn_fbm")
+            .expect("lpfn builtin present");
+        assert!(fbm.detail.contains("lpfn_fbm("));
+        assert!(fbm.info.is_some(), "LPFN completions carry descriptions");
+        let mix = completions
+            .iter()
+            .find(|c| c.label == "mix")
+            .expect("inlined GLSL builtin present");
+        assert_eq!(mix.snippet.as_deref(), Some("mix(${x}, ${y}, ${a})"));
+        let vec3 = completions
+            .iter()
+            .find(|c| c.label == "vec3")
+            .expect("constructor present");
+        assert_eq!(vec3.kind, CodeEditorCompletionKind::Type);
+        assert_eq!(vec3.snippet.as_deref(), Some("vec3(${x}, ${y}, ${z})"));
+        assert_eq!(
+            completions.len(),
+            2 + 6 + lps_builtin_completions::COMPLETIONS.len(),
+            "uniform + render + 6 constructors + the manifest"
+        );
     }
 
     #[test]

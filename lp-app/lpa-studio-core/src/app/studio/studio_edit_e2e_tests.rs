@@ -1475,6 +1475,16 @@ fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
     let tab = find_asset_editor(&snapshot);
     assert_eq!(tab.source, "shader.glsl");
     assert!(tab.content.is_none(), "content resolves only on fetch");
+    // The consumed uniforms ride the editor DTO for completions, typed as
+    // the generated uniform header declares them.
+    assert_eq!(
+        tab.uniforms,
+        vec![crate::UiShaderUniform {
+            name: String::from("time"),
+            glsl_type: String::from("float"),
+        }],
+        "the shader's consumed map projects as editor uniforms"
+    );
 
     // Fetch → the effective content is the base file body, clean.
     handle.tx.send(StudioCommand::Action(tab.fetch_action()));

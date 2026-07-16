@@ -4,7 +4,7 @@ use lpc_model::ArtifactLocation;
 
 use crate::{
     AssetContentFetchOp, AssetEditOp, ControllerId, ProjectController, UiAction, UiAssetContent,
-    UiAssetContentBody, UiAssetEditorKind, UiShaderError,
+    UiAssetContentBody, UiAssetEditorKind, UiShaderError, UiShaderUniform,
 };
 
 /// Editor data embedded in an asset slot row whose def reference resolves to
@@ -49,6 +49,9 @@ pub struct UiAssetEditor {
     /// **last applied** text — the editor's modified chip is the honesty
     /// signal when the user has typed since; positions are never remapped.
     pub shader_error: Option<UiShaderError>,
+    /// The owning shader's consumed uniforms (name + header-declared GLSL
+    /// type), for editor completions. Empty for non-shader assets.
+    pub uniforms: Vec<UiShaderUniform>,
 }
 
 impl UiAssetEditor {
@@ -123,6 +126,7 @@ mod tests {
             in_flight: false,
             failure: None,
             shader_error: None,
+            uniforms: Vec::new(),
         }
     }
 

@@ -32,19 +32,24 @@ Pinned in `package.json` / `package-lock.json`:
   `xml` for SVG sources.
 - `@codemirror/lint` — diagnostics gutter/underline machinery behind
   `setDiagnostics` on the façade handle.
+- `@codemirror/autocomplete` — the completion popup behind the
+  `completions` option / `setCompletions` handle method (entries carry
+  label, signature detail, optional snippet + info; empty list = the
+  extension is absent, so plain/XML editors never grow a popup).
 - `@lezer/highlight` — tags for the studio-token highlight style.
 
-Intentionally excluded: autocomplete, search panel, folding, multiple
-themes — keep the bundle lean; add a package only when a feature needs it,
-and record the size change (`npm run build` prints it; currently ~345 KB
-minified).
+Intentionally excluded: search panel, folding, multiple themes — keep the
+bundle lean; add a package only when a feature needs it, and record the
+size change (`npm run build` prints it; currently ~375 KB minified —
+autocomplete added ~22 KB).
 
 ## Façade contract
 
-`createEditor(parent, {doc, language, readOnly, onModified, onChange,
-onApplyRequested, onSaveRequested})` returns a handle with `getDoc` /
-`setDoc` / `markClean` / `isModified` / `setReadOnly` / `setDiagnostics` /
-`clearDiagnostics` / `revealLine` / `focus` / `destroy`. Semantics are
+`createEditor(parent, {doc, language, readOnly, completions, onModified,
+onChange, onApplyRequested, onSaveRequested})` returns a handle with
+`getDoc` / `setDoc` / `markClean` / `isModified` / `setReadOnly` /
+`setDiagnostics` / `clearDiagnostics` / `setCompletions` / `revealLine` /
+`focus` / `destroy`. Semantics are
 documented in `entry.mjs`; the Rust component's docs describe the ownership
 rules. Mod-Enter (apply) and Mod-s (save) are handled inside the editor's
 own keymap (highest precedence) and call `onApplyRequested` /

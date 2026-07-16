@@ -8,6 +8,12 @@ rust-version.workspace = true
 
 [dependencies]
 async-trait = { version = "0.1", optional = true }
+# Native host flashing (M5): espflash as a library, no `cli` feature. The
+# `serialport` feature brings the `Flasher`/`Connection` surface; everything
+# is gated to `host-serial-esp32`, so wasm builds never see it.
+espflash = { version = "3.3", default-features = false, features = [
+    "serialport",
+], optional = true }
 fw-host = { path = "../../lp-fw/fw-host", optional = true }
 lpa-client = { path = "../lpa-client", optional = true, default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
@@ -16,6 +22,7 @@ lpfs = { path = "../../lp-base/lpfs", optional = true, features = ["std"] }
 js-sys = { version = "0.3", optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6", optional = true }
+serde_json = { workspace = true, optional = true }
 serialport = { version = "4.8", optional = true }
 strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1", features = ["sync"], optional = true }
@@ -77,7 +84,9 @@ host-process = [
 host-serial-esp32 = [
     "device-session-host",
     "lpa-client/serial",
+    "dep:espflash",
     "dep:lpc-model",
+    "dep:serde_json",
     "dep:serialport",
     "dep:tokio",
 ]

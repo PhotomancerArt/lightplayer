@@ -90,8 +90,7 @@ impl App {
 
     pub fn ensure_transport(&mut self) -> Result<&mut SerialCalibrationTransport> {
         if self.transport.is_none() {
-            let mut transport =
-                SerialCalibrationTransport::open(self.port.as_deref(), self.timeout)?;
+            let mut transport = SerialCalibrationTransport::open(self.port.as_deref())?;
             ensure_firmware_ready(&mut transport, self.timeout)?;
             self.transport = Some(transport);
         }
@@ -148,12 +147,13 @@ impl App {
                 Some(transport) => transport
                     .reconnect(MANUAL_RESET_TIMEOUT)
                     .and_then(|_| ensure_firmware_ready(transport, MANUAL_RESET_TIMEOUT)),
-                None => SerialCalibrationTransport::open(self.port.as_deref(), self.timeout)
-                    .and_then(|mut transport| {
+                None => SerialCalibrationTransport::open(self.port.as_deref()).and_then(
+                    |mut transport| {
                         ensure_firmware_ready(&mut transport, MANUAL_RESET_TIMEOUT)?;
                         self.transport = Some(transport);
                         Ok(())
-                    }),
+                    },
+                ),
             };
             match result {
                 Ok(()) => {

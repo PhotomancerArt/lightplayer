@@ -1271,7 +1271,9 @@ impl SlotController {
         }
     }
 
-    fn value(&self) -> Option<&LpValue> {
+    /// The mirrored authored value, when this is a value slot (e.g. a
+    /// consumed shader slot's type ref). `None` for structural slots.
+    pub fn value(&self) -> Option<&LpValue> {
         match &self.body {
             SlotControllerBody::Value { value } => Some(value),
             _ => None,

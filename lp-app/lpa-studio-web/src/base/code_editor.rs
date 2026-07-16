@@ -65,6 +65,47 @@ pub struct CodeEditorDiagnostic {
     pub message: String,
 }
 
+/// The icon family CodeMirror shows beside a completion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CodeEditorCompletionKind {
+    /// Callable — builtins, the `render` entry.
+    Function,
+    /// Value — the shader's consumed uniforms.
+    Variable,
+    /// Language-level word.
+    Keyword,
+    /// Type name / constructor — `vec3(…)`, `mat2(…)`.
+    Type,
+}
+
+impl CodeEditorCompletionKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Function => "function",
+            Self::Variable => "variable",
+            Self::Keyword => "keyword",
+            Self::Type => "class",
+        }
+    }
+}
+
+/// One completion offered by the editor's autocomplete popup.
+///
+/// `label` is what matching runs against and what a plain accept inserts;
+/// a `snippet` (CodeMirror `snippet()` template, e.g. `mix(${x}, ${y},
+/// ${a})`) makes accepting insert the template with navigable
+/// placeholders instead. `detail` renders dimmed beside the label
+/// (signatures go here); `info` is the longer description shown in the
+/// side panel while the item is selected.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CodeEditorCompletion {
+    pub label: String,
+    pub detail: String,
+    pub kind: CodeEditorCompletionKind,
+    pub snippet: Option<String>,
+    pub info: Option<String>,
+}
+
 /// CodeMirror-backed editor. See the module docs for the ownership and
 /// `doc`-reconciliation rules.
 ///
@@ -90,6 +131,7 @@ pub fn CodeEditor(
     #[props(default = CodeEditorLanguage::Plain)] language: CodeEditorLanguage,
     #[props(default = false)] read_only: bool,
     #[props(default = Vec::new())] diagnostics: Vec<CodeEditorDiagnostic>,
+    #[props(default = Vec::new())] completions: Vec<CodeEditorCompletion>,
     #[props(default = None)] reveal_line: Option<u32>,
     #[props(default = None)] on_modified: Option<EventHandler<bool>>,
     #[props(default = None)] on_change: Option<EventHandler<String>>,
@@ -111,6 +153,7 @@ pub fn CodeEditor(
                 doc: String::new(),
                 read_only: false,
                 diagnostics: Vec::new(),
+                completions: Vec::new(),
                 reveal_line: None,
                 language: CodeEditorLanguage::Plain,
             },
@@ -131,6 +174,7 @@ pub fn CodeEditor(
             doc: doc.clone(),
             read_only,
             diagnostics: diagnostics.clone(),
+            completions: completions.clone(),
             reveal_line,
             language,
         };
@@ -279,6 +323,7 @@ struct DesiredState {
     doc: String,
     read_only: bool,
     diagnostics: Vec<CodeEditorDiagnostic>,
+    completions: Vec<CodeEditorCompletion>,
     reveal_line: Option<u32>,
     language: CodeEditorLanguage,
 }
@@ -306,6 +351,7 @@ struct EditorInstance {
     synced_doc: String,
     synced_read_only: bool,
     synced_diagnostics: Vec<CodeEditorDiagnostic>,
+    synced_completions: Vec<CodeEditorCompletion>,
     synced_reveal_line: Option<u32>,
     _on_modified: Closure<dyn FnMut(JsValue)>,
     _on_change: Closure<dyn FnMut(JsValue)>,
@@ -335,6 +381,10 @@ impl EditorInstance {
         if desired.diagnostics != self.synced_diagnostics {
             self.handle.set_diagnostics(&desired.diagnostics);
             self.synced_diagnostics = desired.diagnostics.clone();
+        }
+        if desired.completions != self.synced_completions {
+            self.handle.set_completions(&desired.completions);
+            self.synced_completions = desired.completions.clone();
         }
         if desired.reveal_line != self.synced_reveal_line {
             if let Some(line) = desired.reveal_line {
@@ -452,6 +502,7 @@ async fn initialize_editor(
             synced_doc: doc,
             synced_read_only: read_only,
             synced_diagnostics: Vec::new(),
+            synced_completions: Vec::new(),
             synced_reveal_line: None,
             _on_modified: on_modified,
             _on_change: on_change,
@@ -580,6 +631,28 @@ impl CmHandle {
             list.push(&entry);
         }
         self.call1("setDiagnostics", &list);
+    }
+
+    fn set_completions(&self, completions: &[CodeEditorCompletion]) {
+        let list = js_sys::Array::new();
+        for completion in completions {
+            let entry = js_sys::Object::new();
+            let set = |key: &str, value: &JsValue| {
+                // Reflect::set on a fresh plain object cannot fail.
+                let _ = js_sys::Reflect::set(&entry, &JsValue::from_str(key), value);
+            };
+            set("label", &JsValue::from_str(&completion.label));
+            set("detail", &JsValue::from_str(&completion.detail));
+            set("type", &JsValue::from_str(completion.kind.as_str()));
+            if let Some(snippet) = &completion.snippet {
+                set("snippet", &JsValue::from_str(snippet));
+            }
+            if let Some(info) = &completion.info {
+                set("info", &JsValue::from_str(info));
+            }
+            list.push(&entry);
+        }
+        self.call1("setCompletions", &list);
     }
 
     fn reveal_line(&self, line: u32) {

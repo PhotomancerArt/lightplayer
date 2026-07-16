@@ -115,7 +115,8 @@ pub use nodes::{
     ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
     ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderStateView,
     ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
-    generate_compute_shader_header, read_project_format_json, resolve_artifact_specifier,
+    generate_compute_shader_header, glsl_type_for_lp_type, read_project_format_json,
+    resolve_artifact_specifier,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,

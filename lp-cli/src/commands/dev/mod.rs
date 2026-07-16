@@ -18,7 +18,7 @@ pub use pull_project::pull_project_async;
     unused_imports,
     reason = "Write-only push helper remains part of the dev command surface"
 )]
-pub use push_project::{deploy_project_async, push_project_async};
+pub use push_project::{collect_project_deploy_files, deploy_project_async, push_project_async};
 // Re-export for public API (used internally via direct path)
 #[allow(unused_imports, reason = "Public API re-export")]
 pub use sync::sync_file_change;

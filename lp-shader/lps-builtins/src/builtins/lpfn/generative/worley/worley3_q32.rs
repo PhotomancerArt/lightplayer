@@ -345,6 +345,8 @@ pub fn lpfn_worley3(p: Vec3Q32, seed: u32) -> Q32 {
     (distance / THREE) * TWO - Q32::ONE
 }
 
+/// Worley (cellular) noise (3D)
+///
 /// 3D Worley noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

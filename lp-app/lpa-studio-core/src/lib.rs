@@ -41,10 +41,11 @@ pub use app::node::{
     UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab,
     UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
     UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductTrackingState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
-    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
-    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
+    UiProductTrackingState, UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
+    UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite,
+    UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality,
+    UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue,
+    UiSlotValueKind,
 };
 pub use app::project::{
     AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,

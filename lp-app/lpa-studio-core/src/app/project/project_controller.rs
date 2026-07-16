@@ -20,19 +20,22 @@ use crate::{
     StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
     UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
     UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiSlotAsset, UiStatus,
-    UiViewContent, UxUpdateSink,
+    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
+    UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, MutationCmd, MutationCmdBatch, MutationCmdId,
-    MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, NodeId, SlotEdit, SlotPolicy,
-    SlotShapeId, SlotShapeLookup, SlotShapeRegistry, TreePath, resolve_artifact_specifier,
-    resolve_slot_policy,
+    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
+    MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, NodeId,
+    ShaderValueShapeRef, SlotEdit, SlotMapKey, SlotPathSegment, SlotPolicy, SlotShapeId,
+    SlotShapeLookup, SlotShapeRegistry, TreePath, glsl_type_for_lp_type,
+    resolve_artifact_specifier, resolve_slot_policy,
 };
 use lpc_view::ProjectView;
 
-use super::{NodeController, ProjectProductSubscriptionIntent, node::root_slot_key};
+use super::{
+    NodeController, ProjectProductSubscriptionIntent, SlotController, SlotKind, node::root_slot_key,
+};
 
 /// Project-level Studio controller and synthetic root for node controllers.
 ///
@@ -543,6 +546,7 @@ impl ProjectController {
             in_flight,
             failure,
             shader_error,
+            uniforms: shader_uniforms(node),
         })
     }
 
@@ -2805,6 +2809,64 @@ fn has_focused_node(nodes: &[NodeController]) -> bool {
     nodes
         .iter()
         .any(|node| node.state().focused || has_focused_node(node.children()))
+}
+
+/// The consumed uniforms of the node owning an asset editor, walked from
+/// the mirrored slot tree (the same authored data the config rows render):
+/// the `consumed` map's keys are the uniform names and each entry's `value`
+/// field is its shader value shape ref. Types map through
+/// [`glsl_type_for_lp_type`], so a completion shows exactly the type name
+/// the generated uniform header declares; entries whose shape is not a
+/// builtin value type (native structs) are skipped. Nodes without a
+/// `consumed` map (non-shader nodes) yield an empty vec.
+fn shader_uniforms(node: &NodeController) -> Vec<UiShaderUniform> {
+    fn last_field_is(slot: &SlotController, name: &str) -> bool {
+        matches!(
+            slot.address().path.segments().last(),
+            Some(SlotPathSegment::Field(field)) if field.as_str() == name
+        )
+    }
+
+    fn find_consumed_map(slot: &SlotController) -> Option<&SlotController> {
+        if slot.kind() == SlotKind::Map && last_field_is(slot, "consumed") {
+            return Some(slot);
+        }
+        slot.children().iter().find_map(find_consumed_map)
+    }
+
+    let Some(consumed) = node.slots().iter().find_map(find_consumed_map) else {
+        return Vec::new();
+    };
+    let mut uniforms = Vec::new();
+    for entry in consumed.children() {
+        let Some(SlotPathSegment::Key(SlotMapKey::String(name))) =
+            entry.address().path.segments().last()
+        else {
+            continue;
+        };
+        let Some(value) = entry
+            .children()
+            .iter()
+            .find(|child| last_field_is(child, "value"))
+            .and_then(SlotController::value)
+        else {
+            continue;
+        };
+        let Ok(shape) = ShaderValueShapeRef::from_lp_value(value) else {
+            continue;
+        };
+        let Some(glsl_type) = shape
+            .as_lp_type()
+            .and_then(|ty| glsl_type_for_lp_type(&ty).ok())
+        else {
+            continue;
+        };
+        uniforms.push(UiShaderUniform {
+            name: name.clone(),
+            glsl_type,
+        });
+    }
+    uniforms
 }
 
 fn default_focus_node_mut(nodes: &mut [NodeController]) -> Option<&mut NodeController> {

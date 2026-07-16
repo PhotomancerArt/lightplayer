@@ -8,6 +8,7 @@
     "build": "esbuild entry.mjs --bundle --format=iife --global-name=LpCodeMirror --minify --target=es2020 --outfile=../../public/vendor/codemirror/codemirror.js"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "6.18.4",
     "@codemirror/commands": "6.8.0",
     "@codemirror/language": "6.10.8",
     "@codemirror/legacy-modes": "6.4.2",
