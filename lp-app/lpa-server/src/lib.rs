@@ -28,7 +28,7 @@ pub use lpc_engine::{
     ButtonService, LpGraphics, LpShader, RadioService, ShaderCompileOptions, ShaderFrontend,
 };
 pub use project::Project;
-pub use project_manager::ProjectManager;
+pub use project_manager::{ProjectManager, is_project_dir};
 pub use server::{LpServer, MemoryStatsFn};
 
 /// GLSL frontend that ships on LightPlayer devices — the product constant.

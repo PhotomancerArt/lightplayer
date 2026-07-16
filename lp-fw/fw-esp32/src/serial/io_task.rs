@@ -52,8 +52,18 @@ static SERVER_WRITE_RESULT: Channel<
 > = Channel::new();
 
 /// Write timeout per chunk: if a chunk doesn't complete in this time, the host
-/// is likely gone. Short enough to detect disconnects, long enough for USB.
-const WRITE_TIMEOUT: Duration = Duration::from_millis(1000);
+/// is not draining. A healthy USB full-speed host drains a chunk in well under
+/// a millisecond, so this is still very generous — but short enough that the
+/// frame loop's inline sends stall briefly, not for seconds, in the window
+/// before the not-draining latch kicks in.
+const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Probe timeout while latched not-draining: a single byte either leaves
+/// immediately (host is back) or it doesn't — no reason to wait long.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// Minimum spacing between probe writes while latched not-draining.
+const PROBE_INTERVAL: Duration = Duration::from_millis(2000);
 
 /// Chunk size for large writes. Small enough to avoid timeout on slow USB,
 /// large enough to avoid excessive syscalls. Resource snapshots can be 10KB+.
@@ -64,12 +74,20 @@ const WRITE_CHUNK_SIZE: usize = 256;
 /// by concatenating with the next message. Uses write_all per chunk to
 /// handle partial writes.
 async fn timed_write_all<W: Write>(tx: &mut W, data: &[u8]) -> bool {
+    timed_write_all_with(tx, data, WRITE_TIMEOUT).await
+}
+
+async fn timed_write_all_with<W: Write>(tx: &mut W, data: &[u8], timeout: Duration) -> bool {
     use embassy_futures::select::{Either, select};
     let mut offset = 0;
     while offset < data.len() {
+        // A bounded in-flight write is healthy, not silence: tick liveness
+        // per chunk so a slow host cannot starve the watchdog feeder into
+        // resetting the device.
+        crate::recovery::watchdog::note_io_alive();
         let chunk_end = (offset + WRITE_CHUNK_SIZE).min(data.len());
         let chunk = &data[offset..chunk_end];
-        match select(Timer::after(WRITE_TIMEOUT), tx.write_all(chunk)).await {
+        match select(Timer::after(timeout), tx.write_all(chunk)).await {
             Either::First(_) => return false,
             Either::Second(Err(_)) => return false,
             Either::Second(Ok(())) => {}
@@ -146,39 +164,57 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
 
     let mut read_buffer = Vec::new();
     let mut conn = UsbConnectionMonitor::new();
+    let mut last_probe = embassy_time::Instant::now();
 
     loop {
         // Prove liveness to the watchdog feeder in the server loop.
         crate::recovery::watchdog::note_io_alive();
 
         conn.poll();
-        let connected = conn.is_connected();
+
+        // While latched not-draining, periodically probe with a single byte:
+        // the self-healing path for a host that reopens the port without
+        // sending anything.
+        if conn.needs_probe() && last_probe.elapsed() >= PROBE_INTERVAL {
+            last_probe = embassy_time::Instant::now();
+            if timed_write_all_with(&mut tx, b"\n", PROBE_TIMEOUT).await {
+                conn.note_host_active();
+            }
+        }
 
         #[cfg(feature = "server")]
-        drain_server_write_request(&mut tx, connected).await;
+        drain_server_write_request(&mut tx, &mut conn).await;
 
-        drain_outgoing_messages(&router, &mut tx, connected).await;
+        drain_outgoing_messages(&router, &mut tx, &mut conn).await;
 
-        if connected {
-            read_serial(&mut rx, &mut read_buffer, &router).await;
+        if conn.is_connected() {
+            read_serial(&mut rx, &mut read_buffer, &router, &mut conn).await;
         }
 
         Timer::after(Duration::from_millis(1)).await;
     }
 }
 
-/// Drain outgoing log/message queue. Always consumes; only writes if connected.
-async fn drain_outgoing_messages<W: Write>(router: &MessageRouter, tx: &mut W, connected: bool) {
+/// Drain outgoing log/message queue. Always consumes; only writes if the
+/// host is connected AND draining (write outcomes feed the latch).
+async fn drain_outgoing_messages<W: Write>(
+    router: &MessageRouter,
+    tx: &mut W,
+    conn: &mut UsbConnectionMonitor,
+) {
     let receiver = router.outgoing().receiver();
     loop {
         match receiver.try_receive() {
-            Ok(msg) if connected => {
+            Ok(msg) if conn.is_connected() => {
                 if !timed_write_all(tx, b"\n").await {
+                    conn.note_write_timeout();
                     break;
                 }
                 if !timed_write_all(tx, msg.as_bytes()).await {
+                    conn.note_write_timeout();
                     break;
                 }
+                conn.note_host_active();
             }
             Ok(_) => {}
             Err(_) => break,
@@ -187,7 +223,13 @@ async fn drain_outgoing_messages<W: Write>(router: &MessageRouter, tx: &mut W, c
 }
 
 /// Read from serial with timeout, push complete M! lines to incoming queue.
-async fn read_serial<R: Read>(rx: &mut R, read_buffer: &mut Vec<u8>, router: &MessageRouter) {
+/// Incoming bytes are proof the host application is alive.
+async fn read_serial<R: Read>(
+    rx: &mut R,
+    read_buffer: &mut Vec<u8>,
+    router: &MessageRouter,
+    conn: &mut UsbConnectionMonitor,
+) {
     let mut temp_buf = [0u8; 64];
     match embassy_futures::select::select(
         Timer::after(Duration::from_millis(1)),
@@ -196,6 +238,7 @@ async fn read_serial<R: Read>(rx: &mut R, read_buffer: &mut Vec<u8>, router: &Me
     .await
     {
         embassy_futures::select::Either::Second(Ok(n)) if n > 0 => {
+            conn.note_host_active();
             read_buffer.extend_from_slice(&temp_buf[..n]);
             process_read_buffer(read_buffer, router);
         }
@@ -205,13 +248,20 @@ async fn read_serial<R: Read>(rx: &mut R, read_buffer: &mut Vec<u8>, router: &Me
 
 /// Drain accountable server write requests.
 #[cfg(feature = "server")]
-async fn drain_server_write_request<W: Write>(tx: &mut W, connected: bool) {
+async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnectionMonitor) {
     let receiver = SERVER_WRITE_REQUEST.receiver();
     let Ok((generation, msg)) = receiver.try_receive() else {
         return;
     };
 
-    let result = timed_write_server_msg(tx, msg, connected).await;
+    let result = timed_write_server_msg(tx, msg, conn.is_connected()).await;
+    match &result {
+        Ok(()) => conn.note_host_active(),
+        // Only a USB write timeout/failure is draining evidence; fail-fast
+        // ConnectionLost and serialization errors say nothing about the host.
+        Err(lpc_wire::TransportError::Other(_)) => conn.note_write_timeout(),
+        Err(_) => {}
+    }
     // Echo the request generation so `transport.send()` can discard any stale
     // result left over from a cancelled send.
     SERVER_WRITE_RESULT
