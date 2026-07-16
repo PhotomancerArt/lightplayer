@@ -221,9 +221,6 @@ impl GpuShader {
     /// `read_back`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn probe_f32(&mut self, width: u32, uniforms: &LpsValueF32) -> Result<Vec<f32>, GfxError> {
-        use crate::read_back::read_back_f32;
-        use crate::texture_backing::GpuTexture;
-
         let scope = self
             .shared
             .device
