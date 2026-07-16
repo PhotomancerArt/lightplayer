@@ -69,6 +69,9 @@ pub fn run(
                 continue;
             }
         }
+        if !directive.mode_filter.applies_to(target) {
+            continue;
+        }
         eligible_runs += 1;
         if directive_disposition(&directive.annotations, target) != Disposition::Skip {
             all_unsupported = false;
@@ -80,6 +83,9 @@ pub fn run(
                 if directive.line_number != filter_line {
                     continue;
                 }
+            }
+            if !directive.mode_filter.applies_to(target) {
+                continue;
             }
             stats.total += 1;
             stats.unsupported += 1;
@@ -135,6 +141,9 @@ pub fn run(
                         continue;
                     }
                 }
+                if !directive.mode_filter.applies_to(target) {
+                    continue;
+                }
                 stats.total += 1;
                 let disposition = directive_disposition(&directive.annotations, target);
                 match &disposition {
@@ -176,6 +185,12 @@ pub fn run(
             if directive.line_number != filter_line {
                 continue;
             }
+        }
+
+        // Mode-channeled directive for a different float mode: it does not
+        // exist for this target (not counted, not executed).
+        if !directive.mode_filter.applies_to(target) {
+            continue;
         }
 
         stats.total += 1;

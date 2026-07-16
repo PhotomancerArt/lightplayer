@@ -1130,7 +1130,9 @@ fn lower_expr_vec_uncached(
                     "As with non-32-bit byte convert",
                 )));
             }
-            lower_as_vec(ctx, *inner, *kind)
+            // `convert: None` is a bit-reinterpreting cast (intBitsToFloat);
+            // `convert: Some(_)` is a numeric conversion (float(i), int(f)).
+            lower_as_vec(ctx, *inner, *kind, convert.is_none())
         }
         Expression::Math {
             fun,
@@ -1460,7 +1462,8 @@ pub(crate) fn coerce_assignment_vregs(
     }
     let mut out = VRegVec::new();
     for &src in &srcs {
-        out.push(lower_as_scalar(ctx, src, src_k, dst_k)?);
+        // Assignment/store coercion is always a numeric conversion, never a bitcast.
+        out.push(lower_as_scalar(ctx, src, src_k, dst_k, false)?);
     }
     Ok(out)
 }

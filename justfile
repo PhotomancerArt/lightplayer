@@ -627,8 +627,15 @@ fmt-check:
 # Linting - Workspace-wide
 # ============================================================================
 
+# lp-gfx-wgpu, fw-browser, and naga-wasm-poc are excluded here: they pull the
+# heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
+# They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+
+# The wgpu-tree workspace members excluded from clippy-host.
+clippy-gfx:
+    cargo clippy -p lp-gfx-wgpu -p fw-browser -p naga-wasm-poc -- --no-deps -D warnings
 
 clippy-rv32: install-rv32-target clippy-fw-esp32 clippy-rv32-emu-guest-test-app
 
@@ -692,10 +699,22 @@ test: test-rust test-filetests
 
 test-rust:
     cargo test
-    # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
-    # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
-    # GPU-adapter tests skip cleanly on runners without a GPU.
+
+# lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
+# CPU-side tests gate the canonical-GLSL → WGSL compile path; the
+# GPU-adapter tests skip cleanly on runners without a GPU. Built separately
+# from `test-rust` because `-p lp-gfx-wgpu` unifies features differently and
+# would recompile ~25 crates; CI runs it in the gated Validate GFX job.
+test-gfx:
     cargo test -p lp-gfx-wgpu
+
+# Everything the gated Validate GFX CI job runs.
+[parallel]
+validate-gfx: clippy-gfx test-gfx
+
+# Full test parity with CI (Validate job + gated Validate GFX job).
+[parallel]
+test-all: test test-gfx
 
 test-filetests:
     scripts/filetests.sh

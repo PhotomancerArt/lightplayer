@@ -203,6 +203,9 @@
   .tw\:mb-\[18px\] {
     margin-bottom: 18px;
   }
+  .tw\:ml-1\.5 {
+    margin-left: calc(var(--tw-spacing) * 1.5);
+  }
   .tw\:ml-2 {
     margin-left: calc(var(--tw-spacing) * 2);
   }
@@ -238,6 +241,9 @@
   }
   .tw\:inline-grid {
     display: inline-grid;
+  }
+  .tw\:h-1\.5 {
+    height: calc(var(--tw-spacing) * 1.5);
   }
   .tw\:h-2 {
     height: calc(var(--tw-spacing) * 2);
@@ -295,6 +301,9 @@
   }
   .tw\:max-h-60 {
     max-height: calc(var(--tw-spacing) * 60);
+  }
+  .tw\:max-h-72 {
+    max-height: calc(var(--tw-spacing) * 72);
   }
   .tw\:max-h-80 {
     max-height: calc(var(--tw-spacing) * 80);
@@ -358,6 +367,9 @@
   }
   .tw\:min-h-screen {
     min-height: 100vh;
+  }
+  .tw\:w-1\.5 {
+    width: calc(var(--tw-spacing) * 1.5);
   }
   .tw\:w-2 {
     width: calc(var(--tw-spacing) * 2);
@@ -507,6 +519,9 @@
   }
   .tw\:animate-pulse {
     animation: var(--tw-animate-pulse);
+  }
+  .tw\:cursor-default {
+    cursor: default;
   }
   .tw\:cursor-not-allowed {
     cursor: not-allowed;
@@ -1311,6 +1326,9 @@
   .tw\:whitespace-nowrap {
     white-space: nowrap;
   }
+  .tw\:whitespace-pre-wrap {
+    white-space: pre-wrap;
+  }
   .tw\:text-accent {
     color: var(--tw-color-accent);
   }
@@ -1402,8 +1420,14 @@
   .tw\:opacity-0 {
     opacity: 0%;
   }
+  .tw\:opacity-40 {
+    opacity: 40%;
+  }
   .tw\:opacity-50 {
     opacity: 50%;
+  }
+  .tw\:opacity-60 {
+    opacity: 60%;
   }
   .tw\:opacity-70 {
     opacity: 70%;
@@ -1418,6 +1442,11 @@
   .tw\:shadow-xl {
     --tw-shadow: 0 20px 25px -5px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 8px 10px -6px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  .tw\:transition {
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, visibility, content-visibility, overlay, pointer-events;
+    transition-timing-function: var(--tw-ease, var(--tw-default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--tw-default-transition-duration));
   }
   .tw\:transition-\[grid-template-rows\,opacity\] {
     transition-property: grid-template-rows,opacity;
@@ -1442,6 +1471,10 @@
   .tw\:duration-150 {
     --tw-duration: 150ms;
     transition-duration: 150ms;
+  }
+  .tw\:duration-300 {
+    --tw-duration: 300ms;
+    transition-duration: 300ms;
   }
   .tw\:outline-none {
     --tw-outline-style: none;
@@ -1855,6 +1888,11 @@
   .tw\:\@min-\[560px\]\:\[grid-template-areas\:\'time_level_source_message\'\] {
     @container (width >= 560px) {
       grid-template-areas: 'time level source message';
+    }
+  }
+  .tw\:starting\:opacity-0 {
+    @starting-style {
+      opacity: 0%;
     }
   }
 }

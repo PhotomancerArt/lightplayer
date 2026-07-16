@@ -15,6 +15,7 @@ pub mod icon;
 pub mod icon_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod icon_menu_stories;
+pub mod keyboard;
 pub mod outline;
 pub mod popover;
 #[cfg(feature = "stories")]
@@ -28,5 +29,6 @@ pub use detail_popover::{
 pub use field_row::FieldRow;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
+pub use keyboard::Platform;
 pub use popover::{IconPopoverButton, PopoverButton, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};

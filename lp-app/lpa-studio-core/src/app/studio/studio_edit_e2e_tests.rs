@@ -1391,6 +1391,65 @@ fn special_editor_values_round_trip_save_and_revert() {
 // --- Harness ---------------------------------------------------------------
 
 #[test]
+fn accepted_apply_tightens_the_next_refresh_delay() {
+    use crate::{DEVICE_REFRESH_INTERVAL, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS};
+
+    let server = Rc::new(RefCell::new(asset_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    assert_eq!(
+        handle.delay.get(),
+        DEVICE_REFRESH_INTERVAL,
+        "the fake link runs at device cadence before any apply"
+    );
+
+    let tab = find_asset_editor(&snapshot);
+    handle.tx.send(StudioCommand::Action(tab.fetch_action()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("fetch emits a snapshot");
+    let tab = find_asset_editor(&snapshot);
+
+    // An accepted apply opens the verdict-chase window: the published delay
+    // tightens so the compile verdict is pulled promptly.
+    handle
+        .tx
+        .send(StudioCommand::Action(tab.apply_action(ASSET_SHADER_V2)));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("apply emits a snapshot");
+    assert_eq!(
+        handle.delay.get(),
+        VERDICT_CHASE_INTERVAL,
+        "an accepted apply tightens the next tick to the chase interval"
+    );
+
+    // Each full pull consumes one chase tick; the cadence then relaxes.
+    for _ in 0..VERDICT_CHASE_TICKS {
+        assert_eq!(handle.delay.get(), VERDICT_CHASE_INTERVAL);
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv();
+    }
+    assert_eq!(
+        handle.delay.get(),
+        DEVICE_REFRESH_INTERVAL,
+        "the cadence relaxes once the chase window is consumed"
+    );
+}
+
+#[test]
 fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
     let server = Rc::new(RefCell::new(asset_e2e_server()));
     let sent = Rc::new(RefCell::new(Vec::new()));

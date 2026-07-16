@@ -77,6 +77,42 @@ pub enum ComparisonOp {
     Approx,
 }
 
+/// Float-mode channel for a `// run:` directive.
+///
+/// `// run:` applies to all float modes; `// run[q32]:` / `// run[f32]:`
+/// restrict the directive to targets whose [`crate::targets::FloatMode`]
+/// matches. Non-matching targets skip the directive entirely (it does not
+/// exist for them — not counted, not compiled against).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RunModeFilter {
+    /// Bare `// run:` — applies to every float mode.
+    #[default]
+    All,
+    /// `// run[q32]:` / `// run[f32]:` — applies only to the given mode.
+    Only(crate::targets::FloatMode),
+}
+
+impl RunModeFilter {
+    /// True if a directive with this filter runs on `target`.
+    pub fn applies_to(&self, target: &crate::targets::Target) -> bool {
+        match self {
+            RunModeFilter::All => true,
+            RunModeFilter::Only(mode) => *mode == target.float_mode,
+        }
+    }
+
+    /// Parse a bracketed mode token (`q32` / `f32`).
+    pub fn from_token(token: &str) -> Result<Self, String> {
+        match token {
+            "q32" => Ok(RunModeFilter::Only(crate::targets::FloatMode::Q32)),
+            "f32" => Ok(RunModeFilter::Only(crate::targets::FloatMode::F32)),
+            other => Err(format!(
+                "unknown run directive mode '[{other}]' (expected [q32] or [f32])"
+            )),
+        }
+    }
+}
+
 /// One `// set_uniform: name = value` line attached to the following `// run:`.
 #[derive(Debug, Clone)]
 pub struct SetUniform {
@@ -97,6 +133,8 @@ pub struct RunDirective {
     pub expected_str: String,
     /// Custom tolerance for approximate comparisons (None = use default).
     pub tolerance: Option<f32>,
+    /// Float-mode channel (`// run[q32]:` / `// run[f32]:`; bare = all modes).
+    pub mode_filter: RunModeFilter,
     /// Line number for bless mode updates.
     pub line_number: usize,
     /// Annotations attached to this directive.

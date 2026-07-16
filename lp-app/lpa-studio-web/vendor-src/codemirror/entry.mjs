@@ -112,7 +112,19 @@ const studioTheme = EditorView.theme(
       backgroundColor: "var(--studio-color-bg-wash, rgba(255, 255, 255, 0.04))",
     },
     ".cm-lineNumbers .cm-gutterElement": { minWidth: "2.4em" },
+    // A visible error marker in the margin next to the offending line —
+    // drop CodeMirror's default icon and draw a studio-toned red dot.
     ".cm-lint-marker-error": { content: "none" },
+    ".cm-lint-marker-error::after": {
+      content: '""',
+      display: "block",
+      boxSizing: "border-box",
+      width: "0.72em",
+      height: "0.72em",
+      margin: "0.14em auto 0",
+      borderRadius: "50%",
+      backgroundColor: "var(--studio-status-error-foreground, #f08a8a)",
+    },
   },
   { dark: true },
 );
@@ -153,8 +165,13 @@ function toDiagnostic(state, entry) {
   const lineNumber = Math.min(Math.max(entry.line ?? 1, 1), lineCount);
   const line = state.doc.line(lineNumber);
   const col = Math.max((entry.col ?? 1) - 1, 0);
-  const from = Math.min(line.from + col, line.to);
-  const to = Math.min(from + 1, line.to);
+  const pos = Math.min(line.from + col, line.to);
+  // Widen the underline from a single char to the whole token at the error
+  // position so it is actually visible; fall back to one char at
+  // punctuation/whitespace where there is no word.
+  const word = state.wordAt(pos);
+  const from = word ? word.from : pos;
+  const to = word ? word.to : Math.min(pos + 1, line.to);
   return {
     from,
     to: Math.max(to, from),
@@ -171,6 +188,8 @@ function toDiagnostic(state, entry) {
 //   onChange(text)   fired with the full text after every document change
 //                    (user typing and external setDoc alike)
 //   onApplyRequested() fired on Mod-Enter
+//   onSaveRequested()  fired on Mod-s (always swallowed, so the browser's
+//                      save dialog never opens while the editor is focused)
 // Returns the imperative handle the Rust component drives.
 export function createEditor(parent, opts = {}) {
   const readOnly = new Compartment();
@@ -190,12 +209,22 @@ export function createEditor(parent, opts = {}) {
     notifyModified(text !== baseline);
   });
 
-  // Listed first so it out-prioritizes defaultKeymap's own Mod-Enter.
-  const applyKeymap = keymap.of([
+  // Listed first so it out-prioritizes defaultKeymap's own Mod-Enter. The
+  // `run → true` returns also stop the browser: Mod-s in particular must
+  // never fall through to the native save dialog while the editor is
+  // focused, even when the app treats the save request as a no-op.
+  const editorKeymap = keymap.of([
     {
       key: "Mod-Enter",
       run: () => {
         opts.onApplyRequested?.();
+        return true;
+      },
+    },
+    {
+      key: "Mod-s",
+      run: () => {
+        opts.onSaveRequested?.();
         return true;
       },
     },
@@ -204,7 +233,7 @@ export function createEditor(parent, opts = {}) {
   const state = EditorState.create({
     doc: baseline,
     extensions: [
-      applyKeymap,
+      editorKeymap,
       lineNumbers(),
       highlightActiveLineGutter(),
       highlightSpecialChars(),

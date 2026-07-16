@@ -80,6 +80,8 @@ holds the full context.
 | CI check that a `PROJECT_FORMAT_VERSION` bump lands with a `schemas/history/` snapshot | `2026-07-05-artifact-format-version-and-schema-snapshots` | The first real format bump |
 | CLI adoption of `DeviceSession` (lp-cli still hand-rolls provider/session bundles; `fwcheck`'s boot-line grep dies then) | `2026-07-15-device-session-model` | Device-link M5 (CLI) work begins |
 | Websocket / server-lightplayer connector classes on the capability model | `2026-07-15-device-session-model` | A remote (non-serial) device class becomes real |
+| **Fuel/metering in `lpvm-native`** (back-edge counters in emitted RV32 — the real infinite-loop protection; until then a hung shader rides watchdog-reset → blame → block) | `2026-07-14-shader-auto-apply` | Raised priority — next compiler plan; auto-apply is live without it |
+| Budgeted/async shader compile (spread the ~194 ms device compile across frames instead of one long frame per apply) | `2026-07-14-shader-auto-apply` | The per-apply frame stall matters in practice |
 
 ## Relationship To Shared Planning
 
