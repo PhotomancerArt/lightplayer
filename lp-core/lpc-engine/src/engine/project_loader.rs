@@ -13,7 +13,7 @@ use lpc_model::{
     MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin, ProjectNodePlacement,
     Revision, SlotPath,
 };
-use lpc_model::{SlotDirection, SlotPathSegment, SlotShape, StaticSlotShape};
+use lpc_model::{SlotDirection, SlotPathSegment, SlotShape, StaticSlotShape, well_known_channel};
 use lpc_registry::{AssetText, ParseCtx, ProjectRegistry};
 use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireSlotIndex};
 use lpfs::LpFs;
@@ -1316,16 +1316,17 @@ fn register_node_bindings(
                 .map(|target| binding_target_endpoint(projected_nodes, node, target))
                 .transpose()?
             {
+                let source = BindingSource::ProducedSlot {
+                    node: node.id,
+                    slot: playlist_output_path(),
+                };
                 runtime
                     .add_binding(
                         BindingDraft {
-                            source: BindingSource::ProducedSlot {
-                                node: node.id,
-                                slot: playlist_output_path(),
-                            },
+                            kind: binding_kind(&source, &target, "output"),
+                            source,
                             target,
                             priority: BindingPriority::authored(),
-                            kind: binding_kind_for_slot("output"),
                             owner: node.id,
                         },
                         frame,
@@ -1444,28 +1445,32 @@ fn register_default_bind(
         {
             return Ok(());
         }
+        let source = BindingSource::ProducedSlot {
+            node: current.id,
+            slot,
+        };
+        let target = BindingTarget::BusChannel(channel);
         BindingDraft {
-            source: BindingSource::ProducedSlot {
-                node: current.id,
-                slot,
-            },
-            target: BindingTarget::BusChannel(channel),
+            kind: binding_kind(&source, &target, name),
+            source,
+            target,
             priority: BindingPriority::default_fallback(),
-            kind: binding_kind_for_slot(name),
             owner: current.id,
         }
     } else {
         if binding_source(bindings, name).is_some() {
             return Ok(());
         }
+        let source = BindingSource::BusChannel(channel);
+        let target = BindingTarget::ConsumedSlot {
+            node: current.id,
+            slot,
+        };
         BindingDraft {
-            source: BindingSource::BusChannel(channel),
-            target: BindingTarget::ConsumedSlot {
-                node: current.id,
-                slot,
-            },
+            kind: binding_kind(&source, &target, name),
+            source,
+            target,
             priority: BindingPriority::default_fallback(),
-            kind: binding_kind_for_slot(name),
             owner: current.id,
         }
     };
@@ -1563,14 +1568,15 @@ fn register_source_binding_at_path(
     target_slot: SlotPath,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
+    let target = BindingTarget::ConsumedSlot {
+        node: current.id,
+        slot: target_slot,
+    };
     let draft = BindingDraft {
+        kind: binding_kind(&source, &target, binding_slot_name),
         source,
-        target: BindingTarget::ConsumedSlot {
-            node: current.id,
-            slot: target_slot,
-        },
+        target,
         priority: BindingPriority::new(0),
-        kind: binding_kind_for_slot(binding_slot_name),
         owner: current.id,
     };
     assert_draft_directions(projected_nodes, current, &draft)?;
@@ -1614,14 +1620,15 @@ fn register_target_binding(
             path: node_label(current),
             reason: format!("invalid source slot `{slot_name}`: {e}"),
         })?;
+    let source = BindingSource::ProducedSlot {
+        node: current.id,
+        slot: source_slot,
+    };
     let draft = BindingDraft {
-        source: BindingSource::ProducedSlot {
-            node: current.id,
-            slot: source_slot,
-        },
+        kind: binding_kind(&source, &target, slot_name),
+        source,
         target,
         priority: BindingPriority::authored(),
-        kind: binding_kind_for_slot(slot_name),
         owner: current.id,
     };
     assert_draft_directions(projected_nodes, current, &draft)?;
@@ -1634,7 +1641,22 @@ fn register_target_binding(
     Ok(())
 }
 
-fn binding_kind_for_slot(slot_name: &str) -> Kind {
+/// The kind a binding establishes on the channels it touches.
+///
+/// A bus endpoint's well-known registry kind is authoritative — the first
+/// registered binding stamps the channel's kind, and the old slot-name
+/// guess stamped e.g. `trigger` as Color because only the time-family
+/// names were listed (2026-07-16: bus pane showed "trigger COLOR").
+/// Endpoints outside the registry fall back to the slot-name heuristic.
+fn binding_kind(source: &BindingSource, target: &BindingTarget, slot_name: &str) -> Kind {
+    let channel = match (source, target) {
+        (BindingSource::BusChannel(channel), _) => Some(channel),
+        (_, BindingTarget::BusChannel(channel)) => Some(channel),
+        _ => None,
+    };
+    if let Some(known) = channel.and_then(|channel| well_known_channel(&channel.0)) {
+        return known.kind;
+    }
     match slot_name {
         "time" | "seconds" | "delta_seconds" => Kind::Instant,
         _ => Kind::Color,
@@ -1699,6 +1721,57 @@ fn binding_target_endpoint(
                 slot: node_slot.slot().clone(),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod binding_kind_tests {
+    use lpc_model::{ChannelName, Kind, NodeId, SlotPath};
+
+    use super::binding_kind;
+    use crate::dataflow::binding::{BindingSource, BindingTarget};
+
+    fn consumed(slot: &str) -> BindingTarget {
+        BindingTarget::ConsumedSlot {
+            node: NodeId::new(1),
+            slot: SlotPath::parse(slot).expect("slot path"),
+        }
+    }
+
+    fn produced(slot: &str) -> BindingSource {
+        BindingSource::ProducedSlot {
+            node: NodeId::new(1),
+            slot: SlotPath::parse(slot).expect("slot path"),
+        }
+    }
+
+    #[test]
+    fn well_known_channel_kind_beats_the_slot_name_guess() {
+        // `trigger` is Instant in the registry; the old slot-name guess
+        // stamped it Color (only the time-family names were listed).
+        let source = BindingSource::BusChannel(ChannelName("trigger".into()));
+        assert_eq!(
+            binding_kind(&source, &consumed("trigger"), "trigger"),
+            Kind::Instant
+        );
+        let target = BindingTarget::BusChannel(ChannelName("visual.out".into()));
+        assert_eq!(
+            binding_kind(&produced("output"), &target, "output"),
+            Kind::Color
+        );
+    }
+
+    #[test]
+    fn unregistered_channels_fall_back_to_the_slot_name_guess() {
+        let target = BindingTarget::BusChannel(ChannelName("wobble".into()));
+        assert_eq!(
+            binding_kind(&produced("seconds"), &target, "seconds"),
+            Kind::Instant
+        );
+        assert_eq!(
+            binding_kind(&produced("output"), &target, "output"),
+            Kind::Color
+        );
     }
 }
 

@@ -142,7 +142,10 @@ impl Project {
         &mut self.registry
     }
 
-    pub(crate) fn runtime_read_parts(&mut self) -> (&mut Engine, &ProjectRegistry) {
+    /// Split borrow for read paths that walk the engine against the
+    /// registry (probes need `&mut Engine` for the resolver while reading
+    /// registry state). Public so host-level tests can drive probes.
+    pub fn runtime_read_parts(&mut self) -> (&mut Engine, &ProjectRegistry) {
         let runtime = self
             .runtime
             .as_mut()

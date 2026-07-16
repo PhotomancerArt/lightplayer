@@ -78,7 +78,11 @@ impl Engine {
     /// on implicit runtime consumed slots with no def field — plus every
     /// referenced channel with providers/consumers as indices into the
     /// binding list. See docs/adr/2026-07-06-binding-graph-probe.md.
-    pub(super) fn read_project_binding_graph_probe(
+    ///
+    /// Public (unlike the sibling probes) so host-level tests can assert
+    /// the effective graph directly — the binding index is load-time
+    /// materialized state with no other read surface.
+    pub fn read_project_binding_graph_probe(
         &mut self,
         registry: &ProjectRegistry,
         request: BindingGraphProbeRequest,
