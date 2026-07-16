@@ -7,6 +7,7 @@ int test_full_initialization() {
     int arr[3] = {10, 20, 30};
     return arr[0] + arr[1] + arr[2]; // Should be 10 + 20 + 30 = 60
 }
+// @unsupported(wgpu.f32)
 // run: test_full_initialization() == 60
 
 // Test 2: Partial initialization (remaining elements should be zero)
@@ -15,6 +16,7 @@ int test_partial_initialization() {
     // arr[3] and arr[4] should be 0
     return arr[0] + arr[1] + arr[2] + arr[3] + arr[4]; // Should be 1 + 2 + 3 + 0 + 0 = 6
 }
+// @unsupported(wgpu.f32)
 // run: test_partial_initialization() == 6
 
 // Test 3: Unsized array with inferred size from initializer
@@ -22,6 +24,7 @@ int test_unsized_array() {
     int arr[] = {100, 200, 300};
     return arr[0] + arr[1] + arr[2]; // Should be 100 + 200 + 300 = 600
 }
+// @unsupported(wgpu.f32)
 // run: test_unsized_array() == 600
 
 // Test 4: Partial initialization edge case (only first element)
@@ -30,6 +33,7 @@ int test_single_element_initialization() {
     // arr[1] and arr[2] should be 0
     return arr[0] + arr[1] + arr[2]; // Should be 42 + 0 + 0 = 42
 }
+// @unsupported(wgpu.f32)
 // run: test_single_element_initialization() == 42
 
 // Phase 3 integration test: All initialization types together
@@ -48,5 +52,7 @@ int phase3() {
 
     return x + y + z; // 60 + 1 + 400 = 461
 }
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: phase3() == 461
 

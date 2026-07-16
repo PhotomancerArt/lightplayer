@@ -141,12 +141,27 @@ impl GpuGraphics {
     /// F32Gpu semantics) but returns the concrete [`crate::render::GpuShader`]
     /// so the caller can use [`crate::render::GpuShader::probe_f32`] for
     /// bit-exact f32 readback. Test/diagnostic surface, not a product path.
+    ///
+    /// Pipeline creation runs inside a wgpu validation error scope: corpus
+    /// shaders can carry constructs that pass naga validation but fail wgpu
+    /// device validation (e.g. two uniforms on one binding), and the default
+    /// uncaptured-error handler is fatal — a probe must report, not abort.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn compile_probe_shader(
         &self,
         source: &str,
         textures: &lp_shader::TextureBindingSpecs,
     ) -> Result<crate::render::GpuShader, GfxError> {
-        crate::render::GpuShader::new(self.shared.clone(), source, textures)
+        let scope = self
+            .shared
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let result = crate::render::GpuShader::new(self.shared.clone(), source, textures);
+        let scope_err = pollster::block_on(scope.pop());
+        match (result, scope_err) {
+            (_, Some(e)) => Err(GfxError::Compile(format!("wgpu validation: {e}"))),
+            (r, None) => r,
+        }
     }
 
     #[cfg(test)]

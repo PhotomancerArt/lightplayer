@@ -24,6 +24,7 @@ float test_edge_in_write_error_read() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(wgpu.f32)
 // run: test_edge_in_write_error_read() ~= 1.0
 
 int test_edge_in_write_error_int() {
@@ -32,6 +33,7 @@ int test_edge_in_write_error_int() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(wgpu.f32)
 // run: test_edge_in_write_error_int() == 10
 
 vec2 test_edge_in_write_error_vec2() {
@@ -40,6 +42,7 @@ vec2 test_edge_in_write_error_vec2() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(wgpu.f32)
 // run: test_edge_in_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_in_write_error_vec3() {
@@ -48,6 +51,7 @@ vec3 test_edge_in_write_error_vec3() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(wgpu.f32)
 // run: test_edge_in_write_error_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_edge_in_write_error_vec4() {
@@ -56,6 +60,7 @@ vec4 test_edge_in_write_error_vec4() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(wgpu.f32)
 // run: test_edge_in_write_error_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_edge_in_write_error_calculations() {
@@ -74,6 +79,7 @@ float test_edge_in_write_error_calculations() {
 // @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unimplemented(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {
@@ -89,5 +95,7 @@ vec4 test_edge_in_write_error_vertex_processing() {
     return processed_color;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
 // @unsupported(rv32lpn.q32)
+// @unsupported(wgpu.f32)
 // run: test_edge_in_write_error_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)

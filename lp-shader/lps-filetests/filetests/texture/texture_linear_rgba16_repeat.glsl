@@ -15,5 +15,7 @@ vec4 repeat_blend() {
 }
 
 // interp.f32: no guest memory to bind texture fixtures into
+// wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: repeat_blend() ~= vec4(0.75, 0.25, 0.0, 1.0) (tolerance: 0.005)

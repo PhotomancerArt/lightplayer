@@ -18,6 +18,7 @@ float test_pow_negative_base() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_pow_negative_base() ~= 0.0
 
 float test_pow_zero_negative_exponent() {
@@ -29,6 +30,7 @@ float test_pow_zero_negative_exponent() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_pow_zero_negative_exponent() ~= 0.0
 
 float test_pow_zero_zero() {
@@ -40,6 +42,7 @@ float test_pow_zero_zero() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_pow_zero_zero() ~= 0.0
 
 float test_log_zero() {
@@ -51,6 +54,7 @@ float test_log_zero() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_log_zero() ~= 0.0
 
 float test_log_negative() {
@@ -62,6 +66,7 @@ float test_log_negative() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_log_negative() ~= 0.0
 
 float test_log2_zero() {
@@ -73,6 +78,7 @@ float test_log2_zero() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_log2_zero() ~= 0.0
 
 float test_log2_negative() {
@@ -84,6 +90,7 @@ float test_log2_negative() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_log2_negative() ~= 0.0
 
 float test_sqrt_negative() {
@@ -95,6 +102,7 @@ float test_sqrt_negative() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_sqrt_negative() ~= 0.0
 
 float test_inversesqrt_zero() {
@@ -106,6 +114,7 @@ float test_inversesqrt_zero() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_inversesqrt_zero() ~= 0.0
 
 float test_inversesqrt_negative() {
@@ -113,10 +122,12 @@ float test_inversesqrt_negative() {
     return inversesqrt(-1.0);
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_inversesqrt_negative() ~= 0.0
 
 

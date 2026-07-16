@@ -82,6 +82,8 @@ float test_atan2_both_zero_q32_stable() {
     return atan(rt(0.0), rt(0.0));
 }
 
+// wgpu.f32: f32 GPU result diverges (undefined/edge-domain semantics)
+// @unsupported(wgpu.f32)
 // run: test_atan2_both_zero_q32_stable() ~= 0.0
 
 vec2 test_atan_vec2() {

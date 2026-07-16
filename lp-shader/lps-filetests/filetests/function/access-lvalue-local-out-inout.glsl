@@ -11,6 +11,7 @@ float test_access_index_vector_lane_out() {
     return v[1];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_access_index_vector_lane_out() ~= 21.0
 
 void bump(inout float x) {
@@ -23,6 +24,7 @@ float test_access_index_vector_lane_inout() {
     return v[0];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_access_index_vector_lane_inout() ~= 2.0
 
 void set_two(out vec2 c) {
@@ -35,6 +37,7 @@ float test_access_index_matrix_column_out() {
     return m[1].x + m[1].y;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_access_index_matrix_column_out() ~= 7.0
 
 void scale_cell(inout float x) {
@@ -48,6 +51,7 @@ float test_access_index_matrix_cell_inout() {
     return m[0][1];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_access_index_matrix_cell_inout() ~= 20.0
 
 // Phase 3: local aggregate access (array / struct / nested struct / array-of-struct).
@@ -65,6 +69,7 @@ float test_array_const_element_out() {
     return a[1];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_array_const_element_out() ~= 9.0
 
 float test_array_dynamic_element_inout() {
@@ -77,6 +82,7 @@ float test_array_dynamic_element_inout() {
     return a[2];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_array_dynamic_element_inout() ~= 5.0
 
 struct SFloat {
@@ -93,6 +99,7 @@ float test_struct_scalar_field_out() {
     return s.f;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_struct_scalar_field_out() ~= 7.0
 
 struct InnerN {
@@ -109,6 +116,7 @@ float test_nested_inner_value_inout() {
     return o.inner.value;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_nested_inner_value_inout() ~= 4.0
 
 struct Point2 {
@@ -125,6 +133,7 @@ float test_array_of_struct_member_inout() {
     return ps[0].x;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_array_of_struct_member_inout() ~= 10.0
 
 // Phase 4: writable access actuals rooted in `out` / `inout` pointer parameters.
@@ -145,6 +154,7 @@ float test_pointer_arg_array_element_out() {
     return a[1];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_pointer_arg_array_element_out() ~= 7.0
 
 void wrapper_vec(inout vec3 v) {
@@ -157,6 +167,7 @@ float test_pointer_arg_vector_lane_out() {
     return v.y;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_pointer_arg_vector_lane_out() ~= 7.0
 
 struct Inner {
@@ -177,4 +188,6 @@ float test_pointer_arg_nested_struct_field_out() {
     return o.inner.value;
 }
 
+// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
+// @unsupported(wgpu.f32)
 // run: test_pointer_arg_nested_struct_field_out() ~= 7.0

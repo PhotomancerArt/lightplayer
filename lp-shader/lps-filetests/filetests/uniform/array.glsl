@@ -22,6 +22,7 @@ vec4 test_shared_array_size_colors() {
     return sum;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_shared_array_size_colors() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat3 test_shared_array_size_transforms() {
@@ -33,6 +34,7 @@ mat3 test_shared_array_size_transforms() {
     return combined;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_shared_array_size_transforms() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_shared_array_size_weights() {
@@ -44,6 +46,7 @@ float test_shared_array_size_weights() {
     return total;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_shared_array_size_weights() ~= 0.0
 
 int test_shared_array_size_indices() {
@@ -57,6 +60,7 @@ int test_shared_array_size_indices() {
     return max_index;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_shared_array_size_indices() == 0
 
 float test_shared_array_size_combined() {
@@ -72,4 +76,6 @@ float test_shared_array_size_combined() {
     return result;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_shared_array_size_combined() ~= 0.0

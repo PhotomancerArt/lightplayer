@@ -211,13 +211,19 @@ pub fn max_abs_delta(a: &LpsValueF32, b: &LpsValueF32) -> Option<f64> {
     }
 }
 
-/// Run the whole corpus on `target`, returning one record per applicable
-/// `// run:` directive. Never mutates any corpus file.
-pub fn sweep_corpus(target: &Target) -> anyhow::Result<Vec<SweepRecord>> {
+/// Run the corpus (or, with `roots`, just the files under those paths) on
+/// `target`, returning one record per applicable `// run:` directive.
+/// Never mutates any corpus file.
+pub fn sweep_corpus(target: &Target, roots: &[String]) -> anyhow::Result<Vec<SweepRecord>> {
     let filetests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("filetests");
-    let mut files: Vec<PathBuf> = WalkDir::new(&filetests_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
+    let walk_roots: Vec<PathBuf> = if roots.is_empty() {
+        vec![filetests_dir.clone()]
+    } else {
+        roots.iter().map(|r| filetests_dir.join(r)).collect()
+    };
+    let mut files: Vec<PathBuf> = walk_roots
+        .iter()
+        .flat_map(|root| WalkDir::new(root).into_iter().filter_map(|e| e.ok()))
         .map(|e| e.path().to_path_buf())
         .filter(|p| p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("glsl"))
         .collect();

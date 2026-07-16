@@ -28,7 +28,7 @@
 //! texture fixtures (not yet bound through the lp-gfx texture registry) and
 //! trap-code expectations.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use lp_collection::VecMap;
 use lp_gfx_lpvm::TargetLpvmGraphics;
@@ -38,9 +38,10 @@ use lps_shared::{LpsModuleSig, LpsType, LpsValueF32, StructMember, TextureBindin
 
 use crate::test_run::interp::decode_return;
 
-/// Process-wide adapter-gated GPU context (device creation is expensive and
-/// wgpu devices are internally synchronized).
-static PROBE_GRAPHICS: OnceLock<Option<GpuGraphics>> = OnceLock::new();
+/// Process-wide adapter-gated GPU context. Rebuildable: a corpus shader
+/// that hangs the GPU (no fuel on this tier) can lose the device; the next
+/// probe then recreates it so one bad shader costs only its own directive.
+static PROBE_GRAPHICS: Mutex<ProbeSlot> = Mutex::new(ProbeSlot::Uninit);
 
 /// Serializes compile+render+readback across the harness's parallel file
 /// workers. Concurrent probe pipelines on one device deadlocked inside the
@@ -49,32 +50,60 @@ static PROBE_GRAPHICS: OnceLock<Option<GpuGraphics>> = OnceLock::new();
 /// the GPU at a time is the robust choice.
 static PROBE_SERIAL: Mutex<()> = Mutex::new(());
 
+enum ProbeSlot {
+    Uninit,
+    /// Host has no GPU adapter (sticky — no point retrying per directive).
+    NoAdapter,
+    Ready(Arc<GpuGraphics>),
+}
+
+fn build_graphics() -> Option<GpuGraphics> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        force_fallback_adapter: false,
+        compatible_surface: None,
+    }))
+    .ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("lps-filetests wgpu probe"),
+        ..Default::default()
+    }))
+    .ok()?;
+    Some(GpuGraphics::new(
+        device,
+        queue,
+        Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga)),
+    ))
+}
+
 /// The shared probe `GpuGraphics`, or `None` when the host has no adapter.
-pub fn probe_graphics() -> Option<&'static GpuGraphics> {
-    PROBE_GRAPHICS
-        .get_or_init(|| {
-            let instance =
-                wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-            let adapter =
-                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    force_fallback_adapter: false,
-                    compatible_surface: None,
-                }))
-                .ok()?;
-            let (device, queue) =
-                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                    label: Some("lps-filetests wgpu probe"),
-                    ..Default::default()
-                }))
-                .ok()?;
-            Some(GpuGraphics::new(
-                device,
-                queue,
-                Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga)),
-            ))
-        })
-        .as_ref()
+pub fn probe_graphics() -> Option<Arc<GpuGraphics>> {
+    let mut slot = PROBE_GRAPHICS.lock().expect("probe graphics lock poisoned");
+    match &*slot {
+        ProbeSlot::Ready(g) => Some(Arc::clone(g)),
+        ProbeSlot::NoAdapter => None,
+        ProbeSlot::Uninit => match build_graphics() {
+            Some(g) => {
+                let g = Arc::new(g);
+                *slot = ProbeSlot::Ready(Arc::clone(&g));
+                Some(g)
+            }
+            None => {
+                *slot = ProbeSlot::NoAdapter;
+                None
+            }
+        },
+    }
+}
+
+/// Drop the current device so the next probe rebuilds it (called after
+/// errors that indicate a lost/poisoned device).
+fn probe_reset() {
+    let mut slot = PROBE_GRAPHICS.lock().expect("probe graphics lock poisoned");
+    if matches!(&*slot, ProbeSlot::Ready(_)) {
+        *slot = ProbeSlot::Uninit;
+    }
 }
 
 /// Compiled probe module: the authored source (kept for per-directive
@@ -219,9 +248,12 @@ impl WgpuProbeInstance {
             .map_err(|e| format!("wgpu probe compile: {e}"))?;
 
         let uniforms = self.uniform_tree()?;
-        let texels = shader
-            .probe_f32(width, &uniforms)
-            .map_err(|e| format!("wgpu probe render: {e}"))?;
+        let texels = shader.probe_f32(width, &uniforms).map_err(|e| {
+            // A timed-out or failed submission can poison the device;
+            // rebuild it for the next directive.
+            probe_reset();
+            format!("wgpu probe render: {e}")
+        })?;
 
         // Reinterpret lanes per the plan and decode like the interp target.
         let scalars: Vec<Value> = plan

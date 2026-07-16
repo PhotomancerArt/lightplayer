@@ -16,6 +16,7 @@ vec2 test_unpackunorm2x16_zero() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackunorm2x16_zero() ~= vec2(0.0, 0.0)
 
 vec2 test_unpackunorm2x16_max() {
@@ -28,6 +29,7 @@ vec2 test_unpackunorm2x16_max() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackunorm2x16_max() ~= vec2(1.0, 1.0)
 
 vec2 test_unpackunorm2x16_half() {
@@ -40,6 +42,7 @@ vec2 test_unpackunorm2x16_half() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackunorm2x16_half() ~= vec2(0.5, 0.5)
 
 vec4 test_unpackunorm4x8_zero() {
@@ -52,6 +55,7 @@ vec4 test_unpackunorm4x8_zero() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackunorm4x8_zero() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 vec4 test_unpackunorm4x8_max() {
@@ -64,6 +68,7 @@ vec4 test_unpackunorm4x8_max() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackunorm4x8_max() ~= vec4(1.0, 1.0, 1.0, 1.0)
 
 vec4 test_unpackunorm4x8_quarters() {
@@ -71,11 +76,13 @@ vec4 test_unpackunorm4x8_quarters() {
     return unpackUnorm4x8(67372036u);
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackunorm4x8_quarters() ~= vec4(0.25, 0.25, 0.25, 0.25)
 
 

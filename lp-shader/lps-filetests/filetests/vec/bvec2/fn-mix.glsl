@@ -19,6 +19,7 @@ bvec2 test_bvec2_mix_all_false_selector() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bvec2_mix_all_false_selector() == bvec2(true, false)
 
 bvec2 test_bvec2_mix_all_true_selector() {
@@ -32,6 +33,7 @@ bvec2 test_bvec2_mix_all_true_selector() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bvec2_mix_all_true_selector() == bvec2(false, true)
 
 bvec2 test_bvec2_mix_mixed_selector() {
@@ -45,6 +47,7 @@ bvec2 test_bvec2_mix_mixed_selector() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bvec2_mix_mixed_selector() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_other_mixed_selector() {
@@ -58,6 +61,7 @@ bvec2 test_bvec2_mix_other_mixed_selector() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bvec2_mix_other_mixed_selector() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_same_vectors() {
@@ -70,6 +74,7 @@ bvec2 test_bvec2_mix_same_vectors() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bvec2_mix_same_vectors() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_in_expression() {
@@ -82,8 +87,10 @@ bvec2 test_bvec2_mix_in_expression() {
     // not((false, false)) = (true, true)
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bvec2_mix_in_expression() == bvec2(true, true)

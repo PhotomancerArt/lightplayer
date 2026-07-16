@@ -11,9 +11,13 @@ int div_ints(int a, int b) {
     return a / b;
 }
 
+// @unsupported(wgpu.f32)
 // run: div_ints(42, 0) == -1
+// @unsupported(wgpu.f32)
 // run: div_ints(-42, 0) == -1
+// @unsupported(wgpu.f32)
 // run: div_ints(0, 0) == -1
+// @unsupported(wgpu.f32)
 // run: div_ints(-2147483648, 0) == -1
 // run: div_ints(-2147483648, -1) == -2147483648
 // run: div_ints(-2147483648, 1) == -2147483648
@@ -25,6 +29,8 @@ int test_int_divide_by_zero_local() {
     return a / b;
 }
 
+// wgpu.f32: integer division/modulo by zero is undefined on GPU hardware (Q32 pins device semantics)
+// @unsupported(wgpu.f32)
 // run: test_int_divide_by_zero_local() == -1
 
 int test_int_min_divide_by_minus_one_local() {

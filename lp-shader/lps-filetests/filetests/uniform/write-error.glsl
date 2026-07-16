@@ -23,6 +23,7 @@ float test_edge_uniform_write_error_read() {
     return time + 1.0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_uniform_write_error_read() ~= 1.0
 
 int test_edge_uniform_write_error_int() {
@@ -30,6 +31,7 @@ int test_edge_uniform_write_error_int() {
     return count + 5;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_uniform_write_error_int() == 5
 
 vec2 test_edge_uniform_write_error_vec2() {
@@ -37,6 +39,7 @@ vec2 test_edge_uniform_write_error_vec2() {
     return position * 2.0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_uniform_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_uniform_write_error_vec3() {
@@ -44,6 +47,7 @@ vec3 test_edge_uniform_write_error_vec3() {
     return color + vec3(0.1, 0.1, 0.1);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_uniform_write_error_vec3() ~= vec3(0.1, 0.1, 0.1)
 
 mat4 test_edge_uniform_write_error_mat4() {
@@ -51,6 +55,8 @@ mat4 test_edge_uniform_write_error_mat4() {
     return transform;
 }
 
+// wgpu.f32: wgpu device validation rejects the module (e.g. duplicate uniform bindings)
+// @unsupported(wgpu.f32)
 // run: test_edge_uniform_write_error_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_edge_uniform_write_error_calculations() {
@@ -63,4 +69,6 @@ float test_edge_uniform_write_error_calculations() {
 }
 
 // Zeros + 0.5+0.5 + 0.2 from vec3(0.2,…) first component
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_edge_uniform_write_error_calculations() ~= 1.2

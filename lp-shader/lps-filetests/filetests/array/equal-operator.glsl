@@ -10,6 +10,7 @@ bool test_equal_operator_float_arrays_true() {
     return arr1 == arr2; // Should be true
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_float_arrays_true() == true
 
 bool test_equal_operator_int_arrays_true() {
@@ -18,6 +19,7 @@ bool test_equal_operator_int_arrays_true() {
     return arr1 == arr2; // Should be true
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_int_arrays_true() == true
 
 bool test_equal_operator_vec2_arrays_true() {
@@ -26,6 +28,7 @@ bool test_equal_operator_vec2_arrays_true() {
     return arr1 == arr2; // Should be true
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_vec2_arrays_true() == true
 
 bool test_equal_operator_float_arrays_false() {
@@ -34,6 +37,7 @@ bool test_equal_operator_float_arrays_false() {
     return arr1 == arr2; // Should be false
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_float_arrays_false() == false
 
 bool test_equal_operator_int_arrays_false() {
@@ -42,6 +46,7 @@ bool test_equal_operator_int_arrays_false() {
     return arr1 == arr2; // Should be false
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_int_arrays_false() == false
 
 bool test_equal_operator_vec3_arrays_false() {
@@ -50,6 +55,7 @@ bool test_equal_operator_vec3_arrays_false() {
     return arr1 == arr2; // Should be false
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_vec3_arrays_false() == false
 
 bool test_equal_operator_bool_arrays_true() {
@@ -58,6 +64,7 @@ bool test_equal_operator_bool_arrays_true() {
     return arr1 == arr2; // Should be true
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_bool_arrays_true() == true
 
 bool test_equal_operator_uvec2_arrays_true() {
@@ -66,6 +73,7 @@ bool test_equal_operator_uvec2_arrays_true() {
     return arr1 == arr2; // Should be true
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_uvec2_arrays_true() == true
 
 bool test_equal_operator_different_sizes() {
@@ -75,6 +83,7 @@ bool test_equal_operator_different_sizes() {
     return true; // Just return true to indicate test passes
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_different_sizes() == true
 
 bool test_equal_operator_after_assignment() {
@@ -84,6 +93,7 @@ bool test_equal_operator_after_assignment() {
     return arr1 == arr2; // should be true after assignment
 }
 
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_after_assignment() == true
 
 bool test_equal_operator_empty_arrays() {
@@ -92,4 +102,6 @@ bool test_equal_operator_empty_arrays() {
     return true;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_equal_operator_empty_arrays() == true

@@ -16,6 +16,7 @@ uint test_packunorm2x16_zeros() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_packunorm2x16_zeros() == 0u
 
 uint test_packunorm2x16_ones() {
@@ -28,6 +29,7 @@ uint test_packunorm2x16_ones() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_packunorm2x16_ones() == 4294967295u
 
 uint test_packunorm2x16_half() {
@@ -40,6 +42,7 @@ uint test_packunorm2x16_half() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_packunorm2x16_half() == 2147516416u
 
 uint test_packunorm4x8_zeros() {
@@ -52,6 +55,7 @@ uint test_packunorm4x8_zeros() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_packunorm4x8_zeros() == 0u
 
 uint test_packunorm4x8_ones() {
@@ -64,6 +68,7 @@ uint test_packunorm4x8_ones() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_packunorm4x8_ones() == 4294967295u
 
 uint test_packunorm4x8_quarters() {
@@ -71,11 +76,13 @@ uint test_packunorm4x8_quarters() {
     return packUnorm4x8(vec4(0.25, 0.25, 0.25, 0.25));
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_packunorm4x8_quarters() == 67372036u
 
 

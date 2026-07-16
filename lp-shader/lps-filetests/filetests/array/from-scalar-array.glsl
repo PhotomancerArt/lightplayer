@@ -9,6 +9,7 @@ float test_from_scalar_float_array() {
     return arr[0]; // Should be 1.0
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_float_array() ~= 1.0
 
 int test_from_scalar_int_array() {
@@ -16,6 +17,7 @@ int test_from_scalar_int_array() {
     return arr[2]; // Should be 30
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_int_array() == 30
 
 uint test_from_scalar_uint_array() {
@@ -23,6 +25,7 @@ uint test_from_scalar_uint_array() {
     return arr[1]; // Should be 2u
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_uint_array() == 2u
 
 bool test_from_scalar_bool_array() {
@@ -30,6 +33,7 @@ bool test_from_scalar_bool_array() {
     return arr[1]; // Should be false
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_bool_array() == false
 
 float test_from_scalar_mixed_conversions() {
@@ -37,6 +41,7 @@ float test_from_scalar_mixed_conversions() {
     return arr[1]; // Should be 2.5
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_mixed_conversions() ~= 2.5
 
 int test_from_scalar_int_from_float() {
@@ -44,6 +49,7 @@ int test_from_scalar_int_from_float() {
     return arr[0] + arr[1] + arr[2]; // 1 + 2 + 3 = 6
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_int_from_float() == 6
 
 uint test_from_scalar_uint_from_float() {
@@ -51,6 +57,7 @@ uint test_from_scalar_uint_from_float() {
     return arr[0] + arr[1]; // 1u + 2u = 3u
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_uint_from_float() == 3u
 
 bool test_from_scalar_bool_from_numeric() {
@@ -60,6 +67,7 @@ bool test_from_scalar_bool_from_numeric() {
     // false && !true && false && true = false && false && false && true = false
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_bool_from_numeric() == false
 
 float test_from_scalar_single_element() {
@@ -67,6 +75,7 @@ float test_from_scalar_single_element() {
     return arr[0]; // Should be 42.0
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_single_element() ~= 42.0
 
 int test_from_scalar_zero_size() {
@@ -75,6 +84,7 @@ int test_from_scalar_zero_size() {
     return arr[0]; // Should be 0
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_zero_size() == 0
 
 vec2 test_from_scalar_vector_array() {
@@ -82,6 +92,7 @@ vec2 test_from_scalar_vector_array() {
     return arr[1]; // Should be vec2(3.0, 4.0)
 }
 
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_vector_array() ~= vec2(3.0, 4.0)
 
 float test_from_scalar_expression() {
@@ -89,4 +100,6 @@ float test_from_scalar_expression() {
     return arr[0] + arr[1] + arr[2]; // 3.0 + 6.0 + 3.0 = 12.0
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_from_scalar_expression() ~= 12.0

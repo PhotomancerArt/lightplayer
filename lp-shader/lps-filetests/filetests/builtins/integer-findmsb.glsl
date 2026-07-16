@@ -13,6 +13,7 @@ int test_findmsb_int_zero() {
     return findMSB(0);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findmsb_int_zero() == -1
 
 int test_findmsb_int_one() {
@@ -20,6 +21,7 @@ int test_findmsb_int_one() {
     return findMSB(1);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findmsb_int_one() == 0
 
 int test_findmsb_int_two() {
@@ -27,6 +29,7 @@ int test_findmsb_int_two() {
     return findMSB(2);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findmsb_int_two() == 1
 
 int test_findmsb_int_neg_one() {
@@ -34,6 +37,7 @@ int test_findmsb_int_neg_one() {
     return findMSB(-1);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findmsb_int_neg_one() == -1
 
 int test_findmsb_int_negative() {
@@ -41,6 +45,7 @@ int test_findmsb_int_negative() {
     return findMSB(-2);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findmsb_int_negative() == 0
 
 int test_findmsb_int_large() {
@@ -50,6 +55,7 @@ int test_findmsb_int_large() {
 }
 
 // findMSB(-2)==0 / findMSB(int 2^31)==30 per GLSL semantics (naga const-eval agrees); prior expectations were wrong, the Q32 @broken lines masked correct results.
+// @unsupported(wgpu.f32)
 // run: test_findmsb_int_large() == 30
 
 uint test_findmsb_uint_zero() {
@@ -57,6 +63,7 @@ uint test_findmsb_uint_zero() {
     return findMSB(0u);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findmsb_uint_zero() == 4294967295u
 
 uint test_findmsb_uint_one() {
@@ -64,6 +71,7 @@ uint test_findmsb_uint_one() {
     return findMSB(1u);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findmsb_uint_one() == 0u
 
 uint test_findmsb_uint_large() {
@@ -71,6 +79,7 @@ uint test_findmsb_uint_large() {
     return findMSB(2147483648u);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findmsb_uint_large() == 31u
 
 ivec2 test_findmsb_ivec2() {
@@ -78,6 +87,8 @@ ivec2 test_findmsb_ivec2() {
     return findMSB(ivec2(0, 2));
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_findmsb_ivec2() == ivec2(-1, 1)
 
 

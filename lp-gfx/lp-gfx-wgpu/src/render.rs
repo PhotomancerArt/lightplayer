@@ -224,6 +224,27 @@ impl GpuShader {
         use crate::read_back::read_back_f32;
         use crate::texture_backing::GpuTexture;
 
+        let scope = self
+            .shared
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let result = self.probe_f32_inner(width, uniforms);
+        let scope_err = pollster::block_on(scope.pop());
+        match (result, scope_err) {
+            (_, Some(e)) => Err(GfxError::Render(format!("wgpu validation: {e}"))),
+            (r, None) => r,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn probe_f32_inner(
+        &mut self,
+        width: u32,
+        uniforms: &LpsValueF32,
+    ) -> Result<Vec<f32>, GfxError> {
+        use crate::read_back::read_back_f32;
+        use crate::texture_backing::GpuTexture;
+
         let backing = GpuTexture::new(
             &self.shared.device,
             width,

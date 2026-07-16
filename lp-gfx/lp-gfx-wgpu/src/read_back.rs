@@ -93,8 +93,9 @@ pub(crate) fn read_back_f32(
     let submission = queue.submit([encoder.finish()]);
 
     let slice = buffer.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |result| {
-        result.expect("map read_back buffer");
+    let (map_tx, map_rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = map_tx.send(result);
     });
     // Wait for THIS submission specifically. `submission_index: None` waits
     // for "the most recent submission at poll time", which starves under
@@ -106,6 +107,19 @@ pub(crate) fn read_back_f32(
             timeout,
         })
         .map_err(|e| GfxError::Backend(format!("read_back device poll: {e:?}")))?;
+    // Map failures (e.g. device lost after an earlier hung submission)
+    // surface as errors, never a panic inside the wgpu callback.
+    match map_rx.try_recv() {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            return Err(GfxError::Backend(format!("read_back buffer map: {e:?}")));
+        }
+        Err(_) => {
+            return Err(GfxError::Backend(String::from(
+                "read_back buffer map did not complete after device poll",
+            )));
+        }
+    }
 
     let mut pixels =
         Vec::with_capacity(width as usize * height as usize * bytes_per_pixel as usize / 4);

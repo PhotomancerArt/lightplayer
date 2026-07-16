@@ -14,6 +14,7 @@ float test_forward_declare_simple() {
     return compute_area(4.0, 5.0);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_forward_declare_simple() ~= 20.0
 
 vec2 test_forward_declare_vector() {
@@ -23,6 +24,7 @@ vec2 test_forward_declare_vector() {
     return transform_point(point, transform);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_forward_declare_vector() ~= vec2(1.0, 2.0)
 
 void test_forward_declare_array() {
@@ -32,6 +34,7 @@ void test_forward_declare_array() {
     // Data should be initialized to [1.0, 2.0, 3.0]
 }
 
+// @unsupported(wgpu.f32)
 // run: test_forward_declare_array() == 0.0
 
 float test_forward_declare_multiple_calls() {
@@ -41,6 +44,7 @@ float test_forward_declare_multiple_calls() {
     return area1 + area2;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_forward_declare_multiple_calls() ~= 36.0
 
 float test_forward_declare_in_expression() {
@@ -48,6 +52,7 @@ float test_forward_declare_in_expression() {
     return compute_area(3.0, 4.0) * 2.0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_forward_declare_in_expression() ~= 24.0
 
 // Multiple identical prototypes: valid in GLSL, but our parser rejects duplicates in one file.
@@ -57,6 +62,7 @@ float test_forward_declare_duplicate() {
     return add_numbers(7.0, 8.0);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_forward_declare_duplicate() ~= 15.0
 
 // Forward declaration with different parameter names (OK)
@@ -67,6 +73,8 @@ vec2 test_forward_declare_different_names() {
     return scale_vector(v, 2.0);
 }
 
+// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
+// @unsupported(wgpu.f32)
 // run: test_forward_declare_different_names() ~= vec2(4.0, 6.0)
 
 // ============================================================================

@@ -8,12 +8,14 @@ bool test_isinf_normal() {
     return isinf(1.0);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_isinf_normal() == false
 
 bool test_isinf_zero() {
     return isinf(0.0);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_isinf_zero() == false
 
 bool test_isinf_inf() {
@@ -23,6 +25,7 @@ bool test_isinf_inf() {
 }
 
 // @unsupported(wasm.q32)
+// @unsupported(wgpu.f32)
 // run: test_isinf_inf() == false
 
 bool test_isinf_neg_inf() {
@@ -32,6 +35,7 @@ bool test_isinf_neg_inf() {
 }
 
 // @unsupported(wasm.q32)
+// @unsupported(wgpu.f32)
 // run: test_isinf_neg_inf() == false
 
 bvec2 test_isinf_vec2() {
@@ -41,6 +45,7 @@ bvec2 test_isinf_vec2() {
 }
 
 // @unsupported(wasm.q32)
+// @unsupported(wgpu.f32)
 // run: test_isinf_vec2() == bvec2(false, false)
 
 bvec3 test_isinf_vec3() {
@@ -50,6 +55,7 @@ bvec3 test_isinf_vec3() {
 }
 
 // @unsupported(wasm.q32)
+// @unsupported(wgpu.f32)
 // run: test_isinf_vec3() == bvec3(false, false, false)
 
 bvec4 test_isinf_vec4() {
@@ -58,5 +64,7 @@ bvec4 test_isinf_vec4() {
     return isinf(vec4(p / z, -p / z, 1.0, 0.0));
 }
 
+// wgpu.f32: WGSL has no isnan/isinf (fast-math GPU tier; naga wgsl-out rejects them)
 // @unsupported(wasm.q32)
+// @unsupported(wgpu.f32)
 // run: test_isinf_vec4() == bvec4(false, false, false, false)

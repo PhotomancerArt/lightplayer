@@ -9,6 +9,7 @@ int test_length_method_float_array() {
     return arr.length(); // Should be 5
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_float_array() == 5
 
 int test_length_method_int_array() {
@@ -16,6 +17,7 @@ int test_length_method_int_array() {
     return arr.length(); // Should be 3
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_int_array() == 3
 
 int test_length_method_vec2_array() {
@@ -23,6 +25,7 @@ int test_length_method_vec2_array() {
     return arr.length(); // Should be 4
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_vec2_array() == 4
 
 int test_length_method_bool_array() {
@@ -30,6 +33,7 @@ int test_length_method_bool_array() {
     return arr.length(); // Should be 6
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_bool_array() == 6
 
 int test_length_method_uvec3_array() {
@@ -37,6 +41,7 @@ int test_length_method_uvec3_array() {
     return arr.length(); // Should be 2
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_uvec3_array() == 2
 
 int test_length_method_empty_array() {
@@ -44,6 +49,7 @@ int test_length_method_empty_array() {
     return 0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_empty_array() == 0
 
 int test_length_method_large_array() {
@@ -51,6 +57,7 @@ int test_length_method_large_array() {
     return arr.length(); // Should be 100
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_large_array() == 100
 
 int test_length_method_in_expression() {
@@ -58,6 +65,7 @@ int test_length_method_in_expression() {
     return int(arr.length() / 2); // 7 / 2 = 3 (integer division)
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_in_expression() == 3
 
 int test_length_method_multidimensional() {
@@ -69,6 +77,7 @@ int test_length_method_multidimensional() {
     return arr.length(); // Should be 3 (outer dimension)
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_multidimensional() == 3
 
 int test_length_method_unsized_array() {
@@ -76,6 +85,7 @@ int test_length_method_unsized_array() {
     return arr.length(); // Should be 6
 }
 
+// @unsupported(wgpu.f32)
 // run: test_length_method_unsized_array() == 6
 
 float test_length_method_as_float() {
@@ -83,4 +93,6 @@ float test_length_method_as_float() {
     return float(arr.length()); // Should be 3.0
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_length_method_as_float() ~= 3.0

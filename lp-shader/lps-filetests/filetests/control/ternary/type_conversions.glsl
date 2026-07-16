@@ -12,6 +12,7 @@ int test_ternary_int_both_branches() {
     return b ? 10 : 20;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_int_both_branches() == 10
 
 float test_ternary_float_both_branches() {
@@ -19,6 +20,7 @@ float test_ternary_float_both_branches() {
     return b ? 1.5 : 2.5;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_float_both_branches() ~= 2.5
 
 int test_ternary_int_to_float_conversion() {
@@ -28,6 +30,7 @@ int test_ternary_int_to_float_conversion() {
     return int(result);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_int_to_float_conversion() == 5
 
 int test_ternary_float_to_int_conversion() {
@@ -37,6 +40,7 @@ int test_ternary_float_to_int_conversion() {
     return result;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_float_to_int_conversion() == 10
 
 int test_ternary_bool_to_int_conversion() {
@@ -46,6 +50,7 @@ int test_ternary_bool_to_int_conversion() {
     return result;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_bool_to_int_conversion() == 1
 
 int test_ternary_int_to_bool_conversion() {
@@ -55,6 +60,7 @@ int test_ternary_int_to_bool_conversion() {
     return int(result);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_int_to_bool_conversion() == 0
 
 int test_ternary_uint_to_int_conversion() {
@@ -66,6 +72,7 @@ int test_ternary_uint_to_int_conversion() {
     return result;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_uint_to_int_conversion() == 42
 
 int test_ternary_mixed_numeric_types() {
@@ -75,6 +82,7 @@ int test_ternary_mixed_numeric_types() {
     return int(result * 2.0);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_mixed_numeric_types() == 21
 
 int test_ternary_same_type_no_conversion() {
@@ -84,6 +92,7 @@ int test_ternary_same_type_no_conversion() {
     return b ? x : y;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_same_type_no_conversion() == 100
 
 float test_ternary_same_float_type() {
@@ -93,6 +102,7 @@ float test_ternary_same_float_type() {
     return b ? x : y;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_ternary_same_float_type() ~= 2.5
 
 bool test_ternary_same_bool_type() {
@@ -102,6 +112,8 @@ bool test_ternary_same_bool_type() {
     return b ? x : y;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_ternary_same_bool_type() == true
 
 

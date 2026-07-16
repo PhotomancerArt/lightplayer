@@ -18,7 +18,10 @@ vec4 texel_right() {
 }
 
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: texel_left() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0002)
 // interp.f32: no guest memory to bind texture fixtures into
+// wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: texel_right() ~= vec4(0.0, 1.0, 0.0, 1.0) (tolerance: 0.0002)
