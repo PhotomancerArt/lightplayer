@@ -6,14 +6,16 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, DEPLOY_NODE_ID, DeployOp, UiAction, UiDeviceCard, UiDeviceCardState,
+    ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceController, DeviceOp, UiAction, UiDeviceCard,
+    UiDeviceCardState,
 };
 
 use crate::app::home::time_ago::time_ago;
 use crate::base::{StudioIcon, StudioIconName};
 
-/// One known device. Clicking connects to it (via the browser's port
-/// picker until devices carry stamped identities — M5 refines this).
+/// One known device. Clicking an offline/remembered card reconnects
+/// through an already-granted serial port with no chooser (M1); other
+/// states open the deploy dialog.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceCard(
@@ -54,6 +56,13 @@ pub(crate) fn DeviceCard(
         ),
     };
     let muted = matches!(card.state, UiDeviceCardState::RememberedOffline { .. });
+    // offline/remembered → one-click reconnect over a granted port (M1);
+    // everything else keeps the deploy-dialog entry
+    let click_action = if muted {
+        reconnect_device_action()
+    } else {
+        connect_device_action()
+    };
 
     rsx! {
         article {
@@ -70,7 +79,7 @@ pub(crate) fn DeviceCard(
                     ));
                 }
             },
-            onclick: move |_| on_action.call(connect_device_action()),
+            onclick: move |_| on_action.call(click_action.clone()),
             header { class: "tw:flex tw:items-center tw:gap-2 tw:border-b tw:border-border tw:bg-terminal tw:px-3 tw:py-2",
                 span { class: dot_class }
                 span { class: "tw:inline-flex tw:items-center tw:text-muted-foreground",
@@ -108,6 +117,16 @@ pub(crate) fn ConnectDeviceCard(on_action: EventHandler<UiAction>) -> Element {
             span { class: "tw:text-xs tw:text-dim-foreground", "{meta.summary}" }
         }
     }
+}
+
+/// One-click reconnect for an offline/remembered device (M1): connect a
+/// granted serial port directly; the browser chooser only appears when no
+/// grant exists.
+pub(crate) fn reconnect_device_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::ReconnectDevice,
+    )
 }
 
 /// Connect = open the deploy dialog (M5): connect, provision, and push

@@ -45,9 +45,10 @@ use crate::{
 use crate::app::places::{DeviceContent, DeviceSyncState};
 
 pub struct DeviceController {
-    /// Catalog + factory: consulted when a flow needs the picker list or a
-    /// fresh connector; never borrowed across an await (its methods are
-    /// synchronous and it is owned by value).
+    /// Catalog + factory: consulted when a flow needs the picker list or
+    /// the kind's shared connector (memoized per kind, so endpoint state
+    /// minted by one flow is visible to the next); never borrowed across an
+    /// await (its methods are synchronous and it is owned by value).
     registry: LinkProviderRegistry,
     /// The connect-flow view state (picker/progress/failure). `Connected`
     /// is entered exactly when [`Self::attachment`] becomes non-`None`.
@@ -338,6 +339,65 @@ impl DeviceController {
 
     #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
     async fn open_browser_serial_provider(&mut self) -> Result<DeviceOpenOutcome, UiError> {
+        Err(UiError::UnsupportedFeature(
+            "browser serial ESP32 access requires the browser-serial-esp32 feature on wasm"
+                .to_string(),
+        ))
+    }
+
+    /// One-click reconnect (M1): connect through a serial port this origin
+    /// was ALREADY granted — no chooser. Which physical device a grant
+    /// belongs to is unknowable pre-connect, so the first granted endpoint
+    /// is connected (single-grant is the common case) and identity is
+    /// reconciled from the hello. Falls back to the permission chooser when
+    /// no grant exists yet.
+    #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+    pub async fn reconnect_granted_device(&mut self) -> Result<DeviceOpenOutcome, UiError> {
+        self.attachment = RuntimeAttachment::None;
+        self.flow = ConnectFlowState::DiscoveringEndpoints {
+            provider_id: LinkProviderKind::BrowserSerialEsp32,
+            progress: ProgressState::new("Finding granted serial ports"),
+        };
+
+        let result = match self
+            .registry
+            .create_connector(LinkProviderKind::BrowserSerialEsp32)
+        {
+            Ok(connector) => match &*connector {
+                LinkConnector::BrowserSerialEsp32(provider) => provider
+                    .discover_granted_endpoints()
+                    .await
+                    .map_err(map_link_error),
+                _ => Err(UiError::Link(
+                    "browser serial connector has the wrong provider type".to_string(),
+                )),
+            },
+            Err(error) => Err(map_link_error(error)),
+        };
+        let endpoints = match result {
+            Ok(endpoints) => endpoints,
+            Err(error) => {
+                self.recover_to_provider_selection(error.message());
+                return Err(error);
+            }
+        };
+        let Some(endpoint) = endpoints.into_iter().next() else {
+            return self.open_browser_serial_provider().await;
+        };
+        let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
+        let endpoint_id = endpoint_choice.id.clone();
+        self.flow = ConnectFlowState::SelectingEndpoint {
+            provider_id: LinkProviderKind::BrowserSerialEsp32,
+            endpoints: vec![endpoint_choice],
+        };
+        let logs = self
+            .connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
+            .await?;
+        Ok(DeviceOpenOutcome::Connected { logs })
+    }
+
+    #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
+    pub async fn reconnect_granted_device(&mut self) -> Result<DeviceOpenOutcome, UiError> {
         Err(UiError::UnsupportedFeature(
             "browser serial ESP32 access requires the browser-serial-esp32 feature on wasm"
                 .to_string(),
@@ -794,6 +854,35 @@ mod tests {
             device.flow_state(),
             ConnectFlowState::SelectingProvider { providers, .. }
                 if providers.len() == 1 && providers[0].id == LinkProviderKind::Fake
+        ));
+    }
+
+    #[test]
+    fn connect_flow_uses_the_connector_instance_the_registry_already_handed_out() {
+        // Regression for the browser-serial "link endpoint not found" bug:
+        // the connect flow must land on the SAME factory-built connector a
+        // previous flow (request_access analog) got from the registry. State
+        // armed on the externally held instance is only visible to
+        // `connect_endpoint` when the registry memoizes.
+        let registry = LinkProviderRegistry::from_env(LinkEnv::default());
+        let shared = registry.create_connector(LinkProviderKind::Fake).unwrap();
+        let mut device = DeviceController::with_registry(registry);
+        match &*shared {
+            LinkConnector::Fake(provider) => {
+                provider.set_connect_error(Some("armed on the shared instance".to_string()));
+            }
+            _ => unreachable!("factory Fake kind builds a fake connector"),
+        }
+
+        let result = block_on_ready(
+            device.connect_endpoint(LinkProviderKind::Fake, LinkEndpointId::new("fake-runtime")),
+        );
+
+        // A per-call fresh provider would never see the armed error and
+        // would fail with endpoint-not-found instead.
+        assert!(matches!(
+            &result,
+            Err(UiError::Link(message)) if message.contains("armed on the shared instance")
         ));
     }
 

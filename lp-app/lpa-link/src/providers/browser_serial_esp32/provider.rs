@@ -91,7 +91,30 @@ impl BrowserSerialEsp32Provider {
     /// catalog-level metadata: it answers "has a device ever been granted
     /// here?" without opening anything.
     pub async fn granted_ports_available() -> bool {
-        browser_serial::granted_ports_count().await > 0
+        browser_serial::granted_ports()
+            .await
+            .is_ok_and(|ports| !ports.is_empty())
+    }
+
+    /// Mint endpoints for every port this origin was ALREADY granted
+    /// (`navigator.serial.getPorts()`) — no chooser is shown, and `.open()`
+    /// on a granted port needs no user gesture. Ports that already carry an
+    /// endpoint keep it; new grants get one via
+    /// [`Self::create_granted_endpoint`]. This is the one-click reconnect
+    /// path (M1): which physical device a grant belongs to is unknowable
+    /// pre-connect, so callers connect first and reconcile identity from
+    /// the hello.
+    pub async fn discover_granted_endpoints(&self) -> Result<Vec<LinkEndpoint>, LinkError> {
+        let ports = browser_serial::granted_ports().await?;
+        let mut endpoints = Vec::with_capacity(ports.len());
+        for port in ports {
+            let endpoint_id = match self.endpoint_id_for_port(port.id) {
+                Some(endpoint_id) => endpoint_id,
+                None => self.create_granted_endpoint(port.label, port.id),
+            };
+            endpoints.push(self.endpoint(&endpoint_id)?);
+        }
+        Ok(endpoints)
     }
 
     pub fn is_flash_supported(&self) -> bool {
@@ -337,6 +360,14 @@ impl BrowserSerialEsp32Provider {
 
     fn endpoint_port_id(&self, endpoint_id: &LinkEndpointId) -> Result<u32, LinkError> {
         Ok(self.endpoint_state(endpoint_id)?.port_id)
+    }
+
+    fn endpoint_id_for_port(&self, port_id: u32) -> Option<LinkEndpointId> {
+        self.endpoints
+            .borrow()
+            .values()
+            .find(|state| state.port_id == port_id)
+            .map(|state| state.endpoint.id.clone())
     }
 
     fn session_port_id(&self, session_id: &LinkSessionId) -> Result<u32, LinkError> {

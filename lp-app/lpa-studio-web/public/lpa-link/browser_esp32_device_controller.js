@@ -27,7 +27,12 @@ export class BrowserEsp32DeviceController {
     if (!this.isSupported()) {
       throw new Error("Web Serial is not supported in this browser.");
     }
-    const port = await navigator.serial.requestPort();
+    // Espressif's USB vendor id (D32): the chooser lists only ESP32-class
+    // devices. An empty filtered chooser still rejects with NotFoundError,
+    // which upstream maps to "cancelled".
+    const port = await navigator.serial.requestPort({
+      filters: [{ usbVendorId: 0x303a }],
+    });
     return { port, label: labelForPort(port) };
   }
 

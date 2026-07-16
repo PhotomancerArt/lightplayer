@@ -6,17 +6,37 @@ export function isSupported() {
   return Boolean(globalThis.navigator?.serial);
 }
 
-export async function grantedPortsCount() {
+// Enumerate the ports this origin was ALREADY granted (no permission
+// prompt), registering each one as a session so the returned {id, label}
+// descriptors are openable without a chooser. Repeat calls return the same
+// ids: navigator.serial.getPorts() yields stable SerialPort object
+// identities, and existing sessions are matched by port identity.
+export async function getGrantedPorts() {
   const serial = globalThis.navigator?.serial;
   if (!serial?.getPorts) {
-    return 0;
+    return [];
   }
+  let ports;
   try {
-    const ports = await serial.getPorts();
-    return ports.length;
+    ports = await serial.getPorts();
   } catch {
-    return 0;
+    return [];
   }
+  if (ports.length === 0) {
+    return [];
+  }
+  const { BrowserEsp32DeviceController } = await loadControllerModule();
+  return ports.map((port) => {
+    for (const [id, session] of sessions) {
+      if (session.port === port) {
+        return { id, label: session.label };
+      }
+    }
+    const id = nextSessionId++;
+    const session = new BrowserEsp32DeviceController({ port });
+    sessions.set(id, session);
+    return { id, label: session.label };
+  });
 }
 
 export async function requestPort() {

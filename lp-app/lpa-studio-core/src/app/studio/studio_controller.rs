@@ -1325,6 +1325,19 @@ impl StudioController {
                 self.record_logs(logs);
                 self.attach_runtime(updates).await
             }
+            // One-click reconnect (M1): no activity chip up front — the flow
+            // may fall back to the browser's port chooser, which blocks like
+            // the browser-serial OpenProvider path.
+            DeviceOp::ReconnectDevice => match self.device.reconnect_granted_device().await? {
+                DeviceOpenOutcome::Opened => Ok(UiNotices::new()),
+                DeviceOpenOutcome::Cancelled { message } => {
+                    Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+                }
+                DeviceOpenOutcome::Connected { logs } => {
+                    self.record_logs(logs);
+                    self.attach_runtime(updates).await
+                }
+            },
         }
     }
 
