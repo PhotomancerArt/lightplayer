@@ -15,6 +15,7 @@ pub mod icon;
 pub mod icon_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod icon_menu_stories;
+pub mod outline;
 pub mod popover;
 #[cfg(feature = "stories")]
 pub(crate) mod popover_stories;
