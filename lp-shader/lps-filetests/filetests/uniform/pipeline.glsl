@@ -20,6 +20,7 @@ float test_shared_globals_time() {
     return shared_time + 1.0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_shared_globals_time() ~= 1.0
 
 vec3 test_shared_globals_light() {
@@ -35,6 +36,7 @@ mat4 test_shared_globals_view() {
     return shared_view_matrix;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_shared_globals_view() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 vec4 test_shared_globals_material() {
@@ -42,6 +44,7 @@ vec4 test_shared_globals_material() {
     return shared_material_color * 0.5;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_shared_globals_material() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 int test_shared_globals_mode() {
@@ -49,6 +52,8 @@ int test_shared_globals_mode() {
     return shared_render_mode + 1;
 }
 
+// wgpu.f32: wgpu device validation rejects the module (e.g. duplicate uniform bindings)
+// @unsupported(wgpu.f32)
 // run: test_shared_globals_mode() == 1
 
 float test_shared_globals_combined() {
@@ -60,4 +65,6 @@ float test_shared_globals_combined() {
 }
 
 // All uniforms zero by default: 0 + 0 + 0 + 0
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_shared_globals_combined() ~= 0.0

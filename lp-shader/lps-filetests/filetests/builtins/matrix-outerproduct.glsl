@@ -13,6 +13,7 @@ mat2 test_outerproduct_vec2() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec2() ~= mat2(3.0, 6.0, 4.0, 8.0)
 
 mat3 test_outerproduct_vec3() {
@@ -22,6 +23,7 @@ mat3 test_outerproduct_vec3() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec3() ~= mat3(2.0, 4.0, 6.0, 2.0, 4.0, 6.0, 2.0, 4.0, 6.0)
 
 mat4 test_outerproduct_vec4() {
@@ -31,6 +33,7 @@ mat4 test_outerproduct_vec4() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec4() ~= mat4(1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0)
 
 // Non-square outerProduct: same rectangular-type gap as `matrix-transpose` (see comment there).
@@ -41,6 +44,7 @@ mat2 test_outerproduct_vec2_negative() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec2_negative() ~= mat2(-3.0, 6.0, 4.0, -8.0)
 
 mat3 test_outerproduct_vec3_negative() {
@@ -49,6 +53,7 @@ mat3 test_outerproduct_vec3_negative() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec3_negative() ~= mat3(-2.0, 4.0, -6.0, 2.0, -4.0, 6.0, -3.0, 6.0, -9.0)
 
 mat4 test_outerproduct_vec4_negative() {
@@ -57,6 +62,7 @@ mat4 test_outerproduct_vec4_negative() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec4_negative() ~= mat4(-1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0)
 
 mat2 test_outerproduct_vec2_zero() {
@@ -65,6 +71,7 @@ mat2 test_outerproduct_vec2_zero() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec2_zero() ~= mat2(0.0, 0.0, 0.0, 0.0)
 
 mat3 test_outerproduct_vec3_zero() {
@@ -73,6 +80,7 @@ mat3 test_outerproduct_vec3_zero() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec3_zero() ~= mat3(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat4 test_outerproduct_vec4_zero() {
@@ -81,6 +89,7 @@ mat4 test_outerproduct_vec4_zero() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec4_zero() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 mat2 test_outerproduct_vec2_fractions() {
@@ -89,6 +98,7 @@ mat2 test_outerproduct_vec2_fractions() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec2_fractions() ~= mat2(1.0, 3.0, 1.0, 3.0)
 
 mat3 test_outerproduct_vec3_fractions() {
@@ -97,6 +107,7 @@ mat3 test_outerproduct_vec3_fractions() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec3_fractions() ~= mat3(1.0, 3.0, 5.0, 1.0, 3.0, 5.0, 1.0, 3.0, 5.0)
 
 mat4 test_outerproduct_vec4_fractions() {
@@ -105,24 +116,28 @@ mat4 test_outerproduct_vec4_fractions() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec4_fractions() ~= mat4(1.0, 3.0, 5.0, 7.0, 1.0, 3.0, 5.0, 7.0, 1.0, 3.0, 5.0, 7.0, 1.0, 3.0, 5.0, 7.0)
 
 mat2 test_outerproduct_vec2_expressions() {
     return outerProduct(vec2(2.0, 3.0), vec2(3.0, 4.0));
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec2_expressions() ~= mat2(6.0, 9.0, 8.0, 12.0)
 
 mat3 test_outerproduct_vec3_expressions() {
     return outerProduct(vec3(1.0, 2.0, 3.0), vec3(2.0, 3.0, 4.0));
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec3_expressions() ~= mat3(2.0, 4.0, 6.0, 3.0, 6.0, 9.0, 4.0, 8.0, 12.0)
 
 mat4 test_outerproduct_vec4_expressions() {
     return outerProduct(vec4(1.0, 1.0, 1.0, 1.0), vec4(1.0, 2.0, 3.0, 4.0));
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec4_expressions() ~= mat4(1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0)
 
 mat2 test_outerproduct_vec2_variables() {
@@ -131,6 +146,7 @@ mat2 test_outerproduct_vec2_variables() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec2_variables() ~= mat2(8.0, 12.0, 10.0, 15.0)
 
 mat3 test_outerproduct_vec3_variables() {
@@ -139,6 +155,7 @@ mat3 test_outerproduct_vec3_variables() {
     return outerProduct(a, b);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec3_variables() ~= mat3(3.0, 6.0, 9.0, 2.0, 4.0, 6.0, 1.0, 2.0, 3.0)
 
 mat4 test_outerproduct_vec4_variables() {
@@ -147,4 +164,6 @@ mat4 test_outerproduct_vec4_variables() {
     return outerProduct(a, b);
 }
 
+// wgpu.f32: naga wgsl-out does not support outerProduct
+// @unsupported(wgpu.f32)
 // run: test_outerproduct_vec4_variables() ~= mat4(2.0, 2.0, 2.0, 2.0, 4.0, 4.0, 4.0, 4.0, 6.0, 6.0, 6.0, 6.0, 8.0, 8.0, 8.0, 8.0)

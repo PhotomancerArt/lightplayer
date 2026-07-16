@@ -11,7 +11,9 @@ uint div_uints(uint a, uint b) {
     return a / b;
 }
 
+// @unsupported(wgpu.f32)
 // run: div_uints(42u, 0u) == 4294967295u
+// @unsupported(wgpu.f32)
 // run: div_uints(0u, 0u) == 4294967295u
 // run: div_uints(4294967295u, 0u) == 4294967295u
 
@@ -19,8 +21,10 @@ uint mod_uints(uint a, uint b) {
     return a % b;
 }
 
+// @unsupported(wgpu.f32)
 // run: mod_uints(42u, 0u) == 42u
 // run: mod_uints(0u, 0u) == 0u
+// @unsupported(wgpu.f32)
 // run: mod_uints(4294967295u, 0u) == 4294967295u
 
 uint test_uint_divide_by_zero_local() {
@@ -29,6 +33,7 @@ uint test_uint_divide_by_zero_local() {
     return a / b;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uint_divide_by_zero_local() == 4294967295u
 
 uint test_uint_modulo_by_zero_local() {
@@ -37,6 +42,8 @@ uint test_uint_modulo_by_zero_local() {
     return a % b;
 }
 
+// wgpu.f32: integer division/modulo by zero is undefined on GPU hardware (Q32 pins device semantics)
+// @unsupported(wgpu.f32)
 // run: test_uint_modulo_by_zero_local() == 7u
 
 // Guard idiom: the eager RHS `x / i` must not trap when i == 0u.

@@ -15,6 +15,7 @@ dvec2 test_unpackdouble2x32_zero() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackdouble2x32_zero() ~= dvec2(0.0, 0.0)
 
 dvec2 test_unpackdouble2x32_ones() {
@@ -27,6 +28,7 @@ dvec2 test_unpackdouble2x32_ones() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackdouble2x32_ones() ~= dvec2(1.0, 1.0)
 
 dvec2 test_unpackdouble2x32_half() {
@@ -39,6 +41,7 @@ dvec2 test_unpackdouble2x32_half() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackdouble2x32_half() ~= dvec2(0.5, 0.5)
 
 dvec2 test_unpackdouble2x32_neg_one() {
@@ -51,6 +54,7 @@ dvec2 test_unpackdouble2x32_neg_one() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackdouble2x32_neg_one() ~= dvec2(-1.0, 1.0)
 
 dvec2 test_unpackdouble2x32_two() {
@@ -63,6 +67,7 @@ dvec2 test_unpackdouble2x32_two() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackdouble2x32_two() ~= dvec2(2.0, 2.0)
 
 dvec2 test_unpackdouble2x32_small() {
@@ -70,11 +75,13 @@ dvec2 test_unpackdouble2x32_small() {
     return unpackDouble2x32(uvec2(0u, 1069128089u));
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_unpackdouble2x32_small() ~= dvec2(0.1, 0.1)
 
 

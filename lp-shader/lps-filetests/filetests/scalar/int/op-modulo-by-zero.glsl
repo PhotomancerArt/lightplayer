@@ -11,9 +11,12 @@ int mod_ints(int a, int b) {
     return a % b;
 }
 
+// @unsupported(wgpu.f32)
 // run: mod_ints(42, 0) == 42
+// @unsupported(wgpu.f32)
 // run: mod_ints(-42, 0) == -42
 // run: mod_ints(0, 0) == 0
+// @unsupported(wgpu.f32)
 // run: mod_ints(-2147483648, 0) == -2147483648
 // run: mod_ints(-2147483648, -1) == 0
 // run: mod_ints(-2147483648, 1) == 0
@@ -25,6 +28,8 @@ int test_int_modulo_by_zero_local() {
     return a % b;
 }
 
+// wgpu.f32: integer division/modulo by zero is undefined on GPU hardware (Q32 pins device semantics)
+// @unsupported(wgpu.f32)
 // run: test_int_modulo_by_zero_local() == 7
 
 int test_int_min_modulo_by_minus_one_local() {

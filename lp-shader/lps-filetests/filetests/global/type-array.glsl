@@ -21,6 +21,7 @@ float test_type_array_float() {
            global_float_array[3] + global_float_array[4];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_type_array_float() ~= 15.0
 
 vec2 test_type_array_vec2() {
@@ -32,6 +33,7 @@ vec2 test_type_array_vec2() {
     return global_vec2_array[0] + global_vec2_array[1] + global_vec2_array[2];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_type_array_vec2() ~= vec2(9.0, 12.0)
 
 int test_type_array_int() {
@@ -44,6 +46,7 @@ int test_type_array_int() {
     return global_int_array[0] + global_int_array[1] + global_int_array[2] + global_int_array[3];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_type_array_int() == 100
 
 bool test_type_array_bool() {
@@ -55,6 +58,7 @@ bool test_type_array_bool() {
     return global_bool_array[0] && global_bool_array[2] && !global_bool_array[1];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_type_array_bool() == true
 
 float test_type_array_indexing() {
@@ -68,6 +72,7 @@ float test_type_array_indexing() {
     return global_float_array[0] + global_float_array[index] + global_float_array[4];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_type_array_indexing() ~= 350.0
 
 vec2 test_type_array_loop() {
@@ -82,6 +87,7 @@ vec2 test_type_array_loop() {
     return sum;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_type_array_loop() ~= vec2(6.0, 12.0)
 
 int test_type_array_length() {
@@ -94,6 +100,7 @@ int test_type_array_length() {
     return global_int_array.length();
 }
 
+// @unsupported(wgpu.f32)
 // run: test_type_array_length() == 4
 
 float test_type_array_multidimensional() {
@@ -110,4 +117,6 @@ float test_type_array_multidimensional() {
     return array_of_arrays[0][0].x + array_of_arrays[1][2].y;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_type_array_multidimensional() ~= 13.0

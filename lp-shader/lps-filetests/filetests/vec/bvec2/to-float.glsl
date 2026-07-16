@@ -10,6 +10,7 @@ float test_bvec2_to_float_true() {
     return float(source);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_float_true() ~= 1.0
 
 float test_bvec2_to_float_false() {
@@ -17,6 +18,7 @@ float test_bvec2_to_float_false() {
     return float(source);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_float_false() ~= 0.0
 
 float test_bvec2_to_float_all_true() {
@@ -24,6 +26,7 @@ float test_bvec2_to_float_all_true() {
     return float(source);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_float_all_true() ~= 1.0
 
 float test_bvec2_to_float_all_false() {
@@ -31,6 +34,7 @@ float test_bvec2_to_float_all_false() {
     return float(source);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_float_all_false() ~= 0.0
 
 float test_bvec2_to_float_variable() {
@@ -38,12 +42,14 @@ float test_bvec2_to_float_variable() {
     return float(x);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_float_variable() ~= 1.0
 
 float test_bvec2_to_float_expression() {
     return float(not(bvec2(false, true)));
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_float_expression() ~= 1.0
 
 float test_bvec2_to_float_in_arithmetic() {
@@ -51,4 +57,6 @@ float test_bvec2_to_float_in_arithmetic() {
     return float(x) + 2.5;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_float_in_arithmetic() ~= 3.5

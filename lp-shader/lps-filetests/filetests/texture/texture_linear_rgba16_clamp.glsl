@@ -15,5 +15,7 @@ vec4 center_blend() {
 
 // u=0.5 → halfway between columns → R and G both ~0.5
 // interp.f32: no guest memory to bind texture fixtures into
+// wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: center_blend() ~= vec4(0.5, 0.5, 0.0, 1.0) (tolerance: 0.004)

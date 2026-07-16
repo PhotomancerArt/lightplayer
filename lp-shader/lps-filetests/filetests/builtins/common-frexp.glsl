@@ -18,6 +18,7 @@ vec2 test_frexp_one() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_frexp_one() ~= vec2(0.5, 1.0)
 
 vec2 test_frexp_two() {
@@ -32,6 +33,7 @@ vec2 test_frexp_two() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_frexp_two() ~= vec2(0.5, 2.0)
 
 vec2 test_frexp_half() {
@@ -46,6 +48,7 @@ vec2 test_frexp_half() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_frexp_half() ~= vec2(0.5, 0.0)
 
 vec2 test_frexp_four() {
@@ -60,6 +63,7 @@ vec2 test_frexp_four() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_frexp_four() ~= vec2(0.5, 3.0)
 
 vec2 test_frexp_eight() {
@@ -74,6 +78,7 @@ vec2 test_frexp_eight() {
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_frexp_eight() ~= vec2(0.5, 4.0)
 
 vec4 test_frexp_vec2() {
@@ -83,11 +88,13 @@ vec4 test_frexp_vec2() {
     return vec4(mant.x, mant.y, float(exp.x), float(exp.y));
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_frexp_vec2() ~= vec4(0.5, 0.5, 1.0, 2.0)
 
 

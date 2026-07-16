@@ -16,6 +16,7 @@ int test_bitfieldextract_int_simple() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldextract_int_simple() == 15
 
 int test_bitfieldextract_int_lsb() {
@@ -27,6 +28,7 @@ int test_bitfieldextract_int_lsb() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldextract_int_lsb() == 10
 
 int test_bitfieldextract_int_msb() {
@@ -38,6 +40,7 @@ int test_bitfieldextract_int_msb() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldextract_int_msb() == 10
 
 uint test_bitfieldextract_uint_simple() {
@@ -49,6 +52,7 @@ uint test_bitfieldextract_uint_simple() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldextract_uint_simple() == 15u
 
 uint test_bitfieldextract_uint_single_bit() {
@@ -60,6 +64,7 @@ uint test_bitfieldextract_uint_single_bit() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldextract_uint_single_bit() == 1u
 
 ivec2 test_bitfieldextract_ivec2() {
@@ -67,10 +72,12 @@ ivec2 test_bitfieldextract_ivec2() {
     return bitfieldExtract(ivec2(240, 170), 4, 4);
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldextract_ivec2() == ivec2(15, 10)
 
 

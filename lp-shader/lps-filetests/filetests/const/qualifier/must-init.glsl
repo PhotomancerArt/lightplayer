@@ -15,34 +15,42 @@ float test_const_must_init_float() {
     return PI;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_const_must_init_float() ~= 3.14159
 int test_const_must_init_int() {
     return ANSWER;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_const_must_init_int() == 42
 uint test_const_must_init_uint() {
     return int(UINT_CONST);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_const_must_init_uint() == 123u
 bool test_const_must_init_bool() {
     return FLAG;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_const_must_init_bool() == true
 vec2 test_const_must_init_vec2() {
     return VECTOR_CONST;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_const_must_init_vec2() ~= vec2(1.0, 2.0)
 vec3 test_const_must_init_vec3() {
     return COLOR_CONST;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_const_must_init_vec3() ~= vec3(0.5, 0.5, 0.5)
 mat2 test_const_must_init_mat2() {
     return MATRIX_CONST;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_const_must_init_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)

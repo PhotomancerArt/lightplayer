@@ -18,6 +18,7 @@ float test_edge_lvalue_out_variable() {
     return value;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_lvalue_out_variable() ~= 42.0
 
 void set_vector(out vec2 result) {
@@ -31,6 +32,7 @@ vec2 test_edge_lvalue_out_vector() {
     return vec;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_lvalue_out_vector() ~= vec2(1.0, 2.0)
 
 void modify_value(inout float value) {
@@ -44,6 +46,7 @@ float test_edge_lvalue_inout_variable() {
     return x;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_lvalue_inout_variable() ~= 10.0
 
 /*
@@ -84,6 +87,7 @@ float test_edge_lvalue_out_array_element() {
     return arr[1];
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_lvalue_out_array_element() ~= 99.0
 
 void scale_component(inout float component) {
@@ -97,6 +101,7 @@ float test_edge_lvalue_inout_swizzle() {
     return vec.y;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_lvalue_inout_swizzle() ~= 6.0
 
 /*
@@ -127,6 +132,7 @@ float test_edge_lvalue_out_struct_field() {
     return d.value;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_lvalue_out_struct_field() ~= 123.0
 
 void increment(inout int value) {
@@ -140,4 +146,6 @@ int test_edge_lvalue_inout_int() {
     return x;
 }
 
+// wgpu.f32: wgpu device validation rejects the module (e.g. duplicate uniform bindings)
+// @unsupported(wgpu.f32)
 // run: test_edge_lvalue_inout_int() == 11

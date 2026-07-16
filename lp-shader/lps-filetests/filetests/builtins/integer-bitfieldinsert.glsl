@@ -16,6 +16,7 @@ int test_bitfieldinsert_int_simple() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldinsert_int_simple() == 175
 
 int test_bitfieldinsert_int_lsb() {
@@ -27,6 +28,7 @@ int test_bitfieldinsert_int_lsb() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldinsert_int_lsb() == 243
 
 int test_bitfieldinsert_int_msb() {
@@ -38,6 +40,7 @@ int test_bitfieldinsert_int_msb() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldinsert_int_msb() == 207
 
 uint test_bitfieldinsert_uint_simple() {
@@ -49,6 +52,7 @@ uint test_bitfieldinsert_uint_simple() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldinsert_uint_simple() == 175u
 
 uint test_bitfieldinsert_uint_single_bit() {
@@ -60,6 +64,7 @@ uint test_bitfieldinsert_uint_single_bit() {
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldinsert_uint_single_bit() == 4u
 
 ivec2 test_bitfieldinsert_ivec2() {
@@ -67,10 +72,12 @@ ivec2 test_bitfieldinsert_ivec2() {
     return bitfieldInsert(ivec2(15, 240), ivec2(10, 3), 4, 4);
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @broken(wasm.q32)
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
 // @broken(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_bitfieldinsert_ivec2() == ivec2(175, 48)
 
 

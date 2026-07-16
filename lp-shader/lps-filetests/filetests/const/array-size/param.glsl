@@ -19,6 +19,7 @@ float test_param_array_call() {
     return test_param_array(test_arr);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_param_array_call() == 0.0
 
 vec2 test_nested_calls(vec2 arr[NESTED_SIZE]) {
@@ -30,4 +31,6 @@ vec2 test_nested_calls_call() {
     return test_nested_calls(test_arr);
 }
 
+// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
+// @unsupported(wgpu.f32)
 // run: test_nested_calls_call() ~= vec2(0.0, 0.0)

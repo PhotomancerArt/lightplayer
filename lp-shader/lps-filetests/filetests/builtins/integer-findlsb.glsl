@@ -11,6 +11,7 @@ int test_findlsb_int_zero() {
     return findLSB(0);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findlsb_int_zero() == -1
 
 int test_findlsb_int_one() {
@@ -18,6 +19,7 @@ int test_findlsb_int_one() {
     return findLSB(1);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findlsb_int_one() == 0
 
 int test_findlsb_int_two() {
@@ -25,6 +27,7 @@ int test_findlsb_int_two() {
     return findLSB(2);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findlsb_int_two() == 1
 
 int test_findlsb_int_four() {
@@ -32,6 +35,7 @@ int test_findlsb_int_four() {
     return findLSB(4);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findlsb_int_four() == 2
 
 int test_findlsb_int_pattern() {
@@ -39,6 +43,7 @@ int test_findlsb_int_pattern() {
     return findLSB(168);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findlsb_int_pattern() == 3
 
 uint test_findlsb_uint_zero() {
@@ -46,6 +51,7 @@ uint test_findlsb_uint_zero() {
     return findLSB(0u);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findlsb_uint_zero() == 4294967295u
 
 uint test_findlsb_uint_one() {
@@ -53,6 +59,7 @@ uint test_findlsb_uint_one() {
     return findLSB(1u);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findlsb_uint_one() == 0u
 
 uint test_findlsb_uint_pattern() {
@@ -60,6 +67,7 @@ uint test_findlsb_uint_pattern() {
     return findLSB(168u);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_findlsb_uint_pattern() == 3u
 
 ivec2 test_findlsb_ivec2() {
@@ -67,6 +75,8 @@ ivec2 test_findlsb_ivec2() {
     return findLSB(ivec2(0, 168));
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_findlsb_ivec2() == ivec2(-1, 3)
 
 

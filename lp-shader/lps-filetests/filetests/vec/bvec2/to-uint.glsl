@@ -10,6 +10,7 @@ uint test_bvec2_to_uint_true() {
     return uint(source);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_uint_true() == 1u
 
 uint test_bvec2_to_uint_false() {
@@ -17,6 +18,7 @@ uint test_bvec2_to_uint_false() {
     return uint(source);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_uint_false() == 0u
 
 uint test_bvec2_to_uint_all_true() {
@@ -24,6 +26,7 @@ uint test_bvec2_to_uint_all_true() {
     return uint(source);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_uint_all_true() == 1u
 
 uint test_bvec2_to_uint_all_false() {
@@ -31,6 +34,7 @@ uint test_bvec2_to_uint_all_false() {
     return uint(source);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_uint_all_false() == 0u
 
 uint test_bvec2_to_uint_variable() {
@@ -38,12 +42,14 @@ uint test_bvec2_to_uint_variable() {
     return uint(x);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_uint_variable() == 1u
 
 uint test_bvec2_to_uint_expression() {
     return uint(not(bvec2(false, true)));
 }
 
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_uint_expression() == 1u
 
 uint test_bvec2_to_uint_in_arithmetic() {
@@ -51,4 +57,6 @@ uint test_bvec2_to_uint_in_arithmetic() {
     return uint(x) + 5u;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_bvec2_to_uint_in_arithmetic() == 6u

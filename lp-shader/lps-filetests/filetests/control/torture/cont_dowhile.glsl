@@ -26,9 +26,13 @@ int test_cont_dowhile_d1(int p) {
     return t;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d1(0) == 1212123
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d1(1) == 112123
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d1(2) == 121123
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d1(3) == 121213
 
 int test_cont_dowhile_d1_else(int p) {
@@ -47,9 +51,13 @@ int test_cont_dowhile_d1_else(int p) {
     return t;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d1_else(0) == 3
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d1_else(1) == 123
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d1_else(2) == 123
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d1_else(3) == 123
 
 int test_cont_dowhile_d2_inner(int p) {
@@ -70,7 +78,12 @@ int test_cont_dowhile_d2_inner(int p) {
     return t;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d2_inner(0) == 122312234
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d2_inner(1) == 1231234
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d2_inner(2) == 1231234
+// wgpu.f32: shader does not terminate on the GPU tier (no fuel; CPU targets rely on fuel-exhaustion traps)
+// @unsupported(wgpu.f32)
 // run: test_cont_dowhile_d2_inner(3) == 122312234

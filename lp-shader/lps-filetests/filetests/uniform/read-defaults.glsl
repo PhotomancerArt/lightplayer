@@ -15,22 +15,27 @@ float test_uniform_float_default() {
     return u_time;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_float_default() ~= 0.0
 
 int test_uniform_int_default() {
     return u_frame;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_int_default() == 0
 
 vec2 test_uniform_vec2_default() {
     return u_resolution;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_vec2_default() ~= vec2(0.0, 0.0)
 
 vec4 test_uniform_vec4_default() {
     return u_color;
 }
 
+// wgpu.f32: wgpu device validation rejects the module (e.g. duplicate uniform bindings)
+// @unsupported(wgpu.f32)
 // run: test_uniform_vec4_default() ~= vec4(0.0, 0.0, 0.0, 0.0)

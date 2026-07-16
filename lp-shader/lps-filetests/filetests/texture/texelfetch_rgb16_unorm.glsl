@@ -24,9 +24,13 @@ vec4 fetch_b() {
 }
 
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: fetch_a() ~= vec4(0.2, 0.4, 0.6, 1.0) (tolerance: 0.0003)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: fetch_alpha_a() ~= 1.0 (tolerance: 0.0002)
 // interp.f32: no guest memory to bind texture fixtures into
+// wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: fetch_b() ~= vec4(0.1, 0.3, 0.5, 1.0) (tolerance: 0.0003)

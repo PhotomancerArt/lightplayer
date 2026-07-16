@@ -29,7 +29,7 @@ pub(crate) fn read_back_texture(
 ) -> Result<TextureData, GfxError> {
     use crate::texture_backing::f32_to_texels;
 
-    let pixels = read_back_f32(device, queue, backing, width, height, format)?;
+    let pixels = read_back_f32(device, queue, backing, width, height, format, None)?;
     Ok(TextureData::new(
         width,
         height,
@@ -40,6 +40,11 @@ pub(crate) fn read_back_texture(
 
 /// Read the raw backing floats (pre-quantization) — the conformance/probe
 /// path (e.g. non-finite-lane detection, which quantization would mask).
+///
+/// `timeout`: bound the device wait. The filetest probe passes a bound
+/// because corpus shaders may not terminate (CPU targets rely on fuel
+/// exhaustion; the GPU has none — an unbounded wait hangs the process).
+/// Product paths pass `None` (wait indefinitely, matching `read_back`).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn read_back_f32(
     device: &wgpu::Device,
@@ -48,6 +53,7 @@ pub(crate) fn read_back_f32(
     width: u32,
     height: u32,
     format: TextureStorageFormat,
+    timeout: Option<core::time::Duration>,
 ) -> Result<Vec<f32>, GfxError> {
     use crate::texture_backing::gpu_channels;
 
@@ -84,15 +90,36 @@ pub(crate) fn read_back_f32(
             depth_or_array_layers: 1,
         },
     );
-    queue.submit([encoder.finish()]);
+    let submission = queue.submit([encoder.finish()]);
 
     let slice = buffer.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |result| {
-        result.expect("map read_back buffer");
+    let (map_tx, map_rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = map_tx.send(result);
     });
+    // Wait for THIS submission specifically. `submission_index: None` waits
+    // for "the most recent submission at poll time", which starves under
+    // concurrent submitters (parallel filetest workers keep moving the
+    // goalpost) — the probe path deadlocked on exactly that.
     device
-        .poll(wgpu::PollType::wait_indefinitely())
+        .poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout,
+        })
         .map_err(|e| GfxError::Backend(format!("read_back device poll: {e:?}")))?;
+    // Map failures (e.g. device lost after an earlier hung submission)
+    // surface as errors, never a panic inside the wgpu callback.
+    match map_rx.try_recv() {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            return Err(GfxError::Backend(format!("read_back buffer map: {e:?}")));
+        }
+        Err(_) => {
+            return Err(GfxError::Backend(String::from(
+                "read_back buffer map did not complete after device poll",
+            )));
+        }
+    }
 
     let mut pixels =
         Vec::with_capacity(width as usize * height as usize * bytes_per_pixel as usize / 4);

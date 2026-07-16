@@ -13,6 +13,7 @@ float test_forward_reference_use_before_declare() {
 }
 
 // Initializer below applies before any function runs (single logical global); value is 42.0 here.
+// @unsupported(wgpu.f32)
 // run: test_forward_reference_use_before_declare() ~= 52.0
 
 // Global declaration comes after function definition
@@ -35,6 +36,7 @@ vec2 test_forward_reference_vec() {
 }
 
 // Same as scalar case: vec2(5,10) is visible before this call.
+// @unsupported(wgpu.f32)
 // run: test_forward_reference_vec() ~= vec2(6.0, 11.0)
 
 mat3 test_forward_reference_mat() {
@@ -42,6 +44,8 @@ mat3 test_forward_reference_mat() {
     return global_mat_after * 2.0;
 }
 
+// wgpu.f32: global initializers referencing other globals evaluate in naga declaration order, not lazily
+// @unsupported(wgpu.f32)
 // run: test_forward_reference_mat() ~= mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
 
 // Declarations after function definitions

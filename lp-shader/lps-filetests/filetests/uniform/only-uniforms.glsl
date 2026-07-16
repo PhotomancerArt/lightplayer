@@ -12,10 +12,13 @@ float test_uniforms_only_scalar() {
     return u_brightness + 1.0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniforms_only_scalar() ~= 1.0
 
 vec3 test_uniforms_only_vec() {
     return u_base_color + vec3(0.1, 0.2, 0.3);
 }
 
+// wgpu.f32: wgpu device validation rejects the module (e.g. duplicate uniform bindings)
+// @unsupported(wgpu.f32)
 // run: test_uniforms_only_vec() ~= vec3(0.1, 0.2, 0.3)

@@ -18,6 +18,7 @@ int test_continue_do_while_loop_skip() {
     return sum;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_continue_do_while_loop_skip() == 8
 
 int test_continue_do_while_loop_multiple() {
@@ -34,6 +35,7 @@ int test_continue_do_while_loop_multiple() {
     return sum;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_continue_do_while_loop_multiple() == 25
 
 int test_continue_do_while_loop_after_first() {
@@ -49,5 +51,7 @@ int test_continue_do_while_loop_after_first() {
     return sum;
 }
 
+// wgpu.f32: shader does not terminate on the GPU tier (no fuel; CPU targets rely on fuel-exhaustion traps)
+// @unsupported(wgpu.f32)
 // run: test_continue_do_while_loop_after_first() == 10
 

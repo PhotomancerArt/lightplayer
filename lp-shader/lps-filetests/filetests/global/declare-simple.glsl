@@ -15,6 +15,7 @@ float test_declare_simple_float() {
     return global_float;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_float() ~= 42.0
 
 int test_declare_simple_int() {
@@ -23,6 +24,7 @@ int test_declare_simple_int() {
     return global_int;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_int() == -123
 
 uint test_declare_simple_uint() {
@@ -31,6 +33,7 @@ uint test_declare_simple_uint() {
     return int(global_uint);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_uint() == 987u
 
 bool test_declare_simple_bool() {
@@ -39,6 +42,7 @@ bool test_declare_simple_bool() {
     return global_bool;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_bool() == true
 
 vec2 test_declare_simple_vec2() {
@@ -48,6 +52,7 @@ vec2 test_declare_simple_vec2() {
     return global_vec2;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_vec2() ~= vec2(1.0, 2.0)
 
 vec3 test_declare_simple_vec3() {
@@ -57,6 +62,7 @@ vec3 test_declare_simple_vec3() {
     return global_vec3;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_declare_simple_vec4() {
@@ -66,6 +72,7 @@ vec4 test_declare_simple_vec4() {
     return global_vec4;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 mat2 test_declare_simple_mat2() {
@@ -75,6 +82,7 @@ mat2 test_declare_simple_mat2() {
     return global_mat2;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0)
 
 float test_declare_simple_multiple() {
@@ -88,4 +96,6 @@ float test_declare_simple_multiple() {
     return a + b + c;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_declare_simple_multiple() ~= 60.0

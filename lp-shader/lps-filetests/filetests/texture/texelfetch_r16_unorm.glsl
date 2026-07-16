@@ -33,13 +33,19 @@ float fetch_a() {
 }
 
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: fetch_r() ~= 0.625 (tolerance: 0.0002)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: fetch_g() ~= 0.0 (tolerance: 0.0002)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: fetch_b() ~= 0.0 (tolerance: 0.0002)
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: fetch_a() ~= 1.0 (tolerance: 0.0002)
 // interp.f32: no guest memory to bind texture fixtures into
+// wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
+// @unsupported(wgpu.f32)
 // run: fetch_center() ~= vec4(0.625, 0.0, 0.0, 1.0) (tolerance: 0.00025)

@@ -40,4 +40,6 @@ vec4 worley_demo(vec2 scaledCoord, float time) {
 // run[q32]: render(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14434814, 1.0, 1.0) (tolerance: 0.002)
 // set_uniform: outputSize = vec2(32.0, 32.0)
 // set_uniform: time = 1.25
+// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
+// @unsupported(wgpu.f32)
 // run[f32]: render(vec2(4.0, 8.0)) ~= vec4(0.0, 0.14105844, 1.0, 1.0) (tolerance: 0.002)

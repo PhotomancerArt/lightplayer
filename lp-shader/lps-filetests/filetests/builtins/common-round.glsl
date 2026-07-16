@@ -34,6 +34,7 @@ float test_round_half() {
     return round(t);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_round_half() ~= 3.0
 
 float test_round_neg_half() {
@@ -42,6 +43,7 @@ float test_round_neg_half() {
     return round(t);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_round_neg_half() ~= -3.0
 
 float test_round_negative() {
@@ -71,6 +73,8 @@ vec4 test_round_vec4() {
     return round(vec4(1.1, 2.9, z, 4.0));
 }
 
+// wgpu.f32: WGSL round() is round-half-to-even; libm (interp.f32) rounds half away — both are valid GLSL
+// @unsupported(wgpu.f32)
 // run: test_round_vec4() ~= vec4(1.0, 3.0, -1.0, 4.0)
 
 

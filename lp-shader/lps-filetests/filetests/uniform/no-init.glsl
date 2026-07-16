@@ -27,6 +27,7 @@ float test_uniform_no_init_float() {
     return time + 1.0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_float() ~= 1.0
 
 int test_uniform_no_init_int() {
@@ -34,6 +35,7 @@ int test_uniform_no_init_int() {
     return count + 10;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_int() == 10
 
 uint test_uniform_no_init_uint() {
@@ -41,6 +43,7 @@ uint test_uniform_no_init_uint() {
     return int(seed + 100u);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_uint() == 100u
 
 bool test_uniform_no_init_bool() {
@@ -48,6 +51,7 @@ bool test_uniform_no_init_bool() {
     return enabled || true;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_bool() == true
 
 vec2 test_uniform_no_init_vec2() {
@@ -55,6 +59,7 @@ vec2 test_uniform_no_init_vec2() {
     return position + vec2(1.0, 1.0);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_vec2() ~= vec2(1.0, 1.0)
 
 vec3 test_uniform_no_init_vec3() {
@@ -62,6 +67,7 @@ vec3 test_uniform_no_init_vec3() {
     return color * 2.0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_vec3() ~= vec3(0.0, 0.0, 0.0)
 
 vec4 test_uniform_no_init_vec4() {
@@ -69,6 +75,7 @@ vec4 test_uniform_no_init_vec4() {
     return data;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 mat4 test_uniform_no_init_mat4() {
@@ -76,6 +83,7 @@ mat4 test_uniform_no_init_mat4() {
     return transform;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_mat4() ~= mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
 float test_uniform_no_init_calculations() {
@@ -89,4 +97,6 @@ float test_uniform_no_init_calculations() {
     return result;
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_uniform_no_init_calculations() ~= 0.0

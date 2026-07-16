@@ -27,6 +27,8 @@ float test_tan_pi_half() {
     return tan(rt(1.5707963267948966));
 }
 
+// wgpu.f32: f32 GPU result diverges (undefined/edge-domain semantics)
+// @unsupported(wgpu.f32)
 // run: test_tan_pi_half() ~= 1.6331778728383844e16 (tolerance: 1e17)
 
 float test_tan_pi() {

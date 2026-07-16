@@ -29,6 +29,7 @@ float test_edge_multiple_qualifiers_error_const() {
 // @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unimplemented(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_edge_multiple_qualifiers_error_const() ~= 6.28
 
 float test_edge_multiple_qualifiers_error_uniform() {
@@ -41,6 +42,7 @@ float test_edge_multiple_qualifiers_error_uniform() {
 // @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unimplemented(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_edge_multiple_qualifiers_error_uniform() ~= 1.0
 
 vec2 test_edge_multiple_qualifiers_error_in() {
@@ -53,6 +55,7 @@ vec2 test_edge_multiple_qualifiers_error_in() {
 // @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unimplemented(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_edge_multiple_qualifiers_error_in() ~= vec2(1.0, 1.0)
 
 void test_edge_multiple_qualifiers_error_out() {
@@ -65,6 +68,7 @@ void test_edge_multiple_qualifiers_error_out() {
 // @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unimplemented(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_edge_multiple_qualifiers_error_out() == 0.0
 
 float test_edge_multiple_qualifiers_error_buffer() {
@@ -78,6 +82,7 @@ float test_edge_multiple_qualifiers_error_buffer() {
 // @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unimplemented(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_edge_multiple_qualifiers_error_buffer() ~= 42.0
 
 float test_edge_multiple_qualifiers_error_combined() {
@@ -92,9 +97,11 @@ float test_edge_multiple_qualifiers_error_combined() {
     return result;
 }
 
+// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unimplemented(rv32c.q32)
 // @unimplemented(wasm.q32)
 // @unimplemented(rv32n.q32)
 // @unsupported(rv32lpn.q32)
 // @unimplemented(interp.f32)
+// @unsupported(wgpu.f32)
 // run: test_edge_multiple_qualifiers_error_combined() ~= 8.28

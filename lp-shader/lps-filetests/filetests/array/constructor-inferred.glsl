@@ -9,6 +9,7 @@ float test_constructor_inferred_float() {
     return arr[3]; // Should be 4.0
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_float() ~= 4.0
 
 int test_constructor_inferred_int() {
@@ -16,6 +17,7 @@ int test_constructor_inferred_int() {
     return arr[1]; // Should be 20
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_int() == 20
 
 uint test_constructor_inferred_uint() {
@@ -23,6 +25,7 @@ uint test_constructor_inferred_uint() {
     return arr[4]; // Should be 5u
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_uint() == 5u
 
 bool test_constructor_inferred_bool() {
@@ -30,6 +33,7 @@ bool test_constructor_inferred_bool() {
     return arr[2]; // Should be true
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_bool() == true
 
 vec2 test_constructor_inferred_vec2() {
@@ -37,6 +41,7 @@ vec2 test_constructor_inferred_vec2() {
     return arr[1]; // Should be vec2(3.0, 4.0)
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_vec2() ~= vec2(3.0, 4.0)
 
 vec3 test_constructor_inferred_vec3() {
@@ -44,6 +49,7 @@ vec3 test_constructor_inferred_vec3() {
     return arr[0]; // Should be vec3(1.0, 2.0, 3.0)
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 ivec3 test_constructor_inferred_ivec3() {
@@ -51,6 +57,7 @@ ivec3 test_constructor_inferred_ivec3() {
     return arr[2]; // Should be ivec3(7, 8, 9)
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_ivec3() == ivec3(7, 8, 9)
 
 uvec4 test_constructor_inferred_uvec4() {
@@ -58,6 +65,7 @@ uvec4 test_constructor_inferred_uvec4() {
     return arr[1]; // Should be uvec4(5u, 6u, 7u, 8u)
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_uvec4() == uvec4(5u, 6u, 7u, 8u)
 
 bvec2 test_constructor_inferred_bvec2() {
@@ -65,6 +73,7 @@ bvec2 test_constructor_inferred_bvec2() {
     return arr[0]; // Should be bvec2(true, false)
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_bvec2() == bvec2(true, false)
 
 float test_constructor_inferred_single_element() {
@@ -72,6 +81,7 @@ float test_constructor_inferred_single_element() {
     return arr[0]; // Should be 42.0
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_single_element() ~= 42.0
 
 int test_constructor_inferred_empty() {
@@ -79,6 +89,7 @@ int test_constructor_inferred_empty() {
     return 0;
 }
 
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_empty() == 0
 
 vec2 test_constructor_inferred_mixed_conversions() {
@@ -86,4 +97,6 @@ vec2 test_constructor_inferred_mixed_conversions() {
     return arr[1]; // Should be vec2(3.0, 4.0)
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_constructor_inferred_mixed_conversions() ~= vec2(3.0, 4.0)

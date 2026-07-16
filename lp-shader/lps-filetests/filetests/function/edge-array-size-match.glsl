@@ -14,6 +14,7 @@ float test_edge_array_size_match() {
     return sum_array(data); // OK: sizes match
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_array_size_match() ~= 6.0
 
 /*
@@ -44,6 +45,7 @@ float test_edge_array_size_explicit() {
     return float(data[0] + data[1] + data[2] + data[3]);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_array_size_explicit() ~= 20.0
 
 /*
@@ -85,6 +87,7 @@ float test_edge_array_size_vector() {
     return result.x + result.y; // 4.0 + 6.0 = 10.0
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_array_size_vector() ~= 10.0
 
 float sum2(float[2] arr) {
@@ -102,6 +105,7 @@ float test_edge_array_size_different_types() {
     return sum2(arr2) + sum4(arr4);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_array_size_different_types() ~= 13.0
 
 bool all_true(bool[3] arr) {
@@ -114,6 +118,7 @@ bool test_edge_array_size_bool() {
     return all_true(flags);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_array_size_bool() == true
 
 // See param-array.glsl: const-qualified by-value array parameters are not lowered yet.
@@ -127,6 +132,7 @@ float test_edge_array_size_const() {
     return average(data);
 }
 
+// @unsupported(wgpu.f32)
 // run: test_edge_array_size_const() ~= 30.0
 
 /*
@@ -156,4 +162,6 @@ float test_edge_array_size_multidimensional() {
     return sum_matrix(mat);
 }
 
+// wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
+// @unsupported(wgpu.f32)
 // run: test_edge_array_size_multidimensional() ~= 21.0

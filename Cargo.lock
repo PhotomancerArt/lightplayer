@@ -5744,9 +5744,12 @@ dependencies = [
  "glsl",
  "libm",
  "lp-collection 1.0.0",
+ "lp-gfx-lpvm",
+ "lp-gfx-wgpu",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
+ "lp-shader",
  "lpir",
  "lps-builtins",
  "lps-diagnostics",
@@ -5759,11 +5762,13 @@ dependencies = [
  "lpvm-native",
  "lpvm-wasm",
  "num_cpus",
+ "pollster",
  "regex",
  "walkdir",
  "wasm-encoder 0.245.1",
  "wasmprinter 0.245.1",
  "wasmtime",
+ "wgpu 29.0.0",
 ]
 
 [[package]]
