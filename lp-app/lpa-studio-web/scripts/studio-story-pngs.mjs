@@ -37,6 +37,11 @@ const captureTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_TIMEOUT_M
 // Hard ceiling on any single Chrome DevTools call, so a wedged renderer fails
 // fast (and gets retried) instead of blocking the run indefinitely.
 const cdpCallTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CDP_TIMEOUT_MS", 30_000);
+// A capture pass can still die to a wedged Chrome (CDP navigation timeouts under
+// parallel wasm loads) even after the per-target fresh-page retry. A re-run
+// resumes from the already-captured files and has always completed in practice,
+// so retry the pass in-process instead of taxing callers with a manual re-run.
+const captureAttempts = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_ATTEMPTS", 2);
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
@@ -82,6 +87,11 @@ class CdpConnection {
   }
 
   send(method, params = {}, sessionId = undefined, timeoutMs = cdpCallTimeoutMs) {
+    // A send after Chrome died would be silently discarded by the WebSocket and
+    // sit out the full call timeout; fail it immediately instead.
+    if (this.ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error(`Chrome DevTools connection is closed (${method})`));
+    }
     const id = this.nextId;
     this.nextId += 1;
     const message = { id, method, params };
@@ -186,7 +196,7 @@ try {
     throw new Error("No story links were discovered from the storybook page.");
   }
 
-  const files = await captureStories(storyIds, captureDir);
+  const files = await captureStoriesWithRetry(storyIds, captureDir);
   await optimizePngs(files, { required: mode !== "pngs" });
 
   if (mode === "baselines") {
@@ -349,6 +359,27 @@ async function discoverStoryIds() {
     .sort();
 }
 
+// Run the capture pass, retrying with a fresh Chrome when it fails. Completed
+// captures persist on disk and are skipped by the next attempt, so a retry only
+// redoes the targets the failed pass didn't finish.
+async function captureStoriesWithRetry(storyIds, directory) {
+  let lastError;
+  for (let attempt = 1; attempt <= captureAttempts; attempt += 1) {
+    try {
+      return await captureStories(storyIds, directory);
+    } catch (error) {
+      lastError = error;
+      if (attempt < captureAttempts) {
+        console.warn(
+          `Capture pass ${attempt}/${captureAttempts} failed: ${error.message}\n` +
+            "Retrying with a fresh Chrome — already-captured viewports are kept.",
+        );
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function captureStories(storyIds, directory) {
   const targets = storyTargets(storyIds);
   const concurrency = Math.min(requestedCaptureConcurrency, targets.length);
@@ -395,8 +426,11 @@ async function captureStoryWorker({
 
     const target = targets[targetIndex];
     const file = path.join(directory, storyFileName(target.storyId, target.viewport));
-    // Resume: a viewport already captured for this build is kept as-is.
-    if (resuming && (await isNonEmptyFile(file))) {
+    // A viewport already captured for this build is kept as-is. Any non-empty
+    // file here is from the current build: the capture dir is wiped at startup
+    // whenever the build changed, so this covers both cross-run resume and the
+    // in-process retry pass after a failed capture attempt.
+    if (await isNonEmptyFile(file)) {
       files[targetIndex] = file;
       continue;
     }

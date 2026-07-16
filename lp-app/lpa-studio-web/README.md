@@ -258,9 +258,12 @@ just studio-story-check       # compare fresh captures with committed baselines
 
 Baseline and check modes require `oxipng` so committed and fresh PNGs are
 losslessly normalized. Install it with `brew install oxipng` or
-`cargo install oxipng`. The capture script defaults to one Chrome page for
-stable baseline/check output; set `STUDIO_STORY_PNGS_CONCURRENCY` for faster
-scratch runs when needed.
+`cargo install oxipng`. The capture script drives four parallel Chrome pages
+by default; set `STUDIO_STORY_PNGS_CONCURRENCY` to tune this. Chrome can
+occasionally wedge under the parallel load (a CDP call times out); the script
+automatically retries the capture pass with a fresh Chrome, resuming from the
+viewports already captured (`STUDIO_STORY_CAPTURE_ATTEMPTS`, default `2`).
+Re-running a failed command also resumes, as long as the build is unchanged.
 
 Captures disable CSS transitions and animations before the app mounts so
 every screenshot shows the settled end state; without this, captures raced
