@@ -29,7 +29,6 @@ Point2D test_return_struct_simple() {
     return get_origin();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_return_struct_simple() ~= Point2D(0.0, 0.0)
 
 Color get_red() {
@@ -41,7 +40,6 @@ Color test_return_struct_color() {
     return get_red();
 }
 
-// @unsupported(wgpu.f32)
 // run: test_return_struct_color() ~= Color(vec3(1.0, 0.0, 0.0), 1.0)
 
 Point2D add_points(Point2D p1, Point2D p2) {
@@ -55,7 +53,6 @@ Point2D test_return_struct_calculated() {
     return add_points(a, b);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_return_struct_calculated() ~= Point2D(4.0, 6.0)
 
 Color blend_colors(Color c1, Color c2, float factor) {
@@ -71,7 +68,6 @@ Color test_return_struct_mixed() {
     return blend_colors(red, blue, 0.5);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_return_struct_mixed() ~= Color(vec3(0.5, 0.0, 0.5), 0.9)
 
 Triangle get_equilateral_triangle(float side) {
@@ -88,7 +84,6 @@ Triangle test_return_struct_nested() {
     return get_equilateral_triangle(2.0);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_return_struct_nested() ~= Triangle(Point2D(0.0, 0.0), Point2D(2.0, 0.0), Point2D(1.0, 1.732))
 
 Point2D scale_point(Point2D p, float scale) {
@@ -101,7 +96,6 @@ Point2D test_return_struct_modified() {
     return scale_point(original, 2.0);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_return_struct_modified() ~= Point2D(6.0, 8.0)
 
 Color make_color(float r, float g, float b) {
@@ -113,7 +107,6 @@ Color test_return_struct_constructor() {
     return make_color(0.5, 0.7, 0.9);
 }
 
-// @unsupported(wgpu.f32)
 // run: test_return_struct_constructor() ~= Color(vec3(0.5, 0.7, 0.9), 1.0)
 
 struct Vector3D {
@@ -129,6 +122,4 @@ Vector3D test_return_struct_compact() {
     return get_up_vector();
 }
 
-// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
-// @unsupported(wgpu.f32)
 // run: test_return_struct_compact() ~= Vector3D(0.0, 1.0, 0.0)

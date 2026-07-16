@@ -11,6 +11,7 @@ float test_access_index_vector_lane_out() {
     return v[1];
 }
 
+// wgpu.f32: WGSL forbids taking the address of a vector component; naga wgsl-out emits `&v[i]` for vector-lane out/inout args, and the probe compiles the whole file per directive, so every directive fails (tracked follow-up)
 // @unsupported(wgpu.f32)
 // run: test_access_index_vector_lane_out() ~= 21.0
 
@@ -188,6 +189,5 @@ float test_pointer_arg_nested_struct_field_out() {
     return o.inner.value;
 }
 
-// wgpu.f32: GPU assembly splices prototypes above the authored text; struct-typed signatures / authored prototypes break naga declaration order (tracked follow-up)
 // @unsupported(wgpu.f32)
 // run: test_pointer_arg_nested_struct_field_out() ~= 7.0
