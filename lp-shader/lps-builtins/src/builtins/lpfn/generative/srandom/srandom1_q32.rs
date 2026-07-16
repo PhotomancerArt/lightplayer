@@ -20,6 +20,8 @@ pub fn lpfn_srandom1(x: Q32, seed: u32) -> Q32 {
     Q32::from_f32_wrapping(-1.0) + Q32::from_f32_wrapping(2.0) * random_val
 }
 
+/// Signed random [-1,1] (1D)
+///
 /// 1D Signed Random function (extern C wrapper for compiler).
 ///
 /// # Arguments

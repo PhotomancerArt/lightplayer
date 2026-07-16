@@ -43,6 +43,8 @@ pub fn lpfn_fbm2(p: Vec2Q32, octaves: i32, seed: u32) -> Q32 {
     value
 }
 
+/// Fractal Brownian Motion (2D)
+///
 /// 2D Fractal Brownian Motion noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

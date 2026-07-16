@@ -344,6 +344,8 @@ pub fn lpfn_psrdnoise2(x: Vec2Q32, period: Vec2Q32, alpha: Q32, _seed: u32) -> (
     )
 }
 
+/// Periodic simplex rotation-derivative noise (2D)
+///
 /// 2D Periodic Simplex Rotational Domain noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

@@ -17,7 +17,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ArtifactLocation, UiAssetContent, UiAssetEditor as UiAssetEditorData, UiAssetEditorKind,
-    UiShaderError,
+    UiShaderError, UiShaderUniform,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -43,6 +43,12 @@ fn editor_fixture(content: Option<UiAssetContent>) -> UiAssetEditorData {
         in_flight: false,
         failure: None,
         shader_error: None,
+        // Matches STORY_GLSL's uniform block; also exercises the completion
+        // assembly (the popup itself is interaction-only, not captured).
+        uniforms: vec![UiShaderUniform {
+            name: "time".to_string(),
+            glsl_type: "float".to_string(),
+        }],
     }
 }
 

@@ -23,6 +23,7 @@ mod ui_node_tab;
 mod ui_node_view;
 mod ui_produced_product;
 mod ui_produced_value;
+mod ui_shader_uniform;
 mod ui_slot_aspect;
 mod ui_slot_asset;
 mod ui_slot_composite;
@@ -48,6 +49,7 @@ pub use ui_produced_product::{
     UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState,
 };
 pub use ui_produced_value::UiProducedValue;
+pub use ui_shader_uniform::UiShaderUniform;
 pub use ui_slot_aspect::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 pub use ui_slot_asset::{UiAssetEditorKind, UiSlotAsset};
 pub use ui_slot_composite::{

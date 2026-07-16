@@ -202,7 +202,10 @@ fn lp_type_for_ref(
         ))
 }
 
-fn glsl_type_for_lp_type(ty: &LpType) -> Result<String, ShaderHeaderGenError> {
+/// The single [`LpType`] → GLSL type-name mapping: used by the generated
+/// uniform header above and by the studio's editor completions, so the type
+/// name a completion shows is exactly the one the header declares.
+pub fn glsl_type_for_lp_type(ty: &LpType) -> Result<String, ShaderHeaderGenError> {
     Ok(match ty {
         LpType::F32 => String::from("float"),
         LpType::U32 => String::from("uint"),

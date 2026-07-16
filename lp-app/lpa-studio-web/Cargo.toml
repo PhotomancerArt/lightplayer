@@ -25,6 +25,7 @@ lpa-link = { path = "../lpa-link", features = ["browser-worker"] }
 lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+lps-builtin-completions = { path = "../../lp-shader/lps-builtin-completions" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2"
