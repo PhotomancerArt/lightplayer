@@ -161,7 +161,12 @@ impl NodeController {
 
     /// Project this controller and its slot controllers into the node-pane DTO.
     pub fn ui_node(&self) -> UiNodeView {
-        self.ui_node_with_product_previews(&|_| None, &SlotEditJoin::empty(), &|_, _| None)
+        self.ui_node_with_product_previews(
+            &|_| None,
+            &SlotEditJoin::empty(),
+            &|_| Vec::new(),
+            &|_, _| None,
+        )
     }
 
     /// Project this controller into a node-pane DTO with product preview state.
@@ -180,23 +185,36 @@ impl NodeController {
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
     ) -> UiNodeView {
-        let children = self.ui_children_with_product_previews(product_preview, edits, asset_editor);
+        let children = self.ui_children_with_product_previews(
+            product_preview,
+            edits,
+            extra_config,
+            asset_editor,
+        );
         let dirty = self.own_slots_dirty_summary(edits)
             + children
                 .iter()
                 .map(|child| child.dirty)
                 .sum::<DirtySummary>();
-        let header = UiNodeHeader::new(
+        let mut header = UiNodeHeader::new(
             self.label.clone(),
             self.kind.clone(),
             self.address.to_string(),
         )
         .with_status(self.ui_status())
         .with_dirty(dirty);
+        // Status detail (error/warning/failure text) rides the header so the
+        // node detail popup can answer "why" — the compact status alone read
+        // as an unexplained Error state (gate follow-up, 2026-07-15).
+        if let Some(detail) = self.status.detail.clone() {
+            header = header.with_detail(detail);
+        }
 
-        let mut sections = self.ui_sections_with_product_previews(product_preview, edits);
+        let mut sections =
+            self.ui_sections_with_product_previews(product_preview, edits, extra_config);
         self.embed_asset_editors(&mut sections, asset_editor);
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
@@ -207,6 +225,12 @@ impl NodeController {
         view.collapsed = self.state.collapsed;
         view.issues = self.issues.clone();
         view
+    }
+
+    /// True when any of this node's slot roots carries a top-level field
+    /// named `name` (used to detect wiring with no backing row).
+    pub(in crate::app::project) fn has_slot_root_field(&self, name: &str) -> bool {
+        self.slots.iter().any(|slot| slot.has_root_field(name))
     }
 
     /// Find a descendant node controller by stable address.
@@ -261,6 +285,46 @@ impl NodeController {
             root_slot_applies(entry, &self.address, &view.slots),
             &view.slots,
         );
+        self.apply_binding_facts();
+    }
+
+    /// Distribute authored binding facts from the def root onto the slots
+    /// they name: consumed/config slots on the def root and produced slots
+    /// on the state root (bindings live at node-def roots since M0).
+    fn apply_binding_facts(&mut self) {
+        let facts = self
+            .slots
+            .iter()
+            .find(|slot| matches!(slot.address().root, ProjectSlotRoot::Def))
+            .map(SlotController::binding_facts)
+            .unwrap_or_default();
+        for slot in &mut self.slots {
+            slot.apply_binding_facts(&facts);
+        }
+    }
+
+    /// Apply one graph-derived default binding fact to this node's roots
+    /// (fills only slots authored facts left empty).
+    pub(in crate::app::project) fn apply_default_binding_fact(
+        &mut self,
+        fact: &crate::app::project::slot::SlotBindingFact,
+    ) {
+        for slot in &mut self.slots {
+            slot.apply_default_binding_fact(fact);
+        }
+    }
+
+    /// Find a mutable descendant node controller by runtime node id.
+    pub(in crate::app::project) fn node_by_runtime_id_mut(
+        &mut self,
+        id: NodeId,
+    ) -> Option<&mut NodeController> {
+        if self.target.node_id == id {
+            return Some(self);
+        }
+        self.children
+            .iter_mut()
+            .find_map(|child| child.node_by_runtime_id_mut(id))
     }
 
     fn reconcile_children(&mut self, children: Vec<&TreeEntryView>, view: &ProjectView) {
@@ -321,6 +385,7 @@ impl NodeController {
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
     ) -> Vec<UiNodeSection> {
         let mut products = Vec::new();
         let mut produced_values = Vec::new();
@@ -337,6 +402,9 @@ impl NodeController {
                 }
             }
         }
+        // Binding-derived rows: wiring on slots with no backing row —
+        // implicit runtime consumed slots like `fixture.input` (roadmap M3).
+        config_slots.extend(extra_config(self.target.node_id));
 
         let mut sections = Vec::new();
         if !products.is_empty() {
@@ -396,6 +464,7 @@ impl NodeController {
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
     ) -> Vec<UiNodeChild> {
         self.children
@@ -410,10 +479,15 @@ impl NodeController {
                 view.summary = child.status.detail.clone();
                 view.focused = child.state.focused;
                 view.action = Some(node_focus_action(child));
-                view.sections = child.ui_sections_with_product_previews(product_preview, edits);
+                view.sections =
+                    child.ui_sections_with_product_previews(product_preview, edits, extra_config);
                 child.embed_asset_editors(&mut view.sections, asset_editor);
-                view.children =
-                    child.ui_children_with_product_previews(product_preview, edits, asset_editor);
+                view.children = child.ui_children_with_product_previews(
+                    product_preview,
+                    edits,
+                    extra_config,
+                    asset_editor,
+                );
                 view.dirty = child.own_slots_dirty_summary(edits)
                     + view
                         .children

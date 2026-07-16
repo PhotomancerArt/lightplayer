@@ -38,4 +38,9 @@ impl BindingSet {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Remove every binding (incremental binding rebuild, Option C).
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
 }

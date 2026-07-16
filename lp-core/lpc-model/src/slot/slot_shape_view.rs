@@ -277,6 +277,7 @@ mod tests {
         shape: &BOOL_SHAPE,
         semantics: SlotSemantics::new(SlotDirection::Local, SlotMerge::Latest),
         policy: SlotPolicy::writable_persisted(),
+        default_bind: None,
     }];
     static RECORD: StaticSlotShapeDescriptor = StaticSlotShapeDescriptor::Record {
         meta: StaticSlotMeta::EMPTY,

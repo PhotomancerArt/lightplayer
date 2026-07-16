@@ -207,6 +207,18 @@ impl Engine {
 
         self.project_runtime_index_mut()
             .rebuild_asset_consumers(&registry.inventory().tree);
+
+        // Bindings are load-time materializations, not resolver-read values:
+        // a def body edit to a `bindings` map (or a shader `default_bind`)
+        // would otherwise change nothing at runtime, and selective reattach
+        // no longer registers bindings (the loader's binding phase is
+        // separate). Rebuild the whole index from current defs — cheap
+        // (dozens of entries) and by construction identical to a fresh load
+        // (incremental binding apply, Option C).
+        let projected_nodes = ProjectLoader::ensure_runtime_spine(registry, self, frame)?;
+        self.tree_mut().clear_bindings(frame);
+        ProjectLoader::register_projected_bindings(registry, self, &projected_nodes, frame)?;
+
         self.resolver_mut().clear_frame_cache();
         Ok(result)
     }

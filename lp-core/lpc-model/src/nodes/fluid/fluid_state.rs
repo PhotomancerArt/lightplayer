@@ -7,7 +7,7 @@ use crate::{Slotted, VisualProduct, VisualProductSlot};
 #[slot(default_policy = "read_only_transient")]
 pub struct FluidState {
     /// Renderable visual output produced by this fluid node.
-    #[slot(produced)]
+    #[slot(produced, default_bind = "bus:visual.out")]
     pub output: VisualProductSlot,
 }
 

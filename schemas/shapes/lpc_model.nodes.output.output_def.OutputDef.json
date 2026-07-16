@@ -2,6 +2,25 @@
   "record": {
     "fields": [
       {
+        "default_bind": "bus:control.out",
+        "name": "input",
+        "semantics": {
+          "direction": "consumed"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "control_product",
+              "id": 4213724405,
+              "meta": {},
+              "ty": {
+                "product": "control"
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "endpoint",
         "shape": {
           "value": {

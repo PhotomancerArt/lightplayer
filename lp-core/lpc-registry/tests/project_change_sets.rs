@@ -219,7 +219,7 @@ fn removing_playlist_reference_removes_child_def_and_its_asset() {
   "default_fade": 0.35,
   "bindings": {
     "time": {
-      "source": "bus#time.seconds"
+      "source": "bus:time"
     }
   },
   "entries": {
@@ -315,7 +315,7 @@ fn same_kind_body_value_edit_does_not_report_node_use_change() {
   "endpoint": "ws281x:rmt:D10",
   "bindings": {
     "input": {
-      "source": "bus#control.out"
+      "source": "bus:control.out"
     }
   },
   "options": {

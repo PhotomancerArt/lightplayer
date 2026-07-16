@@ -29,7 +29,7 @@ pub struct FluidDef {
     pub viscosity: PositiveF32Slot,
 
     /// Simulation time in seconds.
-    #[slot(consumed)]
+    #[slot(consumed, default_bind = "bus:time")]
     pub time: ValueSlot<f32>,
 
     /// Stable-key emitter map consumed by the fluid simulation.

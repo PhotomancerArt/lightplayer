@@ -4,10 +4,10 @@
   "render_order": 0,
   "bindings": {
     "events": {
-      "source": "bus#trigger"
+      "source": "bus:trigger"
     },
     "output": {
-      "target": "bus#visual.out"
+      "target": "bus:visual.out"
     }
   },
   "glsl_opts": {

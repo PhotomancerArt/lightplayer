@@ -159,9 +159,12 @@ fn AttachedIconMenuStoryCase(side: &'static str, align: &'static str) -> Element
     const RADIUS: f64 = 8.0;
     const INFLATE: f64 = 3.0;
 
+    // Start/end variants align the trigger's VISIBLE (inflated) edge to the
+    // panel edge, matching the live component's alignment — a raw-edge
+    // alignment would leave an INFLATE-wide shelf in the outline.
     let trigger_x = match align {
-        "start" => EDGE,
-        "end" => STAGE_W - EDGE - TRIGGER,
+        "start" => EDGE + INFLATE,
+        "end" => STAGE_W - EDGE - TRIGGER - INFLATE,
         _ => (STAGE_W - TRIGGER) / 2.0,
     };
     let (trigger_y, panel_y) = if side == "below" {

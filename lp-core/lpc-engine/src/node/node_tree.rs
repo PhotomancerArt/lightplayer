@@ -253,10 +253,57 @@ impl<N> RuntimeNodeTree<N> {
         Ok(binding_ref)
     }
 
+    /// Remove every node-owned binding and reset the derived index. The
+    /// loader's binding phase re-registers from defs afterwards, so the index
+    /// always matches what a fresh load would produce (incremental binding
+    /// apply, Option C).
+    pub fn clear_bindings(&mut self, revision: Revision) {
+        for entry in self.entries_mut() {
+            if entry.bindings.value().is_empty() {
+                continue;
+            }
+            entry.bindings.get_mut().clear();
+            entry.bindings.mark_updated(revision);
+        }
+        self.binding_index = NodeBindingIndex::default();
+    }
+
     /// Iterate over all node-owned bindings.
     pub fn bindings(&self) -> impl Iterator<Item = &BindingEntry> {
         self.entries()
             .flat_map(|entry| entry.bindings.value().iter())
+    }
+
+    /// Iterate over all node-owned bindings with their stable refs, in
+    /// (owner, index) order.
+    pub fn bindings_with_refs(&self) -> impl Iterator<Item = (BindingRef, &BindingEntry)> {
+        self.entries().flat_map(|entry| {
+            entry
+                .bindings
+                .value()
+                .iter()
+                .enumerate()
+                .map(move |(index, binding)| (BindingRef::new(entry.id, index), binding))
+        })
+    }
+
+    /// Resolve all consumers of a bus channel (bindings whose source is the
+    /// channel).
+    pub fn consumers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, &BindingEntry)> {
+        self.binding_index
+            .bus_sources(channel)
+            .iter()
+            .copied()
+            .filter_map(|binding_ref| {
+                binding_by_ref(&self.nodes, binding_ref).map(|entry| (binding_ref, entry))
+            })
+            .collect()
+    }
+
+    /// Every bus channel referenced by at least one binding, with its
+    /// established kind.
+    pub fn bus_channels(&self) -> impl Iterator<Item = (&ChannelName, lpc_model::Kind)> {
+        self.binding_index.channels()
     }
 
     /// Resolve the binding for one consumed slot, if one exists.

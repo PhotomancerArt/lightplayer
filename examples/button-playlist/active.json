@@ -4,7 +4,7 @@
   "render_order": 0,
   "bindings": {
     "time": {
-      "source": "..#entry_time"
+      "source": "node:..#entry_time"
     }
   },
   "glsl_opts": {

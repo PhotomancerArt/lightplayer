@@ -7,6 +7,7 @@
 // (src/base/code_editor.rs) talks only to the API exported here — keep this
 // surface minimal and stable so bundle regenerations stay rare.
 
+import { autocompletion, snippetCompletion } from "@codemirror/autocomplete";
 import { Compartment, EditorState } from "@codemirror/state";
 import {
   EditorView,
@@ -180,10 +181,47 @@ function toDiagnostic(state, entry) {
   };
 }
 
+// Convert one façade completion entry into a CodeMirror `Completion`.
+// Entries are plain objects: { label, detail?, type?, info?, snippet? }.
+// A `snippet` (CodeMirror `snippet()` template, e.g. "mix(${x}, ${y}, ${a})")
+// makes accepting insert the template with navigable placeholders; without
+// one, accepting inserts the label verbatim.
+function toCompletion(entry) {
+  const base = {
+    label: entry.label ?? "",
+    detail: entry.detail || undefined,
+    type: entry.type || undefined,
+    info: entry.info || undefined,
+  };
+  if (entry.snippet) return snippetCompletion(entry.snippet, base);
+  return base;
+}
+
+// The autocompletion extension for a completion list; empty list = no
+// extension at all, so editors without completions (plain text, XML) never
+// grow a popup. The source matches on word prefixes and also fires on
+// explicit request (Ctrl-Space) at any position.
+function completionExtension(entries) {
+  if (!entries.length) return [];
+  const options = entries.map(toCompletion);
+  const source = (context) => {
+    const word = context.matchBefore(/\w+/);
+    if (!word && !context.explicit) return null;
+    return {
+      from: word ? word.from : context.pos,
+      options,
+      validFor: /^\w*$/,
+    };
+  };
+  return autocompletion({ override: [source] });
+}
+
 // Create an editor under `parent`. Options:
 //   doc              initial text (also the initial clean baseline)
 //   language         "glsl" | "xml" | anything-else = plain
 //   readOnly         boolean
+//   completions      optional array of { label, detail?, type?, info?,
+//                    snippet? } (see toCompletion); empty/absent = no popup
 //   onModified(bool) fired when the modified-vs-baseline state flips
 //   onChange(text)   fired with the full text after every document change
 //                    (user typing and external setDoc alike)
@@ -193,6 +231,7 @@ function toDiagnostic(state, entry) {
 // Returns the imperative handle the Rust component drives.
 export function createEditor(parent, opts = {}) {
   const readOnly = new Compartment();
+  const completions = new Compartment();
   let baseline = opts.doc ?? "";
   let modified = false;
 
@@ -247,6 +286,11 @@ export function createEditor(parent, opts = {}) {
       languageExtension(opts.language),
       indentUnit.of("    "),
       readOnly.of(EditorState.readOnly.of(Boolean(opts.readOnly))),
+      completions.of(
+        completionExtension(
+          Array.isArray(opts.completions) ? opts.completions : [],
+        ),
+      ),
       keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
       updateListener,
     ],
@@ -275,6 +319,13 @@ export function createEditor(parent, opts = {}) {
     setReadOnly: (value) => {
       view.dispatch({
         effects: readOnly.reconfigure(EditorState.readOnly.of(Boolean(value))),
+      });
+    },
+    setCompletions: (list) => {
+      view.dispatch({
+        effects: completions.reconfigure(
+          completionExtension(Array.isArray(list) ? list : []),
+        ),
       });
     },
     setDiagnostics: (list) => {

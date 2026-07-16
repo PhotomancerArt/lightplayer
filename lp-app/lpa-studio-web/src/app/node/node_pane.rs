@@ -219,7 +219,7 @@ pub fn NodeSection(
         },
         UiNodeSection::ProducedValues(values) => rsx! {
             section { class: section_class("tw:bg-card-subtle tw:px-4 tw:py-4", first),
-                ProducedValues { values }
+                ProducedValues { values, on_action }
             }
         },
         UiNodeSection::ConfigSlots(slots) => rsx! {

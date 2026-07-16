@@ -57,6 +57,9 @@
     --color-status-error-bg: var(--studio-status-error-bg);
     --color-status-error-border: var(--studio-status-error-border);
     --color-status-error-foreground: var(--studio-status-error-text);
+    --color-status-bound-bg: var(--studio-status-bound-bg);
+    --color-status-bound-border: var(--studio-status-bound-border);
+    --color-status-bound-foreground: var(--studio-status-bound-text);
 
     --color-step-marker: var(--studio-step-marker-bg);
     --color-step-active: var(--studio-step-active-bg);

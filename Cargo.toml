@@ -38,6 +38,7 @@ members = [
     # backend is host-optional (build/test it explicitly, like the spike).
     "lp-gfx/lp-gfx-wgpu",
     # lps workspace members
+    "lp-shader/lps-builtin-completions",
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
     "lp-shader/lpfn-impl-macro",
@@ -98,6 +99,7 @@ default-members = [
     "lp-gfx/lp-gfx",
     "lp-gfx/lp-gfx-lpvm",
     # lps workspace members (excluding lps-builtins-emu-app)
+    "lp-shader/lps-builtin-completions",
     "lp-shader/lps-builtin-ids",
     "lp-shader/lps-builtins",
     "lp-shader/lps-filetests-gen-app",

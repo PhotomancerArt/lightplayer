@@ -50,6 +50,8 @@ pub fn lpfn_gnoise3(p: Vec3Q32, seed: u32) -> Q32 {
     Q32::from_f32_wrapping(-1.0) + Q32::from_f32_wrapping(2.0) * result
 }
 
+/// Gradient noise (3D)
+///
 /// 3D Gradient Noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

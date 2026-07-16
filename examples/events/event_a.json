@@ -3,10 +3,10 @@
   "source": "event_a.glsl",
   "bindings": {
     "events": {
-      "target": "bus#trigger"
+      "target": "bus:trigger"
     },
     "time": {
-      "source": "bus#time.seconds"
+      "source": "bus:time"
     }
   },
   "glsl_opts": {

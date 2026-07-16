@@ -2,38 +2,6 @@
   "record": {
     "fields": [
       {
-        "name": "bindings",
-        "shape": {
-          "map": {
-            "key": "string",
-            "meta": {},
-            "value": {
-              "ref": {
-                "id": 1885459118
-              }
-            }
-          }
-        }
-      },
-      {
-        "name": "trigger",
-        "semantics": {
-          "direction": "consumed",
-          "merge": "by_key"
-        },
-        "shape": {
-          "map": {
-            "key": "u32",
-            "meta": {},
-            "value": {
-              "ref": {
-                "id": 2014621053
-              }
-            }
-          }
-        }
-      },
-      {
         "name": "name",
         "shape": {
           "option": {
@@ -45,6 +13,26 @@
                   "id": 2612013983,
                   "meta": {},
                   "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "trigger_ids",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1028734941,
+                  "meta": {},
+                  "ty": {
+                    "list": "u32"
+                  }
                 }
               }
             }

@@ -577,6 +577,8 @@ pub fn lpfn_psrdnoise3(
     )
 }
 
+/// Periodic simplex rotation-derivative noise (3D)
+///
 /// 3D Periodic Simplex Rotational Domain noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

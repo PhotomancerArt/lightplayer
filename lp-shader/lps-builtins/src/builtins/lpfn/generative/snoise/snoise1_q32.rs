@@ -79,6 +79,8 @@ pub fn lpfn_snoise(x: Q32, seed: u32) -> Q32 {
     }
 }
 
+/// Simplex noise (1D)
+///
 /// 1D Simplex noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

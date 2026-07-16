@@ -6,7 +6,7 @@ use lp_collection::VecMap;
 use lpc_model::{ChannelName, Kind, NodeId, SlotPath};
 
 use crate::dataflow::binding::{
-    BindingEntry, BindingError, BindingRef, BindingTarget, channels_touched,
+    BindingEntry, BindingError, BindingRef, BindingSource, BindingTarget, channels_touched,
 };
 
 use super::RuntimeNodeEntry;
@@ -15,6 +15,7 @@ use super::RuntimeNodeEntry;
 pub(super) struct NodeBindingIndex {
     consumed_targets: VecMap<(NodeId, SlotPath), Vec<BindingRef>>,
     bus_targets: VecMap<ChannelName, Vec<BindingRef>>,
+    bus_sources: VecMap<ChannelName, Vec<BindingRef>>,
     channel_kinds: VecMap<ChannelName, Kind>,
 }
 
@@ -72,6 +73,13 @@ impl NodeBindingIndex {
             }
         }
 
+        if let BindingSource::BusChannel(channel) = &binding.source {
+            self.bus_sources
+                .entry(channel.clone())
+                .or_default()
+                .push(binding_ref);
+        }
+
         Ok(())
     }
 
@@ -83,6 +91,16 @@ impl NodeBindingIndex {
 
     pub(super) fn bus_targets(&self, channel: &ChannelName) -> &[BindingRef] {
         self.bus_targets.get(channel).map_or(&[], Vec::as_slice)
+    }
+
+    pub(super) fn bus_sources(&self, channel: &ChannelName) -> &[BindingRef] {
+        self.bus_sources.get(channel).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every channel referenced by at least one binding, with its established
+    /// kind.
+    pub(super) fn channels(&self) -> impl Iterator<Item = (&ChannelName, Kind)> {
+        self.channel_kinds.iter().map(|(name, kind)| (name, *kind))
     }
 }
 

@@ -1,11 +1,30 @@
 use alloc::string::String;
 use core::fmt;
 
-/// A **bus channel** name: convention-only string with shape like
-/// `<sort>/<in|out>/<id>/…` (e.g. `time`, `video/in/0`, `audio/in/0`), as in
-/// `docs/design/lightplayer/quantity.md` §8 and §11 (channel naming). The type
-/// does not enforce the grammar in v0; compose-time code validates against the
-/// project’s bus graph.
+/// A **bus channel** name: a convention-only string shaped
+/// `purpose[.in|.out][/instance]` (naming norms decided 2026-07-08;
+/// supersedes the retired `<kind>/<dir>/<index>` convention from the
+/// archived quantity.md):
+///
+/// - **purpose**: lowercase dotted segments (`time`, `time.delta`,
+///   `transport.next`). Dots group families for display/pickers; the full
+///   string is the channel identity — no structural resolution.
+/// - **`.in` / `.out`**: only on channels that cross the project boundary
+///   (`visual.out` toward fixtures, `visual.in` from a camera). Interior
+///   channels (`time`, `trigger`) carry no direction — every channel has
+///   writers and readers internally, so direction only means something at
+///   the boundary.
+/// - **`/instance`**: optional parallel-channel suffix, name or number
+///   (`visual.out/left`, `visual.out/2`). The unadorned name is the primary
+///   instance.
+/// - **Units are not encoded in canonical names** (`time`, not
+///   `time.seconds`): unit truth lives in slot metadata and the well-known
+///   channel registry, and the UX displays it. A unit segment stays legal to
+///   mark a deviating channel (`time.millis`).
+///
+/// The type does not enforce the grammar; channels are created lazily by
+/// reference, and the editing UX teaches the norms (picker + well-known
+/// registry) rather than a validator gatekeeping them.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]

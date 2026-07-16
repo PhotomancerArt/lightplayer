@@ -20,6 +20,8 @@ pub struct UiProducedValue {
     pub binding: UiProducedBinding,
     /// Edited-state affordance for authored produced-value metadata.
     pub dirty: UiNodeDirtyState,
+    /// Binding authoring surface when this value is bindable (M4).
+    pub authoring: Option<crate::UiBindingAuthoring>,
 }
 
 impl UiProducedValue {
@@ -32,6 +34,7 @@ impl UiProducedValue {
             unit: None,
             binding: UiProducedBinding::none(),
             dirty: UiNodeDirtyState::Clean,
+            authoring: None,
         }
     }
 
@@ -66,16 +69,13 @@ impl UiProducedValue {
 }
 
 fn produced_value_info_aspect(value: &UiProducedValue) -> UiSlotAspect {
-    let mut display = value.value.clone();
-    if let Some(unit) = value.display_unit() {
-        display.push(' ');
-        display.push_str(&unit.short);
-    }
-
+    // No live value row: the popup describes the slot (identity, shape,
+    // unit, wiring) while the pane hero owns the changing reading —
+    // duplicating it here just churns while the popup is open (gate
+    // feedback 2026-07-15).
     let mut aspect = UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
         .with_row(UiSlotAspectRow::new("Name", value.label.clone()))
-        .with_row(UiSlotAspectRow::shape(UiSlotShape::ProducedValue))
-        .with_row(UiSlotAspectRow::new("Value", display));
+        .with_row(UiSlotAspectRow::shape(UiSlotShape::ProducedValue));
 
     if let Some(unit) = value.display_unit() {
         aspect = aspect.with_row(UiSlotAspectRow::unit(unit));

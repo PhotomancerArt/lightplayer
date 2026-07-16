@@ -1,4 +1,5 @@
 mod args;
+mod flash;
 mod handler;
 mod port;
 mod process;

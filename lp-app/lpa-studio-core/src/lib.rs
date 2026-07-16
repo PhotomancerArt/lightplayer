@@ -25,6 +25,7 @@ pub use lpc_history::{ContentHash, SyncRelation};
 
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
+pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
     ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget,
     DeviceController, DeviceHandle, DeviceOp, DeviceOpenOutcome, DeviceSnapshot, EndpointChoice,
@@ -35,11 +36,12 @@ pub use app::home::{
     UiHomeView, UiPackageCard, ZipBytes,
 };
 pub use app::node::{
-    UiAssetEditor, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody,
-    UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings,
-    UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame,
-    UiProductRef, UiProductTrackingState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
+    UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
+    UiBindingEndpoint, UiChannelChoice, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
+    UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab,
+    UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
+    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductTrackingState, UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
     UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite,
     UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality,
     UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue,
@@ -84,4 +86,4 @@ pub use core::{
     UiStepsView, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
 };
 
-pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/basic";
+pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";

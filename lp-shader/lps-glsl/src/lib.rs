@@ -11,6 +11,7 @@
 extern crate alloc;
 
 mod body;
+pub mod builtin_inventory;
 mod compile;
 mod diagnostic;
 mod hir;

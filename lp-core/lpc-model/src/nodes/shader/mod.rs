@@ -14,7 +14,9 @@ pub use crate::slot_views::{
 pub use compute_shader_def::ComputeShaderDef;
 pub use glsl_opts::{AddSubMode, DivMode, GlslOpts, MulMode};
 pub use shader_def::ShaderDef;
-pub use shader_header_gen::{ShaderHeaderGenError, generate_compute_shader_header};
+pub use shader_header_gen::{
+    ShaderHeaderGenError, generate_compute_shader_header, glsl_type_for_lp_type,
+};
 pub use shader_param_def::{ScalarHint, ShaderParamDef};
 pub use shader_slot_def::{ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderValueShapeRef};
 pub use shader_slot_mapping::{ShaderSlotMappingDef, ShaderSlotMappingKind};

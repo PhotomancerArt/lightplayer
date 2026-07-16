@@ -173,6 +173,14 @@ fn serial_thread_loop(
 /// The USB-JTAG-serial reset dance espflash performs after flashing an
 /// ESP32-C6, expressed as single-pin [`DeviceByteStream::set_signals`] writes
 /// so the pin-write sequence is identical to the pre-seam code.
+///
+/// Before the final release (the RTS falling edge that actually reboots the
+/// chip), any pending input is discarded: a previously RUNNING device flushes
+/// its buffered TX — heartbeat `M!` frames included — into the freshly
+/// opened port, and delivering those to the readiness gate misclassifies the
+/// boot as `Incompatible { FrameBeforeHello }` (found on hardware, M5
+/// smoke). Bytes that arrive before the reset takes effect are not boot
+/// output; everything after the falling edge is.
 fn reset_after_open(stream: &mut dyn DeviceByteStream) -> Result<(), ByteStreamError> {
     stream.set_signals(Some(false), None)?;
     thread::sleep(Duration::from_millis(100));
@@ -180,7 +188,20 @@ fn reset_after_open(stream: &mut dyn DeviceByteStream) -> Result<(), ByteStreamE
     stream.set_signals(Some(false), None)?;
     stream.set_signals(None, Some(true))?;
     thread::sleep(Duration::from_millis(100));
+    discard_stale_input(stream)?;
     stream.set_signals(None, Some(false))?;
+    Ok(())
+}
+
+/// Drain buffered pre-reset bytes. Bounded: a pathological chatterbox must
+/// not hold the connect hostage.
+fn discard_stale_input(stream: &mut dyn DeviceByteStream) -> Result<(), ByteStreamError> {
+    let mut buf = [0u8; 256];
+    for _ in 0..64 {
+        if stream.read_available(&mut buf)? == 0 {
+            break;
+        }
+    }
     Ok(())
 }
 

@@ -387,3 +387,172 @@ impl NodeRuntime for ProduceProbeNode {
         Ok(())
     }
 }
+
+// --- Incremental binding apply (Option C, ADR follow-up) -------------------
+
+/// Bus channels the bindings publish to, as (channel, is_authored) pairs.
+fn published_channels(engine: &lpc_engine::Engine) -> Vec<(String, bool)> {
+    let mut channels = engine
+        .tree()
+        .bindings()
+        .filter_map(|binding| match &binding.target {
+            BindingTarget::BusChannel(channel) => Some((
+                channel.0.clone(),
+                binding.priority == BindingPriority::authored(),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    channels.sort();
+    channels
+}
+
+#[test]
+fn project_apply_binding_body_change_rebinds_runtime() {
+    let mut fs = clock_project_fs();
+    let services = EngineServices::new(TreePath::parse("/rebind.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let clock_use = NodeUseLocation::root().child(SlotPath::parse("nodes[clock]").unwrap());
+    let before = engine
+        .project_runtime_index()
+        .node_id(&clock_use)
+        .expect("clock runtime node");
+
+    // Slot-declared default: seconds publishes bus:time at fallback priority.
+    assert!(
+        published_channels(&engine)
+            .iter()
+            .any(|(channel, _)| channel == "time"),
+        "fresh load registers the declared default"
+    );
+
+    // Author a binding (what M4's picker writes) — the runtime must pick it
+    // up on apply, without a reload and without recreating the node.
+    fs.write_file_mut(
+        LpPath::new("/clock.json"),
+        br#"
+{
+  "kind": "Clock",
+  "controls": {
+    "rate": 1.0
+  },
+  "bindings": {
+    "seconds": {
+      "target": "bus:custom"
+    }
+  }
+}
+"#,
+    )
+    .expect("write clock");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/clock.json"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+    engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    let channels = published_channels(&engine);
+    assert!(
+        channels.iter().any(|(channel, _)| channel == "custom"),
+        "authored binding registered incrementally: {channels:?}"
+    );
+    assert!(
+        !channels.iter().any(|(channel, _)| channel == "time"),
+        "authored binding suppresses the declared default: {channels:?}"
+    );
+    assert_eq!(
+        engine.project_runtime_index().node_id(&clock_use),
+        Some(before),
+        "binding rebuild must not recreate the runtime node"
+    );
+
+    // Load-parity invariant: the incremental index matches a fresh load.
+    let fresh = ProjectLoader::load_from_root(
+        &fs,
+        EngineServices::new(TreePath::parse("/rebind.show").unwrap()),
+    )
+    .expect("fresh load");
+    assert_eq!(
+        published_channels(&engine),
+        published_channels(fresh.engine()),
+        "incremental binding rebuild diverged from a fresh load"
+    );
+}
+
+#[test]
+fn project_apply_unbind_restores_declared_default() {
+    let mut fs = clock_project_fs();
+    // Start with an authored target overriding the declared default.
+    fs.write_file_mut(
+        LpPath::new("/clock.json"),
+        br#"
+{
+  "kind": "Clock",
+  "controls": {
+    "rate": 1.0
+  },
+  "bindings": {
+    "seconds": {
+      "target": "bus:custom"
+    }
+  }
+}
+"#,
+    )
+    .expect("write clock");
+    let services = EngineServices::new(TreePath::parse("/unbind.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    assert!(
+        published_channels(&engine)
+            .iter()
+            .any(|(channel, _)| channel == "custom")
+    );
+
+    // Unbind (remove the authored entry): the slot-declared default takes
+    // over on apply — the M4 unbind semantics, live.
+    fs.write_file_mut(
+        LpPath::new("/clock.json"),
+        br#"
+{
+  "kind": "Clock",
+  "controls": {
+    "rate": 1.0
+  }
+}
+"#,
+    )
+    .expect("write clock");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/clock.json"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+    engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    let channels = published_channels(&engine);
+    assert!(
+        !channels.iter().any(|(channel, _)| channel == "custom"),
+        "removed authored binding is gone: {channels:?}"
+    );
+    assert!(
+        channels.iter().any(|(channel, _)| channel == "time"),
+        "declared default re-materializes after unbind: {channels:?}"
+    );
+}

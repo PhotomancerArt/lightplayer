@@ -1,5 +1,6 @@
 use crate::{LpType, SlotName, SlotNameError, SlotPolicy, SlotSemantics, SlotValueShape};
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -238,6 +239,12 @@ pub struct SlotFieldShape {
     pub semantics: SlotSemantics,
     #[serde(default, skip_serializing_if = "SlotPolicy::is_default")]
     pub policy: SlotPolicy,
+    /// Declarative default binding endpoint (`bus:<channel>`) materialized at
+    /// load when no authored binding names this slot — a produced slot's
+    /// default publishes, a consumed slot's default sources (ADR
+    /// 2026-07-09-declarative-default-bindings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_bind: Option<String>,
 }
 
 impl SlotFieldShape {
@@ -272,6 +279,7 @@ impl SlotFieldShape {
             shape,
             semantics,
             policy,
+            default_bind: None,
         })
     }
 }

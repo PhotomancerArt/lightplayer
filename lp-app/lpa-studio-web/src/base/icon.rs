@@ -4,7 +4,7 @@ use dioxus_icons::lucide::{
     Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, FlaskConical, Folder, Funnel, Image, Info,
     Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed, MousePointerClick, Pencil, Play,
     Plus, Radio, Save, Settings, Sparkles, SquareArrowRight, Trash2, TriangleAlert, Undo2, Upload,
-    Usb, X, Zap,
+    Usb, Waypoints, X, Zap,
 };
 
 #[component]
@@ -22,6 +22,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::StepAttention => rsx! { TriangleAlert { size } },
         StudioIconName::AssignedValue => rsx! { CircleDot { size } },
         StudioIconName::BoundValue => rsx! { Link2 { size } },
+        StudioIconName::Bus => rsx! { Waypoints { size } },
         StudioIconName::ChildValue => rsx! { SquareArrowRight { size } },
         StudioIconName::NodeTreeItem => rsx! { Boxes { size } },
         StudioIconName::Edited => rsx! { Pencil { size } },
@@ -100,6 +101,9 @@ pub enum StudioIconName {
     StepAttention,
     AssignedValue,
     BoundValue,
+    /// Waypoints: the bus — shared visual language wherever a bus channel
+    /// appears (channel cards, binding chips, picker rows, popup wiring).
+    Bus,
     ChildValue,
     NodeTreeItem,
     Edited,

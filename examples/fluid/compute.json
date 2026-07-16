@@ -3,10 +3,10 @@
   "source": "compute.glsl",
   "bindings": {
     "emitters": {
-      "target": "bus#fluid.emitters"
+      "target": "bus:fluid.emitters"
     },
     "time": {
-      "source": "bus#time.seconds"
+      "source": "bus:time"
     }
   },
   "glsl_opts": {

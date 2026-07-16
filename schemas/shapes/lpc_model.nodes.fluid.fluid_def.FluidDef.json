@@ -109,6 +109,7 @@
         }
       },
       {
+        "default_bind": "bus:time",
         "name": "time",
         "semantics": {
           "direction": "consumed"

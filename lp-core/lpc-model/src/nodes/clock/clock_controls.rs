@@ -43,6 +43,7 @@ impl FieldSlot for ClockControls {
                         shape: running_shape,
                         semantics: crate::SlotSemantics::local(),
                         policy: SlotPolicy::writable_transient(),
+                        default_bind: None,
                     },
                     StaticSlotFieldShape {
                         name: "rate",
@@ -51,6 +52,7 @@ impl FieldSlot for ClockControls {
                         },
                         semantics: crate::SlotSemantics::local(),
                         policy: SlotPolicy::writable_transient(),
+                        default_bind: None,
                     },
                     StaticSlotFieldShape {
                         name: "scrub_offset_seconds",
@@ -59,6 +61,7 @@ impl FieldSlot for ClockControls {
                         },
                         semantics: crate::SlotSemantics::local(),
                         policy: SlotPolicy::writable_transient(),
+                        default_bind: None,
                     },
                 ],
             }),

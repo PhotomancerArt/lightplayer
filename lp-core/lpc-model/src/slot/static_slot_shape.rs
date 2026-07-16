@@ -424,17 +424,23 @@ pub struct StaticSlotFieldShape {
     pub semantics: SlotSemantics,
     #[serde(default, skip_serializing_if = "SlotPolicy::is_default")]
     pub policy: SlotPolicy,
+    /// Declarative default binding endpoint (`bus:<channel>`); see
+    /// [`crate::SlotFieldShape::default_bind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_bind: Option<&'static str>,
 }
 
 impl StaticSlotFieldShape {
     pub fn to_owned_field(self) -> SlotFieldShape {
-        SlotFieldShape::with_semantics_and_policy(
+        let mut field = SlotFieldShape::with_semantics_and_policy(
             self.name,
             self.shape.to_owned_shape(),
             self.semantics,
             self.policy,
         )
-        .expect("valid static slot field name")
+        .expect("valid static slot field name");
+        field.default_bind = self.default_bind.map(ToString::to_string);
+        field
     }
 }
 
@@ -465,6 +471,7 @@ mod tests {
         shape: &BOOL_SHAPE,
         semantics: SlotSemantics::new(SlotDirection::Local, SlotMerge::Latest),
         policy: SlotPolicy::writable_persisted(),
+        default_bind: None,
     }];
     static RECORD_SHAPE: StaticSlotShapeDescriptor = StaticSlotShapeDescriptor::Record {
         meta: StaticSlotMeta::EMPTY,

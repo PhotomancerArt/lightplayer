@@ -109,8 +109,8 @@ mod tests {
 
     #[test]
     fn validates_exactly_one_endpoint() {
-        let source = BindingRef::parse("bus#visual.out").unwrap();
-        let target = BindingRef::parse("bus#visual.out").unwrap();
+        let source = BindingRef::parse("bus:visual.out").unwrap();
+        let target = BindingRef::parse("bus:visual.out").unwrap();
 
         assert!(BindingDef::source(source.clone()).validate().is_ok());
         assert!(BindingDef::target(target.clone()).validate().is_ok());
@@ -136,12 +136,12 @@ mod tests {
 
     #[test]
     fn serde_omits_unset_endpoint_slots() {
-        let binding = BindingDef::target(BindingRef::parse("bus#visual.out").unwrap());
+        let binding = BindingDef::target(BindingRef::parse("bus:visual.out").unwrap());
 
         let json = serde_json::to_string(&binding).unwrap();
 
         assert!(!json.contains("source"));
         assert!(!json.contains("value"));
-        assert!(json.contains(r#""target":"bus#visual.out""#));
+        assert!(json.contains(r#""target":"bus:visual.out""#));
     }
 }

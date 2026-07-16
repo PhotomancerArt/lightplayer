@@ -37,6 +37,8 @@ pub fn lpfn_fbm3(p: Vec3Q32, octaves: i32, seed: u32) -> Q32 {
     value
 }
 
+/// Fractal Brownian Motion (3D)
+///
 /// 3D Fractal Brownian Motion noise function (extern C wrapper for compiler).
 ///
 /// # Arguments

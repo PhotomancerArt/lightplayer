@@ -5,10 +5,14 @@ use crate::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 /// A human-readable binding endpoint shown in node binding popovers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiBindingEndpoint {
-    /// Compact label for the endpoint, such as `bus#time.seconds`.
+    /// Compact label for the endpoint, such as `bus:time`.
     pub label: String,
     /// Optional detail, usually the owning node or slot path.
     pub detail: Option<String>,
+    /// True when this wiring came from the slot's declarative `default_bind`
+    /// rather than an authored binding (ADR 2026-07-09). Indicators wear a
+    /// DEF badge and popovers explain the origin.
+    pub default_origin: bool,
 }
 
 impl UiBindingEndpoint {
@@ -17,12 +21,19 @@ impl UiBindingEndpoint {
         Self {
             label: label.into(),
             detail: None,
+            default_origin: false,
         }
     }
 
     /// Add secondary detail to the endpoint.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// Mark this endpoint as wired by declarative default policy.
+    pub fn with_default_origin(mut self) -> Self {
+        self.default_origin = true;
         self
     }
 }
@@ -84,6 +95,9 @@ impl UiProducedBinding {
 
         if let Some(bus_target) = self.bindings.bus_target.as_ref() {
             aspect = aspect.with_row(endpoint_row("Published", bus_target));
+            if bus_target.default_origin {
+                aspect = aspect.with_row(default_origin_row());
+            }
         }
         for target in &self.bindings.target_bindings {
             aspect = aspect.with_row(endpoint_row("Bound to", target));
@@ -116,6 +130,18 @@ fn endpoint_row(label: &'static str, endpoint: &UiBindingEndpoint) -> UiSlotAspe
     let mut row = UiSlotAspectRow::new(label, endpoint.label.clone());
     if let Some(detail) = endpoint.detail.as_ref() {
         row = row.with_detail(detail.clone());
+    } else if endpoint.default_origin {
+        // Secondary rows (targets/consumers) get the short marker; the
+        // primary endpoint gets the full [`default_origin_row`] explanation.
+        row = row.with_detail("default binding");
     }
     row
+}
+
+/// Popover explanation for default-origin wiring: what a default binding is
+/// and how to override it (M5 honest indicator; wording per the 2026-07-15
+/// gate — the DEF story lives here, not on the main-UI chip).
+pub(crate) fn default_origin_row() -> UiSlotAspectRow {
+    UiSlotAspectRow::new("Origin", "default binding")
+        .with_detail("Declared by the slot itself; authoring a binding overrides it.")
 }

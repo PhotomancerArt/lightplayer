@@ -31,7 +31,7 @@ impl EmbeddedExample {
 pub fn embedded_examples() -> &'static [EmbeddedExample] {
     &[EmbeddedExample {
         id: DEMO_PROJECT_ID,
-        name: "Basic",
+        name: "Fyeah Sign",
         kind: "Project",
     }]
 }
@@ -49,9 +49,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn basic_example_is_embedded_with_files() {
-        let example = embedded_example("examples/basic").expect("basic is embedded");
-        assert_eq!(example.name, "Basic");
+    fn demo_example_is_embedded_with_files() {
+        let example = embedded_example(DEMO_PROJECT_ID).expect("demo example is embedded");
+        assert_eq!(example.name, "Fyeah Sign");
         assert_eq!(example.kind, "Project");
         let files = example.files();
         assert!(

@@ -616,8 +616,12 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
     })()
   `;
   const started = Date.now();
+  // Generous cap: readiness polls every 50ms so fast stories pay nothing,
+  // and the forced-BeginFrame kick below unwedges rAF-driven stories — the
+  // 30s ceiling is margin for release-WASM popover stories on a loaded
+  // machine (they used to kill whole baseline runs at 10s).
   let lastForcedFrame = 0;
-  while (Date.now() - started < 10_000) {
+  while (Date.now() - started < 30_000) {
     const ready = await evaluate(cdp, sessionId, expression);
     if (ready) {
       return;

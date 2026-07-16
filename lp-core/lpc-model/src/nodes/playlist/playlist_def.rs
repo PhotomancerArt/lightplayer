@@ -1,5 +1,7 @@
 use super::PlaylistEntry;
-use crate::{BindingDefs, MapSlot, PositiveF32, PositiveF32Slot, Slotted, ValueSlot};
+use crate::{
+    BindingDefs, ControlMessage, MapSlot, PositiveF32, PositiveF32Slot, Slotted, ValueSlot,
+};
 
 /// Authored playlist visual selector node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
@@ -10,6 +12,15 @@ pub struct PlaylistDef {
     /// Global graph time in seconds.
     #[slot(consumed)]
     pub time: ValueSlot<f32>,
+
+    /// Trigger messages that start or restart entries (routed by entry
+    /// `trigger_ids`).
+    #[slot(
+        consumed,
+        merge = "by_key",
+        map(key = "u32", value_ref = "lp::control::Message")
+    )]
+    pub trigger: MapSlot<u32, ControlMessage>,
 
     /// Entry shown when no triggered sequence is active.
     pub idle_entry: ValueSlot<u32>,
@@ -26,6 +37,7 @@ impl Default for PlaylistDef {
         Self {
             bindings: BindingDefs::default(),
             time: default_time(),
+            trigger: MapSlot::default(),
             idle_entry: default_idle_entry(),
             default_fade: default_fade(),
             entries: MapSlot::default(),
@@ -83,6 +95,25 @@ mod tests {
 
         assert_eq!(time.semantics.direction, SlotDirection::Consumed);
         assert_eq!(time.semantics.merge, SlotMerge::Latest);
+    }
+
+    #[test]
+    fn playlist_trigger_shape_is_consumed_by_key() {
+        assert_eq!(
+            crate::slot_shapes::static_slot_shape_name(crate::ControlMessage::SHAPE_ID),
+            Some(crate::CONTROL_MESSAGE_SHAPE_NAME)
+        );
+
+        let SlotShape::Record { fields, .. } = PlaylistDef::slot_shape() else {
+            panic!("record shape");
+        };
+        let trigger = fields
+            .iter()
+            .find(|field| field.name.as_str() == "trigger")
+            .expect("trigger field");
+
+        assert_eq!(trigger.semantics.direction, SlotDirection::Consumed);
+        assert_eq!(trigger.semantics.merge, SlotMerge::ByKey);
     }
 
     #[test]

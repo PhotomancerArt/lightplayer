@@ -3,7 +3,7 @@
   "endpoint": "ws281x:rmt:D10",
   "bindings": {
     "input": {
-      "source": "bus#control.out"
+      "source": "bus:control.out"
     }
   }
 }

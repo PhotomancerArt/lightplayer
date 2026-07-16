@@ -46,6 +46,24 @@
         }
       },
       {
+        "name": "default_bind",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "path",
+                  "id": 1364391883,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "default",
         "shape": {
           "option": {

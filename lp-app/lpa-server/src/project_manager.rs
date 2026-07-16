@@ -238,9 +238,7 @@ impl ProjectManager {
 
         let mut projects = Vec::new();
         for entry in entries {
-            // Check if this entry is a project directory (has project.json)
-            let project_json_path = entry.join("project.json");
-            if fs.file_exists(project_json_path.as_path()).unwrap_or(false) {
+            if is_project_dir(fs, &entry) {
                 // Extract project name from path
                 // Entry format: "/base/project-name" or "/base/project-name/"
                 let entry_str = entry.as_str();
@@ -258,4 +256,13 @@ impl ProjectManager {
 
         Ok(projects)
     }
+}
+
+/// True when `dir` holds the `project.json` manifest — the single
+/// definition of "is a project directory", shared by list-available and
+/// device boot auto-load. (Boot previously checked the retired
+/// `project.toml`, so deployed projects never auto-loaded.)
+pub fn is_project_dir(fs: &dyn LpFs, dir: &LpPathBuf) -> bool {
+    let manifest = dir.join("project.json");
+    fs.file_exists(manifest.as_path()).unwrap_or(false)
 }

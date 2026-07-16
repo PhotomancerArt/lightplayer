@@ -13,7 +13,8 @@
       "value": "f32",
       "default": 0,
       "label": "",
-      "description": ""
+      "description": "",
+      "default_bind": "bus:time"
     }
   }
 }

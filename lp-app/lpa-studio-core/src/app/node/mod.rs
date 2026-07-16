@@ -13,6 +13,7 @@
 //! component tree respectively.
 
 mod ui_asset_editor;
+mod ui_binding_authoring;
 mod ui_config_slot;
 mod ui_node_binding;
 mod ui_node_child;
@@ -23,6 +24,7 @@ mod ui_node_tab;
 mod ui_node_view;
 mod ui_produced_product;
 mod ui_produced_value;
+mod ui_shader_uniform;
 mod ui_slot_aspect;
 mod ui_slot_asset;
 mod ui_slot_composite;
@@ -35,6 +37,7 @@ mod ui_slot_unit;
 mod ui_slot_value;
 
 pub use ui_asset_editor::UiAssetEditor;
+pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};
 pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody, UiSlotOptionality};
 pub use ui_node_binding::{UiBindingEndpoint, UiProducedBinding, UiProducedBindings};
 pub use ui_node_child::UiNodeChild;
@@ -48,6 +51,7 @@ pub use ui_produced_product::{
     UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState,
 };
 pub use ui_produced_value::UiProducedValue;
+pub use ui_shader_uniform::UiShaderUniform;
 pub use ui_slot_aspect::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 pub use ui_slot_asset::{UiAssetEditorKind, UiSlotAsset};
 pub use ui_slot_composite::{

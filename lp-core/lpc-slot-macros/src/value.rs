@@ -232,6 +232,11 @@ fn lp_type_tokens(ty: &Type) -> Result<TokenStream> {
     if array_is_f32_len(ty, 3) {
         return Ok(quote! { ::lpc_model::LpType::Vec3 });
     }
+    if type_is_vec_of(ty, "u32") {
+        return Ok(quote! {
+            ::lpc_model::LpType::List(::lpc_model::__private::Box::new(::lpc_model::LpType::U32))
+        });
+    }
     Err(syn::Error::new_spanned(
         ty,
         "SlotValue derive cannot infer an LpType for this field yet",
@@ -260,6 +265,11 @@ fn static_lp_type_tokens(ty: &Type) -> Result<TokenStream> {
     if array_is_f32_len(ty, 3) {
         return Ok(quote! { ::lpc_model::StaticLpType::Vec3 });
     }
+    if type_is_vec_of(ty, "u32") {
+        return Ok(quote! {
+            ::lpc_model::StaticLpType::List(&::lpc_model::StaticLpType::U32)
+        });
+    }
     Err(syn::Error::new_spanned(
         ty,
         "SlotValue derive cannot infer a StaticLpType for this field yet",
@@ -274,6 +284,28 @@ fn type_is_path(ty: &Type, expected: &str) -> bool {
         .segments
         .last()
         .is_some_and(|segment| segment.ident == expected)
+}
+
+fn type_is_vec_of(ty: &Type, expected_elem: &str) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Vec" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return false;
+    };
+    if args.args.len() != 1 {
+        return false;
+    }
+    let Some(syn::GenericArgument::Type(elem)) = args.args.first() else {
+        return false;
+    };
+    type_is_path(elem, expected_elem)
 }
 
 fn array_is_f32_len(ty: &Type, expected_len: usize) -> bool {

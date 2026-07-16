@@ -77,6 +77,8 @@ pub fn lpfn_hash3(x: u32, y: u32, z: u32, seed: u32) -> u32 {
     hash_impl(combined, seed)
 }
 
+/// Integer hash (1D)
+///
 /// Hash function for 1D coordinates (extern C wrapper for compiler).
 ///
 /// # Arguments
@@ -91,6 +93,8 @@ pub extern "C" fn __lp_lpfn_hash_1(x: u32, seed: u32) -> u32 {
     lpfn_hash(x, seed)
 }
 
+/// Integer hash (2D)
+///
 /// Hash function for 2D coordinates (extern C wrapper for compiler).
 ///
 /// # Arguments
@@ -106,6 +110,8 @@ pub extern "C" fn __lp_lpfn_hash_2(x: u32, y: u32, seed: u32) -> u32 {
     lpfn_hash2(x, y, seed)
 }
 
+/// Integer hash (3D)
+///
 /// Hash function for 3D coordinates (extern C wrapper for compiler).
 ///
 /// # Arguments

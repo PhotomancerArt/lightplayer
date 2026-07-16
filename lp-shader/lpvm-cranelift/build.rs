@@ -11,6 +11,9 @@ fn main() {
         return;
     }
 
+    // Walk up from the crate's manifest dir, NOT from OUT_DIR: with a
+    // configured `build.build-dir`, OUT_DIR lives outside the workspace
+    // entirely, while the manifest dir is always inside it.
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let workspace_root = find_workspace_root(&manifest_dir).expect("workspace root");
     let target = "riscv32imac-unknown-none-elf";
@@ -61,12 +64,6 @@ fn main() {
     .expect("write lp_builtins_lib.rs");
 }
 
-/// Walk up from the crate's manifest dir to the workspace `Cargo.toml`.
-///
-/// Deliberately NOT derived from `OUT_DIR`: a `build.build-dir` cargo
-/// config relocates build scripts outside the repo entirely, and the old
-/// OUT_DIR walk panicked there. The manifest dir always lives in the
-/// workspace tree (including git worktrees at any depth).
 fn find_workspace_root(start: &str) -> Option<std::path::PathBuf> {
     let mut dir = std::path::Path::new(start);
     loop {

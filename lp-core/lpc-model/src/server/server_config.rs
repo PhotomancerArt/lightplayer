@@ -12,3 +12,9 @@ pub struct ServerConfig {
     #[serde(default)]
     pub startup_project: Option<String>,
 }
+
+impl ServerConfig {
+    /// Config file location at the filesystem root — shared by device boot
+    /// (read) and the server's load handler (write).
+    pub const PATH: &'static str = "/lightplayer.json";
+}

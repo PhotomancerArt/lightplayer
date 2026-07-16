@@ -3,6 +3,10 @@
 mod asset_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod asset_editor_stories;
+mod binding_authoring_section;
+#[cfg(feature = "stories")]
+pub(crate) mod binding_authoring_stories;
+mod binding_chip;
 mod config_slot_row;
 #[cfg(feature = "stories")]
 pub(crate) mod config_slot_row_stories;
@@ -47,8 +51,11 @@ mod slot_value_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_value_editor_stories;
 mod slot_vector_fields;
+pub(crate) mod value_display;
 
 pub use asset_editor::AssetEditor;
+pub(crate) use binding_authoring_section::BindingAuthoringSection;
+pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};

@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn json_round_trips_binding_defs_as_nested_objects() {
-        let json = r#"{ "bindings": { "output": { "target": "bus#visual.out" } } }"#;
+        let json = r#"{ "bindings": { "output": { "target": "bus:visual.out" } } }"#;
         let decoded: Wrapper = serde_json::from_str(json).unwrap();
         assert!(matches!(
             decoded.bindings.entries()["output"].target_ref(),
@@ -115,7 +115,7 @@ mod tests {
 
         let encoded = serde_json::to_string(&decoded).unwrap();
         assert!(encoded.contains(r#""bindings":{"output""#));
-        assert!(encoded.contains(r#""target":"bus#visual.out""#));
+        assert!(encoded.contains(r#""target":"bus:visual.out""#));
     }
 
     #[test]
@@ -123,7 +123,7 @@ mod tests {
         let mut entries = VecMap::new();
         entries.insert(
             String::from("output"),
-            BindingDef::target(BindingRef::parse("bus#visual.out").unwrap()),
+            BindingDef::target(BindingRef::parse("bus:visual.out").unwrap()),
         );
         let defs = BindingDefs::new(entries);
 

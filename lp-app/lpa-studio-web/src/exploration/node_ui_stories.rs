@@ -530,13 +530,13 @@ fn ProducedBindingButton(
                 div { class: "ux-node-ui-binding-heading", "bus binding" }
                 if let Some(bus_target) = bus_target {
                     div { class: "ux-node-ui-bus-binding-row",
-                        span { "bus#" }
+                        span { "bus:" }
                         code { "{bus_binding_name(bus_target)}" }
                         button { r#type: "button", "del" }
                     }
                 } else {
                     div { class: "ux-node-ui-bus-binding-row ux-node-ui-bus-binding-row-empty",
-                        span { "bus#" }
+                        span { "bus:" }
                         code { "not assigned" }
                         button { r#type: "button", "add" }
                     }
@@ -817,7 +817,7 @@ fn clock_node() -> NodeUiNode {
                 label: "Seconds",
                 value: "3.333",
                 detail: Some("project time"),
-                bindings: produced_bindings(Some("bus#time.seconds"), &[], &["Playlist.time"]),
+                bindings: produced_bindings(Some("bus:time"), &[], &["Playlist.time"]),
                 revision: 102,
             }),
             NodeUiPresentationItem::Metric(NodeUiMetric {
@@ -894,7 +894,7 @@ fn fixture_node() -> NodeUiNode {
             name: "output",
             size: Some("1 x 657"),
             preview_cells: 30,
-            bindings: produced_bindings(Some("bus#control.fixture"), &[], &["Output.main"]),
+            bindings: produced_bindings(Some("bus:control.fixture"), &[], &["Output.main"]),
             revision: 44,
         })],
         values: vec![
@@ -954,7 +954,7 @@ fn playlist_node() -> NodeUiNode {
                 name: "output",
                 size: Some("128 x 128"),
                 preview_cells: 18,
-                bindings: produced_bindings(Some("bus#visual.out"), &[], &["Fixture.visual"]),
+                bindings: produced_bindings(Some("bus:visual.out"), &[], &["Fixture.visual"]),
                 revision: 104,
             }),
             NodeUiPresentationItem::Metric(NodeUiMetric {
@@ -975,7 +975,7 @@ fn playlist_node() -> NodeUiNode {
         values: vec![
             NodeUiValueGroup {
                 rows: vec![
-                    value_row(NodeUiValueSource::Bound, "Time", "bus#time.seconds"),
+                    value_row(NodeUiValueSource::Bound, "Time", "bus:time"),
                     value_row(NodeUiValueSource::Direct, "Idle entry", "1"),
                     value_row(NodeUiValueSource::Direct, "Default fade", "0.35 s"),
                     value_row(NodeUiValueSource::Direct, "Active entry", "1"),
@@ -985,7 +985,7 @@ fn playlist_node() -> NodeUiNode {
                 rows: vec![
                     value_row(NodeUiValueSource::Child, "idle", "./idle.shader"),
                     value_row(NodeUiValueSource::Child, "blast", "./blast.shader"),
-                    value_row(NodeUiValueSource::Bound, "blast.trigger", "bus#trigger"),
+                    value_row(NodeUiValueSource::Bound, "blast.trigger", "bus:trigger"),
                 ],
             },
         ],
@@ -1016,7 +1016,7 @@ fn playlist_node() -> NodeUiNode {
                 label: "blast",
                 kind: "Shader",
                 detail: "./blast.json",
-                state: "duration 10 s, trigger bus#trigger",
+                state: "duration 10 s, trigger bus:trigger",
                 active: false,
                 presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
                     kind: NodeUiProductKind::Visual,
@@ -1029,7 +1029,7 @@ fn playlist_node() -> NodeUiNode {
                 values: vec![NodeUiValueGroup {
                     rows: vec![
                         value_row(NodeUiValueSource::Bound, "Time", "../playlist#entry_time"),
-                        value_row(NodeUiValueSource::Bound, "Trigger", "bus#trigger"),
+                        value_row(NodeUiValueSource::Bound, "Trigger", "bus:trigger"),
                         value_row(NodeUiValueSource::Direct, "Shader", "blast.glsl"),
                     ],
                 }],
@@ -1122,7 +1122,7 @@ fn produced_bindings(
 }
 
 fn bus_binding_name(binding_ref: &'static str) -> &'static str {
-    binding_ref.strip_prefix("bus#").unwrap_or(binding_ref)
+    binding_ref.strip_prefix("bus:").unwrap_or(binding_ref)
 }
 
 fn split_presentation_items(

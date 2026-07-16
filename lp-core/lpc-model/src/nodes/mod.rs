@@ -35,6 +35,6 @@ pub use shader::{
     ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
     ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
     ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef,
-    generate_compute_shader_header,
+    generate_compute_shader_header, glsl_type_for_lp_type,
 };
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

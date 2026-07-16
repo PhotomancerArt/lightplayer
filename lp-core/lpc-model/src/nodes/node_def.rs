@@ -937,7 +937,7 @@ mod tests {
   "kind": "Shader",
   "render_order": 2,
   "source": { "path": "shader.glsl" },
-  "bindings": { "visual": { "target": "bus#visual.out" } }
+  "bindings": { "visual": { "target": "bus:visual.out" } }
 }"#,
         )
         .expect("shader");
@@ -1093,7 +1093,7 @@ mod tests {
             r##"{
   "kind": "Output",
   "endpoint": "ws281x:rmt:D10",
-  "bindings": { "main": { "target": "bus#control.out" } }
+  "bindings": { "main": { "target": "bus:control.out" } }
 }"##,
         )
         .expect("output target");

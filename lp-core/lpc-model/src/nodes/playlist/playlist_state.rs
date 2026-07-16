@@ -7,7 +7,7 @@ use crate::{Slotted, ValueSlot, VisualProduct, VisualProductSlot};
 #[slot(default_policy = "read_only_transient")]
 pub struct PlaylistState {
     /// Renderable visual output produced by this playlist node.
-    #[slot(produced)]
+    #[slot(produced, default_bind = "bus:visual.out")]
     pub output: VisualProductSlot,
 
     /// Seconds since the current entry became active.

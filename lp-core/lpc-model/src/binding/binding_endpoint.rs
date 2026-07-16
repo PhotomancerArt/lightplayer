@@ -14,8 +14,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// The string form is the canonical slot value representation:
 ///
 /// ```text
-/// bus#visual.out
-/// ..shader#output
+/// bus:visual.out
+/// node:../shader#output
 /// ```
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
@@ -35,9 +35,12 @@ impl BindingRef {
                 .map(Self::Bus)
                 .map_err(BindingRefError::InvalidBus);
         }
-        NodeSlotRef::parse(input)
-            .map(Self::Node)
-            .map_err(BindingRefError::InvalidNode)
+        if input.starts_with(NodeSlotRef::PREFIX) {
+            return NodeSlotRef::parse(input)
+                .map(Self::Node)
+                .map_err(BindingRefError::InvalidNode);
+        }
+        Err(BindingRefError::UnknownScheme)
     }
 
     pub fn is_unset(&self) -> bool {
@@ -133,6 +136,7 @@ impl<'de> Deserialize<'de> for BindingRef {
 /// Error returned when parsing a [`BindingRef`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BindingRefError {
+    UnknownScheme,
     InvalidBus(BusSlotRefError),
     InvalidNode(NodeSlotRefError),
 }
@@ -140,6 +144,7 @@ pub enum BindingRefError {
 impl fmt::Display for BindingRefError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownScheme => f.write_str("binding ref must start with `bus:` or `node:`"),
             Self::InvalidBus(err) => write!(f, "invalid bus binding ref: {err}"),
             Self::InvalidNode(err) => write!(f, "invalid node binding ref: {err}"),
         }
@@ -157,18 +162,18 @@ mod tests {
     fn parses_refs() {
         assert_eq!(BindingRef::parse("").unwrap(), BindingRef::Unset);
         assert!(matches!(
-            BindingRef::parse("bus#visual.out").unwrap(),
+            BindingRef::parse("bus:visual.out").unwrap(),
             BindingRef::Bus(_)
         ));
         assert!(matches!(
-            BindingRef::parse("..shader#output").unwrap(),
+            BindingRef::parse("node:../shader#output").unwrap(),
             BindingRef::Node(_)
         ));
     }
 
     #[test]
     fn round_trips_through_lp_value_as_string() {
-        let binding_ref = BindingRef::parse("bus#visual.out").unwrap();
+        let binding_ref = BindingRef::parse("bus:visual.out").unwrap();
 
         assert_eq!(
             BindingRef::from_lp_value(&binding_ref.to_lp_value()).unwrap(),
@@ -186,11 +191,11 @@ mod tests {
 
     #[test]
     fn serde_uses_string_form() {
-        let binding_ref = BindingRef::parse("bus#visual.out").unwrap();
+        let binding_ref = BindingRef::parse("bus:visual.out").unwrap();
 
         let json = serde_json::to_string(&binding_ref).unwrap();
 
-        assert_eq!(json, r#""bus#visual.out""#);
+        assert_eq!(json, r#""bus:visual.out""#);
         assert_eq!(
             serde_json::from_str::<BindingRef>(&json).unwrap(),
             binding_ref

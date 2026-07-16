@@ -39,10 +39,33 @@ pub fn SlotDetailButton(
     aspects: Vec<UiSlotAspect>,
     #[props(default = false)] initially_open: bool,
     #[props(default = None)] revert: Option<SlotDetailRevert>,
+    /// Dispatch conduit for aspect rows that carry actions (navigation
+    /// affordances — roadmap D11). Rows render as plain text without it.
+    #[props(default = None)]
+    on_action: Option<EventHandler<UiAction>>,
+    /// Binding authoring surface (M4): renders the Bind/Retarget/Unbind
+    /// section when present alongside a dispatch conduit.
+    #[props(default = None)]
+    authoring: Option<lpa_studio_core::UiBindingAuthoring>,
 ) -> Element {
     let affordance = primary_affordance(&aspects);
     let style = slot_affordance_style(affordance);
     let menu_label = format!("{label} details");
+
+    // When the slot is authorable, its Binding aspect folds INTO the
+    // authoring section — one coherent binding block (current wiring, origin
+    // story, Edit/Unbind) instead of a read-only summary followed by a bare
+    // "Bind" section (2026-07-15 gate feedback). Non-authorable surfaces
+    // (e.g. bus channel wiring) keep the plain section rendering.
+    let fold_binding = authoring.is_some() && on_action.is_some();
+    let current_binding = fold_binding
+        .then(|| {
+            aspects
+                .iter()
+                .find(|aspect| aspect.kind == UiSlotAspectKind::Binding)
+                .cloned()
+        })
+        .flatten();
 
     rsx! {
         span { class: "tw:inline-flex tw:w-8 tw:justify-end",
@@ -55,13 +78,23 @@ pub fn SlotDetailButton(
                 active: style.active,
                 initially_open,
                 for aspect in aspects {
-                    SlotDetailSection {
-                        // The revert lives INSIDE the edited (edit-state)
-                        // section it acts on — no floating popup footer.
-                        revert: (aspect.kind == UiSlotAspectKind::EditState)
-                            .then(|| revert.clone())
-                            .flatten(),
-                        aspect,
+                    if !(fold_binding && aspect.kind == UiSlotAspectKind::Binding) {
+                        SlotDetailSection {
+                            // The revert lives INSIDE the edited (edit-state)
+                            // section it acts on — no floating popup footer.
+                            revert: (aspect.kind == UiSlotAspectKind::EditState)
+                                .then(|| revert.clone())
+                                .flatten(),
+                            on_action,
+                            aspect,
+                        }
+                    }
+                }
+                if let (Some(authoring), Some(on_action)) = (authoring, on_action) {
+                    crate::app::node::BindingAuthoringSection {
+                        authoring,
+                        on_action,
+                        current: current_binding,
                     }
                 }
             }
@@ -114,7 +147,7 @@ pub(crate) fn slot_row_class(affordance: UiSlotAffordance, index: usize) -> &'st
             "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-working-bg)_0%,var(--studio-status-working-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Bound => {
-            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-good-bg)_0%,var(--studio-status-good-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-bound-bg)_0%,var(--studio-status-bound-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Info if index % 2 == 0 => {
             "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-color-surface-muted)_0%,var(--studio-color-surface-muted)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
@@ -138,6 +171,7 @@ pub(crate) fn primary_affordance(aspects: &[UiSlotAspect]) -> UiSlotAffordance {
 fn SlotDetailSection(
     aspect: UiSlotAspect,
     #[props(default = None)] revert: Option<SlotDetailRevert>,
+    #[props(default = None)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let summary = aspect_summary(&aspect);
     let section_class = detail_popover_section_class(aspect_section_tint(summary.highlight));
@@ -182,7 +216,7 @@ fn SlotDetailSection(
             } else if !details.is_empty() {
                 div { class: "tw:grid tw:gap-0.5 tw:pl-[18px] tw:pt-0.5",
                     for row in details {
-                        SlotDetailRow { row }
+                        SlotDetailRow { row, on_action }
                     }
                 }
             }
@@ -214,7 +248,7 @@ struct AspectSummary {
 enum AspectTone {
     Quiet,
     Good,
-    Accent,
+    Bound,
     Working,
     Warning,
     Error,
@@ -233,7 +267,7 @@ fn slot_affordance_style(affordance: UiSlotAffordance) -> SlotAffordanceStyle {
             active: true,
         },
         UiSlotAffordance::Bound => SlotAffordanceStyle {
-            tone: IconMenuTone::Accent,
+            tone: IconMenuTone::Bound,
             icon: StudioIconName::BoundValue,
             active: true,
         },
@@ -361,13 +395,26 @@ fn edit_state_summary(aspect: &UiSlotAspect) -> AspectSummary {
 }
 
 fn binding_summary(aspect: &UiSlotAspect) -> AspectSummary {
+    // The bus channel's wiring aspect is a *list* section (writers →
+    // readers), not the single-endpoint binding summary: keep its title and
+    // rows as-is instead of hoisting the first row into the header.
+    if is_wiring_aspect(aspect) {
+        return AspectSummary {
+            title: aspect.title.clone(),
+            code: None,
+            title_is_code: false,
+            icon: StudioIconName::BoundValue,
+            tone: AspectTone::Bound,
+            highlight: Some(UiSlotAffordance::Bound),
+        };
+    }
     match aspect.affordance {
         Some(UiSlotAffordance::Bound) => AspectSummary {
             title: binding_title(aspect),
             code: first_row_value(aspect),
             title_is_code: false,
             icon: StudioIconName::BoundValue,
-            tone: AspectTone::Accent,
+            tone: AspectTone::Bound,
             highlight: Some(UiSlotAffordance::Bound),
         },
         _ if first_row_label_is(aspect, "Unbound") => AspectSummary {
@@ -389,13 +436,17 @@ fn binding_summary(aspect: &UiSlotAspect) -> AspectSummary {
     }
 }
 
-fn binding_title(aspect: &UiSlotAspect) -> String {
+pub(crate) fn binding_title(aspect: &UiSlotAspect) -> String {
     match aspect.rows.first().map(|row| row.label.as_str()) {
         Some(label) if label.eq_ignore_ascii_case("Published") => "Published as".to_string(),
         Some(label) if label.eq_ignore_ascii_case("Bound to") => "Bound to".to_string(),
         Some(label) if label.eq_ignore_ascii_case("Consumed by") => "Consumed by".to_string(),
-        _ => "Bound from".to_string(),
+        _ => "Reading from".to_string(),
     }
+}
+
+fn is_wiring_aspect(aspect: &UiSlotAspect) -> bool {
+    aspect.kind == UiSlotAspectKind::Binding && aspect.title.eq_ignore_ascii_case("Wiring")
 }
 
 fn first_row_label_is(aspect: &UiSlotAspect, label: &str) -> bool {
@@ -405,12 +456,13 @@ fn first_row_label_is(aspect: &UiSlotAspect, label: &str) -> bool {
         .is_some_and(|row| row.label.eq_ignore_ascii_case(label))
 }
 
-fn aspect_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> {
+pub(crate) fn aspect_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> {
     if aspect.kind == UiSlotAspectKind::TypeInfo {
         return Vec::new();
     }
     let value_is_header_code = aspect.kind == UiSlotAspectKind::Binding
-        && aspect.affordance == Some(UiSlotAffordance::Bound);
+        && aspect.affordance == Some(UiSlotAffordance::Bound)
+        && !is_wiring_aspect(aspect);
 
     aspect
         .rows
@@ -503,13 +555,30 @@ fn SlotInfoRow(row: UiSlotAspectRow) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotDetailRow(row: UiSlotAspectRow) -> Element {
+pub(crate) fn SlotDetailRow(
+    row: UiSlotAspectRow,
+    #[props(default = None)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let action = row.action.clone().zip(on_action);
     rsx! {
         p { class: "tw:m-0 tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-1.5 tw:text-xs tw:leading-snug",
             if !row.label.is_empty() {
                 span { class: "tw:font-bold tw:text-subtle-foreground", "{row.label}:" }
             }
-            if !row.value.is_empty() {
+            if let Some((action, on_action)) = action {
+                // Navigation affordance: the row's value is a clickable chip
+                // in the shared bound-site language (D11: no dead ends).
+                button {
+                    class: "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:leading-none tw:text-status-bound-foreground tw:transition-colors tw:hover:border-status-bound-foreground",
+                    r#type: "button",
+                    title: "Click to focus",
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        on_action.call(action.clone());
+                    },
+                    span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-semibold", "{row.value}" }
+                }
+            } else if !row.value.is_empty() {
                 span { class: "tw:text-muted-foreground tw:break-words", "{row.value}" }
             }
             if let Some(detail) = row.detail {
@@ -528,7 +597,7 @@ fn aspect_section_tint(highlight: Option<UiSlotAffordance>) -> DetailSectionTint
         Some(UiSlotAffordance::Error | UiSlotAffordance::Invalid) => DetailSectionTint::Error,
         Some(UiSlotAffordance::Edited) => DetailSectionTint::Warning,
         Some(UiSlotAffordance::Saving) => DetailSectionTint::Working,
-        Some(UiSlotAffordance::Bound) => DetailSectionTint::Good,
+        Some(UiSlotAffordance::Bound) => DetailSectionTint::Bound,
         Some(UiSlotAffordance::Info) | None => DetailSectionTint::None,
     }
 }
@@ -547,8 +616,8 @@ fn aspect_icon_class(tone: AspectTone) -> &'static str {
         AspectTone::Good => {
             "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-status-good-foreground"
         }
-        AspectTone::Accent => {
-            "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-accent"
+        AspectTone::Bound => {
+            "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-status-bound-foreground"
         }
         AspectTone::Quiet => {
             "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-heading"
@@ -562,7 +631,7 @@ fn aspect_heading_class(tone: AspectTone) -> &'static str {
         AspectTone::Warning => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-warning-foreground",
         AspectTone::Working => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-working-foreground",
         AspectTone::Good => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-good-foreground",
-        AspectTone::Accent => "tw:m-0 tw:text-xs tw:font-bold tw:text-accent",
+        AspectTone::Bound => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-bound-foreground",
         AspectTone::Quiet => "tw:m-0 tw:text-xs tw:font-bold tw:text-heading",
     }
 }

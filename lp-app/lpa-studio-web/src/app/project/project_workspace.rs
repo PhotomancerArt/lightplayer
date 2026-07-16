@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{ProjectEditorView, UiAction};
+use lpa_studio_core::{ProjectEditorView, UiAction, UiChannelChoice};
 
 use crate::app::node::NodePane;
 
@@ -9,6 +9,12 @@ use crate::app::node::NodePane;
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiAction>) -> Element {
+    // Channel choices context: every bindable row's binding picker reads
+    // this shared list (observed ∪ well-known, M4).
+    let mut channel_choices = use_context_provider(|| Signal::new(Vec::<UiChannelChoice>::new()));
+    if *channel_choices.peek() != view.channel_choices {
+        channel_choices.set(view.channel_choices.clone());
+    }
     let nodes = view.nodes;
     let pending_edits = view.pending_edits;
 
