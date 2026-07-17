@@ -626,6 +626,83 @@ fn erase_lands_blank_flash_as_success_through_the_deploy_dialog() {
     );
 }
 
+/// Row 11 (D34 rename, both halves, through the real link): a device
+/// renamed while OFFLINE reconciles at the next connect — the registry
+/// name wins over the device-reported name (and the connect path writes it
+/// back to `/.lp/device.json`); a rename dispatched while LIVE updates the
+/// registry and the cached sync identity in one action.
+#[test]
+fn device_rename_reconciles_registry_name_over_the_link() {
+    use crate::app::places::{DeviceRegistry, RegisteredDevice};
+
+    let (store, host) = library();
+    // remembered under its stamped name, then renamed while offline
+    let registry = DeviceRegistry::new(store.fs_handle());
+    registry
+        .upsert(RegisteredDevice {
+            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            name: "Bench board".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 1.0,
+            association: None,
+        })
+        .unwrap();
+    registry
+        .rename("dev_aaaaaaaaaaaaaaaa", "Luna's sign")
+        .unwrap();
+
+    // the device still reports the STALE stamped name
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
+            "dev_aaaaaaaaaaaaaaaa",
+            "Bench board",
+        )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync().expect("connect-as-pull landed");
+    assert_eq!(
+        sync.identity
+            .as_ref()
+            .map(|identity| identity.name.as_str()),
+        Some("Luna's sign"),
+        "the registry name wins over the device-reported name at connect"
+    );
+
+    // live rename: registry + cached identity move together
+    let outcome = drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::app::home::HOME_NODE_ID),
+        crate::HomeOp::RenameDevice {
+            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            name: "Porch sign".to_string(),
+        },
+    )))
+    .expect("live rename succeeds");
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("Porch sign")),
+        "the rename reports its result, got {:?}",
+        outcome.notices
+    );
+    assert_eq!(
+        studio
+            .device_sync()
+            .and_then(|sync| sync.identity.as_ref())
+            .map(|identity| identity.name.as_str()),
+        Some("Porch sign"),
+        "the cached sync identity carries the new name"
+    );
+    assert_eq!(
+        registry.list().unwrap()[0].name,
+        "Porch sign",
+        "the registry carries the new name"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------

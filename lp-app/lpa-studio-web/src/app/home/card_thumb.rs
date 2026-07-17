@@ -14,13 +14,7 @@ pub(crate) fn CardThumb(
     label: String,
     #[props(default = false)] muted: bool,
 ) -> Element {
-    let (hue_a, hue_b) = thumb_hues(&seed);
-    let (saturation, lightness) = if muted { (12, 16) } else { (42, 22) };
-    let style = format!(
-        "background: linear-gradient(135deg, hsl({hue_a} {saturation}% {lightness}%), hsl({hue_b} {}% {}%));",
-        saturation + 12,
-        lightness + 10,
-    );
+    let style = thumb_swatch_style(&seed, muted);
     // dated slugs (2026-07-09-1421-basic) take their initial from the
     // label part, not the stamp
     let initial = label
@@ -42,6 +36,19 @@ pub(crate) fn CardThumb(
             span { class: initial_class, "{initial}" }
         }
     }
+}
+
+/// The thumbnail gradient as an inline style, for small identity swatches
+/// (the device card's project chip) that must match the project's full
+/// thumbnail without carrying the whole component.
+pub(crate) fn thumb_swatch_style(seed: &str, muted: bool) -> String {
+    let (hue_a, hue_b) = thumb_hues(seed);
+    let (saturation, lightness) = if muted { (12, 16) } else { (42, 22) };
+    format!(
+        "background: linear-gradient(135deg, hsl({hue_a} {saturation}% {lightness}%), hsl({hue_b} {}% {}%));",
+        saturation + 12,
+        lightness + 10,
+    )
 }
 
 /// Two stable hues from the seed (uid or name): FNV-1a, split into two

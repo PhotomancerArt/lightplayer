@@ -1,17 +1,26 @@
-//! One device as the gallery's *Connected* section shows it.
+//! One device as the gallery's *Devices* roster shows it.
+
+use crate::app::roster::RosterCardState;
 
 /// A device card. Visually distinct from package cards by contract: the
-/// renderer gives it a hardware header (connection dot + transport) and a
-/// parity footer so it never reads as "just another project".
+/// renderer gives it a hardware header (status circle + transport) so it
+/// never reads as "just another project". The card's health lives in
+/// [`RosterCardState`] (the 14-state vocabulary, derived from evidence by
+/// `derive_roster_card_state`); the project chip is identity, not status.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceCard {
     /// `dev_…` uid when the device is registered; `None` for a live
-    /// connection that has no stamped identity yet (pre-M5).
+    /// connection that has no stamped identity yet.
     pub uid: Option<String>,
     pub name: String,
-    /// Transport label ("USB" today; a different glyph for networked later).
+    /// Transport label ("USB" today; a different glyph for networked
+    /// later). Empty while a connect is still resolving the provider.
     pub transport: String,
-    pub state: UiDeviceCardState,
+    /// Where the card stands in the honest roster vocabulary.
+    pub state: RosterCardState,
+    /// The project the device holds (live cards) or last ran (offline
+    /// cards) — identity for the header chip, never health.
+    pub project: Option<UiDeviceProjectChip>,
 }
 
 impl UiDeviceCard {
@@ -25,29 +34,13 @@ impl UiDeviceCard {
     }
 }
 
-/// The device card state chart (O2, settled in M5). Under D24
-/// unification, a connected device holding a LOCALLY-KNOWN project has
-/// no device card at all — the project card carries the connected
-/// indication — so the connected states here cover only devices whose
-/// contents aren't a local project.
+/// The header chip naming the device's project: thumbnail seed + display
+/// name. Identity only — the status line and circle carry health. On
+/// offline/error cards the renderer mutes it (last-known, not current).
 #[derive(Clone, Debug, PartialEq)]
-pub enum UiDeviceCardState {
-    /// Connected, no firmware answering: click opens the deploy wizard.
-    Blank,
-    /// Connected and running a project (shown when the project is not a
-    /// local library entry — otherwise D24 unifies onto the project
-    /// card). Click opens the editor against the device.
-    ConnectedRunning {
-        /// The project the device holds, when known.
-        project: Option<String>,
-    },
-    /// Connected but the contents are unreadable or awaiting identity.
-    ConnectedUnknown { detail: String },
-    /// Remembered but offline: muted card from the registry.
-    RememberedOffline {
-        /// f64 epoch seconds.
-        last_seen_at: f64,
-        /// "Name vN" of the last-known pushed project, when recorded.
-        last_known: Option<String>,
-    },
+pub struct UiDeviceProjectChip {
+    /// `prj_…` uid — thumbnail seed and the push/review target key.
+    pub uid: String,
+    /// Display name (library slug; a deleted project falls back to uid).
+    pub name: String,
 }

@@ -191,24 +191,28 @@ pub fn registry_entry_for(
 
 /// Upsert a device into the registry, preserving an existing association
 /// when the incoming entry has none (associations change on push, not on
-/// sight).
+/// sight) — and preserving the registry NAME always: the registry is the
+/// user-facing naming truth (D34), so a sighting never renames a device.
+/// Renames go through [`DeviceRegistry::rename`]; the connect path writes
+/// the registry name back to the device instead of the other way around.
 pub fn upsert_device_merged(
     store: &LibraryStore,
     mut device: RegisteredDevice,
 ) -> Result<(), LibraryError> {
     let registry = DeviceRegistry::new(store.fs_handle());
-    if device.association.is_none() || device.transport.is_empty() {
-        if let Some(existing) = registry
-            .list()?
-            .into_iter()
-            .find(|entry| entry.uid == device.uid)
-        {
-            if device.association.is_none() {
-                device.association = existing.association;
-            }
-            if device.transport.is_empty() {
-                device.transport = existing.transport;
-            }
+    if let Some(existing) = registry
+        .list()?
+        .into_iter()
+        .find(|entry| entry.uid == device.uid)
+    {
+        if device.association.is_none() {
+            device.association = existing.association;
+        }
+        if device.transport.is_empty() {
+            device.transport = existing.transport;
+        }
+        if !existing.name.is_empty() {
+            device.name = existing.name;
         }
     }
     registry.upsert(device)
@@ -675,5 +679,27 @@ mod tests {
         let listed = registry.list().unwrap();
         assert_eq!(listed[0].last_seen_at, 99.0);
         assert_eq!(listed[0].association, seeded.association);
+    }
+
+    #[test]
+    fn registry_name_wins_over_the_sighted_name() {
+        // D34: the user renamed the device (registry) while it was offline;
+        // the next sighting still carries the old on-device name — the
+        // registry name must survive the reconcile (write-back to the
+        // device happens on the connect path, not here).
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        let mut renamed = device();
+        renamed.name = "Luna's sign".to_string();
+        registry.upsert(renamed).unwrap();
+
+        let mut sighting = device();
+        sighting.name = "Porch sign".to_string(); // stale on-device name
+        sighting.last_seen_at = 99.0;
+        upsert_device_merged(&store, sighting).unwrap();
+
+        let listed = registry.list().unwrap();
+        assert_eq!(listed[0].name, "Luna's sign");
+        assert_eq!(listed[0].last_seen_at, 99.0);
     }
 }

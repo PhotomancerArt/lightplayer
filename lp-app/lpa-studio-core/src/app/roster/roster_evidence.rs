@@ -69,9 +69,10 @@ pub struct RosterEvidence<'a> {
 /// its own vocabulary (not [`ConnectFlowState`](crate::ConnectFlowState)):
 /// the retry ladder (D31 replacement) and D32 auto-connect land in later
 /// milestones and will narrate through this same seam.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ConnectEvidence {
     /// Nothing in flight.
+    #[default]
     Idle,
     /// The retry ladder is working a rung.
     Connecting { phase: ConnectPhase },

@@ -173,6 +173,9 @@
   .tw\:mx-auto {
     margin-inline: auto;
   }
+  .tw\:-my-1 {
+    margin-block: calc(var(--tw-spacing) * -1);
+  }
   .tw\:-mt-4 {
     margin-top: calc(var(--tw-spacing) * -4);
   }
@@ -253,6 +256,9 @@
   }
   .tw\:h-2\.5 {
     height: calc(var(--tw-spacing) * 2.5);
+  }
+  .tw\:h-3 {
+    height: calc(var(--tw-spacing) * 3);
   }
   .tw\:h-3\.5 {
     height: calc(var(--tw-spacing) * 3.5);
@@ -385,6 +391,9 @@
   }
   .tw\:w-2\.5 {
     width: calc(var(--tw-spacing) * 2.5);
+  }
+  .tw\:w-3 {
+    width: calc(var(--tw-spacing) * 3);
   }
   .tw\:w-3\.5 {
     width: calc(var(--tw-spacing) * 3.5);
@@ -776,6 +785,9 @@
   .tw\:rounded {
     border-radius: 0.25rem;
   }
+  .tw\:rounded-\[3px\] {
+    border-radius: 3px;
+  }
   .tw\:rounded-full {
     border-radius: calc(infinity * 1px);
   }
@@ -1106,6 +1118,9 @@
   .tw\:p-0 {
     padding: calc(var(--tw-spacing) * 0);
   }
+  .tw\:p-0\.5 {
+    padding: calc(var(--tw-spacing) * 0.5);
+  }
   .tw\:p-1 {
     padding: calc(var(--tw-spacing) * 1);
   }
@@ -1234,6 +1249,9 @@
   }
   .tw\:pb-2 {
     padding-bottom: calc(var(--tw-spacing) * 2);
+  }
+  .tw\:pb-3 {
+    padding-bottom: calc(var(--tw-spacing) * 3);
   }
   .tw\:pb-6 {
     padding-bottom: calc(var(--tw-spacing) * 6);
@@ -1617,6 +1635,13 @@
   }
   .tw\:\[grid-template-areas\:\'time_level_source\'_\'message_message_message\'\] {
     grid-template-areas: 'time level source' 'message message message';
+  }
+  .tw\:group-hover\:visible {
+    &:is(:where(.tw\:group):hover *) {
+      @media (hover: hover) {
+        visibility: visible;
+      }
+    }
   }
   .tw\:first\:border-t-0 {
     &:first-child {

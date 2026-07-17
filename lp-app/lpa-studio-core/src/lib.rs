@@ -32,8 +32,8 @@ pub use app::device::{
     ProviderChoice, RuntimeAttachment, SimAttachment, UiDeployChoice, UiDeployView,
 };
 pub use app::home::{
-    HOME_NODE_ID, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceCardState, UiExampleCard,
-    UiHomeView, UiPackageCard, ZipBytes,
+    HOME_NODE_ID, HomeDeviceEvidence, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
+    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,

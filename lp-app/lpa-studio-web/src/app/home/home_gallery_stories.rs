@@ -4,7 +4,8 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    UiDeviceCard, UiDeviceCardState, UiExampleCard, UiHomeView, UiIssue, UiPackageCard,
+    RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiIssue,
+    UiPackageCard,
 };
 
 use crate::app::home::HomeGallery;
@@ -56,23 +57,29 @@ fn packages() -> Vec<UiPackageCard> {
 }
 
 fn devices() -> Vec<UiDeviceCard> {
+    // the D27 roster: live first (naturally), then last-seen order
     vec![
         UiDeviceCard {
             uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
             name: "Workbench ESP32".to_string(),
             transport: "USB".to_string(),
-            state: UiDeviceCardState::ConnectedRunning {
-                project: Some("Porch sign".to_string()),
-            },
+            state: RosterCardState::RunningUpToDate,
+            project: Some(UiDeviceProjectChip {
+                uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                name: "2026-07-02-0930-porch-sign".to_string(),
+            }),
         },
         UiDeviceCard {
             uid: Some("dev_4hJk6Lm01nPqRs3TuVwXyz".to_string()),
             name: "Luna's porch sign".to_string(),
             transport: "USB".to_string(),
-            state: UiDeviceCardState::RememberedOffline {
-                last_seen_at: STORY_NOW - 3.0 * 86_400.0,
-                last_known: Some("2026-07-02-0930-porch-sign".to_string()),
+            state: RosterCardState::Offline {
+                last_seen_at: Some(STORY_NOW - 3.0 * 86_400.0),
             },
+            project: Some(UiDeviceProjectChip {
+                uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                name: "2026-07-02-0930-porch-sign".to_string(),
+            }),
         },
     ]
 }
@@ -124,28 +131,31 @@ fn populated() -> Element {
 }
 
 #[story]
-fn connected_device_unified_card() -> Element {
-    // D24: the connected device holding a local project = ONE project
-    // card with the connected indication; a blank second board keeps its
-    // own device card
+fn connected_device_and_project_chip() -> Element {
+    // D28 (D24's collapse is gone): a connected device holding a known
+    // project keeps its DEVICE card and the project card carries the live
+    // chip — one fact, two views. A blank second board rides alongside.
     use lpa_studio_core::UiCardConnection;
 
     let mut projects = packages();
     projects[0].connected_device = Some(UiCardConnection {
-        device_name: "Luna's porch sign".to_string(),
-        relation: lpa_studio_core::SyncRelation::AtHead,
-    });
-    projects[1].connected_device = Some(UiCardConnection {
         device_name: "Workbench ESP32".to_string(),
         relation: lpa_studio_core::SyncRelation::Behind,
     });
+    let mut devices = devices();
+    devices[0].state = RosterCardState::RunningBehind {
+        observed_version: Some(3),
+        head_version: Some(5),
+    };
+    devices.push(UiDeviceCard {
+        uid: Some("dev_4hJk6Lm01nPqRs3T".to_string()),
+        name: "Fresh board".to_string(),
+        transport: "USB".to_string(),
+        state: RosterCardState::ReadyToSetUp,
+        project: None,
+    });
     let home = UiHomeView {
-        devices: vec![UiDeviceCard {
-            uid: Some("dev_4hJk6Lm01nPqRs3T".to_string()),
-            name: "Fresh board".to_string(),
-            transport: "USB".to_string(),
-            state: UiDeviceCardState::Blank,
-        }],
+        devices,
         projects,
         examples: examples(),
         library_available: true,
