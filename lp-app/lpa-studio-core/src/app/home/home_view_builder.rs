@@ -265,6 +265,12 @@ fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
         }),
         _ => None,
     });
+    // hello firmware provenance: Technical evidence for the card's
+    // rich-object detail (Ready links only — a pre-hello link has none)
+    let fw = match &live.link {
+        Some(DeviceState::Ready { hello }) => Some(hello.fw.clone()),
+        _ => None,
+    };
     Some(UiDeviceCard {
         uid: identity.map(|identity| identity.uid.clone()),
         name: identity
@@ -273,6 +279,7 @@ fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
         transport: live.transport.clone().unwrap_or_default(),
         state,
         project,
+        fw,
     })
 }
 
@@ -384,6 +391,8 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         transport: device.transport.clone(),
         state,
         project,
+        // remembered only: no live hello, no firmware provenance
+        fw: None,
     }
 }
 
@@ -570,6 +579,7 @@ mod tests {
                 transport: "USB".to_string(),
                 state: offline.clone(),
                 project: None,
+                fw: None,
             },
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
@@ -577,6 +587,7 @@ mod tests {
                 transport: "USB".to_string(),
                 state: offline,
                 project: None,
+                fw: None,
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");

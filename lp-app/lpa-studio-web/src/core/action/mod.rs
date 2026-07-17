@@ -6,6 +6,7 @@ pub mod action_strip;
 pub(crate) mod action_strip_stories;
 
 pub use action_button::{
-    ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class,
+    ActionButton, ActionButtonVariant, menu_item_action_class, menu_item_destructive_action_class,
+    quiet_action_class,
 };
 pub use action_strip::ActionStrip;

@@ -48,6 +48,47 @@ pub(crate) fn affordance_trigger_style(affordance: UiAffordance) -> AffordanceSt
     }
 }
 
+/// The detail-trigger treatment for a rich object's rolled-up status tone
+/// (device cards; the M7 runtime pane header). Same vocabulary as
+/// [`affordance_trigger_style`], keyed by status family instead of the
+/// node edit vocabulary — devices have no pencil states:
+///
+/// - `Neutral`/`Good` → the quiet "i" (OK is not announced — no
+///   checkmark, no status coloring);
+/// - `Working` → the "i" in the working tone (genuine activity);
+/// - `Warning` → the "i" in the warning tone (attention, not an edit —
+///   the pencil stays node-only);
+/// - `Error` → the red warning glyph.
+pub(crate) fn status_trigger_style(kind: UiStatusKind) -> AffordanceStyle {
+    match kind {
+        UiStatusKind::Neutral | UiStatusKind::Good => AffordanceStyle {
+            icon: StudioIconName::InfoBare,
+            tone: IconMenuTone::Quiet,
+        },
+        UiStatusKind::Working => AffordanceStyle {
+            icon: StudioIconName::InfoBare,
+            tone: IconMenuTone::Working,
+        },
+        UiStatusKind::Warning => AffordanceStyle {
+            icon: StudioIconName::InfoBare,
+            tone: IconMenuTone::Warning,
+        },
+        UiStatusKind::Error => AffordanceStyle {
+            icon: StudioIconName::StepAttention,
+            tone: IconMenuTone::Error,
+        },
+    }
+}
+
+/// Whether a rolled-up status tone announces itself on the trigger (the
+/// `active` treatment) — the quiet families do not.
+pub(crate) fn status_trigger_active(kind: UiStatusKind) -> bool {
+    matches!(
+        kind,
+        UiStatusKind::Working | UiStatusKind::Warning | UiStatusKind::Error
+    )
+}
+
 /// Header-wash tone for a pane wearing an affordance: announced affordances
 /// wash the header in their own tone; a silent (`Info`) pane falls back to
 /// its runtime status tone.
@@ -121,6 +162,29 @@ mod tests {
         let error = affordance_trigger_style(UiAffordance::Error);
         assert_eq!(error.icon, StudioIconName::StepAttention);
         assert_eq!(error.tone, IconMenuTone::Error);
+    }
+
+    #[test]
+    fn status_triggers_follow_the_documented_rollup_mapping() {
+        // OK is not announced: quiet "i" for both Neutral and Good.
+        for quiet in [UiStatusKind::Neutral, UiStatusKind::Good] {
+            let style = status_trigger_style(quiet);
+            assert_eq!(style.icon, StudioIconName::InfoBare);
+            assert_eq!(style.tone, IconMenuTone::Quiet);
+            assert!(!status_trigger_active(quiet));
+        }
+        // Working and Warning keep the "i" glyph in their own tones.
+        let working = status_trigger_style(UiStatusKind::Working);
+        assert_eq!(working.icon, StudioIconName::InfoBare);
+        assert_eq!(working.tone, IconMenuTone::Working);
+        let warning = status_trigger_style(UiStatusKind::Warning);
+        assert_eq!(warning.icon, StudioIconName::InfoBare);
+        assert_eq!(warning.tone, IconMenuTone::Warning);
+        // Error escalates to the red warning glyph.
+        let error = status_trigger_style(UiStatusKind::Error);
+        assert_eq!(error.icon, StudioIconName::StepAttention);
+        assert_eq!(error.tone, IconMenuTone::Error);
+        assert!(status_trigger_active(UiStatusKind::Error));
     }
 
     #[test]

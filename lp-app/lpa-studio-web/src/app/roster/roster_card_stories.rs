@@ -1,5 +1,7 @@
 //! The roster card vocabulary sheet: one story per direction.md state row,
-//! plus the sim-card variant (D36) and the standing firmware chip.
+//! plus the sim-card variant (D36), the standing firmware chip, and the
+//! rich-object detail popover (the card's node-style detail trigger,
+//! open).
 //!
 //! These stories are the visual-gate surface for the card grammar. Each
 //! renders through the ONE shared card renderer
@@ -12,8 +14,8 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    ConnectPhase, DegradedReason, RosterCardState, UiDeviceCard, UiDeviceProjectChip,
-    firmware_update_available,
+    BundledFirmware, ConnectPhase, DegradedReason, RosterCardState, UiDeviceCard,
+    UiDeviceProjectChip,
 };
 use lpc_wire::FwProvenance;
 
@@ -166,22 +168,15 @@ fn simulator_runtime() -> Element {
 #[story(description = "The standing amber chip: firmware drift is advisory on any Running row.")]
 fn firmware_update_chip() -> Element {
     // the chip rides only an honest comparison: clean builds, differing
-    // commits (dirty or unknown on either side suppresses it)
-    let bundled_commit = "abc123456789";
-    let device_fw = FwProvenance {
-        package: "fw-esp32".to_string(),
-        commit: "def987654321".to_string(),
-        dirty: false,
-        profile: "release-esp32".to_string(),
-    };
-    let offered = firmware_update_available(bundled_commit, false, &device_fw);
+    // commits (dirty or unknown on either side suppresses it) — the card
+    // compares the bundled image against the card's hello provenance
     sheet(vec![
         rsx! {
             div { class: "tw:w-64",
                 DeviceCard {
-                    card: device_card(RosterCardState::RunningUpToDate, true),
+                    card: device_card_with_fw(RosterCardState::RunningUpToDate, true),
                     now_secs: Some(STORY_NOW),
-                    fw_update: offered,
+                    bundled_fw: Some(bundled_firmware()),
                     on_action: |_| {},
                 }
             }
@@ -190,7 +185,7 @@ fn firmware_update_chip() -> Element {
         rsx! {
             div { class: "tw:w-64",
                 DeviceCard {
-                    card: device_card(
+                    card: device_card_with_fw(
                         RosterCardState::RunningBehind {
                             observed_version: Some(3),
                             head_version: Some(5),
@@ -198,12 +193,60 @@ fn firmware_update_chip() -> Element {
                         true,
                     ),
                     now_secs: Some(STORY_NOW),
-                    fw_update: offered,
+                    bundled_fw: Some(bundled_firmware()),
                     on_action: |_| {},
                 }
             }
         },
     ])
+}
+
+#[story(
+    description = "The rich-object detail popover on a live Running-behind device, open from the card's node-style trigger (Q1: the affordance-following icon on the right; the circle stays a pure indicator). Fixed schema order — Health, Project, Technical — with the danger zone pinned last as the inline red-tinted section (Q5): Flash firmware and Erase migrated here from the interim More-menu. The advisory firmware chip tones the Technical section, never the trigger."
+)]
+fn device_detail_running_behind() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[640px] tw:p-4",
+            div { class: "tw:w-64",
+                DeviceCard {
+                    card: device_card_with_fw(
+                        RosterCardState::RunningBehind {
+                            observed_version: Some(3),
+                            head_version: Some(5),
+                        },
+                        true,
+                    ),
+                    now_secs: Some(STORY_NOW),
+                    bundled_fw: Some(bundled_firmware()),
+                    detail_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The rich-object detail popover on an offline (remembered) device: quiet trigger, Neutral rollup; Health carries Reconnect, Project shows the last-ran copy, Technical keeps the registered identity, and the danger zone holds Forget (the offline card's old More-menu row)."
+)]
+fn device_detail_offline() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[520px] tw:p-4",
+            div { class: "tw:w-64",
+                DeviceCard {
+                    card: device_card(
+                        RosterCardState::Offline {
+                            last_seen_at: Some(STORY_NOW - 2.0 * 86_400.0),
+                        },
+                        true,
+                    ),
+                    now_secs: Some(STORY_NOW),
+                    detail_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
 }
 
 /// Lay story cards out on the sheet.
@@ -241,5 +284,29 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
             uid: "prj_3fKq8Zr21bTxYw0A".to_string(),
             name: "porch-sign".to_string(),
         }),
+        fw: None,
+    }
+}
+
+/// The same card carrying hello firmware provenance (live-link Technical
+/// evidence for the popover and the chip comparison).
+fn device_card_with_fw(state: RosterCardState, with_project: bool) -> UiDeviceCard {
+    UiDeviceCard {
+        fw: Some(FwProvenance {
+            package: "fw-esp32".to_string(),
+            commit: "def987654321".to_string(),
+            dirty: false,
+            profile: "release-esp32".to_string(),
+        }),
+        ..device_card(state, with_project)
+    }
+}
+
+/// A bundled image on a different clean commit than the running firmware,
+/// so the honest comparison offers the update chip.
+fn bundled_firmware() -> BundledFirmware {
+    BundledFirmware {
+        commit: "abc123456789".to_string(),
+        dirty: false,
     }
 }

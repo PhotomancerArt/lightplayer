@@ -68,6 +68,7 @@ fn devices() -> Vec<UiDeviceCard> {
                 uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
+            fw: None,
         },
         UiDeviceCard {
             uid: Some("dev_4hJk6Lm01nPqRs3TuVwXyz".to_string()),
@@ -80,6 +81,7 @@ fn devices() -> Vec<UiDeviceCard> {
                 uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
+            fw: None,
         },
     ]
 }
@@ -153,6 +155,7 @@ fn connected_device_and_project_chip() -> Element {
         transport: "USB".to_string(),
         state: RosterCardState::ReadyToSetUp,
         project: None,
+        fw: None,
     });
     let home = UiHomeView {
         devices,

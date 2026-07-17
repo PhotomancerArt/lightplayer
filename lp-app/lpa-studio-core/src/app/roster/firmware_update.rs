@@ -12,6 +12,25 @@ use lpc_wire::FwProvenance;
 /// Sentinel both producers emit when git was unavailable at build time.
 const UNKNOWN_COMMIT: &str = "unknown";
 
+/// Studio's bundled firmware image provenance, as chip-comparison
+/// evidence: `build.sourceCommit` / dirty flag from the packaged
+/// `firmware/esp32c6/manifest.json`. Callers assemble it wherever the
+/// manifest is on hand; absence of the manifest is honest evidence of
+/// absence (no chip).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BundledFirmware {
+    pub commit: String,
+    pub dirty: bool,
+}
+
+impl BundledFirmware {
+    /// Whether this bundled image should be offered over the running
+    /// firmware (see [`firmware_update_available`]).
+    pub fn update_available(&self, device_fw: &FwProvenance) -> bool {
+        firmware_update_available(&self.commit, self.dirty, device_fw)
+    }
+}
+
 /// Whether Studio should offer a firmware update chip: the bundled image
 /// and the running firmware come from different, honestly-known commits.
 ///

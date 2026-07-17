@@ -10,23 +10,23 @@
 //!
 //! Anatomy (direction.md "Card grammar"): header row = status circle ·
 //! transport glyph+label · project chip right-aligned (identity, not
-//! status; muted last-known on offline/error); device name with
-//! pencil-on-hover inline rename (D34); status line (health only); ≤1
-//! sub-line; ≤1 affordance button; offline whole-card fade.
+//! status; muted last-known on offline/error) · the rich-object detail
+//! trigger at the right edge (Q1: node-style affordance-following icon —
+//! see `device_detail_popover.rs`); device name with pencil-on-hover
+//! inline rename (D34); status line (health only); ≤1 sub-line; ≤1
+//! affordance button (Q2); offline whole-card fade.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceController, DeviceOp, HomeOp, LinkProviderKind,
-    RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape as CoreShape, UiAction,
-    UiDeviceCard, UiStatus, UiStatusKind,
+    BundledFirmware, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceController, DeviceOp, HomeOp,
+    LinkProviderKind, RosterAffordance, RosterCardState, RosterCircle,
+    RosterCircleShape as CoreShape, UiAction, UiDeviceCard, UiStatus, UiStatusKind,
 };
 
 use crate::app::home::card_thumb::thumb_swatch_style;
+use crate::app::home::device_detail_popover::DeviceDetailPopover;
 use crate::app::home::package_card::home_action;
-use crate::base::{
-    DetailPopover, DetailSection, PopoverPlacement, StatusCircle, StatusCircleShape,
-    StatusCircleTone, StudioIcon, StudioIconName,
-};
+use crate::base::{StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, quiet_action_class};
 
 /// One roster card. Clicking an offline card reconnects through an
@@ -44,9 +44,14 @@ pub(crate) fn DeviceCard(
     /// instead of the transport, no connect ceremony.
     #[props(default = false)]
     sim: bool,
-    /// The standing amber "firmware update available" chip.
+    /// Studio's bundled firmware image (packaged manifest), when known —
+    /// evidence for the standing amber "firmware update available" chip
+    /// and the popover's Technical section.
+    #[props(default)]
+    bundled_fw: Option<BundledFirmware>,
+    /// Open the detail popover on mount (story captures only).
     #[props(default = false)]
-    fw_update: bool,
+    detail_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(super::package_card::platform_now_secs);
@@ -67,20 +72,14 @@ pub(crate) fn DeviceCard(
     let affordance = card
         .state
         .affordance()
-        .and_then(|affordance| affordance_button(&card, &affordance));
+        .and_then(|affordance| device_affordance_action(&card, &affordance));
     let can_rename = card.uid.is_some() && !sim;
-    let can_forget = card.uid.is_some() && faded && !sim;
-    // management actions (flash/erase) live on every live card whose wire
-    // could take them — the wipe path must never depend on card state
-    let live_actions = !sim
-        && !faded
-        && !matches!(
-            card.state,
-            RosterCardState::ConnectingRetrying { .. }
-                | RosterCardState::OperationInFlight { .. }
-                | RosterCardState::InUseElsewhere
-        );
-    let show_actions = live_actions || can_forget;
+    // the standing advisory chip rides an honest comparison of the
+    // bundled image against the hello provenance (never a bare flag)
+    let fw_update = match (&bundled_fw, &card.fw) {
+        (Some(bundled), Some(fw)) => bundled.update_available(fw),
+        _ => false,
+    };
     let droppable = !sim && !faded;
 
     let mut renaming = use_signal(|| false);
@@ -90,7 +89,6 @@ pub(crate) fn DeviceCard(
         card.name.clone()
     };
     let mut rename_value = use_signal(|| rename_reset.clone());
-    let rename_uid = card.uid.clone().unwrap_or_default();
 
     let (glyph, transport_label) = if sim {
         (StudioIconName::Simulator, "Simulator".to_string())
@@ -150,41 +148,20 @@ pub(crate) fn DeviceCard(
                         span { class: chip_name_class(chip_muted), "{chip.name}" }
                     }
                 }
-                if show_actions {
+                if !sim {
+                    // the rich-object detail trigger (Q1): the node-style
+                    // affordance-following icon at the right edge, riding
+                    // the rollup tone; Flash/Erase/Forget live in its
+                    // danger zone (the More-menu's rows migrated there)
                     span {
                         class: if card.project.is_some() { "tw:-my-1" } else { "tw:-my-1 tw:ml-auto" },
                         onclick: move |event| event.stop_propagation(),
-                        DetailPopover {
-                            icon: StudioIconName::More,
-                            label: "Device actions".to_string(),
-                            placement: PopoverPlacement::BottomEnd,
-                            DetailSection {
-                                if live_actions {
-                                    // firmware + wipe: the interim danger
-                                    // zone (the rich-object detail spike
-                                    // gives these a real home)
-                                    ActionButton {
-                                        action: flash_device_action(true),
-                                        running: false,
-                                        variant: ActionButtonVariant::MenuItem,
-                                        on_action,
-                                    }
-                                    ActionButton {
-                                        action: erase_device_action(card.name.clone()),
-                                        running: false,
-                                        variant: ActionButtonVariant::MenuItem,
-                                        on_action,
-                                    }
-                                }
-                                if can_forget {
-                                    ActionButton {
-                                        action: forget_device_action(rename_uid.clone(), card.name.clone()),
-                                        running: false,
-                                        variant: ActionButtonVariant::MenuItem,
-                                        on_action,
-                                    }
-                                }
-                            }
+                        DeviceDetailPopover {
+                            card: card.clone(),
+                            now_secs: now,
+                            bundled_fw: bundled_fw.clone(),
+                            initially_open: detail_open,
+                            on_action,
                         }
                     }
                 }
@@ -397,7 +374,10 @@ fn card_click_action(state: &RosterCardState) -> Option<UiAction> {
 /// dialog with the device context — never a dead button. Click-through
 /// affordances (open editor) render no button; the card body carries the
 /// action.
-fn affordance_button(card: &UiDeviceCard, affordance: &RosterAffordance) -> Option<UiAction> {
+pub(super) fn device_affordance_action(
+    card: &UiDeviceCard,
+    affordance: &RosterAffordance,
+) -> Option<UiAction> {
     let dialog = |target_key: Option<String>| {
         UiAction::from_op(
             ControllerId::new(DEPLOY_NODE_ID),
@@ -441,10 +421,19 @@ fn affordance_button(card: &UiDeviceCard, affordance: &RosterAffordance) -> Opti
     Some(action.with_label(affordance.label()))
 }
 
-/// Erase the device's flash entirely, from the card's actions popover.
+/// The danger zone's flash row: [`flash_device_action`] with a live
+/// device context, wearing the destructive treatment the zone's rows
+/// share (Q5 — the inline-tinted zone reads uniformly red).
+pub(super) fn flash_device_action_destructive() -> UiAction {
+    let action = flash_device_action(true);
+    let meta = action.meta().clone().destructive();
+    action.with_meta(meta)
+}
+
+/// Erase the device's flash entirely, from the danger zone.
 /// Confirmation states the honest facts: full wipe; anything Studio could
 /// read was banked at connect (D8) — unreadable content is gone for good.
-fn erase_device_action(name: String) -> UiAction {
+pub(super) fn erase_device_action(name: String) -> UiAction {
     UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::EraseDevice).with_confirmation(
         lpa_studio_core::ActionConfirmation::new(
             "Erase device",
@@ -457,8 +446,8 @@ fn erase_device_action(name: String) -> UiAction {
     )
 }
 
-/// The forget action (D34 hygiene) for the offline card's popup.
-fn forget_device_action(uid: String, name: String) -> UiAction {
+/// The forget action (D34 hygiene) for the offline card's danger zone.
+pub(super) fn forget_device_action(uid: String, name: String) -> UiAction {
     home_action(HomeOp::ForgetDevice { uid }).with_confirmation(
         lpa_studio_core::ActionConfirmation::new(
             "Forget device",

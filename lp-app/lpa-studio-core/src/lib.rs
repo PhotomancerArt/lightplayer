@@ -60,9 +60,13 @@ pub use app::project::{
     SlotEditOp, SlotKind, UiAffordance, UiAssetContent, UiAssetContentBody, UiPendingEdit,
     UiPendingEditKind, UiPendingEditPhase, UiShaderError,
 };
+pub use app::rich_object::{
+    RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
+};
 pub use app::roster::{
-    ConnectEvidence, ConnectPhase, DegradedReason, RosterAffordance, RosterCardState, RosterCircle,
-    RosterCircleShape, RosterEvidence, derive_roster_card_state, firmware_update_available,
+    BundledFirmware, ConnectEvidence, ConnectPhase, DegradedReason, DeviceDetailAffordance,
+    DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape,
+    RosterEvidence, derive_roster_card_state, device_rich_object, firmware_update_available,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,

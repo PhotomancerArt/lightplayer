@@ -29,24 +29,19 @@ use crate::app::home::device_card::circle_props;
 use crate::app::layout::{PaneChip, PaneChrome, PaneTone, StudioPane};
 use crate::base::{
     DetailPopover, DetailSection, DetailSectionTint, IconMenuTone, PopoverButton, PopoverPlacement,
-    StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon, StudioIconName, node_kind_icon,
+    StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon, StudioIconName,
+    detail_popover_card_class, node_kind_icon,
 };
-use crate::core::{StatusChip, menu_item_action_class, quiet_action_class};
+use crate::core::{
+    StatusChip, menu_item_action_class, menu_item_destructive_action_class, quiet_action_class,
+};
 
-/// The detail-card chrome, copied from `base::detail_popover`'s private
-/// `detail_popover_card_class`. COMPOSITION FINDING: the card chrome is not
-/// reachable behind a non-icon trigger — [`DetailPopover`] hard-wires an
-/// icon trigger, so putting the standard detail card behind a status circle
-/// requires [`PopoverButton`] plus this copied class. P3's `RichIndicator`/
-/// `RichDetail` split should export the card chrome (or take an arbitrary
-/// trigger).
-const DETAIL_CARD_CLASS: &str = "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-0 tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg";
-
-/// The destructive menu-row treatment, copied from `core::action`'s private
-/// `menu_item_class(destructive: true)` (only the non-destructive class is
-/// exported for non-`UiAction` rows). COMPOSITION FINDING for P3: danger
-/// sections need the destructive row class without a `UiAction`.
-const DANGER_MENU_ITEM_CLASS: &str = "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60";
+// COMPOSITION FINDINGS (P2), both codified in P3: the detail-card chrome
+// (`base::detail_popover_card_class`) and the destructive menu-row class
+// (`core::menu_item_destructive_action_class`) were copied here because
+// they were private; they are exported now and this spike record consumes
+// the exports. (Finding #1's other half — the card chrome behind a
+// non-icon trigger — dissolved at the gate: Q1 chose the icon trigger.)
 
 #[story(
     description = "The centerpiece: the card's status circle IS the popover trigger (no More-menu), open over a Running-behind device. All six sections from the design note's device table — Health, Project, Technical, Performance, Backup, Danger zone — each with its own lines and affordance where the table says so. Advisory facts (the firmware chip) tone a chip, never the circle. All buttons are inert; exploration only."
@@ -310,7 +305,7 @@ fn CircleDetailTrigger(
             },
             label: label.clone(),
             title: label,
-            popup_class: DETAIL_CARD_CLASS.to_string(),
+            popup_class: detail_popover_card_class().to_string(),
             // The rollup tone's popover chrome (the class name is
             // `icon_menu_chrome_class`'s private mapping).
             chrome_class: "ux-popover-chrome-warning".to_string(),
@@ -390,7 +385,7 @@ fn RichObjectCard(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn StaticDetailCard(children: Element) -> Element {
     rsx! {
-        div { class: DETAIL_CARD_CLASS, {children} }
+        div { class: detail_popover_card_class(), {children} }
     }
 }
 
@@ -526,11 +521,11 @@ fn danger_zone(treatment: DangerTreatment) -> Element {
             div { class: "tw:border-t tw:border-status-error-border",
                 DetailSection { title: "Danger zone".to_string(), tint: DetailSectionTint::Error,
                     div { class: "tw:grid tw:py-1",
-                        button { class: DANGER_MENU_ITEM_CLASS, r#type: "button",
+                        button { class: menu_item_destructive_action_class(), r#type: "button",
                             StudioIcon { name: StudioIconName::Apply, size: 14 }
                             span { "Flash firmware…" }
                         }
-                        button { class: DANGER_MENU_ITEM_CLASS, r#type: "button",
+                        button { class: menu_item_destructive_action_class(), r#type: "button",
                             StudioIcon { name: StudioIconName::Remove, size: 14 }
                             span { "Erase device…" }
                         }

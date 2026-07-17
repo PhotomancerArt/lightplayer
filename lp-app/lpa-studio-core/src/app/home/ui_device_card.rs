@@ -1,5 +1,7 @@
 //! One device as the gallery's *Devices* roster shows it.
 
+use lpc_wire::FwProvenance;
+
 use crate::app::roster::RosterCardState;
 
 /// A device card. Visually distinct from package cards by contract: the
@@ -21,6 +23,10 @@ pub struct UiDeviceCard {
     /// The project the device holds (live cards) or last ran (offline
     /// cards) — identity for the header chip, never health.
     pub project: Option<UiDeviceProjectChip>,
+    /// Running-firmware provenance from the live link's hello — Technical
+    /// evidence for the card's rich-object detail; `None` for remembered
+    /// (offline) cards and pre-hello links.
+    pub fw: Option<FwProvenance>,
 }
 
 impl UiDeviceCard {

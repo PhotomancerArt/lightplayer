@@ -30,7 +30,8 @@ pub use code_editor::{
     CodeEditorLanguage,
 };
 pub use detail_popover::{
-    DetailPopover, DetailSection, DetailSectionTint, detail_popover_section_class,
+    DetailPopover, DetailSection, DetailSectionTint, detail_popover_card_class,
+    detail_popover_section_class,
 };
 pub use field_row::FieldRow;
 pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_kind_icon};
