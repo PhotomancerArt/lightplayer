@@ -147,6 +147,50 @@ fn attaching_a_device_with_a_loaded_project_never_opens_the_editor() {
     assert_eq!(*relation, lpc_history::SyncRelation::AtHead);
 }
 
+/// Row 1c (storage-discovery regression): a device provisioned OUTSIDE
+/// Studio — its project lives in `/projects/bench`, not the sim's default
+/// slot — and running it. The connect-time pull must discover the loaded
+/// project's storage dir and classify the copy (a fixed-"studio" pull
+/// reported this device as Empty).
+#[test]
+fn device_running_from_a_non_default_storage_dir_classifies_not_empty() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let library_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_project_dir("bench")
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let DeviceContent::Known { relation, slug, .. } = &sync.content else {
+        panic!(
+            "the running copy must classify from its real dir, got {:?}",
+            sync.content
+        );
+    };
+    assert_eq!(*relation, lpc_history::SyncRelation::AtHead);
+    assert_eq!(slug, &summary.slug);
+}
+
 /// Row 1 (happy path, part 2): the stamp→push flow on an empty device —
 /// the deploy dialog's whole wizard, but with every wire operation running
 /// through the real serial framing.

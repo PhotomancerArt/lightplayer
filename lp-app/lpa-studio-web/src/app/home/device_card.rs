@@ -56,6 +56,9 @@ pub(crate) fn DeviceCard(
     let faded = matches!(card.state, RosterCardState::Offline { .. });
     // last-known, not current, on offline/error cards (card grammar)
     let chip_muted = faded || matches!(card.state, RosterCardState::NotResponding);
+    // Needs-a-name opens the SAME inline form the pencil rename uses —
+    // naming is card-anchored, never a dialog trip
+    let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
     let click_action = if sim {
         None
     } else {
@@ -70,9 +73,13 @@ pub(crate) fn DeviceCard(
     let droppable = !sim && !faded;
 
     let mut renaming = use_signal(|| false);
-    let mut rename_value = use_signal(|| card.name.clone());
+    let rename_reset = if name_inline {
+        String::new()
+    } else {
+        card.name.clone()
+    };
+    let mut rename_value = use_signal(|| rename_reset.clone());
     let rename_uid = card.uid.clone().unwrap_or_default();
-    let rename_reset = card.name.clone();
 
     let (glyph, transport_label) = if sim {
         (StudioIconName::Simulator, "Simulator".to_string())
@@ -82,7 +89,7 @@ pub(crate) fn DeviceCard(
 
     rsx! {
         article {
-            class: device_card_class(faded, click_action.is_some()),
+            class: device_card_class(faded, click_action.is_some() || name_inline),
             title: "{status_line}",
             // connected cards are drop targets: project card → device card
             // opens the deploy dialog pre-filled (replace preview)
@@ -106,7 +113,9 @@ pub(crate) fn DeviceCard(
             onclick: {
                 let click_action = click_action.clone();
                 move |_| {
-                    if let Some(action) = &click_action {
+                    if name_inline {
+                        renaming.set(true);
+                    } else if let Some(action) = &click_action {
                         on_action.call(action.clone());
                     }
                 }
@@ -156,15 +165,21 @@ pub(crate) fn DeviceCard(
                         class: "tw:flex tw:gap-2",
                         onclick: move |event| event.stop_propagation(),
                         onsubmit: {
-                            let uid = rename_uid.clone();
+                            let uid = card.uid.clone();
                             move |event: FormEvent| {
                                 event.prevent_default();
                                 let name = rename_value.read().trim().to_string();
                                 if !name.is_empty() {
-                                    on_action.call(home_action(HomeOp::RenameDevice {
-                                        uid: uid.clone(),
-                                        name,
-                                    }));
+                                    // stamped devices rename; an anonymous
+                                    // device (Needs a name) stamps
+                                    let op = match &uid {
+                                        Some(uid) => HomeOp::RenameDevice {
+                                            uid: uid.clone(),
+                                            name,
+                                        },
+                                        None => HomeOp::NameDevice { name },
+                                    };
+                                    on_action.call(home_action(op));
                                 }
                                 renaming.set(false);
                             }
@@ -172,6 +187,7 @@ pub(crate) fn DeviceCard(
                         input {
                             class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-0.5 tw:text-sm tw:text-strong-foreground",
                             autofocus: true,
+                            placeholder: if name_inline { "e.g. Porch sign" } else { "" },
                             value: "{rename_value}",
                             oninput: move |event| rename_value.set(event.value()),
                             onkeydown: {
@@ -184,7 +200,11 @@ pub(crate) fn DeviceCard(
                                 }
                             },
                         }
-                        button { class: quiet_action_class(), r#type: "submit", "Rename" }
+                        button {
+                            class: quiet_action_class(),
+                            r#type: "submit",
+                            if name_inline { "Name" } else { "Rename" }
+                        }
                     }
                 } else {
                     span { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
@@ -228,6 +248,21 @@ pub(crate) fn DeviceCard(
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
                             }
+                        }
+                    }
+                }
+                if name_inline && !renaming() {
+                    // the Needs-a-name affordance: opens the inline form
+                    // above (card-anchored naming, never a dialog)
+                    div { class: "tw:mt-1",
+                        button {
+                            class: quiet_action_class(),
+                            r#type: "button",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                                renaming.set(true);
+                            },
+                            "Name this device…"
                         }
                     }
                 }
@@ -317,6 +352,8 @@ fn card_click_action(state: &RosterCardState) -> Option<UiAction> {
         RosterCardState::ConnectingRetrying { .. }
         | RosterCardState::OperationInFlight { .. }
         | RosterCardState::InUseElsewhere => None,
+        // handled in the renderer: click opens the inline name form
+        RosterCardState::NeedsAName => None,
         _ => Some(UiAction::from_op(
             ControllerId::new(DEPLOY_NODE_ID),
             DeployOp::OpenDialog { target_key: None },
@@ -365,9 +402,8 @@ fn affordance_button(card: &UiDeviceCard, affordance: &RosterAffordance) -> Opti
         RosterAffordance::UpdateFirmware => dialog(None)
             .with_summary("Install this build's firmware on the device.")
             .with_icon("zap"),
-        RosterAffordance::NameDevice => dialog(None)
-            .with_summary("Name this device to keep it in your list.")
-            .with_icon("edit"),
+        // rendered as the card's inline name form, not an action button
+        RosterAffordance::NameDevice => return None,
         RosterAffordance::Reconnect => reconnect_device_action()
             .with_summary("Reconnect over the granted serial port.")
             .with_icon("usb"),

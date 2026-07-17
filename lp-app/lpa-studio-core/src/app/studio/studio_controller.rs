@@ -83,6 +83,12 @@ pub struct StudioController {
     /// the roster's "Running vN"/"Push vN" evidence. `(None, None)`
     /// otherwise; only read while `device_sync` holds a `Known` content.
     device_versions: (Option<usize>, Option<usize>),
+    /// The project storage dir the attached device actually runs from
+    /// (discovered from its loaded project at connect) — pull and push
+    /// target it so one dir replaces in place. `None` while disconnected
+    /// or when the device holds nothing; push then falls back to
+    /// [`DEMO_PROJECT_STORAGE_ID`](crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID).
+    device_storage_id: Option<String>,
     /// The open deploy dialog, when there is one (M5). Pure state — the
     /// controller executes its effects through the existing seams.
     deploy: Option<DeploySession>,
@@ -135,6 +141,7 @@ impl StudioController {
             pending_open: None,
             device_sync: None,
             device_versions: (None, None),
+            device_storage_id: None,
             deploy: None,
             random: Rc::new(clock_fallback_random),
         }
@@ -460,6 +467,7 @@ impl StudioController {
     pub(crate) async fn refresh_device_sync(&mut self) {
         self.device_sync = None;
         self.device_versions = (None, None);
+        self.device_storage_id = None;
         let pulled = {
             let Ok(server) = self.device.server.client_mut() else {
                 return;
@@ -491,6 +499,7 @@ impl StudioController {
                 }
             }
         };
+        self.device_storage_id = Some(pulled.storage_id.clone());
         match self.absorb_device_pull(pulled).await {
             Ok(state) => {
                 self.device_sync = Some(state);
@@ -1160,10 +1169,16 @@ impl StudioController {
         };
 
         // 2. hash-verified replace + load (the device runs it immediately)
+        // into the storage dir the device actually uses, so one project
+        // dir replaces in place (CLI uploads use dirs other than the
+        // sim's default slot)
         {
+            let storage_id = self.device_storage_id.clone().unwrap_or_else(|| {
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+            });
             let server = self.device.server.client_mut()?;
             let loaded = server
-                .open_library_project(&files, &local_hash.to_string())
+                .open_library_project(&storage_id, &files, &local_hash.to_string())
                 .await?;
             self.record_logs(loaded.logs);
         }
@@ -1518,6 +1533,23 @@ impl StudioController {
                 self.run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
                     .await?;
                 Ok(UiNotices::new().with_notice(UiNotice::info("Device forgotten")))
+            }
+            HomeOp::NameDevice { name } => {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err(UiError::UnsupportedAction(
+                        "a device name cannot be empty".to_string(),
+                    ));
+                }
+                // the Needs-a-name card's inline form (D14 gently insists
+                // upstream): stamp mints the uid, writes the identity over
+                // the wire, registers the device, and re-pulls (adoption
+                // may now run for previously-anonymous content)
+                let identity = self.run_identity_stamp(name).await?;
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                    "This device is now \"{}\"",
+                    identity.name
+                ))))
             }
         }
     }

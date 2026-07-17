@@ -81,6 +81,10 @@ pub struct FakeLightPlayerState {
     /// startup-project resume (fw-esp32 `boot::auto_load_project`): the
     /// server reports it via `project_list_loaded` from the first request.
     pub load_project_at_boot: bool,
+    /// Absolute storage dir the seeded project files land in. Defaults to
+    /// [`FAKE_DEVICE_PROJECT_DIR`]; override to mimic a device provisioned
+    /// outside Studio (CLI uploads use other dirs under `/projects/`).
+    pub project_dir: String,
 }
 
 impl FakeLightPlayerState {
@@ -93,6 +97,7 @@ impl FakeLightPlayerState {
             suppress_hello: false,
             proto_override: None,
             load_project_at_boot: false,
+            project_dir: FAKE_DEVICE_PROJECT_DIR.to_string(),
         }
     }
 
@@ -126,6 +131,13 @@ impl FakeLightPlayerState {
     /// project.
     pub fn with_loaded_project(mut self) -> Self {
         self.load_project_at_boot = true;
+        self
+    }
+
+    /// Seed the project into `/projects/<dir>` instead of the default
+    /// slot: mimics a device provisioned outside Studio (CLI upload).
+    pub fn with_project_dir(mut self, dir: &str) -> Self {
+        self.project_dir = format!("/projects/{dir}");
         self
     }
 }

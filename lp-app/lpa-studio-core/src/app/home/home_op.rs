@@ -62,6 +62,12 @@ pub enum HomeOp {
     ForgetDevice {
         uid: String,
     },
+    /// Name an anonymous connected device (the Needs-a-name card's inline
+    /// form): mints a `dev_` uid and stamps the identity over the wire —
+    /// card-anchored, never a dialog.
+    NameDevice {
+        name: String,
+    },
 }
 
 impl ControllerOp for HomeOp {
@@ -115,6 +121,12 @@ impl ControllerOp for HomeOp {
             )
             .with_icon("remove")
             .destructive(),
+            Self::NameDevice { .. } => ActionMeta::new(
+                "Name device",
+                "Name this device so Studio remembers it.",
+                ActionPriority::Primary,
+            )
+            .with_icon("edit"),
         }
     }
 
@@ -133,7 +145,8 @@ impl ControllerOp for HomeOp {
             | Self::DeletePackage { .. }
             | Self::ImportZip { .. }
             | Self::RenameDevice { .. }
-            | Self::ForgetDevice { .. } => ActionClass::Foreground {
+            | Self::ForgetDevice { .. }
+            | Self::NameDevice { .. } => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
         }
