@@ -1044,7 +1044,10 @@ impl StudioController {
                     .with_notice(UiNotice::info(format!("Saved the device's copy as {slug}"))))
             }
             DeployOp::EraseDevice => {
-                let resume = self.deploy_state_now()?;
+                // reachable from the card's actions popover (no dialog) as
+                // well as from the dialog; only an open dialog carries
+                // failure-resume state
+                let resume = self.deploy.as_ref().map(|session| session.state.clone());
                 let result = self.reset_to_blank(updates).await;
                 let env = self.deploy_environment();
                 match result {
@@ -1055,7 +1058,7 @@ impl StudioController {
                         Ok(outcome)
                     }
                     Err(error) => {
-                        if let Some(session) = self.deploy.as_mut() {
+                        if let (Some(session), Some(resume)) = (self.deploy.as_mut(), resume) {
                             session.fail(format!("Erase failed: {error}"), resume);
                         }
                         Err(error)

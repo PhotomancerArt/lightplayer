@@ -50,6 +50,14 @@ pub enum RosterCardState {
     },
     /// Live link, nothing loaded. Green solid — an empty device is fine.
     ConnectedEmpty,
+    /// Holds project data Studio cannot read (old format, corruption).
+    /// Amber solid — honest about the content; replacing (choose a
+    /// project) or erasing are the ways out. Added 2026-07-17 after the
+    /// hardware walk: mapping this to Connected-empty hid the truth.
+    HoldsUnreadableData {
+        /// Why the content didn't parse (manifest error detail).
+        detail: String,
+    },
     /// Blank/erased flash (or ROM download mode): provisioning turns it
     /// into a Device. Amber solid.
     ReadyToSetUp,
@@ -106,7 +114,8 @@ impl RosterCardState {
             | Self::ReadyToSetUp
             | Self::OtherFirmware
             | Self::NeedsFirmwareUpdate
-            | Self::NeedsAName => (RosterCircleShape::Solid, UiStatusKind::Warning),
+            | Self::NeedsAName
+            | Self::HoldsUnreadableData { .. } => (RosterCircleShape::Solid, UiStatusKind::Warning),
             Self::ConnectingRetrying { .. } | Self::OperationInFlight { .. } => {
                 (RosterCircleShape::Pulsing, UiStatusKind::Warning)
             }
@@ -153,6 +162,7 @@ impl RosterCardState {
                 percent: None,
             } => format!("{label}…"),
             Self::ConnectedEmpty => "Connected — nothing loaded".to_string(),
+            Self::HoldsUnreadableData { .. } => "Holds unreadable data".to_string(),
             Self::ReadyToSetUp => "Ready to set up".to_string(),
             Self::OtherFirmware => "Other firmware detected".to_string(),
             Self::NeedsFirmwareUpdate => "Needs a firmware update".to_string(),
@@ -166,12 +176,13 @@ impl RosterCardState {
         }
     }
 
-    /// The card's ≤1 sub-line. Only the diverged row carries one: the
-    /// banked note (D8 — the device copy is already saved, nothing is at
-    /// risk).
+    /// The card's ≤1 sub-line: the diverged row's banked note (D8 — the
+    /// device copy is already saved, nothing is at risk), and the
+    /// unreadable row's parse detail.
     pub fn sub_line(&self) -> Option<String> {
         match self {
             Self::EditedOnDevice => Some("Device copy saved to history".to_string()),
+            Self::HoldsUnreadableData { detail } => Some(detail.clone()),
             _ => None,
         }
     }
@@ -189,7 +200,11 @@ impl RosterCardState {
             Self::ConnectingRetrying { .. }
             | Self::OperationInFlight { .. }
             | Self::InUseElsewhere => None,
-            Self::ConnectedEmpty => Some(RosterAffordance::ChooseProject),
+            // choosing a project replaces the unreadable content; erase
+            // rides the card's actions popover
+            Self::ConnectedEmpty | Self::HoldsUnreadableData { .. } => {
+                Some(RosterAffordance::ChooseProject)
+            }
             Self::ReadyToSetUp | Self::OtherFirmware => Some(RosterAffordance::SetUp),
             Self::NeedsFirmwareUpdate => Some(RosterAffordance::UpdateFirmware),
             Self::NeedsAName => Some(RosterAffordance::NameDevice),

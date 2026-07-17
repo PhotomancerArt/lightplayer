@@ -97,6 +97,18 @@ fn connected_empty() -> Element {
     sheet(vec![card(RosterCardState::ConnectedEmpty, false)])
 }
 
+#[story(
+    description = "Amber solid: content Studio cannot read — detail as sub-line; replace or erase."
+)]
+fn holds_unreadable_data() -> Element {
+    sheet(vec![card(
+        RosterCardState::HoldsUnreadableData {
+            detail: "project.json is not a current-format project".to_string(),
+        },
+        false,
+    )])
+}
+
 #[story(description = "Amber solid: blank flash — provisioning turns it into a Device.")]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])

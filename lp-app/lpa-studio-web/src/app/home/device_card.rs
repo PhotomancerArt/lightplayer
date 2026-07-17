@@ -70,6 +70,17 @@ pub(crate) fn DeviceCard(
         .and_then(|affordance| affordance_button(&card, &affordance));
     let can_rename = card.uid.is_some() && !sim;
     let can_forget = card.uid.is_some() && faded && !sim;
+    // management actions (flash/erase) live on every live card whose wire
+    // could take them — the wipe path must never depend on card state
+    let live_actions = !sim
+        && !faded
+        && !matches!(
+            card.state,
+            RosterCardState::ConnectingRetrying { .. }
+                | RosterCardState::OperationInFlight { .. }
+                | RosterCardState::InUseElsewhere
+        );
+    let show_actions = live_actions || can_forget;
     let droppable = !sim && !faded;
 
     let mut renaming = use_signal(|| false);
@@ -139,7 +150,7 @@ pub(crate) fn DeviceCard(
                         span { class: chip_name_class(chip_muted), "{chip.name}" }
                     }
                 }
-                if can_forget {
+                if show_actions {
                     span {
                         class: if card.project.is_some() { "tw:-my-1" } else { "tw:-my-1 tw:ml-auto" },
                         onclick: move |event| event.stop_propagation(),
@@ -148,11 +159,30 @@ pub(crate) fn DeviceCard(
                             label: "Device actions".to_string(),
                             placement: PopoverPlacement::BottomEnd,
                             DetailSection {
-                                ActionButton {
-                                    action: forget_device_action(rename_uid.clone(), card.name.clone()),
-                                    running: false,
-                                    variant: ActionButtonVariant::MenuItem,
-                                    on_action,
+                                if live_actions {
+                                    // firmware + wipe: the interim danger
+                                    // zone (the rich-object detail spike
+                                    // gives these a real home)
+                                    ActionButton {
+                                        action: flash_device_action(true),
+                                        running: false,
+                                        variant: ActionButtonVariant::MenuItem,
+                                        on_action,
+                                    }
+                                    ActionButton {
+                                        action: erase_device_action(card.name.clone()),
+                                        running: false,
+                                        variant: ActionButtonVariant::MenuItem,
+                                        on_action,
+                                    }
+                                }
+                                if can_forget {
+                                    ActionButton {
+                                        action: forget_device_action(rename_uid.clone(), card.name.clone()),
+                                        running: false,
+                                        variant: ActionButtonVariant::MenuItem,
+                                        on_action,
+                                    }
                                 }
                             }
                         }
@@ -409,6 +439,22 @@ fn affordance_button(card: &UiDeviceCard, affordance: &RosterAffordance) -> Opti
             .with_icon("usb"),
     };
     Some(action.with_label(affordance.label()))
+}
+
+/// Erase the device's flash entirely, from the card's actions popover.
+/// Confirmation states the honest facts: full wipe; anything Studio could
+/// read was banked at connect (D8) — unreadable content is gone for good.
+fn erase_device_action(name: String) -> UiAction {
+    UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::EraseDevice).with_confirmation(
+        lpa_studio_core::ActionConfirmation::new(
+            "Erase device",
+            format!(
+                "Erase everything on \"{name}\"? Its flash is wiped clean; \
+                 anything Studio could read was already saved to your library."
+            ),
+            "Erase",
+        ),
+    )
 }
 
 /// The forget action (D34 hygiene) for the offline card's popup.

@@ -27,7 +27,7 @@
 //! | [`DeviceState::Ready`] + [`DeviceContent::Adopted`] | Running, up to date (adoption made the library head this content) |
 //! | [`DeviceState::Ready`] + [`DeviceContent::Empty`] | Connected, empty |
 //! | [`DeviceState::Ready`] + [`DeviceContent::PendingIdentity`] | Needs a name |
-//! | [`DeviceState::Ready`] + [`DeviceContent::Unreadable`] | Connected, empty (nothing loadABLE; "Choose a project" replaces the garbage — the honest affordance) |
+//! | [`DeviceState::Ready`] + [`DeviceContent::Unreadable`] | Holds unreadable data (amber; detail as sub-line; choose-a-project replaces, erase rides the actions popover) |
 //! | [`DeviceState::Ready`], pull not yet classified | Connecting/retrying (the attach isn't done until the pull lands) |
 //! | [`DeviceState::Gone`], or no link at all | Offline (last seen from the registry) |
 //!
@@ -132,7 +132,9 @@ fn running_state(evidence: &RosterEvidence<'_>) -> RosterCardState {
         Some(DeviceContent::Adopted { .. }) => RosterCardState::RunningUpToDate,
         Some(DeviceContent::Empty) => RosterCardState::ConnectedEmpty,
         Some(DeviceContent::PendingIdentity { .. }) => RosterCardState::NeedsAName,
-        Some(DeviceContent::Unreadable { .. }) => RosterCardState::ConnectedEmpty,
+        Some(DeviceContent::Unreadable { detail }) => RosterCardState::HoldsUnreadableData {
+            detail: detail.clone(),
+        },
         // ready but the connect-as-pull hasn't classified yet: still
         // attaching, honestly
         None => RosterCardState::ConnectingRetrying {
@@ -270,16 +272,19 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_content_maps_to_connected_empty() {
-        // nothing loadABLE; "Choose a project" replaces the garbage —
-        // the honest affordance (see module doc)
+    fn unreadable_content_maps_to_holds_unreadable_data() {
+        // honest about the content (2026-07-17 hardware-walk veto of the
+        // Connected-empty mapping): the card says what's there; choosing
+        // a project replaces it, erase rides the actions popover
         let ready = ready_link();
         let content = DeviceContent::Unreadable {
             detail: "manifest unparseable".to_string(),
         };
         assert_eq!(
             derive(&evidence().with_link(&ready).with_content(&content)),
-            RosterCardState::ConnectedEmpty
+            RosterCardState::HoldsUnreadableData {
+                detail: "manifest unparseable".to_string(),
+            }
         );
     }
 
