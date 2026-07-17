@@ -4,8 +4,8 @@ use std::cell::RefCell;
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ActionConfirmation, ControllerId, DEPLOY_NODE_ID, DeployOp, HOME_NODE_ID, HomeOp, SyncRelation,
-    UiAction, UiPackageCard,
+    ActionConfirmation, ControllerId, DEPLOY_NODE_ID, DeployOp, HOME_NODE_ID, HomeOp,
+    PreviewSource, SyncRelation, UiAction, UiPackageCard,
 };
 
 use crate::app::home::card_thumb::CardThumb;
@@ -61,7 +61,11 @@ pub(crate) fn PackageCard(
                     }
                 },
             }
-            CardThumb { seed: card.uid.clone(), label: card.slug.clone() }
+            CardThumb {
+                seed: card.uid.clone(),
+                label: card.slug.clone(),
+                source: Some(PreviewSource::ProjectUid(card.uid.clone())),
+            }
             div { class: "tw:flex tw:items-start tw:justify-between tw:gap-2 tw:p-3",
                 div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
                     p { class: "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",

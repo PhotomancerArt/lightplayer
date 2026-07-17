@@ -47,6 +47,12 @@ pub use app::node::{
     UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue,
     UiSlotValueKind,
 };
+#[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
+pub use app::preview_host::{
+    PreviewHostConfig, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus, PreviewSource,
+    PreviewTier,
+};
 pub use app::project::{
     AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
     NodeController, NodeControllerState, NodeRevertOp, PendingAssetEdit, PendingEdit,

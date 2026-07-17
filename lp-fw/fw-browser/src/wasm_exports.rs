@@ -62,6 +62,20 @@ pub fn create_runtime(label: &str, tier: &str) -> Result<String, String> {
     .map_err(|error| format!("serialize runtime creation result: {error}"))
 }
 
+/// Destroy a runtime created by [`create_runtime`], dropping its firmware
+/// state (on the GPU tier this includes the runtime's graphics backend and
+/// any attached card surface — a clean drop even with a live canvas, see
+/// `runtime::GpuRuntimeState`).
+///
+/// Returns `true` when a runtime was destroyed, `false` when the id was
+/// unknown — destruction is an idempotent release, so double-destroy is not
+/// an error. The boot-runtime guard lives in the worker script, which owns
+/// the boot runtime id.
+#[wasm_bindgen]
+pub fn destroy_runtime(runtime_id: u32) -> bool {
+    runtime_registry::destroy_runtime(runtime_id)
+}
+
 /// Number of live browser firmware runtimes.
 #[wasm_bindgen]
 pub fn runtime_count() -> u32 {
