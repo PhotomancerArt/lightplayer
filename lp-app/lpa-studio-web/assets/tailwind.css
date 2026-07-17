@@ -377,6 +377,9 @@
   .tw\:min-h-\[640px\] {
     min-height: 640px;
   }
+  .tw\:min-h-\[710px\] {
+    min-height: 710px;
+  }
   .tw\:min-h-full {
     min-height: 100%;
   }
@@ -478,6 +481,9 @@
   }
   .tw\:max-w-72 {
     max-width: calc(var(--tw-spacing) * 72);
+  }
+  .tw\:max-w-80 {
+    max-width: calc(var(--tw-spacing) * 80);
   }
   .tw\:max-w-\[320px\] {
     max-width: 320px;
@@ -603,6 +609,9 @@
   }
   .tw\:grid-cols-\[80px_minmax\(0\,1fr\)\] {
     grid-template-columns: 80px minmax(0,1fr);
+  }
+  .tw\:grid-cols-\[88px_minmax\(0\,1fr\)\] {
+    grid-template-columns: 88px minmax(0,1fr);
   }
   .tw\:grid-cols-\[160px_repeat\(5\,72px\)\] {
     grid-template-columns: 160px repeat(5,72px);
