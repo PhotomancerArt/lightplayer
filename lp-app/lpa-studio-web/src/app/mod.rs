@@ -12,6 +12,7 @@ pub mod home;
 pub mod layout;
 pub mod node;
 pub mod project;
+pub mod roster;
 #[cfg(feature = "stories")]
 pub(crate) mod story_fixtures;
 

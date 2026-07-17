@@ -60,6 +60,10 @@ pub use app::project::{
     SlotEditOp, SlotKind, UiAffordance, UiAssetContent, UiAssetContentBody, UiPendingEdit,
     UiPendingEditKind, UiPendingEditPhase, UiShaderError,
 };
+pub use app::roster::{
+    ConnectEvidence, ConnectPhase, DegradedReason, RosterAffordance, RosterCardState, RosterCircle,
+    RosterCircleShape, RosterEvidence, derive_roster_card_state, firmware_update_available,
+};
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
     ServerSnapshot, ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation,

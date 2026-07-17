@@ -10,8 +10,9 @@ use lpa_studio_core::{
     UiDeviceCardState,
 };
 
-use crate::app::home::time_ago::time_ago;
-use crate::base::{StudioIcon, StudioIconName};
+use lpa_studio_core::core::time_ago::time_ago;
+
+use crate::base::{StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon, StudioIconName};
 
 /// One known device. Clicking an offline/remembered card reconnects
 /// through an already-granted serial port with no chooser (M1); other
@@ -26,27 +27,33 @@ pub(crate) fn DeviceCard(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(super::package_card::platform_now_secs);
-    let (dot_class, status_line) = match &card.state {
+    // shape grammar: solid = live link, hollow = remembered only (the
+    // full 14-state vocabulary drives this via the roster view-model in M4)
+    let (circle_shape, circle_tone, status_line) = match &card.state {
         UiDeviceCardState::Blank => (
-            "tw:h-2 tw:w-2 tw:rounded-full tw:bg-status-warning-foreground",
+            StatusCircleShape::Solid,
+            StatusCircleTone::Warning,
             "Ready to set up — install firmware".to_string(),
         ),
         UiDeviceCardState::ConnectedRunning { project } => (
-            "tw:h-2 tw:w-2 tw:rounded-full tw:bg-status-good-foreground",
+            StatusCircleShape::Solid,
+            StatusCircleTone::Good,
             project
                 .clone()
                 .map(|project| format!("Running {project}"))
                 .unwrap_or_else(|| "Connected".to_string()),
         ),
         UiDeviceCardState::ConnectedUnknown { detail } => (
-            "tw:h-2 tw:w-2 tw:rounded-full tw:bg-status-good-foreground",
+            StatusCircleShape::Solid,
+            StatusCircleTone::Good,
             detail.clone(),
         ),
         UiDeviceCardState::RememberedOffline {
             last_seen_at,
             last_known,
         } => (
-            "tw:h-2 tw:w-2 tw:rounded-full tw:bg-border-strong",
+            StatusCircleShape::Hollow,
+            StatusCircleTone::Neutral,
             match last_known {
                 Some(project) => {
                     format!("Last ran {project} · seen {}", time_ago(now, *last_seen_at))
@@ -81,7 +88,7 @@ pub(crate) fn DeviceCard(
             },
             onclick: move |_| on_action.call(click_action.clone()),
             header { class: "tw:flex tw:items-center tw:gap-2 tw:border-b tw:border-border tw:bg-terminal tw:px-3 tw:py-2",
-                span { class: dot_class }
+                StatusCircle { shape: circle_shape, tone: circle_tone }
                 span { class: "tw:inline-flex tw:items-center tw:text-muted-foreground",
                     StudioIcon { name: StudioIconName::Usb, size: 14 }
                 }

@@ -8,9 +8,10 @@ use lpa_studio_core::{
     UiAction, UiPackageCard,
 };
 
+use lpa_studio_core::core::time_ago::time_ago;
+
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::package_export::export_package_to_download;
-use crate::app::home::time_ago::time_ago;
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class};
 

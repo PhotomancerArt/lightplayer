@@ -11,7 +11,6 @@ pub(crate) mod package_export;
 pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
-pub(crate) mod time_ago;
 
 pub use home_gallery::HomeGallery;
 pub use project_opening_frame::ProjectOpeningFrame;
