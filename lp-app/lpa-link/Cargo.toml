@@ -91,5 +91,9 @@ host-serial-esp32 = [
     "dep:tokio",
 ]
 
+[[example]]
+name = "manage_smoke"
+required-features = ["host-serial-esp32"]
+
 [lints]
 workspace = true
