@@ -1889,10 +1889,19 @@ impl StudioController {
                     "Checking",
                     "Checking server response",
                 );
-                let auto_connect = match self
-                    .connect_running_project_if_available(updates.clone())
-                    .await
-                {
+                // sim: auto-connect the editor to whatever runs. Hardware:
+                // the roster model (M3) — attach observes only; the running
+                // project belongs on the device card via connect-as-pull,
+                // and editor entry is the explicit D29 click (M5). The probe
+                // still issues the first wire request either way, so
+                // readiness settles and NoFirmware/Incompatible classify.
+                let probe = if is_sim {
+                    self.connect_running_project_if_available(updates.clone())
+                        .await
+                } else {
+                    self.probe_server_readiness(updates.clone()).await
+                };
+                let auto_connect = match probe {
                     Ok(auto_connect) => auto_connect,
                     Err(error) => {
                         let pending_logs = self.device.server.take_pending_logs();
@@ -2017,6 +2026,30 @@ impl StudioController {
                 Err(error)
             }
         }
+    }
+
+    /// Hardware readiness probe: issue the wire's first request so
+    /// readiness settles (and NoFirmware/Incompatible surface through the
+    /// same error path as the sim probe) WITHOUT connecting the editor to
+    /// anything the device runs — attach is observation (roster model);
+    /// the loaded project shows on the device card, not in the editor.
+    async fn probe_server_readiness(
+        &mut self,
+        updates: UxUpdateSink,
+    ) -> Result<AutoProjectConnect, UiError> {
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_DEVICE),
+            "Checking device",
+            "Checking",
+            "Checking server response",
+        );
+        let catalog = {
+            let server = self.device.server.client_mut()?;
+            server.list_loaded_projects().await?
+        };
+        self.record_logs(catalog.logs);
+        Ok(AutoProjectConnect::NotFound)
     }
 
     async fn connect_running_project_if_available(

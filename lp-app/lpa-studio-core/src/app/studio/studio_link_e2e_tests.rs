@@ -99,6 +99,54 @@ fn known_device_connects_and_classifies_at_head_through_the_link() {
     );
 }
 
+/// Row 1b (roster model regression): a device that boots with its project
+/// LOADED — the real-hardware shape since standalone startup-resume — must
+/// attach as pure observation: the gallery keeps the view (no open
+/// project, no editor entry), while connect-as-pull classifies the running
+/// copy for the device card. Editor entry is the explicit D29 click (M5).
+#[test]
+fn attaching_a_device_with_a_loaded_project_never_opens_the_editor() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let library_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let snapshot = studio.snapshot();
+    assert!(
+        matches!(snapshot.project.state, crate::ProjectState::NotLoaded),
+        "hardware attach observes only — the editor must not open, got {:?}",
+        snapshot.project.state
+    );
+    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!(
+            "running copy classifies for the card, got {:?}",
+            sync.content
+        );
+    };
+    assert_eq!(*relation, lpc_history::SyncRelation::AtHead);
+}
+
 /// Row 1 (happy path, part 2): the stamp→push flow on an empty device —
 /// the deploy dialog's whole wizard, but with every wire operation running
 /// through the real serial framing.
