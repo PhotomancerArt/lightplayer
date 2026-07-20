@@ -1,7 +1,7 @@
 //! Example cards: the window-shopper path.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{HomeOp, UiAction, UiExampleCard};
+use lpa_studio_core::{HomeOp, PreviewSource, UiAction, UiExampleCard};
 
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::package_card::home_action;
@@ -32,7 +32,11 @@ pub(crate) fn ExampleCard(
                     }));
                 }
             },
-            CardThumb { seed: card.id.clone(), label: card.name.clone() }
+            CardThumb {
+                seed: card.id.clone(),
+                label: card.name.clone(),
+                source: Some(PreviewSource::Example(card.id.clone())),
+            }
             div { class: "tw:grid tw:gap-0.5 tw:p-3",
                 p { class: "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",
                     "{card.name}"

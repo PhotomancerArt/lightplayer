@@ -52,6 +52,18 @@ pub enum BrowserInputEnvelope {
         label: String,
         tier: BrowserRuntimeTier,
     },
+    /// Destroy a runtime previously created with [`Self::CreateRuntime`],
+    /// releasing everything it owns (GPU-tier runtimes drop their graphics
+    /// backend and any attached card surface).
+    ///
+    /// The worker answers with [`BrowserOutputEnvelope::RuntimeDestroyed`].
+    /// Destroying an unknown id is a no-op ack (release is idempotent);
+    /// destroying the boot runtime is refused with
+    /// [`BrowserOutputEnvelope::PreviewError`] (`frame_id` 0) — it is the
+    /// authoritative sim serving single-runtime consumers.
+    DestroyRuntime {
+        runtime_id: u32,
+    },
     ProtocolIn {
         /// Target runtime; `None` addresses the boot runtime.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,6 +147,11 @@ pub enum BrowserOutputEnvelope {
         #[serde(default)]
         tier_reason: Option<String>,
     },
+    /// Response to [`BrowserInputEnvelope::DestroyRuntime`]: the runtime (if
+    /// it existed) has been dropped and its worker memory released.
+    ///
+    /// Acked for unknown ids too — destruction is an idempotent release.
+    RuntimeDestroyed { runtime_id: u32 },
     /// A transferred card surface was attached to a GPU-tier runtime
     /// (response to the worker `attach_surface` message sent by
     /// `BrowserWorkerHandle::attach_preview_surface`).

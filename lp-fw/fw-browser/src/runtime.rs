@@ -77,6 +77,13 @@ pub(crate) struct BrowserFirmwareRuntime {
 
 /// GPU-tier pieces owned by one runtime: the worker's shared device, the
 /// runtime's `GpuGraphics` backend, and (once attached) its card surface.
+///
+/// Dropping this (runtime destruction) is clean even while a canvas is
+/// attached: wgpu's WebGPU backend `Surface` drop is an explicit no-op that
+/// just releases its JS refs (`GPUCanvasContext` + canvas), and the
+/// `OffscreenCanvas` was transferred into the worker, so the surface holds
+/// the only reference and JS GC reclaims both. The worker's shared device
+/// outlives the runtime via `worker_gpu`.
 struct GpuRuntimeState {
     worker_gpu: Rc<WorkerGpu>,
     graphics: Arc<GpuGraphics>,
