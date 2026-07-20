@@ -8,13 +8,14 @@
 //! line, sub-line, and the ≤1 affordance all come from core, so the
 //! renderer can never drift from the vocabulary.
 //!
-//! Anatomy (direction.md "Card grammar"): header row = status circle ·
-//! transport glyph+label · project chip right-aligned (identity, not
-//! status; muted last-known on offline/error) · the rich-object detail
+//! Anatomy (direction.md "Card grammar", amended 2026-07-17): header row
+//! = status circle · transport glyph+label · the rich-object detail
 //! trigger at the right edge (Q1: node-style affordance-following icon —
-//! see `device_detail_popover.rs`); device name with pencil-on-hover
-//! inline rename (D34); status line (health only); ≤1 sub-line; ≤1
-//! affordance button (Q2); offline whole-card fade.
+//! see `device_detail_popover.rs`); body = device name with
+//! pencil-on-hover inline rename (D34) · status line (health only) · ≤1
+//! sub-line · project chip (identity, not status; muted last-known on
+//! offline/error — moved out of the title bar for space) · ≤1 affordance
+//! button (Q2); offline whole-card fade.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -137,24 +138,16 @@ pub(crate) fn DeviceCard(
                 span { class: "tw:text-[11px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-muted-foreground",
                     "{transport_label}"
                 }
-                if let Some(chip) = card.project.clone() {
-                    // identity, not status: the project the device holds
-                    // (or last ran — muted on offline/error cards)
-                    span { class: "tw:ml-auto tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5",
-                        span {
-                            class: "tw:inline-block tw:h-3 tw:w-3 tw:flex-none tw:rounded-[3px]",
-                            style: thumb_swatch_style(&chip.uid, chip_muted),
-                        }
-                        span { class: chip_name_class(chip_muted), "{chip.name}" }
-                    }
-                }
                 if !sim {
                     // the rich-object detail trigger (Q1): the node-style
                     // affordance-following icon at the right edge, riding
                     // the rollup tone; Flash/Erase/Forget live in its
-                    // danger zone (the More-menu's rows migrated there)
+                    // danger zone (the More-menu's rows migrated there).
+                    // -mr-1.5 cancels the header's px-3 down to the pane
+                    // pattern's 6px edge inset, so the button's right gap
+                    // matches its top/bottom.
                     span {
-                        class: if card.project.is_some() { "tw:-my-1" } else { "tw:-my-1 tw:ml-auto" },
+                        class: "tw:-my-1 tw:-mr-1.5 tw:ml-auto",
                         onclick: move |event| event.stop_propagation(),
                         DeviceDetailPopover {
                             card: card.clone(),
@@ -239,6 +232,19 @@ pub(crate) fn DeviceCard(
                 p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-dim-foreground", "{status_line}" }
                 if let Some(sub_line) = sub_line {
                     p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-subtle-foreground", "{sub_line}" }
+                }
+                if let Some(chip) = card.project.clone() {
+                    // identity, not status: the project the device holds
+                    // (or last ran — muted on offline/error cards). Lives
+                    // in the BODY, not the title bar (Yona 2026-07-17:
+                    // header space is precious, the chip read oddly there)
+                    span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5",
+                        span {
+                            class: "tw:inline-block tw:h-3 tw:w-3 tw:flex-none tw:rounded-[3px]",
+                            style: thumb_swatch_style(&chip.uid, chip_muted),
+                        }
+                        span { class: chip_name_class(chip_muted), "{chip.name}" }
+                    }
                 }
                 if fw_update {
                     div { class: "tw:mt-1",

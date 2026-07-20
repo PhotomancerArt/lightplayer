@@ -188,6 +188,9 @@
   .tw\:mt-2 {
     margin-top: calc(var(--tw-spacing) * 2);
   }
+  .tw\:-mr-1\.5 {
+    margin-right: calc(var(--tw-spacing) * -1.5);
+  }
   .tw\:-mb-4 {
     margin-bottom: calc(var(--tw-spacing) * -4);
   }
