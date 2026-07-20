@@ -38,7 +38,7 @@ pub use compile_stats::LpsCompileStats;
 pub use compute_abi::{ComputeAbi, ComputeOutputAbi};
 pub use compute_shader::LpsComputeShader;
 pub use engine::LpsEngine;
-pub use error::LpsError;
+pub use error::{LpsError, ShaderFuelTrap, ShaderFuelTrapEntry};
 pub use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue};
 pub use lpvm::AllocError;
 pub use px_shader::LpsPxShader;

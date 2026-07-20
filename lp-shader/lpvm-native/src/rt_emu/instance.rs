@@ -16,12 +16,21 @@ use lpvm::{
     flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
     validate_compute_tick_sig, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
+use lpvm::{INVOCATION_INDEX_ARMED, TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP};
 use lpvm_cranelift::{CompileOptions, signature_for_ir_func, signature_uses_struct_return};
-use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa, write_guest_vmctx_header};
+use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa};
 
 use crate::error::NativeError;
 
 use super::NativeEmuModule;
+
+/// Per-call emulator instruction limit for emulated native execution.
+///
+/// Raised above lp-riscv-emu's 1M default so guest fuel traps
+/// deterministically first (a flat call arms `DEFAULT_VMCTX_FUEL` = 1M
+/// back-edges ≈ 6-10M instructions of spinning before the trap fires). It
+/// remains a hard backstop when fuel emission is compiled off.
+const EMU_CALL_INSTRUCTION_LIMIT: u64 = 64_000_000;
 
 pub(crate) struct RenderTextureEntry {
     name: String,
@@ -41,6 +50,10 @@ pub struct NativeEmuInstance {
     pub(crate) snapshot_offset: usize,
     /// Size of globals region in bytes
     pub(crate) globals_size: usize,
+    /// Fuel budget written to the vmctx fuel low u32 when arming before each
+    /// guest entry. Defaults to `DEFAULT_VMCTX_FUEL as u32`; render wrappers
+    /// re-arm per pixel/sample with `DEFAULT_INVOCATION_FUEL` regardless.
+    pub(crate) armed_fuel: u32,
     pub(crate) render_texture_cache: Option<RenderTextureEntry>,
     pub(crate) render_samples_cache: Option<RenderTextureEntry>,
 }
@@ -104,13 +117,43 @@ impl NativeEmuInstance {
         }
     }
 
+    /// Arm the vmctx fuel/trap words before a guest entry: full tank in the
+    /// fuel low u32, host-armed invocation index in the high u32, no trap.
+    /// `metadata` (vmctx+12) is left untouched.
     fn refresh_vmctx_header(&self) {
         let off =
             (u64::from(self.vmctx_guest) - u64::from(self.module.arena.shared_start())) as usize;
         let mut v = self.module.arena.lock_storage();
         if off + GUEST_VMCTX_BYTES <= v.len() {
-            write_guest_vmctx_header(&mut v[off..off + GUEST_VMCTX_BYTES]);
+            let fuel = off + VMCTX_OFFSET_FUEL;
+            v[fuel..fuel + 4].copy_from_slice(&self.armed_fuel.to_le_bytes());
+            v[fuel + 4..fuel + 8].copy_from_slice(&INVOCATION_INDEX_ARMED.to_le_bytes());
+            let trap = off + VMCTX_OFFSET_TRAP;
+            v[trap..trap + 4].copy_from_slice(&TRAP_CODE_NONE.to_le_bytes());
         }
+    }
+
+    /// Read the trap slot after a guest entry; nonzero → typed error carrying
+    /// the invocation index (fuel high u32). Return values from a trapped
+    /// call are garbage — callers must discard them on `Err`.
+    fn take_trap(&self) -> Result<(), NativeError> {
+        let trap_bytes = self.vmctx_read_bytes(VMCTX_OFFSET_TRAP, 4)?;
+        let trap = u32::from_le_bytes(trap_bytes[..4].try_into().expect("4 trap bytes"));
+        if trap == TRAP_CODE_NONE {
+            return Ok(());
+        }
+        let idx_bytes = self.vmctx_read_bytes(VMCTX_OFFSET_FUEL + 4, 4)?;
+        let invocation = u32::from_le_bytes(idx_bytes[..4].try_into().expect("4 index bytes"));
+        Err(NativeError::Trap {
+            code: trap,
+            invocation,
+        })
+    }
+
+    /// Override the fuel budget armed before each guest entry (tests / perf
+    /// comparison; production uses the default).
+    pub fn set_armed_fuel(&mut self, fuel: u32) {
+        self.armed_fuel = fuel;
     }
 
     fn cranelift_options(&self) -> CompileOptions {
@@ -238,7 +281,16 @@ impl NativeEmuInstance {
         } else {
             LogLevel::None
         };
-        let mut emu = Riscv32Emulator::from_memory(mem, &[]).with_log_level(log_level);
+        // Guest fuel (armed by `refresh_vmctx_header` before every entry)
+        // bounds runaway shader code first: a full `DEFAULT_VMCTX_FUEL` tank
+        // of loop back-edges costs ~6-10 guest instructions each (≲10M),
+        // well under `EMU_CALL_INSTRUCTION_LIMIT`. Raising the emulator
+        // limit is safe precisely because of that metering; the limit stays
+        // as the hard host-side backstop for fuel-off compiles and codegen
+        // bugs.
+        let mut emu = Riscv32Emulator::from_memory(mem, &[])
+            .with_log_level(log_level)
+            .with_call_instruction_limit(EMU_CALL_INSTRUCTION_LIMIT);
         emu.set_cycle_model(cycle_model);
 
         let ret_result = if uses_sret {
@@ -297,6 +349,9 @@ impl NativeEmuInstance {
                 }
                 self.last_guest_instruction_count = Some(n_inst);
                 self.last_guest_cycle_count = Some(emu.get_cycle_count());
+                // A trapped guest exits cleanly (epilogue cascade), so the
+                // trap slot — not the emulator result — is the signal.
+                self.take_trap()?;
                 Ok(words)
             }
             Err(e) => {
@@ -754,5 +809,418 @@ impl NativeEmuInstance {
             return Ok(Vec::new());
         }
         Ok(words)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::String;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use lp_shader::synth::synthesise_render_texture;
+    use lpir::builder::FunctionBuilder;
+    use lpir::{FuncId, IrType, LpirModule, LpirOp};
+    use lps_shared::{
+        FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureStorageFormat,
+    };
+    use lpvm::{
+        DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpvmEngine, LpvmInstance, LpvmModule,
+        TRAP_CODE_OUT_OF_FUEL, VMCTX_OFFSET_FUEL,
+    };
+
+    use crate::error::NativeError;
+    use crate::native_options::NativeCompileOptions;
+    use crate::rt_emu::NativeEmuEngine;
+
+    const Q_ONE: i32 = 65536;
+    const Q_HALF: i32 = 32768;
+
+    /// An infinite loop exhausts its fuel tank and surfaces as the typed
+    /// trap error; the same instance stays usable (arming resets the
+    /// fuel and trap slots on the next entry).
+    #[test]
+    fn infinite_loop_traps_and_instance_stays_reusable() {
+        let (ir, meta) = spin_and_ok_module();
+        let engine = NativeEmuEngine::new(NativeCompileOptions::default());
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+        // Small tank keeps this test fast (~6 guest instructions per spin
+        // iteration); the default 1M tank is exercised by
+        // `default_tank_trap_fires_before_emulator_instruction_limit`.
+        inst.set_armed_fuel(1_000);
+
+        let err = inst
+            .call_q32("spin", &[])
+            .expect_err("infinite loop must trap");
+        match &err {
+            NativeError::Trap { code, invocation } => {
+                assert_eq!(*code, TRAP_CODE_OUT_OF_FUEL);
+                // No render wrapper ran, so the index is the host-armed marker.
+                assert_eq!(*invocation, INVOCATION_INDEX_ARMED);
+            }
+            other => panic!("expected NativeError::Trap, got {other:?}"),
+        }
+        let msg = alloc::format!("{err}");
+        assert!(
+            msg.contains("trap") && msg.contains("fuel"),
+            "trap message must mention trap + fuel: {msg}"
+        );
+
+        // Next call re-arms and succeeds.
+        let words = inst
+            .call_q32("ok", &[])
+            .expect("instance reusable after trap");
+        assert_eq!(words, vec![42]);
+    }
+
+    /// With the raised `EMU_CALL_INSTRUCTION_LIMIT`, a flat call armed with
+    /// the DEFAULT 1M tank exhausts guest fuel (≈6M spin instructions)
+    /// before the emulator instruction limit — the typed fuel trap, not
+    /// `InstructionLimitExceeded`, is what surfaces.
+    #[test]
+    fn default_tank_trap_fires_before_emulator_instruction_limit() {
+        let (ir, meta) = spin_and_ok_module();
+        let engine = NativeEmuEngine::new(NativeCompileOptions::default());
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+
+        let err = inst
+            .call_q32("spin", &[])
+            .expect_err("infinite loop must trap on the default tank");
+        match &err {
+            NativeError::Trap { code, .. } => assert_eq!(*code, TRAP_CODE_OUT_OF_FUEL),
+            other => panic!("expected NativeError::Trap, got {other:?}"),
+        }
+        let insts = inst
+            .last_guest_instruction_count()
+            .expect("instruction count recorded on the trap path");
+        assert!(
+            insts > DEFAULT_VMCTX_FUEL,
+            "draining a 1M tank must cost more than 1M guest instructions \
+             (would have died on the old emulator limit): {insts}"
+        );
+    }
+
+    /// A loop of N iterations consumes exactly N fuel units: back-edge
+    /// checks decrement by one, entry checks are check-only.
+    #[test]
+    fn counted_loop_consumes_one_fuel_unit_per_backedge() {
+        let (ir, meta) = counted_loop_module();
+        let engine = NativeEmuEngine::new(NativeCompileOptions::default());
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+
+        let n = 10;
+        let words = inst.call_q32("count", &[n]).expect("call");
+        assert_eq!(words, vec![n]);
+
+        let fuel_bytes = inst
+            .vmctx_read_bytes(VMCTX_OFFSET_FUEL, 4)
+            .expect("read fuel low");
+        let fuel = u32::from_le_bytes(fuel_bytes[..4].try_into().expect("4 bytes"));
+        assert_eq!(
+            fuel,
+            DEFAULT_VMCTX_FUEL as u32 - n as u32,
+            "expected armed - N after N back-edges"
+        );
+    }
+
+    /// Render-texture path with the real synth wrapper: the pixel that
+    /// loops forever traps with its linear invocation index; pixels before
+    /// it are already written.
+    #[test]
+    fn render_texture_trap_reports_offending_pixel_index() {
+        let k = 2u32; // pixel (2, 0) of a 4x1 texture
+        let (mut ir, mut meta) = render_module_spinning_at(k as i32 * Q_ONE + Q_HALF);
+        let name =
+            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
+                .expect("synth");
+
+        let engine = NativeEmuEngine::new(NativeCompileOptions::default());
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+        let mut tex = engine.memory().alloc(4 * 8, 4).expect("alloc texture");
+
+        let err = inst
+            .call_render_texture(&name, &mut tex, 4, 1)
+            .expect_err("pixel k must trap");
+        match &err {
+            NativeError::Trap { code, invocation } => {
+                assert_eq!(*code, TRAP_CODE_OUT_OF_FUEL);
+                assert_eq!(*invocation, k, "invocation index must be the pixel index");
+            }
+            other => panic!("expected NativeError::Trap, got {other:?}"),
+        }
+
+        // Pixels 0 and 1 rendered 1.0 per channel before the trap.
+        let mut before = [0u8; 16];
+        unsafe { tex.read(0, &mut before).expect("read pixels 0..2") };
+        assert!(
+            before.iter().all(|b| *b == 0xFF),
+            "earlier pixels must be written: {before:?}"
+        );
+
+        // Headroom documentation for P3: the whole trapped frame (two good
+        // pixels + one 100k-iteration tank) must fit under lp-riscv-emu's
+        // 1M call_function instruction limit.
+        let insts = inst
+            .last_guest_instruction_count()
+            .expect("instruction count recorded on the trap path");
+        assert!(insts < 1_000_000, "observed {insts} guest instructions");
+        eprintln!("render_texture fuel-trap frame: {insts} guest instructions");
+    }
+
+    /// A bounded shader renders byte-identically with fuel on and off.
+    #[test]
+    fn bounded_render_is_byte_identical_with_fuel_on_and_off() {
+        let with_fuel = bounded_render_bytes(true);
+        let without_fuel = bounded_render_bytes(false);
+        assert_eq!(with_fuel, without_fuel);
+        assert!(
+            with_fuel.iter().any(|b| *b != 0),
+            "sanity: rendered texture must not be all zero"
+        );
+    }
+
+    fn bounded_render_bytes(fuel: bool) -> Vec<u8> {
+        let (mut ir, mut meta) = bounded_render_module();
+        let name =
+            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
+                .expect("synth");
+        let options = NativeCompileOptions {
+            fuel,
+            ..NativeCompileOptions::default()
+        };
+        let engine = NativeEmuEngine::new(options);
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+        let mut tex = engine.memory().alloc(4 * 2 * 8, 4).expect("alloc texture");
+        inst.call_render_texture(&name, &mut tex, 4, 2)
+            .expect("bounded render");
+        let mut bytes = vec![0u8; 4 * 2 * 8];
+        unsafe { tex.read(0, &mut bytes).expect("read texture") };
+        bytes
+    }
+
+    /// `spin`: void fn looping forever; `ok`: () -> 42.
+    fn spin_and_ok_module() -> (LpirModule, LpsModuleSig) {
+        let mut fb = FunctionBuilder::new("spin", &[]);
+        let scratch = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: scratch,
+            value: 0,
+        });
+        fb.push_loop();
+        fb.push(LpirOp::IaddImm {
+            dst: scratch,
+            src: scratch,
+            imm: 1,
+        });
+        fb.end_loop();
+        fb.push_return(&[]);
+        let spin = fb.finish();
+
+        let mut fb = FunctionBuilder::new("ok", &[IrType::I32]);
+        let r = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: r, value: 42 });
+        fb.push_return(&[r]);
+        let ok = fb.finish();
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), spin);
+        module.functions.insert(FuncId(1), ok);
+
+        let meta = LpsModuleSig {
+            functions: vec![
+                void_sig("spin"),
+                LpsFnSig {
+                    name: String::from("ok"),
+                    return_type: LpsType::Int,
+                    parameters: vec![],
+                    kind: LpsFnKind::UserDefined,
+                },
+            ],
+            ..Default::default()
+        };
+        (module, meta)
+    }
+
+    /// `count(n)`: i = 0; loop { if i >= n break; i += 1 }; return i.
+    fn counted_loop_module() -> (LpirModule, LpsModuleSig) {
+        let mut fb = FunctionBuilder::new("count", &[IrType::I32]);
+        let n = fb.add_param(IrType::I32);
+        let i = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: i, value: 0 });
+        fb.push_loop();
+        {
+            let done = fb.alloc_vreg(IrType::I32);
+            fb.push(LpirOp::IgeS {
+                dst: done,
+                lhs: i,
+                rhs: n,
+            });
+            fb.push_if(done);
+            fb.push(LpirOp::Break);
+            fb.end_if();
+            fb.push(LpirOp::IaddImm {
+                dst: i,
+                src: i,
+                imm: 1,
+            });
+        }
+        fb.end_loop();
+        fb.push_return(&[i]);
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), fb.finish());
+
+        let meta = LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("count"),
+                return_type: LpsType::Int,
+                parameters: vec![FnParam {
+                    name: String::from("n"),
+                    ty: LpsType::Int,
+                    qualifier: ParamQualifier::In,
+                }],
+                kind: LpsFnKind::UserDefined,
+            }],
+            ..Default::default()
+        };
+        (module, meta)
+    }
+
+    /// `render(pos)`: loops forever iff `pos.x == k_center` (Q16.16 bits),
+    /// else returns vec4(1.0).
+    fn render_module_spinning_at(k_center_bits: i32) -> (LpirModule, LpsModuleSig) {
+        let ret_tys = [IrType::F32; 4];
+        let mut fb = FunctionBuilder::new("render", &ret_tys);
+        let px = fb.add_param(IrType::F32);
+        let _py = fb.add_param(IrType::F32);
+
+        let k_bits = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: k_bits,
+            value: k_center_bits,
+        });
+        let kf = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::FfromI32Bits {
+            dst: kf,
+            src: k_bits,
+        });
+        let cond = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::Feq {
+            dst: cond,
+            lhs: px,
+            rhs: kf,
+        });
+        fb.push_if(cond);
+        {
+            // Empty body: the cheapest possible spin (~9 guest instructions
+            // per back-edge incl. the fuel check), so draining the 100k
+            // tank stays under lp-riscv-emu's 1M call_function limit until
+            // P3 makes that limit configurable.
+            fb.push_loop();
+            fb.end_loop();
+        }
+        fb.end_if();
+
+        let one_bits = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: one_bits,
+            value: Q_ONE,
+        });
+        let one = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::FfromI32Bits {
+            dst: one,
+            src: one_bits,
+        });
+        fb.push_return(&[one, one, one, one]);
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), fb.finish());
+        (module, render_vec4_meta())
+    }
+
+    /// `render(pos)`: 3-iteration counted loop, then vec4(pos.x * 0.25).
+    fn bounded_render_module() -> (LpirModule, LpsModuleSig) {
+        let ret_tys = [IrType::F32; 4];
+        let mut fb = FunctionBuilder::new("render", &ret_tys);
+        let px = fb.add_param(IrType::F32);
+        let _py = fb.add_param(IrType::F32);
+
+        let i = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: i, value: 0 });
+        let three = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: three,
+            value: 3,
+        });
+        fb.push_loop();
+        {
+            let done = fb.alloc_vreg(IrType::I32);
+            fb.push(LpirOp::IgeS {
+                dst: done,
+                lhs: i,
+                rhs: three,
+            });
+            fb.push_if(done);
+            fb.push(LpirOp::Break);
+            fb.end_if();
+            fb.push(LpirOp::IaddImm {
+                dst: i,
+                src: i,
+                imm: 1,
+            });
+        }
+        fb.end_loop();
+
+        let quarter_bits = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: quarter_bits,
+            value: Q_ONE / 4,
+        });
+        let quarter = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::FfromI32Bits {
+            dst: quarter,
+            src: quarter_bits,
+        });
+        let c = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::Fmul {
+            dst: c,
+            lhs: px,
+            rhs: quarter,
+        });
+        fb.push_return(&[c, c, c, c]);
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), fb.finish());
+        (module, render_vec4_meta())
+    }
+
+    fn render_vec4_meta() -> LpsModuleSig {
+        LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("render"),
+                return_type: LpsType::Vec4,
+                parameters: vec![FnParam {
+                    name: String::from("pos"),
+                    ty: LpsType::Vec2,
+                    qualifier: ParamQualifier::In,
+                }],
+                kind: LpsFnKind::UserDefined,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn void_sig(name: &str) -> LpsFnSig {
+        LpsFnSig {
+            name: String::from(name),
+            return_type: LpsType::Void,
+            parameters: vec![],
+            kind: LpsFnKind::UserDefined,
+        }
     }
 }

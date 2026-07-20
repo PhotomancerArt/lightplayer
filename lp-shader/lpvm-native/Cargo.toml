@@ -50,6 +50,8 @@ lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features
 
 [dev-dependencies]
 rstest = "0.25"
+# Real synth render wrappers for the rt_emu per-invocation fuel tests.
+lp-shader = { path = "../lp-shader" }
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
 lps-builtins = { path = "../lps-builtins", default-features = false }

@@ -10,10 +10,13 @@ use lps_shared::{
     LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, StructMember, TextureBindingSpec,
     TextureStorageFormat,
 };
-use lpvm::{LpvmBuffer, LpvmInstance, LpvmModule};
+use lpvm::{
+    DEFAULT_INVOCATION_FUEL, GuestTrapError, INVOCATION_INDEX_ARMED, LpvmBuffer, LpvmInstance,
+    LpvmModule, TRAP_CODE_OUT_OF_FUEL,
+};
 
 use crate::LpsCompileStats;
-use crate::error::LpsError;
+use crate::error::{LpsError, ShaderFuelTrap, ShaderFuelTrapEntry};
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 use crate::texture_buf::LpsTextureBuf;
 
@@ -57,7 +60,22 @@ impl<M: LpvmModule + 'static> PxShaderBackend for BackendAdapter<M> {
     ) -> Result<(), LpsError> {
         self.instance
             .call_render_texture(name, texture, width, height)
-            .map_err(|e| LpsError::Render(format!("call_render_texture `{name}`: {e}")))
+            .map_err(|e| {
+                // This is the layer that knows the entry kind and the target
+                // width, so out-of-fuel traps become structured diagnostics
+                // with derived pixel coordinates here.
+                if let Some(index) = out_of_fuel_invocation(&e) {
+                    let w = width.max(1);
+                    return LpsError::FuelExhausted(ShaderFuelTrap {
+                        entry: ShaderFuelTrapEntry::RenderTexture {
+                            x: index % w,
+                            y: index / w,
+                        },
+                        budget: DEFAULT_INVOCATION_FUEL,
+                    });
+                }
+                LpsError::Render(format!("call_render_texture `{name}`: {e}"))
+            })
     }
 
     fn set_uniform(&mut self, path: &str, value: &LpsValueF32) -> Result<(), LpsError> {
@@ -75,8 +93,26 @@ impl<M: LpvmModule + 'static> PxShaderBackend for BackendAdapter<M> {
     ) -> Result<(), LpsError> {
         self.instance
             .call_render_samples(name, points, out, count)
-            .map_err(|e| LpsError::Render(format!("call_render_samples `{name}`: {e}")))
+            .map_err(|e| {
+                if let Some(index) = out_of_fuel_invocation(&e) {
+                    return LpsError::FuelExhausted(ShaderFuelTrap {
+                        entry: ShaderFuelTrapEntry::RenderSamples { sample: index },
+                        budget: DEFAULT_INVOCATION_FUEL,
+                    });
+                }
+                LpsError::Render(format!("call_render_samples `{name}`: {e}"))
+            })
     }
+}
+
+/// The linear invocation index of an out-of-fuel trap on a per-invocation
+/// render entry, if that is what `error` is. Traps outside a render wrapper
+/// carry the [`INVOCATION_INDEX_ARMED`] sentinel (no coordinates to derive)
+/// and fall through to the plain error message, as do other trap codes.
+fn out_of_fuel_invocation<E: GuestTrapError>(error: &E) -> Option<u32> {
+    let trap = error.guest_trap()?;
+    (trap.code == TRAP_CODE_OUT_OF_FUEL && trap.invocation != INVOCATION_INDEX_ARMED)
+        .then_some(trap.invocation)
 }
 
 /// A compiled pixel shader with internal execution state.
@@ -413,5 +449,197 @@ pub(crate) fn px_shader_from_parts_for_test(
         render_texture_fn_name,
         render_samples_fn_name: Some(String::from(crate::synth::RENDER_SAMPLES_RGBA16_FN)),
         render_fn_index,
+    }
+}
+
+#[cfg(test)]
+mod fuel_trap_mapping_tests {
+    use super::*;
+    use alloc::string::ToString;
+    use alloc::vec::Vec;
+    use lps_shared::LpsValueQ32;
+    use lpvm::{GuestTrap, TRAP_CODE_NONE};
+
+    #[test]
+    fn render_texture_out_of_fuel_maps_to_structured_trap_with_pixel_coords() {
+        // Linear invocation 514 on a width-40 target is pixel (34, 12).
+        let mut adapter = trap_adapter(GuestTrap {
+            code: TRAP_CODE_OUT_OF_FUEL,
+            invocation: 12 * 40 + 34,
+        });
+        let err = adapter
+            .call_render_texture("__render_texture_rgba16", &mut dummy_buffer(), 40, 20)
+            .expect_err("trap must surface as an error");
+        let LpsError::FuelExhausted(trap) = err else {
+            panic!("expected FuelExhausted, got: {err}");
+        };
+        assert_eq!(
+            trap.entry,
+            ShaderFuelTrapEntry::RenderTexture { x: 34, y: 12 }
+        );
+        assert_eq!(trap.budget, DEFAULT_INVOCATION_FUEL);
+        assert_eq!(
+            trap.to_string(),
+            "shader fuel exhausted: render_texture pixel (34, 12) exceeded 100000 iterations"
+        );
+    }
+
+    #[test]
+    fn render_samples_out_of_fuel_maps_to_structured_trap_with_sample_index() {
+        let mut adapter = trap_adapter(GuestTrap {
+            code: TRAP_CODE_OUT_OF_FUEL,
+            invocation: 7,
+        });
+        let err = adapter
+            .call_render_samples(
+                "__render_samples_rgba16",
+                &mut dummy_buffer(),
+                &mut dummy_buffer(),
+                16,
+            )
+            .expect_err("trap must surface as an error");
+        let LpsError::FuelExhausted(trap) = err else {
+            panic!("expected FuelExhausted, got: {err}");
+        };
+        assert_eq!(trap.entry, ShaderFuelTrapEntry::RenderSamples { sample: 7 });
+        assert_eq!(
+            trap.to_string(),
+            "shader fuel exhausted: render_samples sample 7 exceeded 100000 iterations"
+        );
+    }
+
+    #[test]
+    fn armed_sentinel_trap_falls_back_to_plain_render_error() {
+        // A trap outside a per-invocation wrapper has no coordinates to
+        // derive; it stays a plain message-bearing render error.
+        let mut adapter = trap_adapter(GuestTrap {
+            code: TRAP_CODE_OUT_OF_FUEL,
+            invocation: lpvm::INVOCATION_INDEX_ARMED,
+        });
+        let err = adapter
+            .call_render_texture("__render_texture_rgba16", &mut dummy_buffer(), 4, 4)
+            .expect_err("trap must surface as an error");
+        let LpsError::Render(message) = err else {
+            panic!("expected plain Render error, got: {err:?}");
+        };
+        assert!(message.contains("fuel"), "message: {message}");
+    }
+
+    #[test]
+    fn non_trap_error_stays_plain_render_error() {
+        let mut adapter = trap_adapter(GuestTrap {
+            code: TRAP_CODE_NONE,
+            invocation: 0,
+        });
+        let err = adapter
+            .call_render_texture("__render_texture_rgba16", &mut dummy_buffer(), 4, 4)
+            .expect_err("error must surface");
+        assert!(matches!(err, LpsError::Render(_)), "got: {err:?}");
+    }
+
+    fn dummy_buffer() -> LpvmBuffer {
+        LpvmBuffer::new(core::ptr::null_mut(), 0, 0, 1)
+    }
+
+    fn trap_adapter(trap: GuestTrap) -> BackendAdapter<TrapModule> {
+        BackendAdapter {
+            _module: TrapModule {
+                meta: LpsModuleSig::default(),
+            },
+            instance: TrapInstance { trap },
+        }
+    }
+
+    /// Error carrying an optional guest trap, like `NativeError::Trap`.
+    struct TrapError(GuestTrap);
+
+    impl core::fmt::Display for TrapError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            if self.0.code == lpvm::TRAP_CODE_OUT_OF_FUEL {
+                write!(f, "native trap: fuel exhausted (invocation {})", self.0.invocation)
+            } else {
+                write!(f, "backend call failed")
+            }
+        }
+    }
+
+    impl lpvm::GuestTrapError for TrapError {
+        fn guest_trap(&self) -> Option<GuestTrap> {
+            (self.0.code != TRAP_CODE_NONE).then_some(self.0)
+        }
+    }
+
+    /// Backend instance whose calls always fail with the configured trap.
+    struct TrapInstance {
+        trap: GuestTrap,
+    }
+
+    impl LpvmInstance for TrapInstance {
+        type Error = TrapError;
+
+        fn call(&mut self, _name: &str, _args: &[LpsValueF32]) -> Result<LpsValueF32, TrapError> {
+            Err(TrapError(self.trap))
+        }
+
+        fn call_q32(&mut self, _name: &str, _args: &[i32]) -> Result<Vec<i32>, TrapError> {
+            Err(TrapError(self.trap))
+        }
+
+        fn call_render_texture(
+            &mut self,
+            _fn_name: &str,
+            _texture: &mut LpvmBuffer,
+            _width: u32,
+            _height: u32,
+        ) -> Result<(), TrapError> {
+            Err(TrapError(self.trap))
+        }
+
+        fn call_render_samples(
+            &mut self,
+            _fn_name: &str,
+            _points: &mut LpvmBuffer,
+            _out: &mut LpvmBuffer,
+            _count: u32,
+        ) -> Result<(), TrapError> {
+            Err(TrapError(self.trap))
+        }
+
+        fn set_uniform(&mut self, _path: &str, _value: &LpsValueF32) -> Result<(), TrapError> {
+            Err(TrapError(self.trap))
+        }
+
+        fn set_uniform_q32(&mut self, _path: &str, _value: &LpsValueQ32) -> Result<(), TrapError> {
+            Err(TrapError(self.trap))
+        }
+
+        fn set_global(&mut self, _path: &str, _value: &LpsValueF32) -> Result<(), TrapError> {
+            Err(TrapError(self.trap))
+        }
+
+        fn get_global(&mut self, _path: &str) -> Result<LpsValueF32, TrapError> {
+            Err(TrapError(self.trap))
+        }
+
+        fn call_compute_tick(&mut self, _name: &str) -> Result<(), TrapError> {
+            Err(TrapError(self.trap))
+        }
+    }
+
+    struct TrapModule {
+        meta: LpsModuleSig,
+    }
+
+    impl LpvmModule for TrapModule {
+        type Instance = TrapInstance;
+        type Error = LpsError;
+
+        fn signatures(&self) -> &LpsModuleSig {
+            &self.meta
+        }
+
+        fn instantiate(&self) -> Result<TrapInstance, LpsError> {
+            unreachable!("tests construct the adapter directly")
+        }
     }
 }

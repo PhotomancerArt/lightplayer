@@ -5,7 +5,7 @@ use alloc::format;
 use lp_gfx::{
     GfxError, LpShader, SampleOutHandle, SamplePointsHandle, ShaderCompileStats, TextureHandle,
 };
-use lp_shader::LpsPxShader;
+use lp_shader::{LpsError, LpsPxShader};
 use lps_shared::LpsValueF32;
 
 use crate::lpvm_graphics::{sample_out_buf_mut, sample_points_buf_mut, texture_buf_mut};
@@ -31,7 +31,12 @@ impl LpShader for LpvmShader {
         let buffer = texture_buf_mut(target)?;
         self.px
             .render_frame(uniforms, buffer)
-            .map_err(|e| GfxError::Render(format!("render_frame: {e}")))
+            .map_err(|e| match e {
+                // Out-of-fuel stays structured for the engine's typed
+                // panic/blame route (lpvm-native fuel ADR).
+                LpsError::FuelExhausted(trap) => GfxError::FuelExhausted(trap),
+                e => GfxError::Render(format!("render_frame: {e}")),
+            })
     }
 
     fn sample_rgba16(
@@ -44,7 +49,10 @@ impl LpShader for LpvmShader {
         let out_buffer = sample_out_buf_mut(out)?;
         self.px
             .sample_points_rgba16(uniforms, point_buffer, out_buffer)
-            .map_err(|e| GfxError::Render(format!("sample_points_rgba16: {e}")))
+            .map_err(|e| match e {
+                LpsError::FuelExhausted(trap) => GfxError::FuelExhausted(trap),
+                e => GfxError::Render(format!("sample_points_rgba16: {e}")),
+            })
     }
 
     fn compile_stats(&self) -> Option<ShaderCompileStats> {

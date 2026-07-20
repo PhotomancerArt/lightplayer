@@ -590,6 +590,35 @@ fn parse_nodef_instruction(
         });
     }
 
+    // FuelCheck i0, @1[, dec]
+    if let Some(rest) = line.strip_prefix("FuelCheck ") {
+        let parts: Vec<&str> = rest.split(',').map(|s| s.trim()).collect();
+        if parts.len() != 2 && parts.len() != 3 {
+            return Err(ParseError {
+                line: line_num,
+                message: "FuelCheck needs vmctx, @trap_label[, dec]".into(),
+            });
+        }
+        let vmctx = parse_ireg(parts[0])?;
+        let trap_label = parse_label(parts[1])?;
+        let decrement = match parts.get(2) {
+            None => false,
+            Some(&"dec") => true,
+            Some(other) => {
+                return Err(ParseError {
+                    line: line_num,
+                    message: format!("FuelCheck flag must be 'dec', got '{other}'"),
+                });
+            }
+        };
+        return Ok(VInst::FuelCheck {
+            vmctx,
+            decrement,
+            trap_label,
+            src_op: SRC_OP_NONE,
+        });
+    }
+
     // Br @0
     if let Some(rest) = line.strip_prefix("Br ") {
         let target = parse_label(rest.trim())?;
@@ -882,6 +911,18 @@ fn format_vinst(inst: &VInst, pool: &[VReg], symbols: &ModuleSymbols) -> String 
         VInst::BrIf { cond, target, .. } => {
             format!("BrIf {}, @{}", ireg(cond), target)
         }
+        VInst::FuelCheck {
+            vmctx,
+            decrement,
+            trap_label,
+            ..
+        } => {
+            if *decrement {
+                format!("FuelCheck {}, @{}, dec", ireg(vmctx), trap_label)
+            } else {
+                format!("FuelCheck {}, @{}", ireg(vmctx), trap_label)
+            }
+        }
     }
 }
 
@@ -1034,6 +1075,42 @@ mod tests {
         };
         let s = format_vinst(&inst, &[], &ModuleSymbols::default());
         assert_eq!(s, "i3 = Icmp Eq, i0, i1");
+    }
+
+    #[test]
+    fn test_parse_fuel_check() {
+        let (vinsts, _, _) = parse("FuelCheck i0, @3").unwrap();
+        assert!(matches!(
+            vinsts[0],
+            VInst::FuelCheck {
+                vmctx: VReg(0),
+                decrement: false,
+                trap_label: 3,
+                src_op: SRC_OP_NONE,
+            }
+        ));
+
+        let (vinsts, _, _) = parse("FuelCheck i2, @1, dec").unwrap();
+        assert!(matches!(
+            vinsts[0],
+            VInst::FuelCheck {
+                vmctx: VReg(2),
+                decrement: true,
+                trap_label: 1,
+                src_op: SRC_OP_NONE,
+            }
+        ));
+
+        assert!(parse("FuelCheck i0, @1, bogus").is_err());
+        assert!(parse("FuelCheck i0").is_err());
+    }
+
+    #[test]
+    fn test_format_fuel_check_roundtrip() {
+        for input in ["FuelCheck i0, @3", "FuelCheck i2, @1, dec"] {
+            let (vinsts, syms, pool) = parse(input).unwrap();
+            assert_eq!(format(&vinsts, &pool, &syms), input);
+        }
     }
 
     #[test]

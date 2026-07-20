@@ -52,6 +52,7 @@ pub mod texture_handle;
 
 pub use compute_shader::LpComputeShader;
 pub use gfx_error::GfxError;
+pub use lp_shader::{ShaderFuelTrap, ShaderFuelTrapEntry};
 pub use graphics::LpGraphics;
 pub use handle_allocator::{HandleAllocator, HandleBacking};
 pub use sample_out_handle::SampleOutHandle;

@@ -6,7 +6,7 @@
 //!
 //! # Per-instance vs shared memory
 //!
-//! [`VmContext`] is **per shader instance** (fuel, trap handler, metadata for instance locals).
+//! [`VmContext`] is **per shader instance** (fuel, trap code, metadata for instance locals).
 //! **Shared** data (textures, cross-shader globals) is allocated through
 //! [`LpvmEngine::memory`](crate::LpvmEngine::memory) as [`ShaderPtr`](crate::ShaderPtr) values;
 //! the guest sees [`ShaderPtr::guest_value`](crate::ShaderPtr::guest_value) via uniforms.
@@ -18,10 +18,26 @@ use lps_shared::LpsType;
 /// Default instruction fuel for new [`VmContext`] values (tests and host JIT calls).
 pub const DEFAULT_VMCTX_FUEL: u64 = 1_000_000;
 
+/// Default per-invocation (per-pixel / per-sample) fuel budget, in loop
+/// back-edge executions. Render wrappers reset the fuel counter to this
+/// value at the top of each invocation (calibrated in the fuel plan's P4).
+pub const DEFAULT_INVOCATION_FUEL: u32 = 100_000;
+
+/// Value of the invocation-index half of [`VmContext::fuel`] (high u32,
+/// offset 4) written by the host when arming the header before a guest
+/// entry — i.e. "no per-invocation wrapper has run yet".
+pub const INVOCATION_INDEX_ARMED: u32 = 0xFFFF_FFFF;
+
+/// [`VmContext::trap`] code: no trap occurred.
+pub const TRAP_CODE_NONE: u32 = 0;
+/// [`VmContext::trap`] code: guest observed an exhausted fuel counter and
+/// aborted to the function epilogue.
+pub const TRAP_CODE_OUT_OF_FUEL: u32 = 1;
+
 /// Byte offset of [`VmContext::fuel`].
 pub const VMCTX_OFFSET_FUEL: usize = core::mem::offset_of!(VmContext, fuel);
-/// Byte offset of [`VmContext::trap_handler`].
-pub const VMCTX_OFFSET_TRAP_HANDLER: usize = core::mem::offset_of!(VmContext, trap_handler);
+/// Byte offset of [`VmContext::trap`].
+pub const VMCTX_OFFSET_TRAP: usize = core::mem::offset_of!(VmContext, trap);
 /// Byte offset of [`VmContext::metadata`].
 pub const VMCTX_OFFSET_METADATA: usize = core::mem::offset_of!(VmContext, metadata);
 /// Size of [`VmContext`] in bytes (target-dependent).
@@ -34,9 +50,21 @@ pub const VMCTX_HEADER_SIZE: usize = core::mem::size_of::<VmContext>();
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct VmContext {
+    /// Fuel word, split into two u32 halves (little-endian layout):
+    ///
+    /// * **low u32 (offset 0)** — remaining fuel counter. Unit: loop
+    ///   back-edge executions. All guest arithmetic is u32; existing
+    ///   readers (`__lp_get_fuel`) already truncate to 32 bits.
+    /// * **high u32 (offset 4)** — current invocation index (linear
+    ///   pixel/sample counter). `0xFFFF_FFFF` means host-armed, before
+    ///   any invocation.
     pub fuel: u64,
-    pub trap_handler: u32,
+    /// Trap code slot: [`TRAP_CODE_NONE`] (0) = no trap,
+    /// [`TRAP_CODE_OUT_OF_FUEL`] (1) = out of fuel. Written by emitted
+    /// fuel checks; read by the host after each guest entry.
+    pub trap: u32,
     /// Per-instance globals/uniforms layout; may be null until wired up.
+    /// Reserved as the future home for probe trace state — leave untouched.
     pub metadata: *const LpsType,
 }
 
@@ -49,7 +77,7 @@ impl Default for VmContext {
     fn default() -> Self {
         Self {
             fuel: DEFAULT_VMCTX_FUEL,
-            trap_handler: 0,
+            trap: TRAP_CODE_NONE,
             metadata: core::ptr::null(),
         }
     }
@@ -101,8 +129,8 @@ mod tests {
             VMCTX_OFFSET_FUEL
         );
         assert_eq!(
-            core::ptr::addr_of!(header.trap_handler) as usize - base,
-            VMCTX_OFFSET_TRAP_HANDLER
+            core::ptr::addr_of!(header.trap) as usize - base,
+            VMCTX_OFFSET_TRAP
         );
         assert_eq!(
             core::ptr::addr_of!(header.metadata) as usize - base,

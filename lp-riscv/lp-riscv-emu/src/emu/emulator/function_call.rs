@@ -15,10 +15,6 @@ use cranelift_codegen::ir::types;
 use cranelift_codegen::ir::{ArgumentPurpose, Signature};
 use cranelift_codegen::settings::{self, Configurable, Flags};
 
-/// Default fuel limit for function calls (max instructions).
-/// Prevents infinite loops during buggy shader execution.
-const DEFAULT_FUNCTION_CALL_FUEL: u64 = 1_000_000;
-
 impl Riscv32Emulator {
     /// Call a compiled function using the RISC-V calling convention.
     ///
@@ -113,15 +109,18 @@ impl Riscv32Emulator {
         // Don't reset instruction_count - limit should be cumulative across all calls
         self.regs[1] = halt_address as i32; // ra = halt_address
 
-        // Execute until function returns (EBREAK or PC at halt address)
-        let mut fuel = DEFAULT_FUNCTION_CALL_FUEL;
+        // Execute until function returns (EBREAK or PC at halt address).
+        // The instruction limit is the hard host-side backstop against
+        // runaway guest code (see `with_call_instruction_limit`).
+        let limit = self.call_instruction_limit;
+        let mut budget = limit;
         loop {
-            // Check fuel limit to prevent infinite loops
-            fuel -= 1;
-            if fuel == 0 {
+            // Check the instruction limit to prevent infinite loops
+            budget -= 1;
+            if budget == 0 {
                 return Err(EmulatorError::InstructionLimitExceeded {
-                    limit: DEFAULT_FUNCTION_CALL_FUEL,
-                    executed: DEFAULT_FUNCTION_CALL_FUEL,
+                    limit,
+                    executed: limit,
                     pc: self.pc,
                     regs: self.regs,
                 });
@@ -319,15 +318,18 @@ impl Riscv32Emulator {
         // Don't reset instruction_count - limit should be cumulative across all calls
         self.regs[1] = halt_address as i32; // ra = halt_address
 
-        // Execute until function returns (EBREAK or PC at halt address)
-        let mut fuel = DEFAULT_FUNCTION_CALL_FUEL;
+        // Execute until function returns (EBREAK or PC at halt address).
+        // The instruction limit is the hard host-side backstop against
+        // runaway guest code (see `with_call_instruction_limit`).
+        let limit = self.call_instruction_limit;
+        let mut budget = limit;
         loop {
-            // Check fuel limit to prevent infinite loops
-            fuel -= 1;
-            if fuel == 0 {
+            // Check the instruction limit to prevent infinite loops
+            budget -= 1;
+            if budget == 0 {
                 return Err(EmulatorError::InstructionLimitExceeded {
-                    limit: DEFAULT_FUNCTION_CALL_FUEL,
-                    executed: DEFAULT_FUNCTION_CALL_FUEL,
+                    limit,
+                    executed: limit,
                     pc: self.pc,
                     regs: self.regs,
                 });
@@ -1093,6 +1095,29 @@ mod tests {
             .set("enable_multi_ret_implicit_sret", "true")
             .unwrap();
         Flags::new(builder)
+    }
+
+    #[test]
+    fn call_function_honors_configured_instruction_limit() {
+        // `jal x0, 0` at offset 0: an unconditional self-loop.
+        let mut code = vec![0u8; 1024];
+        code[0..4].copy_from_slice(&0x0000_006fu32.to_le_bytes());
+        let mut emulator = Riscv32Emulator::new(code, vec![0; 1024 * 1024])
+            .with_call_instruction_limit(1_000);
+
+        let mut sig = Signature::new(CallConv::SystemV);
+        sig.returns.push(AbiParam::new(types::I32));
+
+        let err = emulator
+            .call_function(0, &[], &sig)
+            .expect_err("self-loop must hit the instruction limit");
+        match err {
+            EmulatorError::InstructionLimitExceeded { limit, executed, .. } => {
+                assert_eq!(limit, 1_000);
+                assert_eq!(executed, 1_000);
+            }
+            other => panic!("expected InstructionLimitExceeded, got {other:?}"),
+        }
     }
 
     #[test]

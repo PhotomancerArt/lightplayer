@@ -50,6 +50,18 @@ pub enum NativeError {
     /// JIT relocation or symbol resolution failure (RISC-V firmware path).
     #[cfg(target_arch = "riscv32")]
     JitLink(String),
+    /// Guest wrote a trap code to the vmctx trap slot during a call
+    /// (e.g. [`lpvm::TRAP_CODE_OUT_OF_FUEL`]). Return values from the
+    /// trapped call are garbage and have been discarded.
+    Trap {
+        /// Trap code read from the vmctx trap slot (`lpvm::TRAP_CODE_*`).
+        code: u32,
+        /// Invocation index (vmctx fuel high word) at the time of the trap:
+        /// linear pixel/sample index written by the render wrappers, or
+        /// [`lpvm::INVOCATION_INDEX_ARMED`] when the trap occurred outside a
+        /// per-invocation wrapper.
+        invocation: u32,
+    },
     /// Backward-walk register allocation failed.
     RegAlloc(crate::regalloc::AllocError),
     /// Internal error (e.g., during restructuring).
@@ -102,6 +114,28 @@ impl fmt::Display for NativeError {
             NativeError::Alloc(s) => write!(f, "allocation error: {s}"),
             #[cfg(target_arch = "riscv32")]
             NativeError::JitLink(s) => write!(f, "JIT link: {s}"),
+            // The out-of-fuel message must contain both "trap" and "fuel"
+            // (filetest trap classification sniffs strings; typed callers
+            // match on the variant instead).
+            NativeError::Trap { code, invocation } => {
+                if *code == lpvm::TRAP_CODE_OUT_OF_FUEL {
+                    write!(f, "native trap: fuel exhausted (invocation {invocation})")
+                } else {
+                    write!(f, "native trap: code {code} (invocation {invocation})")
+                }
+            }
+        }
+    }
+}
+
+impl lpvm::GuestTrapError for NativeError {
+    fn guest_trap(&self) -> Option<lpvm::GuestTrap> {
+        match self {
+            NativeError::Trap { code, invocation } => Some(lpvm::GuestTrap {
+                code: *code,
+                invocation: *invocation,
+            }),
+            _ => None,
         }
     }
 }
