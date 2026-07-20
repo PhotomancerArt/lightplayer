@@ -174,6 +174,7 @@ fw-browser-test: install-wasm32-target
 
 # Local project store tests: real browser + real OPFS. Needs a chromedriver
 # matching the local Chrome major version; set CHROMEDRIVER to override.
+# CI runs this (and fw-browser-test) in the path-gated validate-browser job.
 lpa-fs-opfs-test: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
