@@ -502,6 +502,10 @@ async fn fuel_exhausted_shader_gates_without_reboot() {
 
     let good_shader = read_node_id_for_suffix(&client, handle, "/shader.shader").await;
     let bad_shader = read_node_id_for_suffix(&client, handle, "/shader_2.shader").await;
+    // Blame identity is the node's full tree path (hashed); ledger entries
+    // DISPLAY it truncated (CRASH_FRAME_NAME_CAP = 14 bytes), so entry
+    // names are asserted as prefixes of this path.
+    let bad_shader_path = read_node_path(&client, handle, bad_shader).await;
 
     // Baseline: healthy chain renders, ledger green.
     advance_guest_time(&emulator, 40);
@@ -527,8 +531,10 @@ async fn fuel_exhausted_shader_gates_without_reboot() {
     assert!(
         entry_states(&snapshot)
             .iter()
-            .any(|(name, state)| name.contains("shader_2") && *state == "yellow"),
-        "entries: {:?}",
+            .any(|(name, state)| !name.is_empty()
+                && bad_shader_path.starts_with(name.as_str())
+                && *state == "yellow"),
+        "expected a yellow entry on {bad_shader_path}; entries: {:?}",
         entry_states(&snapshot)
     );
     assert!(
@@ -549,8 +555,10 @@ async fn fuel_exhausted_shader_gates_without_reboot() {
     assert!(
         entry_states(&snapshot)
             .iter()
-            .any(|(name, state)| name.contains("shader_2") && *state == "red"),
-        "entries: {:?}",
+            .any(|(name, state)| !name.is_empty()
+                && bad_shader_path.starts_with(name.as_str())
+                && *state == "red"),
+        "expected a red entry on {bad_shader_path}; entries: {:?}",
         entry_states(&snapshot)
     );
 
@@ -733,6 +741,20 @@ async fn read_node_id_for_suffix(
         available.push(node_path);
     }
     panic!("node path ending in {suffix} not found; available paths: {available:?}");
+}
+
+async fn read_node_path(
+    client: &TokioLpClient,
+    handle: lpc_wire::WireProjectHandle,
+    node: NodeId,
+) -> String {
+    let view = read_nodes_view(client, handle).await;
+    view.tree
+        .nodes
+        .get(&node)
+        .unwrap_or_else(|| panic!("node {node:?} missing from tree read"))
+        .path
+        .to_string()
 }
 
 async fn read_node_status(
