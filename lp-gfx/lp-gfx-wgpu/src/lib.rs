@@ -33,6 +33,8 @@ pub mod gpu_graphics;
 pub mod read_back;
 pub mod render;
 pub mod sample_backing;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sample_pass;
 pub mod surface_blit;
 pub mod tanh_pass;
 pub mod texture_backing;
