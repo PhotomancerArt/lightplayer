@@ -436,7 +436,7 @@ locally before every push:
 rustup update nightly        # CI installs fresh nightly each run; do the same
 just check                   # fmt-check + clippy-host + clippy-rv32  (the usual blocker)
 just build-ci                # host + rv32 builtins + emu-guest
-just test                    # cargo test + glsl filetests
+just test                    # cargo test (+ studio-web view tests) + glsl filetests
 ```
 
 Or, in one go: `just ci` (which is the parallel composition above).
