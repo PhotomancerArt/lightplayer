@@ -116,6 +116,9 @@
   .tw\:top-0 {
     top: calc(var(--tw-spacing) * 0);
   }
+  .tw\:top-1\.5 {
+    top: calc(var(--tw-spacing) * 1.5);
+  }
   .tw\:top-1\/2 {
     top: calc(1/2 * 100%);
   }
@@ -454,6 +457,9 @@
   }
   .tw\:w-\[128px\] {
     width: 128px;
+  }
+  .tw\:w-\[720px\] {
+    width: 720px;
   }
   .tw\:w-\[min\(320px\,calc\(100vw-24px\)\)\] {
     width: min(320px, calc(100vw - 24px));
@@ -962,6 +968,12 @@
   .tw\:bg-accent {
     background-color: var(--tw-color-accent);
   }
+  .tw\:bg-background\/70 {
+    background-color: var(--tw-color-background);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--tw-color-background) 70%, transparent);
+    }
+  }
   .tw\:bg-background\/80 {
     background-color: var(--tw-color-background);
     @supports (color: color-mix(in lab, red, red)) {
@@ -1126,6 +1138,9 @@
   }
   .tw\:bg-\[linear-gradient\(270deg\,var\(--studio-status-working-bg\)_0\%\,var\(--studio-status-working-bg\)_34\%\,transparent_100\%\)\] {
     background-image: linear-gradient(270deg,var(--studio-status-working-bg) 0%,var(--studio-status-working-bg) 34%,transparent 100%);
+  }
+  .tw\:object-cover {
+    object-fit: cover;
   }
   .tw\:p-0 {
     padding: calc(var(--tw-spacing) * 0);
@@ -1352,6 +1367,10 @@
   .tw\:text-\[11px\] {
     font-size: 11px;
   }
+  .tw\:leading-4 {
+    --tw-leading: calc(var(--tw-spacing) * 4);
+    line-height: calc(var(--tw-spacing) * 4);
+  }
   .tw\:leading-none {
     --tw-leading: 1;
     line-height: 1;
@@ -1552,6 +1571,10 @@
   .tw\:duration-150 {
     --tw-duration: 150ms;
     transition-duration: 150ms;
+  }
+  .tw\:duration-200 {
+    --tw-duration: 200ms;
+    transition-duration: 200ms;
   }
   .tw\:duration-300 {
     --tw-duration: 300ms;

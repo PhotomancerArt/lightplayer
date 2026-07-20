@@ -25,6 +25,12 @@ fn split_parent(path: &LpPath) -> (String, String) {
 
 /// Write `bytes` to `path` (absolute lp-style) below `root`, creating parent
 /// directories as needed. Atomic per file (commit happens at close).
+///
+/// The atomic swap only protects *content* — `getFileHandle(create)` makes
+/// the entry itself immediately. A write that fails after creation would
+/// otherwise leave a persistent empty husk (seen on iOS Safari, where a
+/// jetsammed tab can abandon a flush mid-file), so a failed write to a file
+/// that did not previously exist removes the husk best-effort.
 pub async fn write_file(
     root: &FileSystemDirectoryHandle,
     path: &LpPath,
@@ -32,6 +38,8 @@ pub async fn write_file(
 ) -> Result<(), OpfsError> {
     let (parent_path, name) = split_parent(path);
     let parent = open_dir(root, &parent_path, true).await?;
+
+    let existed = JsFuture::from(parent.get_file_handle(&name)).await.is_ok();
 
     let options = FileSystemGetFileOptions::new();
     options.set_create(true);
@@ -42,6 +50,20 @@ pub async fn write_file(
         .dyn_into()
         .map_err(|e| OpfsError::new("get_file_handle", path.as_str().to_string(), e))?;
 
+    let result = write_via_writable(&handle, path, bytes).await;
+    if result.is_err() && !existed {
+        let _ = JsFuture::from(parent.remove_entry(&name)).await;
+    }
+    result
+}
+
+/// The stage-and-swap half of [`write_file`]: create a writable, write,
+/// close (the commit point).
+async fn write_via_writable(
+    handle: &FileSystemFileHandle,
+    path: &LpPath,
+    bytes: &[u8],
+) -> Result<(), OpfsError> {
     let stream = JsFuture::from(handle.create_writable())
         .await
         .map_err(|e| OpfsError::new("create_writable", path.as_str().to_string(), e))?;

@@ -41,7 +41,12 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `core/` contains reusable data-driven app substrate: action metadata, generic
   pane/stack/activity/status view data, and UX node routing primitives.
 - `app/` contains the actual Studio product ownership areas: `studio`,
-  `device`, `server`, and `project`.
+  `device`, `server`, `project`, and `preview_host` (leased, pooled live
+  project previews for gallery cards and future preview consumers — see
+  `docs/adr/2026-07-16-preview-host.md`; the browser-facing half is gated
+  to `wasm32 + browser-worker` like the server client io, while its
+  request/status/scheduling vocabulary stays target-neutral and
+  unit-tested).
 - A future `base/` layer can hold truly primitive app-core concepts if one
   emerges. It is intentionally not present until there is a clean need for it.
 

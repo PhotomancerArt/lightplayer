@@ -42,6 +42,10 @@ self.onmessage = async (event) => {
         });
         break;
       }
+      case "destroy_runtime":
+        requireBooted();
+        destroyRuntime(message);
+        break;
       case "attach_surface":
         requireBooted();
         attachSurface(message);
@@ -155,6 +159,28 @@ function previewFrame(message) {
       kind: "preview_error",
       runtime_id: runtimeId,
       frame_id: frameId,
+      message: String(error?.stack || error),
+    });
+  }
+}
+
+// Runtime disposal: release a preview lease so the worker can be recycled.
+// Destroying the boot runtime is an error (it is the authoritative sim
+// serving single-runtime consumers); destroying an unknown id is a no-op ack
+// so releases are idempotent.
+function destroyRuntime(message) {
+  const runtimeId = message.runtime_id;
+  try {
+    if (runtimeId === bootRuntimeId) {
+      throw new Error(`refusing to destroy the boot runtime (${runtimeId})`);
+    }
+    fwBrowser.destroy_runtime(runtimeId);
+    self.postMessage({ kind: "runtime_destroyed", runtime_id: runtimeId });
+  } catch (error) {
+    self.postMessage({
+      kind: "preview_error",
+      runtime_id: runtimeId,
+      frame_id: 0,
       message: String(error?.stack || error),
     });
   }

@@ -3,13 +3,17 @@
 //! The wasm boundary uses numeric runtime ids so one page can create multiple
 //! browser firmware instances without exposing Rust references to JavaScript.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crate::runtime::BrowserFirmwareRuntime;
 use crate::tier::{RuntimeTier, TierSelection};
 
 thread_local! {
     static RUNTIMES: RefCell<Vec<BrowserFirmwareRuntime>> = const { RefCell::new(Vec::new()) };
+    // Monotonic so a destroyed runtime's id is never reissued: `len() + 1`
+    // would collide with a live runtime once destruction punches holes in
+    // the id sequence.
+    static NEXT_RUNTIME_ID: Cell<u32> = const { Cell::new(1) };
 }
 
 /// Create a runtime on the requested tier; returns its stable id plus the
@@ -21,11 +25,29 @@ pub(crate) fn create_runtime(
 ) -> Result<(u32, TierSelection), String> {
     RUNTIMES.with(|runtimes| {
         let mut runtimes = runtimes.borrow_mut();
-        let id = runtimes.len() as u32 + 1;
+        let id = NEXT_RUNTIME_ID.with(|next| {
+            let id = next.get();
+            next.set(id + 1);
+            id
+        });
         let runtime = BrowserFirmwareRuntime::new(id, label, requested)?;
         let selection = runtime.tier().clone();
         runtimes.push(runtime);
         Ok((id, selection))
+    })
+}
+
+/// Drop the runtime with `runtime_id`, releasing everything it owns (server,
+/// filesystem, and on the GPU tier the graphics backend plus any attached
+/// preview surface).
+///
+/// Returns `false` when no such runtime exists — release is idempotent.
+pub(crate) fn destroy_runtime(runtime_id: u32) -> bool {
+    RUNTIMES.with(|runtimes| {
+        let mut runtimes = runtimes.borrow_mut();
+        let before = runtimes.len();
+        runtimes.retain(|runtime| runtime.id() != runtime_id);
+        runtimes.len() != before
     })
 }
 

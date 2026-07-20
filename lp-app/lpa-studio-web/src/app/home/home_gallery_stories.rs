@@ -9,6 +9,8 @@ use lpa_studio_core::{
 };
 
 use crate::app::home::HomeGallery;
+use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::gallery_preview::ThumbPreviewBadge;
 
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -224,6 +226,54 @@ fn opening_a_project() -> Element {
             }
         }
     }
+}
+
+#[story]
+fn live_thumb_states() -> Element {
+    // The live-thumb overlay states, injected statically (story mode has
+    // no PreviewHost and mounts no canvas): placeholder gradient, GPU
+    // tier, CPU fallback with a surfaced reason, and a failed preview.
+    // Live cards derive the same badges from their slot status.
+    rsx! {
+        section { class: "tw:grid tw:w-[720px] tw:grid-cols-4 tw:gap-3.5 tw:p-4",
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb { seed: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(), label: "placeholder".to_string() }
+                p { class: thumb_state_caption_class(), "Placeholder" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+                    label: "gpu".to_string(),
+                    static_badge: Some(ThumbPreviewBadge::Gpu),
+                }
+                p { class: thumb_state_caption_class(), "GPU tier" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
+                    label: "cpu".to_string(),
+                    static_badge: Some(ThumbPreviewBadge::Cpu {
+                        reason: Some("WebGPU unavailable".to_string()),
+                    }),
+                }
+                p { class: thumb_state_caption_class(), "CPU fallback" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "examples/basic".to_string(),
+                    label: "failed".to_string(),
+                    static_badge: Some(ThumbPreviewBadge::Error {
+                        reason: "deploy: shader compile failed".to_string(),
+                    }),
+                }
+                p { class: thumb_state_caption_class(), "Failed" }
+            }
+        }
+    }
+}
+
+fn thumb_state_caption_class() -> &'static str {
+    "tw:m-0 tw:p-3 tw:text-xs tw:text-muted-foreground"
 }
 
 #[story]
