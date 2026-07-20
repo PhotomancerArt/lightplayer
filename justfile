@@ -738,6 +738,10 @@ test: test-rust test-filetests
 
 test-rust:
     cargo test
+    # Studio web view layer is outside default-members (Dioxus web dep tree);
+    # its unit tests are pure host-runnable view helpers. Separate invocation
+    # per the no-workspace-wide-cargo rule (feature unification).
+    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
