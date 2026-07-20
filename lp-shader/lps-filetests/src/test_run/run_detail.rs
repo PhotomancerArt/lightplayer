@@ -1059,8 +1059,7 @@ mod tests {
     /// The emulator instruction-limit backstop is an error, NOT a trap.
     #[test]
     fn emulator_instruction_limit_is_not_a_trap() {
-        let msg =
-            "Instruction limit exceeded: executed 64000000 instructions (limit: 64000000) at PC 0x00000040";
+        let msg = "Instruction limit exceeded: executed 64000000 instructions (limit: 64000000) at PC 0x00000040";
         assert!(!is_trap_error(msg), "must not classify as trap: {msg}");
     }
 }

@@ -556,7 +556,11 @@ mod fuel_trap_mapping_tests {
     impl core::fmt::Display for TrapError {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             if self.0.code == lpvm::TRAP_CODE_OUT_OF_FUEL {
-                write!(f, "native trap: fuel exhausted (invocation {})", self.0.invocation)
+                write!(
+                    f,
+                    "native trap: fuel exhausted (invocation {})",
+                    self.0.invocation
+                )
             } else {
                 write!(f, "backend call failed")
             }

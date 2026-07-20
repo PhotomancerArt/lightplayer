@@ -1102,8 +1102,8 @@ mod tests {
         // `jal x0, 0` at offset 0: an unconditional self-loop.
         let mut code = vec![0u8; 1024];
         code[0..4].copy_from_slice(&0x0000_006fu32.to_le_bytes());
-        let mut emulator = Riscv32Emulator::new(code, vec![0; 1024 * 1024])
-            .with_call_instruction_limit(1_000);
+        let mut emulator =
+            Riscv32Emulator::new(code, vec![0; 1024 * 1024]).with_call_instruction_limit(1_000);
 
         let mut sig = Signature::new(CallConv::SystemV);
         sig.returns.push(AbiParam::new(types::I32));
@@ -1112,7 +1112,9 @@ mod tests {
             .call_function(0, &[], &sig)
             .expect_err("self-loop must hit the instruction limit");
         match err {
-            EmulatorError::InstructionLimitExceeded { limit, executed, .. } => {
+            EmulatorError::InstructionLimitExceeded {
+                limit, executed, ..
+            } => {
                 assert_eq!(limit, 1_000);
                 assert_eq!(executed, 1_000);
             }

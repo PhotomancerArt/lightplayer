@@ -29,14 +29,12 @@ impl LpShader for LpvmShader {
         uniforms: &LpsValueF32,
     ) -> Result<(), GfxError> {
         let buffer = texture_buf_mut(target)?;
-        self.px
-            .render_frame(uniforms, buffer)
-            .map_err(|e| match e {
-                // Out-of-fuel stays structured for the engine's typed
-                // panic/blame route (lpvm-native fuel ADR).
-                LpsError::FuelExhausted(trap) => GfxError::FuelExhausted(trap),
-                e => GfxError::Render(format!("render_frame: {e}")),
-            })
+        self.px.render_frame(uniforms, buffer).map_err(|e| match e {
+            // Out-of-fuel stays structured for the engine's typed
+            // panic/blame route (lpvm-native fuel ADR).
+            LpsError::FuelExhausted(trap) => GfxError::FuelExhausted(trap),
+            e => GfxError::Render(format!("render_frame: {e}")),
+        })
     }
 
     fn sample_rgba16(
