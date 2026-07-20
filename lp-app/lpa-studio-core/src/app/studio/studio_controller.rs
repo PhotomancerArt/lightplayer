@@ -77,6 +77,18 @@ pub struct StudioController {
     /// disconnected or when the runtime is the simulator (the sim is not
     /// a device — D22).
     device_sync: Option<DeviceSyncState>,
+    /// The device copy's and local head's version numbers on the project
+    /// line (`ProjectHistory::version_number`), computed alongside
+    /// `device_sync` when the pull classifies against a known project —
+    /// the roster's "Running vN"/"Push vN" evidence. `(None, None)`
+    /// otherwise; only read while `device_sync` holds a `Known` content.
+    device_versions: (Option<usize>, Option<usize>),
+    /// The project storage dir the attached device actually runs from
+    /// (discovered from its loaded project at connect) — pull and push
+    /// target it so one dir replaces in place. `None` while disconnected
+    /// or when the device holds nothing; push then falls back to
+    /// [`DEMO_PROJECT_STORAGE_ID`](crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID).
+    device_storage_id: Option<String>,
     /// The open deploy dialog, when there is one (M5). Pure state — the
     /// controller executes its effects through the existing seams.
     deploy: Option<DeploySession>,
@@ -128,6 +140,8 @@ impl StudioController {
             library_refresh_pending: false,
             pending_open: None,
             device_sync: None,
+            device_versions: (None, None),
+            device_storage_id: None,
             deploy: None,
             random: Rc::new(clock_fallback_random),
         }
@@ -252,9 +266,43 @@ impl StudioController {
             self.home_inputs.as_ref(),
             opening.map(|pending| pending.card_key().to_string()),
             issue,
-            self.device_sync.as_ref(),
-            self.device.transport_label(),
+            &self.home_device_evidence(),
         ))
+    }
+
+    /// The single live session's roster evidence (M3; M4's runtime pool
+    /// replaces this assembly with per-runtime evidence).
+    fn home_device_evidence(&self) -> crate::app::home::HomeDeviceEvidence {
+        let (observed_version, head_version) = self.device_versions;
+        crate::app::home::HomeDeviceEvidence {
+            sync: self.device_sync.clone(),
+            link: self.device.device_state(),
+            connect: self.gallery_connect_evidence(),
+            transport: self.device.transport_label().map(str::to_string),
+            observed_version,
+            head_version,
+        }
+    }
+
+    /// The connect flow narrated as roster evidence: a hardware provider
+    /// mid-discovery/connect pulses the live card ("Connecting…"). The
+    /// sim's flow never reaches the roster (the sim is not a device, D22);
+    /// `Failed` surfaces as the gallery issue chip, not as card evidence
+    /// (the retry ladder that would earn `NotResponding` is M6).
+    fn gallery_connect_evidence(&self) -> crate::ConnectEvidence {
+        let provider_id = match self.device.flow_state() {
+            ConnectFlowState::DiscoveringEndpoints { provider_id, .. } => *provider_id,
+            ConnectFlowState::Connecting { endpoint, .. } => endpoint.provider_id,
+            // SelectingEndpoint is a parked picker, not work in flight
+            _ => return crate::ConnectEvidence::Idle,
+        };
+        if provider_id.transport_label().is_some() {
+            crate::ConnectEvidence::Connecting {
+                phase: crate::ConnectPhase::Connecting,
+            }
+        } else {
+            crate::ConnectEvidence::Idle
+        }
     }
 
     /// The console slice of the view: ring entries passing the display
@@ -418,6 +466,8 @@ impl StudioController {
     /// stay reachable on a device we can't read).
     pub(crate) async fn refresh_device_sync(&mut self) {
         self.device_sync = None;
+        self.device_versions = (None, None);
+        self.device_storage_id = None;
         let pulled = {
             let Ok(server) = self.device.server.client_mut() else {
                 return;
@@ -449,6 +499,7 @@ impl StudioController {
                 }
             }
         };
+        self.device_storage_id = Some(pulled.storage_id.clone());
         match self.absorb_device_pull(pulled).await {
             Ok(state) => {
                 self.device_sync = Some(state);
@@ -475,7 +526,7 @@ impl StudioController {
     ) -> Result<DeviceSyncState, UiError> {
         self.record_logs(core::mem::take(&mut pulled.logs));
         let now = (self.now_secs)();
-        let identity = pulled.identity.clone();
+        let identity = self.reconcile_identity_name(pulled.identity.clone()).await;
 
         if let Some(identity) = &identity {
             self.upsert_device_entry(identity, now).await;
@@ -512,11 +563,25 @@ impl StudioController {
                             .into_iter()
                             .find(|summary| summary.uid.to_string() == *uid)
                             .map(|summary| {
-                                let relation = store
+                                // relation + line version numbers (the
+                                // roster's "Running vN"/"Push vN" evidence)
+                                // in one handle open
+                                let (relation, versions) = store
                                     .open(summary.uid)
-                                    .map(|handle| handle.history.classify(pulled.observed))
-                                    .unwrap_or(lpc_history::SyncRelation::Diverged);
-                                (summary, relation)
+                                    .map(|handle| {
+                                        let history = &handle.history;
+                                        (
+                                            history.classify(pulled.observed),
+                                            (
+                                                history.version_number(pulled.observed),
+                                                history
+                                                    .head()
+                                                    .and_then(|head| history.version_number(head)),
+                                            ),
+                                        )
+                                    })
+                                    .unwrap_or((lpc_history::SyncRelation::Diverged, (None, None)));
+                                (summary, relation, versions)
                             }),
                         Err(_) => None,
                     }
@@ -526,7 +591,8 @@ impl StudioController {
             _ => None,
         };
 
-        if let Some((summary, relation)) = local {
+        if let Some((summary, relation, versions)) = local {
+            self.device_versions = versions;
             let content = DeviceContent::Known {
                 project_uid: summary.uid.to_string(),
                 slug: summary.slug.clone(),
@@ -618,6 +684,52 @@ impl StudioController {
         })
     }
 
+    /// D34 name reconcile at connect: the registry name is the user-facing
+    /// truth, so a device reporting a stale name (renamed while offline)
+    /// gets the registry name written back to `/.lp/device.json` — and the
+    /// UI uses the registry name either way. A failed write-back only
+    /// logs: the next connect retries, and the registry keeps winning in
+    /// the meantime (`upsert_device_merged`).
+    async fn reconcile_identity_name(
+        &mut self,
+        identity: Option<crate::app::places::DeviceIdentity>,
+    ) -> Option<crate::app::places::DeviceIdentity> {
+        let mut identity = identity?;
+        let registry_name = match self.library_host() {
+            Ok(host) => match host.catalog_snapshot().await {
+                Ok(fs) => crate::app::places::DeviceRegistry::new(fs)
+                    .list()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|entry| entry.uid == identity.uid)
+                    .map(|entry| entry.name),
+                Err(_) => None,
+            },
+            Err(_) => None,
+        };
+        if let Some(registry_name) = registry_name
+            && !registry_name.is_empty()
+            && registry_name != identity.name
+        {
+            use lpc_model::AsLpPath;
+            identity.name = registry_name;
+            match self.device.server.client_mut() {
+                Ok(server) => match server
+                    .fs_write(
+                        crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
+                        &identity.to_json_bytes(),
+                    )
+                    .await
+                {
+                    Ok(logs) => self.record_logs(logs),
+                    Err(error) => log::warn!("device rename write-back failed: {error}"),
+                },
+                Err(_) => log::warn!("device rename write-back skipped: no live server"),
+            }
+        }
+        Some(identity)
+    }
+
     /// Record the device sighting in the registry (merge semantics: an
     /// association survives sight-only upserts).
     async fn upsert_device_entry(
@@ -644,16 +756,14 @@ impl StudioController {
     fn usual_device_line(&self) -> Option<String> {
         let slug = self.project.active_library_slug()?;
         let inputs = self.home_inputs.as_ref()?;
-        inputs
-            .devices
-            .iter()
-            .find_map(|device| match &device.state {
-                crate::app::home::UiDeviceCardState::RememberedOffline {
-                    last_known: Some(known),
-                    ..
-                } if *known == slug => Some(format!("Usually on {}.", device.name)),
-                _ => None,
-            })
+        inputs.devices.iter().find_map(|device| {
+            let offline = matches!(device.state, crate::RosterCardState::Offline { .. });
+            let holds_it = device
+                .project
+                .as_ref()
+                .is_some_and(|chip| chip.name == slug);
+            (offline && holds_it).then(|| format!("Usually on {}.", device.name))
+        })
     }
 
     /// The dialog view model, when the dialog is open.
@@ -934,7 +1044,10 @@ impl StudioController {
                     .with_notice(UiNotice::info(format!("Saved the device's copy as {slug}"))))
             }
             DeployOp::EraseDevice => {
-                let resume = self.deploy_state_now()?;
+                // reachable from the card's actions popover (no dialog) as
+                // well as from the dialog; only an open dialog carries
+                // failure-resume state
+                let resume = self.deploy.as_ref().map(|session| session.state.clone());
                 let result = self.reset_to_blank(updates).await;
                 let env = self.deploy_environment();
                 match result {
@@ -945,7 +1058,7 @@ impl StudioController {
                         Ok(outcome)
                     }
                     Err(error) => {
-                        if let Some(session) = self.deploy.as_mut() {
+                        if let (Some(session), Some(resume)) = (self.deploy.as_mut(), resume) {
                             session.fail(format!("Erase failed: {error}"), resume);
                         }
                         Err(error)
@@ -1059,10 +1172,16 @@ impl StudioController {
         };
 
         // 2. hash-verified replace + load (the device runs it immediately)
+        // into the storage dir the device actually uses, so one project
+        // dir replaces in place (CLI uploads use dirs other than the
+        // sim's default slot)
         {
+            let storage_id = self.device_storage_id.clone().unwrap_or_else(|| {
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+            });
             let server = self.device.server.client_mut()?;
             let loaded = server
-                .open_library_project(&files, &local_hash.to_string())
+                .open_library_project(&storage_id, &files, &local_hash.to_string())
                 .await?;
             self.record_logs(loaded.logs);
         }
@@ -1325,6 +1444,19 @@ impl StudioController {
                 self.record_logs(logs);
                 self.attach_runtime(updates).await
             }
+            // One-click reconnect (M1): no activity chip up front — the flow
+            // may fall back to the browser's port chooser, which blocks like
+            // the browser-serial OpenProvider path.
+            DeviceOp::ReconnectDevice => match self.device.reconnect_granted_device().await? {
+                DeviceOpenOutcome::Opened => Ok(UiNotices::new()),
+                DeviceOpenOutcome::Cancelled { message } => {
+                    Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+                }
+                DeviceOpenOutcome::Connected { logs } => {
+                    self.record_logs(logs);
+                    self.attach_runtime(updates).await
+                }
+            },
         }
     }
 
@@ -1382,7 +1514,86 @@ impl StudioController {
                     .unwrap_or_default();
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!("Imported {imported}"))))
             }
+            HomeOp::RenameDevice { uid, name } => {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err(UiError::UnsupportedAction(
+                        "a device name cannot be empty".to_string(),
+                    ));
+                }
+                // registry first — it is the naming truth (D34); a failed
+                // live write-back below heals on the next connect
+                self.run_catalog_op(CatalogOp::RenameRegisteredDevice {
+                    uid: uid.clone(),
+                    name: name.clone(),
+                })
+                .await?;
+                self.write_back_live_identity_name(&uid, &name).await?;
+                Ok(UiNotices::new()
+                    .with_notice(UiNotice::info(format!("This device is now \"{name}\""))))
+            }
+            HomeOp::ForgetDevice { uid } => {
+                self.run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
+                    .await?;
+                Ok(UiNotices::new().with_notice(UiNotice::info("Device forgotten")))
+            }
+            HomeOp::NameDevice { name } => {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err(UiError::UnsupportedAction(
+                        "a device name cannot be empty".to_string(),
+                    ));
+                }
+                // the Needs-a-name card's inline form (D14 gently insists
+                // upstream): stamp mints the uid, writes the identity over
+                // the wire, registers the device, and re-pulls (adoption
+                // may now run for previously-anonymous content)
+                let identity = self.run_identity_stamp(name).await?;
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                    "This device is now \"{}\"",
+                    identity.name
+                ))))
+            }
         }
+    }
+
+    /// The live half of a device rename (D34): when the renamed device is
+    /// the attached one, write `/.lp/device.json` back over the wire and
+    /// update the cached sync state so every surface shows the new name
+    /// immediately. Offline devices skip this — the write-back happens on
+    /// the next connect (`reconcile_identity_name`).
+    async fn write_back_live_identity_name(
+        &mut self,
+        uid: &str,
+        name: &str,
+    ) -> Result<(), UiError> {
+        use lpc_model::AsLpPath;
+        let is_live = self
+            .device_sync
+            .as_ref()
+            .and_then(|sync| sync.identity.as_ref())
+            .is_some_and(|identity| identity.uid == uid);
+        if !is_live {
+            return Ok(());
+        }
+        let identity = crate::app::places::DeviceIdentity {
+            uid: uid.to_string(),
+            name: name.to_string(),
+        };
+        let logs = self
+            .device
+            .server
+            .client_mut()?
+            .fs_write(
+                crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
+                &identity.to_json_bytes(),
+            )
+            .await?;
+        self.record_logs(logs);
+        if let Some(sync) = self.device_sync.as_mut() {
+            sync.identity = Some(identity);
+        }
+        Ok(())
     }
 
     /// Run one catalog transaction through the host and schedule a gallery
@@ -1713,10 +1924,19 @@ impl StudioController {
                     "Checking",
                     "Checking server response",
                 );
-                let auto_connect = match self
-                    .connect_running_project_if_available(updates.clone())
-                    .await
-                {
+                // sim: auto-connect the editor to whatever runs. Hardware:
+                // the roster model (M3) — attach observes only; the running
+                // project belongs on the device card via connect-as-pull,
+                // and editor entry is the explicit D29 click (M5). The probe
+                // still issues the first wire request either way, so
+                // readiness settles and NoFirmware/Incompatible classify.
+                let probe = if is_sim {
+                    self.connect_running_project_if_available(updates.clone())
+                        .await
+                } else {
+                    self.probe_server_readiness(updates.clone()).await
+                };
+                let auto_connect = match probe {
                     Ok(auto_connect) => auto_connect,
                     Err(error) => {
                         let pending_logs = self.device.server.take_pending_logs();
@@ -1841,6 +2061,30 @@ impl StudioController {
                 Err(error)
             }
         }
+    }
+
+    /// Hardware readiness probe: issue the wire's first request so
+    /// readiness settles (and NoFirmware/Incompatible surface through the
+    /// same error path as the sim probe) WITHOUT connecting the editor to
+    /// anything the device runs — attach is observation (roster model);
+    /// the loaded project shows on the device card, not in the editor.
+    async fn probe_server_readiness(
+        &mut self,
+        updates: UxUpdateSink,
+    ) -> Result<AutoProjectConnect, UiError> {
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_DEVICE),
+            "Checking device",
+            "Checking",
+            "Checking server response",
+        );
+        let catalog = {
+            let server = self.device.server.client_mut()?;
+            server.list_loaded_projects().await?
+        };
+        self.record_logs(catalog.logs);
+        Ok(AutoProjectConnect::NotFound)
     }
 
     async fn connect_running_project_if_available(

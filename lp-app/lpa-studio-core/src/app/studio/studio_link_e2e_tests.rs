@@ -99,6 +99,98 @@ fn known_device_connects_and_classifies_at_head_through_the_link() {
     );
 }
 
+/// Row 1b (roster model regression): a device that boots with its project
+/// LOADED — the real-hardware shape since standalone startup-resume — must
+/// attach as pure observation: the gallery keeps the view (no open
+/// project, no editor entry), while connect-as-pull classifies the running
+/// copy for the device card. Editor entry is the explicit D29 click (M5).
+#[test]
+fn attaching_a_device_with_a_loaded_project_never_opens_the_editor() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let library_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let snapshot = studio.snapshot();
+    assert!(
+        matches!(snapshot.project.state, crate::ProjectState::NotLoaded),
+        "hardware attach observes only — the editor must not open, got {:?}",
+        snapshot.project.state
+    );
+    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!(
+            "running copy classifies for the card, got {:?}",
+            sync.content
+        );
+    };
+    assert_eq!(*relation, lpc_history::SyncRelation::AtHead);
+}
+
+/// Row 1c (storage-discovery regression): a device provisioned OUTSIDE
+/// Studio — its project lives in `/projects/bench`, not the sim's default
+/// slot — and running it. The connect-time pull must discover the loaded
+/// project's storage dir and classify the copy (a fixed-"studio" pull
+/// reported this device as Empty).
+#[test]
+fn device_running_from_a_non_default_storage_dir_classifies_not_empty() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let library_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_project_dir("bench")
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync().expect("connect-as-pull landed");
+    let DeviceContent::Known { relation, slug, .. } = &sync.content else {
+        panic!(
+            "the running copy must classify from its real dir, got {:?}",
+            sync.content
+        );
+    };
+    assert_eq!(*relation, lpc_history::SyncRelation::AtHead);
+    assert_eq!(slug, &summary.slug);
+}
+
 /// Row 1 (happy path, part 2): the stamp→push flow on an empty device —
 /// the deploy dialog's whole wizard, but with every wire operation running
 /// through the real serial framing.
@@ -623,6 +715,83 @@ fn erase_lands_blank_flash_as_success_through_the_deploy_dialog() {
         ),
         "the dialog derives Blank after the erase, got {:?}",
         deploy_state(&studio)
+    );
+}
+
+/// Row 11 (D34 rename, both halves, through the real link): a device
+/// renamed while OFFLINE reconciles at the next connect — the registry
+/// name wins over the device-reported name (and the connect path writes it
+/// back to `/.lp/device.json`); a rename dispatched while LIVE updates the
+/// registry and the cached sync identity in one action.
+#[test]
+fn device_rename_reconciles_registry_name_over_the_link() {
+    use crate::app::places::{DeviceRegistry, RegisteredDevice};
+
+    let (store, host) = library();
+    // remembered under its stamped name, then renamed while offline
+    let registry = DeviceRegistry::new(store.fs_handle());
+    registry
+        .upsert(RegisteredDevice {
+            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            name: "Bench board".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 1.0,
+            association: None,
+        })
+        .unwrap();
+    registry
+        .rename("dev_aaaaaaaaaaaaaaaa", "Luna's sign")
+        .unwrap();
+
+    // the device still reports the STALE stamped name
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
+            "dev_aaaaaaaaaaaaaaaa",
+            "Bench board",
+        )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let sync = studio.device_sync().expect("connect-as-pull landed");
+    assert_eq!(
+        sync.identity
+            .as_ref()
+            .map(|identity| identity.name.as_str()),
+        Some("Luna's sign"),
+        "the registry name wins over the device-reported name at connect"
+    );
+
+    // live rename: registry + cached identity move together
+    let outcome = drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::app::home::HOME_NODE_ID),
+        crate::HomeOp::RenameDevice {
+            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            name: "Porch sign".to_string(),
+        },
+    )))
+    .expect("live rename succeeds");
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("Porch sign")),
+        "the rename reports its result, got {:?}",
+        outcome.notices
+    );
+    assert_eq!(
+        studio
+            .device_sync()
+            .and_then(|sync| sync.identity.as_ref())
+            .map(|identity| identity.name.as_str()),
+        Some("Porch sign"),
+        "the cached sync identity carries the new name"
+    );
+    assert_eq!(
+        registry.list().unwrap()[0].name,
+        "Porch sign",
+        "the registry carries the new name"
     );
 }
 

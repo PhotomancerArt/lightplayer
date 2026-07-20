@@ -32,8 +32,8 @@ pub use app::device::{
     ProviderChoice, RuntimeAttachment, SimAttachment, UiDeployChoice, UiDeployView,
 };
 pub use app::home::{
-    HOME_NODE_ID, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceCardState, UiExampleCard,
-    UiHomeView, UiPackageCard, ZipBytes,
+    HOME_NODE_ID, HomeDeviceEvidence, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
+    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -65,6 +65,14 @@ pub use app::project::{
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
     SlotEditOp, SlotKind, UiAffordance, UiAssetContent, UiAssetContentBody, UiPendingEdit,
     UiPendingEditKind, UiPendingEditPhase, UiShaderError,
+};
+pub use app::rich_object::{
+    RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
+};
+pub use app::roster::{
+    BundledFirmware, ConnectEvidence, ConnectPhase, DegradedReason, DeviceDetailAffordance,
+    DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape,
+    RosterEvidence, derive_roster_card_state, device_rich_object, firmware_update_available,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,

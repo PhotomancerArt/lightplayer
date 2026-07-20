@@ -67,6 +67,16 @@ pub enum CatalogOp {
         id: String,
     },
     UpsertRegisteredDevice(RegisteredDevice),
+    /// Rename a registered device (D34). Registry-only — the identity
+    /// write-back to a live device is the studio controller's.
+    RenameRegisteredDevice {
+        uid: String,
+        name: String,
+    },
+    /// Remove a device from the registry (D34 hygiene). Idempotent.
+    ForgetRegisteredDevice {
+        uid: String,
+    },
     /// Connect-as-pull (D8) for a project NOT open in this tab: bank the
     /// observed device copy into that project's history (no-op when the
     /// hash is known) and refresh the registry entry. The host takes the
@@ -111,7 +121,7 @@ pub enum CatalogOp {
 #[derive(Clone, Debug)]
 pub struct CatalogOutcome {
     /// The touched/created package, where the op has one (everything but
-    /// `Delete` and `UpsertRegisteredDevice`).
+    /// `Delete` and the registry ops).
     pub summary: Option<PackageSummary>,
 }
 
@@ -260,6 +270,18 @@ pub fn apply_catalog_op(
             // not erase what was last pushed
             crate::app::places::device_session::upsert_device_merged(store, device)
                 .map_err(|e| LibraryHostError::Host(e.to_string()))?;
+            None
+        }
+        CatalogOp::RenameRegisteredDevice { uid, name } => {
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .rename(&uid, &name)
+                .map_err(LibraryHostError::from)?;
+            None
+        }
+        CatalogOp::ForgetRegisteredDevice { uid } => {
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .forget(&uid)
+                .map_err(LibraryHostError::from)?;
             None
         }
         CatalogOp::RecordDeviceObservation {

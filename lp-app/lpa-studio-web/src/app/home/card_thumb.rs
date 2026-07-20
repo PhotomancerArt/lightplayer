@@ -40,13 +40,7 @@ pub(crate) fn CardThumb(
 ) -> Element {
     let preview = use_thumb_preview(source);
     let badge = static_badge.or(preview.badge);
-    let (hue_a, hue_b) = thumb_hues(&seed);
-    let (saturation, lightness) = if muted { (12, 16) } else { (42, 22) };
-    let style = format!(
-        "background: linear-gradient(135deg, hsl({hue_a} {saturation}% {lightness}%), hsl({hue_b} {}% {}%));",
-        saturation + 12,
-        lightness + 10,
-    );
+    let style = thumb_swatch_style(&seed, muted);
     // dated slugs (2026-07-09-1421-basic) take their initial from the
     // label part, not the stamp
     let initial = label
@@ -142,6 +136,19 @@ fn thumb_badge_title(badge: &ThumbPreviewBadge) -> String {
         } => format!("CPU tier (GPU unavailable: {reason})"),
         ThumbPreviewBadge::Error { reason } => format!("Preview failed: {reason}"),
     }
+}
+
+/// The identity-gradient style for a seed — the thumb's base layer, and
+/// the small project-chip swatch on device cards (same identity, same
+/// colors, chip-sized).
+pub(crate) fn thumb_swatch_style(seed: &str, muted: bool) -> String {
+    let (hue_a, hue_b) = thumb_hues(seed);
+    let (saturation, lightness) = if muted { (12, 16) } else { (42, 22) };
+    format!(
+        "background: linear-gradient(135deg, hsl({hue_a} {saturation}% {lightness}%), hsl({hue_b} {}% {}%));",
+        saturation + 12,
+        lightness + 10,
+    )
 }
 
 /// Two stable hues from the seed (uid or name): FNV-1a, split into two

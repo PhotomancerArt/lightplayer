@@ -37,8 +37,8 @@ extern "C" {
     #[wasm_bindgen(js_name = requestPort)]
     fn js_request_port() -> Promise;
 
-    #[wasm_bindgen(js_name = grantedPortsCount)]
-    fn js_granted_ports_count() -> Promise;
+    #[wasm_bindgen(js_name = getGrantedPorts)]
+    fn js_get_granted_ports() -> Promise;
 
     #[wasm_bindgen(js_name = openPort)]
     fn js_open(id: u32, baud_rate: u32) -> Promise;
@@ -66,14 +66,24 @@ pub fn is_supported() -> bool {
     js_is_supported()
 }
 
-/// Number of serial ports the user has ALREADY granted this origin
-/// (`navigator.serial.getPorts()` length) — no permission prompt is shown.
-/// `0` when Web Serial is unsupported or the probe fails.
-pub async fn granted_ports_count() -> usize {
-    match JsFuture::from(js_granted_ports_count()).await {
-        Ok(value) => value.as_f64().unwrap_or(0.0) as usize,
-        Err(_) => 0,
+/// Serial ports the user has ALREADY granted this origin
+/// (`navigator.serial.getPorts()`) — no permission prompt is shown. Each
+/// granted port is registered as an openable JS session; repeat calls return
+/// the same handles (the JS side matches sessions by port identity). Empty
+/// when Web Serial is unsupported or the probe fails.
+pub async fn granted_ports() -> Result<Vec<BrowserSerialPortHandle>, LinkError> {
+    let value = JsFuture::from(js_get_granted_ports())
+        .await
+        .map_err(js_error)?;
+    let array = Array::from(&value);
+    let mut ports = Vec::with_capacity(array.length() as usize);
+    for entry in array.iter() {
+        ports.push(BrowserSerialPortHandle {
+            id: reflect_u32(&entry, "id")?,
+            label: reflect_string(&entry, "label")?,
+        });
     }
+    Ok(ports)
 }
 
 pub async fn request_port() -> Result<BrowserSerialPortHandle, LinkError> {

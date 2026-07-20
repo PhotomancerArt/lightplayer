@@ -6,5 +6,7 @@ pub mod node;
 pub mod places;
 pub mod preview_host;
 pub mod project;
+pub mod rich_object;
+pub mod roster;
 pub mod server;
 pub mod studio;

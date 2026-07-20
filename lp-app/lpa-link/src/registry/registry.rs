@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -7,11 +8,16 @@ use crate::{LinkError, LinkProvider};
 /// Catalog + factory for the link providers compiled into `lpa-link`.
 ///
 /// The registry answers "which provider kinds exist in this build?" (the
-/// catalog: [`Self::descriptors`], [`Self::kinds`], for picker UI) and builds
-/// an owned [`LinkConnector`] on demand ([`Self::create_connector`]) from the
-/// per-kind options stored at construction ([`LinkEnv`]). It does NOT hold
-/// live provider state: a connector is created per open flow and owned by the
-/// connection owner, so nothing borrows a shared registry on hot paths.
+/// catalog: [`Self::descriptors`], [`Self::kinds`], for picker UI) and hands
+/// out an owned [`LinkConnector`] on demand ([`Self::create_connector`]) from
+/// the per-kind options stored at construction ([`LinkEnv`]).
+///
+/// Connectors are SHARED per kind: the first `create_connector` call for a
+/// kind constructs the provider, every later call returns the same `Rc`.
+/// Provider-held endpoint state must survive across flows — the browser
+/// serial provider mints an endpoint in `request_access` (one call) that the
+/// subsequent connect flow (another call) has to find; a fresh instance per
+/// call loses it ("link endpoint not found").
 #[derive(Default)]
 pub struct LinkProviderRegistry {
     env: LinkEnv,
@@ -20,6 +26,10 @@ pub struct LinkProviderRegistry {
     /// device-backed fakes here; `create_connector` returns the SAME shared
     /// instance for the kind so a test's scripted state survives re-opens.
     prebuilt: BTreeMap<LinkProviderKind, Rc<LinkConnector>>,
+    /// Factory-built connectors, memoized per kind on first request so every
+    /// flow sees one shared instance (interior mutability: the registry is
+    /// owned by value and served through `&self`).
+    built: RefCell<BTreeMap<LinkProviderKind, Rc<LinkConnector>>>,
 }
 
 impl LinkProviderRegistry {
@@ -53,6 +63,7 @@ impl LinkProviderRegistry {
             env,
             catalog,
             prebuilt: BTreeMap::new(),
+            built: RefCell::new(BTreeMap::new()),
         }
     }
 
@@ -71,11 +82,13 @@ impl LinkProviderRegistry {
         self.prebuilt.insert(kind, Rc::new(connector));
     }
 
-    /// Build (or return the preconfigured) connector for a kind.
+    /// Return the shared connector for a kind, building it on first request.
     ///
-    /// Each call for a factory-built kind constructs a FRESH provider from
-    /// the stored `LinkEnv`; a preconfigured kind returns its shared
-    /// instance. Kinds absent from this build's catalog are an error.
+    /// A preconfigured kind returns its inserted instance; a factory-built
+    /// kind is constructed ONCE from the stored `LinkEnv` and memoized, so
+    /// endpoint state minted through one flow (e.g. browser serial
+    /// `request_access`) is visible to every later flow. Kinds absent from
+    /// this build's catalog are an error.
     pub fn create_connector(&self, kind: LinkProviderKind) -> Result<Rc<LinkConnector>, LinkError> {
         if let Some(connector) = self.prebuilt.get(&kind) {
             return Ok(Rc::clone(connector));
@@ -85,6 +98,9 @@ impl LinkProviderRegistry {
                 "provider {} is not available",
                 kind.key()
             )));
+        }
+        if let Some(connector) = self.built.borrow().get(&kind) {
+            return Ok(Rc::clone(connector));
         }
         let _ = &self.env;
         let connector = match kind {
@@ -129,7 +145,9 @@ impl LinkProviderRegistry {
                 )));
             }
         };
-        Ok(Rc::new(connector))
+        let connector = Rc::new(connector);
+        self.built.borrow_mut().insert(kind, Rc::clone(&connector));
+        Ok(connector)
     }
 
     /// Return descriptors for all provider kinds in this registry's catalog.
@@ -227,6 +245,22 @@ mod tests {
             LinkProviderKind::Fake,
             "Fake runtime",
         )));
+
+        let first = registry.create_connector(LinkProviderKind::Fake).unwrap();
+        let second = registry.create_connector(LinkProviderKind::Fake).unwrap();
+
+        assert_eq!(first.kind(), LinkProviderKind::Fake);
+        assert!(std::rc::Rc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn factory_built_connector_is_memoized_and_shared() {
+        use crate::LinkProvider;
+
+        // Regression: `request_access` and `connect_endpoint` run through
+        // separate `create_connector` calls; both must land on ONE provider
+        // instance or endpoints minted by the first call vanish.
+        let registry = LinkProviderRegistry::from_env(LinkEnv::default());
 
         let first = registry.create_connector(LinkProviderKind::Fake).unwrap();
         let second = registry.create_connector(LinkProviderKind::Fake).unwrap();

@@ -17,6 +17,7 @@ pub(crate) mod metric_grid_stories;
 pub mod progress_bar;
 #[cfg(feature = "stories")]
 pub(crate) mod progress_bar_stories;
+pub mod rich_detail;
 pub mod status_chip;
 #[cfg(feature = "stories")]
 pub(crate) mod status_chip_stories;
@@ -28,12 +29,14 @@ pub(crate) mod terminal_output_stories;
 pub mod view;
 
 pub use action::{
-    ActionButton, ActionButtonVariant, ActionStrip, menu_item_action_class, quiet_action_class,
+    ActionButton, ActionButtonVariant, ActionStrip, menu_item_action_class,
+    menu_item_destructive_action_class, quiet_action_class,
 };
 pub use issue_view::IssueView;
 pub use log_list::LogList;
 pub use metric_grid::MetricGrid;
 pub use progress_bar::ProgressBar;
+pub use rich_detail::RichDetailSection;
 pub use status_chip::StatusChip;
 pub use terminal_output::TerminalOutput;
 pub use view::activity_view::ActivityView;

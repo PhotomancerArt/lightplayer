@@ -138,6 +138,13 @@ pub fn menu_item_action_class() -> &'static str {
     menu_item_class(false)
 }
 
+/// The destructive menu-row classes, for popup rows that cannot be
+/// `UiAction`s but must wear the danger treatment (P3 rich-object
+/// codification: danger-zone rows without an action model).
+pub fn menu_item_destructive_action_class() -> &'static str {
+    menu_item_class(true)
+}
+
 fn disabled_reason(enablement: &ActionEnablement) -> Option<&str> {
     match enablement {
         ActionEnablement::Enabled => None,

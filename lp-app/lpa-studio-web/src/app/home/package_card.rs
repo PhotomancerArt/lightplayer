@@ -8,9 +8,10 @@ use lpa_studio_core::{
     PreviewSource, SyncRelation, UiAction, UiPackageCard,
 };
 
+use lpa_studio_core::core::time_ago::time_ago;
+
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::package_export::export_package_to_download;
-use crate::app::home::time_ago::time_ago;
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class};
 
@@ -110,6 +111,25 @@ pub(crate) fn PackageCard(
                 span {
                     class: "tw:relative tw:z-[2]",
                     PackageCardMenu { card: card.clone(), on_action }
+                }
+            }
+            // the crystallized open action (D36 prep): same navigation as
+            // the bare card click, spelled out — projects always open on
+            // the sim, never a device takeover (D29)
+            div { class: "tw:flex tw:px-3 tw:pb-3",
+                a {
+                    class: "{quiet_action_class()} tw:relative tw:z-[2]",
+                    href: "#/project/{card.slug}",
+                    title: "Open this project in the simulator.",
+                    onclick: move |event| {
+                        if busy || opening {
+                            event.prevent_default();
+                        }
+                    },
+                    span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                        StudioIcon { name: StudioIconName::Play, size: 14 }
+                    }
+                    span { "Open in sim" }
                 }
             }
         }

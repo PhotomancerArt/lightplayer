@@ -2,9 +2,9 @@ use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus, Clock,
     Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, FlaskConical, Folder, Funnel, Image, Info,
-    Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed, MousePointerClick, Pencil, Play,
-    Plus, Radio, Save, Settings, Sparkles, SquareArrowRight, Trash2, TriangleAlert, Undo2, Upload,
-    Usb, Waypoints, X, Zap,
+    Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed, MonitorPlay, MousePointerClick,
+    Pencil, Play, Plus, Radio, Save, Settings, Sparkles, SquareArrowRight, Trash2, TriangleAlert,
+    Undo2, Upload, Usb, Waypoints, X, Zap,
 };
 
 #[component]
@@ -13,6 +13,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
     match name {
         StudioIconName::Play => rsx! { Play { size } },
         StudioIconName::Usb => rsx! { Usb { size } },
+        StudioIconName::Simulator => rsx! { MonitorPlay { size } },
         StudioIconName::Test => rsx! { FlaskConical { size } },
         StudioIconName::StatusRunning => rsx! { Play { size } },
         StudioIconName::StatusIdle => rsx! { CircleMinus { size } },
@@ -92,6 +93,9 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
 pub enum StudioIconName {
     Play,
     Usb,
+    /// The sim runtime's card glyph — where a device card shows its
+    /// transport, a sim card shows this instead (D36).
+    Simulator,
     Test,
     StatusRunning,
     StatusIdle,

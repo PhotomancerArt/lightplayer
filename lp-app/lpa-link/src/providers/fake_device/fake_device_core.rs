@@ -14,7 +14,7 @@ use lpfs::{LpFs, LpFsMemory};
 
 use crate::providers::fake_device::failure_injection::FakeFailurePlan;
 use crate::providers::fake_device::fake_device_script::{
-    FAKE_DEVICE_PROJECT_DIR, FakeBootState, FakeDeviceScript, FakeLightPlayerState, fake_provenance,
+    FakeBootState, FakeDeviceScript, FakeLightPlayerState, fake_provenance,
 };
 use crate::stream::ByteStreamError;
 
@@ -259,6 +259,8 @@ impl FakeDeviceCore {
         ));
 
         let files = lp.project_files.clone();
+        let load_at_boot = lp.load_project_at_boot;
+        let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
         let hello = lpc_wire::ServerHello {
             proto: lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION),
@@ -268,7 +270,7 @@ impl FakeDeviceCore {
         let start = HostRuntime::start_with_server(move || {
             let fs = LpFsMemory::new();
             for (relative, bytes) in &files {
-                let path = format!("{FAKE_DEVICE_PROJECT_DIR}/{relative}");
+                let path = format!("{project_dir}/{relative}");
                 if let Err(error) = fs.write_file(path.as_path(), bytes) {
                     eprintln!("[fake-device] failed to seed {path}: {error}");
                 }
@@ -284,7 +286,15 @@ impl FakeDeviceCore {
                     eprintln!("[fake-device] failed to stamp identity: {error}");
                 }
             }
-            create_memory_server_with(fs, hello)
+            let mut server = create_memory_server_with(fs, hello);
+            if load_at_boot {
+                // the real-hardware shape: firmware auto-resumes its
+                // startup project before serving (fw-esp32 boot.rs)
+                if let Err(error) = server.load_project(project_dir.as_path()) {
+                    eprintln!("[fake-device] boot auto-load failed: {error}");
+                }
+            }
+            server
         });
         match start {
             Ok(runtime) => {

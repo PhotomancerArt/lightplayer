@@ -157,6 +157,10 @@ fn detail_section_title_class(tint: DetailSectionTint) -> &'static str {
 
 /// Card chrome for the detail-popover panel: capped width, sectioned grid
 /// (no gap — sections carry their own padding), standard border and shadow.
-fn detail_popover_card_class() -> &'static str {
+///
+/// Public (P3 rich-object codification) so a surface that needs the
+/// standard detail card behind a bespoke trigger or as a static panel
+/// (story comparison sheets) never copies the class.
+pub fn detail_popover_card_class() -> &'static str {
     "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-0 tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg"
 }

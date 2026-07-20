@@ -1,8 +1,8 @@
-//! Relative-time labels for gallery card meta lines.
+//! Relative-time labels for card meta and status lines.
 
 /// "just now" / "5m ago" / "3h ago" / "4d ago" / "6w ago". Coarse on
 /// purpose: card meta is a recall clue, not a log timestamp.
-pub(crate) fn time_ago(now_secs: f64, then_secs: f64) -> String {
+pub fn time_ago(now_secs: f64, then_secs: f64) -> String {
     let elapsed = (now_secs - then_secs).max(0.0);
     if elapsed < 90.0 {
         return "just now".to_string();

@@ -162,6 +162,12 @@ fn handle_fs_request(fs: &mut dyn LpFs, request: FsRequest) -> Result<FsResponse
                 error: Some(format!("{e}")),
             }),
         },
+        // deleting an absent dir succeeds: the goal state already holds
+        // (LittleFS surfaces missing dirs as generic Filesystem errors,
+        // so probe existence rather than matching error kinds)
+        FsRequest::DeleteDir { path } if !fs.is_dir(path.as_path()).unwrap_or(false) => {
+            Ok(FsResponse::DeleteDir { path, error: None })
+        }
         FsRequest::DeleteDir { path } => match fs.delete_dir(path.as_path()) {
             Ok(()) => Ok(FsResponse::DeleteDir { path, error: None }),
             Err(e) => Ok(FsResponse::DeleteDir {
@@ -367,6 +373,28 @@ fn handle_stop_all_projects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Deleting an absent dir reports success: the goal state already
+    /// holds. Regression for push-onto-a-fresh-device failing with the
+    /// device fs's "no such file or directory" during the replace clear.
+    #[test]
+    fn delete_dir_on_a_missing_dir_succeeds() {
+        use lpc_model::AsLpPathBuf;
+        let mut fs = lpfs::LpFsMemory::new();
+
+        let response = handle_fs_request(
+            &mut fs,
+            FsRequest::DeleteDir {
+                path: "/projects/studio".as_path_buf(),
+            },
+        )
+        .expect("handler runs");
+
+        assert!(
+            matches!(response, FsResponse::DeleteDir { error: None, .. }),
+            "absent dir deletes as a no-op, got {response:?}"
+        );
+    }
 
     /// `log::set_max_level` is process-global, so this single test exercises
     /// several levels and restores the original value at the end, keeping it
