@@ -89,6 +89,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       gfx: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.gfx }}
+      browser: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.browser }}
     steps:
       - name: Filter changed paths
         id: filter
@@ -109,6 +110,24 @@ jobs:
               - 'lp-app/lpa-studio-core/**'
               - 'lp-app/lpa-fs-opfs/**'
               - 'spikes/naga-wasm-poc/**'
+              - 'third_party/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+            # Dependency closure (by directory) of the two real-browser wasm
+            # suites: lpa-fs-opfs (real OPFS + Web Locks) and fw-browser
+            # (runtime protocol over wasm). Same conservative-gate philosophy
+            # as `gfx` above: misses surface on the next main push.
+            browser:
+              - 'lp-app/lpa-fs-opfs/**'
+              - 'lp-fw/**'
+              - 'lp-base/**'
+              - 'lp-core/**'
+              - 'lp-shader/**'
+              - 'lp-gfx/**'
+              - 'lp-riscv/**'
               - 'third_party/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -155,6 +174,59 @@ jobs:
 
       - name: Validate GFX
         run: cd lp2025 && just validate-gfx
+
+  # Real-browser wasm suites: lpa-fs-opfs (real OPFS ops, Web Locks, store
+  # round-trip — the Safari-OPFS-corruption defect class) and fw-browser
+  # (runtime protocol tests). Both run `cargo test --target
+  # wasm32-unknown-unknown` through wasm-bindgen-test-runner against headless
+  # Chrome. Runs on x64 because Google Chrome has no linux-arm64 build; GitHub
+  # x64 images preinstall Chrome and a matching chromedriver, and host arch is
+  # irrelevant for wasm tests.
+  validate-browser:
+    name: Validate Browser (x64)
+    runs-on: ubuntu-24.04
+    needs: detect-gfx-changes
+    if: needs.detect-gfx-changes.outputs.browser == 'true'
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rustfmt, clippy, rust-src
+
+      # rust-cache keys on the job id, so this job's cache (wasm32 tree) stays
+      # separate from the other validate jobs'. It also caches ~/.cargo/bin,
+      # which amortizes the wasm-bindgen-cli install below.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match the workspace wasm-bindgen dep; the just recipes
+      # refuse to run with a missing runner and print this exact version.
+      - name: Install wasm-bindgen-cli
+        run: command -v wasm-bindgen-test-runner >/dev/null || cargo install wasm-bindgen-cli --version 0.2.114
+
+      - name: Browser wasm tests
+        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test
 
   # Story baselines are CI-canonical: this job captures every story with a
   # pinned browser and compares against the committed PNGs (pixel tolerance,
