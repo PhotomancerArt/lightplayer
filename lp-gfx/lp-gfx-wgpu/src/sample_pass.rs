@@ -4,9 +4,12 @@
 //!
 //! # Shape
 //!
-//! One **point-list draw into an `N × 1` target**: vertex `i` carries its
-//! own clip-space x (precomputed on the CPU as the center of pixel `i`) plus
-//! the pixel-space sample position as a second attribute, passed to the
+//! One **point-list draw into a row-major `W × H` grid target** (`W =
+//! min(count, max_texture_dimension_2d)`, `H = ceil(count / W)` — a single
+//! row for small sets, wrapping into rows at device-limit scale, e.g. the
+//! ~30k-LED radiance dome): vertex `i` carries its own clip-space position
+//! (precomputed on the CPU as the center of grid texel `i`) plus the
+//! pixel-space sample position as a second attribute, passed to the
 //! fragment stage as a varying. The fragment `main` evaluates
 //! `render(lp_gfx_sample_pos)` — see
 //! [`crate::assembly::assemble_sample_fragment_glsl`]. Point primitives
@@ -33,8 +36,8 @@ use crate::read_back::read_back_f32;
 use crate::texture_backing::{GpuTexture, gpu_format, quantize_unorm16};
 
 /// Hand-written point-list vertex stage. Attribute 0 is the precomputed
-/// clip-space x of target pixel `i`; attribute 1 is the pixel-space sample
-/// position forwarded to the fragment stage.
+/// clip-space position of target grid texel `i`; attribute 1 is the
+/// pixel-space sample position forwarded to the fragment stage.
 const SAMPLE_VERTEX_WGSL: &str = "
 struct VsOut {
     @builtin(position) position: vec4<f32>,
@@ -42,16 +45,16 @@ struct VsOut {
 }
 
 @vertex
-fn vs_main(@location(0) clip_x: f32, @location(1) point: vec2<f32>) -> VsOut {
+fn vs_main(@location(0) clip_pos: vec2<f32>, @location(1) point: vec2<f32>) -> VsOut {
     var out: VsOut;
-    out.position = vec4<f32>(clip_x, 0.0, 0.0, 1.0);
+    out.position = vec4<f32>(clip_pos, 0.0, 1.0);
     out.sample_pos = point;
     return out;
 }
 ";
 
-/// Bytes per sample vertex: `clip_x: f32` + `point: vec2<f32>`.
-const VERTEX_STRIDE: u64 = 12;
+/// Bytes per sample vertex: `clip_pos: vec2<f32>` + `point: vec2<f32>`.
+const VERTEX_STRIDE: u64 = 16;
 
 /// The compiled sample pipeline plus its per-count resources. Built lazily
 /// on the first `sample_rgba16` call (render-only consumers — the gallery —
@@ -62,9 +65,11 @@ pub(crate) struct SamplePass {
     resources: Option<SampleResources>,
 }
 
-/// Vertex buffer and `N × 1` target for one point count.
+/// Vertex buffer and row-major `W × H` grid target for one point count.
 struct SampleResources {
     count: u32,
+    width: u32,
+    height: u32,
     vertex_buffer: wgpu::Buffer,
     target: GpuTexture,
 }
@@ -107,13 +112,13 @@ impl SamplePass {
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
                         wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32,
+                            format: wgpu::VertexFormat::Float32x2,
                             offset: 0,
                             shader_location: 0,
                         },
                         wgpu::VertexAttribute {
                             format: wgpu::VertexFormat::Float32x2,
-                            offset: 4,
+                            offset: 8,
                             shader_location: 1,
                         },
                     ],
@@ -162,11 +167,11 @@ impl SamplePass {
         if count == 0 {
             return Ok(());
         }
-        let max_width = shared.device.limits().max_texture_dimension_2d;
-        if count > max_width {
+        let max_dim = shared.device.limits().max_texture_dimension_2d;
+        if u64::from(count) > u64::from(max_dim) * u64::from(max_dim) {
             return Err(GfxError::Render(format!(
-                "sample_rgba16: {count} points exceed the device's maximum sample-target width \
-                 ({max_width})"
+                "sample_rgba16: {count} points exceed the device's maximum sample-target grid \
+                 ({max_dim} x {max_dim})"
             )));
         }
 
@@ -175,13 +180,20 @@ impl SamplePass {
             .resources
             .as_ref()
             .expect("sample resources were just ensured");
+        let (width, height) = (resources.width, resources.height);
 
-        // Vertex i: clip-space center of target pixel i, then the Q16.16
-        // point as f32 pixel coordinates (exact for |coord| < 2^24 texels).
-        let mut vertices = Vec::with_capacity(points_q16.len() / 2 * 3);
+        // Vertex i: clip-space center of grid texel (i % W, i / W), then the
+        // Q16.16 point as f32 pixel coordinates (exact for |coord| < 2^24
+        // texels). Texel row 0 is the top of the target, which is clip-space
+        // +y, so rows map top-down.
+        let mut vertices = Vec::with_capacity(points_q16.len() / 2 * 4);
         for (i, point) in points_q16.chunks_exact(2).enumerate() {
-            let clip_x = (i as f32 + 0.5) / count as f32 * 2.0 - 1.0;
+            let col = i as u32 % width;
+            let row = i as u32 / width;
+            let clip_x = (col as f32 + 0.5) / width as f32 * 2.0 - 1.0;
+            let clip_y = 1.0 - (row as f32 + 0.5) / height as f32 * 2.0;
             vertices.push(clip_x);
+            vertices.push(clip_y);
             vertices.push((f64::from(point[0]) / 65536.0) as f32);
             vertices.push((f64::from(point[1]) / 65536.0) as f32);
         }
@@ -219,12 +231,15 @@ impl SamplePass {
         }
         shared.queue.submit([encoder.finish()]);
 
+        // Row-major readback: texel (col, row) is index row * W + col, so
+        // channels line up with `out` directly; the final row's unused tail
+        // (count not divisible by W) falls off the zip.
         let pixels = read_back_f32(
             &shared.device,
             &shared.queue,
             &resources.target,
-            count,
-            1,
+            width,
+            height,
             TextureStorageFormat::Rgba16Unorm,
             None,
         )?;
@@ -240,6 +255,9 @@ impl SamplePass {
             .as_ref()
             .is_none_or(|resources| resources.count != count)
         {
+            let max_dim = shared.device.limits().max_texture_dimension_2d;
+            let width = count.min(max_dim);
+            let height = count.div_ceil(width);
             let vertex_buffer = shared.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("lp-gfx-wgpu sample points"),
                 size: u64::from(count) * VERTEX_STRIDE,
@@ -248,13 +266,15 @@ impl SamplePass {
             });
             let target = GpuTexture::new(
                 &shared.device,
-                count,
-                1,
+                width,
+                height,
                 TextureStorageFormat::Rgba16Unorm,
                 "lp-gfx-wgpu sample target",
             );
             self.resources = Some(SampleResources {
                 count,
+                width,
+                height,
                 vertex_buffer,
                 target,
             });
