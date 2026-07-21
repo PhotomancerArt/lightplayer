@@ -131,24 +131,42 @@ fn parse_args() -> Result<Args, String> {
 }
 
 /// `examples/basic` relative to the workspace this binary was built from.
+/// Recursively copy a project directory into the scratch root.
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 fn default_project_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/basic")
 }
 
 fn run(args: &Args) -> Result<(), String> {
-    let project_dir = args
+    let source_dir = args
         .project_dir
         .canonicalize()
         .map_err(|e| format!("project dir {}: {e}", args.project_dir.display()))?;
-    let project_name = project_dir
+    let project_name = source_dir
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("project dir {} has no name", project_dir.display()))?
+        .ok_or_else(|| format!("project dir {} has no name", source_dir.display()))?
         .to_owned();
-    let projects_root = project_dir
-        .parent()
-        .ok_or_else(|| format!("project dir {} has no parent", project_dir.display()))?
-        .to_path_buf();
+    // The server persists runtime state (e.g. `lightplayer.json` with the
+    // startup project) into its projects root — copy the project into a
+    // scratch root so harness runs never dirty the source tree.
+    let scratch = std::env::temp_dir().join(format!("lp-gfx-harness-{}", std::process::id()));
+    let projects_root = scratch.clone();
+    let project_dir = scratch.join(&project_name);
+    copy_dir(&source_dir, &project_dir).map_err(|e| format!("stage project: {e}"))?;
 
     let timings = Arc::new(ShaderTimings::default());
     let graphics: Arc<dyn LpGraphics> = Arc::new(TimingGraphics::new(
