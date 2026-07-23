@@ -360,6 +360,15 @@ pub(crate) fn emit_op(
                     fctx.unreachable_mode = false;
                 }
                 Some(CtrlEntry::Loop { .. }) => {
+                    // The `br(0)` below is the loop's single back-edge; the
+                    // fuel check-then-decrement sits immediately before it so
+                    // it executes exactly once per back-edge traversal.
+                    if fctx.module.options.fuel {
+                        let vmctx = fctx.vmctx_local.ok_or_else(|| {
+                            String::from("internal: fuel back-edge check without vmctx local")
+                        })?;
+                        crate::emit::fuel::emit_backedge_fuel_check(sink, vmctx);
+                    }
                     sink.br(0);
                     sink.end();
                     sink.end();
@@ -449,6 +458,29 @@ pub(crate) fn emit_op(
             args,
             results,
         } => {
+            // `__lp_get_fuel` inlines as a direct vmctx fuel-word load —
+            // never an import call — because the native builtin's pointer
+            // read cannot work at linear-memory offset 0 on the wasm hosts
+            // (see `imports::import_is_inline_get_fuel`).
+            if let CalleeRef::Import(ImportId(i)) = *callee {
+                if imports::import_is_inline_get_fuel(ir, i as usize) {
+                    let vmctx = fctx.vmctx_local.ok_or_else(|| {
+                        String::from("__lp_get_fuel inline lowering requires a vmctx local")
+                    })?;
+                    let rs = func.pool_slice(*results);
+                    if rs.len() != 1 {
+                        return Err(format!(
+                            "__lp_get_fuel must have exactly one result, got {}",
+                            rs.len()
+                        ));
+                    }
+                    sink.local_get(vmctx)
+                        .i32_load(memory::mem_arg0(lpvm::VMCTX_OFFSET_FUEL as u32, 2))
+                        .local_set(rs[0].0);
+                    return Ok(());
+                }
+            }
+
             let idx = wasm_func_index(fctx, *callee)?;
             let (is_import, import_idx) = match *callee {
                 CalleeRef::Import(ImportId(i)) => (true, i as usize),

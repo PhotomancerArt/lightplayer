@@ -822,6 +822,51 @@ fn render_frame_no_uniforms() {
         .expect("render_frame");
 }
 
+/// The wasm backend's typed guest trap ([`lpvm::GuestTrapError`]) reaches
+/// `px_shader`'s coordinate derivation: an infinite-loop pixel surfaces as
+/// `LpsError::FuelExhausted` naming the offending pixel, same as lpvm-native.
+#[test]
+fn render_frame_infinite_pixel_traps_with_fuel_exhausted_coords() {
+    let engine = test_engine();
+    // Pixel centers are at x + 0.5, so pixels (2, 0) and (3, 0) of the 4x1
+    // frame satisfy the spin condition; the wrapper traps at the FIRST one.
+    let glsl = r#"
+vec4 render(vec2 pos) {
+    if (pos.x > 2.0) {
+        int x = 0;
+        while (true) { x = x + 1; }
+    }
+    return vec4(1.0);
+}
+"#;
+    let shader = engine
+        .compile_px(
+            glsl,
+            TextureStorageFormat::Rgba16Unorm,
+            &lpir::CompilerConfig::default(),
+            ShaderFrontend::LpsGlsl,
+        )
+        .expect("compile_px");
+    let mut tex = engine
+        .alloc_texture(4, 1, TextureStorageFormat::Rgba16Unorm)
+        .expect("alloc_texture");
+    let uniforms = LpsValueF32::Struct {
+        name: None,
+        fields: vec![],
+    };
+    let err = shader
+        .render_frame(&uniforms, &mut tex)
+        .expect_err("infinite pixel must trap");
+    let LpsError::FuelExhausted(trap) = err else {
+        panic!("expected FuelExhausted, got: {err}");
+    };
+    assert_eq!(
+        trap.entry,
+        crate::error::ShaderFuelTrapEntry::RenderTexture { x: 2, y: 0 }
+    );
+    assert_eq!(trap.budget, lpvm::DEFAULT_INVOCATION_FUEL);
+}
+
 #[test]
 fn render_samples_no_uniforms_writes_rgba16_points() {
     let engine = test_engine();

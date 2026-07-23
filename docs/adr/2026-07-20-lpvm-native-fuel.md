@@ -162,6 +162,11 @@ The trap flows to the engine as **data, never substring matching**:
   existing yellow. The panic message becomes the node error status.
   Non-fuel render errors keep returning plain `Err`.
 
+  *Amended 2026-07-23:* the panic conversion is gated on the
+  `panic-recovery` feature — hosts return the same message as a plain
+  typed `Err` (wasm panics abort; the ledger only exists on device). See
+  [2026-07-23-per-target-panic-strategy.md](2026-07-23-per-target-panic-strategy.md).
+
 ### Posture
 
 - **Always on** for device codegen (`NativeCompileOptions::default()` has
@@ -177,10 +182,13 @@ The trap flows to the engine as **data, never substring matching**:
 
 ### Accepted divergences
 
-- **wasmtime keeps its own per-call store fuel** (~64× tank). Guest memory
-  writes cannot reset wasmtime's fuel, so per-invocation tanks are
-  impossible there; host builds get a per-call bound with a plain error (no
-  blame route — the panic conversion only triggers on the native marker).
+- ~~**wasmtime keeps its own per-call store fuel** (~64× tank).~~
+  *Resolved 2026-07-23:* fuel checks are now instrumented into the
+  emitted wasm itself and wasmtime store fuel is removed — the premise
+  (guest code can't reset wasmtime fuel) was true but irrelevant to our
+  own emission. Both wasm hosts share the rv32 unit, header contract,
+  and message. See
+  [2026-07-23-sim-wasm-fuel.md](2026-07-23-sim-wasm-fuel.md).
 - **interp** has no loop bound at all (opt-in oracle target; recorded
   follow-up).
 - Compute-tick and `__shader_init` traps surface as plain typed-message
@@ -256,6 +264,6 @@ The trap flows to the engine as **data, never substring matching**:
 - **Compute/init blame route**: compute-tick and shader-init traps abort
   bounded but bypass the panic/blame ledger today; wire them through if
   runaway compute shaders show up in practice.
-- **wasm per-invocation parity**: revisit only if host-side blame for
-  infinite shaders becomes a product need (wasmtime fuel cannot be reset
-  from guest code — would need epoch interruption or a different scheme).
+- ~~**wasm per-invocation parity**~~ — *done 2026-07-23*: fuel is
+  instrumented into the emitted wasm on both hosts; see
+  [2026-07-23-sim-wasm-fuel.md](2026-07-23-sim-wasm-fuel.md).

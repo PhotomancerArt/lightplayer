@@ -120,6 +120,8 @@ cleanly instead of hanging the device (see
 - The `lp-shader` synthesised render wrappers re-arm a per-pixel/sample
   tank (`lpvm::DEFAULT_INVOCATION_FUEL`) and write the linear invocation
   index to the fuel high word, so a trap names the offending pixel.
+- The wasm backends implement the same contract in their own emission —
+  see `lpvm-wasm`'s README and `docs/adr/2026-07-23-sim-wasm-fuel.md`.
 
 ## Usage
 

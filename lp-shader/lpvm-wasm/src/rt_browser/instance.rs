@@ -7,7 +7,8 @@ use js_sys::{Function, Reflect, WebAssembly};
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
-    LpsValueF32, LpvmBuffer, LpvmInstance, decode_global_read, encode_global_write,
+    DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpsValueF32, LpvmBuffer, LpvmInstance,
+    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, encode_global_write,
     encode_uniform_write, encode_uniform_write_q32, global_data_span, validate_compute_tick_sig,
     validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
@@ -65,7 +66,23 @@ impl BrowserLpvmInstance {
         })
     }
 
-    fn prepare_call(&self) -> Result<(), WasmError> {
+    /// Arm the vmctx fuel/trap words and reset the shadow stack before a
+    /// guest entry: full tank in the fuel low u32, host-armed invocation
+    /// index in the high u32, no trap (mirrors `rt_wasmtime`). Render
+    /// wrappers immediately re-arm per pixel/sample with
+    /// `DEFAULT_INVOCATION_FUEL`; `metadata` (vmctx+12) is left untouched.
+    ///
+    /// Arming is mandatory with fuel-instrumented modules: the emitted
+    /// checks are check-then-decrement, so an unarmed zero fuel word traps
+    /// at the very first function entry.
+    fn prepare_call(&mut self) -> Result<(), WasmError> {
+        let mut header = [0u8; 12];
+        header[0..4].copy_from_slice(&(DEFAULT_VMCTX_FUEL as u32).to_le_bytes());
+        header[4..8].copy_from_slice(&INVOCATION_INDEX_ARMED.to_le_bytes());
+        header[8..12].copy_from_slice(&TRAP_CODE_NONE.to_le_bytes());
+        debug_assert_eq!(VMCTX_OFFSET_FUEL, 0);
+        debug_assert_eq!(VMCTX_OFFSET_TRAP, 8);
+        self.vmctx_write_bytes(VMCTX_OFFSET_FUEL, &header)?;
         if let Some(base) = self.shadow_stack_base {
             let global = Reflect::get(
                 &self.exports_obj,
@@ -144,6 +161,29 @@ impl BrowserLpvmInstance {
         let mut bytes = vec![0u8; len];
         view.copy_to(&mut bytes);
         Ok(bytes)
+    }
+
+    /// Read the vmctx trap slot after a guest entry; nonzero → typed
+    /// [`WasmError::Trap`] carrying the invocation index (fuel high u32).
+    ///
+    /// Must run on BOTH `Ok` and `Err` call returns: an emitted fuel check
+    /// aborts with `unreachable`, which surfaces here as an opaque JS
+    /// `RuntimeError` — classification is by the slot, never the JS error.
+    /// A JS error with a clean trap slot stays the generic "WASM trap: …"
+    /// runtime error (a genuine non-fuel trap). Return values from a trapped
+    /// call are garbage; callers must discard them.
+    fn take_trap(&mut self) -> Result<(), WasmError> {
+        let words = self.vmctx_read_bytes(VMCTX_OFFSET_FUEL + 4, 8)?;
+        let invocation = u32::from_le_bytes(words[0..4].try_into().expect("4 bytes"));
+        let trap = u32::from_le_bytes(words[4..8].try_into().expect("4 bytes"));
+        if trap == TRAP_CODE_NONE {
+            Ok(())
+        } else {
+            Err(WasmError::Trap {
+                code: trap,
+                invocation,
+            })
+        }
     }
 
     fn resolve_render_texture(&mut self, fn_name: &str) -> Result<Function, WasmError> {
@@ -295,9 +335,9 @@ impl LpvmInstance for BrowserLpvmInstance {
             )
         };
 
-        let result = func
-            .apply(&JsValue::NULL, &js_args)
-            .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+        let call_result = func.apply(&JsValue::NULL, &js_args);
+        self.take_trap()?;
+        let result = call_result.map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
 
         if let Some(frame) = shadow_frame {
             browser_shadow_frame_close(&self.exports_obj, frame)?;
@@ -379,9 +419,9 @@ impl LpvmInstance for BrowserLpvmInstance {
             )
         };
 
-        let result = func
-            .apply(&JsValue::NULL, &js_args)
-            .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+        let call_result = func.apply(&JsValue::NULL, &js_args);
+        self.take_trap()?;
+        let result = call_result.map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
 
         if let Some(frame) = shadow_frame {
             browser_shadow_frame_close(&self.exports_obj, frame)?;
@@ -433,8 +473,9 @@ impl LpvmInstance for BrowserLpvmInstance {
         js_args.push(&JsValue::from_f64(f64::from(height as i32)));
 
         self.prepare_call()?;
-        func.apply(&JsValue::NULL, &js_args)
-            .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+        let call_result = func.apply(&JsValue::NULL, &js_args);
+        self.take_trap()?;
+        call_result.map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
         Ok(())
     }
 
@@ -472,8 +513,9 @@ impl LpvmInstance for BrowserLpvmInstance {
         js_args.push(&JsValue::from_f64(f64::from(count as i32)));
 
         self.prepare_call()?;
-        func.apply(&JsValue::NULL, &js_args)
-            .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+        let call_result = func.apply(&JsValue::NULL, &js_args);
+        self.take_trap()?;
+        call_result.map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
         Ok(())
     }
 
@@ -520,8 +562,9 @@ impl LpvmInstance for BrowserLpvmInstance {
         self.prepare_call()?;
         let args = js_sys::Array::new();
         args.push(&JsValue::from_f64(0.0));
-        func.apply(&JsValue::NULL, &args)
-            .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+        let call_result = func.apply(&JsValue::NULL, &args);
+        self.take_trap()?;
+        call_result.map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
         Ok(())
     }
 }

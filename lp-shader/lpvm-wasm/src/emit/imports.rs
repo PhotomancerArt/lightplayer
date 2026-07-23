@@ -28,7 +28,8 @@ fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
         for op in &f.body {
             if let LpirOp::Call { callee, .. } = op {
                 if let CalleeRef::Import(ImportId(i)) = callee {
-                    if (*i as u32) < n {
+                    // Inline-lowered builtins never become wasm imports.
+                    if (*i as u32) < n && !import_is_inline_get_fuel(ir, *i as usize) {
                         used.insert(*i as u32);
                     }
                 }
@@ -50,6 +51,42 @@ fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
     }
 
     used
+}
+
+/// True if the import resolves to [`BuiltinId::LpVmGetFuelQ32`].
+///
+/// The wasm emitter inlines this builtin as a direct load of the vmctx fuel
+/// low word (see the `LpirOp::Call` arm in `ops.rs`) instead of calling an
+/// import: the native `__lp_vm_get_fuel_q32` reads the header through a
+/// pointer, which can never work on the wasm hosts — there the vmctx block
+/// sits at linear-memory offset 0, and Rust rejects address-0 dereferences
+/// (a hard "null pointer dereference" trap in debug builds, UB in release).
+/// Inlined calls are not "used" imports, so the import section omits the
+/// entry entirely.
+pub(crate) fn import_is_inline_get_fuel(ir: &LpirModule, import_idx: usize) -> bool {
+    ir.imports
+        .get(import_idx)
+        .is_some_and(|d| resolve_builtin_id(d).is_ok_and(|id| id == BuiltinId::LpVmGetFuelQ32))
+}
+
+/// True if any function calls the inline-lowered `__lp_get_fuel` builtin —
+/// the emitted load touches linear memory, so the module needs `env.memory`
+/// even when nothing else does.
+pub(crate) fn module_inlines_get_fuel(ir: &LpirModule) -> bool {
+    for f in ir.functions.values() {
+        for op in &f.body {
+            if let LpirOp::Call {
+                callee: CalleeRef::Import(ImportId(i)),
+                ..
+            } = op
+            {
+                if import_is_inline_get_fuel(ir, *i as usize) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// LPIR ops whose Q32 lowering resolves to a builtin import call at emit time:

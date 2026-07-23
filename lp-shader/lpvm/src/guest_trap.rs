@@ -22,9 +22,8 @@ pub struct GuestTrap {
 /// Structured guest-trap details on an [`crate::LpvmInstance::Error`].
 ///
 /// Backends whose calls can end in a guest trap (lpvm-native's rt_jit /
-/// rt_emu) return `Some`; backends without the vmctx trap contract keep the
-/// default `None` (wasmtime meters its own store fuel — an accepted
-/// divergence documented in the fuel ADR).
+/// rt_emu, lpvm-wasm's hosts) return `Some`; backends without the vmctx
+/// trap contract keep the default `None`.
 pub trait GuestTrapError {
     /// The guest trap behind this error, if that is what it is.
     fn guest_trap(&self) -> Option<GuestTrap> {

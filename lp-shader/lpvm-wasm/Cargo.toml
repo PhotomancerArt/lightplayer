@@ -29,4 +29,6 @@ wasm-bindgen = "0.2"
 [dev-dependencies]
 lps-frontend = { path = "../lps-frontend" }
 lps-glsl = { path = "../lps-glsl" }
+# Real synth render wrappers for the rt_wasmtime per-invocation fuel tests.
+lp-shader = { path = "../lp-shader" }
 wasmtime = "42"
