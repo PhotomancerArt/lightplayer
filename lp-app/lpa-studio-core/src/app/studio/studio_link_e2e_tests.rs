@@ -795,6 +795,219 @@ fn device_rename_reconciles_registry_name_over_the_link() {
     );
 }
 
+/// Row 12 (P2 coexistence): a fake device connected through the real link
+/// AND a project opened on the sim — both sessions live in the pool at
+/// once. The old `open_from_home` hardware refusal is gone: the open
+/// succeeds, the editor mirror lands on the SIM session (lens), the device
+/// session keeps its connect-time classification (`device_sync` intact), a
+/// slot-edit round-trips over the sim's wire, and the device's slow status
+/// heartbeat drains a buffered console line into the ring.
+///
+/// Host builds have no browser-worker provider, so the sim session is
+/// installed through the stub seam with an in-process server client; the
+/// open itself still runs the REAL `open_from_home` reuse path.
+#[test]
+fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
+    use super::studio_edit_e2e_tests::{
+        InProcessServerIo, edit_e2e_files, edit_e2e_server, find_slot, slot_value_display,
+    };
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, SlotEditOp, StudioServerClient, UiLogDraft, UiLogLevel, UiLogOrigin};
+    use lpc_model::LpValue;
+    use std::collections::VecDeque;
+
+    let (store, host) = library();
+    // "Porch" runs on the DEVICE; "Sign" (the edit-e2e node graph, so a
+    // slot exists to edit) opens on the SIM.
+    let porch = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let porch_files = store.open(porch.uid).unwrap().read_all_files().unwrap();
+    let sign = store
+        .install_package(
+            "Sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(porch_files)
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
+    assert!(
+        matches!(
+            studio.device_sync().map(|sync| &sync.content),
+            Some(DeviceContent::Known { .. })
+        ),
+        "the device classifies before the open"
+    );
+
+    // The sim session, alongside the device (an in-process server client
+    // stands in for the browser worker on host).
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let sim_id = studio.install_stub_sim_with_client_for_test(
+        StudioServerClient::from_io_for_test("in-process", Box::new(io)),
+    );
+
+    // THE forcing case: opening a project with a device attached used to
+    // refuse ("disconnect the device to open this project"). Now it opens
+    // on the sim while the device stays attached.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            key: sign.uid.to_string(),
+        },
+    )))
+    .expect("opening a project with a device attached no longer refuses");
+
+    // Both sessions in the pool; the lens (editor mirror) is on the sim.
+    let pool = studio.runtime_pool_for_test();
+    assert!(pool.device_session().is_some(), "device session survives");
+    assert!(pool.sim_session().is_some(), "sim session exists");
+    assert_eq!(pool.lens(), Some(sim_id), "the editor is a lens on the sim");
+    // The device session is still classified: device_sync intact.
+    let sync = studio.device_sync().expect("device_sync survives the open");
+    let DeviceContent::Known { slug, relation, .. } = &sync.content else {
+        panic!("device stays classified, got {:?}", sync.content);
+    };
+    assert_eq!(slug, &porch.slug);
+    assert_eq!(*relation, lpc_history::SyncRelation::AtHead);
+
+    // The editor mirror is live on the sim: a slot-edit round-trips.
+    let view = studio.view();
+    assert!(view.home.is_none(), "the open left the gallery");
+    let rate = find_slot(&view, "controls.rate");
+    let address = rate.address.clone().expect("rate slot carries an address");
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        SlotEditOp::SetValue {
+            address,
+            value: LpValue::F32(2.0),
+        },
+    )))
+    .expect("slot edit lands on the sim session");
+    let view = studio.view();
+    assert_eq!(slot_value_display(find_slot(&view, "controls.rate")), "2");
+
+    // The device heartbeat drains a buffered console line into the ring…
+    studio.push_device_console_log_for_test(UiLogDraft::new(
+        UiLogLevel::Info,
+        UiLogOrigin::Device,
+        "standalone frame tick",
+    ));
+    studio.run_due_heartbeats();
+    assert!(
+        studio
+            .logs()
+            .iter()
+            .any(|entry| entry.message == "standalone frame tick"),
+        "the first heartbeat drains the device session's console buffer"
+    );
+    // …and stays SLOW: a line buffered right after is not drained until
+    // the heartbeat interval elapses (the fixed test clock never advances).
+    studio.push_device_console_log_for_test(UiLogDraft::new(
+        UiLogLevel::Info,
+        UiLogOrigin::Device,
+        "buffered until the next heartbeat",
+    ));
+    studio.run_due_heartbeats();
+    assert!(
+        !studio
+            .logs()
+            .iter()
+            .any(|entry| entry.message == "buffered until the next heartbeat"),
+        "a heartbeat inside the interval drains nothing"
+    );
+}
+
+/// Row 13 (papercut, defect 2026-07-23): the deploy dialog opened from a
+/// device card with NO explicit target, while the device runs a project
+/// the library KNOWS, pre-targets that project — landing on Reviewing
+/// instead of ChoosingPackage. Choosing a DIFFERENT project stays
+/// reachable from Reviewing.
+#[test]
+fn deploy_dialog_pre_targets_the_running_project() {
+    let (store, host) = library();
+    let porch = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let porch_files = store.open(porch.uid).unwrap().read_all_files().unwrap();
+    let other = store
+        .install_package(
+            "Other",
+            &project_files("v-other"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(porch_files)
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    let DeployState::Reviewing {
+        target, on_device, ..
+    } = deploy_state(&studio)
+    else {
+        panic!(
+            "a device running a known project opens on Reviewing, got {:?}",
+            deploy_state(&studio)
+        );
+    };
+    assert_eq!(target.slug, porch.slug, "the running project is the target");
+    assert!(
+        matches!(on_device, DeviceContent::Known { .. }),
+        "the review shows what the device holds"
+    );
+
+    // The default never removes the choice: a different project remains
+    // one ChoosePackage away.
+    drive(studio.dispatch(deploy_action(DeployOp::ChoosePackage {
+        key: other.uid.to_string(),
+    })))
+    .unwrap();
+    let DeployState::Reviewing { target, .. } = deploy_state(&studio) else {
+        panic!("choosing re-reviews, got {:?}", deploy_state(&studio));
+    };
+    assert_eq!(target.slug, other.slug);
+}
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
@@ -865,9 +1078,15 @@ fn deploy_state(studio: &StudioController) -> DeployState {
 }
 
 fn library() -> (LibraryStore, Rc<MemoryLibraryHost>) {
+    // Counter-based uid bytes: rows installing MORE than one package need
+    // distinct `prj_` uids (a fixed byte pattern would collide them).
+    let counter = Rc::new(RefCell::new(6u8));
     let store = LibraryStore::new(
         Rc::new(RefCell::new(LpFsMemory::new())),
-        Rc::new(|| [7u8; 16]),
+        Rc::new(move || {
+            *counter.borrow_mut() += 1;
+            [*counter.borrow(); 16]
+        }),
         Rc::new(|| "2026-07-14-0900".to_string()),
     );
     let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 1.0)));

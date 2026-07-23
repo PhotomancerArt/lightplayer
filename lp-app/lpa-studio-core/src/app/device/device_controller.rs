@@ -68,8 +68,11 @@ pub struct DeviceController {
     /// builds with no hardware connectors; the web shell installs its
     /// gloo-backed timers at startup and tests install poll timers.
     timers: DeviceTimers,
-    /// Device console lines observed by the live session's event sink,
-    /// drained into the studio log ring by the controller.
+    /// The MOST RECENT hardware connect's console-log buffer. A fresh
+    /// buffer is minted per connect and travels with the session payload
+    /// (per-session routing, runtime-pool P2); this alias covers the
+    /// window before the payload lands in the pool — and failed connects,
+    /// whose captured boot chatter would otherwise be lost.
     pending_device_logs: Rc<RefCell<Vec<UiLogDraft>>>,
 }
 
@@ -155,17 +158,6 @@ impl DeviceController {
             .into_iter()
             .map(|descriptor| descriptor.kind)
             .collect()
-    }
-
-    /// Transport label for the CONNECTED device flow ("USB" for serial
-    /// classes), from the connector class metadata. The caller guards on
-    /// the pool's runtime kind — the simulator's flow must never surface a
-    /// transport (never a device — D22).
-    pub(crate) fn transport_label(&self) -> Option<&'static str> {
-        match &self.flow {
-            ConnectFlowState::Connected { device } => device.provider_id.transport_label(),
-            _ => None,
-        }
     }
 
     /// Drain the console drafts buffered by the session's event sink.
@@ -424,12 +416,24 @@ impl DeviceController {
         let result = if provider_id == LinkProviderKind::BrowserWorker {
             open_sim_attachment(connector, &endpoint_id).await
         } else {
-            let sink = console_event_sink(Rc::clone(&self.pending_device_logs));
+            // Per-session console-log routing (runtime-pool P2): mint a
+            // fresh buffer for this connect; the session payload carries
+            // it, and the controller field aliases it for the window
+            // before the pool holds the session (and for failed connects).
+            let console_logs = Rc::new(RefCell::new(Vec::new()));
+            self.pending_device_logs = Rc::clone(&console_logs);
+            let sink = console_event_sink(Rc::clone(&console_logs));
             match DeviceSession::connect(connector, &endpoint_id, self.timers.clone(), sink).await {
                 Ok(session) => {
                     let connector = session.connector();
                     let logs = link_session_logs(&connector, session.session().id())?;
-                    Ok((RuntimePayload::Device(DeviceHandle::Session(session)), logs))
+                    Ok((
+                        RuntimePayload::Device(DeviceHandle::Session {
+                            session,
+                            console_logs,
+                        }),
+                        logs,
+                    ))
                 }
                 Err(error) => Err(map_link_error(error)),
             }

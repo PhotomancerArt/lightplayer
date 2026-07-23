@@ -294,6 +294,11 @@ fn device_connect_pulls_classifies_and_adopts() {
     };
     let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
     let mut controller = StudioController::connected_with_client_for_test(client);
+    // Device reconcile targets the DEVICE session (runtime-pool P2), so
+    // this stand-in must be device-kind, not the sim stub.
+    controller.set_stub_device_for_test(
+        crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+    );
 
     let store = LibraryStore::new(
         Rc::new(RefCell::new(LpFsMemory::new())),
@@ -1492,7 +1497,13 @@ fn accepted_apply_tightens_the_next_refresh_delay() {
         sent: Rc::new(RefCell::new(Vec::new())),
     };
     let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    // Cadence is per-session KIND (runtime-pool P2): a device-kind lens
+    // runs the calm interval the chase window tightens; the sim's 33 ms
+    // interval is already tighter than the chase.
+    controller.set_stub_device_for_test(
+        crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+    );
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
@@ -1504,7 +1515,7 @@ fn accepted_apply_tightens_the_next_refresh_delay() {
     assert_eq!(
         handle.delay.get(),
         DEVICE_REFRESH_INTERVAL,
-        "the fake link runs at device cadence before any apply"
+        "a device-kind lens session runs at device cadence before any apply"
     );
 
     let tab = find_asset_editor(&snapshot);
@@ -1915,7 +1926,7 @@ fn device_e2e_server() -> LpServer {
     )
 }
 
-fn edit_e2e_server() -> LpServer {
+pub(crate) fn edit_e2e_server() -> LpServer {
     let mut server = device_e2e_server();
 
     for (name, body) in edit_e2e_files() {
@@ -1931,7 +1942,7 @@ fn edit_e2e_server() -> LpServer {
     server
 }
 
-fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
+pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
         (
             "project.json",
@@ -2073,7 +2084,7 @@ fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
 }
 
 /// Find a config slot anywhere in the editor DTO tree by its address path.
-fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
+pub(crate) fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
     try_find_slot(view, path).unwrap_or_else(|| panic!("config slot with path {path} should exist"))
 }
 
@@ -2132,7 +2143,7 @@ fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigS
         .or_else(|| in_slots(&editor.root_slots, path))
 }
 
-fn slot_value_display(slot: &UiConfigSlot) -> &str {
+pub(crate) fn slot_value_display(slot: &UiConfigSlot) -> &str {
     let UiConfigSlotBody::Value(value) = &slot.body else {
         panic!("expected a value body for {}", slot.label);
     };
@@ -2148,10 +2159,10 @@ fn slot_editor_hint(slot: &UiConfigSlot) -> &UiSlotEditorHint {
 
 /// `ClientIo` that pumps each client message through the in-process server's
 /// `tick_and_send` and queues the produced frames for `receive`.
-struct InProcessServerIo {
-    server: Rc<RefCell<LpServer>>,
-    inbox: Rc<RefCell<VecDeque<WireServerMessage>>>,
-    sent: Rc<RefCell<Vec<ClientMessage>>>,
+pub(crate) struct InProcessServerIo {
+    pub(crate) server: Rc<RefCell<LpServer>>,
+    pub(crate) inbox: Rc<RefCell<VecDeque<WireServerMessage>>>,
+    pub(crate) sent: Rc<RefCell<Vec<ClientMessage>>>,
 }
 
 impl ClientIo for InProcessServerIo {

@@ -75,8 +75,8 @@ pub use app::roster::{
     RosterEvidence, derive_roster_card_state, device_rich_object, firmware_update_available,
 };
 pub use app::runtime_pool::{
-    DeviceHandle, RuntimeId, RuntimeKind, RuntimePayload, RuntimePool, RuntimeSession,
-    SimAttachment,
+    DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,
+    RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
@@ -84,12 +84,13 @@ pub use app::server::{
     StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
-    ConsoleCommand, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing,
-    RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK, StudioActor, StudioCommand,
-    StudioController, StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver,
-    StudioViewSender, UiConsoleView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
-    UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
-    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, studio_view_channel,
+    ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
+    LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,
+    StudioActor, StudioCommand, StudioController, StudioHandle, StudioLogSink, StudioSnapshot,
+    StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLogDraft, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget,
+    UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher,
+    studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

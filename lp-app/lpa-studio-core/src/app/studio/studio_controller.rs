@@ -4,7 +4,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use lpa_client::{CancelSignal, ProgressDeadline};
-use lpa_link::{DeviceState, LinkManagementRequest, LinkManagementResult, LinkProviderKind};
+use lpa_link::{
+    DeviceState, LinkManagementRequest, LinkManagementResult, LinkProvider, LinkProviderKind,
+};
 
 use crate::app::device::device_controller::DeviceRuntimeEvidence;
 use crate::app::device::device_event_adapter::management_event_sink;
@@ -34,10 +36,10 @@ use crate::{
 pub struct StudioController {
     device: DeviceController,
     /// The runtime sessions the studio is attached to, plus the editor
-    /// lens. P1 of the runtime-pool milestone: at most one session, and
-    /// attach still replaces; every network op resolves its wire client
-    /// through one of the pool's two named seams (lens-bound editor ops vs
-    /// session-targeted device/deploy/reconcile ops).
+    /// lens. P2 of the runtime-pool milestone: one sim AND one device
+    /// session coexist under the capacity policy; every network op
+    /// resolves its wire client through one of the pool's two named seams
+    /// (lens-bound editor ops vs device-targeted deploy/reconcile ops).
     pool: RuntimePool,
     project: ProjectController,
     /// Bounded, chronological log buffer. Capped in core (P3/Q5) rather than in
@@ -229,42 +231,117 @@ impl StudioController {
     }
 
     /// Transport label for the attached HARDWARE device ("USB" for serial
-    /// classes). `None` when nothing is attached or the runtime is the
-    /// simulator (never a device — D22): the kind guard reads the pool,
-    /// the label reads the connect flow.
+    /// classes), derived from the device SESSION's link record — never
+    /// from the shared connect flow, which the sim's open may have moved
+    /// on (P2 coexistence). `None` when no hardware is attached (the sim
+    /// is never a device — D22).
     fn transport_label(&self) -> Option<&'static str> {
-        if !self.is_hardware_attached() {
-            return None;
-        }
-        self.device.transport_label()
+        self.pool
+            .device_session()?
+            .payload()
+            .link_session()?
+            .provider_kind
+            .transport_label()
     }
 
     /// The pool-derived runtime evidence the device pane renders from.
+    /// The server-protocol slice is the DEVICE session's when hardware is
+    /// attached (the pane is about hardware), the lens session's otherwise
+    /// (the "Running in the simulator" ambient line).
     fn device_runtime_evidence(&self) -> DeviceRuntimeEvidence {
+        let server_state = match self.pool.device_session() {
+            Some(device) => device.server_state().clone(),
+            None => self.server_snapshot().state,
+        };
         DeviceRuntimeEvidence {
             is_hardware: self.is_hardware_attached(),
             is_sim: self.pool.sim_session().is_some(),
             device_state: self.device_state(),
-            server_state: self.server_snapshot().state,
+            server_state,
         }
     }
 
-    /// The passive-refresh cadence for the current connection, as data (P4/Q3).
+    /// The delay before the next passive tick: the MINIMUM over sessions
+    /// (runtime-pool P2, per-session tick policy).
     ///
-    /// The actor publishes this to the UI timer so the interval policy lives in
-    /// core, not as a `LinkProviderKind` match in the view layer.
-    pub fn refresh_cadence(&self) -> RefreshCadence {
-        RefreshCadence::for_flow_state(self.device.flow_state())
+    /// - The LENS session contributes its kind cadence (sim fast, device
+    ///   calm) tightened to the verdict-chase interval while a
+    ///   just-accepted asset apply awaits its compile verdict, plus its
+    ///   own passive-refresh backoff.
+    /// - Non-lens DEVICE sessions contribute the time until their next
+    ///   slow status heartbeat.
+    /// - Non-lens SIM sessions tick nothing (self-ticking worker).
+    /// - An empty pool falls back to the calm device interval, matching
+    ///   the retired disconnected default.
+    pub fn next_refresh_interval(&self) -> core::time::Duration {
+        let now = (self.now_secs)();
+        let lens = self.pool.lens();
+        let mut delay: Option<Duration> = None;
+        for session in self.pool.sessions() {
+            let candidate = if Some(session.id()) == lens {
+                let cadence = session.cadence_interval();
+                let cadence = match self.project.verdict_chase_interval() {
+                    Some(chase) => cadence.min(chase),
+                    None => cadence,
+                };
+                cadence.saturating_add(session.backoff_delay())
+            } else if session.is_device() {
+                session.heartbeat_due_in(now)
+            } else {
+                continue;
+            };
+            delay = Some(delay.map_or(candidate, |current| current.min(candidate)));
+        }
+        delay.unwrap_or_else(|| RefreshCadence::default().interval())
     }
 
-    /// The delay before the next passive tick: the connection cadence,
-    /// tightened to the verdict-chase interval while a just-accepted asset
-    /// apply awaits its compile verdict (the auto-apply post-ack refresh).
-    pub fn next_refresh_interval(&self) -> core::time::Duration {
-        let cadence = self.refresh_cadence().interval();
-        match self.project.verdict_chase_interval() {
-            Some(chase) => cadence.min(chase),
-            None => cadence,
+    /// Record a passive project-refresh outcome on the LENS session's
+    /// backoff (only the lens runs the fallible project pull).
+    pub fn record_passive_refresh_success(&mut self) {
+        if let Ok(session) = self.pool.lens_session_mut() {
+            session.record_refresh_success();
+        }
+    }
+
+    /// See [`Self::record_passive_refresh_success`].
+    pub fn record_passive_refresh_failure(&mut self) {
+        if let Ok(session) = self.pool.lens_session_mut() {
+            session.record_refresh_failure();
+        }
+    }
+
+    /// The lens session's current passive-refresh backoff delay (zero
+    /// while healthy or with no lens session).
+    pub fn passive_refresh_backoff(&self) -> Duration {
+        self.pool
+            .lens_session()
+            .map(crate::RuntimeSession::backoff_delay)
+            .unwrap_or(Duration::ZERO)
+    }
+
+    /// Run the slow status heartbeat on every DEVICE session whose
+    /// interval elapsed (runtime-pool P2): drain the session's buffered
+    /// wire and console log lines into the ring and surface device-state
+    /// changes through the change gate. No wire operation rides a
+    /// heartbeat — the session's background monitor fills the buffers —
+    /// so a tick that fans into lens-refresh + heartbeats still issues at
+    /// most one wire op per session.
+    pub fn run_due_heartbeats(&mut self) {
+        let now = (self.now_secs)();
+        let mut drained = Vec::new();
+        let mut state_changed = false;
+        for session in self.pool.sessions_mut() {
+            if !session.is_device() || !session.heartbeat_due(now) {
+                continue;
+            }
+            session.mark_heartbeat(now);
+            drained.extend(session.take_pending_logs());
+            drained.extend(session.take_device_console_logs());
+            state_changed |= session.note_device_state_change();
+        }
+        self.record_logs(drained);
+        if state_changed {
+            self.mark_dirty();
         }
     }
 
@@ -322,12 +399,14 @@ impl StudioController {
         ))
     }
 
-    /// The single live session's roster evidence (M3; M4's runtime pool
-    /// replaces this assembly with per-runtime evidence).
+    /// The live DEVICE session's roster evidence (M3; P4 of the runtime
+    /// pool replaces this assembly with per-runtime evidence). Device
+    /// reconcile state reads the device session — never the lens, which
+    /// may be on the sim (P2 coexistence).
     fn home_device_evidence(&self) -> crate::app::home::HomeDeviceEvidence {
         let (observed_version, head_version) = self
             .pool
-            .lens_session()
+            .device_session()
             .map(crate::RuntimeSession::device_versions)
             .unwrap_or((None, None));
         crate::app::home::HomeDeviceEvidence {
@@ -513,13 +592,13 @@ impl StudioController {
     }
 
     /// What the attached device holds (connect-as-pull result), for the
-    /// pane, cards, and deploy dialog. `None` while disconnected or when
-    /// the runtime is the simulator. A pool read since the runtime-pool
-    /// extraction: the reconcile bundle lives on the session (P1: the sole
-    /// one), same external signature as the retired controller field.
+    /// pane, cards, and deploy dialog. `None` while no hardware is
+    /// attached (the sim carries no reconcile bundle — D22). A pool read
+    /// since the runtime-pool extraction: the bundle lives on the DEVICE
+    /// session, wherever the lens is (P2 coexistence).
     pub fn device_sync(&self) -> Option<&DeviceSyncState> {
         self.pool
-            .lens_session()
+            .device_session()
             .and_then(crate::RuntimeSession::device_sync)
     }
 
@@ -954,9 +1033,16 @@ impl StudioController {
         let device_state = self.device_state();
         let device_link_connected =
             self.is_hardware_attached() && !matches!(device_state, Some(DeviceState::Gone));
+        // The server-protocol read targets the DEVICE session — the dialog
+        // conceptually targets hardware, and the lens may be on the sim
+        // (P2 coexistence).
+        let device_server_connected = self
+            .pool
+            .device_session()
+            .is_some_and(|session| matches!(session.server_state(), ServerState::Connected { .. }));
         let firmware_available = device_link_connected
             && matches!(device_state, Some(DeviceState::Ready { .. }))
-            && self.has_lightplayer_state();
+            && device_server_connected;
         crate::app::device::DeployEnvironment {
             device_link_connected,
             firmware_available,
@@ -1002,7 +1088,22 @@ impl StudioController {
             DeployOp::OpenDialog { target_key } => {
                 let target = match target_key {
                     Some(key) => Some(self.resolve_deploy_target(&key).await?),
-                    None => None,
+                    // No explicit target: when the device already runs a
+                    // project the library KNOWS, default the dialog onto it
+                    // — the review step, not the picker (an honest default;
+                    // choosing a different project stays one click away in
+                    // Reviewing). A failed resolve (project deleted, no
+                    // library) falls back to the picker.
+                    None => match self.device_sync().map(|sync| &sync.content) {
+                        Some(
+                            DeviceContent::Known { project_uid, .. }
+                            | DeviceContent::Adopted { project_uid, .. },
+                        ) => {
+                            let uid = project_uid.clone();
+                            self.resolve_deploy_target(&uid).await.ok()
+                        }
+                        _ => None,
+                    },
                 };
                 self.deploy = Some(DeploySession::open(&self.deploy_environment(), target));
                 Ok(UiNotices::new())
@@ -1277,7 +1378,7 @@ impl StudioController {
         {
             let storage_id = self
                 .pool
-                .lens_session()
+                .device_session()
                 .and_then(|session| session.device_storage_id().map(str::to_string))
                 .unwrap_or_else(|| {
                     crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
@@ -1494,7 +1595,19 @@ impl StudioController {
             DeviceOp::DisconnectLightPlayer => self.disconnect_lightplayer().await,
             DeviceOp::SetLogLevel { level } => self.set_device_log_level(level).await,
             DeviceOp::ResetDevice => self.reset_device(updates).await,
-            DeviceOp::ConnectLightPlayer => self.connect_server_from_link(updates).await,
+            DeviceOp::ConnectLightPlayer => {
+                // A device-pane op: target the hardware session when one
+                // exists; the lens session (the sim's reconnect) otherwise.
+                let id = self
+                    .pool
+                    .device_session()
+                    .map(crate::RuntimeSession::id)
+                    .or_else(|| self.pool.lens())
+                    .ok_or_else(|| {
+                        UiError::MissingSession("link connection is not open".to_string())
+                    })?;
+                self.connect_server_from_link(id, updates).await
+            }
             DeviceOp::ProvisionFirmware => self.provision_firmware(updates).await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
             DeviceOp::RefreshConnections => {
@@ -1518,7 +1631,8 @@ impl StudioController {
                     );
                 }
                 let outcome = self.device.open_provider(provider_id).await;
-                self.settle_connect_outcome(outcome, updates).await
+                self.settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
+                    .await
             }
             DeviceOp::ConnectEndpoint {
                 provider_id,
@@ -1536,44 +1650,73 @@ impl StudioController {
                     .connect_endpoint(provider_id, endpoint_id)
                     .await
                     .map(|(payload, logs)| DeviceOpenOutcome::Connected { payload, logs });
-                self.settle_connect_outcome(outcome, updates).await
+                self.settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
+                    .await
             }
             // One-click reconnect (M1): no activity chip up front — the flow
             // may fall back to the browser's port chooser, which blocks like
             // the browser-serial OpenProvider path.
             DeviceOp::ReconnectDevice { uid } => {
                 let outcome = self.device.reconnect_granted_device(uid).await;
-                self.settle_connect_outcome(outcome, updates).await
+                self.settle_connect_outcome(crate::RuntimeKind::Device, outcome, updates)
+                    .await
             }
         }
     }
 
-    /// Land a connect flow's outcome in the pool, mirroring the retired
-    /// single-slot behavior: only a live payload leaves a session behind
-    /// (`Opened`, `Cancelled`, and failures all ended with the attachment
-    /// slot empty), and attach still replaces (P1 capacity).
+    /// Land a connect flow's outcome in the pool. P2 capacity semantics:
+    /// only the KIND being connected is touched — `Opened`, `Cancelled`,
+    /// and failures clear that kind's slot (matching the retired
+    /// empty-slot endings), a live payload installs kind-aware (the other
+    /// kind's session stays attached).
     async fn settle_connect_outcome(
         &mut self,
+        kind: crate::RuntimeKind,
         outcome: Result<DeviceOpenOutcome, UiError>,
         updates: UxUpdateSink,
     ) -> UiResult {
         match outcome {
             Ok(DeviceOpenOutcome::Opened) => {
-                self.pool.clear();
+                self.pool.remove_kind(kind);
                 Ok(UiNotices::new())
             }
             Ok(DeviceOpenOutcome::Cancelled { message }) => {
-                self.pool.clear();
+                self.pool.remove_kind(kind);
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
-                self.pool.install(payload);
-                self.attach_runtime(updates).await
+                let id = self.install_session(payload).await?;
+                self.attach_runtime(id, updates).await
             }
             Err(error) => {
-                self.pool.clear();
+                self.pool.remove_kind(kind);
                 Err(error)
+            }
+        }
+    }
+
+    /// Install a connected payload into the pool under the capacity
+    /// policy. A refusal (an operation is still in flight on the session
+    /// that would be replaced — DQ-A swap semantics) closes the fresh
+    /// payload so its session doesn't leak, then surfaces the refusal.
+    async fn install_session(
+        &mut self,
+        payload: crate::RuntimePayload,
+    ) -> Result<crate::RuntimeId, UiError> {
+        match self.pool.install(payload) {
+            Ok(id) => Ok(id),
+            Err(refusal) => {
+                let message = refusal.message;
+                match refusal.payload {
+                    crate::RuntimePayload::Sim(sim) => {
+                        let _ = sim.connector.close(&sim.session.id).await;
+                    }
+                    crate::RuntimePayload::Device(handle) => {
+                        let _ = handle.close().await;
+                    }
+                }
+                Err(UiError::UnsupportedAction(message))
             }
         }
     }
@@ -1763,19 +1906,14 @@ impl StudioController {
         })
     }
 
-    /// Open a home card: push the package's head to the simulator, starting
-    /// the simulator first when nothing is connected (D13: a library card
-    /// opens in the sim; the sim is invisible infrastructure).
+    /// Open a home card: push the package's head to the simulator,
+    /// creating or reusing THE sim session (D13: a library card opens in
+    /// the sim; the sim is invisible infrastructure). A connected hardware
+    /// device simply stays attached and reconciled while the project opens
+    /// (P2 coexistence — the old "disconnect the device to open this
+    /// project" refusal is gone).
     async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
         self.library_host()?;
-        // a connected hardware device is M5's push flow, not an open
-        if self.is_hardware_attached() {
-            return Err(UiError::UnsupportedAction(
-                "Pushing to a connected device lands with the provision dialog (M5); \
-                 disconnect the device to open this project in the simulator"
-                    .to_string(),
-            ));
-        }
         self.pending_open = Some(pending);
         let result = self.open_from_home_inner(updates).await;
         self.pending_open = None;
@@ -1783,16 +1921,21 @@ impl StudioController {
     }
 
     async fn open_from_home_inner(&mut self, updates: UxUpdateSink) -> UiResult {
-        // already attached to the simulator: replace-and-load directly
-        if self.has_lightplayer_state() {
-            return self.open_pending_package(updates).await;
+        // The open targets THE sim session: reuse it when it exists — the
+        // lens moves onto it (the editor mirror opens on the sim) — and
+        // replace-and-load directly when its server protocol is live, or
+        // reconnect its server first when not.
+        if let Some(sim) = self.pool.sim_session() {
+            let sim_id = sim.id();
+            let server_live = matches!(sim.server_state(), ServerState::Connected { .. });
+            self.pool.set_lens(sim_id);
+            if server_live {
+                return self.open_pending_package(updates).await;
+            }
+            return self.connect_server_from_link(sim_id, updates).await;
         }
-        // an open sim attachment without a server session reconnects first;
-        // otherwise start the simulator — both paths run the pending open
-        // inside `attach_runtime`
-        if self.pool.has_session() {
-            return self.connect_server_from_link(updates).await;
-        }
+        // No sim yet: start the simulator runtime. A device session stays
+        // attached throughout — only the SIM slot is touched on failure.
         emit_activity(
             &updates,
             device_section_target(DeviceController::SECTION_DEVICE),
@@ -1807,21 +1950,21 @@ impl StudioController {
         match outcome {
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
-                self.pool.install(payload);
-                self.attach_runtime(updates).await
+                let id = self.install_session(payload).await?;
+                self.attach_runtime(id, updates).await
             }
             Ok(DeviceOpenOutcome::Opened) => {
-                self.pool.clear();
+                self.pool.remove_kind(crate::RuntimeKind::Sim);
                 Err(UiError::MissingSession(
                     "the simulator opened without connecting".to_string(),
                 ))
             }
             Ok(DeviceOpenOutcome::Cancelled { message }) => {
-                self.pool.clear();
+                self.pool.remove_kind(crate::RuntimeKind::Sim);
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             Err(error) => {
-                self.pool.clear();
+                self.pool.remove_kind(crate::RuntimeKind::Sim);
                 Err(error)
             }
         }
@@ -1945,7 +2088,9 @@ impl StudioController {
         updates: UxUpdateSink,
     ) -> UiResult {
         self.project.reset();
-        if let Ok(session) = self.pool.lens_session_mut() {
+        // Quiesce the DEVICE slot this recovery open replaces; a sim
+        // session is untouched (P2 coexistence).
+        if let Ok(session) = self.pool.device_session_mut() {
             session.disconnect_server();
         }
         emit_activity(
@@ -1958,13 +2103,13 @@ impl StudioController {
         let outcome = self.device.open_provider(provider_id).await;
         match outcome {
             Ok(DeviceOpenOutcome::Opened) => {
-                self.pool.clear();
+                self.pool.remove_kind(crate::RuntimeKind::Device);
                 Ok(UiNotices::new().with_notice(UiNotice::info(
                     "Choose the device endpoint to open for flashing",
                 )))
             }
             Ok(DeviceOpenOutcome::Cancelled { message }) => {
-                self.pool.clear();
+                self.pool.remove_kind(crate::RuntimeKind::Device);
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             // Recovery open: the DeviceSession exists (monitor/management
@@ -1972,41 +2117,51 @@ impl StudioController {
             // app protocol is deliberately NOT attached.
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
-                self.pool.install(payload);
+                self.install_session(payload).await?;
                 self.rederive_deploy();
                 updates.emit(UxUpdate::View(self.view()));
                 Ok(UiNotices::new().with_notice(UiNotice::info("Device opened for flashing")))
             }
             Err(error) => {
-                self.pool.clear();
+                self.pool.remove_kind(crate::RuntimeKind::Device);
                 Err(error)
             }
         }
     }
 
-    async fn connect_server_from_link(&mut self, updates: UxUpdateSink) -> UiResult {
-        if !self.pool.has_session() {
-            return Err(UiError::MissingSession(
-                "link connection is not open".to_string(),
-            ));
-        }
+    async fn connect_server_from_link(
+        &mut self,
+        id: crate::RuntimeId,
+        updates: UxUpdateSink,
+    ) -> UiResult {
         // A hardware session stuck in a terminal state needs a rebuilt link
         // generation before the server can attach (reconnect-that-rebuilds);
-        // Booting/Ready sessions attach directly.
-        let needs_reconnect = matches!(
-            self.device_state(),
-            Some(
-                DeviceState::Gone
-                    | DeviceState::Incompatible { .. }
-                    | DeviceState::Unresponsive { .. }
-                    | DeviceState::BlankFlash
-                    | DeviceState::Bootloader
-                    | DeviceState::ForeignFirmware
+        // Booting/Ready sessions (and the sim) attach directly.
+        let needs_reconnect = {
+            let Some(session) = self.pool.session(id) else {
+                return Err(UiError::MissingSession(
+                    "link connection is not open".to_string(),
+                ));
+            };
+            matches!(
+                session.device_state(),
+                Some(
+                    DeviceState::Gone
+                        | DeviceState::Incompatible { .. }
+                        | DeviceState::Unresponsive { .. }
+                        | DeviceState::BlankFlash
+                        | DeviceState::Bootloader
+                        | DeviceState::ForeignFirmware
+                )
             )
-        );
+        };
         if needs_reconnect {
-            self.project.reset();
-            if let Ok(session) = self.pool.lens_session_mut() {
+            // Quiesce the editor only when it is a lens on THIS session —
+            // a project open on the sim survives a device reconnect (P2).
+            if self.pool.lens() == Some(id) {
+                self.project.reset();
+            }
+            if let Some(session) = self.pool.session_mut(id) {
                 session.disconnect_server();
             }
             emit_activity(
@@ -2017,23 +2172,31 @@ impl StudioController {
                 "Resetting device before server connect",
             );
             let result = {
-                let session = self.hardware_session().ok_or_else(|| {
-                    UiError::MissingSession(
-                        "hardware attachment has no live device session".to_string(),
-                    )
-                })?;
+                let session = self
+                    .pool
+                    .session(id)
+                    .and_then(crate::RuntimeSession::hardware_session)
+                    .ok_or_else(|| {
+                        UiError::MissingSession(
+                            "hardware attachment has no live device session".to_string(),
+                        )
+                    })?;
                 session.reconnect().await
             };
             result.map_err(|error| UiError::Link(error.to_string()))?;
         }
-        self.attach_runtime(updates).await
+        self.attach_runtime(id, updates).await
     }
 
-    /// Attach the server protocol to the current runtime attachment (the
+    /// Attach the server protocol to the session `id`'s runtime (the
     /// device session's channel for hardware, worker io for the sim) and
     /// run the post-attach sequence: readiness probe, no-firmware /
     /// incompatible handling, connect-as-pull, deploy re-derivation.
-    async fn attach_runtime(&mut self, updates: UxUpdateSink) -> UiResult {
+    ///
+    /// Session-targeted throughout (P2): every state write lands on the
+    /// session being attached, never "the lens" — the lens may be on the
+    /// OTHER session while a device reconnects under an open sim project.
+    async fn attach_runtime(&mut self, id: crate::RuntimeId, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
             device_section_target(DeviceController::SECTION_DEVICE),
@@ -2045,12 +2208,14 @@ impl StudioController {
             updates.clone(),
             device_section_target(DeviceController::SECTION_DEVICE),
         );
-        let is_sim = self.pool.sim_session().is_some();
-        let attach_result = match self.pool.lens().and_then(|id| self.pool.session_mut(id)) {
-            Some(session) => session.attach_server(server_updates),
-            None => Err(UiError::MissingSession(
-                "link connection is not open".to_string(),
-            )),
+        let (is_sim, attach_result) = match self.pool.session_mut(id) {
+            Some(session) => (session.is_sim(), session.attach_server(server_updates)),
+            None => (
+                false,
+                Err(UiError::MissingSession(
+                    "link connection is not open".to_string(),
+                )),
+            ),
         };
         match attach_result {
             Ok(()) => {
@@ -2059,13 +2224,14 @@ impl StudioController {
                 updates.emit(UxUpdate::View(self.view()));
                 // a home-card open skips the running-project probe: opening
                 // is a push of the library head regardless of what runs
-                // (D19); the sim-only guard lives in `open_from_home`
+                // (D19) — always on the sim (the open flows target it and
+                // put the lens on it)
                 if self.pending_open.is_some() && is_sim {
                     let open_outcome = self.open_pending_package(updates).await?;
                     outcome.notices.extend(open_outcome.notices);
                     return Ok(outcome);
                 }
-                if is_sim && let Ok(session) = self.pool.lens_session_mut() {
+                if is_sim && let Some(session) = self.pool.session_mut(id) {
                     session.clear_reconcile();
                 }
                 emit_activity(
@@ -2092,20 +2258,25 @@ impl StudioController {
                     Err(error) => {
                         let pending_logs = self
                             .pool
-                            .lens_session_mut()
+                            .session_mut(id)
                             .map(|session| session.take_pending_logs())
                             .unwrap_or_default();
                         self.record_logs(pending_logs);
                         let device_logs = self.device.take_pending_device_logs();
                         self.record_logs(device_logs);
-                        self.project.reset();
+                        // Quiesce the editor only when it is a lens on the
+                        // failing session (P2: a project open on the sim
+                        // survives a failed device attach).
+                        if self.pool.lens() == Some(id) {
+                            self.project.reset();
+                        }
                         if matches!(error, UiError::NoFirmwareDetected(_)) {
                             self.push_log(UiLogDraft::new(
                                 UiLogLevel::Info,
                                 UiLogOrigin::Studio,
                                 "No LightPlayer firmware detected during server readiness",
                             ));
-                            if let Ok(session) = self.pool.lens_session_mut() {
+                            if let Some(session) = self.pool.session_mut(id) {
                                 session.fail_no_firmware();
                             }
                             // now the dialog's Blank state is the truth
@@ -2124,7 +2295,7 @@ impl StudioController {
                                 UiLogOrigin::Studio,
                                 format!("device firmware is incompatible: {error}"),
                             ));
-                            if let Ok(session) = self.pool.lens_session_mut() {
+                            if let Some(session) = self.pool.session_mut(id) {
                                 session.fail(error.to_string());
                             }
                             self.rederive_deploy();
@@ -2137,7 +2308,7 @@ impl StudioController {
                             UiLogOrigin::Studio,
                             format!("server readiness probe failed: {error}"),
                         ));
-                        if let Ok(session) = self.pool.lens_session_mut() {
+                        if let Some(session) = self.pool.session_mut(id) {
                             session.fail(error.to_string());
                         }
                         return Err(error);
@@ -2172,7 +2343,7 @@ impl StudioController {
                 Ok(outcome)
             }
             Err(error) => {
-                if let Ok(session) = self.pool.lens_session_mut() {
+                if let Some(session) = self.pool.session_mut(id) {
                     session.fail(error.to_string());
                 }
                 self.rederive_deploy();
@@ -2408,14 +2579,19 @@ impl StudioController {
 
     async fn disconnect_device(&mut self) -> UiResult {
         self.project.reset();
-        // Taking the session out of the pool drops its wire client, server
-        // state, and reconcile bundle with it; the controller closes the
-        // payload and resets the connect flow.
-        let payload = self
-            .pool
-            .take_sole_session()
-            .map(crate::RuntimeSession::into_payload);
-        self.device.disconnect(payload).await?;
+        // Taking a session out of the pool drops its wire client, server
+        // state, and reconcile bundle with it; the controller closes each
+        // payload and resets the connect flow. P2 interim: this tears down
+        // EVERY session (the gallery-return route policy dispatches it) —
+        // per-session teardown is P3's lens semantics.
+        let sessions = self.pool.take_all_sessions();
+        if sessions.is_empty() {
+            self.device.disconnect(None).await?;
+        } else {
+            for session in sessions {
+                self.device.disconnect(Some(session.into_payload())).await?;
+            }
+        }
         self.rederive_deploy();
         Ok(UiNotices::new().with_notice(UiNotice::info("Device disconnected")))
     }
@@ -2430,14 +2606,16 @@ impl StudioController {
     }
 
     /// Ask the connected server to apply `level` at runtime and record the
-    /// confirmation as a Server-origin log entry. The requested level is
-    /// tracked optimistically on the session (no wire read-back) so the
-    /// console's device selector reflects it; failure surfaces through the
-    /// normal action error path.
+    /// confirmation as a Server-origin log entry. The console's selector
+    /// shows the LENS session's level, so the request targets the lens
+    /// session's server (the runtime whose console the user is looking
+    /// at). The requested level is tracked optimistically on that session
+    /// (no wire read-back); failure surfaces through the normal action
+    /// error path.
     async fn set_device_log_level(&mut self, level: UiLogLevel) -> UiResult {
         let mut logs = self
             .pool
-            .device_session_mut()?
+            .lens_session_mut()?
             .client_mut()?
             .set_log_level(level)
             .await?;
@@ -2447,7 +2625,7 @@ impl StudioController {
             format!("device log level set to {}", level.label()),
         ));
         self.record_logs(logs);
-        if let Ok(session) = self.pool.device_session_mut() {
+        if let Ok(session) = self.pool.lens_session_mut() {
             session.set_requested_log_level(level);
         }
         Ok(UiNotices::new())
@@ -2514,9 +2692,23 @@ impl StudioController {
         spec: ManagementFlowSpec,
         updates: UxUpdateSink,
     ) -> UiResult {
-        self.project.reset();
-        if let Ok(session) = self.pool.lens_session_mut() {
+        let device_id = self
+            .pool
+            .device_session()
+            .map(crate::RuntimeSession::id)
+            .ok_or_else(|| {
+                UiError::MissingSession("no hardware device session for management".to_string())
+            })?;
+        // Quiesce the editor only when it is a lens on the device being
+        // managed (P2: a project open on the sim survives a flash/erase).
+        if self.pool.lens() == Some(device_id) {
+            self.project.reset();
+        }
+        if let Some(session) = self.pool.session_mut(device_id) {
             session.disconnect_server();
+            // The pool refuses a same-kind replace while this runs (DQ-A
+            // swap semantics); cleared when the manage half settles.
+            session.set_op_in_flight(true);
         }
         let captured_logs = Rc::new(RefCell::new(Vec::new()));
         let target = device_section_target(DeviceController::SECTION_DEVICE);
@@ -2536,11 +2728,23 @@ impl StudioController {
             Rc::clone(&captured_logs),
         );
         let manage_result = {
-            let session = self.hardware_session().ok_or_else(|| {
-                UiError::MissingSession("no hardware device session for management".to_string())
-            })?;
+            let session = match self.hardware_session() {
+                Some(session) => session,
+                None => {
+                    if let Some(session) = self.pool.session_mut(device_id) {
+                        session.set_op_in_flight(false);
+                    }
+                    return Err(UiError::MissingSession(
+                        "no hardware device session for management".to_string(),
+                    ));
+                }
+            };
             session.manage(spec.request, event_sink).await
         };
+        // The manage half settled (either way): session replaces unblock.
+        if let Some(session) = self.pool.session_mut(device_id) {
+            session.set_op_in_flight(false);
+        }
         let management = match manage_result {
             Ok(management) => management,
             Err(error) => {
@@ -2562,8 +2766,8 @@ impl StudioController {
             spec.reconnect_detail,
         );
         // The link was already rebuilt inside `manage`; what remains is the
-        // server reattach + post-attach sequence.
-        match self.attach_runtime(updates).await {
+        // server reattach + post-attach sequence on the managed session.
+        match self.attach_runtime(device_id, updates).await {
             Ok(mut attach_outcome) => {
                 outcome.notices.append(&mut attach_outcome.notices);
                 Ok(outcome)
@@ -2577,7 +2781,7 @@ impl StudioController {
                         spec.degrade_subject
                     ),
                 ));
-                if let Ok(session) = self.pool.lens_session_mut() {
+                if let Some(session) = self.pool.session_mut(device_id) {
                     session.fail(error.to_string());
                 }
                 Ok(outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice)))
@@ -2614,10 +2818,45 @@ impl StudioController {
         match self.pool.lens_session_mut() {
             Ok(session) => session.set_payload_for_test(payload),
             Err(_) => {
-                self.pool.install(payload);
+                self.pool
+                    .install(payload)
+                    .unwrap_or_else(|refusal| panic!("stub install refused: {}", refusal.message));
             }
         }
         self.device.set_stub_connected_flow_for_test();
+    }
+
+    /// Install a stubbed SIM session ALONGSIDE whatever is attached (the
+    /// P2 coexistence fixture — `set_stub_sim_for_test` would replace the
+    /// lens session's payload instead) and give it an injected wire
+    /// client. The lens lands on the sim, as `install` semantics dictate.
+    pub(crate) fn install_stub_sim_with_client_for_test(
+        &mut self,
+        client: crate::StudioServerClient,
+    ) -> crate::RuntimeId {
+        let id = self
+            .pool
+            .install(crate::RuntimePayload::stub_sim_for_test())
+            .unwrap_or_else(|refusal| panic!("sim install refused: {}", refusal.message));
+        self.pool
+            .session_mut(id)
+            .expect("just-installed sim session")
+            .set_client_for_test(client);
+        id
+    }
+
+    /// The runtime pool, for e2e assertions about session coexistence.
+    pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
+        &self.pool
+    }
+
+    /// Push a console line into the DEVICE session's buffer, as the live
+    /// event sink would (heartbeat-drain tests).
+    pub(crate) fn push_device_console_log_for_test(&mut self, draft: UiLogDraft) {
+        self.pool
+            .device_session_mut()
+            .expect("a device session is attached")
+            .push_device_console_log_for_test(draft);
     }
 
     /// Set the lens session's server protocol state directly (the retired
@@ -2702,6 +2941,16 @@ fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> Ui
 
 fn deploy_transition_error(error: crate::app::device::InvalidTransition) -> UiError {
     UiError::UnsupportedAction(error.to_string())
+}
+
+/// Which pool slot a connect flow is aimed at: the browser-worker provider
+/// is THE simulator; every other provider class is hardware.
+fn runtime_kind_for(provider_id: LinkProviderKind) -> crate::RuntimeKind {
+    if provider_id == LinkProviderKind::BrowserWorker {
+        crate::RuntimeKind::Sim
+    } else {
+        crate::RuntimeKind::Device
+    }
 }
 
 /// Constructor-default randomness: clock-derived bytes. Unique enough

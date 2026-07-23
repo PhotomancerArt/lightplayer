@@ -31,7 +31,7 @@ use core::time::Duration;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use lpa_client::{BackoffPolicy, CancelSignal, ProgressDeadline};
+use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::studio_command::StudioCommand;
@@ -44,13 +44,6 @@ use crate::{
     ControllerId, DeviceController, DeviceOp, ProjectRefreshOutcome, SlotEditOp, StudioController,
     UiAction, UiLogDraft, UiLogLevel, UiLogOrigin, UiStudioView, UxUpdate, UxUpdateSink,
 };
-
-/// The default passive-refresh backoff: start at 3 s (the retired flat
-/// `PASSIVE_REFRESH_FAILURE_BACKOFF_MS`), double on consecutive failures, cap at
-/// 30 s. The actor consults it after a failed/timed-out passive pull.
-pub const PASSIVE_REFRESH_BACKOFF_BASE: Duration = Duration::from_secs(3);
-/// Cap for [`PASSIVE_REFRESH_BACKOFF_BASE`] exponential backoff.
-pub const PASSIVE_REFRESH_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
 /// The surface the UI holds after spawning the actor: a sender for commands, a
 /// receiver for change-gated view snapshots, and a read-only cell carrying the
@@ -108,16 +101,21 @@ impl CancelSignal for SharedCancel {
 }
 
 /// The actor: owns the controller and drives it from the command queue.
+///
+/// Tick policy is per session (runtime-pool P2): the passive pull follows
+/// the LENS session, non-lens device sessions get the slow status
+/// heartbeat, and cadence/backoff live on the sessions themselves — the
+/// controller derives the published delay as the minimum over sessions.
 pub struct StudioActor<MakeTimer> {
     controller: StudioController,
     commands: CommandReceiver,
     view_out: StudioViewSender,
-    backoff: BackoffPolicy,
     /// Builds a fresh quiet-gap timer for a pull's [`ProgressDeadline`]. Native
     /// callers pass a `sleep`-backed factory; wasm callers a `setTimeout` one.
     make_timer: MakeTimer,
     /// Shared with the [`StudioHandle`]: the delay the UI timer waits before the
-    /// next tick (cadence interval + current backoff), refreshed each batch.
+    /// next tick (min over sessions of cadence/heartbeat + backoff),
+    /// refreshed each batch.
     delay: Rc<Cell<Duration>>,
 }
 
@@ -134,14 +132,14 @@ where
     pub fn new(controller: StudioController, make_timer: MakeTimer) -> (Self, StudioHandle) {
         let (tx, commands) = command_channel();
         let (view_out, view) = studio_view_channel();
-        // Seed the shared delay from the controller's initial cadence so the UI
-        // timer has a sane first interval before the first batch runs.
-        let delay = Rc::new(Cell::new(controller.refresh_cadence().interval()));
+        // Seed the shared delay from the controller's initial per-session
+        // policy so the UI timer has a sane first interval before the
+        // first batch runs.
+        let delay = Rc::new(Cell::new(controller.next_refresh_interval()));
         let actor = Self {
             controller,
             commands,
             view_out,
-            backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
             make_timer,
             delay: Rc::clone(&delay),
         };
@@ -188,7 +186,13 @@ where
             self.run_action(action).await;
         }
         if plan.tick {
+            // One tick command fans into the lens-bound project pull plus
+            // the slow per-session status heartbeats. Heartbeats issue no
+            // wire operation (they drain session-buffered logs and surface
+            // state changes), so each session still sees at most one wire
+            // op per batch.
             self.run_refresh_tick().await;
+            self.controller.run_due_heartbeats();
         }
         // Re-hydrate the gallery / release closed projects' locks when due
         // (attach or LibraryChanged with no action in the batch; actions
@@ -200,15 +204,14 @@ where
         !plan.shutdown
     }
 
-    /// Refresh the shared next-tick delay the UI timer reads: the connection's
-    /// cadence interval (core policy, tightened during a post-apply verdict
-    /// chase) plus any active backoff. Called after each processed batch so a
-    /// cadence change (e.g. simulator connects), a chase window, or a backoff
-    /// bump takes effect on the next tick.
+    /// Refresh the shared next-tick delay the UI timer reads: the minimum
+    /// over sessions of lens cadence (tightened during a post-apply verdict
+    /// chase, plus that session's backoff) and heartbeat due-times — all
+    /// core policy on the controller. Called after each processed batch so
+    /// a lens change, a chase window, or a backoff bump takes effect on
+    /// the next tick.
     fn publish_refresh_delay(&self) {
-        let interval = self.controller.next_refresh_interval();
-        self.delay
-            .set(interval.saturating_add(self.backoff.current_delay()));
+        self.delay.set(self.controller.next_refresh_interval());
     }
 
     /// Dispatch a user action through the controller.
@@ -290,17 +293,17 @@ where
         match outcome {
             Ok(Some(ProjectRefreshOutcome::Synced(sync))) => {
                 if sync.synced {
-                    self.backoff.record_success();
+                    self.controller.record_passive_refresh_success();
                 } else {
                     // A recorded sync failure applies backoff, just like the
                     // retired web `delay_next_project_refresh` did.
-                    self.backoff.record_failure();
+                    self.controller.record_passive_refresh_failure();
                 }
             }
             Ok(Some(ProjectRefreshOutcome::TimedOut)) => {
                 self.controller
                     .mark_passive_project_refresh_failed("passive project refresh timed out");
-                self.backoff.record_failure();
+                self.controller.record_passive_refresh_failure();
             }
             // A clean cancel (preempted) is not a failure: no backoff, no mark.
             Ok(Some(ProjectRefreshOutcome::Cancelled)) => {}
@@ -310,15 +313,16 @@ where
                 self.controller
                     .mark_passive_project_refresh_failed(error.to_string());
                 self.controller_log(UiLogDraft::from_error(error));
-                self.backoff.record_failure();
+                self.controller.record_passive_refresh_failure();
             }
         }
     }
 
-    /// The delay to apply before the next passive refresh, per the backoff
-    /// policy (zero while healthy). The UI timer adds this to its cadence.
+    /// The lens session's passive-refresh backoff delay (zero while
+    /// healthy). Per-session since runtime-pool P2; the published delay
+    /// already folds it in.
     pub fn refresh_backoff_delay(&self) -> Duration {
-        self.backoff.current_delay()
+        self.controller.passive_refresh_backoff()
     }
 
     fn controller_log(&mut self, draft: UiLogDraft) {

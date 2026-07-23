@@ -16,11 +16,18 @@
 //! There is no `None` arm: absence of a runtime is absence from the
 //! [`RuntimePool`](super::RuntimePool).
 
+use core::time::Duration;
+use std::cell::RefCell;
 use std::rc::Rc;
 
+use lpa_client::BackoffPolicy;
 use lpa_link::{DeviceSession, DeviceState, LinkConnection, LinkConnector, LinkSession};
 
 use crate::app::places::DeviceSyncState;
+use crate::app::studio::refresh_cadence::{
+    DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX,
+    RefreshCadence,
+};
 use crate::{
     RuntimeId, ServerFailureKind, ServerState, StudioServerClient, UiError, UiIssue, UiLogDraft,
     UiLogLevel, UxUpdateSink,
@@ -75,22 +82,31 @@ pub struct SimAttachment {
 /// stub the session with a fixed [`DeviceState`] instead of scripting a
 /// whole fake device.
 pub enum DeviceHandle {
-    Session(DeviceSession),
+    Session {
+        session: DeviceSession,
+        /// Device console lines observed by THIS session's event sink,
+        /// buffered per session (runtime-pool P2) and drained into the
+        /// studio log ring by dispatch settles and status heartbeats.
+        console_logs: Rc<RefCell<Vec<UiLogDraft>>>,
+    },
     #[cfg(test)]
     Stub(StubDevice),
 }
 
-/// Test-only hardware stand-in: a fixed device state, no wire.
+/// Test-only hardware stand-in: a fixed device state, no wire. Carries a
+/// console-log buffer so heartbeat drains stay exercisable without a live
+/// session.
 #[cfg(test)]
 pub struct StubDevice {
     pub state: DeviceState,
+    pub console_logs: Rc<RefCell<Vec<UiLogDraft>>>,
 }
 
 impl DeviceHandle {
     /// The session's current device state.
     pub fn state(&self) -> DeviceState {
         match self {
-            Self::Session(session) => session.state(),
+            Self::Session { session, .. } => session.state(),
             #[cfg(test)]
             Self::Stub(stub) => stub.state.clone(),
         }
@@ -99,16 +115,25 @@ impl DeviceHandle {
     /// The live session, when this handle holds one.
     pub fn session(&self) -> Option<&DeviceSession> {
         match self {
-            Self::Session(session) => Some(session),
+            Self::Session { session, .. } => Some(session),
             #[cfg(test)]
             Self::Stub(_) => None,
+        }
+    }
+
+    /// This session's device-console log buffer.
+    fn console_logs(&self) -> &Rc<RefCell<Vec<UiLogDraft>>> {
+        match self {
+            Self::Session { console_logs, .. } => console_logs,
+            #[cfg(test)]
+            Self::Stub(stub) => &stub.console_logs,
         }
     }
 
     /// Close the underlying session (attachment teardown).
     pub async fn close(self) -> Result<(), UiError> {
         match self {
-            Self::Session(session) => session
+            Self::Session { session, .. } => session
                 .close()
                 .await
                 .map_err(|error| UiError::Link(error.to_string())),
@@ -146,6 +171,22 @@ pub struct RuntimeSession {
     /// (discovered from its loaded project at connect) — pull and push
     /// target it so one dir replaces in place.
     device_storage_id: Option<String>,
+    /// A long-running wire operation (flash / erase / reset management
+    /// flow) is in flight on this session. The pool refuses a same-kind
+    /// replace while set (DQ-A swap semantics).
+    op_in_flight: bool,
+    /// This session's passive-refresh backoff (runtime-pool P2: the shared
+    /// actor singleton became per-session). Only the LENS session's
+    /// advances — only the lens runs the fallible project pull.
+    backoff: BackoffPolicy,
+    /// When the last status heartbeat ran (injected-clock epoch seconds).
+    /// `None` = never: the first heartbeat is immediately due, so a fresh
+    /// session baselines its observed device state right away.
+    last_heartbeat_at: Option<f64>,
+    /// The device state the last heartbeat observed, for surfacing state
+    /// changes through the change gate (view builds read the live state;
+    /// the heartbeat's job is marking the view dirty when it moved).
+    heartbeat_device_state: Option<DeviceState>,
 }
 
 impl RuntimeSession {
@@ -161,6 +202,10 @@ impl RuntimeSession {
             device_sync: None,
             device_versions: (None, None),
             device_storage_id: None,
+            op_in_flight: false,
+            backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
+            last_heartbeat_at: None,
+            heartbeat_device_state: None,
         }
     }
 
@@ -301,6 +346,89 @@ impl RuntimeSession {
             .unwrap_or_default()
     }
 
+    /// Drain device-console lines buffered by this session's event sink
+    /// (device sessions; the sim buffers nothing here).
+    pub fn take_device_console_logs(&mut self) -> Vec<UiLogDraft> {
+        match &self.payload {
+            RuntimePayload::Device(handle) => {
+                core::mem::take(&mut *handle.console_logs().borrow_mut())
+            }
+            RuntimePayload::Sim(_) => Vec::new(),
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Tick policy (runtime-pool P2: per-session cadence/backoff/heartbeat)
+    // -----------------------------------------------------------------
+
+    /// A long-running management operation (flash / erase / reset) is in
+    /// flight on this session; the pool refuses a same-kind replace.
+    pub fn op_in_flight(&self) -> bool {
+        self.op_in_flight
+    }
+
+    pub(crate) fn set_op_in_flight(&mut self, value: bool) {
+        self.op_in_flight = value;
+    }
+
+    /// The passive project-refresh interval while the lens is on this
+    /// session (kind policy: sim fast, device calm).
+    pub fn cadence_interval(&self) -> Duration {
+        RefreshCadence::for_kind(self.kind()).interval()
+    }
+
+    /// This session's current passive-refresh backoff delay.
+    pub fn backoff_delay(&self) -> Duration {
+        self.backoff.current_delay()
+    }
+
+    pub(crate) fn record_refresh_success(&mut self) {
+        self.backoff.record_success();
+    }
+
+    pub(crate) fn record_refresh_failure(&mut self) {
+        self.backoff.record_failure();
+    }
+
+    /// Whether a status heartbeat is due at `now` (injected-clock epoch
+    /// seconds). A session that never heartbeated is due immediately, so
+    /// the first heartbeat baselines the observed device state.
+    pub(crate) fn heartbeat_due(&self, now: f64) -> bool {
+        match self.last_heartbeat_at {
+            None => true,
+            Some(last) => now - last >= DEVICE_HEARTBEAT_INTERVAL.as_secs_f64(),
+        }
+    }
+
+    /// Time until this session's next heartbeat is due, for the actor's
+    /// min-over-sessions delay.
+    pub(crate) fn heartbeat_due_in(&self, now: f64) -> Duration {
+        match self.last_heartbeat_at {
+            None => Duration::ZERO,
+            Some(last) => {
+                let elapsed = (now - last).max(0.0);
+                DEVICE_HEARTBEAT_INTERVAL.saturating_sub(Duration::from_secs_f64(elapsed))
+            }
+        }
+    }
+
+    pub(crate) fn mark_heartbeat(&mut self, now: f64) {
+        self.last_heartbeat_at = Some(now);
+    }
+
+    /// Record the currently observed device state and report whether it
+    /// moved since the last heartbeat. The first observation baselines
+    /// silently (attach flows already emitted their views).
+    pub(crate) fn note_device_state_change(&mut self) -> bool {
+        let current = self.device_state();
+        let changed = match (&self.heartbeat_device_state, &current) {
+            (Some(last), Some(current)) => last != current,
+            (None, _) | (_, None) => false,
+        };
+        self.heartbeat_device_state = current;
+        changed
+    }
+
     pub fn fail(&mut self, message: impl Into<String>) {
         self.fail_with_kind(message, ServerFailureKind::Unknown);
     }
@@ -388,13 +516,24 @@ impl RuntimeSession {
         self.server_state = ServerState::Connected { protocol };
         self.requested_log_level = UiLogLevel::Info;
     }
+
+    /// Push a console line into the device-console buffer, as the live
+    /// session's event sink would (heartbeat-drain tests).
+    pub(crate) fn push_device_console_log_for_test(&mut self, draft: UiLogDraft) {
+        if let RuntimePayload::Device(handle) = &self.payload {
+            handle.console_logs().borrow_mut().push(draft);
+        }
+    }
 }
 
 #[cfg(test)]
 impl RuntimePayload {
     /// A stubbed hardware payload in the given device state.
     pub(crate) fn stub_device_for_test(state: DeviceState) -> Self {
-        Self::Device(DeviceHandle::Stub(StubDevice { state }))
+        Self::Device(DeviceHandle::Stub(StubDevice {
+            state,
+            console_logs: Rc::new(RefCell::new(Vec::new())),
+        }))
     }
 
     /// A stubbed SIMULATOR payload (record-level fake connector, synthetic
