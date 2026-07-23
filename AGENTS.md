@@ -284,6 +284,17 @@ the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
 `docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
 be migrated unless a separate migration plan asks for it.
 
+## Debt tracking
+
+Standing structural burdens live in `docs/debt/`, one slug-named file per
+burden (`story-capture-pipeline.md` — conditions get names; events get
+dates). When you hit a recurring operational pain, CHECK the register
+first — the entry's Workarounds section is the current lore — and APPEND
+to its incident log when you hit it again. File a new entry only for a
+structural, recurring burden (not todos or one-off deferrals). Paydown
+decisions with lasting shape become ADRs the entry links. See
+`docs/debt/README.md`.
+
 ## Defect tracking
 
 Durable defects live in `docs/defects/`, one dated file each — ADRs record
