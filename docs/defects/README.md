@@ -41,7 +41,11 @@ get a home immediately, before anyone decides when to fix them.
 ---
 status: fixed          # open | fixed | wontfix
 found: YYYY-MM-DD      # how: hardware-walk | live-debugging | ci | e2e | report
-fixed: <commit>        # absent while open
+fixed: <commit>        # absent while open. NOTE: an entry cannot cite
+                       # its OWN commit (the hash doesn't exist yet, and
+                       # amending changes it) — write `fixed: this change`
+                       # at commit time and fill the real hash in the NEXT
+                       # commit that touches the registry.
 area: <crate/module>
 class: <one from the vocabulary>
 related: []            # other defects, ADRs, plan dirs

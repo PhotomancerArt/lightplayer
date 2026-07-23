@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-07-23      # how: report
-fixed: 69129a9f2
+fixed: 384563337
 area: lpa-studio-core/device (deploy_session + studio_controller)
 class: assumed-context
 related:
