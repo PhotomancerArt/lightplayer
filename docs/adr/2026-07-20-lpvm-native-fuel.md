@@ -47,6 +47,64 @@ trap threaded to the engine and converted to a caught panic for blame.**
   reach the reset. A trapping pixel is genuinely the expensive one, and the
   budget is a small constant independent of texture size / LED count.
 
+### Why back-edges are a sound unit
+
+The claim behind the design: bounding back-edge traversals bounds every
+loop-shaped divergence. The argument is structural, in two pigeonhole
+steps:
+
+1. An infinite execution path through a finite CFG visits finitely many
+   nodes, so some node is visited infinitely often; each pair of
+   consecutive visits closes a cycle — the path traverses cycles
+   infinitely often.
+2. LPIR's structured control flow (`LoopStart`/`End`/`Break`/`Continue`,
+   no goto) lowers to a **reducible** CFG by construction: deleting
+   back-edges leaves a DAG, so every cycle contains a back-edge. Lowering
+   materialises exactly one back-edge per natural loop (`Continue` routes
+   through the continuing block into the same `Br`), identified
+   syntactically — no dominance analysis anywhere.
+
+Hence any infinite path crosses back-edges infinitely often and hits the
+decrementing check. The only divergence class outside the argument is
+unbounded recursion, which diverges in stack rather than cycles (the
+frontends do not emit it; entry checks deliberately do not meter it — a
+1-per-activation decrement would overflow the stack long before denting
+the tank).
+
+Deliberate consequences of defining the unit at IR-structure level
+(rather than counting instructions, as wasmtime fuel does):
+
+- **Not a cost model.** Straight-line code is free and the unit is blind
+  to loop-body size. The job is *termination detection*, not time
+  accounting; the wall-clock bound is `budget × max-body-cost`, bounded
+  in practice by compile/JIT-chunk budgets.
+- **Deterministic and compiler-stable.** The count is a function of
+  source-level loop structure, invariant under regalloc, peephole, and
+  emission changes — filetests can assert exact remainders
+  (`1_000_000 − N`) that survive backend evolution.
+- **Inlining-invariant.** Inlining a loop-free callee removes only a
+  non-decrementing entry check; a loopy callee's back-edges carry over
+  unchanged.
+
+**Randomness footnote** (soundness vs completeness): the structural
+argument quantifies over individual paths, so randomized branch decisions
+cannot escape it — any actually-infinite run traps regardless of how its
+branches were chosen. What randomness breaks is *completeness*: an
+almost-surely-terminating randomized loop (rejection sampling is the
+graphics-shaped example; MTG's "Four Horsemen" loop is the folklore one)
+terminates with probability 1 but has no finite iteration bound, so every
+finite budget falsely traps a measure-tiny set of unlucky runs. Fuel
+respects bounded termination, not almost-sure termination — deciding the
+latter at runtime is not tractable (probabilistic-termination proofs need
+ranking supermartingales, nothing a runtime checks cheaply). In this
+codebase the case is theoretical: shader "randomness" (`lpfn_random`,
+`lpfn_hash`, the noise family) is seeded-hash — a pure function of
+coordinates/time/seed, with no entropy source in the sans-IO core — so
+every execution is deterministic and every terminating shader has a
+concrete per-input iteration count. A hash-based rejection loop with an
+absurdly unlucky pixel traps with that pixel's coordinates in the
+message, which is the designed outcome.
+
 ### VmContext header contract (16-byte header unchanged)
 
 | Offset | Word | Meaning |
