@@ -284,6 +284,19 @@ the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
 `docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
 be migrated unless a separate migration plan asks for it.
 
+## Defect tracking
+
+Durable defects live in `docs/defects/`, one dated file each — ADRs record
+decisions; defects record failures. File one when the bug reached a user or a
+hardware walk, revealed a contract/model gap, produced (or should have
+produced) a regression test, or the lesson outlives the fix. Fix-forward
+trivialities stay commit messages.
+
+When you fix a qualifying bug, write the entry in the same change; when a walk
+or debugging session finds one you don't fix, file it `status: open`. Update
+the index in `docs/defects/README.md` either way. Recurring classes in that
+index are architecture signals — surface them when you see one repeat.
+
 ## Studio UI visual baselines
 
 When a change touches non-generated files under `lp-app/lpa-studio-web/`, run the
