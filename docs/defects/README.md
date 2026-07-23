@@ -71,6 +71,9 @@ genuinely fits none of these, and define it here in one line.
 - **`assumed-context`** — code presumes state instead of asking the
   source of truth.
 - **`state-conflation`** — one state models two different facts.
+- **`stand-in-divergence`** — a stand-in (placeholder, mock, fallback)
+  meant to be equivalent to what it replaces diverges in a dimension the
+  substitution didn't model.
 
 ## Index
 
@@ -91,6 +94,7 @@ bookkeeping fact.
 | assumed-context | 2026-07-17 | [storage-slot-assumed](2026-07-17-storage-slot-assumed.md) | fixed | lpa-studio-core/places |
 | partial-knowledge-loss | 2026-07-22 | [identity-lost-on-failed-read](2026-07-22-identity-lost-on-failed-read.md) | fixed | lpa-studio-core/places+studio |
 | policy-leak | 2026-07-17 | [hardware-attach-opened-editor](2026-07-17-hardware-attach-opened-editor.md) | fixed | lpa-studio-core/studio |
+| stand-in-divergence | 2026-07-23 | [popover-open-resizes-card](2026-07-23-popover-open-resizes-card.md) | fixed | lpa-studio-web/base/popover |
 
 ## Predecessor: `docs/bugs/`
 
