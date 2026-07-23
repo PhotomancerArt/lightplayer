@@ -20,6 +20,12 @@ pub struct NativeCompileOptions {
     /// Intended for targeted profiling and stress harnesses.
     pub stage_trace: bool,
 
+    /// When true (default), insert fuel checks: check-then-decrement at every
+    /// loop back-edge and check-only at every function entry. Always on for
+    /// device codegen and filetest targets; `false` exists for tests and perf
+    /// comparison only.
+    pub fuel: bool,
+
     /// Middle-end LPIR pass settings (inline, etc.).
     pub config: lpir::CompilerConfig,
 }
@@ -32,6 +38,7 @@ impl Default for NativeCompileOptions {
             emu_trace_instructions: false,
             alloc_trace: false,
             stage_trace: false,
+            fuel: true,
             config: lpir::CompilerConfig::default(),
         }
     }

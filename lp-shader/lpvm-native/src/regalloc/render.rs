@@ -612,6 +612,18 @@ fn format_inst(inst: &VInst, vreg_pool: &[VReg], symbols: Option<&ModuleSymbols>
             s.push(')');
             s
         }
+        VInst::FuelCheck {
+            vmctx,
+            decrement,
+            trap_label,
+            ..
+        } => {
+            if *decrement {
+                format!("FuelCheck i{}, L{}, dec", vmctx.0, trap_label)
+            } else {
+                format!("FuelCheck i{}, L{}", vmctx.0, trap_label)
+            }
+        }
     }
 }
 

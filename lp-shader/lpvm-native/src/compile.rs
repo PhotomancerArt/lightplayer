@@ -121,6 +121,7 @@ pub(crate) fn compile_function_lower_stage(
     let lower_opts = LowerOpts {
         float_mode: session.float_mode,
         q32: &session.options.config.q32,
+        fuel: session.options.fuel,
     };
     let lowered =
         crate::lower::lower_ops(func, ir, &session.abi, &lower_opts).map_err(NativeError::Lower)?;

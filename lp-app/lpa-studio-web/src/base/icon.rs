@@ -78,7 +78,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("test-tube") => Some(StudioIconName::Test),
         Some("save") => Some(StudioIconName::Save),
         Some("revert") => Some(StudioIconName::Revert),
-        Some("apply") => Some(StudioIconName::Apply),
+        Some("apply") | Some("zap") => Some(StudioIconName::Apply),
         Some("add") => Some(StudioIconName::Add),
         Some("remove") => Some(StudioIconName::Remove),
         Some("edit") => Some(StudioIconName::Edited),

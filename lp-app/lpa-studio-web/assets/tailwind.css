@@ -875,6 +875,10 @@
     --tw-border-style: dashed;
     border-style: dashed;
   }
+  .tw\:border-none {
+    --tw-border-style: none;
+    border-style: none;
+  }
   .tw\:border-accent {
     border-color: var(--tw-color-accent);
   }

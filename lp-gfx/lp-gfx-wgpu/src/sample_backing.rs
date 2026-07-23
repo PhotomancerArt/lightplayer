@@ -1,9 +1,11 @@
 //! CPU-resident sample buffers on the GPU backend.
 //!
-//! Sample points/outputs stay host-side vectors until the GPU sample-point
-//! pass lands (the `sample_rgba16` milestone); the create/write/read/clear
-//! surface works so the engine can allocate through this backend, while
-//! `LpShader::sample_rgba16` itself reports the milestone gap.
+//! Sample points/outputs are host-side vectors: points are tiny (thousands
+//! of Q16.16 pairs, rewritten by the engine each tick) and outputs are the
+//! quantized results of the sample pass's readback, so neither earns a
+//! persistent GPU allocation. `LpShader::sample_rgba16` uploads the point
+//! vector into the pass's vertex buffer per call and quantizes the readback
+//! into the out vector (see [`crate::sample_pass`]).
 
 use lp_gfx::{GfxError, SampleOutHandle, SamplePointsHandle};
 

@@ -100,6 +100,27 @@ The intermediate representation between LPIR and machine code:
 | [`rt_jit/`](src/rt_jit/)       | JIT runtime for RISC-V targets           |
 | [`rt_emu/`](src/rt_emu/)       | Emulation runtime for host testing       |
 
+### Fuel Metering
+
+Emitted code is fuel-metered so an infinite loop in shader code aborts
+cleanly instead of hanging the device (see
+`docs/adr/2026-07-20-lpvm-native-fuel.md` for the full contract):
+
+- Lowering inserts a `FuelCheck` VInst at every loop back-edge
+  (check-then-decrement of the u32 counter at vmctx+0) and at every
+  function entry (check-only), flowing through the normal
+  regalloc/emission pipeline. Always on (`NativeCompileOptions::fuel`,
+  default `true`; `false` is for tests/perf comparison only).
+- On observing 0 the check writes `TRAP_CODE_OUT_OF_FUEL` to the vmctx
+  trap slot (offset 8) and jumps to the function epilogue; the abort
+  cascades up the call stack because fuel stays 0.
+- `rt_jit`/`rt_emu` arm the header before every guest entry and read the
+  trap slot after return → `NativeError::Trap { code, invocation }`
+  (structured access via `lpvm::GuestTrapError`).
+- The `lp-shader` synthesised render wrappers re-arm a per-pixel/sample
+  tank (`lpvm::DEFAULT_INVOCATION_FUEL`) and write the linear invocation
+  index to the fuel high word, so a trap names the offending pixel.
+
 ## Usage
 
 ### Compiling a Module

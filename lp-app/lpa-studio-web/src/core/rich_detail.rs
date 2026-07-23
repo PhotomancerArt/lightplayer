@@ -15,8 +15,9 @@ use crate::base::{DetailSection, DetailSectionTint};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
 
 /// One rich section inside a detail popover. Regular sections show their
-/// fact rows, advisory chip, and ≤1 quiet affordance; a Danger section
-/// shows its destructive verbs as menu rows behind the hard separator.
+/// fact rows, advisory chip, and ≤1 affordance as a menu row; a Danger
+/// section shows its destructive verbs the same way, behind the hard
+/// separator.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn RichDetailSection(
@@ -65,12 +66,15 @@ pub fn RichDetailSection(
                     StatusChip { status: chip_status(&chip) }
                 }
             }
+            // Affordances are menu rows, same as the danger zone's: the
+            // popover is an inspector, and its one box is the popover
+            // itself — actions read as rows, never as nested buttons.
             for action in section.affordances {
                 div { class: "tw:py-1",
                     ActionButton {
                         action,
                         running: false,
-                        variant: ActionButtonVariant::Quiet,
+                        variant: ActionButtonVariant::MenuItem,
                         on_action,
                     }
                 }

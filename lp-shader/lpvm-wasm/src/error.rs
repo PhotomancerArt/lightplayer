@@ -29,6 +29,11 @@ impl WasmError {
     }
 }
 
+/// No vmctx-trap contract on the WASM backends: wasmtime meters its own
+/// store fuel and reports exhaustion as a plain runtime error (accepted
+/// divergence — see the lpvm-native fuel ADR). Default `None` applies.
+impl lpvm::GuestTrapError for WasmError {}
+
 impl fmt::Display for WasmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

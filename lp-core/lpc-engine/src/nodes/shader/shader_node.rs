@@ -15,7 +15,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lp_gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
+use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
 use lpc_model::{
     AddSubMode, AssetLocation, DivMode, GlslOpts, MapSlot, MulMode, NodeId, NodeRuntimeStatus,
     Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState,
@@ -612,9 +612,11 @@ impl RenderNode for ShaderNode {
             .shader
             .as_mut()
             .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
-        shader
-            .render(target, &uniforms)
-            .map_err(err_ctx("shader render"))
+        match shader.render(target, &uniforms) {
+            Ok(()) => Ok(()),
+            Err(GfxError::FuelExhausted(trap)) => fuel_exhausted_panic(&trap),
+            Err(error) => Err(err_ctx("shader render")(error)),
+        }
     }
 
     fn sample_visual_into(
@@ -656,10 +658,27 @@ impl RenderNode for ShaderNode {
             .shader
             .as_mut()
             .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
-        shader
-            .sample_rgba16(request.points, target.samples, &uniforms)
-            .map_err(err_ctx("shader sample"))
+        match shader.sample_rgba16(request.points, target.samples, &uniforms) {
+            Ok(()) => Ok(()),
+            Err(GfxError::FuelExhausted(trap)) => fuel_exhausted_panic(&trap),
+            Err(error) => Err(err_ctx("shader sample")(error)),
+        }
     }
+}
+
+/// Convert an out-of-fuel trap into a panic — deliberate, limited
+/// panic-as-control-flow per the lpvm-native fuel ADR
+/// (`docs/adr/2026-07-20-lpvm-native-fuel.md`).
+///
+/// The render/sample calls above run inside `catch_node_panic_framed`
+/// (`FrameKind::NodeRender`): only a **caught panic** records blame in the
+/// lp-recovery ledger, so repeat offenders go yellow → red-gate (the sticky
+/// blocked UX is the retry latch). A plain returned `Err` would record
+/// nothing — worse, the recovery frame's clean completion on the error path
+/// would *heal* an existing yellow. The panic message becomes the node
+/// error status. Non-fuel render errors keep returning plain `Err`.
+fn fuel_exhausted_panic(trap: &lp_gfx::ShaderFuelTrap) -> ! {
+    panic!("{trap}");
 }
 
 fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform> {

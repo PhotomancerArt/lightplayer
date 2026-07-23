@@ -49,6 +49,10 @@ impl From<CallError> for InstanceError {
 
 impl core::error::Error for InstanceError {}
 
+/// The cranelift-reference emulation path does not emit fuel checks, so its
+/// errors never carry a guest trap. Default `None` applies.
+impl lpvm::GuestTrapError for InstanceError {}
+
 struct RenderTextureEntry {
     name: String,
     entry_pc: u32,

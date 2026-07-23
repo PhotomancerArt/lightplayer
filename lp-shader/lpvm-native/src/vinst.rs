@@ -442,6 +442,23 @@ pub enum VInst {
     Ret { vals: VRegSlice, src_op: u16 },
     /// Label definition (branch target).
     Label(LabelId, u16),
+    /// Fuel check (pseudo — multi-instruction expansion in the emitter).
+    ///
+    /// Loads the fuel counter (vmctx low fuel word); if it is zero, writes
+    /// [`lpvm::TRAP_CODE_OUT_OF_FUEL`] to the vmctx trap slot and jumps to
+    /// `trap_label` (the function's epilogue). Otherwise, when `decrement`
+    /// is set, subtracts 1 and stores the counter back (check-then-decrement:
+    /// the trap fires when a check *observes* 0, not when the counter reaches
+    /// 0). Inserted at function entry (`decrement: false`) and at every loop
+    /// back-edge (`decrement: true`) when fuel metering is enabled.
+    FuelCheck {
+        /// The vmctx pointer vreg (a plain use; regalloc handles spill/reload).
+        vmctx: VReg,
+        decrement: bool,
+        /// Branch target on exhaustion: the function's epilogue label.
+        trap_label: LabelId,
+        src_op: u16,
+    },
 }
 
 impl VInst {
@@ -470,7 +487,8 @@ impl VInst {
             | VInst::MemcpyWords { src_op, .. }
             | VInst::IConst32 { src_op, .. }
             | VInst::Call { src_op, .. }
-            | VInst::Ret { src_op, .. } => *src_op,
+            | VInst::Ret { src_op, .. }
+            | VInst::FuelCheck { src_op, .. } => *src_op,
             VInst::Label(_, src_op) => *src_op,
         };
         unpack_src_op(raw)
@@ -499,7 +517,8 @@ impl VInst {
             | VInst::MemcpyWords { .. }
             | VInst::Label(..)
             | VInst::Br { .. }
-            | VInst::BrIf { .. } => {}
+            | VInst::BrIf { .. }
+            | VInst::FuelCheck { .. } => {}
             VInst::Call { rets, .. } => {
                 for r in rets.vregs(pool) {
                     f(*r);
@@ -570,6 +589,7 @@ impl VInst {
                     f(*r);
                 }
             }
+            VInst::FuelCheck { vmctx, .. } => f(*vmctx),
         }
     }
 
@@ -603,6 +623,7 @@ impl VInst {
             VInst::Call { .. } => "Call",
             VInst::Ret { .. } => "Ret",
             VInst::Label(..) => "Label",
+            VInst::FuelCheck { .. } => "FuelCheck",
         }
     }
 
@@ -718,6 +739,18 @@ impl VInst {
                 format!("({s})")
             }
             VInst::Label(id, _) => format!("({id})"),
+            VInst::FuelCheck {
+                vmctx,
+                decrement,
+                trap_label,
+                ..
+            } => {
+                if *decrement {
+                    format!("fuel(v{})--, trap -> {}", vmctx.0, trap_label)
+                } else {
+                    format!("fuel(v{}), trap -> {}", vmctx.0, trap_label)
+                }
+            }
         }
     }
 }

@@ -42,6 +42,7 @@ mod data_error;
 mod debug;
 mod engine;
 mod global_data;
+mod guest_trap;
 mod instance;
 mod lpvm_abi;
 mod lpvm_data_q32;
@@ -59,6 +60,7 @@ pub use data_error::DataError;
 pub use debug::{FunctionDebugInfo, ModuleDebugInfo};
 pub use engine::LpvmEngine;
 pub use global_data::{GlobalDataSpan, decode_global_read, encode_global_write, global_data_span};
+pub use guest_trap::{GuestTrap, GuestTrapError};
 pub use instance::LpvmInstance;
 pub use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 pub use lps_shared::lps_value_f32::LpsValueF32;
@@ -76,8 +78,9 @@ pub use memory::{AllocError, BumpLpvmMemory, LpvmMemory};
 pub use module::LpvmModule;
 pub use set_uniform::{encode_uniform_write, encode_uniform_write_q32};
 pub use vmcontext::{
-    DEFAULT_VMCTX_FUEL, VMCTX_HEADER_SIZE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_METADATA,
-    VMCTX_OFFSET_TRAP_HANDLER, VmContext, VmContextHeader, minimal_vmcontext,
+    DEFAULT_INVOCATION_FUEL, DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, TRAP_CODE_NONE,
+    TRAP_CODE_OUT_OF_FUEL, VMCTX_HEADER_SIZE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_METADATA,
+    VMCTX_OFFSET_TRAP, VmContext, VmContextHeader, minimal_vmcontext,
 };
 
 use lpir::{IrFunction, IrType};

@@ -7,7 +7,7 @@
 use lp_gfx::GfxError;
 use lp_shader::TextureBindingSpecs;
 
-use crate::assembly::assemble_fragment_glsl;
+use crate::assembly::{assemble_fragment_glsl, assemble_sample_fragment_glsl};
 use crate::tanh_pass::bound_tanh;
 use crate::uniform_layout::assign_texture_bindings;
 
@@ -25,7 +25,8 @@ pub struct WgslShader {
     pub info: naga::valid::ModuleInfo,
 }
 
-/// Translate an authored pixel shader to WGSL at f32 semantics.
+/// Translate an authored pixel shader to WGSL at f32 semantics
+/// (fullscreen-triangle wrapper: `render(floor(gl_FragCoord.xy))`).
 ///
 /// `textures` is the compile-time `TextureBindingSpec` map; sampling call
 /// sites are lowered against it during assembly and the resulting texture
@@ -34,8 +35,22 @@ pub fn compile_wgsl(
     authored: &str,
     textures: &TextureBindingSpecs,
 ) -> Result<WgslShader, GfxError> {
-    let assembled_glsl = assemble_fragment_glsl(authored, textures)?;
+    translate_assembled_glsl(assemble_fragment_glsl(authored, textures)?)
+}
 
+/// Translate the sample-point variant of an authored pixel shader: the same
+/// unit with a wrapper `main` that evaluates `render` at a caller-provided
+/// position varying (see [`crate::sample_pass`]).
+pub fn compile_sample_wgsl(
+    authored: &str,
+    textures: &TextureBindingSpecs,
+) -> Result<WgslShader, GfxError> {
+    translate_assembled_glsl(assemble_sample_fragment_glsl(authored, textures)?)
+}
+
+/// naga `glsl-in` → bounded-tanh pass → validation → `wgsl-out` on an
+/// already-assembled fragment compilation unit.
+fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxError> {
     let mut frontend = naga::front::glsl::Frontend::default();
     let options = naga::front::glsl::Options::from(naga::ShaderStage::Fragment);
     let mut module = frontend.parse(&options, &assembled_glsl).map_err(|e| {
@@ -90,6 +105,23 @@ mod tests {
         .expect("translates");
         assert!(shader.wgsl.contains("fn main"), "entry point present");
         assert!(shader.assembled_glsl.contains("void main()"));
+    }
+
+    #[test]
+    fn sample_unit_translates_with_a_location_zero_input() {
+        let shader = compile_sample_wgsl(
+            "layout(binding = 0) uniform vec2 outputSize;\n\
+             vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
+            &TextureBindingSpecs::new(),
+        )
+        .expect("translates");
+        assert!(shader.wgsl.contains("fn main"), "entry point present");
+        assert!(
+            shader.wgsl.contains("@location(0)"),
+            "sample position varying survives to WGSL:\n{}",
+            shader.wgsl
+        );
+        assert!(shader.assembled_glsl.contains("lp_gfx_sample_pos"));
     }
 
     #[test]

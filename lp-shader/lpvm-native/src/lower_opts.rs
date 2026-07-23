@@ -8,4 +8,8 @@ use lpir::FloatMode;
 pub struct LowerOpts<'a> {
     pub float_mode: FloatMode,
     pub q32: &'a lps_q32::q32_options::Q32Options,
+    /// Insert fuel checks ([`crate::vinst::VInst::FuelCheck`]) at function
+    /// entry and loop back-edges (see
+    /// [`crate::native_options::NativeCompileOptions::fuel`]).
+    pub fuel: bool,
 }
