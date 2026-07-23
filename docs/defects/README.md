@@ -90,6 +90,7 @@ bookkeeping fact.
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
 | assumed-context | 2026-07-17 | [storage-slot-assumed](2026-07-17-storage-slot-assumed.md) | fixed | lpa-studio-core/places |
 | partial-knowledge-loss | 2026-07-22 | [identity-lost-on-failed-read](2026-07-22-identity-lost-on-failed-read.md) | fixed | lpa-studio-core/places+studio |
+| partial-knowledge-loss | 2026-07-23 | [reconnect-transient-twin-card](2026-07-23-reconnect-transient-twin-card.md) | fixed | lpa-studio-core/home + device |
 | policy-leak | 2026-07-17 | [hardware-attach-opened-editor](2026-07-17-hardware-attach-opened-editor.md) | fixed | lpa-studio-core/studio |
 
 ## Predecessor: `docs/bugs/`

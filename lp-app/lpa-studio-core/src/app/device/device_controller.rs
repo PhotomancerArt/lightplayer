@@ -59,6 +59,10 @@ pub struct DeviceController {
     /// is entered exactly when a connect flow hands a live
     /// [`RuntimePayload`] to the caller.
     flow: ConnectFlowState,
+    /// The remembered device a one-click reconnect was aimed at: the
+    /// connect window renders on THAT card (no transient twin) until the
+    /// identity read lands or the flow resets. Cleared with the flow.
+    pending_reconnect_uid: Option<String>,
     /// Injected timer factory for [`DeviceSession`] deadlines. The default
     /// is IMMEDIATE-READY sleeps (deadlines fire instantly) — fine for
     /// builds with no hardware connectors; the web shell installs its
@@ -127,6 +131,7 @@ impl DeviceController {
             flow,
             timers: DeviceTimers::new(|_| Box::pin(std::future::ready(()))),
             pending_device_logs: Rc::new(RefCell::new(Vec::new())),
+            pending_reconnect_uid: None,
         }
     }
 
@@ -180,6 +185,7 @@ impl DeviceController {
     }
 
     fn reset_to_provider_selection(&mut self, issue: Option<UiIssue>) {
+        self.pending_reconnect_uid = None;
         self.flow = ConnectFlowState::SelectingProvider {
             providers: provider_choices(&self.registry),
             issue,
@@ -187,6 +193,7 @@ impl DeviceController {
     }
 
     fn recover_to_provider_selection(&mut self, message: impl Into<String>) {
+        self.pending_reconnect_uid = None;
         self.reset_to_provider_selection(Some(UiIssue::new(message)));
     }
 
@@ -310,6 +317,13 @@ impl DeviceController {
         ))
     }
 
+    /// The remembered device a one-click reconnect targets, while the
+    /// connect window is open (cleared with the flow): the roster renders
+    /// the connect narration ON that card instead of a transient twin.
+    pub fn pending_reconnect_uid(&self) -> Option<&str> {
+        self.pending_reconnect_uid.as_deref()
+    }
+
     /// One-click reconnect (M1): connect through a serial port this origin
     /// was ALREADY granted — no chooser. Which physical device a grant
     /// belongs to is unknowable pre-connect, so the first granted endpoint
@@ -317,7 +331,11 @@ impl DeviceController {
     /// reconciled from the hello. Falls back to the permission chooser when
     /// no grant exists yet.
     #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-    pub async fn reconnect_granted_device(&mut self) -> Result<DeviceOpenOutcome, UiError> {
+    pub async fn reconnect_granted_device(
+        &mut self,
+        uid: Option<String>,
+    ) -> Result<DeviceOpenOutcome, UiError> {
+        self.pending_reconnect_uid = uid;
         self.flow = ConnectFlowState::DiscoveringEndpoints {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             progress: ProgressState::new("Finding granted serial ports"),
@@ -361,7 +379,10 @@ impl DeviceController {
     }
 
     #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
-    pub async fn reconnect_granted_device(&mut self) -> Result<DeviceOpenOutcome, UiError> {
+    pub async fn reconnect_granted_device(
+        &mut self,
+        _uid: Option<String>,
+    ) -> Result<DeviceOpenOutcome, UiError> {
         Err(UiError::UnsupportedFeature(
             "browser serial ESP32 access requires the browser-serial-esp32 feature on wasm"
                 .to_string(),
@@ -439,6 +460,7 @@ impl DeviceController {
     /// the pool by the caller) and return to the provider catalog (failure
     /// lands on the flow's `Failed` state).
     pub async fn disconnect(&mut self, payload: Option<RuntimePayload>) -> Result<(), UiError> {
+        self.pending_reconnect_uid = None;
         let result = match payload {
             None => Ok(()),
             Some(RuntimePayload::Sim(sim)) => sim

@@ -61,6 +61,11 @@ pub struct HomeDeviceEvidence {
     pub observed_version: Option<usize>,
     /// The local head's version number, for the "Push vN" affordance.
     pub head_version: Option<usize>,
+    /// The remembered device a one-click reconnect targets: while the
+    /// connect window is open and no identity has landed, the live
+    /// evidence renders ON that card (uid + name adopted from the
+    /// registry) instead of spawning a transient anonymous twin.
+    pub pending_uid: Option<String>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -194,7 +199,22 @@ fn assemble_roster(
     registry_cards: &[UiDeviceCard],
     live: &HomeDeviceEvidence,
 ) -> (Option<(String, UiCardConnection)>, Vec<UiDeviceCard>) {
-    let live_card = live_device_card(live);
+    let mut live_card = live_device_card(live);
+    // Connect-window attribution: the user clicked a SPECIFIC remembered
+    // card; until the identity read lands, the live evidence belongs to
+    // that card (docs/defects/2026-07-23-reconnect-transient-twin-card).
+    if let (Some(card), Some(pending)) = (&mut live_card, &live.pending_uid)
+        && card.uid.is_none()
+        && let Some(remembered) = registry_cards
+            .iter()
+            .find(|entry| entry.uid.as_deref() == Some(pending.as_str()))
+    {
+        card.uid = Some(pending.clone());
+        card.name = remembered.name.clone();
+        if card.transport.is_empty() {
+            card.transport = remembered.transport.clone();
+        }
+    }
 
     let mut devices: Vec<UiDeviceCard> = registry_cards
         .iter()
@@ -637,6 +657,44 @@ mod tests {
             .find(|card| card.slug == "2026-07-09-1421-porch")
             .unwrap();
         assert_eq!(porch.on_device.as_deref(), Some("Luna's porch sign"));
+    }
+
+    #[test]
+    fn reconnect_window_renders_on_the_remembered_card_not_a_twin() {
+        // Regression (2026-07-22 HW walk, second sighting): during the
+        // connect window — link opening, no identity landed yet — the
+        // live evidence must render ON the clicked remembered card, not
+        // as a transient anonymous card that later collapses.
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "TestBoard1".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 5.0,
+                association: None,
+            })
+            .unwrap();
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+
+        let evidence = HomeDeviceEvidence {
+            connect: ConnectEvidence::Connecting {
+                phase: crate::ConnectPhase::Connecting,
+            },
+            pending_uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            ..HomeDeviceEvidence::default()
+        };
+        let view = build_home_view(Some(&inputs), None, None, &evidence);
+
+        assert_eq!(view.devices.len(), 1, "the remembered card, no twin");
+        let card = &view.devices[0];
+        assert_eq!(card.name, "TestBoard1");
+        assert_eq!(card.uid.as_deref(), Some("dev_aaaaaaaaaaaaaaaa"));
+        assert!(matches!(
+            card.state,
+            RosterCardState::ConnectingRetrying { .. }
+        ));
     }
 
     #[test]

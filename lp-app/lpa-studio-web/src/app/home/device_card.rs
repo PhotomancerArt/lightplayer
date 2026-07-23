@@ -65,11 +65,7 @@ pub(crate) fn DeviceCard(
     // Needs-a-name opens the SAME inline form the pencil rename uses —
     // naming is card-anchored, never a dialog trip
     let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
-    let click_action = if sim {
-        None
-    } else {
-        card_click_action(&card.state)
-    };
+    let click_action = if sim { None } else { card_click_action(&card) };
     let affordance = card
         .state
         .affordance()
@@ -309,10 +305,10 @@ pub(crate) fn ConnectDeviceCard(on_action: EventHandler<UiAction>) -> Element {
 /// One-click reconnect for an offline/remembered device (M1): connect a
 /// granted serial port directly; the browser chooser only appears when no
 /// grant exists.
-pub(crate) fn reconnect_device_action() -> UiAction {
+pub(crate) fn reconnect_device_action(uid: Option<String>) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::ReconnectDevice,
+        DeviceOp::ReconnectDevice { uid },
     )
 }
 
@@ -359,9 +355,9 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
 /// What clicking the card body does, per state: offline reconnects (M1);
 /// connected states open the deploy dialog WITH the device context (the
 /// D29 attach-editor click is M5); self-healing/working states are quiet.
-fn card_click_action(state: &RosterCardState) -> Option<UiAction> {
-    match state {
-        RosterCardState::Offline { .. } => Some(reconnect_device_action()),
+fn card_click_action(card: &UiDeviceCard) -> Option<UiAction> {
+    match &card.state {
+        RosterCardState::Offline { .. } => Some(reconnect_device_action(card.uid.clone())),
         RosterCardState::ConnectingRetrying { .. }
         | RosterCardState::OperationInFlight { .. }
         | RosterCardState::InUseElsewhere => None,
@@ -420,7 +416,7 @@ pub(super) fn device_affordance_action(
             .with_icon("zap"),
         // rendered as the card's inline name form, not an action button
         RosterAffordance::NameDevice => return None,
-        RosterAffordance::Reconnect => reconnect_device_action()
+        RosterAffordance::Reconnect => reconnect_device_action(card.uid.clone())
             .with_summary("Reconnect over the granted serial port.")
             .with_icon("usb"),
     };

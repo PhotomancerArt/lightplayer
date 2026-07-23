@@ -21,8 +21,12 @@ pub enum DeviceOp {
     },
     /// One-click reconnect (M1): connect through an already-granted browser
     /// serial port with no chooser; the chooser only appears when no grant
-    /// exists yet.
-    ReconnectDevice,
+    /// exists yet. `uid` names the remembered device the user clicked, so
+    /// the connect window renders on THAT card (no transient twin) —
+    /// identity read at connect stays the truth once it lands.
+    ReconnectDevice {
+        uid: Option<String>,
+    },
     ConnectLightPlayer,
     DisconnectLightPlayer,
     ResetDevice,
@@ -56,7 +60,7 @@ impl ControllerOp for DeviceOp {
                 "Open this device endpoint.",
                 ActionPriority::Primary,
             ),
-            Self::ReconnectDevice => ActionMeta::new(
+            Self::ReconnectDevice { .. } => ActionMeta::new(
                 "Reconnect",
                 "Reconnect to a previously connected device.",
                 ActionPriority::Primary,
@@ -126,7 +130,7 @@ impl ControllerOp for DeviceOp {
             Self::OpenProvider { .. }
             | Self::OpenProviderForRecovery { .. }
             | Self::ConnectEndpoint { .. }
-            | Self::ReconnectDevice
+            | Self::ReconnectDevice { .. }
             | Self::ConnectLightPlayer
             | Self::DisconnectLightPlayer
             | Self::ResetDevice
@@ -178,7 +182,7 @@ mod tests {
                 provider_id: LinkProviderKind::BrowserWorker,
                 endpoint_id: LinkEndpointId::new("endpoint"),
             },
-            DeviceOp::ReconnectDevice,
+            DeviceOp::ReconnectDevice { uid: None },
             DeviceOp::ConnectLightPlayer,
             DeviceOp::DisconnectLightPlayer,
             DeviceOp::ResetDevice,

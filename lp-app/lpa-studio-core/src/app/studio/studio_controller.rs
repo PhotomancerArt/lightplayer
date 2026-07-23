@@ -337,6 +337,7 @@ impl StudioController {
             transport: self.transport_label().map(str::to_string),
             observed_version,
             head_version,
+            pending_uid: self.device.pending_reconnect_uid().map(str::to_string),
         }
     }
 
@@ -1540,8 +1541,8 @@ impl StudioController {
             // One-click reconnect (M1): no activity chip up front — the flow
             // may fall back to the browser's port chooser, which blocks like
             // the browser-serial OpenProvider path.
-            DeviceOp::ReconnectDevice => {
-                let outcome = self.device.reconnect_granted_device().await;
+            DeviceOp::ReconnectDevice { uid } => {
+                let outcome = self.device.reconnect_granted_device(uid).await;
                 self.settle_connect_outcome(outcome, updates).await
             }
         }
