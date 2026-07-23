@@ -382,8 +382,9 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     };
     let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
     let mut controller = StudioController::connected_with_client_for_test(client);
-    controller
-        .set_stub_device_for_test(crate::app::device::runtime_attachment::ready_state_for_test());
+    controller.set_stub_device_for_test(
+        crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+    );
     // the shell-injected randomness (crypto bytes on the web) is what
     // mints `dev_` uids — install a fixed generator to pin the wiring
     controller.set_random(|| [7u8; 16]);

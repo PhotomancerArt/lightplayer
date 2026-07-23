@@ -28,8 +28,8 @@ pub use self::core::view::progress_state::ProgressState;
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
     ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget,
-    DeviceController, DeviceHandle, DeviceOp, DeviceOpenOutcome, DeviceSnapshot, EndpointChoice,
-    ProviderChoice, RuntimeAttachment, SimAttachment, UiDeployChoice, UiDeployView,
+    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice, UiDeployChoice,
+    UiDeployView,
 };
 pub use app::home::{
     HOME_NODE_ID, HomeDeviceEvidence, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
@@ -74,10 +74,14 @@ pub use app::roster::{
     DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape,
     RosterEvidence, derive_roster_card_state, device_rich_object, firmware_update_available,
 };
+pub use app::runtime_pool::{
+    DeviceHandle, RuntimeId, RuntimeKind, RuntimePayload, RuntimePool, RuntimeSession,
+    SimAttachment,
+};
 pub use app::server::{
-    LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
-    ServerSnapshot, ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation,
-    StudioOverlayRead, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+    LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
+    ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation, StudioOverlayRead,
+    StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
     ConsoleCommand, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing,

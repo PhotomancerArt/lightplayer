@@ -1,16 +1,17 @@
 //! The connect-flow view state: where the picker/open sequence stands.
 //!
-//! [`DeviceController`] drives this alongside its [`RuntimeAttachment`]:
-//! the flow narrates the catalog → discovery → endpoint → connect sequence
-//! for the views (gallery issue chip, deploy dialog endpoint choices),
-//! while the attachment holds what actually got connected. `Connected` is
-//! entered exactly when the attachment becomes non-`None`.
+//! [`DeviceController`] drives this alongside the runtime pool: the flow
+//! narrates the catalog → discovery → endpoint → connect sequence for the
+//! views (gallery issue chip, deploy dialog endpoint choices), while the
+//! pool's [`RuntimeSession`] holds what actually got connected.
+//! `Connected` is entered exactly when a connect flow hands a live
+//! session payload to the pool.
 //!
 //! There is deliberately no `Managing` variant: management runs inside
 //! the hardware `DeviceSession` and never leaves the flow's `Connected`.
 //!
 //! [`DeviceController`]: super::DeviceController
-//! [`RuntimeAttachment`]: super::RuntimeAttachment
+//! [`RuntimeSession`]: crate::RuntimeSession
 
 use crate::{ConnectedDeviceSummary, EndpointChoice, ProgressState, ProviderChoice, UiIssue};
 use lpa_link::LinkProviderKind;

@@ -6,6 +6,7 @@ use std::rc::Rc;
 use lpa_client::{CancelSignal, ProgressDeadline};
 use lpa_link::{DeviceState, LinkManagementRequest, LinkManagementResult, LinkProviderKind};
 
+use crate::app::device::device_controller::DeviceRuntimeEvidence;
 use crate::app::device::device_event_adapter::management_event_sink;
 use crate::app::device::link_ux::management_result_logs;
 use crate::app::device::{
@@ -24,14 +25,20 @@ use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
     DeviceController, DeviceOp, NodeRevertOp, ProjectConnectResult, ProjectController,
-    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, SlotEditOp,
-    StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView,
-    UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePool,
+    ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView,
+    UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress,
+    UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
     device: DeviceController,
+    /// The runtime sessions the studio is attached to, plus the editor
+    /// lens. P1 of the runtime-pool milestone: at most one session, and
+    /// attach still replaces; every network op resolves its wire client
+    /// through one of the pool's two named seams (lens-bound editor ops vs
+    /// session-targeted device/deploy/reconcile ops).
+    pool: RuntimePool,
     project: ProjectController,
     /// Bounded, chronological log buffer. Capped in core (P3/Q5) rather than in
     /// the web crate's retired 80-entry mirror.
@@ -72,23 +79,6 @@ pub struct StudioController {
     /// while the simulator opens, and tells the connect flow which package
     /// to push instead of probing running projects.
     pending_open: Option<PendingOpen>,
-    /// What the attached DEVICE holds, computed by connect-as-pull (D8)
-    /// right after the server protocol attaches to hardware. `None` while
-    /// disconnected or when the runtime is the simulator (the sim is not
-    /// a device — D22).
-    device_sync: Option<DeviceSyncState>,
-    /// The device copy's and local head's version numbers on the project
-    /// line (`ProjectHistory::version_number`), computed alongside
-    /// `device_sync` when the pull classifies against a known project —
-    /// the roster's "Running vN"/"Push vN" evidence. `(None, None)`
-    /// otherwise; only read while `device_sync` holds a `Known` content.
-    device_versions: (Option<usize>, Option<usize>),
-    /// The project storage dir the attached device actually runs from
-    /// (discovered from its loaded project at connect) — pull and push
-    /// target it so one dir replaces in place. `None` while disconnected
-    /// or when the device holds nothing; push then falls back to
-    /// [`DEMO_PROJECT_STORAGE_ID`](crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID).
-    device_storage_id: Option<String>,
     /// The open deploy dialog, when there is one (M5). Pure state — the
     /// controller executes its effects through the existing seams.
     deploy: Option<DeploySession>,
@@ -127,6 +117,7 @@ impl StudioController {
     pub fn new(now_secs: impl Fn() -> f64 + 'static) -> Self {
         Self {
             device: DeviceController::new(),
+            pool: RuntimePool::new(),
             project: ProjectController::new(),
             logs: LogRing::new(),
             log_filter: LogFilter::default(),
@@ -139,9 +130,6 @@ impl StudioController {
             home_inputs: None,
             library_refresh_pending: false,
             pending_open: None,
-            device_sync: None,
-            device_versions: (None, None),
-            device_storage_id: None,
             deploy: None,
             random: Rc::new(clock_fallback_random),
         }
@@ -192,11 +180,73 @@ impl StudioController {
 
     pub fn snapshot(&self) -> StudioSnapshot {
         StudioSnapshot::new(
-            self.device.snapshot().flow,
-            self.device.snapshot().server,
+            self.device.flow_state().clone(),
+            self.server_snapshot(),
             self.project.snapshot(),
             self.logs.to_vec(),
         )
+    }
+
+    /// The server slice of the snapshot/view surfaces: the LENS session's
+    /// server protocol state (identical to the retired `ServerController`
+    /// snapshot in P1, where the pool holds at most one session), or
+    /// `Disconnected` while no session exists.
+    fn server_snapshot(&self) -> ServerSnapshot {
+        let state = self
+            .pool
+            .lens_session()
+            .map(|session| session.server_state().clone())
+            .unwrap_or(ServerState::Disconnected);
+        ServerSnapshot::new(state)
+    }
+
+    /// Whether the lens session's server protocol answered (`Connected`).
+    fn has_lightplayer_state(&self) -> bool {
+        self.pool
+            .lens_session()
+            .is_some_and(|session| matches!(session.server_state(), ServerState::Connected { .. }))
+    }
+
+    /// The attached hardware's device state, when hardware is attached
+    /// (kind-filtered — the sim is not a device, D22).
+    fn device_state(&self) -> Option<lpa_link::DeviceState> {
+        self.pool
+            .device_session()
+            .and_then(crate::RuntimeSession::device_state)
+    }
+
+    /// Whether the attached runtime is real hardware.
+    fn is_hardware_attached(&self) -> bool {
+        self.pool.device_session().is_some()
+    }
+
+    /// The live hardware [`lpa_link::DeviceSession`], when one is attached
+    /// (test stubs have none).
+    fn hardware_session(&self) -> Option<&lpa_link::DeviceSession> {
+        self.pool
+            .device_session()
+            .and_then(crate::RuntimeSession::hardware_session)
+    }
+
+    /// Transport label for the attached HARDWARE device ("USB" for serial
+    /// classes). `None` when nothing is attached or the runtime is the
+    /// simulator (never a device — D22): the kind guard reads the pool,
+    /// the label reads the connect flow.
+    fn transport_label(&self) -> Option<&'static str> {
+        if !self.is_hardware_attached() {
+            return None;
+        }
+        self.device.transport_label()
+    }
+
+    /// The pool-derived runtime evidence the device pane renders from.
+    fn device_runtime_evidence(&self) -> DeviceRuntimeEvidence {
+        DeviceRuntimeEvidence {
+            is_hardware: self.is_hardware_attached(),
+            is_sim: self.pool.sim_session().is_some(),
+            device_state: self.device_state(),
+            server_state: self.server_snapshot().state,
+        }
     }
 
     /// The passive-refresh cadence for the current connection, as data (P4/Q3).
@@ -204,7 +254,7 @@ impl StudioController {
     /// The actor publishes this to the UI timer so the interval policy lives in
     /// core, not as a `LinkProviderKind` match in the view layer.
     pub fn refresh_cadence(&self) -> RefreshCadence {
-        RefreshCadence::for_flow_state(&self.device.snapshot().flow)
+        RefreshCadence::for_flow_state(self.device.flow_state())
     }
 
     /// The delay before the next passive tick: the connection cadence,
@@ -226,16 +276,18 @@ impl StudioController {
         if let Some(home) = self.home_view() {
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
-                .with_device_sync(self.device_sync.clone())
+                .with_device_sync(self.device_sync().cloned())
                 .with_deploy(self.deploy_view());
         }
-        let device_view = self
-            .device
-            .view(self.device_sync.as_ref(), self.usual_device_line());
+        let device_view = self.device.view(
+            &self.device_runtime_evidence(),
+            self.device_sync(),
+            self.usual_device_line(),
+        );
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
         let panes = vec![
-            self.project.view(self.device.has_lightplayer_state()),
+            self.project.view(self.has_lightplayer_state()),
             self.bus_pane(),
             device_view,
         ];
@@ -244,7 +296,7 @@ impl StudioController {
                 self.project.active_library_uid(),
                 self.project.active_library_slug(),
             )
-            .with_device_sync(self.device_sync.clone())
+            .with_device_sync(self.device_sync().cloned())
             .with_deploy(self.deploy_view())
     }
 
@@ -273,12 +325,16 @@ impl StudioController {
     /// The single live session's roster evidence (M3; M4's runtime pool
     /// replaces this assembly with per-runtime evidence).
     fn home_device_evidence(&self) -> crate::app::home::HomeDeviceEvidence {
-        let (observed_version, head_version) = self.device_versions;
+        let (observed_version, head_version) = self
+            .pool
+            .lens_session()
+            .map(crate::RuntimeSession::device_versions)
+            .unwrap_or((None, None));
         crate::app::home::HomeDeviceEvidence {
-            sync: self.device_sync.clone(),
-            link: self.device.device_state(),
+            sync: self.device_sync().cloned(),
+            link: self.device_state(),
             connect: self.gallery_connect_evidence(),
-            transport: self.device.transport_label().map(str::to_string),
+            transport: self.transport_label().map(str::to_string),
             observed_version,
             head_version,
         }
@@ -311,7 +367,10 @@ impl StudioController {
     /// while disconnected) for the device-level selector.
     fn console_view(&self) -> UiConsoleView {
         let mut console = UiConsoleView::from_ring(&self.logs, &self.log_filter);
-        console.device_log_level = self.device.server.requested_log_level();
+        console.device_log_level = self
+            .pool
+            .lens_session()
+            .and_then(crate::RuntimeSession::requested_log_level);
         console
     }
 
@@ -454,9 +513,13 @@ impl StudioController {
 
     /// What the attached device holds (connect-as-pull result), for the
     /// pane, cards, and deploy dialog. `None` while disconnected or when
-    /// the runtime is the simulator.
+    /// the runtime is the simulator. A pool read since the runtime-pool
+    /// extraction: the reconcile bundle lives on the session (P1: the sole
+    /// one), same external signature as the retired controller field.
     pub fn device_sync(&self) -> Option<&DeviceSyncState> {
-        self.device_sync.as_ref()
+        self.pool
+            .lens_session()
+            .and_then(crate::RuntimeSession::device_sync)
     }
 
     /// Connect-is-a-pull (D8): pull the attached device's copy, classify
@@ -465,11 +528,14 @@ impl StudioController {
     /// errors are logged and leave the state `None` (flash/erase must
     /// stay reachable on a device we can't read).
     pub(crate) async fn refresh_device_sync(&mut self) {
-        self.device_sync = None;
-        self.device_versions = (None, None);
-        self.device_storage_id = None;
+        if let Ok(session) = self.pool.device_session_mut() {
+            session.clear_reconcile();
+        }
         let pulled = {
-            let Ok(server) = self.device.server.client_mut() else {
+            let Ok(session) = self.pool.device_session_mut() else {
+                return;
+            };
+            let Ok(server) = session.client_mut() else {
                 return;
             };
             match device_session::pull_device_copy(
@@ -488,21 +554,27 @@ impl StudioController {
                     // an actionable state, never an eternal "Checking…":
                     // the dialog shows the unreadable note; flash/erase
                     // stay reachable
-                    self.device_sync = Some(DeviceSyncState {
-                        identity: None,
-                        content: DeviceContent::Unreadable {
-                            detail: format!("could not read the device: {error}"),
-                        },
-                    });
+                    if let Ok(session) = self.pool.device_session_mut() {
+                        session.set_device_sync(Some(DeviceSyncState {
+                            identity: None,
+                            content: DeviceContent::Unreadable {
+                                detail: format!("could not read the device: {error}"),
+                            },
+                        }));
+                    }
                     self.mark_dirty();
                     return;
                 }
             }
         };
-        self.device_storage_id = Some(pulled.storage_id.clone());
+        if let Ok(session) = self.pool.device_session_mut() {
+            session.set_device_storage_id(Some(pulled.storage_id.clone()));
+        }
         match self.absorb_device_pull(pulled).await {
             Ok(state) => {
-                self.device_sync = Some(state);
+                if let Ok(session) = self.pool.device_session_mut() {
+                    session.set_device_sync(Some(state));
+                }
                 self.mark_dirty();
             }
             Err(error) => {
@@ -592,7 +664,9 @@ impl StudioController {
         };
 
         if let Some((summary, relation, versions)) = local {
-            self.device_versions = versions;
+            if let Ok(session) = self.pool.device_session_mut() {
+                session.set_device_versions(versions);
+            }
             let content = DeviceContent::Known {
                 project_uid: summary.uid.to_string(),
                 slug: summary.slug.clone(),
@@ -620,7 +694,7 @@ impl StudioController {
                     project_uid: summary.uid.to_string(),
                     device: device_session::registry_entry_for(
                         &identity_value,
-                        self.device.transport_label().unwrap_or_default(),
+                        self.transport_label().unwrap_or_default(),
                         now,
                     ),
                     observed: pulled.observed,
@@ -658,7 +732,7 @@ impl StudioController {
             .catalog(CatalogOp::AdoptDevicePackage {
                 device: device_session::registry_entry_for(
                     identity_value,
-                    self.device.transport_label().unwrap_or_default(),
+                    self.transport_label().unwrap_or_default(),
                     now,
                 ),
                 files: pulled.files.clone(),
@@ -713,7 +787,11 @@ impl StudioController {
         {
             use lpc_model::AsLpPath;
             identity.name = registry_name;
-            match self.device.server.client_mut() {
+            match self
+                .pool
+                .device_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+            {
                 Ok(server) => match server
                     .fs_write(
                         crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
@@ -742,7 +820,7 @@ impl StudioController {
         };
         let entry = device_session::registry_entry_for(
             identity,
-            self.device.transport_label().unwrap_or_default(),
+            self.transport_label().unwrap_or_default(),
             now,
         );
         if let Err(error) = host.catalog(CatalogOp::UpsertRegisteredDevice(entry)).await {
@@ -852,16 +930,16 @@ impl StudioController {
     /// sim never counts — D22); firmware is available exactly when the
     /// session reached `Ready` AND the server protocol answered.
     fn deploy_environment(&self) -> crate::app::device::DeployEnvironment {
-        let device_state = self.device.device_state();
+        let device_state = self.device_state();
         let device_link_connected =
-            self.device.is_hardware_link() && !matches!(device_state, Some(DeviceState::Gone));
+            self.is_hardware_attached() && !matches!(device_state, Some(DeviceState::Gone));
         let firmware_available = device_link_connected
             && matches!(device_state, Some(DeviceState::Ready { .. }))
-            && self.device.has_lightplayer_state();
+            && self.has_lightplayer_state();
         crate::app::device::DeployEnvironment {
             device_link_connected,
             firmware_available,
-            device_sync: self.device_sync.clone(),
+            device_sync: self.device_sync().cloned(),
         }
     }
 
@@ -1120,7 +1198,7 @@ impl StudioController {
             name,
         };
         {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.device_session_mut()?.client_mut()?;
             let logs = server
                 .fs_write(
                     crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
@@ -1176,10 +1254,14 @@ impl StudioController {
         // dir replaces in place (CLI uploads use dirs other than the
         // sim's default slot)
         {
-            let storage_id = self.device_storage_id.clone().unwrap_or_else(|| {
-                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
-            });
-            let server = self.device.server.client_mut()?;
+            let storage_id = self
+                .pool
+                .lens_session()
+                .and_then(|session| session.device_storage_id().map(str::to_string))
+                .unwrap_or_else(|| {
+                    crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+                });
+            let server = self.pool.device_session_mut()?.client_mut()?;
             let loaded = server
                 .open_library_project(&storage_id, &files, &local_hash.to_string())
                 .await?;
@@ -1200,7 +1282,7 @@ impl StudioController {
             // association still goes through the registry (store root)
             let mut entry = device_session::registry_entry_for(
                 device,
-                self.device.transport_label().unwrap_or_default(),
+                self.transport_label().unwrap_or_default(),
                 now,
             );
             entry.association = Some(lpc_history::DeviceAssociation {
@@ -1220,7 +1302,7 @@ impl StudioController {
                 project_uid: target.project_uid.clone(),
                 device: device_session::registry_entry_for(
                     device,
-                    self.device.transport_label().unwrap_or_default(),
+                    self.transport_label().unwrap_or_default(),
                     now,
                 ),
                 version: local_hash,
@@ -1300,11 +1382,11 @@ impl StudioController {
         Timer: Future<Output = ()>,
         Cancel: CancelSignal + ?Sized,
     {
-        if !self.project_is_loaded() || !self.device.has_lightplayer_state() {
+        if !self.project_is_loaded() || !self.has_lightplayer_state() {
             return Ok(None);
         }
         let outcome = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
                 .refresh_project_gated(server, deadline, cancel)
                 .await?
@@ -1395,10 +1477,9 @@ impl StudioController {
             DeviceOp::ProvisionFirmware => self.provision_firmware(updates).await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
             DeviceOp::RefreshConnections => {
-                // Drop the attachment (no provider close) + catalog refresh.
+                // Drop the session (no provider close) + catalog refresh.
                 self.device.refresh_provider_catalog();
-                self.device.server.disconnect();
-                self.device_sync = None;
+                self.pool.clear();
                 self.project.reset();
                 Ok(UiNotices::new().with_notice(UiNotice::info("Connection catalog refreshed")))
             }
@@ -1415,16 +1496,8 @@ impl StudioController {
                         format!("Opening {}", provider_id.label()),
                     );
                 }
-                match self.device.open_provider(provider_id).await? {
-                    DeviceOpenOutcome::Opened => Ok(UiNotices::new()),
-                    DeviceOpenOutcome::Cancelled { message } => {
-                        Ok(UiNotices::new().with_notice(UiNotice::info(message)))
-                    }
-                    DeviceOpenOutcome::Connected { logs } => {
-                        self.record_logs(logs);
-                        self.attach_runtime(updates).await
-                    }
-                }
+                let outcome = self.device.open_provider(provider_id).await;
+                self.settle_connect_outcome(outcome, updates).await
             }
             DeviceOp::ConnectEndpoint {
                 provider_id,
@@ -1437,26 +1510,50 @@ impl StudioController {
                     "Connecting",
                     "Opening device endpoint",
                 );
-                let logs = self
+                let outcome = self
                     .device
                     .connect_endpoint(provider_id, endpoint_id)
-                    .await?;
-                self.record_logs(logs);
-                self.attach_runtime(updates).await
+                    .await
+                    .map(|(payload, logs)| DeviceOpenOutcome::Connected { payload, logs });
+                self.settle_connect_outcome(outcome, updates).await
             }
             // One-click reconnect (M1): no activity chip up front — the flow
             // may fall back to the browser's port chooser, which blocks like
             // the browser-serial OpenProvider path.
-            DeviceOp::ReconnectDevice => match self.device.reconnect_granted_device().await? {
-                DeviceOpenOutcome::Opened => Ok(UiNotices::new()),
-                DeviceOpenOutcome::Cancelled { message } => {
-                    Ok(UiNotices::new().with_notice(UiNotice::info(message)))
-                }
-                DeviceOpenOutcome::Connected { logs } => {
-                    self.record_logs(logs);
-                    self.attach_runtime(updates).await
-                }
-            },
+            DeviceOp::ReconnectDevice => {
+                let outcome = self.device.reconnect_granted_device().await;
+                self.settle_connect_outcome(outcome, updates).await
+            }
+        }
+    }
+
+    /// Land a connect flow's outcome in the pool, mirroring the retired
+    /// single-slot behavior: only a live payload leaves a session behind
+    /// (`Opened`, `Cancelled`, and failures all ended with the attachment
+    /// slot empty), and attach still replaces (P1 capacity).
+    async fn settle_connect_outcome(
+        &mut self,
+        outcome: Result<DeviceOpenOutcome, UiError>,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        match outcome {
+            Ok(DeviceOpenOutcome::Opened) => {
+                self.pool.clear();
+                Ok(UiNotices::new())
+            }
+            Ok(DeviceOpenOutcome::Cancelled { message }) => {
+                self.pool.clear();
+                Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+            }
+            Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
+                self.record_logs(logs);
+                self.pool.install(payload);
+                self.attach_runtime(updates).await
+            }
+            Err(error) => {
+                self.pool.clear();
+                Err(error)
+            }
         }
     }
 
@@ -1569,8 +1666,7 @@ impl StudioController {
     ) -> Result<(), UiError> {
         use lpc_model::AsLpPath;
         let is_live = self
-            .device_sync
-            .as_ref()
+            .device_sync()
             .and_then(|sync| sync.identity.as_ref())
             .is_some_and(|identity| identity.uid == uid);
         if !is_live {
@@ -1581,8 +1677,8 @@ impl StudioController {
             name: name.to_string(),
         };
         let logs = self
-            .device
-            .server
+            .pool
+            .device_session_mut()?
             .client_mut()?
             .fs_write(
                 crate::app::places::DEVICE_IDENTITY_PATH.as_path(),
@@ -1590,7 +1686,12 @@ impl StudioController {
             )
             .await?;
         self.record_logs(logs);
-        if let Some(sync) = self.device_sync.as_mut() {
+        if let Some(sync) = self
+            .pool
+            .device_session_mut()
+            .ok()
+            .and_then(crate::RuntimeSession::device_sync_mut)
+        {
             sync.identity = Some(identity);
         }
         Ok(())
@@ -1647,7 +1748,7 @@ impl StudioController {
     async fn open_from_home(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
         self.library_host()?;
         // a connected hardware device is M5's push flow, not an open
-        if self.device.is_hardware_link() {
+        if self.is_hardware_attached() {
             return Err(UiError::UnsupportedAction(
                 "Pushing to a connected device lands with the provision dialog (M5); \
                  disconnect the device to open this project in the simulator"
@@ -1662,13 +1763,13 @@ impl StudioController {
 
     async fn open_from_home_inner(&mut self, updates: UxUpdateSink) -> UiResult {
         // already attached to the simulator: replace-and-load directly
-        if self.device.has_lightplayer_state() {
+        if self.has_lightplayer_state() {
             return self.open_pending_package(updates).await;
         }
         // an open sim attachment without a server session reconnects first;
         // otherwise start the simulator — both paths run the pending open
         // inside `attach_runtime`
-        if self.device.has_runtime_attachment() {
+        if self.pool.has_session() {
             return self.connect_server_from_link(updates).await;
         }
         emit_activity(
@@ -1678,20 +1779,29 @@ impl StudioController {
             "Opening",
             "Starting the simulator runtime",
         );
-        match self
+        let outcome = self
             .device
             .open_provider(LinkProviderKind::BrowserWorker)
-            .await?
-        {
-            DeviceOpenOutcome::Connected { logs } => {
+            .await;
+        match outcome {
+            Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
+                self.pool.install(payload);
                 self.attach_runtime(updates).await
             }
-            DeviceOpenOutcome::Opened => Err(UiError::MissingSession(
-                "the simulator opened without connecting".to_string(),
-            )),
-            DeviceOpenOutcome::Cancelled { message } => {
+            Ok(DeviceOpenOutcome::Opened) => {
+                self.pool.clear();
+                Err(UiError::MissingSession(
+                    "the simulator opened without connecting".to_string(),
+                ))
+            }
+            Ok(DeviceOpenOutcome::Cancelled { message }) => {
+                self.pool.clear();
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+            }
+            Err(error) => {
+                self.pool.clear();
+                Err(error)
             }
         }
     }
@@ -1710,7 +1820,7 @@ impl StudioController {
             "Pushing the project to the simulator",
         );
         let result = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             match &pending {
                 PendingOpen::Package(key) => self.project.open_library_package(server, key).await,
                 PendingOpen::Example(id) => self.project.open_example_package(server, id).await,
@@ -1749,14 +1859,14 @@ impl StudioController {
             ProjectOp::DisconnectProject => self.disconnect_project().await,
             ProjectOp::SaveOverlay => {
                 let run = {
-                    let server = self.device.server.client_mut()?;
+                    let server = self.pool.lens_session_mut()?.client_mut()?;
                     self.project.save_overlay(server).await
                 };
                 self.record_project_edit_run(run)
             }
             ProjectOp::RevertAllEdits => {
                 let run = {
-                    let server = self.device.server.client_mut()?;
+                    let server = self.pool.lens_session_mut()?.client_mut()?;
                     self.project.revert_all_edits(server).await
                 };
                 self.record_project_edit_run(run)
@@ -1766,7 +1876,7 @@ impl StudioController {
 
     async fn execute_slot_edit_op(&mut self, op: SlotEditOp) -> UiResult {
         let run = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.apply_slot_edit(server, op).await
         };
         self.record_project_edit_run(run)
@@ -1774,7 +1884,7 @@ impl StudioController {
 
     async fn execute_asset_edit_op(&mut self, op: AssetEditOp) -> UiResult {
         let run = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.apply_asset_edit(server, op).await
         };
         self.record_project_edit_run(run)
@@ -1785,7 +1895,7 @@ impl StudioController {
     /// outcome; server log lines join the ring like any edit run's.
     async fn execute_asset_content_fetch(&mut self, op: AssetContentFetchOp) -> UiResult {
         let run = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.asset_content(server, &op.artifact).await?
         };
         self.record_logs(run.logs);
@@ -1794,7 +1904,7 @@ impl StudioController {
 
     async fn execute_node_revert_op(&mut self, op: NodeRevertOp) -> UiResult {
         let run = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.revert_node_edits(server, &op.node).await
         };
         self.record_project_edit_run(run)
@@ -1814,7 +1924,9 @@ impl StudioController {
         updates: UxUpdateSink,
     ) -> UiResult {
         self.project.reset();
-        self.device.server.disconnect();
+        if let Ok(session) = self.pool.lens_session_mut() {
+            session.disconnect_server();
+        }
         emit_activity(
             &updates,
             device_section_target(DeviceController::SECTION_DEVICE),
@@ -1822,27 +1934,37 @@ impl StudioController {
             "Opening",
             "Opening device without attaching LightPlayer",
         );
-        match self.device.open_provider(provider_id).await? {
-            DeviceOpenOutcome::Opened => Ok(UiNotices::new().with_notice(UiNotice::info(
-                "Choose the device endpoint to open for flashing",
-            ))),
-            DeviceOpenOutcome::Cancelled { message } => {
+        let outcome = self.device.open_provider(provider_id).await;
+        match outcome {
+            Ok(DeviceOpenOutcome::Opened) => {
+                self.pool.clear();
+                Ok(UiNotices::new().with_notice(UiNotice::info(
+                    "Choose the device endpoint to open for flashing",
+                )))
+            }
+            Ok(DeviceOpenOutcome::Cancelled { message }) => {
+                self.pool.clear();
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             // Recovery open: the DeviceSession exists (monitor/management
             // reachable; BlankFlash/Bootloader are fine end states) but the
             // app protocol is deliberately NOT attached.
-            DeviceOpenOutcome::Connected { logs } => {
+            Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
+                self.pool.install(payload);
                 self.rederive_deploy();
                 updates.emit(UxUpdate::View(self.view()));
                 Ok(UiNotices::new().with_notice(UiNotice::info("Device opened for flashing")))
+            }
+            Err(error) => {
+                self.pool.clear();
+                Err(error)
             }
         }
     }
 
     async fn connect_server_from_link(&mut self, updates: UxUpdateSink) -> UiResult {
-        if !self.device.has_runtime_attachment() {
+        if !self.pool.has_session() {
             return Err(UiError::MissingSession(
                 "link connection is not open".to_string(),
             ));
@@ -1851,7 +1973,7 @@ impl StudioController {
         // generation before the server can attach (reconnect-that-rebuilds);
         // Booting/Ready sessions attach directly.
         let needs_reconnect = matches!(
-            self.device.device_state(),
+            self.device_state(),
             Some(
                 DeviceState::Gone
                     | DeviceState::Incompatible { .. }
@@ -1863,7 +1985,9 @@ impl StudioController {
         );
         if needs_reconnect {
             self.project.reset();
-            self.device.server.disconnect();
+            if let Ok(session) = self.pool.lens_session_mut() {
+                session.disconnect_server();
+            }
             emit_activity(
                 &updates,
                 device_section_target(DeviceController::SECTION_DEVICE),
@@ -1872,7 +1996,7 @@ impl StudioController {
                 "Resetting device before server connect",
             );
             let result = {
-                let session = self.device.device_session().ok_or_else(|| {
+                let session = self.hardware_session().ok_or_else(|| {
                     UiError::MissingSession(
                         "hardware attachment has no live device session".to_string(),
                     )
@@ -1900,8 +2024,14 @@ impl StudioController {
             updates.clone(),
             device_section_target(DeviceController::SECTION_DEVICE),
         );
-        let is_sim = self.device.is_sim_attached();
-        match self.device.attach_server(server_updates) {
+        let is_sim = self.pool.sim_session().is_some();
+        let attach_result = match self.pool.lens().and_then(|id| self.pool.session_mut(id)) {
+            Some(session) => session.attach_server(server_updates),
+            None => Err(UiError::MissingSession(
+                "link connection is not open".to_string(),
+            )),
+        };
+        match attach_result {
             Ok(()) => {
                 let mut outcome =
                     UiNotices::new().with_notice(UiNotice::info("Server protocol connected"));
@@ -1914,8 +2044,8 @@ impl StudioController {
                     outcome.notices.extend(open_outcome.notices);
                     return Ok(outcome);
                 }
-                if is_sim {
-                    self.device_sync = None;
+                if is_sim && let Ok(session) = self.pool.lens_session_mut() {
+                    session.clear_reconcile();
                 }
                 emit_activity(
                     &updates,
@@ -1939,7 +2069,11 @@ impl StudioController {
                 let auto_connect = match probe {
                     Ok(auto_connect) => auto_connect,
                     Err(error) => {
-                        let pending_logs = self.device.server.take_pending_logs();
+                        let pending_logs = self
+                            .pool
+                            .lens_session_mut()
+                            .map(|session| session.take_pending_logs())
+                            .unwrap_or_default();
                         self.record_logs(pending_logs);
                         let device_logs = self.device.take_pending_device_logs();
                         self.record_logs(device_logs);
@@ -1950,7 +2084,9 @@ impl StudioController {
                                 UiLogOrigin::Studio,
                                 "No LightPlayer firmware detected during server readiness",
                             ));
-                            self.device.server.fail_no_firmware();
+                            if let Ok(session) = self.pool.lens_session_mut() {
+                                session.fail_no_firmware();
+                            }
                             // now the dialog's Blank state is the truth
                             self.rederive_deploy();
                             return Ok(UiNotices::new().with_notice(UiNotice::info(
@@ -1961,16 +2097,15 @@ impl StudioController {
                         // reflash affordance instead of a dead-end error —
                         // reflashing is the ONE way out, and it must stay
                         // reachable (explicit, never automatic).
-                        if matches!(
-                            self.device.device_state(),
-                            Some(DeviceState::Incompatible { .. })
-                        ) {
+                        if matches!(self.device_state(), Some(DeviceState::Incompatible { .. })) {
                             self.push_log(UiLogDraft::new(
                                 UiLogLevel::Warn,
                                 UiLogOrigin::Studio,
                                 format!("device firmware is incompatible: {error}"),
                             ));
-                            self.device.server.fail(error.to_string());
+                            if let Ok(session) = self.pool.lens_session_mut() {
+                                session.fail(error.to_string());
+                            }
                             self.rederive_deploy();
                             return Ok(UiNotices::new().with_notice(UiNotice::info(
                                 "Device firmware is incompatible with this Studio; update the firmware",
@@ -1981,7 +2116,9 @@ impl StudioController {
                             UiLogOrigin::Studio,
                             format!("server readiness probe failed: {error}"),
                         ));
-                        self.device.server.fail(error.to_string());
+                        if let Ok(session) = self.pool.lens_session_mut() {
+                            session.fail(error.to_string());
+                        }
                         return Err(error);
                     }
                 };
@@ -2014,7 +2151,9 @@ impl StudioController {
                 Ok(outcome)
             }
             Err(error) => {
-                self.device.server.fail(error.to_string());
+                if let Ok(session) = self.pool.lens_session_mut() {
+                    session.fail(error.to_string());
+                }
                 self.rederive_deploy();
                 Err(error)
             }
@@ -2030,7 +2169,7 @@ impl StudioController {
             "Checking loaded projects",
         );
         let result = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.connect_running_project(server).await
         };
         match result {
@@ -2080,7 +2219,7 @@ impl StudioController {
             "Checking server response",
         );
         let catalog = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.device_session_mut()?.client_mut()?;
             server.list_loaded_projects().await?
         };
         self.record_logs(catalog.logs);
@@ -2099,7 +2238,7 @@ impl StudioController {
             "Checking loaded projects",
         );
         let result = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
                 .connect_running_project_if_available(server)
                 .await
@@ -2132,7 +2271,7 @@ impl StudioController {
             "Loading project shape",
         );
         let result = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.connect_loaded_project(server, handle_id).await
         };
         match result {
@@ -2166,7 +2305,7 @@ impl StudioController {
             "Uploading demo project",
         );
         let result = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.load_demo_project(server).await
         };
         match result {
@@ -2206,7 +2345,7 @@ impl StudioController {
         );
         updates.emit(UxUpdate::View(self.view()));
         let sync = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.refresh_project(server).await?
         };
         self.record_project_sync_run(&sync);
@@ -2231,7 +2370,7 @@ impl StudioController {
         );
         updates.emit(UxUpdate::View(self.view()));
         let sync = {
-            let server = self.device.server.client_mut()?;
+            let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.sync_loaded_project(server).await?
         };
         self.record_project_sync_run(&sync);
@@ -2248,29 +2387,36 @@ impl StudioController {
 
     async fn disconnect_device(&mut self) -> UiResult {
         self.project.reset();
-        self.device_sync = None;
-        self.device.server.disconnect();
-        self.device.disconnect().await?;
+        // Taking the session out of the pool drops its wire client, server
+        // state, and reconcile bundle with it; the controller closes the
+        // payload and resets the connect flow.
+        let payload = self
+            .pool
+            .take_sole_session()
+            .map(crate::RuntimeSession::into_payload);
+        self.device.disconnect(payload).await?;
         self.rederive_deploy();
         Ok(UiNotices::new().with_notice(UiNotice::info("Device disconnected")))
     }
 
     async fn disconnect_lightplayer(&mut self) -> UiResult {
         self.project.reset();
-        self.device_sync = None;
-        self.device.server.disconnect();
+        if let Ok(session) = self.pool.lens_session_mut() {
+            session.clear_reconcile();
+            session.disconnect_server();
+        }
         Ok(UiNotices::new().with_notice(UiNotice::info("LightPlayer disconnected")))
     }
 
     /// Ask the connected server to apply `level` at runtime and record the
     /// confirmation as a Server-origin log entry. The requested level is
-    /// tracked optimistically on the server controller (no wire read-back)
-    /// so the console's device selector reflects it; failure surfaces
-    /// through the normal action error path.
+    /// tracked optimistically on the session (no wire read-back) so the
+    /// console's device selector reflects it; failure surfaces through the
+    /// normal action error path.
     async fn set_device_log_level(&mut self, level: UiLogLevel) -> UiResult {
         let mut logs = self
-            .device
-            .server
+            .pool
+            .device_session_mut()?
             .client_mut()?
             .set_log_level(level)
             .await?;
@@ -2280,7 +2426,9 @@ impl StudioController {
             format!("device log level set to {}", level.label()),
         ));
         self.record_logs(logs);
-        self.device.server.set_requested_log_level(level);
+        if let Ok(session) = self.pool.device_session_mut() {
+            session.set_requested_log_level(level);
+        }
         Ok(UiNotices::new())
     }
 
@@ -2346,7 +2494,9 @@ impl StudioController {
         updates: UxUpdateSink,
     ) -> UiResult {
         self.project.reset();
-        self.device.server.disconnect();
+        if let Ok(session) = self.pool.lens_session_mut() {
+            session.disconnect_server();
+        }
         let captured_logs = Rc::new(RefCell::new(Vec::new()));
         let target = device_section_target(DeviceController::SECTION_DEVICE);
         let activity = Rc::new(RefCell::new(
@@ -2365,7 +2515,7 @@ impl StudioController {
             Rc::clone(&captured_logs),
         );
         let manage_result = {
-            let session = self.device.device_session().ok_or_else(|| {
+            let session = self.hardware_session().ok_or_else(|| {
                 UiError::MissingSession("no hardware device session for management".to_string())
             })?;
             session.manage(spec.request, event_sink).await
@@ -2406,7 +2556,9 @@ impl StudioController {
                         spec.degrade_subject
                     ),
                 ));
-                self.device.server.fail(error.to_string());
+                if let Ok(session) = self.pool.lens_session_mut() {
+                    session.fail(error.to_string());
+                }
                 Ok(outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice)))
             }
         }
@@ -2418,15 +2570,51 @@ impl StudioController {
 }
 
 /// Cross-module test builders. The actor tests live in a sibling module and
-/// cannot reach the private `device`/`project` fields, so these `pub(crate)`
-/// helpers assemble a connected controller for them.
+/// cannot reach the private `device`/`pool`/`project` fields, so these
+/// `pub(crate)` helpers assemble a connected controller for them.
 #[cfg(test)]
 impl StudioController {
     /// Attach stubbed hardware in the given device state (view/derivation
-    /// tests that must not script a whole fake device).
-    #[cfg(test)]
+    /// tests that must not script a whole fake device). Replaces the
+    /// session PAYLOAD in place when a session exists — the retired
+    /// attachment and server slots were independently settable, so an
+    /// injected client survives.
     pub(crate) fn set_stub_device_for_test(&mut self, state: lpa_link::DeviceState) {
-        self.device.set_stub_hardware_for_test(state);
+        self.set_stub_payload_for_test(crate::RuntimePayload::stub_device_for_test(state));
+    }
+
+    /// Attach a stubbed SIMULATOR payload and mark the flow `Connected` —
+    /// the "connected but not hardware" fixture.
+    pub(crate) fn set_stub_sim_for_test(&mut self) {
+        self.set_stub_payload_for_test(crate::RuntimePayload::stub_sim_for_test());
+    }
+
+    fn set_stub_payload_for_test(&mut self, payload: crate::RuntimePayload) {
+        match self.pool.lens_session_mut() {
+            Ok(session) => session.set_payload_for_test(payload),
+            Err(_) => {
+                self.pool.install(payload);
+            }
+        }
+        self.device.set_stub_connected_flow_for_test();
+    }
+
+    /// Set the lens session's server protocol state directly (the retired
+    /// `ServerController::set_state` seam). Requires a stub session.
+    pub(crate) fn set_server_state_for_test(&mut self, state: crate::ServerState) {
+        self.pool
+            .lens_session_mut()
+            .expect("a stub session is installed")
+            .set_server_state_for_test(state);
+    }
+
+    /// Install an injected wire client on the lens session (the retired
+    /// `ServerController::set_client_for_test` seam).
+    pub(crate) fn set_server_client_for_test(&mut self, client: crate::StudioServerClient) {
+        self.pool
+            .lens_session_mut()
+            .expect("a stub session is installed")
+            .set_client_for_test(client);
     }
 
     /// A fresh controller whose device flow uses the given provider
@@ -2448,8 +2636,8 @@ impl StudioController {
         use crate::ProjectInventorySummary;
 
         let mut studio = Self::new(|| 0.0);
-        studio.device.set_stub_sim_for_test();
-        studio.device.server.set_client_for_test(client);
+        studio.set_stub_sim_for_test();
+        studio.set_server_client_for_test(client);
         studio
             .project
             .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
@@ -2463,7 +2651,7 @@ impl StudioController {
 
     /// The attached hardware's device-session state, for e2e assertions.
     pub(crate) fn device_state_for_test(&self) -> Option<lpa_link::DeviceState> {
-        self.device.device_state()
+        self.device_state()
     }
 }
 
@@ -2663,8 +2851,7 @@ mod tests {
     use crate::{
         ConnectFlowState, ControllerId, ProjectController, ProjectEditorOp, ProjectEditorTarget,
         ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTarget, ProjectState,
-        ProjectSyncPhase, ServerController, ServerFailureKind, ServerState, StudioServerClient,
-        UiIssue,
+        ProjectSyncPhase, ServerFailureKind, ServerState, StudioServerClient, UiIssue,
     };
 
     #[test]
@@ -2780,7 +2967,7 @@ mod tests {
 
     #[test]
     fn deploy_environment_derives_from_attachment_and_session_state() {
-        use crate::app::device::runtime_attachment::ready_state_for_test;
+        use crate::app::runtime_pool::runtime_session::ready_state_for_test;
         use lpa_link::DeviceState;
 
         // no attachment: nothing connected
@@ -2791,8 +2978,8 @@ mod tests {
 
         // sim attachment: never a device (D22)
         let mut studio = StudioController::new(|| 0.0);
-        studio.device.set_stub_sim_for_test();
-        studio.device.server.set_state(ServerState::Connected {
+        studio.set_stub_sim_for_test();
+        studio.set_server_state_for_test(ServerState::Connected {
             protocol: "sim".to_string(),
         });
         let env = studio.deploy_environment();
@@ -2806,32 +2993,28 @@ mod tests {
         assert!(env.firmware_available);
 
         // hardware Ready but the server protocol has not answered
-        studio.device.server.set_state(ServerState::Disconnected);
+        studio.set_server_state_for_test(ServerState::Disconnected);
         let env = studio.deploy_environment();
         assert!(env.device_link_connected);
         assert!(!env.firmware_available, "Ready needs a connected server");
 
         // hardware BlankFlash: connected, no firmware (dialog's Blank)
         let mut studio = connected_studio();
-        studio
-            .device
-            .set_stub_hardware_for_test(DeviceState::BlankFlash);
+        studio.set_stub_device_for_test(DeviceState::BlankFlash);
         let env = studio.deploy_environment();
         assert!(env.device_link_connected);
         assert!(!env.firmware_available);
 
         // hardware Gone: the link no longer counts as connected
         let mut studio = connected_studio();
-        studio.device.set_stub_hardware_for_test(DeviceState::Gone);
+        studio.set_stub_device_for_test(DeviceState::Gone);
         let env = studio.deploy_environment();
         assert!(!env.device_link_connected);
         assert!(!env.firmware_available);
 
         // server Connected alone (Ready session) stays the happy path
         let mut studio = connected_studio();
-        studio
-            .device
-            .set_stub_hardware_for_test(ready_state_for_test());
+        studio.set_stub_device_for_test(ready_state_for_test());
         assert!(studio.deploy_environment().firmware_available);
     }
 
@@ -2840,11 +3023,9 @@ mod tests {
         use lpa_link::{DeviceState, IncompatibleReason};
 
         let mut studio = connected_studio();
-        studio
-            .device
-            .set_stub_hardware_for_test(DeviceState::Incompatible {
-                reason: IncompatibleReason::NoHello,
-            });
+        studio.set_stub_device_for_test(DeviceState::Incompatible {
+            reason: IncompatibleReason::NoHello,
+        });
 
         let view = studio.view();
         let device_pane = view
@@ -3078,7 +3259,7 @@ mod tests {
         // the pane escalates to the flash affordance (the dialog's Blank
         // state is the full wizard; the pane mirrors the status)
         let mut studio = connected_studio();
-        studio.device.server.set_state(ServerState::Failed {
+        studio.set_server_state_for_test(ServerState::Failed {
             issue: UiIssue::new("No LightPlayer firmware detected."),
             kind: ServerFailureKind::NoFirmware,
         });
@@ -3190,7 +3371,7 @@ mod tests {
             ProjectState::NotLoaded
         ));
         assert!(matches!(
-            studio.device.server.snapshot().state,
+            studio.snapshot().server.state,
             ServerState::Disconnected
         ));
         assert!(matches!(
@@ -3210,7 +3391,7 @@ mod tests {
             ProjectState::NotLoaded
         ));
         assert!(matches!(
-            studio.device.server.snapshot().state,
+            studio.snapshot().server.state,
             ServerState::Connected { .. }
         ));
         assert!(matches!(
@@ -3230,7 +3411,7 @@ mod tests {
             ProjectState::NotLoaded
         ));
         assert!(matches!(
-            studio.device.server.snapshot().state,
+            studio.snapshot().server.state,
             ServerState::Disconnected
         ));
         assert!(matches!(
@@ -3252,7 +3433,7 @@ mod tests {
             ProjectState::NotLoaded
         ));
         assert!(matches!(
-            studio.device.server.snapshot().state,
+            studio.snapshot().server.state,
             ServerState::Disconnected
         ));
         assert!(matches!(
@@ -3276,7 +3457,7 @@ mod tests {
             ProjectState::NotLoaded
         ));
         assert!(matches!(
-            studio.device.server.snapshot().state,
+            studio.snapshot().server.state,
             ServerState::Disconnected
         ));
         assert!(matches!(
@@ -3300,7 +3481,7 @@ mod tests {
             ProjectState::NotLoaded
         ));
         assert!(matches!(
-            studio.device.server.snapshot().state,
+            studio.snapshot().server.state,
             ServerState::Connected { .. }
         ));
         assert!(matches!(
@@ -3570,7 +3751,7 @@ mod tests {
         let retargeted = retarget_activity_updates(sink, target.clone());
 
         retargeted.emit(UxUpdate::Activity {
-            target: UxActivityTarget::pane(ServerController::NODE_ID),
+            target: UxActivityTarget::pane("studio|server"),
             status: UiStatus::working("Connecting"),
             activity: UiActivityView::new("Connecting ESP32 server"),
         });
@@ -3586,7 +3767,7 @@ mod tests {
 
     fn connected_studio() -> StudioController {
         let mut studio = link_connected_studio();
-        studio.device.server.set_state(ServerState::Connected {
+        studio.set_server_state_for_test(ServerState::Connected {
             protocol: "fake-protocol".to_string(),
         });
         studio
@@ -3597,13 +3778,10 @@ mod tests {
 
     fn connected_studio_with_client(io: ScriptedClientIo) -> StudioController {
         let mut studio = link_connected_studio();
-        studio
-            .device
-            .server
-            .set_client_for_test(StudioServerClient::from_io_for_test(
-                "fake-protocol",
-                Box::new(io),
-            ));
+        studio.set_server_client_for_test(StudioServerClient::from_io_for_test(
+            "fake-protocol",
+            Box::new(io),
+        ));
         studio
             .project
             .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
@@ -3614,8 +3792,8 @@ mod tests {
         let mut studio = StudioController::new(|| 0.0);
         // hardware, as far as the pane is concerned: a stubbed device
         // session in the Ready state
-        studio.device.set_stub_hardware_for_test(
-            crate::app::device::runtime_attachment::ready_state_for_test(),
+        studio.set_stub_device_for_test(
+            crate::app::runtime_pool::runtime_session::ready_state_for_test(),
         );
         studio
     }
