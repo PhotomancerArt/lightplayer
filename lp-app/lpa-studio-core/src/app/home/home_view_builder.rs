@@ -640,6 +640,46 @@ mod tests {
     }
 
     #[test]
+    fn failed_read_live_card_keeps_its_identity_and_dedups_the_registry() {
+        // Regression (2026-07-22 HW walk): a content-read failure after a
+        // successful identity read must NOT spawn an anonymous second
+        // card — partial knowledge survives, the live card wears the
+        // remembered name and replaces the offline card.
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "TestBoard1".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 5.0,
+                association: None,
+            })
+            .unwrap();
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+
+        let evidence = live(DeviceSyncState {
+            identity: Some(DeviceIdentity {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "TestBoard1".to_string(),
+            }),
+            content: DeviceContent::Unreadable {
+                detail: "could not read the device: hash package failed".to_string(),
+            },
+        });
+        let view = build_home_view(Some(&inputs), None, None, &evidence);
+
+        assert_eq!(view.devices.len(), 1, "one card, not an anonymous twin");
+        let card = &view.devices[0];
+        assert_eq!(card.name, "TestBoard1");
+        assert_eq!(card.uid.as_deref(), Some("dev_aaaaaaaaaaaaaaaa"));
+        assert!(matches!(
+            card.state,
+            RosterCardState::HoldsUnreadableData { .. }
+        ));
+    }
+
+    #[test]
     fn d28_connected_device_keeps_its_card_and_the_project_gets_the_chip() {
         let store = store();
         let summary = store.create("Porch", 1.0).unwrap();

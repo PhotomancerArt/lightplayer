@@ -115,7 +115,7 @@ pub(crate) fn connected_at_head() -> Element {
 #[story]
 pub(crate) fn ready_to_flash() -> Element {
     story_pane(pane(
-        UiStatus::warning("Ready to flash"),
+        UiStatus::attention("Ready to flash"),
         vec![
             UiStepView::new(
                 DeviceController::SECTION_DEVICE,
@@ -140,7 +140,7 @@ pub(crate) fn ready_to_flash() -> Element {
 #[story]
 pub(crate) fn reflash_needed() -> Element {
     story_pane(pane(
-        UiStatus::warning("Reflash needed"),
+        UiStatus::attention("Reflash needed"),
         vec![
             UiStepView::new(
                 DeviceController::SECTION_DEVICE,

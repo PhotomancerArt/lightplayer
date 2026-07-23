@@ -55,6 +55,13 @@
     --studio-status-warning-bg: #292614;
     --studio-status-warning-border: #796c33;
     --studio-status-warning-text: #f0dc7a;
+    /* Attention (orange): device/roster health family — "needs a look".
+       Deliberately distinct from warning-yellow, which is the node
+       language's unsaved/edit color. Hue-rotated from the warning family
+       (~50° → ~32°) at the same chroma and lightness. */
+    --studio-status-attention-bg: #291f14;
+    --studio-status-attention-border: #795833;
+    --studio-status-attention-text: #f0b97a;
     --studio-status-error-bg: #301b1d;
     --studio-status-error-border: #874b4b;
     --studio-status-error-text: #ffc7c7;
@@ -1366,6 +1373,14 @@ label:has(> input:not(:disabled)) {
     --ux-popover-border-color: var(--studio-status-warning-border);
     --ux-popover-icon-color: var(--studio-status-warning-text);
     --ux-popover-trigger-fill-top: var(--studio-status-warning-bg);
+    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
+    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+}
+
+.ux-popover-chrome-attention {
+    --ux-popover-border-color: var(--studio-status-attention-border);
+    --ux-popover-icon-color: var(--studio-status-attention-text);
+    --ux-popover-trigger-fill-top: var(--studio-status-attention-bg);
     --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
     --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
 }

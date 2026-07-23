@@ -156,8 +156,10 @@ pub enum PaneTone {
     Good,
     /// Live-only (transient) state, blue.
     Live,
-    /// Needs attention (e.g. unsaved), yellow.
+    /// Unsaved/edited, yellow (node edit vocabulary).
     Warning,
+    /// Health needs a look, orange (device/roster attention family).
+    Attention,
     /// Failed, red.
     Error,
 }
@@ -304,6 +306,9 @@ fn pane_header_tint_class(tone: PaneTone) -> &'static str {
         PaneTone::Warning => {
             "tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg),transparent_62%)]"
         }
+        PaneTone::Attention => {
+            "tw:bg-[linear-gradient(90deg,var(--studio-status-attention-bg),transparent_62%)]"
+        }
         PaneTone::Error => {
             "tw:bg-[linear-gradient(90deg,var(--studio-status-error-bg),transparent_66%)]"
         }
@@ -326,6 +331,9 @@ fn pane_chip_class(tone: PaneTone) -> &'static str {
         }
         PaneTone::Warning => {
             "tw:shrink-0 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:leading-none tw:text-status-warning-foreground"
+        }
+        PaneTone::Attention => {
+            "tw:shrink-0 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-attention-border tw:bg-status-attention-bg tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:leading-none tw:text-status-attention-foreground"
         }
         PaneTone::Error => {
             "tw:shrink-0 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-0.5 tw:text-xs tw:font-bold tw:leading-none tw:text-status-error-foreground"

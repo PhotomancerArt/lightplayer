@@ -91,6 +91,8 @@ pub enum DetailSectionTint {
     Working,
     /// Unsaved/edited (yellow) wash.
     Warning,
+    /// Health-attention (orange) wash — device/roster surfaces.
+    Attention,
     /// Failed/invalid (red) wash.
     Error,
     /// Live/transient (blue) wash.
@@ -115,6 +117,9 @@ pub fn detail_popover_section_class(tint: DetailSectionTint) -> &'static str {
         }
         DetailSectionTint::Warning => {
             "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
+        }
+        DetailSectionTint::Attention => {
+            "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-attention-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
         }
         DetailSectionTint::Error => {
             "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-error-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
@@ -142,6 +147,9 @@ fn detail_section_title_class(tint: DetailSectionTint) -> &'static str {
         }
         DetailSectionTint::Warning => {
             "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-warning-foreground"
+        }
+        DetailSectionTint::Attention => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-attention-foreground"
         }
         DetailSectionTint::Error => {
             "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-error-foreground"

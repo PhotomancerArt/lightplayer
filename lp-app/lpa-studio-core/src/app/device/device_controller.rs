@@ -523,13 +523,13 @@ impl DeviceController {
         // Incompatible firmware outranks the server state: the ONE
         // affordance is reflashing (explicit, never automatic).
         if matches!(runtime.device_state, Some(DeviceState::Incompatible { .. })) {
-            return UiStatus::warning("Reflash needed");
+            return UiStatus::attention("Reflash needed");
         }
         match &runtime.server_state {
             ServerState::Failed {
                 kind: ServerFailureKind::NoFirmware,
                 ..
-            } => UiStatus::warning("Ready to flash"),
+            } => UiStatus::attention("Ready to flash"),
             ServerState::Failed { .. } => UiStatus::error("Needs attention"),
             ServerState::Connecting { .. } => UiStatus::working("Connecting"),
             ServerState::Connected { .. } => {

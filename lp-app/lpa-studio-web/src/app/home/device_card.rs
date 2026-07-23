@@ -248,7 +248,7 @@ pub(crate) fn DeviceCard(
                 }
                 if fw_update {
                     div { class: "tw:mt-1",
-                        StatusChip { status: UiStatus::warning("Firmware update available") }
+                        StatusChip { status: UiStatus::attention("Firmware update available") }
                     }
                 }
                 if let Some(action) = affordance {
@@ -476,6 +476,7 @@ pub(crate) fn circle_props(circle: RosterCircle) -> (StatusCircleShape, StatusCi
         UiStatusKind::Working => StatusCircleTone::Working,
         UiStatusKind::Good => StatusCircleTone::Good,
         UiStatusKind::Warning => StatusCircleTone::Warning,
+        UiStatusKind::Attention => StatusCircleTone::Attention,
         UiStatusKind::Error => StatusCircleTone::Error,
     };
     (shape, tone)

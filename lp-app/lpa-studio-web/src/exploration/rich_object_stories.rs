@@ -445,7 +445,7 @@ struct RichSectionSpec {
 fn tint_severity(tint: DetailSectionTint) -> u8 {
     match tint {
         DetailSectionTint::Error => 4,
-        DetailSectionTint::Warning => 3,
+        DetailSectionTint::Warning | DetailSectionTint::Attention => 3,
         DetailSectionTint::Working | DetailSectionTint::Live | DetailSectionTint::Bound => 2,
         DetailSectionTint::Good => 1,
         DetailSectionTint::None => 0,

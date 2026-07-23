@@ -57,7 +57,7 @@ impl UiAffordance {
         match status {
             UiStatusKind::Neutral | UiStatusKind::Good => Self::Info,
             UiStatusKind::Working => Self::Busy,
-            UiStatusKind::Warning | UiStatusKind::Error => Self::Error,
+            UiStatusKind::Warning | UiStatusKind::Attention | UiStatusKind::Error => Self::Error,
         }
     }
 

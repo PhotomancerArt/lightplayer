@@ -604,6 +604,26 @@ impl StudioController {
             self.upsert_device_entry(identity, now).await;
         }
 
+        // a content read/hash failure on an IDENTIFIED device: partial
+        // knowledge survives — the identity above was already reconciled
+        // and the sighting recorded, so the card keeps its name and
+        // dedups against the registry; only classification is unknown.
+        // Checked BEFORE the empty-content branch (a failed read has no
+        // files, but that must never classify as Empty).
+        if let Some(detail) = &pulled.read_error {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!("device content read failed: {detail}"),
+            ));
+            return Ok(DeviceSyncState {
+                identity,
+                content: DeviceContent::Unreadable {
+                    detail: format!("could not read the device: {detail}"),
+                },
+            });
+        }
+
         // a device with no project files — or only `.lp/*` metadata (a
         // freshly stamped board) — is EMPTY, not unreadable
         let has_project_content = pulled
@@ -3033,7 +3053,7 @@ mod tests {
             .iter()
             .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
             .expect("device pane");
-        assert_eq!(device_pane.status.kind, UiStatusKind::Warning);
+        assert_eq!(device_pane.status.kind, UiStatusKind::Attention);
         assert_eq!(device_pane.status.label, "Reflash needed");
         // The ONE affordance: reflash (explicit, never automatic).
         let actions = view_actions(&view);
@@ -3270,7 +3290,7 @@ mod tests {
             .iter()
             .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
             .expect("device pane");
-        assert_eq!(device_pane.status.kind, UiStatusKind::Warning);
+        assert_eq!(device_pane.status.kind, UiStatusKind::Attention);
         assert_eq!(device_pane.status.label, "Ready to flash");
         let actions = view_actions(&view);
         assert!(actions.iter().any(|action| matches!(

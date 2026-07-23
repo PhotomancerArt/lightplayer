@@ -115,9 +115,11 @@ impl RosterCardState {
             | Self::OtherFirmware
             | Self::NeedsFirmwareUpdate
             | Self::NeedsAName
-            | Self::HoldsUnreadableData { .. } => (RosterCircleShape::Solid, UiStatusKind::Warning),
+            | Self::HoldsUnreadableData { .. } => {
+                (RosterCircleShape::Solid, UiStatusKind::Attention)
+            }
             Self::ConnectingRetrying { .. } | Self::OperationInFlight { .. } => {
-                (RosterCircleShape::Pulsing, UiStatusKind::Warning)
+                (RosterCircleShape::Pulsing, UiStatusKind::Attention)
             }
             Self::NotResponding => (RosterCircleShape::Solid, UiStatusKind::Error),
             Self::InUseElsewhere => (RosterCircleShape::Solid, UiStatusKind::Neutral),
@@ -246,7 +248,7 @@ mod tests {
                 tone: UiStatusKind::Neutral,
             }
         );
-        // every working state pulses amber
+        // every working state pulses amber (the attention family)
         for working in [
             RosterCardState::ConnectingRetrying {
                 phase: ConnectPhase::Resetting,
@@ -260,7 +262,7 @@ mod tests {
                 working.circle(),
                 RosterCircle {
                     shape: RosterCircleShape::Pulsing,
-                    tone: UiStatusKind::Warning,
+                    tone: UiStatusKind::Attention,
                 }
             );
         }
@@ -279,7 +281,7 @@ mod tests {
             RosterCardState::NeedsFirmwareUpdate,
             RosterCardState::NeedsAName,
         ] {
-            assert_eq!(attention.circle(), solid(UiStatusKind::Warning));
+            assert_eq!(attention.circle(), solid(UiStatusKind::Attention));
         }
     }
 
