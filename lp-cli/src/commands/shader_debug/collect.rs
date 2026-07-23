@@ -54,6 +54,8 @@ pub fn collect_fa_data(
         let lower_opts = LowerOpts {
             float_mode,
             q32: &compiler_config.q32,
+            // Match device codegen defaults (fuel checks on).
+            fuel: true,
         };
         let lowered = lower_ops(func, ir, &module_abi, &lower_opts)
             .map_err(|e| anyhow::anyhow!("lower: {e:?}"))?;

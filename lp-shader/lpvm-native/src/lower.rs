@@ -1641,6 +1641,22 @@ impl<'a> LowerCtx<'a> {
                         None
                     };
 
+                    // Fuel: check-then-decrement immediately before the
+                    // back-edge Br. Every header re-entry (including
+                    // `Continue`, which branches to the continuing block that
+                    // falls through here) passes through this check. The
+                    // FuelCheck is included in the back-edge Linear region so
+                    // the regalloc walk covers it; `LoopRegion::backedge_idx`
+                    // still points at the Br itself.
+                    let fuel_idx = self.out.len() as u16;
+                    if self.lower_opts.fuel {
+                        self.out.push(VInst::FuelCheck {
+                            vmctx: fa_vreg(self.func.vmctx_vreg),
+                            decrement: true,
+                            trap_label: self.epilogue_label,
+                            src_op: pack_src_op(Some((eo.saturating_sub(1)) as u32)),
+                        });
+                    }
                     let backedge_idx = self.out.len() as u16;
                     self.out.push(VInst::Br {
                         target: header_label,
@@ -1648,7 +1664,7 @@ impl<'a> LowerCtx<'a> {
                     });
                     let backedge_end = self.out.len() as u16;
                     let backedge = self.region_tree.push(Region::Linear {
-                        start: backedge_idx,
+                        start: fuel_idx,
                         end: backedge_end,
                     });
 
@@ -1879,8 +1895,35 @@ pub fn lower_ops(
         block_exit_stack: Vec::new(),
     };
     ctx.epilogue_label = ctx.alloc_label();
-    let root = ctx.lower_range(0, func.body.len())?;
+    // Fuel: entry check (check-only, no decrement) as the very first VInst.
+    // Keeps loop-free functions consuming nothing and acts as the cascade
+    // cutoff when a callee traps (fuel stays 0, so the caller's next check
+    // fails too).
+    if opts.fuel {
+        ctx.out.push(VInst::FuelCheck {
+            vmctx: fa_vreg(func.vmctx_vreg),
+            decrement: false,
+            trap_label: ctx.epilogue_label,
+            src_op: SRC_OP_NONE,
+        });
+    }
+    let body_root = ctx.lower_range(0, func.body.len())?;
     ctx.out.push(VInst::Label(ctx.epilogue_label, SRC_OP_NONE));
+    // The entry FuelCheck sits before the body's regions; give it its own
+    // Linear region so the regalloc walk covers it (the walk only visits
+    // VInsts reachable through the region tree).
+    let root = if opts.fuel {
+        let entry_lin = ctx
+            .region_tree
+            .push(crate::region::Region::Linear { start: 0, end: 1 });
+        if body_root == REGION_ID_NONE {
+            entry_lin
+        } else {
+            ctx.region_tree.push_seq(&[entry_lin, body_root])
+        }
+    } else {
+        body_root
+    };
     ctx.region_tree.root = root;
     // Collect LPIR slot sizes for frame layout
     let lpir_slots: Vec<(u32, u32)> = ctx
@@ -2082,7 +2125,11 @@ mod tests {
         ir: &LpirModule,
         abi: &ModuleAbi,
     ) -> Result<Vec<VInst>, LowerError> {
-        let opts = LowerOpts { float_mode, q32 };
+        let opts = LowerOpts {
+            float_mode,
+            q32,
+            fuel: false,
+        };
         let mut out = Vec::new();
         let mut symbols = ModuleSymbols::default();
         let mut pool = Vec::new();
@@ -2123,7 +2170,11 @@ mod tests {
         ir: &LpirModule,
         abi: &ModuleAbi,
     ) -> Result<(Vec<VInst>, ModuleSymbols, Vec<FaVReg>), LowerError> {
-        let opts = LowerOpts { float_mode, q32 };
+        let opts = LowerOpts {
+            float_mode,
+            q32,
+            fuel: false,
+        };
         let mut out = Vec::new();
         let mut symbols = ModuleSymbols::default();
         let mut pool = Vec::new();
@@ -3605,9 +3656,12 @@ mod tests {
         let abi = ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &sig);
 
         let q32 = Q32Options::default();
+        // fuel: false — this test asserts the *body* region structure; with
+        // fuel on the root becomes a Seq([entry FuelCheck, body]).
         let lower_opts = LowerOpts {
             float_mode: FloatMode::Q32,
             q32: &q32,
+            fuel: false,
         };
         let lowered = lower_ops(&func, &ir, &abi, &lower_opts).expect("lower ok");
 
@@ -3633,6 +3687,264 @@ mod tests {
                 *end as usize <= lowered.vinsts.len(),
                 "Linear end should not exceed vinsts len"
             );
+        }
+    }
+
+    // ── Fuel check insertion ────────────────────────────────────────────────
+
+    /// Counted loop: `i = 0; loop { if !(i < n) break; i += 1 }; return i`.
+    fn counted_loop_func() -> IrFunction {
+        IrFunction {
+            name: String::from("loop_n"),
+            is_entry: false,
+            vmctx_vreg: IrVReg(0),
+            param_count: 1,
+            return_types: vec![IrType::I32],
+            sret_arg: None,
+            // v0 = vmctx, v1 = n, v2 = i, v3 = cond
+            vreg_types: vec![IrType::Pointer, IrType::I32, IrType::I32, IrType::I32],
+            slots: vec![],
+            body: vec![
+                LpirOp::IconstI32 {
+                    dst: v(2),
+                    value: 0,
+                },
+                LpirOp::LoopStart {
+                    continuing_offset: 5,
+                    end_offset: 6,
+                },
+                LpirOp::IltS {
+                    dst: v(3),
+                    lhs: v(2),
+                    rhs: v(1),
+                },
+                LpirOp::BrIfNot { cond: v(3) },
+                LpirOp::IaddImm {
+                    dst: v(2),
+                    src: v(2),
+                    imm: 1,
+                },
+                LpirOp::End,
+                LpirOp::Return {
+                    values: VRegRange { start: 0, count: 1 },
+                },
+            ]
+            .into(),
+            vreg_pool: vec![v(2)],
+        }
+    }
+
+    /// Loop-free: `return 42`.
+    fn loop_free_func() -> IrFunction {
+        IrFunction {
+            name: String::from("plain"),
+            is_entry: false,
+            vmctx_vreg: IrVReg(0),
+            param_count: 0,
+            return_types: vec![IrType::I32],
+            sret_arg: None,
+            vreg_types: vec![IrType::Pointer, IrType::I32],
+            slots: vec![],
+            body: vec![
+                LpirOp::IconstI32 {
+                    dst: v(1),
+                    value: 42,
+                },
+                LpirOp::Return {
+                    values: VRegRange { start: 0, count: 1 },
+                },
+            ]
+            .into(),
+            vreg_pool: vec![v(1)],
+        }
+    }
+
+    /// Nested loops: `loop { loop { break }; break }; return 0`.
+    fn nested_loop_func() -> IrFunction {
+        IrFunction {
+            name: String::from("nested"),
+            is_entry: false,
+            vmctx_vreg: IrVReg(0),
+            param_count: 0,
+            return_types: vec![IrType::I32],
+            sret_arg: None,
+            vreg_types: vec![IrType::Pointer, IrType::I32],
+            slots: vec![],
+            body: vec![
+                LpirOp::LoopStart {
+                    continuing_offset: 5,
+                    end_offset: 6,
+                },
+                LpirOp::LoopStart {
+                    continuing_offset: 3,
+                    end_offset: 4,
+                },
+                LpirOp::Break,
+                LpirOp::End,
+                LpirOp::Break,
+                LpirOp::End,
+                LpirOp::IconstI32 {
+                    dst: v(1),
+                    value: 0,
+                },
+                LpirOp::Return {
+                    values: VRegRange { start: 0, count: 1 },
+                },
+            ]
+            .into(),
+            vreg_pool: vec![v(1)],
+        }
+    }
+
+    fn lower_with_fuel(func: &IrFunction, fuel: bool) -> LoweredFunction {
+        use lp_collection::VecMap;
+        use lpir::FuncId;
+
+        let ir = LpirModule {
+            imports: vec![],
+            functions: VecMap::from([(FuncId(0), func.clone())]),
+        };
+        let sig = LpsModuleSig::default();
+        let abi = ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &sig);
+        let q32 = Q32Options::default();
+        let lower_opts = LowerOpts {
+            float_mode: FloatMode::Q32,
+            q32: &q32,
+            fuel,
+        };
+        lower_ops(func, &ir, &abi, &lower_opts).expect("lower ok")
+    }
+
+    fn fuel_checks(lowered: &LoweredFunction) -> Vec<(usize, bool)> {
+        lowered
+            .vinsts
+            .iter()
+            .enumerate()
+            .filter_map(|(i, inst)| match inst {
+                VInst::FuelCheck { decrement, .. } => Some((i, *decrement)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fuel_loop_gets_entry_check_and_backedge_check() {
+        let lowered = lower_with_fuel(&counted_loop_func(), true);
+        let checks = fuel_checks(&lowered);
+        assert_eq!(
+            checks.len(),
+            2,
+            "one entry check + one back-edge check, got {checks:?}"
+        );
+        // Entry check: first VInst, check-only.
+        assert_eq!(checks[0], (0, false), "entry check must be the first VInst");
+        // Back-edge check: decrementing, immediately before the back-edge Br,
+        // with LoopRegion.backedge_idx still pointing at the Br.
+        assert_eq!(lowered.loop_regions.len(), 1);
+        let lr = &lowered.loop_regions[0];
+        assert_eq!(
+            checks[1],
+            (lr.backedge_idx - 1, true),
+            "back-edge check sits immediately before the back-edge Br"
+        );
+        match &lowered.vinsts[lr.backedge_idx] {
+            VInst::Br { .. } => {}
+            other => panic!("backedge_idx must point at the Br, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fuel_nested_loops_get_one_check_per_backedge() {
+        let lowered = lower_with_fuel(&nested_loop_func(), true);
+        let checks = fuel_checks(&lowered);
+        let decrementing: Vec<_> = checks.iter().filter(|(_, dec)| *dec).collect();
+        assert_eq!(
+            decrementing.len(),
+            2,
+            "one decrementing check per loop back-edge, got {checks:?}"
+        );
+        assert_eq!(lowered.loop_regions.len(), 2);
+        for lr in &lowered.loop_regions {
+            assert!(
+                matches!(
+                    &lowered.vinsts[lr.backedge_idx - 1],
+                    VInst::FuelCheck {
+                        decrement: true,
+                        ..
+                    }
+                ),
+                "each back-edge Br is preceded by a decrementing FuelCheck"
+            );
+        }
+    }
+
+    #[test]
+    fn fuel_loop_free_function_gets_only_entry_check() {
+        let lowered = lower_with_fuel(&loop_free_func(), true);
+        let checks = fuel_checks(&lowered);
+        assert_eq!(checks, vec![(0, false)], "entry check only, no decrement");
+    }
+
+    #[test]
+    fn fuel_disabled_emits_no_checks() {
+        for func in [counted_loop_func(), loop_free_func(), nested_loop_func()] {
+            let lowered = lower_with_fuel(&func, false);
+            assert!(
+                fuel_checks(&lowered).is_empty(),
+                "fuel: false must emit no FuelChecks ({})",
+                func.name
+            );
+        }
+    }
+
+    /// The entry FuelCheck must be covered by the region tree so the regalloc
+    /// walk visits it (uncovered VInsts never get their uses allocated).
+    #[test]
+    fn fuel_checks_are_covered_by_region_tree() {
+        use crate::region::Region;
+
+        fn covers(tree: &crate::region::RegionTree, id: crate::region::RegionId, idx: u16) -> bool {
+            if id == crate::region::REGION_ID_NONE {
+                return false;
+            }
+            match &tree.nodes[id as usize] {
+                Region::Linear { start, end } => *start <= idx && idx < *end,
+                Region::Seq {
+                    children_start,
+                    child_count,
+                } => {
+                    let s = *children_start as usize;
+                    let e = s + *child_count as usize;
+                    tree.seq_children[s..e]
+                        .iter()
+                        .any(|&c| covers(tree, c, idx))
+                }
+                Region::IfThenElse {
+                    head,
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    covers(tree, *head, idx)
+                        || covers(tree, *then_body, idx)
+                        || covers(tree, *else_body, idx)
+                }
+                Region::Loop { header, body, .. } => {
+                    covers(tree, *header, idx) || covers(tree, *body, idx)
+                }
+                Region::Block { body, .. } => covers(tree, *body, idx),
+            }
+        }
+
+        for func in [counted_loop_func(), loop_free_func(), nested_loop_func()] {
+            let lowered = lower_with_fuel(&func, true);
+            for (i, dec) in fuel_checks(&lowered) {
+                assert!(
+                    covers(&lowered.region_tree, lowered.region_tree.root, i as u16),
+                    "FuelCheck at {i} (decrement={dec}) not covered by region tree ({})",
+                    func.name
+                );
+            }
         }
     }
 }

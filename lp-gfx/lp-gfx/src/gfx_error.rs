@@ -2,6 +2,8 @@
 
 use alloc::string::String;
 
+use lp_shader::ShaderFuelTrap;
+
 /// Failure raised by a graphics backend.
 ///
 /// Each variant carries a complete human-readable message; [`core::fmt::Display`]
@@ -16,6 +18,10 @@ pub enum GfxError {
     Alloc(String),
     /// Shader execution / rendering / sampling failed.
     Render(String),
+    /// A shader invocation exhausted its per-invocation fuel tank.
+    /// Structured (not a message) so the engine's shader node can route it
+    /// typed into the panic/blame path (lpvm-native fuel ADR).
+    FuelExhausted(ShaderFuelTrap),
     /// The backend cannot service the request at all: unsupported capability
     /// (e.g. an explicit [`crate::ShaderSemantics`] tier this backend does not
     /// implement, compute shaders on a render-only backend) or a handle that
@@ -30,6 +36,7 @@ impl core::fmt::Display for GfxError {
             | Self::Alloc(message)
             | Self::Render(message)
             | Self::Backend(message) => f.write_str(message),
+            Self::FuelExhausted(trap) => write!(f, "{trap}"),
         }
     }
 }

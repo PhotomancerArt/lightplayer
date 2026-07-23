@@ -7,7 +7,8 @@ use alloc::vec::Vec;
 use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
-    CallError, LpvmBuffer, LpvmInstance, decode_global_read, decode_q32_return,
+    CallError, DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpvmBuffer, LpvmInstance,
+    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, decode_q32_return,
     encode_global_write, encode_uniform_write, encode_uniform_write_q32,
     flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
     validate_compute_tick_sig,
@@ -79,6 +80,43 @@ impl NativeJitInstance {
 
         unsafe {
             core::ptr::copy_nonoverlapping(globals_ptr, snapshot_ptr, self.globals_size as usize);
+        }
+    }
+
+    /// Arm the vmctx fuel/trap words before a guest entry: full tank in the
+    /// fuel low u32, host-armed invocation index in the high u32, no trap.
+    /// Render wrappers immediately re-arm per pixel/sample with
+    /// `DEFAULT_INVOCATION_FUEL`; `metadata` (vmctx+12) is left untouched.
+    fn arm_fuel_header(&mut self) {
+        let base = self.vmctx_guest as *mut u8;
+        // SAFETY: the vmctx allocation is 16-aligned and at least
+        // header-sized (see `NativeJitModule::instantiate`).
+        unsafe {
+            (base.add(VMCTX_OFFSET_FUEL) as *mut u32).write(DEFAULT_VMCTX_FUEL as u32);
+            (base.add(VMCTX_OFFSET_FUEL + 4) as *mut u32).write(INVOCATION_INDEX_ARMED);
+            (base.add(VMCTX_OFFSET_TRAP) as *mut u32).write(TRAP_CODE_NONE);
+        }
+    }
+
+    /// Read the trap slot after a guest entry; nonzero → typed error carrying
+    /// the invocation index (fuel high u32). Return values from a trapped
+    /// call are garbage — callers must discard them on `Err`.
+    fn take_trap(&self) -> Result<(), NativeError> {
+        let base = self.vmctx_guest as *const u8;
+        // SAFETY: same allocation as `arm_fuel_header`.
+        let (trap, invocation) = unsafe {
+            (
+                (base.add(VMCTX_OFFSET_TRAP) as *const u32).read(),
+                (base.add(VMCTX_OFFSET_FUEL + 4) as *const u32).read(),
+            )
+        };
+        if trap == TRAP_CODE_NONE {
+            Ok(())
+        } else {
+            Err(NativeError::Trap {
+                code: trap,
+                invocation,
+            })
         }
     }
 
@@ -185,6 +223,8 @@ impl NativeJitInstance {
 
         let entry = unsafe { self.module.buffer().entry_ptr(handle.entry_offset) as usize };
 
+        self.arm_fuel_header();
+
         if handle.is_sret {
             // sret path: a0 = sret buffer pointer, a1-a7 = args
             if full_len > 7 {
@@ -200,10 +240,12 @@ impl NativeJitInstance {
             unsafe {
                 rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7);
             }
+            self.take_trap()?;
         } else {
             // Direct return path: returns in a0, a1
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_direct_arr(&full);
             let (r0, r1) = unsafe { rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
+            self.take_trap()?;
 
             match handle.ret_count {
                 0 => {}
@@ -244,6 +286,8 @@ impl NativeJitInstance {
             .ok_or_else(|| CallError::Unsupported(format!("symbol `{name}` not in JIT image")))?;
         let entry = unsafe { self.module.buffer().entry_ptr(entry_off) as usize };
 
+        self.arm_fuel_header();
+
         if is_sret {
             if full.len() > 7 {
                 return Err(NativeError::Call(CallError::Unsupported(String::from(
@@ -257,6 +301,7 @@ impl NativeJitInstance {
             unsafe {
                 rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7);
             }
+            self.take_trap()?;
             sret_buf.truncate(n_ret);
             return Ok(sret_buf);
         }
@@ -269,6 +314,7 @@ impl NativeJitInstance {
 
         let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_direct(&full);
         let (r0, r1) = unsafe { rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
+        self.take_trap()?;
 
         match n_ret {
             0 => Ok(Vec::new()),
@@ -514,6 +560,8 @@ impl LpvmInstance for NativeJitInstance {
         let tex_offset = (texture.guest_base() as u32) as i32;
         let vmctx = self.vmctx_guest as i32;
 
+        self.arm_fuel_header();
+
         #[cfg(target_arch = "riscv32")]
         unsafe {
             crate::rt_jit::call::rv32_jalr_a0_a7(
@@ -535,6 +583,9 @@ impl LpvmInstance for NativeJitInstance {
                 "NativeJitInstance::call_render_texture requires riscv32 host",
             ))));
         }
+
+        #[cfg(target_arch = "riscv32")]
+        self.take_trap()?;
 
         Ok(())
     }
@@ -559,6 +610,8 @@ impl LpvmInstance for NativeJitInstance {
         let out_offset = (out.guest_base() as u32) as i32;
         let vmctx = self.vmctx_guest as i32;
 
+        self.arm_fuel_header();
+
         #[cfg(target_arch = "riscv32")]
         unsafe {
             crate::rt_jit::call::rv32_jalr_a0_a7(
@@ -580,6 +633,9 @@ impl LpvmInstance for NativeJitInstance {
                 "NativeJitInstance::call_render_samples requires riscv32 host",
             ))));
         }
+
+        #[cfg(target_arch = "riscv32")]
+        self.take_trap()?;
 
         Ok(())
     }

@@ -11,8 +11,8 @@ pub use cycle_model::{CycleModel, InstClass};
 #[cfg(feature = "std")]
 pub use emulator::FrameOutcome;
 pub use emulator::{
-    DEFAULT_RAM_START, DEFAULT_SHARED_START, OomInfo, PanicInfo, Riscv32Emulator, StepResult,
-    SyscallInfo,
+    DEFAULT_CALL_INSTRUCTION_LIMIT, DEFAULT_RAM_START, DEFAULT_SHARED_START, OomInfo, PanicInfo,
+    Riscv32Emulator, StepResult, SyscallInfo,
 };
 pub use error::{EmulatorError, MemoryAccessKind, trap_code_to_string};
 pub use logging::{InstLog, LogLevel};

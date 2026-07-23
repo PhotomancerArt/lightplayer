@@ -36,9 +36,9 @@ pub mod test_util;
 pub use emu::FrameOutcome;
 pub use emu::memory::{DEFAULT_RAM_START, Memory};
 pub use emu::{
-    CycleModel, DEFAULT_SHARED_START, EmulatorError, InstClass, InstLog, LogLevel,
-    MemoryAccessKind, OomInfo, PanicInfo, Riscv32Emulator, StepResult, SyscallInfo,
-    trap_code_to_string,
+    CycleModel, DEFAULT_CALL_INSTRUCTION_LIMIT, DEFAULT_SHARED_START, EmulatorError, InstClass,
+    InstLog, LogLevel, MemoryAccessKind, OomInfo, PanicInfo, Riscv32Emulator, StepResult,
+    SyscallInfo, trap_code_to_string,
 };
 pub use time::TimeMode;
 

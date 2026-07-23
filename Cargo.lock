@@ -5906,6 +5906,7 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
+ "lp-shader",
  "lpir",
  "lps-builtin-ids",
  "lps-builtins",
