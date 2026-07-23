@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-07-22      # how: hardware-walk
-fixed: 3c68b5004
+fixed: c1841349e
 area: lpa-studio-core/home + device
 class: partial-knowledge-loss
 related:
