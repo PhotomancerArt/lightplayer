@@ -46,12 +46,33 @@ use crate::texture_lowering::lower_texture_calls;
 /// Name of the generated fragment output variable.
 const FRAG_OUT: &str = "lp_gfx_frag_color";
 
+/// Name of the generated sample-position varying (sample-point pass).
+const SAMPLE_POS_IN: &str = "lp_gfx_sample_pos";
+
 /// Assemble the full fragment-stage GLSL for an authored pixel shader.
 ///
 /// `textures` is the compile-time [`lps_shared::TextureBindingSpec`] map
 /// keyed by sampler uniform leaf path; sampling call sites are lowered
 /// against it (a sampled name without a spec is a compile error).
 pub fn assemble_fragment_glsl(
+    authored: &str,
+    textures: &TextureBindingSpecs,
+) -> Result<String, GfxError> {
+    let mut out = assembled_unit_prefix(authored, textures)?;
+    let _ = write!(
+        out,
+        "\nlayout(location = 0) out vec4 {FRAG_OUT};\n\
+         void main() {{\n    {FRAG_OUT} = render(floor(gl_FragCoord.xy));\n}}\n"
+    );
+    Ok(out)
+}
+
+/// Everything of the compilation unit before the generated `main`: version,
+/// lpfn prelude, hoisted struct/const declarations, texture-lowering
+/// helpers, generated prototypes, the (rewritten) authored text, and helper
+/// definitions. Shared verbatim by the render and sample wrappers so both
+/// units lower textures and order declarations identically.
+fn assembled_unit_prefix(
     authored: &str,
     textures: &TextureBindingSpecs,
 ) -> Result<String, GfxError> {
@@ -71,10 +92,26 @@ pub fn assemble_fragment_glsl(
     // prototypes spliced above).
     out.push('\n');
     out.push_str(&lowered.helper_definitions);
+    Ok(out)
+}
+
+/// Assemble the sample-point fragment-stage GLSL for an authored pixel
+/// shader: identical prelude/prototypes/authored unit, but `main` evaluates
+/// `render` at a caller-provided pixel-space position carried in a varying
+/// (one point primitive per sample — see `crate::sample_pass`) instead of
+/// `gl_FragCoord`. Points may be fractional; no `floor` is applied, matching
+/// the CPU tier's `__render_samples_rgba16` loop, which passes raw Q16.16
+/// coordinates through to `render`.
+pub fn assemble_sample_fragment_glsl(
+    authored: &str,
+    textures: &TextureBindingSpecs,
+) -> Result<String, GfxError> {
+    let mut out = assembled_unit_prefix(authored, textures)?;
     let _ = write!(
         out,
-        "\nlayout(location = 0) out vec4 {FRAG_OUT};\n\
-         void main() {{\n    {FRAG_OUT} = render(floor(gl_FragCoord.xy));\n}}\n"
+        "\nlayout(location = 0) in vec2 {SAMPLE_POS_IN};\n\
+         layout(location = 0) out vec4 {FRAG_OUT};\n\
+         void main() {{\n    {FRAG_OUT} = render({SAMPLE_POS_IN});\n}}\n"
     );
     Ok(out)
 }
@@ -676,5 +713,21 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
         let main_at = unit.find("void main()").expect("wrapper");
         assert!(saturate_at < proto_at && proto_at < authored_at && authored_at < main_at);
         assert!(unit.contains("render(floor(gl_FragCoord.xy))"));
+    }
+
+    #[test]
+    fn sample_unit_reads_the_position_varying_without_flooring() {
+        let authored = "layout(binding = 0) uniform vec2 outputSize;\n\
+                        vec4 render(vec2 pos) { return vec4(lpfn_saturate(pos.x)); }\n";
+        let unit = assemble_sample_fragment_glsl(authored, &TextureBindingSpecs::new())
+            .expect("assembles");
+        assert!(unit.starts_with("#version 450 core\n"));
+        assert!(unit.contains("float lpfn_saturate("), "prelude spliced");
+        assert!(unit.contains("layout(location = 0) in vec2 lp_gfx_sample_pos;"));
+        assert!(unit.contains("render(lp_gfx_sample_pos)"));
+        assert!(
+            !unit.contains("gl_FragCoord"),
+            "sample positions come from the varying, not the raster position"
+        );
     }
 }

@@ -5246,6 +5246,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-gfx-harness"
+version = "40.0.0"
+dependencies = [
+ "env_logger 0.11.9",
+ "log",
+ "lp-gfx",
+ "lp-gfx-lpvm",
+ "lp-gfx-wgpu",
+ "lp-shader",
+ "lpa-server",
+ "lpc-model",
+ "lpc-shared",
+ "lpc-wire",
+ "lpfs",
+ "lps-shared",
+ "pollster",
+ "wgpu 29.0.0",
+]
+
+[[package]]
 name = "lp-gfx-lpvm"
 version = "40.0.0"
 dependencies = [
