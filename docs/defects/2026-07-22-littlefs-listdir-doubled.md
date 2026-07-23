@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-07-22      # how: live-debugging
-fixed: f80077871
+fixed: c9a75fa0e
 area: fw-esp32/fs
 class: backend-contract-divergence
 related: ["2026-07-17-deletedir-error-shape", "LpFs conformance-suite chip"]

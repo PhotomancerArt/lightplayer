@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-07-22      # how: live-debugging
-fixed: f80077871
+fixed: c9a75fa0e
 area: lpa-link/browser-serial
 class: lifecycle-ownership
 related: ["2026-07-16-browser-serial-endpoint-lost", "LpFs conformance-suite chip"]

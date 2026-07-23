@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-07-22      # how: live-debugging
-fixed: 89474a789
+fixed: 89474a789 (on branch claude/runtime-pool-m4; merges with the device-flow PR)
 area: lpa-studio-core/places+studio
 class: partial-knowledge-loss
 related: ["2026-07-22-read-failure-vs-unreadable-content"]
