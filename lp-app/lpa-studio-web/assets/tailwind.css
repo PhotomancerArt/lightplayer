@@ -619,9 +619,6 @@
   .tw\:grid-cols-\[88px_minmax\(0\,1fr\)\] {
     grid-template-columns: 88px minmax(0,1fr);
   }
-  .tw\:grid-cols-\[160px_repeat\(5\,72px\)\] {
-    grid-template-columns: 160px repeat(5,72px);
-  }
   .tw\:grid-cols-\[260px_minmax\(0\,1fr\)\] {
     grid-template-columns: 260px minmax(0,1fr);
   }
