@@ -1256,7 +1256,7 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
     // The D29 click.
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
-        ProjectOp::OpenDeviceProject,
+        ProjectOp::OpenDeviceProject { uid: None },
     )))
     .expect("the D29 op connects the device's running project");
 
@@ -1307,7 +1307,7 @@ fn d29_click_with_a_sim_project_open_moves_the_lens_and_keeps_the_sim() {
 
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(crate::ProjectController::NODE_ID),
-        ProjectOp::OpenDeviceProject,
+        ProjectOp::OpenDeviceProject { uid: None },
     )))
     .expect("the D29 op connects the device's running project");
 
@@ -1407,6 +1407,269 @@ fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
         matches!(&sync.content, DeviceContent::Known { .. }),
         "device classified while the lens stayed on the sim, got {:?}",
         sync.content
+    );
+}
+
+/// M5/D37 (`#/device/<uid>` re-derivation): with the editor detached and
+/// the device session already in the pool, the route's op attaches the
+/// lens by uid — no reconnect — and the emitted view binds the device
+/// lens (the URL's evidence). A uid the pool does NOT hold refuses
+/// honestly instead of tearing the live session down.
+#[test]
+fn device_route_attaches_the_existing_session_by_uid() {
+    use crate::{ProjectOp, UiLensRuntime};
+
+    let (mut studio, _device, _sim_id) = coexisting_sim_and_device_running();
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::DetachLens,
+    )))
+    .expect("lens detach succeeds");
+    assert!(studio.view().home.is_some(), "detached editor = gallery");
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::OpenDeviceProject {
+            uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+        },
+    )))
+    .expect("the route op attaches the existing session");
+
+    let device_id = {
+        let pool = studio.runtime_pool_for_test();
+        let device_id = pool.device_session().expect("device session").id();
+        assert_eq!(pool.lens(), Some(device_id), "the lens is on the device");
+        device_id
+    };
+    let view = studio.view();
+    assert!(view.home.is_none(), "the editor shows the device's project");
+    assert_eq!(
+        view.lens,
+        Some(UiLensRuntime::Device {
+            uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+        }),
+        "the view binds the device lens for the URL"
+    );
+
+    // A different uid: the live session is never sacrificed to the route.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::OpenDeviceProject {
+            uid: Some("dev_bbbbbbbbbbbbbbbb".to_string()),
+        },
+    )))
+    .expect_err("a mismatched uid refuses");
+    let pool = studio.runtime_pool_for_test();
+    assert_eq!(
+        pool.device_session().map(crate::RuntimeSession::id),
+        Some(device_id),
+        "the attached session survives the refusal"
+    );
+}
+
+/// M5/D37 (`#/sim/<key>` reuse-vs-open): re-opening the project the sim
+/// ALREADY runs re-attaches the lens to the running session — the acked
+/// overlay edit survives — instead of pushing the head again (which would
+/// reset it). D19's head push stays for everything else; the emitted view
+/// binds the sim lens with the loaded project's key (the URL's evidence).
+#[test]
+fn open_package_reattaches_when_the_sim_already_runs_it() {
+    use super::studio_edit_e2e_tests::{find_slot, slot_value_display};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, ProjectOp, SlotEditOp, UiLensRuntime};
+    use lpc_model::LpValue;
+
+    let (mut studio, _device, sim_id) = coexisting_sim_and_device();
+    // an acked edit on the open sim project ("Sign")
+    let view = studio.view();
+    let address = find_slot(&view, "controls.rate")
+        .address
+        .clone()
+        .expect("rate slot carries an address");
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        SlotEditOp::SetValue {
+            address,
+            value: LpValue::F32(2.0),
+        },
+    )))
+    .expect("slot edit lands on the sim session");
+    // gallery return (the route policy's detach)
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::DetachLens,
+    )))
+    .expect("lens detach succeeds");
+
+    let (sign_uid, sign_slug) = {
+        let pool = studio.runtime_pool_for_test();
+        let loaded = pool
+            .sim_session()
+            .expect("sim session survives detach")
+            .sim_loaded_project()
+            .expect("the sim remembers its loaded project");
+        (loaded.uid.clone(), loaded.name.clone())
+    };
+
+    // the `#/sim/<key>` navigation (and the project-card click that rides
+    // it): the same key the sim already runs
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            key: sign_uid.clone(),
+        },
+    )))
+    .expect("the open succeeds");
+
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        Some(sim_id),
+        "the lens re-attached to the running sim session"
+    );
+    let view = studio.view();
+    assert!(view.home.is_none(), "the editor is back");
+    assert_eq!(
+        slot_value_display(find_slot(&view, "controls.rate")),
+        "2",
+        "the applied edit survived — re-attach, not a head re-push"
+    );
+    assert_eq!(
+        view.lens,
+        Some(UiLensRuntime::Sim {
+            project_key: Some(sign_slug),
+        }),
+        "the view binds the sim lens with the loaded project's key"
+    );
+}
+
+/// M5 (in-card push): the Running-behind card's Push button dispatches
+/// `DeployOp::PushProject` directly — the button IS the D11 consent, no
+/// dialog. While the push runs, the device card narrates through the
+/// Operation-in-flight lane (the same session flag that blocks pool
+/// replaces); it settles back to Running-up-to-date with the device at
+/// head.
+#[test]
+fn push_from_card_narrates_operation_in_flight_and_settles() {
+    use crate::app::roster::RosterCardState;
+    use crate::{UxUpdate, UxUpdateSink};
+
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let v1_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+    // the library moves on: v2 becomes the head, so the device (holding
+    // v1) classifies Behind at connect
+    {
+        use lpc_model::AsLpPath;
+        let mut handle = store.open(summary.uid).unwrap();
+        handle
+            .apply_update("/shader.glsl".as_path(), Some(b"v2"))
+            .unwrap();
+        handle.record_save(2.0).unwrap().expect("head advanced");
+    }
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(v1_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    assert!(
+        matches!(
+            studio.device_sync().map(|sync| &sync.content),
+            Some(DeviceContent::Known {
+                relation: lpc_history::SyncRelation::Behind,
+                ..
+            })
+        ),
+        "device classifies Behind, got {:?}",
+        studio.device_sync().map(|sync| &sync.content)
+    );
+
+    // Capture the progressive views the dispatch emits: the card must
+    // pass through Operation-in-flight while the push runs.
+    let seen_labels: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink_labels = Rc::clone(&seen_labels);
+    let sink = UxUpdateSink::new(move |update| {
+        if let UxUpdate::View(view) = update
+            && let Some(home) = &view.home
+        {
+            for card in &home.devices {
+                if let RosterCardState::OperationInFlight { label, .. } = &card.state {
+                    sink_labels.borrow_mut().push(label.clone());
+                }
+            }
+        }
+    });
+    let outcome = drive(studio.dispatch_with_updates(
+        deploy_action(DeployOp::PushProject {
+            key: summary.uid.to_string(),
+        }),
+        sink,
+    ))
+    .expect("the in-card push succeeds");
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("Pushed")),
+        "the push reports itself: {:?}",
+        outcome.notices
+    );
+    assert!(
+        seen_labels
+            .borrow()
+            .iter()
+            .any(|label| label.starts_with("Pushing")),
+        "the card narrated the push in flight: {:?}",
+        seen_labels.borrow()
+    );
+
+    // Settled: at head, the operation cleared, the card derives
+    // Running-up-to-date again.
+    assert!(
+        matches!(
+            studio.device_sync().map(|sync| &sync.content),
+            Some(DeviceContent::Known {
+                relation: lpc_history::SyncRelation::AtHead,
+                ..
+            })
+        ),
+        "device is at head after the push, got {:?}",
+        studio.device_sync().map(|sync| &sync.content)
+    );
+    let pool = studio.runtime_pool_for_test();
+    assert!(
+        !pool
+            .device_session()
+            .expect("device session")
+            .op_in_flight(),
+        "the operation cleared"
+    );
+    let view = studio.view();
+    let home = view.home.expect("gallery view");
+    assert!(
+        home.devices
+            .iter()
+            .any(|card| matches!(card.state, RosterCardState::RunningUpToDate)),
+        "the card settled to Running-up-to-date: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
     );
 }
 

@@ -94,6 +94,19 @@ fn operation_in_flight() -> Element {
     )])
 }
 
+#[story(
+    description = "The in-card push (M5): the Running-behind card's Push button was the D11 consent; the push now runs with progress folded into the card's Operation-in-flight state — same lane as flash/erase, project chip retained, no dialog."
+)]
+fn operation_pushing() -> Element {
+    sheet(vec![card(
+        RosterCardState::OperationInFlight {
+            label: "Pushing v5".to_string(),
+            percent: None,
+        },
+        true,
+    )])
+}
+
 #[story(description = "Green solid: live link, nothing loaded.")]
 fn connected_empty() -> Element {
     sheet(vec![card(RosterCardState::ConnectedEmpty, false)])

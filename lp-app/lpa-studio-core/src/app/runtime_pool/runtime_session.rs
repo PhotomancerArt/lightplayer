@@ -184,10 +184,14 @@ pub struct RuntimeSession {
     /// (discovered from its loaded project at connect) — pull and push
     /// target it so one dir replaces in place.
     device_storage_id: Option<String>,
-    /// A long-running wire operation (flash / erase / reset management
-    /// flow) is in flight on this session. The pool refuses a same-kind
-    /// replace while set (DQ-A swap semantics).
-    op_in_flight: bool,
+    /// A long-running wire operation (flash / erase / reset / push) in
+    /// flight on this session, carrying its human label ("Installing
+    /// firmware", "Pushing v5"). While set, the pool refuses a same-kind
+    /// replace (DQ-A swap semantics) AND the roster narrates the session's
+    /// card through the `ConnectEvidence::OperationInFlight` lane — one
+    /// flag, both consequences, so the card can never claim idleness while
+    /// a replace would be refused.
+    operation: Option<String>,
     /// This session's passive-refresh backoff (runtime-pool P2: the shared
     /// actor singleton became per-session). Only the LENS session's
     /// advances — only the lens runs the fallible project pull.
@@ -219,7 +223,7 @@ impl RuntimeSession {
             device_sync: None,
             device_versions: (None, None),
             device_storage_id: None,
-            op_in_flight: false,
+            operation: None,
             backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
             last_heartbeat_at: None,
             heartbeat_device_state: None,
@@ -394,14 +398,21 @@ impl RuntimeSession {
     // Tick policy (runtime-pool P2: per-session cadence/backoff/heartbeat)
     // -----------------------------------------------------------------
 
-    /// A long-running management operation (flash / erase / reset) is in
+    /// A long-running operation (flash / erase / reset / push) is in
     /// flight on this session; the pool refuses a same-kind replace.
     pub fn op_in_flight(&self) -> bool {
-        self.op_in_flight
+        self.operation.is_some()
     }
 
-    pub(crate) fn set_op_in_flight(&mut self, value: bool) {
-        self.op_in_flight = value;
+    /// The in-flight operation's human label, for the card's
+    /// Operation-in-flight narration (`None` while idle).
+    pub fn operation_label(&self) -> Option<&str> {
+        self.operation.as_deref()
+    }
+
+    /// Mark (`Some(label)`) or clear (`None`) the in-flight operation.
+    pub(crate) fn set_operation(&mut self, operation: Option<String>) {
+        self.operation = operation;
     }
 
     /// The passive project-refresh interval while the lens is on this
