@@ -27,9 +27,9 @@
 //!   URL, or a startup reopen would erase the very route that requested
 //!   it.
 //! - browser navigation (back/forward/manual hash edit) → dispatch: to
-//!   `Home` while a project is open = disconnect (full return to the
-//!   gallery — it only renders when the link is idle); to `Project` while
-//!   home = open.
+//!   `Home` while a project is open = lens detach (runtime-pool P3: the
+//!   editor closes, every runtime session keeps running — the gallery
+//!   renders live sim/device cards); to `Project` while home = open.
 //!
 //! `navigate`/`replace` update the URL via the History API, which fires
 //! **no** events — the caller updates the route signal itself, so browser

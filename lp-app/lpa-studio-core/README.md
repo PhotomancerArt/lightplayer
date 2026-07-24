@@ -7,14 +7,14 @@ This crate sits above lower-level services such as `lpa-link` and
 language consumed by renderers: views, actions, progress, issues, logs, and
 project summaries.
 
-The current stateful controller types still use the `*Ux` suffix
-(`StudioUx`, `DeviceUx`, `ProjectUx`) for compatibility with the existing app
-surface. The architectural role is "controller": these types own Studio app
-state and policy, accept typed operations, and produce inert view data.
+The stateful owners are "controllers" (`StudioController`,
+`DeviceController`, `ProjectController`): they own Studio app state and
+policy, accept typed operations, and produce inert view data.
 
 The UI layer should render this language and dispatch actions back into
-`StudioUx`. It should not own provider runtimes, drain service effects,
-correlate protocol responses, or implement project attach/load policy.
+`StudioController` (via the `StudioActor` command queue). It should not own
+provider runtimes, drain service effects, correlate protocol responses, or
+implement project attach/load policy.
 
 ```text
 lpa-link / lpa-client / lp-server protocol
@@ -31,8 +31,8 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `lpa-client` owns server protocol request ids, response correlation, typed
   project operations, and side-channel protocol events.
 - `lpa-studio-core` owns Studio product state, the `LinkProviderRegistry`, the
-  connected server client, project attach/load policy, and async action
-  execution above those services.
+  runtime pool (per-session wire clients), project attach/load policy, and
+  async action execution above those services.
 - `lpa-studio-web` renders `StudioView` panes, stack sections, terminal output,
   and available actions.
 
@@ -41,8 +41,12 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `core/` contains reusable data-driven app substrate: action metadata, generic
   pane/stack/activity/status view data, and UX node routing primitives.
 - `app/` contains the actual Studio product ownership areas: `studio`,
-  `device`, `server`, `project`, and `preview_host` (leased, pooled live
-  project previews for gallery cards and future preview consumers — see
+  `device`, `runtime_pool` (sessions + the editor lens — see
+  `docs/adr/2026-07-24-runtime-pool.md`), `server` (the per-session
+  `StudioServerClient` and its ios), `project`, `home`/`roster`/`places`
+  (the gallery, card vocabulary, and push/pull substrate), and
+  `preview_host` (leased, pooled live project previews for gallery cards
+  and future preview consumers — see
   `docs/adr/2026-07-16-preview-host.md`; the browser-facing half is gated
   to `wasm32 + browser-worker` like the server client io, while its
   request/status/scheduling vocabulary stays target-neutral and
@@ -52,31 +56,37 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 
 The long-term naming direction is role-based: render data should move toward
 `*View` names, stateful owners toward `*Controller` names, snapshots remain
-`*Snapshot`, and command payloads remain `*Op`. This crate keeps the legacy
-`Ui*` and `*Ux` public names for now so the high-level crate/layer refactor
+`*Snapshot`, and command payloads remain `*Op`. The stateful owners are
+`*Controller` names now; this crate keeps the legacy `Ui*` view-data
+prefix for now so the high-level crate/layer refactor
 does not blur into a larger API rename.
 
 ## Public Model
 
-- `StudioUx` is the top-level controller. It owns `DeviceUx` and `ProjectUx`.
-- `DeviceUx` is the user-facing device workflow. It owns the lower-level link
-  and server controllers and presents one stack of steps: select connection,
-  connect device, connect LightPlayer, and open project. The stack is
-  progressive: completed steps remain as compact history, the current relevant
-  step owns the available actions, and future steps are hidden until they are
-  useful.
-- Device exposes the open-project step only after LightPlayer is connected. That
-  step offers running-project attach and demo-load actions until a project is
-  loaded.
-- `DeviceController` also owns the connect flow: the `LinkProviderRegistry`
-  catalog, the picker view state (`ConnectFlowState`), and the runtime
-  attachment (a hardware `DeviceSession` or the simulator's worker session).
-- `ServerUx` owns the connected `lpa-client` protocol client once a link exposes
-  server I/O. It remains an implementation detail below `DeviceUx`.
-- `ProjectUx` owns Studio's view of the loaded project and is shown only after a
-  project is loaded. It keeps the internal `lpc-view::ProjectView` mirror in
-  sync with server project reads and exposes semantic readonly project-editor
-  views to UI code. The web UI does not own or inspect the raw `ProjectView`.
+- `StudioController` is the top-level controller. It owns the
+  `RuntimePool`, `DeviceController`, and `ProjectController`.
+- `RuntimePool` (`app/runtime_pool/`, runtime-pool ADR) holds the runtime
+  sessions Studio is attached to — each `RuntimeSession` bundles its
+  runtime payload (browser-worker sim or hardware `DeviceSession`), its
+  OWN `StudioServerClient` + server protocol state, and the per-device
+  reconcile bundle — plus the editor **lens** (the ≤1 session the editor
+  is bound to). Capacity is a policy (MVP: 1 sim + 1 device); "connected"
+  means "a session exists in the pool". Network ops resolve through two
+  named seams: lens-bound editor ops (`lens_session_mut`) and
+  session-targeted device/deploy/reconcile ops (`device_session_mut`).
+- `DeviceController` owns the connect flow — the `LinkProviderRegistry`
+  catalog and the picker view state (`ConnectFlowState`) — and is the
+  session FACTORY: connect flows build and return a `RuntimePayload` that
+  `StudioController` installs into the pool. The controller itself is
+  slotless.
+- `ProjectController` owns Studio's view of the loaded project — the edit
+  state of the LENS: it holds no client (network methods take `server:
+  &mut StudioServerClient` per call), keeps the internal
+  `lpc-view::ProjectView` mirror in sync with server project reads, and
+  exposes semantic readonly project-editor views to UI code. Detaching
+  the lens resets the mirror; re-attach rebuilds it against the target
+  session's client. The web UI does not own or inspect the raw
+  `ProjectView`.
 - `UxNodeId` is a path-shaped UX address with dotted display compatibility.
   Static ids such as `studio.device` still compare and render as strings, while
   dynamic editor ids can be built structurally with child segments.
@@ -84,10 +94,11 @@ does not blur into a larger API rename.
   dynamic address such as `studio.project.node_tree` or
   `studio.project.node.4.slot.brightness` does not imply that Studio owns a
   separate boxed node object for that target.
-- Dispatch is hierarchical. `StudioUx` routes top-level device actions to
-  `DeviceUx` and routes `studio.project` plus `studio.project.*` actions to
-  project ownership. `ProjectUx` owns interpretation of project-local targets
-  such as `node_tree`, `node`, `slot`, `asset`, `changes`, and `bus`.
+- Dispatch is hierarchical. `StudioController` routes top-level device actions
+  to `DeviceController` and routes `studio.project` plus `studio.project.*`
+  actions to project ownership. `ProjectController` owns interpretation of
+  project-local targets such as `node_tree`, `node`, `slot`, `asset`,
+  `changes`, and `bus`.
 - `UiAction` is an in-process action offering: target `UxNodeId`, boxed typed
   operation, and metadata such as label, summary, priority, icon, enablement,
   and confirmation.
@@ -106,8 +117,8 @@ does not blur into a larger API rename.
   opening. Section-local actions are the action surface.
 - `UiActivity` describes live work inside a pane or stack section: title,
   optional progress, optional milestone steps, and optional terminal lines.
-- `UxUpdate` / `UxUpdateSink` let `StudioUx::dispatch_with_updates` publish
-  live pane activity or fresh `StudioView` snapshots while an async action is
+- `UxUpdate` / `UxUpdateSink` let `StudioController::dispatch_with_updates`
+  publish live pane activity or fresh view snapshots while an async action is
   still running.
 - `StudioSnapshot` and the node snapshots remain cloneable domain read models,
   but web rendering should prefer `StudioView`.
@@ -119,7 +130,7 @@ when one is already loaded, can load the demo project, and reads project
 inventory.
 
 Project data sync is also core-owned. After Studio attaches to a running project
-or loads the demo project, `ProjectUx` performs a shape-registry sync followed
+or loads the demo project, `ProjectController` performs a shape-registry sync followed
 by a normal project read for node detail, initial slot roots, resource
 summaries, and runtime status. The loaded Project pane shows a compact summary
 of the synced mirror alongside a readonly node workspace and exposes
@@ -312,7 +323,7 @@ again; `Refresh connections` is reserved for rebuilding the provider catalog.
 
 Canceling the browser Web Serial chooser is a normal UX outcome, not a failed
 link. `lpa-link` preserves chooser cancellation as a typed cancellation error,
-the connect flow returns to provider selection without an issue, and `StudioUx`
+the connect flow returns to provider selection without an issue, and Studio
 reports only a low-key notice suitable for a console or activity log.
 
 Generic notices and action failures are expected to flow into recent activity
@@ -361,7 +372,7 @@ link-level management because they happen below the running server protocol:
   connected device session supports `EraseDeviceFlash`.
 
 Both actions flow through `lpa-link::LinkProvider::manage_with_events`.
-`StudioUx` clears project and server state before executing them because
+`StudioController` clears project and server state before executing them because
 firmware flashing and full-device erase invalidate any previous server/client
 connection. Browser Web Serial ESP32 management streams progress into the
 active Device step and raw esptool output into the Studio log while the action

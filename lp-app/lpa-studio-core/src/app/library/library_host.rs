@@ -142,8 +142,10 @@ pub enum LibraryHostError {
     OpenElsewhere {
         key: String,
     },
-    /// Guarded same-tab self-conflict (unreachable via the UI — the
-    /// gallery only renders with no project open — but hosts guard it).
+    /// Guarded same-tab self-conflict (unreachable via the UI — an open
+    /// quiesces the previous open first, releasing its same-tab lock,
+    /// and the sim's detached run holds no project store open — but
+    /// hosts guard it).
     OpenInThisTab {
         uid: String,
     },

@@ -1,7 +1,7 @@
 //! The roster card-state vocabulary (device-UX direction, "Card grammar").
 //!
 //! One honest, transport-independent state per roster card — device or
-//! (later) sim runtime — replacing the laundered booleans the gallery used
+//! live sim runtime — replacing the laundered booleans the gallery used
 //! to render. The vocabulary is a first-class concept: the same states may
 //! later drive on-device LEDs or richer displays, so [`RosterCardState`]
 //! stays free of web/UI types. See

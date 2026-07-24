@@ -11,7 +11,7 @@ use crate::core::time_ago::time_ago;
 use super::roster_affordance::RosterAffordance;
 use super::roster_circle::{RosterCircle, RosterCircleShape};
 
-/// Where a roster card (device now; sim runtime in M4) stands, in the
+/// Where a roster card (device or live sim runtime) stands, in the
 /// honest card vocabulary. Derived by
 /// [`derive_roster_card_state`](super::derive_roster_card_state); every
 /// variant exists even where not yet reachable live (Degraded has no

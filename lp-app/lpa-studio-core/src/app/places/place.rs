@@ -18,7 +18,10 @@ pub enum PlaceKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlaceDescriptor {
     pub kind: PlaceKind,
-    /// `None` = unbounded (the library); `Some(1)` = single-slot runtimes.
+    /// `None` = unbounded (the library); `Some(1)` = a runtime's single
+    /// project storage slot. This is the PLACE's storage shape — how
+    /// many runtimes may attach at once is the pool capacity policy in
+    /// `runtime_pool` (see `docs/adr/2026-07-24-runtime-pool.md`).
     pub capacity: Option<usize>,
 }
 

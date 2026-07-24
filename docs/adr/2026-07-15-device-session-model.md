@@ -209,6 +209,10 @@ gone (recorded as the amendment in
 
 ## Follow-ups
 
+- ~~The studio-side single `RuntimeAttachment` slot~~ — replaced by the
+  runtime pool (`2026-07-24-runtime-pool.md`): sessions are plural
+  (`RuntimePayload` in a `RuntimePool`), each owning its wire client;
+  `DeviceSession` semantics here are unchanged.
 - CLI adoption of `DeviceSession` (device-link M5) — lp-cli still
   hand-rolls provider/session bundles; `fwcheck`'s boot-line grep dies
   then.

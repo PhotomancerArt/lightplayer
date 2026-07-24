@@ -1,4 +1,4 @@
-//! The editor's DEVICE pane (D23) + the runtime attachment it manages.
+//! The editor's DEVICE pane (D23) + the connect flow / session factory.
 //!
 //! The pre-M5 four-step connect wizard (Select connection / Connect
 //! device / Connect LightPlayer / Open project, with Provider/Endpoint/
