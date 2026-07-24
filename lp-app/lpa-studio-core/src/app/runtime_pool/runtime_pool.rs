@@ -5,9 +5,10 @@
 //! [`DEVICE_SESSION_CAPACITY`] device session(s) simultaneously;
 //! [`RuntimePool::install`] no longer evicts the other KIND, a same-kind
 //! attach replaces (refused while an operation is in flight on the session
-//! being replaced — the DQ-A swap record), and the lens moves to the newly
-//! installed session. The two named resolution seams every network op goes
-//! through:
+//! being replaced — the DQ-A swap record), and install preserves a held
+//! lens (P3: attaching observes; only a lens-less pool — or an evicted
+//! lens session — hands the lens to the newcomer). The two named
+//! resolution seams every network op goes through:
 //!
 //! - **Lens-bound** ops (the editor mirror) resolve
 //!   [`RuntimePool::lens_session_mut`] — the session the editor is a lens
@@ -40,8 +41,12 @@ pub struct InstallRefusal {
 pub struct RuntimePool {
     sessions: BTreeMap<RuntimeId, RuntimeSession>,
     /// The session the editor is currently a lens on (D35: the editor is
-    /// a lens on exactly one session). Follows [`RuntimePool::install`];
-    /// detach semantics arrive with P3.
+    /// a lens on exactly one session). P3 lens semantics: `None` means the
+    /// editor is detached — sessions keep running (worker + wire client)
+    /// without a mirror. [`RuntimePool::install`] only claims the lens
+    /// when nothing holds it (install observes; it never steals the lens
+    /// from another session), and [`RuntimePool::detach_lens`] releases it
+    /// without touching the sessions.
     lens: Option<RuntimeId>,
     next_id: u64,
 }
@@ -55,12 +60,20 @@ impl RuntimePool {
         }
     }
 
-    /// Install a session around `payload` and put the lens on it.
+    /// Install a session around `payload`.
     ///
     /// Kind-aware capacity (P2): sessions of the OTHER kind stay attached;
     /// same-kind sessions beyond the kind's capacity are replaced, oldest
     /// first — refused (payload handed back) while an operation is in
     /// flight on a session that would be replaced.
+    ///
+    /// Lens rule (P3): install preserves the lens unless none — attaching
+    /// a runtime observes; it never steals the editor from a session the
+    /// lens is on. The newcomer only claims the lens when nothing holds it
+    /// (an empty pool, a detached editor, or a same-kind replace that just
+    /// evicted the lens session — the replacement inherits the lens).
+    /// Flows that deliberately move the editor (opening a project on the
+    /// sim, the D29 device click) call [`RuntimePool::set_lens`].
     pub fn install(&mut self, payload: RuntimePayload) -> Result<RuntimeId, InstallRefusal> {
         let kind = payload.kind();
         let mut same_kind: Vec<RuntimeId> = self
@@ -88,8 +101,18 @@ impl RuntimePool {
         }
         let id = self.mint_id();
         self.sessions.insert(id, RuntimeSession::new(id, payload));
-        self.lens = Some(id);
+        if self.lens.is_none() {
+            self.lens = Some(id);
+        }
         Ok(id)
+    }
+
+    /// Detach the editor lens (P3): the mirror's session binding drops,
+    /// every session stays — worker running, wire client attached, device
+    /// reconcile state intact. The caller (`StudioController`) owns the
+    /// mirror teardown (`project.reset()`); this only releases the id.
+    pub(crate) fn detach_lens(&mut self) {
+        self.lens = None;
     }
 
     /// Drop every session (and the lens) without closing payloads — the
@@ -253,8 +276,9 @@ mod tests {
         assert!(pool.session(device).is_some());
         assert!(pool.session(sim).is_some());
         assert_eq!(pool.sessions().count(), 2);
-        // The lens follows the newly installed session.
-        assert_eq!(pool.lens(), Some(sim));
+        // Install observes (P3): the lens stays where it was — flows that
+        // deliberately move the editor call `set_lens`.
+        assert_eq!(pool.lens(), Some(device));
         // Kind-filtered views resolve their own kinds.
         assert_eq!(pool.device_session().map(RuntimeSession::id), Some(device));
         assert_eq!(pool.sim_session().map(RuntimeSession::id), Some(sim));
@@ -262,13 +286,19 @@ mod tests {
     }
 
     #[test]
-    fn same_kind_install_replaces_and_moves_the_lens() {
+    fn same_kind_install_replaces_and_only_an_evicted_lens_moves() {
         let mut pool = RuntimePool::new();
         let first_sim = install(&mut pool, RuntimePayload::stub_sim_for_test());
+        assert_eq!(
+            pool.lens(),
+            Some(first_sim),
+            "an empty pool's first session claims the lens"
+        );
         let device = install(
             &mut pool,
             RuntimePayload::stub_device_for_test(DeviceState::Gone),
         );
+        assert_eq!(pool.lens(), Some(first_sim), "a held lens is never stolen");
         let second_sim = install(&mut pool, RuntimePayload::stub_sim_for_test());
 
         assert_ne!(first_sim, second_sim, "ids are never reused");
@@ -277,7 +307,11 @@ mod tests {
             "same-kind attach replaces"
         );
         assert!(pool.session(device).is_some(), "the other kind stays");
-        assert_eq!(pool.lens(), Some(second_sim));
+        assert_eq!(
+            pool.lens(),
+            Some(second_sim),
+            "evicting the lens session hands the lens to the replacement"
+        );
 
         let second_device = install(
             &mut pool,
@@ -285,8 +319,44 @@ mod tests {
         );
         assert!(pool.session(device).is_none());
         assert!(pool.session(second_sim).is_some());
-        assert_eq!(pool.lens(), Some(second_device));
+        assert_eq!(
+            pool.lens(),
+            Some(second_sim),
+            "replacing the OTHER kind leaves the lens alone"
+        );
+        assert_ne!(pool.lens(), Some(second_device));
         assert_eq!(pool.sessions().count(), 2);
+    }
+
+    #[test]
+    fn detach_lens_keeps_every_session_and_reattach_resolves_again() {
+        let mut pool = RuntimePool::new();
+        let device = install(
+            &mut pool,
+            RuntimePayload::stub_device_for_test(ready_state_for_test()),
+        );
+        let sim = install(&mut pool, RuntimePayload::stub_sim_for_test());
+        pool.set_lens(sim);
+
+        pool.detach_lens();
+
+        // The lens is gone; BOTH sessions stay in the pool untouched.
+        assert_eq!(pool.lens(), None);
+        assert!(pool.session(device).is_some(), "device session survives");
+        assert!(pool.session(sim).is_some(), "sim session survives");
+        assert!(matches!(
+            pool.lens_session_mut(),
+            Err(UiError::MissingSession(_))
+        ));
+
+        // Re-attach: the lens resolves the chosen session again.
+        pool.set_lens(device);
+        assert_eq!(pool.lens_session_mut().expect("lens resolves").id(), device);
+
+        // A detached editor lets the next install claim the lens.
+        pool.detach_lens();
+        let second_sim = install(&mut pool, RuntimePayload::stub_sim_for_test());
+        assert_eq!(pool.lens(), Some(second_sim));
     }
 
     #[test]
@@ -333,11 +403,12 @@ mod tests {
             RuntimePayload::stub_device_for_test(ready_state_for_test()),
         );
         let sim = install(&mut pool, RuntimePayload::stub_sim_for_test());
-        assert_eq!(pool.lens(), Some(sim));
+        assert_eq!(pool.lens(), Some(device), "install never steals the lens");
 
         // Removing a kind with no session is a no-op (lens untouched).
         pool.set_lens(device);
         assert!(pool.remove_kind(RuntimeKind::Sim).is_some());
+        assert!(pool.session(sim).is_none(), "the sim session is gone");
         assert_eq!(pool.lens(), Some(device), "lens was not on the removed sim");
         assert!(pool.remove_kind(RuntimeKind::Sim).is_none());
 
@@ -444,7 +515,7 @@ mod tests {
         // The sim never associates a device uid (D22).
         install(&mut pool, RuntimePayload::stub_sim_for_test());
         assert_eq!(
-            pool.lens_session().and_then(RuntimeSession::device_uid),
+            pool.sim_session().and_then(RuntimeSession::device_uid),
             None
         );
     }

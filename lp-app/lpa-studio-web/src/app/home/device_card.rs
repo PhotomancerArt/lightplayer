@@ -20,8 +20,8 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     BundledFirmware, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceController, DeviceOp, HomeOp,
-    LinkProviderKind, RosterAffordance, RosterCardState, RosterCircle,
-    RosterCircleShape as CoreShape, UiAction, UiDeviceCard, UiStatus, UiStatusKind,
+    LinkProviderKind, ProjectController, ProjectOp, RosterAffordance, RosterCardState,
+    RosterCircle, RosterCircleShape as CoreShape, UiAction, UiDeviceCard, UiStatus, UiStatusKind,
 };
 
 use crate::app::home::card_thumb::thumb_swatch_style;
@@ -31,9 +31,10 @@ use crate::base::{StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon,
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, quiet_action_class};
 
 /// One roster card. Clicking an offline card reconnects through an
-/// already-granted serial port with no chooser (M1); clicking a connected
-/// card opens the deploy dialog with the device context (D29's
-/// attach-as-runtime click lands in M5); working states are quiet.
+/// already-granted serial port with no chooser (M1); clicking a
+/// Running-family card opens its project in the editor ON the device
+/// session (the D29 click, runtime-pool P3); other connected cards open
+/// the deploy dialog with the device context; working states are quiet.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceCard(
@@ -353,8 +354,11 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
 }
 
 /// What clicking the card body does, per state: offline reconnects (M1);
-/// connected states open the deploy dialog WITH the device context (the
-/// D29 attach-editor click is M5); self-healing/working states are quiet.
+/// Running-family states with a Known/Adopted project attach the editor
+/// lens to the DEVICE session and open its running project (the D29
+/// click, runtime-pool P3 — no URL until M5); other provisioning-ish
+/// connected states open the deploy dialog WITH the device context;
+/// self-healing/working states are quiet.
 fn card_click_action(card: &UiDeviceCard) -> Option<UiAction> {
     match &card.state {
         RosterCardState::Offline { .. } => Some(reconnect_device_action(card.uid.clone())),
@@ -363,11 +367,28 @@ fn card_click_action(card: &UiDeviceCard) -> Option<UiAction> {
         | RosterCardState::InUseElsewhere => None,
         // handled in the renderer: click opens the inline name form
         RosterCardState::NeedsAName => None,
+        // D29: the device is running a project the library knows
+        // (RunningUpToDate/RunningBehind derive from Known/Adopted;
+        // EditedOnDevice is the banked diverged copy) — the click opens
+        // it in the editor on the device's own session. Push/resolve
+        // stay one click away on the card's affordance button.
+        RosterCardState::RunningUpToDate
+        | RosterCardState::RunningBehind { .. }
+        | RosterCardState::EditedOnDevice => Some(open_device_project_action()),
         _ => Some(UiAction::from_op(
             ControllerId::new(DEPLOY_NODE_ID),
             DeployOp::OpenDialog { target_key: None },
         )),
     }
+}
+
+/// The D29 click: move the editor lens onto the device session and open
+/// its running project in the editor.
+fn open_device_project_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::OpenDeviceProject,
+    )
 }
 
 /// The ≤1 affordance button, wired to what exists TODAY: flows the
@@ -387,8 +408,8 @@ pub(super) fn device_affordance_action(
         )
     };
     let action = match affordance {
-        // click-through: the card click is the action (deploy dialog now,
-        // editor-on-device in M5)
+        // click-through: the card click is the action (the D29
+        // editor-on-device click)
         RosterAffordance::OpenEditor => return None,
         // the dialog's Reviewing state carries push + the diverged verbs
         // until the in-card push / D30 popup land

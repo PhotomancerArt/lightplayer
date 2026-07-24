@@ -268,9 +268,11 @@ impl StudioController {
     ///   calm) tightened to the verdict-chase interval while a
     ///   just-accepted asset apply awaits its compile verdict, plus its
     ///   own passive-refresh backoff.
-    /// - Non-lens DEVICE sessions contribute the time until their next
-    ///   slow status heartbeat.
-    /// - Non-lens SIM sessions tick nothing (self-ticking worker).
+    /// - Non-lens sessions (device AND detached sim — P3) contribute the
+    ///   time until their next slow status heartbeat, which drains their
+    ///   buffered logs so nothing accumulates unboundedly while detached.
+    ///   The sim's worker still self-ticks; no wire op rides its
+    ///   heartbeat.
     /// - An empty pool falls back to the calm device interval, matching
     ///   the retired disconnected default.
     pub fn next_refresh_interval(&self) -> core::time::Duration {
@@ -285,10 +287,8 @@ impl StudioController {
                     None => cadence,
                 };
                 cadence.saturating_add(session.backoff_delay())
-            } else if session.is_device() {
-                session.heartbeat_due_in(now)
             } else {
-                continue;
+                session.heartbeat_due_in(now)
             };
             delay = Some(delay.map_or(candidate, |current| current.min(candidate)));
         }
@@ -319,19 +319,24 @@ impl StudioController {
             .unwrap_or(Duration::ZERO)
     }
 
-    /// Run the slow status heartbeat on every DEVICE session whose
-    /// interval elapsed (runtime-pool P2): drain the session's buffered
-    /// wire and console log lines into the ring and surface device-state
-    /// changes through the change gate. No wire operation rides a
-    /// heartbeat — the session's background monitor fills the buffers —
-    /// so a tick that fans into lens-refresh + heartbeats still issues at
-    /// most one wire op per session.
+    /// Run the slow status heartbeat on every DEVICE session — and every
+    /// DETACHED sim session (P3: a sim without the lens has no project
+    /// pull draining its client, so the heartbeat keeps its buffered wire
+    /// logs from accumulating unboundedly) — whose interval elapsed:
+    /// drain the session's buffered wire and console log lines into the
+    /// ring and surface device-state changes through the change gate. No
+    /// wire operation rides a heartbeat — the session's background
+    /// monitor / self-ticking worker fills the buffers — so a tick that
+    /// fans into lens-refresh + heartbeats still issues at most one wire
+    /// op per session.
     pub fn run_due_heartbeats(&mut self) {
         let now = (self.now_secs)();
+        let lens = self.pool.lens();
         let mut drained = Vec::new();
         let mut state_changed = false;
         for session in self.pool.sessions_mut() {
-            if !session.is_device() || !session.heartbeat_due(now) {
+            let lens_bound = Some(session.id()) == lens;
+            if (session.is_sim() && lens_bound) || !session.heartbeat_due(now) {
                 continue;
             }
             session.mark_heartbeat(now);
@@ -1592,6 +1597,7 @@ impl StudioController {
     async fn execute_device_op(&mut self, op: DeviceOp, updates: UxUpdateSink) -> UiResult {
         match op {
             DeviceOp::DisconnectDevice => self.disconnect_device().await,
+            DeviceOp::StopSimulator => self.stop_simulator().await,
             DeviceOp::DisconnectLightPlayer => self.disconnect_lightplayer().await,
             DeviceOp::SetLogLevel { level } => self.set_device_log_level(level).await,
             DeviceOp::ResetDevice => self.reset_device(updates).await,
@@ -1700,12 +1706,26 @@ impl StudioController {
     /// policy. A refusal (an operation is still in flight on the session
     /// that would be replaced — DQ-A swap semantics) closes the fresh
     /// payload so its session doesn't leak, then surfaces the refusal.
+    ///
+    /// When the install replaces the session the lens is on (a same-kind
+    /// re-connect under an open editor), the mirror quiesces first — the
+    /// replacement inherits the lens with a clean slate. A lens on the
+    /// OTHER kind is untouched (install observes, P3).
     async fn install_session(
         &mut self,
         payload: crate::RuntimePayload,
     ) -> Result<crate::RuntimeId, UiError> {
+        let lens_replaced = self
+            .pool
+            .lens_session()
+            .is_some_and(|session| session.kind() == payload.kind());
         match self.pool.install(payload) {
-            Ok(id) => Ok(id),
+            Ok(id) => {
+                if lens_replaced {
+                    self.project.reset();
+                }
+                Ok(id)
+            }
             Err(refusal) => {
                 let message = refusal.message;
                 match refusal.payload {
@@ -1921,10 +1941,20 @@ impl StudioController {
     }
 
     async fn open_from_home_inner(&mut self, updates: UxUpdateSink) -> UiResult {
+        // A lens on the DEVICE session (the D29 editor) detaches first —
+        // quiesce, then open on the sim (P3). The device session stays.
+        if self
+            .pool
+            .lens_session()
+            .is_some_and(|session| !session.is_sim())
+        {
+            self.quiesce_lens();
+        }
         // The open targets THE sim session: reuse it when it exists — the
         // lens moves onto it (the editor mirror opens on the sim) — and
         // replace-and-load directly when its server protocol is live, or
-        // reconnect its server first when not.
+        // reconnect its server first when not. A fresh install claims the
+        // lens by the pool's lens-less rule (the quiesce above cleared it).
         if let Some(sim) = self.pool.sim_session() {
             let sim_id = sim.id();
             let server_live = matches!(sim.server_state(), ServerState::Connected { .. });
@@ -2021,6 +2051,15 @@ impl StudioController {
             ProjectOp::LoadDemoProject => self.load_demo_project(updates).await,
             ProjectOp::RefreshProject => self.refresh_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
+            ProjectOp::DetachLens => self.detach_lens(),
+            ProjectOp::OpenDeviceProject => {
+                let id = self
+                    .pool
+                    .device_session()
+                    .map(crate::RuntimeSession::id)
+                    .ok_or_else(|| UiError::MissingSession("no device is connected".to_string()))?;
+                self.attach_lens(id, updates).await
+            }
             ProjectOp::SaveOverlay => {
                 let run = {
                     let server = self.pool.lens_session_mut()?.client_mut()?;
@@ -2241,17 +2280,20 @@ impl StudioController {
                     "Checking",
                     "Checking server response",
                 );
-                // sim: auto-connect the editor to whatever runs. Hardware:
-                // the roster model (M3) — attach observes only; the running
-                // project belongs on the device card via connect-as-pull,
-                // and editor entry is the explicit D29 click (M5). The probe
-                // still issues the first wire request either way, so
-                // readiness settles and NoFirmware/Incompatible classify.
-                let probe = if is_sim {
+                // The sim WITH the lens auto-connects the editor to
+                // whatever runs. Everything else — hardware (roster model,
+                // M3: attach observes; editor entry is the explicit D29
+                // click) and a sim attaching while the lens is elsewhere
+                // (P3: attach never steals the editor) — probes readiness
+                // only. The probe still issues the first wire request
+                // either way, so readiness settles and NoFirmware/
+                // Incompatible classify.
+                let lens_bound = self.pool.lens() == Some(id);
+                let probe = if is_sim && lens_bound {
                     self.connect_running_project_if_available(updates.clone())
                         .await
                 } else {
-                    self.probe_server_readiness(updates.clone()).await
+                    self.probe_server_readiness(id, updates.clone()).await
                 };
                 let auto_connect = match probe {
                     Ok(auto_connect) => auto_connect,
@@ -2325,7 +2367,7 @@ impl StudioController {
                     AutoProjectConnect::SelectionRequired => {
                         outcome = outcome.with_notice(UiNotice::info("Choose running project"));
                     }
-                    AutoProjectConnect::NotFound if is_sim => {
+                    AutoProjectConnect::NotFound if is_sim && lens_bound => {
                         let demo_outcome = self.load_demo_project(updates).await?;
                         outcome.notices.extend(demo_outcome.notices);
                     }
@@ -2394,13 +2436,16 @@ impl StudioController {
         }
     }
 
-    /// Hardware readiness probe: issue the wire's first request so
-    /// readiness settles (and NoFirmware/Incompatible surface through the
-    /// same error path as the sim probe) WITHOUT connecting the editor to
-    /// anything the device runs — attach is observation (roster model);
-    /// the loaded project shows on the device card, not in the editor.
+    /// Observation-only readiness probe: issue the wire's first request on
+    /// session `id` so readiness settles (and NoFirmware/Incompatible
+    /// surface through the same error path as the auto-connect probe)
+    /// WITHOUT connecting the editor to anything the runtime runs —
+    /// hardware attach is observation (roster model; editor entry is the
+    /// explicit D29 click), and a sim attaching without the lens must not
+    /// steal the mirror (P3).
     async fn probe_server_readiness(
         &mut self,
+        id: crate::RuntimeId,
         updates: UxUpdateSink,
     ) -> Result<AutoProjectConnect, UiError> {
         emit_activity(
@@ -2411,7 +2456,13 @@ impl StudioController {
             "Checking server response",
         );
         let catalog = {
-            let server = self.pool.device_session_mut()?.client_mut()?;
+            let server = self
+                .pool
+                .session_mut(id)
+                .ok_or_else(|| {
+                    UiError::MissingSession("runtime session is not attached".to_string())
+                })?
+                .client_mut()?;
             server.list_loaded_projects().await?
         };
         self.record_logs(catalog.logs);
@@ -2527,6 +2578,111 @@ impl StudioController {
         Ok(UiNotices::new().with_notice(UiNotice::info("Project disconnected")))
     }
 
+    /// Detach the editor lens (runtime-pool P3): the mirror drops, every
+    /// session STAYS in the pool — worker running, wire client attached,
+    /// device reconcile state intact. The gallery-return route policy
+    /// dispatches this; explicit disconnect affordances keep their full
+    /// teardown meaning ([`Self::disconnect_device`]).
+    ///
+    /// Quiescing is the actor's serialized dispatch (verified, per the P3
+    /// contract): every edit dispatch is fully awaited — its ack landed —
+    /// before the next queued command runs, and the op's Foreground class
+    /// cancels an in-flight passive pull at a frame boundary before this
+    /// executes. By the time we run, no edit ack is in flight; acked
+    /// overlay state is server-side and survives for re-attach.
+    fn detach_lens(&mut self) -> UiResult {
+        self.quiesce_lens();
+        Ok(UiNotices::new())
+    }
+
+    /// Drop the mirror's session binding: drain the departing lens
+    /// session's buffered wire logs into the ring (nothing strands while
+    /// detached), reset the mirror (edit state lives with the lens — Q1/Q4
+    /// of the roadmap DQ record), release the lens id. Sessions untouched.
+    fn quiesce_lens(&mut self) {
+        let pending = self
+            .pool
+            .lens_session_mut()
+            .map(|session| session.take_pending_logs())
+            .unwrap_or_default();
+        self.record_logs(pending);
+        self.project.reset();
+        self.pool.detach_lens();
+    }
+
+    /// Attach the editor lens to session `id` and rebuild the mirror
+    /// against that session's client via the existing connect sequence
+    /// (`connect_running_project` → `sync_loaded_project`), for BOTH kinds
+    /// (P3). A mirror open on another session quiesces first; that session
+    /// stays in the pool.
+    pub(crate) async fn attach_lens(
+        &mut self,
+        id: crate::RuntimeId,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let connected = self
+            .pool
+            .session(id)
+            .ok_or_else(|| UiError::MissingSession("runtime session is not attached".to_string()))?
+            .is_connected();
+        if !connected {
+            return Err(UiError::MissingSession(
+                "server client is not connected".to_string(),
+            ));
+        }
+        if self.pool.lens() != Some(id) {
+            self.quiesce_lens();
+            self.pool.set_lens(id);
+        }
+        self.connect_running_project(updates).await
+    }
+
+    /// Stop-sim (runtime-pool P3, Q5): destroy THE simulator session —
+    /// quiesce the editor when the lens is on it, remove it from the pool,
+    /// close the provider session (`worker.terminate()` on the web). Every
+    /// other session stays. A failed provider close still removes the
+    /// session (the pool is the truth about attachment); the failure lands
+    /// in the ring as a warning.
+    async fn stop_simulator(&mut self) -> UiResult {
+        let sim_id = self
+            .pool
+            .sim_session()
+            .map(crate::RuntimeSession::id)
+            .ok_or_else(|| UiError::MissingSession("the simulator is not running".to_string()))?;
+        if self.pool.lens() == Some(sim_id) {
+            self.quiesce_lens();
+        }
+        let Some(mut session) = self.pool.remove_kind(crate::RuntimeKind::Sim) else {
+            return Err(UiError::MissingSession(
+                "the simulator is not running".to_string(),
+            ));
+        };
+        let pending = session.take_pending_logs();
+        self.record_logs(pending);
+        match session.into_payload() {
+            crate::RuntimePayload::Sim(sim) => {
+                if let Err(error) = sim.connector.close(&sim.session.id).await {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!("simulator session close reported: {error}"),
+                    ));
+                }
+            }
+            crate::RuntimePayload::Device(handle) => {
+                // Unreachable by construction (`remove_kind(Sim)` returns a
+                // sim payload); close defensively rather than leak.
+                let _ = handle.close().await;
+            }
+        }
+        if !self.pool.has_session() {
+            // Nothing attached anymore: return the connect flow to the
+            // provider catalog, like a full disconnect would.
+            self.device.refresh_provider_catalog();
+        }
+        Ok(UiNotices::new().with_notice(UiNotice::info("Simulator stopped")))
+    }
+
     async fn refresh_project(&mut self, updates: UxUpdateSink) -> UiResult {
         emit_activity(
             &updates,
@@ -2581,9 +2737,10 @@ impl StudioController {
         self.project.reset();
         // Taking a session out of the pool drops its wire client, server
         // state, and reconcile bundle with it; the controller closes each
-        // payload and resets the connect flow. P2 interim: this tears down
-        // EVERY session (the gallery-return route policy dispatches it) —
-        // per-session teardown is P3's lens semantics.
+        // payload and resets the connect flow. This is the EXPLICIT
+        // disconnect affordance and keeps its full teardown meaning (P3);
+        // the gallery-return route policy now dispatches the lens detach
+        // (`ProjectOp::DetachLens`) instead, which keeps every session.
         let sessions = self.pool.take_all_sessions();
         if sessions.is_empty() {
             self.device.disconnect(None).await?;
@@ -2596,9 +2753,24 @@ impl StudioController {
         Ok(UiNotices::new().with_notice(UiNotice::info("Device disconnected")))
     }
 
+    /// Detach the server protocol while keeping the runtime attached (the
+    /// device pane's "Disconnect LightPlayer" affordance — the
+    /// keep-worker-drop-client precedent P3's lens detach built on).
+    /// Re-homed for the pool: the op is a device-pane affordance, so it
+    /// targets the HARDWARE session when one exists, the lens session
+    /// otherwise; the mirror only quiesces when the lens sat on the
+    /// disconnected session (a project open on the sim survives).
     async fn disconnect_lightplayer(&mut self) -> UiResult {
-        self.project.reset();
-        if let Ok(session) = self.pool.lens_session_mut() {
+        let id = self
+            .pool
+            .device_session()
+            .map(crate::RuntimeSession::id)
+            .or_else(|| self.pool.lens())
+            .ok_or_else(|| UiError::MissingSession("server client is not connected".to_string()))?;
+        if self.pool.lens() == Some(id) {
+            self.quiesce_lens();
+        }
+        if let Some(session) = self.pool.session_mut(id) {
             session.clear_reconcile();
             session.disconnect_server();
         }
@@ -2829,7 +3001,8 @@ impl StudioController {
     /// Install a stubbed SIM session ALONGSIDE whatever is attached (the
     /// P2 coexistence fixture — `set_stub_sim_for_test` would replace the
     /// lens session's payload instead) and give it an injected wire
-    /// client. The lens lands on the sim, as `install` semantics dictate.
+    /// client. Install preserves a held lens (P3): the sim only claims it
+    /// when nothing does; open flows move it explicitly.
     pub(crate) fn install_stub_sim_with_client_for_test(
         &mut self,
         client: crate::StudioServerClient,
@@ -3337,6 +3510,28 @@ mod tests {
                 .iter()
                 .all(|action| action.node_id().as_str() == DeviceController::NODE_ID)
         );
+    }
+
+    #[test]
+    fn detached_sim_sessions_join_the_slow_heartbeat_lane() {
+        use crate::app::studio::refresh_cadence::{
+            DEVICE_HEARTBEAT_INTERVAL, SIMULATOR_REFRESH_INTERVAL,
+        };
+
+        let mut studio = StudioController::new(|| 100.0);
+        studio.set_stub_sim_for_test();
+
+        // Lens on the sim: the fast sim cadence drives the tick.
+        assert_eq!(studio.next_refresh_interval(), SIMULATOR_REFRESH_INTERVAL);
+
+        // Detached (P3): the sim leaves the lens lane and joins the slow
+        // heartbeat lane, so its buffered wire logs keep draining while no
+        // project pull touches its client. A never-heartbeated session is
+        // immediately due; a fresh heartbeat re-arms the full interval.
+        studio.detach_lens().expect("detach succeeds");
+        assert_eq!(studio.next_refresh_interval(), Duration::ZERO);
+        studio.run_due_heartbeats();
+        assert_eq!(studio.next_refresh_interval(), DEVICE_HEARTBEAT_INTERVAL);
     }
 
     #[test]

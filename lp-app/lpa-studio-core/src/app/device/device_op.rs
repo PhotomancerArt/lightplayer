@@ -33,6 +33,12 @@ pub enum DeviceOp {
     ProvisionFirmware,
     ResetToBlank,
     DisconnectDevice,
+    /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
+    /// editor when the lens is on the sim, close the provider session
+    /// (`worker.terminate()` on the web), remove it from the pool. The
+    /// device session (and everything else) stays. Surfaced on the sim
+    /// card's danger zone once the pool-fed roster lands (P4).
+    StopSimulator,
     RefreshConnections,
     /// Set the connected server's process-global log level at runtime (wire
     /// `SetLogLevel`). Not persisted device-side: a reboot reverts to the
@@ -106,6 +112,12 @@ impl ControllerOp for DeviceOp {
                 "Close the current device session and return to connection choices.",
                 ActionPriority::Tertiary,
             ),
+            Self::StopSimulator => ActionMeta::new(
+                "Stop simulator",
+                "Shut the simulator down; unsaved editor changes are discarded.",
+                ActionPriority::Tertiary,
+            )
+            .destructive(),
             Self::RefreshConnections => ActionMeta::new(
                 "Refresh connections",
                 "Rebuild the connection catalog from available providers.",
@@ -137,6 +149,7 @@ impl ControllerOp for DeviceOp {
             | Self::ProvisionFirmware
             | Self::ResetToBlank
             | Self::DisconnectDevice
+            | Self::StopSimulator
             | Self::RefreshConnections => ActionClass::Recovery,
             // A quick request/ack on the existing connection — no reason to
             // preempt other foreground work or own the connection.
@@ -189,6 +202,7 @@ mod tests {
             DeviceOp::ProvisionFirmware,
             DeviceOp::ResetToBlank,
             DeviceOp::DisconnectDevice,
+            DeviceOp::StopSimulator,
             DeviceOp::RefreshConnections,
         ];
 

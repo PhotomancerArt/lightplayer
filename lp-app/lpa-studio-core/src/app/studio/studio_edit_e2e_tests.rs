@@ -186,6 +186,77 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     assert_eq!(editor_dirty(&snapshot), (0, 0));
 }
 
+/// Row P3-b (detach quiesce): an edit and the lens detach queued into the
+/// SAME actor batch. The actor's serialized dispatch IS the quiesce — the
+/// edit is fully awaited (its mutation reaches the wire, acked) before
+/// the detach drops the mirror — and a re-attach rebuilds the mirror over
+/// the server-side overlay with the value intact: nothing lost.
+#[test]
+fn detach_with_an_edit_in_flight_quiesces_and_loses_nothing() {
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let rate_address = find_slot(&snapshot, "controls.rate")
+        .address
+        .clone()
+        .expect("rate slot carries an address");
+
+    // One batch: the edit is queued (in flight) when the detach lands
+    // behind it.
+    let mutations_before = count_mutations(&sent);
+    handle
+        .tx
+        .send(set_value_action(rate_address, LpValue::F32(2.0)));
+    handle.tx.send(project_action(ProjectOp::DetachLens));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the batch emits a snapshot");
+
+    assert!(
+        snapshot.home.is_some(),
+        "the detach landed: the gallery shows"
+    );
+    assert_eq!(
+        count_mutations(&sent) - mutations_before,
+        1,
+        "the queued edit reached the wire (acked) BEFORE the mirror dropped"
+    );
+
+    // Nothing lost: re-attach on the surviving session rebuilds the
+    // mirror over the server-side overlay.
+    let sim_id = actor
+        .controller_mut_for_test()
+        .runtime_pool_for_test()
+        .sim_session()
+        .expect("the sim session survives the detach")
+        .id();
+    drive(
+        actor
+            .controller_mut_for_test()
+            .attach_lens(sim_id, crate::UxUpdateSink::noop()),
+    )
+    .expect("re-attach connects");
+    let rebuilt = actor.controller_mut_for_test().view();
+    assert_eq!(
+        slot_value_display(find_slot(&rebuilt, "controls.rate")),
+        "2",
+        "the acked edit is visible after detach → re-attach"
+    );
+}
+
 #[test]
 fn home_open_package_pushes_the_library_head_end_to_end() {
     use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};

@@ -374,6 +374,14 @@ where
             let _ = self.process_batch(batch).await;
         }
     }
+
+    /// The owned controller (test-only), for e2e rows that interleave a
+    /// controller-level step (e.g. a lens re-attach) between driven
+    /// batches.
+    #[cfg(test)]
+    pub(crate) fn controller_mut_for_test(&mut self) -> &mut StudioController {
+        &mut self.controller
+    }
 }
 
 /// A planned batch: the console commands to apply (in queue order, never

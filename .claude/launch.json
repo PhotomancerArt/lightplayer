@@ -5,7 +5,7 @@
       "name": "studio-dev",
       "runtimeExecutable": "just",
       "runtimeArgs": ["studio-dev"],
-      "port": 2820,
+      "port": 27395,
       "autoPort": false
     }
   ]
