@@ -75,6 +75,7 @@ fn devices() -> Vec<UiDeviceCard> {
             }),
             fw: None,
             sim: false,
+            console_tail: Vec::new(),
         },
         UiDeviceCard {
             uid: Some("dev_4hJk6Lm01nPqRs3TuVwXyz".to_string()),
@@ -89,6 +90,7 @@ fn devices() -> Vec<UiDeviceCard> {
             }),
             fw: None,
             sim: false,
+            console_tail: Vec::new(),
         },
     ]
 }
@@ -164,6 +166,7 @@ fn connected_device_and_project_chip() -> Element {
         project: None,
         fw: None,
         sim: false,
+        console_tail: Vec::new(),
     });
     let home = UiHomeView {
         devices,
@@ -300,6 +303,7 @@ fn sim_device_card(with_project: bool) -> UiDeviceCard {
         }),
         fw: None,
         sim: true,
+        console_tail: Vec::new(),
     }
 }
 

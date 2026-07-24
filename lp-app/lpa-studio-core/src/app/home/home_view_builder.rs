@@ -66,6 +66,8 @@ pub struct HomeSimEvidence {
     /// the card's chip and the project card's "Running in simulator"
     /// pairing key.
     pub project: Option<UiDeviceProjectChip>,
+    /// The session's console tail (D42), oldest first.
+    pub console_tail: Vec<crate::UiLogEntry>,
 }
 
 /// Everything one live DEVICE session contributes to the roster — the
@@ -92,6 +94,8 @@ pub struct HomeDeviceEvidence {
     /// evidence renders ON that card (uid + name adopted from the
     /// registry) instead of spawning a transient anonymous twin.
     pub pending_uid: Option<String>,
+    /// The session's console tail (D42), oldest first.
+    pub console_tail: Vec<crate::UiLogEntry>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -323,6 +327,7 @@ fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         project: sim.project.clone(),
         fw: None,
         sim: true,
+        console_tail: sim.console_tail.clone(),
     }
 }
 
@@ -374,6 +379,7 @@ fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
         project,
         fw,
         sim: false,
+        console_tail: live.console_tail.clone(),
     })
 }
 
@@ -489,6 +495,8 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         // remembered only: no live hello, no firmware provenance
         fw: None,
         sim: false,
+        // no session, no console (D42: the console is the session's)
+        console_tail: Vec::new(),
     }
 }
 
@@ -559,7 +567,10 @@ mod tests {
     fn sim_pool(project: Option<UiDeviceProjectChip>) -> HomePoolEvidence {
         HomePoolEvidence {
             devices: Vec::new(),
-            sim: Some(HomeSimEvidence { project }),
+            sim: Some(HomeSimEvidence {
+                project,
+                console_tail: Vec::new(),
+            }),
         }
     }
 
@@ -693,6 +704,7 @@ mod tests {
                 project: None,
                 fw: None,
                 sim: false,
+                console_tail: Vec::new(),
             },
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
@@ -702,6 +714,7 @@ mod tests {
                 project: None,
                 fw: None,
                 sim: false,
+                console_tail: Vec::new(),
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
@@ -1085,6 +1098,7 @@ mod tests {
                     uid: sign.uid.to_string(),
                     name: sign.slug.clone(),
                 }),
+                console_tail: Vec::new(),
             }),
         };
         let view = build_home_view(Some(&inputs), None, None, &pool);

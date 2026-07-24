@@ -36,12 +36,69 @@ use lpa_studio_core::{
 #[cfg(feature = "stories")]
 use lpa_studio_core::RosterCircle;
 
+use lpa_studio_core::{UiLogEntry, UiLogLevel};
+
+use crate::app::home::card_sheet::{
+    CardSheet, CardSheetButton, CardSheetButtons, CardSheetMessage, CardSheetTitle, SheetButtonTone,
+};
 use crate::app::home::card_thumb::thumb_swatch_style;
 use crate::app::home::package_card::home_action;
 use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
 #[cfg(feature = "stories")]
 use crate::base::{StatusCircleShape, StatusCircleTone};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, chip_status, quiet_action_class};
+
+/// A card-resident sheet (D41) the card can open: THE destructive-confirm
+/// pattern for card actions, the name-stamping sheet, and the D30 drift
+/// sheet. One at a time; the title bar is always spared.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum DeviceCardSheet {
+    /// A destructive confirm: title/message/verb come from the action's
+    /// own [`lpa_studio_core::ActionConfirmation`]; Confirm dispatches it.
+    Confirm(UiAction),
+    /// The name-stamping sheet (NeedsAName — ratified spike round 3).
+    /// Supersedes the title-bar-form entry for the unstamped board;
+    /// renaming a STAMPED device stays the title bar's inline edit.
+    Name,
+    /// The D30 drift-resolution sheet on the Edited-on-device card:
+    /// adopt / keep-both / stay (the deploy-dialog era's verbs, card-
+    /// resident; M5-A's minimal dialog routing dissolves into this).
+    Drift,
+}
+
+/// What a rendered affordance row does. Sheet rows carry a display-only
+/// action (label/icon/destructive chrome) that never dispatches — the
+/// sheet's own confirm does.
+#[derive(Clone, PartialEq)]
+enum CardRowAction {
+    Dispatch(UiAction),
+    Sheet(DeviceCardSheet, UiAction),
+}
+
+impl CardRowAction {
+    /// Wrap a wired action: one that demands confirmation becomes a
+    /// confirm-sheet row (D41 replaces the native `confirm()` on cards);
+    /// anything else dispatches directly.
+    fn from_action(action: UiAction) -> Self {
+        if action.meta().confirmation.is_some() {
+            let display = strip_confirmation(action.clone());
+            Self::Sheet(DeviceCardSheet::Confirm(action), display)
+        } else {
+            Self::Dispatch(action)
+        }
+    }
+}
+
+/// The same action without its confirmation gate — sheet rows render
+/// through [`ActionButton`], which would otherwise fire the native
+/// `confirm()` before our sheet ever opened.
+fn strip_confirmation(action: UiAction) -> UiAction {
+    let meta = lpa_studio_core::ActionMeta {
+        confirmation: None,
+        ..action.meta().clone()
+    };
+    action.with_meta(meta)
+}
 
 /// One roster card: the device (or live sim session) as a tabbed control
 /// panel. The grow control is the editor entry; the tabs carry status,
@@ -66,6 +123,9 @@ pub(crate) fn DeviceCard(
     /// Open with this tab selected (story captures only).
     #[props(default)]
     initial_tab: Option<DeviceCardTab>,
+    /// Open with this card sheet showing (story captures only).
+    #[props(default)]
+    initial_sheet: Option<DeviceCardSheet>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(super::package_card::platform_now_secs);
@@ -73,16 +133,16 @@ pub(crate) fn DeviceCard(
     let faded = matches!(card.state, RosterCardState::Offline { .. });
     // last-known, not current, on offline/error cards (card grammar)
     let chip_muted = faded || matches!(card.state, RosterCardState::NotResponding);
-    // Needs-a-name opens the SAME inline form the pencil rename uses —
-    // naming is card-anchored, never a dialog trip
+    // Needs-a-name opens the name-stamping SHEET (D41 — ratified spike
+    // round 3); renaming a stamped device stays the title-bar inline edit
     let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
     let can_rename = card.uid.is_some() && !sim;
     let droppable = !sim && !faded;
 
-    // The rich-object view: sections wired to concrete actions here (the
-    // one identity→action hop), rollup tone for the edge, then the
-    // ratified sections→tabs grouping.
-    let sections: Vec<RichSection<UiAction>> = if sim {
+    // The rich-object view: sections wired to concrete rows here (the
+    // one identity→action hop — a row dispatches or opens a card sheet),
+    // rollup tone for the edge, then the ratified sections→tabs grouping.
+    let sections: Vec<RichSection<CardRowAction>> = if sim {
         sim_rich_object(&SimRichInput {
             state: &card.state,
             project_name: card.project.as_ref().map(|chip| chip.name.as_str()),
@@ -90,7 +150,7 @@ pub(crate) fn DeviceCard(
         })
         .sections
         .into_iter()
-        .map(wire_sim_section)
+        .map(wire_sim_card_section)
         .collect()
     } else {
         device_rich_object(&DeviceRichInput {
@@ -104,7 +164,7 @@ pub(crate) fn DeviceCard(
         })
         .sections
         .into_iter()
-        .map(|section| wire_section(&card, section))
+        .map(|section| wire_card_section(&card, section))
         .collect()
     };
     let view = RichObjectView::new(sections);
@@ -134,13 +194,10 @@ pub(crate) fn DeviceCard(
         .iter()
         .find(|tab| tab.tab == selected())
         .map_or(DeviceCardTab::Status, |tab| tab.tab);
+    let mut sheet = use_signal(move || initial_sheet.clone());
 
     let mut renaming = use_signal(|| false);
-    let rename_reset = if name_inline {
-        String::new()
-    } else {
-        card.name.clone()
-    };
+    let rename_reset = card.name.clone();
     let mut rename_value = use_signal(|| rename_reset.clone());
 
     let edge_style = format!(
@@ -197,17 +254,16 @@ pub(crate) fn DeviceCard(
                             move |event: FormEvent| {
                                 event.prevent_default();
                                 let name = rename_value.read().trim().to_string();
-                                if !name.is_empty() {
-                                    // stamped devices rename; an anonymous
-                                    // device (Needs a name) stamps
-                                    let op = match &uid {
-                                        Some(uid) => HomeOp::RenameDevice {
-                                            uid: uid.clone(),
-                                            name,
-                                        },
-                                        None => HomeOp::NameDevice { name },
-                                    };
-                                    on_action.call(home_action(op));
+                                if !name.is_empty()
+                                    && let Some(uid) = &uid
+                                {
+                                    // stamped devices rename inline; the
+                                    // unstamped board's naming is the D41
+                                    // sheet, never this form
+                                    on_action.call(home_action(HomeOp::RenameDevice {
+                                        uid: uid.clone(),
+                                        name,
+                                    }));
                                 }
                                 renaming.set(false);
                             }
@@ -215,7 +271,6 @@ pub(crate) fn DeviceCard(
                         input {
                             class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-card tw:px-2 tw:py-0.5 tw:text-sm tw:text-strong-foreground",
                             autofocus: true,
-                            placeholder: if name_inline { "e.g. Porch sign" } else { "" },
                             value: "{rename_value}",
                             oninput: move |event| rename_value.set(event.value()),
                             onkeydown: {
@@ -231,16 +286,18 @@ pub(crate) fn DeviceCard(
                         button {
                             class: quiet_action_class(),
                             r#type: "submit",
-                            if name_inline { "Name" } else { "Rename" }
+                            "Rename"
                         }
                     }
                 } else {
                     p {
                         class: device_name_class(faded, can_rename || name_inline),
-                        title: if can_rename || name_inline { "Rename this device" } else { "" },
+                        title: if can_rename { "Rename this device" } else if name_inline { "Name this device" } else { "" },
                         onclick: move |_| {
-                            if can_rename || name_inline {
+                            if can_rename {
                                 renaming.set(true);
+                            } else if name_inline {
+                                sheet.set(Some(DeviceCardSheet::Name));
                             }
                         },
                         "{card.name}"
@@ -285,39 +342,108 @@ pub(crate) fn DeviceCard(
                     }
                 }
             }
-            // the icon-tab row (below the title bar — spike anatomy)
-            div {
-                class: "tw:flex tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
-                role: "tablist",
-                for tab_view in tabs.iter() {
-                    {tab_button(tab_view, active_tab, selected)}
+            // Everything below the title bar shares one wrapper: a D41
+            // sheet dims exactly this region, so the name above it stays
+            // readable (spike round 3: sheets spare the title bar). An
+            // open sheet floors the region's height — a short tab body
+            // must never clip the panel (the card is overflow-hidden);
+            // the drift sheet's three stacked verbs need the tall floor.
+            div { class: match sheet() {
+                    Some(DeviceCardSheet::Drift) => "tw:relative tw:min-h-[290px]",
+                    Some(_) => "tw:relative tw:min-h-[210px]",
+                    None => "tw:relative",
+                },
+                // the icon-tab row (below the title bar — spike anatomy)
+                div {
+                    class: "tw:flex tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
+                    role: "tablist",
+                    for tab_view in tabs.iter() {
+                        {tab_button(tab_view, active_tab, selected)}
+                    }
                 }
-            }
-            div { class: "tw:grid tw:content-start tw:gap-1.5 tw:p-3",
-                match active_tab {
-                    DeviceCardTab::Status => rsx! {
-                        {status_tab_body(&card, &tabs, chip_muted, name_inline, renaming, on_action)}
-                    },
-                    DeviceCardTab::Console => rsx! {
-                        // D42's strip + per-session log plumbing land in
-                        // M7′ P2; the tab keeps its learned position.
-                        p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
-                            "The per-device console lands here soon."
-                        }
-                    },
-                    _ => rsx! {
-                        {sections_tab_body(&tabs, active_tab, on_action)}
-                    },
+                div { class: "tw:grid tw:content-start tw:gap-1.5 tw:p-3",
+                    match active_tab {
+                        DeviceCardTab::Status => rsx! {
+                            {status_tab_body(&card, &tabs, chip_muted, on_action, sheet)}
+                        },
+                        DeviceCardTab::Console => rsx! {
+                            {console_tab_body(&card.console_tail)}
+                        },
+                        _ => rsx! {
+                            {sections_tab_body(&tabs, active_tab, on_action, sheet)}
+                        },
+                    }
+                }
+                // D42's ambient strip: the console's latest line at the
+                // card's bottom edge; clicking jumps to the Console tab,
+                // and the strip HIDES while that tab is active.
+                if active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
+                    {console_strip(&card.console_tail, selected)}
+                }
+                if let Some(active_sheet) = sheet() {
+                    {device_card_sheet_view(&active_sheet, &card, sheet, selected, on_action)}
                 }
             }
         }
     }
 }
 
+/// The D42 strip: one mono line (the tail's newest entry), full width,
+/// quiet; the one expansion mechanism is jumping to the Console tab.
+fn console_strip(tail: &[UiLogEntry], mut selected: Signal<DeviceCardTab>) -> Element {
+    let line = tail
+        .last()
+        .map(|entry| entry.message.clone())
+        .unwrap_or_default();
+    rsx! {
+        button {
+            class: "ux-console-strip",
+            r#type: "button",
+            title: "Open the console tab",
+            onclick: move |event| {
+                event.stop_propagation();
+                selected.set(DeviceCardTab::Console);
+            },
+            span { class: "ux-console-strip-line", "› {line}" }
+            span { class: "tw:flex-none tw:text-[10px] tw:text-dim-foreground", "▲" }
+        }
+    }
+}
+
+/// The Console tab (D42, card mode): the session's tail, read-only.
+/// Level/filtering controls are display-only in P2 — severity shows as
+/// line tint, nothing else.
+fn console_tab_body(tail: &[UiLogEntry]) -> Element {
+    if tail.is_empty() {
+        return rsx! {
+            p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
+                "No console output yet."
+            }
+        };
+    }
+    rsx! {
+        div { class: "ux-console-lines",
+            for entry in tail {
+                div { class: console_line_class(entry.level), "{entry.message}" }
+            }
+        }
+    }
+}
+
+/// Severity tint for a console line (the shared status families).
+fn console_line_class(level: UiLogLevel) -> &'static str {
+    match level {
+        UiLogLevel::Trace | UiLogLevel::Debug => "ux-console-line-dim",
+        UiLogLevel::Info => "",
+        UiLogLevel::Warn => "ux-console-line-warn",
+        UiLogLevel::Error => "ux-console-line-error",
+    }
+}
+
 /// One icon tab: selection wears the card tint (`.ux-device-tab` — the
 /// Danger tab the error family), the badge dot the per-tab announcement.
-fn tab_button(
-    tab_view: &CardTabView<UiAction>,
+fn tab_button<A>(
+    tab_view: &CardTabView<A>,
     active_tab: DeviceCardTab,
     mut selected: Signal<DeviceCardTab>,
 ) -> Element {
@@ -354,11 +480,10 @@ fn tab_button(
 /// card body, re-homed.
 fn status_tab_body(
     card: &UiDeviceCard,
-    tabs: &[CardTabView<UiAction>],
+    tabs: &[CardTabView<CardRowAction>],
     chip_muted: bool,
-    name_inline: bool,
-    mut renaming: Signal<bool>,
     on_action: EventHandler<UiAction>,
+    sheet: Signal<Option<DeviceCardSheet>>,
 ) -> Element {
     let health = tabs
         .iter()
@@ -400,26 +525,9 @@ fn status_tab_body(
             }
         }
         for section in health {
-            for action in section.affordances.iter() {
+            for row in section.affordances.iter() {
                 div { class: "tw:mt-1",
-                    ActionButton {
-                        action: action.clone(),
-                        running: false,
-                        variant: ActionButtonVariant::Quiet,
-                        on_action,
-                    }
-                }
-            }
-        }
-        if name_inline && !renaming() {
-            // the Needs-a-name affordance: opens the title bar's inline
-            // form (card-anchored naming, never a dialog)
-            div { class: "tw:mt-1",
-                button {
-                    class: quiet_action_class(),
-                    r#type: "button",
-                    onclick: move |_| renaming.set(true),
-                    "Name this device…"
+                    {row_button(row, ActionButtonVariant::Quiet, on_action, sheet)}
                 }
             }
         }
@@ -430,9 +538,10 @@ fn status_tab_body(
 /// advisory chip + affordances. Danger rows render as destructive menu
 /// rows (inspector-row convention); other affordances as quiet chips.
 fn sections_tab_body(
-    tabs: &[CardTabView<UiAction>],
+    tabs: &[CardTabView<CardRowAction>],
     active_tab: DeviceCardTab,
     on_action: EventHandler<UiAction>,
+    sheet: Signal<Option<DeviceCardSheet>>,
 ) -> Element {
     let sections = tabs
         .iter()
@@ -459,18 +568,236 @@ fn sections_tab_body(
             if let Some(chip) = section.chip.as_ref() {
                 div { StatusChip { status: chip_status(chip) } }
             }
-            for action in section.affordances.iter() {
+            for row in section.affordances.iter() {
                 div {
-                    ActionButton {
-                        action: action.clone(),
-                        running: false,
-                        variant: if menu_rows { ActionButtonVariant::MenuItem } else { ActionButtonVariant::Quiet },
+                    {row_button(
+                        row,
+                        if menu_rows { ActionButtonVariant::MenuItem } else { ActionButtonVariant::Quiet },
                         on_action,
+                        sheet,
+                    )}
+                }
+            }
+        }
+    }
+}
+
+/// One affordance row: dispatch rows fire `on_action`; sheet rows open
+/// their card sheet instead (the display action never dispatches — its
+/// confirmation, if any, was stripped at wiring).
+fn row_button(
+    row: &CardRowAction,
+    variant: ActionButtonVariant,
+    on_action: EventHandler<UiAction>,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+) -> Element {
+    match row {
+        CardRowAction::Dispatch(action) => rsx! {
+            ActionButton { action: action.clone(), running: false, variant, on_action }
+        },
+        CardRowAction::Sheet(kind, display) => {
+            let kind = kind.clone();
+            rsx! {
+                ActionButton {
+                    action: display.clone(),
+                    running: false,
+                    variant,
+                    on_action: move |_| sheet.set(Some(kind.clone())),
+                }
+            }
+        }
+    }
+}
+
+/// Render the active card sheet (D41).
+fn device_card_sheet_view(
+    active: &DeviceCardSheet,
+    card: &UiDeviceCard,
+    sheet: Signal<Option<DeviceCardSheet>>,
+    selected: Signal<DeviceCardTab>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    match active {
+        DeviceCardSheet::Confirm(action) => rsx! {
+            ConfirmSheet { action: action.clone(), sheet, on_action }
+        },
+        DeviceCardSheet::Name => rsx! {
+            NameDeviceSheet { sheet, selected, on_action }
+        },
+        DeviceCardSheet::Drift => rsx! {
+            DriftSheet {
+                project_name: card.project.as_ref().map(|chip| chip.name.clone()),
+                sheet,
+                on_action,
+            }
+        },
+    }
+}
+
+/// The destructive-confirm sheet: copy from the action's own
+/// [`lpa_studio_core::ActionConfirmation`] (title · message · verb);
+/// Confirm dispatches the action with the gate stripped (the sheet WAS
+/// the gate).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ConfirmSheet(
+    action: UiAction,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let meta = action.meta().clone();
+    let confirmation = meta.confirmation.clone().unwrap_or_else(|| {
+        // defensive: a confirm sheet over an unconfirmed action still
+        // reads sensibly (label as title, summary as body)
+        lpa_studio_core::ActionConfirmation::new(
+            meta.label.clone(),
+            meta.summary.clone(),
+            meta.label.clone(),
+        )
+    });
+    let tone = if meta.destructive {
+        SheetButtonTone::Destructive
+    } else {
+        SheetButtonTone::Primary
+    };
+    let confirmed = strip_confirmation(action);
+    rsx! {
+        CardSheet { on_dismiss: move |_| sheet.set(None),
+            CardSheetTitle { text: confirmation.title.clone() }
+            CardSheetMessage { text: confirmation.message.clone() }
+            CardSheetButtons {
+                CardSheetButton {
+                    label: "Cancel",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| sheet.set(None),
+                }
+                CardSheetButton {
+                    label: confirmation.confirm_label.clone(),
+                    tone,
+                    onclick: move |_| {
+                        sheet.set(None);
+                        on_action.call(confirmed.clone());
+                    },
+                }
+            }
+        }
+    }
+}
+
+/// The name-stamping sheet (NeedsAName — spike round 3): input +
+/// Enter-to-save; naming stamps the uid and the card returns to Status.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NameDeviceSheet(
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    mut selected: Signal<DeviceCardTab>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut name = use_signal(String::new);
+    rsx! {
+        CardSheet { on_dismiss: move |_| sheet.set(None),
+            CardSheetTitle { text: "Name this device" }
+            CardSheetMessage { text: "Studio remembers it by name; the name is stamped onto the board." }
+            form {
+                onsubmit: move |event: FormEvent| {
+                    event.prevent_default();
+                    save_device_name(name, sheet, selected, on_action);
+                },
+                input {
+                    class: "tw:mb-3 tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    autofocus: true,
+                    placeholder: "e.g. Porch sign",
+                    value: "{name}",
+                    oninput: move |event| name.set(event.value()),
+                    onkeydown: move |event: KeyboardEvent| {
+                        if event.key() == Key::Escape {
+                            sheet.set(None);
+                        }
+                    },
+                }
+                CardSheetButtons {
+                    CardSheetButton {
+                        label: "Cancel",
+                        tone: SheetButtonTone::Quiet,
+                        onclick: move |_| sheet.set(None),
+                    }
+                    CardSheetButton {
+                        label: "Name device",
+                        tone: SheetButtonTone::Primary,
+                        onclick: move |_| save_device_name(name, sheet, selected, on_action),
                     }
                 }
             }
         }
     }
+}
+
+/// The name sheet's save: a non-empty name dispatches the stamp op,
+/// closes the sheet, and returns the card to Status (spike round 3).
+fn save_device_name(
+    name: Signal<String>,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    mut selected: Signal<DeviceCardTab>,
+    on_action: EventHandler<UiAction>,
+) {
+    let value = name.read().trim().to_string();
+    if value.is_empty() {
+        return;
+    }
+    on_action.call(home_action(HomeOp::NameDevice { name: value }));
+    sheet.set(None);
+    selected.set(DeviceCardTab::Status);
+}
+
+/// The D30 drift-resolution sheet on the Edited-on-device card: adopt /
+/// keep-both / stay. The verbs are the deploy-dialog era's ops —
+/// `AdoptDeviceCopy` and `KeepBothFork` now resolve the diverged copy
+/// from the live session when no dialog is open.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DriftSheet(
+    project_name: Option<String>,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let subject = project_name.unwrap_or_else(|| "This project".to_string());
+    let message = format!(
+        "\"{subject}\" was edited on the device, so its copy differs from yours. \
+         The device's copy was already saved to your library at connect."
+    );
+    rsx! {
+        CardSheet { on_dismiss: move |_| sheet.set(None),
+            CardSheetTitle { text: "Edited on device" }
+            CardSheetMessage { text: message }
+            div { class: "tw:grid tw:justify-end tw:gap-2",
+                CardSheetButton {
+                    label: "Use the device's copy",
+                    tone: SheetButtonTone::Primary,
+                    onclick: move |_| dispatch_drift_verb(sheet, on_action, DeployOp::AdoptDeviceCopy),
+                }
+                CardSheetButton {
+                    label: "Keep both",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| dispatch_drift_verb(sheet, on_action, DeployOp::KeepBothFork),
+                }
+                CardSheetButton {
+                    label: "Stay",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| sheet.set(None),
+                }
+            }
+        }
+    }
+}
+
+/// Dispatch one D30 verb and close the sheet.
+fn dispatch_drift_verb(
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    on_action: EventHandler<UiAction>,
+    op: DeployOp,
+) {
+    sheet.set(None);
+    on_action.call(UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op));
 }
 
 /// The tab's icon (icon tabs at card scale; labels arrive in pane mode).
@@ -595,7 +922,7 @@ fn open_sim_project_action() -> UiAction {
 /// destroy op). Confirmation states the honest cost: the worker dies, and
 /// applied-but-unsaved edits live on it — anything not saved to the
 /// library is gone.
-pub(super) fn stop_simulator_action() -> UiAction {
+pub(crate) fn stop_simulator_action() -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
         DeviceOp::StopSimulator,
@@ -671,6 +998,91 @@ pub(super) fn device_affordance_action(
     Some(action.with_label(affordance.label()))
 }
 
+/// Map one device section's affordance identities onto card ROWS (M7′
+/// P2): confirm-carrying actions and the name/drift flows become sheet
+/// rows (D41); everything else dispatches. (`wire_section` below keeps
+/// the popover-era `UiAction` wiring compiling until P3 deletes the
+/// popover.)
+fn wire_card_section(
+    card: &UiDeviceCard,
+    section: RichSection<DeviceDetailAffordance>,
+) -> RichSection<CardRowAction> {
+    RichSection {
+        title: section.title,
+        tone: section.tone,
+        lines: section.lines,
+        chip: section.chip,
+        affordances: section
+            .affordances
+            .iter()
+            .filter_map(|affordance| wire_card_affordance(card, affordance))
+            .collect(),
+        weight: section.weight,
+    }
+}
+
+fn wire_card_affordance(
+    card: &UiDeviceCard,
+    affordance: &DeviceDetailAffordance,
+) -> Option<CardRowAction> {
+    match affordance {
+        // D30: the drift sheet (the deploy-dialog routing dissolved into
+        // it). The display action is meta-only — the sheet's verbs fire.
+        DeviceDetailAffordance::Roster(RosterAffordance::ResolveDrift) => {
+            let display =
+                UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::AdoptDeviceCopy)
+                    .with_label(RosterAffordance::ResolveDrift.label())
+                    .with_summary("Review the device's edited copy against your version.")
+                    .with_icon("edit");
+            Some(CardRowAction::Sheet(DeviceCardSheet::Drift, display))
+        }
+        // The name-stamping sheet (an unstamped board's one naming flow).
+        DeviceDetailAffordance::Roster(RosterAffordance::NameDevice) => {
+            let display = home_action(HomeOp::NameDevice {
+                name: String::new(),
+            })
+            .with_label("Name this device…")
+            .with_summary("Stamp a name onto this board so Studio remembers it.")
+            .with_icon("edit");
+            Some(CardRowAction::Sheet(DeviceCardSheet::Name, display))
+        }
+        DeviceDetailAffordance::Roster(affordance) => {
+            device_affordance_action(card, affordance).map(CardRowAction::from_action)
+        }
+        DeviceDetailAffordance::FlashFirmware => {
+            Some(CardRowAction::from_action(flash_device_action_destructive()))
+        }
+        DeviceDetailAffordance::EraseDevice => Some(CardRowAction::from_action(
+            erase_device_action(card.name.clone()),
+        )),
+        DeviceDetailAffordance::ForgetDevice => card
+            .uid
+            .clone()
+            .map(|uid| CardRowAction::from_action(forget_device_action(uid, card.name.clone()))),
+    }
+}
+
+/// Map one sim section's affordance identities onto card rows (the
+/// stop-simulator confirm rides the D41 sheet).
+fn wire_sim_card_section(section: RichSection<SimDetailAffordance>) -> RichSection<CardRowAction> {
+    RichSection {
+        title: section.title,
+        tone: section.tone,
+        lines: section.lines,
+        chip: section.chip,
+        affordances: section
+            .affordances
+            .iter()
+            .map(|affordance| match affordance {
+                SimDetailAffordance::StopSimulator => {
+                    CardRowAction::from_action(stop_simulator_action())
+                }
+            })
+            .collect(),
+        weight: section.weight,
+    }
+}
+
 /// Map one device section's affordance identities onto concrete
 /// `UiAction`s for this card. Identities without a live flow render no
 /// row (the name-device flow lives in the title bar).
@@ -734,7 +1146,7 @@ pub(super) fn flash_device_action_destructive() -> UiAction {
 /// Erase the device's flash entirely, from the Danger tab. Confirmation
 /// states the honest facts: full wipe; anything Studio could read was
 /// banked at connect (D8) — unreadable content is gone for good.
-pub(super) fn erase_device_action(name: String) -> UiAction {
+pub(crate) fn erase_device_action(name: String) -> UiAction {
     UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::EraseDevice).with_confirmation(
         lpa_studio_core::ActionConfirmation::new(
             "Erase device",
@@ -748,7 +1160,7 @@ pub(super) fn erase_device_action(name: String) -> UiAction {
 }
 
 /// The forget action (D34 hygiene) for the offline card's Danger tab.
-pub(super) fn forget_device_action(uid: String, name: String) -> UiAction {
+pub(crate) fn forget_device_action(uid: String, name: String) -> UiAction {
     home_action(HomeOp::ForgetDevice { uid }).with_confirmation(
         lpa_studio_core::ActionConfirmation::new(
             "Forget device",
