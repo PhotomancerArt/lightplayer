@@ -290,6 +290,9 @@
   .tw\:h-\[15px\] {
     height: 15px;
   }
+  .tw\:h-\[560px\] {
+    height: 560px;
+  }
   .tw\:h-full {
     height: 100%;
   }
@@ -445,6 +448,9 @@
   }
   .tw\:w-\[128px\] {
     width: 128px;
+  }
+  .tw\:w-\[340px\] {
+    width: 340px;
   }
   .tw\:w-\[720px\] {
     width: 720px;

@@ -396,6 +396,26 @@ impl StudioController {
             )
             .with_device_sync(self.device_sync().cloned())
             .with_deploy(self.deploy_view())
+            .with_lens_card(self.lens_device_card())
+    }
+
+    /// The LENS session's card (D43): the grown control panel the editor
+    /// docks as its right-side pane. The same construction the gallery
+    /// roster uses — one derivation, both scales.
+    fn lens_device_card(&self) -> Option<crate::UiDeviceCard> {
+        let session = self.pool.lens_session()?;
+        let evidence = self.home_pool_evidence();
+        if session.is_sim() {
+            evidence
+                .sim
+                .as_ref()
+                .map(crate::app::home::home_view_builder::sim_card)
+        } else {
+            evidence
+                .devices
+                .first()
+                .and_then(crate::app::home::home_view_builder::live_device_card)
+        }
     }
 
     /// The lens's runtime binding for the view (SDI: the URL is the

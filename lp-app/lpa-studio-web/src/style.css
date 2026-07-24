@@ -295,6 +295,40 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-error-text);
 }
 
+/* Pane mode (D43, round 3.5): the console is a permanent expanded
+   bottom region — a normal console; the tab and strip are gone. */
+
+.ux-console-region {
+    flex: none;
+    height: 200px;
+    padding: 8px 12px;
+    overflow-y: auto;
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    background: var(--studio-color-terminal);
+    border-top: 1px solid var(--studio-color-border);
+}
+
+.ux-console-region > div {
+    overflow: hidden;
+    padding: 1.5px 0;
+    color: var(--studio-color-text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ux-console-region > .ux-console-line-dim {
+    color: var(--studio-color-text-dim);
+}
+
+.ux-console-region > .ux-console-line-warn {
+    color: var(--studio-status-warning-text);
+}
+
+.ux-console-region > .ux-console-line-error {
+    color: var(--studio-status-error-text);
+}
+
 /* Slot slider control (config slot editor). */
 
 .ux-slot-slider {

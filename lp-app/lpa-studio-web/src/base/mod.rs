@@ -20,9 +20,6 @@ pub mod outline;
 pub mod popover;
 #[cfg(feature = "stories")]
 pub(crate) mod popover_stories;
-pub mod status_circle;
-#[cfg(feature = "stories")]
-pub(crate) mod status_circle_stories;
 pub mod tabs;
 
 pub use code_editor::{
@@ -38,5 +35,4 @@ pub use icon::{NodeKindIcon, StudioIcon, StudioIconName, action_icon_name, node_
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
 pub use keyboard::Platform;
 pub use popover::{IconPopoverButton, PopoverButton, PopoverPlacement};
-pub use status_circle::{StatusCircle, StatusCircleShape, StatusCircleTone, status_circle_class};
 pub use tabs::{TabItem, Tabs};

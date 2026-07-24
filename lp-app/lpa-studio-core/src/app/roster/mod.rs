@@ -9,7 +9,7 @@
 //!
 //! Concept map:
 //! - [`roster_card_state`]: the 14-state enum + its status-line copy.
-//! - [`roster_circle`]: the status-circle spec (shape × status family).
+//! - [`roster_state_spec`]: the status-circle spec (shape × status family).
 //! - [`roster_affordance`]: the one affordance each state carries (identity
 //!   only in M2 — wiring lands with the flows that make each state real).
 //! - [`roster_evidence`]: evidence inputs + the pure derivation function
@@ -29,8 +29,8 @@ pub mod device_rich_object;
 pub mod firmware_update;
 pub mod roster_affordance;
 pub mod roster_card_state;
-pub mod roster_circle;
 pub mod roster_evidence;
+pub mod roster_state_spec;
 pub mod sim_rich_object;
 
 pub use card_tabs::{CardTabView, DeviceCardTab, device_card_tabs};
@@ -38,6 +38,6 @@ pub use device_rich_object::{DeviceDetailAffordance, DeviceRichInput, device_ric
 pub use firmware_update::{BundledFirmware, firmware_update_available};
 pub use roster_affordance::RosterAffordance;
 pub use roster_card_state::{ConnectPhase, DegradedReason, RosterCardState};
-pub use roster_circle::{RosterCircle, RosterCircleShape};
 pub use roster_evidence::{ConnectEvidence, RosterEvidence, derive_roster_card_state};
+pub use roster_state_spec::{RosterStateSpec, RosterTreatment};
 pub use sim_rich_object::{SimDetailAffordance, SimRichInput, sim_rich_object};
