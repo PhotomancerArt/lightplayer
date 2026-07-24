@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,7 +10,10 @@ const repoRoot = path.resolve(scriptDir, "../..");
 const args = parseArgs(process.argv.slice(2));
 const kind = requiredArg(args, "kind");
 const siteDir = path.resolve(repoRoot, requiredArg(args, "dir"));
-const port = Number(args.port ?? "2830");
+// Port 0 (the default) means "any free port": nothing reconnects to a smoke
+// server, and fixed ports collide when multiple agent worktrees run checks
+// concurrently on one machine. Pass --port to pin one for debugging.
+const port = Number(args.port ?? "0") || (await findFreePort());
 const browserMode = args.browser ?? "optional";
 const serverMode = args.server ?? "required";
 const baseUrl = `http://127.0.0.1:${port}/`;
@@ -190,6 +194,19 @@ async function fetchBytes(url) {
   if (bytes.byteLength === 0) {
     throw new Error(`${url.pathname} is empty`);
   }
+}
+
+// Ask the OS for a free TCP port by binding to 0, then release it and hand the
+// number to the static server. Same approach as studio-story-pngs.mjs.
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port: assigned } = probe.address();
+      probe.close((closeError) => (closeError ? reject(closeError) : resolve(assigned)));
+    });
+  });
 }
 
 function findChrome() {
