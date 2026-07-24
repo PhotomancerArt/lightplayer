@@ -81,6 +81,9 @@
     --tw-color-status-warning-bg: var(--studio-status-warning-bg);
     --tw-color-status-warning-border: var(--studio-status-warning-border);
     --tw-color-status-warning-foreground: var(--studio-status-warning-text);
+    --tw-color-status-attention-bg: var(--studio-status-attention-bg);
+    --tw-color-status-attention-border: var(--studio-status-attention-border);
+    --tw-color-status-attention-foreground: var(--studio-status-attention-text);
     --tw-color-status-error-bg: var(--studio-status-error-bg);
     --tw-color-status-error-border: var(--studio-status-error-border);
     --tw-color-status-error-foreground: var(--studio-status-error-text);
@@ -912,6 +915,12 @@
   .tw\:border-selection-border {
     border-color: var(--tw-color-selection-border);
   }
+  .tw\:border-status-attention-border {
+    border-color: var(--tw-color-status-attention-border);
+  }
+  .tw\:border-status-attention-foreground {
+    border-color: var(--tw-color-status-attention-foreground);
+  }
   .tw\:border-status-bound-border {
     border-color: var(--tw-color-status-bound-border);
   }
@@ -1017,6 +1026,12 @@
       background-color: color-mix(in oklab, var(--tw-color-red-500) 10%, transparent);
     }
   }
+  .tw\:bg-status-attention-bg {
+    background-color: var(--tw-color-status-attention-bg);
+  }
+  .tw\:bg-status-attention-foreground {
+    background-color: var(--tw-color-status-attention-foreground);
+  }
   .tw\:bg-status-bound-bg {
     background-color: var(--tw-color-status-bound-bg);
   }
@@ -1064,6 +1079,12 @@
   }
   .tw\:bg-transparent {
     background-color: transparent;
+  }
+  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-attention-bg\)\,transparent_62\%\)\] {
+    background-image: linear-gradient(90deg,var(--studio-status-attention-bg),transparent 62%);
+  }
+  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-attention-bg\)_0\%\,transparent_72\%\)\] {
+    background-image: linear-gradient(90deg,var(--studio-status-attention-bg) 0%,transparent 72%);
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-bound-bg\)\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-bound-bg),transparent 72%);
@@ -1463,6 +1484,9 @@
   .tw\:text-soft-foreground {
     color: var(--tw-color-soft-foreground);
   }
+  .tw\:text-status-attention-foreground {
+    color: var(--tw-color-status-attention-foreground);
+  }
   .tw\:text-status-bound-foreground {
     color: var(--tw-color-status-bound-foreground);
   }
@@ -1720,6 +1744,13 @@
     &:hover {
       @media (hover: hover) {
         border-color: var(--tw-color-border-strong);
+      }
+    }
+  }
+  .tw\:hover\:border-status-attention-foreground {
+    &:hover {
+      @media (hover: hover) {
+        border-color: var(--tw-color-status-attention-foreground);
       }
     }
   }

@@ -1,10 +1,13 @@
 //! Places: everywhere a project can live (roadmap D18/D19).
 //!
-//! The library is the source of truth; runtimes (simulator now, devices in
-//! M5) are places projects are pushed to and pulled from. The trait here is
-//! deliberately small — it establishes the seam (kind + capacity) that M4's
-//! gallery and M5's device flows grow against; the ops live on the concrete
-//! types until real callers shape the abstraction.
+//! The library is the source of truth; runtimes (simulator and devices)
+//! are places projects are pushed to and pulled from. The trait here is
+//! deliberately small — it establishes the seam (kind + capacity) — and
+//! the ops live on the concrete types until real callers shape the
+//! abstraction (`RuntimePlace` still has none; see its module doc and
+//! the runtime-pool ADR). The load-bearing content of this module is the
+//! connect-as-pull machinery (`device_session`), the device registry,
+//! and device identity.
 
 pub mod device_identity;
 pub mod device_registry;

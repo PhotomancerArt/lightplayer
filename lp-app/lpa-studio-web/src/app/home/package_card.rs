@@ -97,6 +97,16 @@ pub(crate) fn PackageCard(
                                 {connected_line(&connection.device_name, connection.relation)}
                             }
                         }
+                        // the D28 grammar's sim arm: the sim session runs
+                        // this project (independent of any device — both
+                        // lines may honestly show at once). Load-as-push
+                        // always runs the head, so the sim is current:
+                        // green, like the at-head connected line.
+                        if card.running_in_sim {
+                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground",
+                                "Running in simulator"
+                            }
+                        }
                         // a fact, not a warning: neutral chip; the card stays
                         // clickable — the open's refusal notice explains
                         if card.open_elsewhere {

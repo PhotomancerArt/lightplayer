@@ -19,6 +19,9 @@ pub const DEPLOY_NODE_ID: &str = "studio|deploy";
 pub enum DeployOp {
     /// Open the dialog, optionally preselecting a push target (slug or
     /// `prj_…` uid — the editor's Push action and drag-drop pass one).
+    /// With no explicit target, a device running a library-KNOWN project
+    /// pre-targets that project — the dialog opens on Reviewing, with the
+    /// picker one click away (defect 2026-07-23).
     OpenDialog {
         target_key: Option<String>,
     },

@@ -36,9 +36,14 @@ impl UiStatus {
         Self::new(label, UiStatusKind::Good)
     }
 
-    /// Create a warning status for states that need attention but can continue.
+    /// Create a warning status for the unsaved/edit vocabulary (yellow).
     pub fn warning(label: impl Into<String>) -> Self {
         Self::new(label, UiStatusKind::Warning)
+    }
+
+    /// Create an attention status for health states needing a look (orange).
+    pub fn attention(label: impl Into<String>) -> Self {
+        Self::new(label, UiStatusKind::Attention)
     }
 
     /// Create an error status for failed states.
@@ -56,8 +61,11 @@ pub enum UiStatusKind {
     Working,
     /// Ready, connected, or successful.
     Good,
-    /// Attention needed, but not a hard failure.
+    /// Unsaved/edited working state (yellow — the node edit vocabulary).
     Warning,
+    /// Health needs a look, but not a hard failure (orange — the
+    /// device/roster attention family, distinct from unsaved-yellow).
+    Attention,
     /// Failed or blocked.
     Error,
 }

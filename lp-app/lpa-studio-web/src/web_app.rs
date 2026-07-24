@@ -29,7 +29,7 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    ConsoleCommand, DeviceController, DeviceOp, DeviceTimers, HOME_NODE_ID, HomeOp,
+    ConsoleCommand, DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp,
     STUDIO_LOG_SINK, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
     UiLogLevel, UiStudioView,
 };
@@ -182,11 +182,15 @@ pub fn App() -> Element {
             match &new_route {
                 StudioRoute::Home => {
                     if nav_open_ids.borrow().is_some() {
-                        // back to the gallery = full return: the gallery
-                        // only renders when the link is idle
+                        // back to the gallery = lens detach (runtime-pool
+                        // P3): the editor closes, every runtime session
+                        // keeps running — the sim stays live (self-ticking
+                        // worker, client attached) and the device stays
+                        // attached. Explicit disconnect affordances keep
+                        // full teardown.
                         nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
-                            DeviceController::NODE_ID,
-                            DeviceOp::DisconnectDevice,
+                            ProjectController::NODE_ID,
+                            ProjectOp::DetachLens,
                         )));
                     }
                 }

@@ -27,8 +27,9 @@ pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
 pub use console_command::ConsoleCommand;
 pub use refresh_cadence::{
-    DEVICE_REFRESH_INTERVAL, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, VERDICT_CHASE_INTERVAL,
-    VERDICT_CHASE_TICKS,
+    DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE,
+    PASSIVE_REFRESH_BACKOFF_MAX, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
+    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
 };
 pub use studio_actor::{StudioActor, StudioHandle};
 pub use studio_command::StudioCommand;

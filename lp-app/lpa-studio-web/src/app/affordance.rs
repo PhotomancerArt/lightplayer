@@ -56,8 +56,10 @@ pub(crate) fn affordance_trigger_style(affordance: UiAffordance) -> AffordanceSt
 /// - `Neutral`/`Good` → the quiet "i" (OK is not announced — no
 ///   checkmark, no status coloring);
 /// - `Working` → the "i" in the working tone (genuine activity);
-/// - `Warning` → the "i" in the warning tone (attention, not an edit —
+/// - `Warning` → the "i" in the warning tone (the yellow edit vocabulary —
 ///   the pencil stays node-only);
+/// - `Attention` → the "i" in the attention-orange tone (health, not an
+///   edit — the device/roster family);
 /// - `Error` → the red warning glyph.
 pub(crate) fn status_trigger_style(kind: UiStatusKind) -> AffordanceStyle {
     match kind {
@@ -73,6 +75,10 @@ pub(crate) fn status_trigger_style(kind: UiStatusKind) -> AffordanceStyle {
             icon: StudioIconName::InfoBare,
             tone: IconMenuTone::Warning,
         },
+        UiStatusKind::Attention => AffordanceStyle {
+            icon: StudioIconName::InfoBare,
+            tone: IconMenuTone::Attention,
+        },
         UiStatusKind::Error => AffordanceStyle {
             icon: StudioIconName::StepAttention,
             tone: IconMenuTone::Error,
@@ -85,7 +91,10 @@ pub(crate) fn status_trigger_style(kind: UiStatusKind) -> AffordanceStyle {
 pub(crate) fn status_trigger_active(kind: UiStatusKind) -> bool {
     matches!(
         kind,
-        UiStatusKind::Working | UiStatusKind::Warning | UiStatusKind::Error
+        UiStatusKind::Working
+            | UiStatusKind::Warning
+            | UiStatusKind::Attention
+            | UiStatusKind::Error
     )
 }
 
@@ -130,6 +139,7 @@ pub(crate) fn status_pane_tone(kind: UiStatusKind) -> PaneTone {
         UiStatusKind::Working => PaneTone::Working,
         UiStatusKind::Good => PaneTone::Good,
         UiStatusKind::Warning => PaneTone::Warning,
+        UiStatusKind::Attention => PaneTone::Attention,
         UiStatusKind::Error => PaneTone::Error,
     }
 }
@@ -173,13 +183,18 @@ mod tests {
             assert_eq!(style.tone, IconMenuTone::Quiet);
             assert!(!status_trigger_active(quiet));
         }
-        // Working and Warning keep the "i" glyph in their own tones.
+        // Working, Warning, and Attention keep the "i" glyph in their own
+        // tones (yellow = edits, orange = health attention).
         let working = status_trigger_style(UiStatusKind::Working);
         assert_eq!(working.icon, StudioIconName::InfoBare);
         assert_eq!(working.tone, IconMenuTone::Working);
         let warning = status_trigger_style(UiStatusKind::Warning);
         assert_eq!(warning.icon, StudioIconName::InfoBare);
         assert_eq!(warning.tone, IconMenuTone::Warning);
+        let attention = status_trigger_style(UiStatusKind::Attention);
+        assert_eq!(attention.icon, StudioIconName::InfoBare);
+        assert_eq!(attention.tone, IconMenuTone::Attention);
+        assert!(status_trigger_active(UiStatusKind::Attention));
         // Error escalates to the red warning glyph.
         let error = status_trigger_style(UiStatusKind::Error);
         assert_eq!(error.icon, StudioIconName::StepAttention);

@@ -41,7 +41,11 @@ get a home immediately, before anyone decides when to fix them.
 ---
 status: fixed          # open | fixed | wontfix
 found: YYYY-MM-DD      # how: hardware-walk | live-debugging | ci | e2e | report
-fixed: <commit>        # absent while open
+fixed: <commit>        # absent while open. NOTE: an entry cannot cite
+                       # its OWN commit (the hash doesn't exist yet, and
+                       # amending changes it) — write `fixed: this change`
+                       # at commit time and fill the real hash in the NEXT
+                       # commit that touches the registry.
 area: <crate/module>
 class: <one from the vocabulary>
 related: []            # other defects, ADRs, plan dirs
@@ -92,7 +96,9 @@ bookkeeping fact.
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
 | assumed-context | 2026-07-17 | [storage-slot-assumed](2026-07-17-storage-slot-assumed.md) | fixed | lpa-studio-core/places |
+| assumed-context | 2026-07-23 | [deploy-dialog-ignores-running-project](2026-07-23-deploy-dialog-ignores-running-project.md) | fixed | lpa-studio-core/device |
 | partial-knowledge-loss | 2026-07-22 | [identity-lost-on-failed-read](2026-07-22-identity-lost-on-failed-read.md) | fixed | lpa-studio-core/places+studio |
+| partial-knowledge-loss | 2026-07-23 | [reconnect-transient-twin-card](2026-07-23-reconnect-transient-twin-card.md) | fixed | lpa-studio-core/home + device |
 | policy-leak | 2026-07-17 | [hardware-attach-opened-editor](2026-07-17-hardware-attach-opened-editor.md) | fixed | lpa-studio-core/studio |
 | stand-in-divergence | 2026-07-23 | [popover-open-resizes-card](2026-07-23-popover-open-resizes-card.md) | fixed | lpa-studio-web/base/popover |
 

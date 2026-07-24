@@ -54,6 +54,9 @@
     --color-status-warning-bg: var(--studio-status-warning-bg);
     --color-status-warning-border: var(--studio-status-warning-border);
     --color-status-warning-foreground: var(--studio-status-warning-text);
+    --color-status-attention-bg: var(--studio-status-attention-bg);
+    --color-status-attention-border: var(--studio-status-attention-border);
+    --color-status-attention-foreground: var(--studio-status-attention-text);
     --color-status-error-bg: var(--studio-status-error-bg);
     --color-status-error-border: var(--studio-status-error-border);
     --color-status-error-foreground: var(--studio-status-error-text);

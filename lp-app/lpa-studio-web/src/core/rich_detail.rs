@@ -91,6 +91,7 @@ pub fn rich_section_tint(tone: UiStatusKind) -> DetailSectionTint {
         UiStatusKind::Working => DetailSectionTint::Working,
         UiStatusKind::Good => DetailSectionTint::Good,
         UiStatusKind::Warning => DetailSectionTint::Warning,
+        UiStatusKind::Attention => DetailSectionTint::Attention,
         UiStatusKind::Error => DetailSectionTint::Error,
     }
 }
@@ -101,6 +102,7 @@ fn chip_status(chip: &RichChip) -> UiStatus {
         UiStatusKind::Working => UiStatus::working(chip.text.clone()),
         UiStatusKind::Good => UiStatus::good(chip.text.clone()),
         UiStatusKind::Warning => UiStatus::warning(chip.text.clone()),
+        UiStatusKind::Attention => UiStatus::attention(chip.text.clone()),
         UiStatusKind::Error => UiStatus::error(chip.text.clone()),
     }
 }

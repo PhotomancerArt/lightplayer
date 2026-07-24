@@ -186,6 +186,77 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     assert_eq!(editor_dirty(&snapshot), (0, 0));
 }
 
+/// Row P3-b (detach quiesce): an edit and the lens detach queued into the
+/// SAME actor batch. The actor's serialized dispatch IS the quiesce — the
+/// edit is fully awaited (its mutation reaches the wire, acked) before
+/// the detach drops the mirror — and a re-attach rebuilds the mirror over
+/// the server-side overlay with the value intact: nothing lost.
+#[test]
+fn detach_with_an_edit_in_flight_quiesces_and_loses_nothing() {
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let rate_address = find_slot(&snapshot, "controls.rate")
+        .address
+        .clone()
+        .expect("rate slot carries an address");
+
+    // One batch: the edit is queued (in flight) when the detach lands
+    // behind it.
+    let mutations_before = count_mutations(&sent);
+    handle
+        .tx
+        .send(set_value_action(rate_address, LpValue::F32(2.0)));
+    handle.tx.send(project_action(ProjectOp::DetachLens));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the batch emits a snapshot");
+
+    assert!(
+        snapshot.home.is_some(),
+        "the detach landed: the gallery shows"
+    );
+    assert_eq!(
+        count_mutations(&sent) - mutations_before,
+        1,
+        "the queued edit reached the wire (acked) BEFORE the mirror dropped"
+    );
+
+    // Nothing lost: re-attach on the surviving session rebuilds the
+    // mirror over the server-side overlay.
+    let sim_id = actor
+        .controller_mut_for_test()
+        .runtime_pool_for_test()
+        .sim_session()
+        .expect("the sim session survives the detach")
+        .id();
+    drive(
+        actor
+            .controller_mut_for_test()
+            .attach_lens(sim_id, crate::UxUpdateSink::noop()),
+    )
+    .expect("re-attach connects");
+    let rebuilt = actor.controller_mut_for_test().view();
+    assert_eq!(
+        slot_value_display(find_slot(&rebuilt, "controls.rate")),
+        "2",
+        "the acked edit is visible after detach → re-attach"
+    );
+}
+
 #[test]
 fn home_open_package_pushes_the_library_head_end_to_end() {
     use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
@@ -294,6 +365,11 @@ fn device_connect_pulls_classifies_and_adopts() {
     };
     let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
     let mut controller = StudioController::connected_with_client_for_test(client);
+    // Device reconcile targets the DEVICE session (runtime-pool P2), so
+    // this stand-in must be device-kind, not the sim stub.
+    controller.set_stub_device_for_test(
+        crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+    );
 
     let store = LibraryStore::new(
         Rc::new(RefCell::new(LpFsMemory::new())),
@@ -382,8 +458,9 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     };
     let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
     let mut controller = StudioController::connected_with_client_for_test(client);
-    controller
-        .set_stub_device_for_test(crate::app::device::runtime_attachment::ready_state_for_test());
+    controller.set_stub_device_for_test(
+        crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+    );
     // the shell-injected randomness (crypto bytes on the web) is what
     // mints `dev_` uids — install a fixed generator to pin the wiring
     controller.set_random(|| [7u8; 16]);
@@ -1491,7 +1568,13 @@ fn accepted_apply_tightens_the_next_refresh_delay() {
         sent: Rc::new(RefCell::new(Vec::new())),
     };
     let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    // Cadence is per-session KIND (runtime-pool P2): a device-kind lens
+    // runs the calm interval the chase window tightens; the sim's 33 ms
+    // interval is already tighter than the chase.
+    controller.set_stub_device_for_test(
+        crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+    );
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
@@ -1503,7 +1586,7 @@ fn accepted_apply_tightens_the_next_refresh_delay() {
     assert_eq!(
         handle.delay.get(),
         DEVICE_REFRESH_INTERVAL,
-        "the fake link runs at device cadence before any apply"
+        "a device-kind lens session runs at device cadence before any apply"
     );
 
     let tab = find_asset_editor(&snapshot);
@@ -1914,7 +1997,7 @@ fn device_e2e_server() -> LpServer {
     )
 }
 
-fn edit_e2e_server() -> LpServer {
+pub(crate) fn edit_e2e_server() -> LpServer {
     let mut server = device_e2e_server();
 
     for (name, body) in edit_e2e_files() {
@@ -1930,7 +2013,7 @@ fn edit_e2e_server() -> LpServer {
     server
 }
 
-fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
+pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
     &[
         (
             "project.json",
@@ -2072,7 +2155,7 @@ fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
 }
 
 /// Find a config slot anywhere in the editor DTO tree by its address path.
-fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
+pub(crate) fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
     try_find_slot(view, path).unwrap_or_else(|| panic!("config slot with path {path} should exist"))
 }
 
@@ -2131,7 +2214,7 @@ fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigS
         .or_else(|| in_slots(&editor.root_slots, path))
 }
 
-fn slot_value_display(slot: &UiConfigSlot) -> &str {
+pub(crate) fn slot_value_display(slot: &UiConfigSlot) -> &str {
     let UiConfigSlotBody::Value(value) = &slot.body else {
         panic!("expected a value body for {}", slot.label);
     };
@@ -2147,10 +2230,10 @@ fn slot_editor_hint(slot: &UiConfigSlot) -> &UiSlotEditorHint {
 
 /// `ClientIo` that pumps each client message through the in-process server's
 /// `tick_and_send` and queues the produced frames for `receive`.
-struct InProcessServerIo {
-    server: Rc<RefCell<LpServer>>,
-    inbox: Rc<RefCell<VecDeque<WireServerMessage>>>,
-    sent: Rc<RefCell<Vec<ClientMessage>>>,
+pub(crate) struct InProcessServerIo {
+    pub(crate) server: Rc<RefCell<LpServer>>,
+    pub(crate) inbox: Rc<RefCell<VecDeque<WireServerMessage>>>,
+    pub(crate) sent: Rc<RefCell<Vec<ClientMessage>>>,
 }
 
 impl ClientIo for InProcessServerIo {

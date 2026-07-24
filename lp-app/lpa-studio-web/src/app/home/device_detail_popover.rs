@@ -1,4 +1,5 @@
-//! The device card's rich-object detail popover.
+//! The device card's rich-object detail popover — and the sim card's
+//! ([`SimDetailPopover`]), same anatomy over the sim's sections.
 //!
 //! Q1 of the rich-object spike: the trigger is the NODE-STYLE
 //! affordance-following icon at the header's right edge — a quiet "i"
@@ -12,14 +13,14 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    BundledFirmware, DeviceDetailAffordance, DeviceRichInput, RichSection, UiAction, UiDeviceCard,
-    device_rich_object,
+    BundledFirmware, DeviceDetailAffordance, DeviceRichInput, RichSection, SimDetailAffordance,
+    SimRichInput, UiAction, UiDeviceCard, device_rich_object, sim_rich_object,
 };
 
 use crate::app::affordance::{status_trigger_active, status_trigger_style};
 use crate::app::home::device_card::{
     device_affordance_action, erase_device_action, flash_device_action_destructive,
-    forget_device_action,
+    forget_device_action, stop_simulator_action,
 };
 use crate::base::{DetailPopover, DetailSection};
 use crate::core::RichDetailSection;
@@ -86,6 +87,75 @@ pub(crate) fn DeviceDetailPopover(
                 RichDetailSection { section, on_action }
             }
         }
+    }
+}
+
+/// The sim card's rich-object detail popover (D36, runtime-pool P4): the
+/// same trigger and section anatomy over [`sim_rich_object`]'s
+/// honestly-applicable sections — Health, Project (when loaded), and the
+/// danger zone carrying Stop simulator (P3's destroy op).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn SimDetailPopover(
+    card: UiDeviceCard,
+    /// Fixed clock (stories) or the platform clock, resolved by the card.
+    now_secs: f64,
+    /// Open on mount (story captures only).
+    #[props(default = false)]
+    initially_open: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let view = sim_rich_object(&SimRichInput {
+        state: &card.state,
+        project_name: card.project.as_ref().map(|chip| chip.name.as_str()),
+        now_secs,
+    });
+    let rollup = view.rollup();
+    let style = status_trigger_style(rollup.tone);
+    let active = status_trigger_active(rollup.tone);
+    let label = format!("{} details", card.name);
+    let sections: Vec<RichSection<UiAction>> =
+        view.sections.into_iter().map(wire_sim_section).collect();
+
+    rsx! {
+        DetailPopover {
+            icon: style.icon,
+            label,
+            tone: style.tone,
+            active,
+            initially_open,
+            DetailSection {
+                div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-4 tw:py-1",
+                    div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
+                        strong { class: "tw:min-w-0 tw:text-sm tw:text-strong-foreground tw:break-words",
+                            "{card.name}"
+                        }
+                        span { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground", "Simulator" }
+                    }
+                }
+            }
+            for section in sections {
+                RichDetailSection { section, on_action }
+            }
+        }
+    }
+}
+
+/// Map one sim section's affordance identities onto concrete `UiAction`s.
+fn wire_sim_section(section: RichSection<SimDetailAffordance>) -> RichSection<UiAction> {
+    RichSection {
+        title: section.title,
+        tone: section.tone,
+        lines: section.lines,
+        chip: section.chip,
+        affordances: section
+            .affordances
+            .iter()
+            .map(|affordance| match affordance {
+                SimDetailAffordance::StopSimulator => stop_simulator_action(),
+            })
+            .collect(),
+        weight: section.weight,
     }
 }
 

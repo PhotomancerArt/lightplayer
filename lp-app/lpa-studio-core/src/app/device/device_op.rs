@@ -21,14 +21,24 @@ pub enum DeviceOp {
     },
     /// One-click reconnect (M1): connect through an already-granted browser
     /// serial port with no chooser; the chooser only appears when no grant
-    /// exists yet.
-    ReconnectDevice,
+    /// exists yet. `uid` names the remembered device the user clicked, so
+    /// the connect window renders on THAT card (no transient twin) —
+    /// identity read at connect stays the truth once it lands.
+    ReconnectDevice {
+        uid: Option<String>,
+    },
     ConnectLightPlayer,
     DisconnectLightPlayer,
     ResetDevice,
     ProvisionFirmware,
     ResetToBlank,
     DisconnectDevice,
+    /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
+    /// editor when the lens is on the sim, close the provider session
+    /// (`worker.terminate()` on the web), remove it from the pool. The
+    /// device session (and everything else) stays. Surfaced on the sim
+    /// card's danger zone once the pool-fed roster lands (P4).
+    StopSimulator,
     RefreshConnections,
     /// Set the connected server's process-global log level at runtime (wire
     /// `SetLogLevel`). Not persisted device-side: a reboot reverts to the
@@ -56,7 +66,7 @@ impl ControllerOp for DeviceOp {
                 "Open this device endpoint.",
                 ActionPriority::Primary,
             ),
-            Self::ReconnectDevice => ActionMeta::new(
+            Self::ReconnectDevice { .. } => ActionMeta::new(
                 "Reconnect",
                 "Reconnect to a previously connected device.",
                 ActionPriority::Primary,
@@ -102,6 +112,12 @@ impl ControllerOp for DeviceOp {
                 "Close the current device session and return to connection choices.",
                 ActionPriority::Tertiary,
             ),
+            Self::StopSimulator => ActionMeta::new(
+                "Stop simulator",
+                "Shut the simulator down; unsaved editor changes are discarded.",
+                ActionPriority::Tertiary,
+            )
+            .destructive(),
             Self::RefreshConnections => ActionMeta::new(
                 "Refresh connections",
                 "Rebuild the connection catalog from available providers.",
@@ -126,13 +142,14 @@ impl ControllerOp for DeviceOp {
             Self::OpenProvider { .. }
             | Self::OpenProviderForRecovery { .. }
             | Self::ConnectEndpoint { .. }
-            | Self::ReconnectDevice
+            | Self::ReconnectDevice { .. }
             | Self::ConnectLightPlayer
             | Self::DisconnectLightPlayer
             | Self::ResetDevice
             | Self::ProvisionFirmware
             | Self::ResetToBlank
             | Self::DisconnectDevice
+            | Self::StopSimulator
             | Self::RefreshConnections => ActionClass::Recovery,
             // A quick request/ack on the existing connection — no reason to
             // preempt other foreground work or own the connection.
@@ -178,13 +195,14 @@ mod tests {
                 provider_id: LinkProviderKind::BrowserWorker,
                 endpoint_id: LinkEndpointId::new("endpoint"),
             },
-            DeviceOp::ReconnectDevice,
+            DeviceOp::ReconnectDevice { uid: None },
             DeviceOp::ConnectLightPlayer,
             DeviceOp::DisconnectLightPlayer,
             DeviceOp::ResetDevice,
             DeviceOp::ProvisionFirmware,
             DeviceOp::ResetToBlank,
             DeviceOp::DisconnectDevice,
+            DeviceOp::StopSimulator,
             DeviceOp::RefreshConnections,
         ];
 
