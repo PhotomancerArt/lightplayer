@@ -166,6 +166,7 @@ impl NodeController {
             &SlotEditJoin::empty(),
             &|_| Vec::new(),
             &|_, _| None,
+            None,
         )
     }
 
@@ -187,12 +188,14 @@ impl NodeController {
         edits: &SlotEditJoin<'_>,
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
+        always_live: Option<&UiProductRef>,
     ) -> UiNodeView {
         let children = self.ui_children_with_product_previews(
             product_preview,
             edits,
             extra_config,
             asset_editor,
+            always_live,
         );
         let dirty = self.own_slots_dirty_summary(edits)
             + children
@@ -213,8 +216,12 @@ impl NodeController {
             header = header.with_detail(detail);
         }
 
-        let mut sections =
-            self.ui_sections_with_product_previews(product_preview, edits, extra_config);
+        let mut sections = self.ui_sections_with_product_previews(
+            product_preview,
+            edits,
+            extra_config,
+            always_live,
+        );
         self.embed_asset_editors(&mut sections, asset_editor);
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
@@ -412,6 +419,7 @@ impl NodeController {
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
+        always_live: Option<&UiProductRef>,
     ) -> Vec<UiNodeSection> {
         let mut products = Vec::new();
         let mut produced_values = Vec::new();
@@ -443,12 +451,18 @@ impl NodeController {
                     product.preview = preview;
                     has_cached_preview = true;
                 }
-                product.tracking =
-                    if base_tracking == UiProductTrackingState::Untracked && has_cached_preview {
-                        UiProductTrackingState::Paused
-                    } else {
-                        base_tracking
-                    }
+                // The primary visual is always presented live: it is
+                // subscribed project-wide regardless of node focus (ADR
+                // 2026-07-16-primary-visual-product, M6 P3).
+                let is_always_live =
+                    product.product.is_some() && product.product.as_ref() == always_live;
+                product.tracking = if is_always_live {
+                    UiProductTrackingState::Tracking
+                } else if base_tracking == UiProductTrackingState::Untracked && has_cached_preview {
+                    UiProductTrackingState::Paused
+                } else {
+                    base_tracking
+                }
             }
             sections.push(UiNodeSection::ProducedProducts(products));
         }
@@ -492,6 +506,7 @@ impl NodeController {
         edits: &SlotEditJoin<'_>,
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
+        always_live: Option<&UiProductRef>,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -505,14 +520,19 @@ impl NodeController {
                 view.summary = child.status.detail.clone();
                 view.focused = child.state.focused;
                 view.action = Some(node_focus_action(child));
-                view.sections =
-                    child.ui_sections_with_product_previews(product_preview, edits, extra_config);
+                view.sections = child.ui_sections_with_product_previews(
+                    product_preview,
+                    edits,
+                    extra_config,
+                    always_live,
+                );
                 child.embed_asset_editors(&mut view.sections, asset_editor);
                 view.children = child.ui_children_with_product_previews(
                     product_preview,
                     edits,
                     extra_config,
                     asset_editor,
+                    always_live,
                 );
                 view.dirty = child.own_slots_dirty_summary(edits)
                     + view

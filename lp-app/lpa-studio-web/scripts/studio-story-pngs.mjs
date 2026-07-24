@@ -651,6 +651,12 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
       if (!el || el.getAttribute('data-story-id') !== ${JSON.stringify(storyId)}) {
         return false;
       }
+      // Webfont fallback metrics shift text by a few pixels; a capture that
+      // races font decoding diffs nondeterministically run-to-run (scattered
+      // ~Δ180 text pixels on whichever pages lost the race).
+      if (document.fonts && document.fonts.status !== 'loaded') {
+        return false;
+      }
       return !document.querySelector('[data-story-wait="1"]');
     })()
   `;
