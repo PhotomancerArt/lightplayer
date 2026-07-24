@@ -24,6 +24,9 @@ pub fn status_class(kind: UiStatusKind) -> &'static str {
         UiStatusKind::Warning => {
             "tw:inline-flex tw:min-h-6 tw:max-w-full tw:flex-shrink tw:items-center tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2 tw:text-xs tw:font-bold tw:leading-none tw:text-status-warning-foreground tw:break-words"
         }
+        UiStatusKind::Attention => {
+            "tw:inline-flex tw:min-h-6 tw:max-w-full tw:flex-shrink tw:items-center tw:rounded-pill tw:border tw:border-status-attention-border tw:bg-status-attention-bg tw:px-2 tw:text-xs tw:font-bold tw:leading-none tw:text-status-attention-foreground tw:break-words"
+        }
         UiStatusKind::Error => {
             "tw:inline-flex tw:min-h-6 tw:max-w-full tw:flex-shrink tw:items-center tw:rounded-pill tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:text-xs tw:font-bold tw:leading-none tw:text-status-error-foreground tw:break-words"
         }

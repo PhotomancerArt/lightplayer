@@ -55,7 +55,9 @@ fn tone_severity(tone: UiStatusKind) -> u8 {
         UiStatusKind::Neutral => 0,
         UiStatusKind::Good => 1,
         UiStatusKind::Working => 2,
-        UiStatusKind::Warning => 3,
+        // Warning (unsaved-yellow) and Attention (health-orange) are equal
+        // severity: both announce; schema order breaks the tie.
+        UiStatusKind::Warning | UiStatusKind::Attention => 3,
         UiStatusKind::Error => 4,
     }
 }

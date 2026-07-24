@@ -28,7 +28,10 @@ pub enum StatusCircleTone {
     Neutral,
     Working,
     Good,
+    /// Unsaved/edit yellow (node vocabulary — not device health).
     Warning,
+    /// Health-attention orange (the roster's amber family).
+    Attention,
     Error,
 }
 
@@ -62,6 +65,7 @@ fn solid_paint(tone: StatusCircleTone) -> &'static str {
         StatusCircleTone::Working => "tw:bg-status-working-foreground",
         StatusCircleTone::Good => "tw:bg-status-good-foreground",
         StatusCircleTone::Warning => "tw:bg-status-warning-foreground",
+        StatusCircleTone::Attention => "tw:bg-status-attention-foreground",
         StatusCircleTone::Error => "tw:bg-status-error-foreground",
     }
 }
@@ -77,6 +81,9 @@ fn hollow_paint(tone: StatusCircleTone) -> &'static str {
         StatusCircleTone::Good => "tw:border tw:border-status-good-foreground tw:bg-transparent",
         StatusCircleTone::Warning => {
             "tw:border tw:border-status-warning-foreground tw:bg-transparent"
+        }
+        StatusCircleTone::Attention => {
+            "tw:border tw:border-status-attention-foreground tw:bg-transparent"
         }
         StatusCircleTone::Error => "tw:border tw:border-status-error-foreground tw:bg-transparent",
     }

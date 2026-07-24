@@ -1,14 +1,21 @@
-//! Runtime places: the simulator (and, with M5, devices) as push/pull
+//! Runtime places: connected runtimes (sim or device) as push/pull
 //! targets.
+//!
+//! `RuntimePlace` itself is a vestigial seam with zero production
+//! callers (runtime-pool ADR, `docs/adr/2026-07-24-runtime-pool.md`):
+//! how many runtimes may be attached at once is the pool's capacity
+//! POLICY in [`crate::app::runtime_pool`], not a place descriptor. The
+//! `capacity` here describes a place's storage-slot shape only, and the
+//! seam stays untouched until a real caller shapes it.
 
 use lpa_link::LinkConnectionKind;
 use lpc_history::{ContentHash, ProjectHistory, SyncRelation};
 
 use super::place::{Place, PlaceDescriptor, PlaceKind};
 
-/// A connected runtime as a place. One storage slot today (the studio uses
-/// a single `"studio"` storage id); real multi-slot capacity is a future
-/// place capability.
+/// A connected runtime as a place. One storage slot today (push/pull
+/// target one project dir per runtime); real multi-slot capacity is a
+/// future place capability.
 pub struct RuntimePlace {
     connection_kind: LinkConnectionKind,
 }

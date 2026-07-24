@@ -10,9 +10,9 @@
 //! | Section | tone source | weight | present when |
 //! |---|---|---|---|
 //! | Health | the card state's circle tone | Actionable | always |
-//! | Project | drift (Warning on behind/diverged) | Actionable | a project is known (held now or last ran) |
+//! | Project | drift (Attention on behind/diverged) | Actionable | a project is known (held now or last ran) |
 //! | Technical | Neutral (+ advisory fw chip) | Advisory | uid / transport / hello fw evidence exists |
-//! | Performance | Neutral/Warning | Advisory | never yet — `ProjectRuntimeSummary` does not flow to cards |
+//! | Performance | Neutral/Attention | Advisory | never yet — `ProjectRuntimeSummary` does not flow to cards |
 //! | Backup | Neutral | Actionable | a device copy was banked at connect (diverged) |
 //! | Danger zone | Neutral (never colors rollup) | Danger | live manageable link → flash+erase; offline registered → forget |
 //!
@@ -112,7 +112,7 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
 }
 
 /// Project: what the device holds (live) or last ran (offline), with the
-/// drift facts. Drift tone matches the card grammar (Warning on
+/// drift facts. Drift tone matches the card grammar (Attention on
 /// behind/diverged). The section's own affordance is the D29 open —
 /// push/resolve stay on Health per the state table, so the two sections
 /// never offer the same verb twice.
@@ -126,7 +126,7 @@ fn project_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDeta
             observed_version,
             head_version,
         } => {
-            tone = UiStatusKind::Warning;
+            tone = UiStatusKind::Attention;
             lines.push(RichLine::new(
                 "running",
                 match observed_version {
@@ -140,7 +140,7 @@ fn project_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDeta
             affordances.push(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
         }
         RosterCardState::EditedOnDevice => {
-            tone = UiStatusKind::Warning;
+            tone = UiStatusKind::Attention;
             lines.push(RichLine::new(
                 "running",
                 format!("{name} · edited on device"),
@@ -196,7 +196,7 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
         .zip(input.fw)
         .filter(|(bundled, fw)| bundled.update_available(fw))
         .map(|_| RichChip {
-            tone: UiStatusKind::Warning,
+            tone: UiStatusKind::Attention,
             text: "Firmware update available".to_string(),
         });
     Some(RichSection {
@@ -280,8 +280,8 @@ mod tests {
         );
 
         let rollup = view.rollup();
-        assert_eq!(rollup.tone, UiStatusKind::Warning);
-        // Health wins the Warning tie with Project (schema precedence), so
+        assert_eq!(rollup.tone, UiStatusKind::Attention);
+        // Health wins the Attention tie with Project (schema precedence), so
         // the primary affordance is the state table's push.
         assert_eq!(
             rollup.affordance,
@@ -355,7 +355,7 @@ mod tests {
             .unwrap();
         let chip = technical.chip.as_ref().expect("chip offered");
         assert_eq!(chip.text, "Firmware update available");
-        assert_eq!(chip.tone, UiStatusKind::Warning);
+        assert_eq!(chip.tone, UiStatusKind::Attention);
         // …but the rollup stays the Health section's Good.
         assert_eq!(view.rollup().tone, UiStatusKind::Good);
     }
@@ -369,7 +369,7 @@ mod tests {
         let view = device_rich_object(&input(&state));
         assert!(!titles(&view).contains(&"Danger zone"));
         assert_eq!(view.rollup().affordance, None);
-        assert_eq!(view.rollup().tone, UiStatusKind::Warning);
+        assert_eq!(view.rollup().tone, UiStatusKind::Attention);
     }
 
     const NOW: f64 = 1_800_000_000.0;

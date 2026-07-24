@@ -20,20 +20,21 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     BundledFirmware, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceController, DeviceOp, HomeOp,
-    LinkProviderKind, RosterAffordance, RosterCardState, RosterCircle,
-    RosterCircleShape as CoreShape, UiAction, UiDeviceCard, UiStatus, UiStatusKind,
+    LinkProviderKind, ProjectController, ProjectOp, RosterAffordance, RosterCardState,
+    RosterCircle, RosterCircleShape as CoreShape, UiAction, UiDeviceCard, UiStatus, UiStatusKind,
 };
 
 use crate::app::home::card_thumb::thumb_swatch_style;
-use crate::app::home::device_detail_popover::DeviceDetailPopover;
+use crate::app::home::device_detail_popover::{DeviceDetailPopover, SimDetailPopover};
 use crate::app::home::package_card::home_action;
 use crate::base::{StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, quiet_action_class};
 
 /// One roster card. Clicking an offline card reconnects through an
-/// already-granted serial port with no chooser (M1); clicking a connected
-/// card opens the deploy dialog with the device context (D29's
-/// attach-as-runtime click lands in M5); working states are quiet.
+/// already-granted serial port with no chooser (M1); clicking a
+/// Running-family card opens its project in the editor ON the device
+/// session (the D29 click, runtime-pool P3); other connected cards open
+/// the deploy dialog with the device context; working states are quiet.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceCard(
@@ -65,15 +66,24 @@ pub(crate) fn DeviceCard(
     // Needs-a-name opens the SAME inline form the pencil rename uses —
     // naming is card-anchored, never a dialog trip
     let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
+    // The sim card's click re-attaches the editor lens to the sim session
+    // (the D29 grammar's sim arm, runtime-pool P4) — only when a project
+    // is loaded (no dead click on an empty sim: there is nothing to open).
     let click_action = if sim {
+        card.project.is_some().then(open_sim_project_action)
+    } else {
+        card_click_action(&card)
+    };
+    // The state-table affordances are device flows (choose-project routes
+    // to the deploy dialog); the sim card offers none — its click opens
+    // the editor and its danger zone lives in the popover.
+    let affordance = if sim {
         None
     } else {
-        card_click_action(&card.state)
+        card.state
+            .affordance()
+            .and_then(|affordance| device_affordance_action(&card, &affordance))
     };
-    let affordance = card
-        .state
-        .affordance()
-        .and_then(|affordance| device_affordance_action(&card, &affordance));
     let can_rename = card.uid.is_some() && !sim;
     // the standing advisory chip rides an honest comparison of the
     // bundled image against the hello provenance (never a bare flag)
@@ -138,17 +148,24 @@ pub(crate) fn DeviceCard(
                 span { class: "tw:text-[11px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-muted-foreground",
                     "{transport_label}"
                 }
-                if !sim {
-                    // the rich-object detail trigger (Q1): the node-style
-                    // affordance-following icon at the right edge, riding
-                    // the rollup tone; Flash/Erase/Forget live in its
-                    // danger zone (the More-menu's rows migrated there).
-                    // -mr-1.5 cancels the header's px-3 down to the pane
-                    // pattern's 6px edge inset, so the button's right gap
-                    // matches its top/bottom.
-                    span {
-                        class: "tw:-my-1 tw:-mr-1.5 tw:ml-auto",
-                        onclick: move |event| event.stop_propagation(),
+                // the rich-object detail trigger (Q1): the node-style
+                // affordance-following icon at the right edge, riding
+                // the rollup tone; the danger zone lives in the popover
+                // (device: Flash/Erase/Forget; sim: Stop simulator).
+                // -mr-1.5 cancels the header's px-3 down to the pane
+                // pattern's 6px edge inset, so the button's right gap
+                // matches its top/bottom.
+                span {
+                    class: "tw:-my-1 tw:-mr-1.5 tw:ml-auto",
+                    onclick: move |event| event.stop_propagation(),
+                    if sim {
+                        SimDetailPopover {
+                            card: card.clone(),
+                            now_secs: now,
+                            initially_open: detail_open,
+                            on_action,
+                        }
+                    } else {
                         DeviceDetailPopover {
                             card: card.clone(),
                             now_secs: now,
@@ -248,7 +265,7 @@ pub(crate) fn DeviceCard(
                 }
                 if fw_update {
                     div { class: "tw:mt-1",
-                        StatusChip { status: UiStatus::warning("Firmware update available") }
+                        StatusChip { status: UiStatus::attention("Firmware update available") }
                     }
                 }
                 if let Some(action) = affordance {
@@ -309,10 +326,10 @@ pub(crate) fn ConnectDeviceCard(on_action: EventHandler<UiAction>) -> Element {
 /// One-click reconnect for an offline/remembered device (M1): connect a
 /// granted serial port directly; the browser chooser only appears when no
 /// grant exists.
-pub(crate) fn reconnect_device_action() -> UiAction {
+pub(crate) fn reconnect_device_action(uid: Option<String>) -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
-        DeviceOp::ReconnectDevice,
+        DeviceOp::ReconnectDevice { uid },
     )
 }
 
@@ -357,21 +374,66 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
 }
 
 /// What clicking the card body does, per state: offline reconnects (M1);
-/// connected states open the deploy dialog WITH the device context (the
-/// D29 attach-editor click is M5); self-healing/working states are quiet.
-fn card_click_action(state: &RosterCardState) -> Option<UiAction> {
-    match state {
-        RosterCardState::Offline { .. } => Some(reconnect_device_action()),
+/// Running-family states with a Known/Adopted project attach the editor
+/// lens to the DEVICE session and open its running project (the D29
+/// click, runtime-pool P3 — no URL until M5); other provisioning-ish
+/// connected states open the deploy dialog WITH the device context;
+/// self-healing/working states are quiet.
+fn card_click_action(card: &UiDeviceCard) -> Option<UiAction> {
+    match &card.state {
+        RosterCardState::Offline { .. } => Some(reconnect_device_action(card.uid.clone())),
         RosterCardState::ConnectingRetrying { .. }
         | RosterCardState::OperationInFlight { .. }
         | RosterCardState::InUseElsewhere => None,
         // handled in the renderer: click opens the inline name form
         RosterCardState::NeedsAName => None,
+        // D29: the device is running a project the library knows
+        // (RunningUpToDate/RunningBehind derive from Known/Adopted;
+        // EditedOnDevice is the banked diverged copy) — the click opens
+        // it in the editor on the device's own session. Push/resolve
+        // stay one click away on the card's affordance button.
+        RosterCardState::RunningUpToDate
+        | RosterCardState::RunningBehind { .. }
+        | RosterCardState::EditedOnDevice => Some(open_device_project_action()),
         _ => Some(UiAction::from_op(
             ControllerId::new(DEPLOY_NODE_ID),
             DeployOp::OpenDialog { target_key: None },
         )),
     }
+}
+
+/// The D29 click: move the editor lens onto the device session and open
+/// its running project in the editor.
+fn open_device_project_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::OpenDeviceProject,
+    )
+}
+
+/// The sim-card click (the D29 grammar's sim arm, runtime-pool P4):
+/// re-attach the editor lens to the sim session and open what it runs.
+fn open_sim_project_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::OpenSimProject,
+    )
+}
+
+/// Stop the simulator, from the sim card's danger zone (runtime-pool P3's
+/// destroy op). Confirmation states the honest cost: the worker dies, and
+/// applied-but-unsaved edits live on it — anything not saved to the
+/// library is gone.
+pub(super) fn stop_simulator_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::StopSimulator,
+    )
+    .with_confirmation(lpa_studio_core::ActionConfirmation::new(
+        "Stop simulator",
+        "Stop the simulator? Anything not saved to your library is discarded.",
+        "Stop",
+    ))
 }
 
 /// The ≤1 affordance button, wired to what exists TODAY: flows the
@@ -391,8 +453,8 @@ pub(super) fn device_affordance_action(
         )
     };
     let action = match affordance {
-        // click-through: the card click is the action (deploy dialog now,
-        // editor-on-device in M5)
+        // click-through: the card click is the action (the D29
+        // editor-on-device click)
         RosterAffordance::OpenEditor => return None,
         // the dialog's Reviewing state carries push + the diverged verbs
         // until the in-card push / D30 popup land
@@ -420,7 +482,7 @@ pub(super) fn device_affordance_action(
             .with_icon("zap"),
         // rendered as the card's inline name form, not an action button
         RosterAffordance::NameDevice => return None,
-        RosterAffordance::Reconnect => reconnect_device_action()
+        RosterAffordance::Reconnect => reconnect_device_action(card.uid.clone())
             .with_summary("Reconnect over the granted serial port.")
             .with_icon("usb"),
     };
@@ -476,6 +538,7 @@ pub(crate) fn circle_props(circle: RosterCircle) -> (StatusCircleShape, StatusCi
         UiStatusKind::Working => StatusCircleTone::Working,
         UiStatusKind::Good => StatusCircleTone::Good,
         UiStatusKind::Warning => StatusCircleTone::Warning,
+        UiStatusKind::Attention => StatusCircleTone::Attention,
         UiStatusKind::Error => StatusCircleTone::Error,
     };
     (shape, tone)

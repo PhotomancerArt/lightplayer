@@ -59,6 +59,14 @@ each new agent session re-learns the incantations from memory notes.
   discovered skipping committed-tree changes; rc masking discovered;
   orange/popover baselines deferred as debt.
 
+- 2026-07-24 — M4 closeout capture: QUIET machine, concurrency 1,
+  120s CDP timeout — still wedged, third kill by the SAME story
+  (`project-workspace/project-pane` sm, a heavy end-of-queue sheet);
+  780/810 viewports fine. Resume-from-disk retry used for the tail.
+  The wedge is now story-specific, not load-correlated: the exit
+  criteria's "resume-instead-of-restart" exists (used today) but the
+  per-story hang deserves its own diagnosis.
+
 **Exit criteria** — All of: (1) captures complete deterministically at
 default concurrency on a loaded machine, or run somewhere isolated
 (the "is local PNG generation worth it" decision — likely a paydown

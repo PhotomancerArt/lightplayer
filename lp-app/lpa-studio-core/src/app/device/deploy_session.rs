@@ -451,6 +451,39 @@ mod tests {
     }
 
     #[test]
+    fn pre_targeted_open_reviews_and_a_different_choice_stays_reachable() {
+        // The papercut fix (2026-07-23): a dialog opened with no explicit
+        // target while the device runs a KNOWN project gets that project
+        // resolved as the target by the controller — entry must land on
+        // Reviewing, not the picker.
+        let running = synced(
+            Some(identity()),
+            DeviceContent::Known {
+                project_uid: "prj_aaaaaaaaaaaaaaaa".to_string(),
+                slug: "2026-07-10-1000-porch".to_string(),
+                observed: ContentHash::of(b"v1"),
+                relation: SyncRelation::AtHead,
+            },
+        );
+        let environment = env(true, true, running);
+        let mut session = DeploySession::open(&environment, Some(target(1)));
+        assert!(
+            matches!(&session.state, DeployState::Reviewing { target, .. } if *target == self::target(1)),
+            "a pre-targeted open reviews the running project, got {:?}",
+            session.state
+        );
+
+        // Choosing a DIFFERENT project stays reachable from Reviewing —
+        // the default never removes the choice.
+        session.choose_target(&environment, target(2)).unwrap();
+        assert!(
+            matches!(&session.state, DeployState::Reviewing { target, .. } if *target == self::target(2)),
+            "Reviewing re-derives onto the newly chosen target, got {:?}",
+            session.state
+        );
+    }
+
+    #[test]
     fn failure_resumes_the_failed_step_not_the_wizard_start() {
         let stamped = env(true, true, synced(Some(identity()), DeviceContent::Empty));
         let mut session = DeploySession::open(&stamped, Some(target(3)));

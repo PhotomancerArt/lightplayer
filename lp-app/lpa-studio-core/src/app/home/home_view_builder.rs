@@ -40,11 +40,37 @@ pub struct HomeInputs {
     pub issue: Option<UiIssue>,
 }
 
-/// Everything the single live session contributes to the roster — the
-/// evidence feeding [`derive_roster_card_state`] for the live card. M4's
-/// runtime pool replaces this with per-runtime evidence without changing
-/// the derivation. Absence of every field is honest evidence of absence
-/// (no live card).
+/// Everything the runtime pool contributes to the roster (runtime-pool
+/// P4): one evidence bundle per DEVICE session — each feeding its live
+/// card through the M2 derivation exactly as the single-session shape did
+/// — plus the SIM session's evidence while that session lives.
+#[derive(Clone, Debug, Default)]
+pub struct HomePoolEvidence {
+    /// Per-DEVICE-session evidence (≤1 under the MVP capacity policy —
+    /// the Vec is the shape, capacity is policy). The connect flow's
+    /// transient evidence (a connect in flight before any session exists)
+    /// rides an entry of its own: evidence of work, not of a session.
+    pub devices: Vec<HomeDeviceEvidence>,
+    /// The live SIM session's evidence — present exactly while the
+    /// session lives (D36: the sim card exists only while the session
+    /// does; stop-sim removes both together).
+    pub sim: Option<HomeSimEvidence>,
+}
+
+/// What the live SIM session contributes to its card (D36). The session's
+/// existence IS the live status — there is no link state, no connect
+/// ceremony, no registry entry (the sim is not a device, D22).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HomeSimEvidence {
+    /// The project loaded on the sim (uid + display name), when one is —
+    /// the card's chip and the project card's "Running in simulator"
+    /// pairing key.
+    pub project: Option<UiDeviceProjectChip>,
+}
+
+/// Everything one live DEVICE session contributes to the roster — the
+/// evidence feeding [`derive_roster_card_state`] for its live card.
+/// Absence of every field is honest evidence of absence (no live card).
 #[derive(Clone, Debug, Default)]
 pub struct HomeDeviceEvidence {
     /// Connect-as-pull result, once the pull landed.
@@ -61,6 +87,11 @@ pub struct HomeDeviceEvidence {
     pub observed_version: Option<usize>,
     /// The local head's version number, for the "Push vN" affordance.
     pub head_version: Option<usize>,
+    /// The remembered device a one-click reconnect targets: while the
+    /// connect window is open and no identity has landed, the live
+    /// evidence renders ON that card (uid + name adopted from the
+    /// registry) instead of spawning a transient anonymous twin.
+    pub pending_uid: Option<String>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -112,14 +143,16 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
 
 /// Assemble the gallery view model from cached inputs. `inputs` is `None`
 /// when no local store mounted (the gallery still shows examples and the
-/// connect card). `live` is the single live session's evidence; the D28
-/// pairing happens here: a live device holding a known project keeps its
-/// device card AND that project's card gets the [`UiCardConnection`] chip.
+/// connect card). `pool` is the runtime pool's per-session evidence; the
+/// D28 pairing happens here: a live device holding a known project keeps
+/// its device card AND that project's card gets the [`UiCardConnection`]
+/// chip, and the sim session's loaded project stamps its card's
+/// "Running in simulator" indication (the sim arm).
 pub fn build_home_view(
     inputs: Option<&HomeInputs>,
     opening: Option<String>,
     issue: Option<UiIssue>,
-    live: &HomeDeviceEvidence,
+    pool: &HomePoolEvidence,
 ) -> UiHomeView {
     let examples = dedupe_by_key(
         embedded_examples()
@@ -135,7 +168,7 @@ pub fn build_home_view(
     );
 
     let Some(inputs) = inputs else {
-        let (_, devices) = assemble_roster(&[], live);
+        let (_, devices) = assemble_roster(&[], pool);
         return UiHomeView {
             devices: dedupe_by_key(devices, |card| card.render_key().to_string(), "device"),
             projects: Vec::new(),
@@ -147,11 +180,19 @@ pub fn build_home_view(
     };
 
     let mut projects = inputs.projects.clone();
-    let (live_connection, devices) = assemble_roster(&inputs.devices, live);
-    if let Some((project_uid, connection)) = live_connection
-        && let Some(card) = projects.iter_mut().find(|card| card.uid == project_uid)
+    let (live_connections, devices) = assemble_roster(&inputs.devices, pool);
+    for (project_uid, connection) in live_connections {
+        if let Some(card) = projects.iter_mut().find(|card| card.uid == project_uid) {
+            card.connected_device = Some(connection);
+        }
+    }
+    // The sim arm of the D28 pairing: the loaded project's card wears the
+    // "Running in simulator" indication alongside (independent of) any
+    // device connection.
+    if let Some(chip) = pool.sim.as_ref().and_then(|sim| sim.project.as_ref())
+        && let Some(card) = projects.iter_mut().find(|card| card.uid == chip.uid)
     {
-        card.connected_device = Some(connection);
+        card.running_in_sim = true;
     }
 
     UiHomeView {
@@ -183,25 +224,69 @@ fn dedupe_by_key<T>(cards: Vec<T>, key: impl Fn(&T) -> String, what: &'static st
         .collect()
 }
 
-/// The D27 roster shape: the live card first, then remembered cards
-/// sorted by last seen (newest first). The live device stops being
-/// "remembered offline" while it's here; its project pairing (when the
-/// contents are a known/adopted library project) returns alongside so the
-/// project card can carry the D28 chip.
+/// The D27 roster shape, fed from the pool (P4): the sim card pinned
+/// first among live (the sim is always "now" — pinning keeps ties
+/// stable), then live device cards in session order, then remembered
+/// cards sorted by last seen (newest first). A live device stops being
+/// "remembered offline" while it's here; each live project pairing (when
+/// the contents are a known/adopted library project) returns alongside so
+/// the project cards can carry the D28 chips.
 ///
-/// Returns `(live project connection, device cards)`.
+/// Returns `(live project connections, device cards)`.
 fn assemble_roster(
     registry_cards: &[UiDeviceCard],
-    live: &HomeDeviceEvidence,
-) -> (Option<(String, UiCardConnection)>, Vec<UiDeviceCard>) {
-    let live_card = live_device_card(live);
+    pool: &HomePoolEvidence,
+) -> (Vec<(String, UiCardConnection)>, Vec<UiDeviceCard>) {
+    let mut live_cards: Vec<UiDeviceCard> = Vec::new();
+    let mut connections: Vec<(String, UiCardConnection)> = Vec::new();
+    for live in &pool.devices {
+        let mut live_card = live_device_card(live);
+        // Connect-window attribution: the user clicked a SPECIFIC
+        // remembered card; until the identity read lands, the live
+        // evidence belongs to that card
+        // (docs/defects/2026-07-23-reconnect-transient-twin-card).
+        if let (Some(card), Some(pending)) = (&mut live_card, &live.pending_uid)
+            && card.uid.is_none()
+            && let Some(remembered) = registry_cards
+                .iter()
+                .find(|entry| entry.uid.as_deref() == Some(pending.as_str()))
+        {
+            card.uid = Some(pending.clone());
+            card.name = remembered.name.clone();
+            if card.transport.is_empty() {
+                card.transport = remembered.transport.clone();
+            }
+        }
+        let Some(card) = live_card else {
+            continue;
+        };
+        if let Some(chip) = card.project.as_ref() {
+            let relation = match live.sync.as_ref().map(|sync| &sync.content) {
+                Some(DeviceContent::Known { relation, .. }) => Some(*relation),
+                Some(DeviceContent::Adopted { .. }) => Some(lpc_history::SyncRelation::AtHead),
+                _ => None,
+            };
+            if let Some(relation) = relation {
+                connections.push((
+                    chip.uid.clone(),
+                    UiCardConnection {
+                        device_name: card.name.clone(),
+                        relation,
+                    },
+                ));
+            }
+        }
+        live_cards.push(card);
+    }
 
     let mut devices: Vec<UiDeviceCard> = registry_cards
         .iter()
-        .filter(|card| match (&card.uid, &live_card) {
-            // the live device is not "remembered offline" while it's here
-            (Some(uid), Some(live_card)) => live_card.uid.as_deref() != Some(uid.as_str()),
-            _ => true,
+        .filter(|card| match &card.uid {
+            // a live device is not "remembered offline" while it's here
+            Some(uid) => !live_cards
+                .iter()
+                .any(|live| live.uid.as_deref() == Some(uid.as_str())),
+            None => true,
         })
         .cloned()
         .collect();
@@ -211,26 +296,34 @@ fn assemble_roster(
             .partial_cmp(&last_seen_sort_key(a))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-
-    let connection = live_card.as_ref().and_then(|card| {
-        let chip = card.project.as_ref()?;
-        let relation = match live.sync.as_ref().map(|sync| &sync.content) {
-            Some(DeviceContent::Known { relation, .. }) => *relation,
-            Some(DeviceContent::Adopted { .. }) => lpc_history::SyncRelation::AtHead,
-            _ => return None,
-        };
-        Some((
-            chip.uid.clone(),
-            UiCardConnection {
-                device_name: card.name.clone(),
-                relation,
-            },
-        ))
-    });
-    if let Some(card) = live_card {
+    for card in live_cards.into_iter().rev() {
         devices.insert(0, card);
     }
-    (connection, devices)
+    if let Some(sim) = &pool.sim {
+        devices.insert(0, sim_card(sim));
+    }
+    (connections, devices)
+}
+
+/// The live sim card (D36): the shared card grammar in the sim
+/// presentation. The session's existence is the status — Running when a
+/// project is loaded, "Connected — nothing loaded" otherwise; no uid, no
+/// transport, no firmware provenance (the sim is not a device, D22).
+fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
+    let state = if sim.project.is_some() {
+        RosterCardState::RunningUpToDate
+    } else {
+        RosterCardState::ConnectedEmpty
+    };
+    UiDeviceCard {
+        uid: None,
+        name: "Simulator".to_string(),
+        transport: String::new(),
+        state,
+        project: sim.project.clone(),
+        fw: None,
+        sim: true,
+    }
 }
 
 /// The live session's card, derived from evidence. `None` when there is
@@ -280,6 +373,7 @@ fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
         state,
         project,
         fw,
+        sim: false,
     })
 }
 
@@ -329,6 +423,7 @@ fn package_card(
         on_device,
         open_elsewhere: false,  // stamped by the hydration pass
         connected_device: None, // stamped by the D28 pairing at view build
+        running_in_sim: false,  // stamped by the D28 sim arm at view build
     })
 }
 
@@ -393,6 +488,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         project,
         // remembered only: no live hello, no firmware provenance
         fw: None,
+        sim: false,
     }
 }
 
@@ -423,7 +519,7 @@ mod tests {
 
     fn view_of(store: &LibraryStore) -> UiHomeView {
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
-        build_home_view(Some(&inputs), None, None, &HomeDeviceEvidence::default())
+        build_home_view(Some(&inputs), None, None, &HomePoolEvidence::default())
     }
 
     fn ready_link() -> DeviceState {
@@ -451,9 +547,25 @@ mod tests {
         }
     }
 
+    /// A pool carrying one device session's evidence and no sim.
+    fn device_pool(device: HomeDeviceEvidence) -> HomePoolEvidence {
+        HomePoolEvidence {
+            devices: vec![device],
+            sim: None,
+        }
+    }
+
+    /// A pool carrying only the live sim session's evidence.
+    fn sim_pool(project: Option<UiDeviceProjectChip>) -> HomePoolEvidence {
+        HomePoolEvidence {
+            devices: Vec::new(),
+            sim: Some(HomeSimEvidence { project }),
+        }
+    }
+
     #[test]
     fn no_library_still_lists_examples() {
-        let view = build_home_view(None, None, None, &HomeDeviceEvidence::default());
+        let view = build_home_view(None, None, None, &HomePoolEvidence::default());
         assert!(!view.library_available);
         assert!(view.projects.is_empty());
         assert_eq!(view.examples.len(), embedded_examples().len());
@@ -580,6 +692,7 @@ mod tests {
                 state: offline.clone(),
                 project: None,
                 fw: None,
+                sim: false,
             },
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
@@ -588,6 +701,7 @@ mod tests {
                 state: offline,
                 project: None,
                 fw: None,
+                sim: false,
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
@@ -640,6 +754,84 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_window_renders_on_the_remembered_card_not_a_twin() {
+        // Regression (2026-07-22 HW walk, second sighting): during the
+        // connect window — link opening, no identity landed yet — the
+        // live evidence must render ON the clicked remembered card, not
+        // as a transient anonymous card that later collapses.
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "TestBoard1".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 5.0,
+                association: None,
+            })
+            .unwrap();
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+
+        let evidence = HomeDeviceEvidence {
+            connect: ConnectEvidence::Connecting {
+                phase: crate::ConnectPhase::Connecting,
+            },
+            pending_uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            ..HomeDeviceEvidence::default()
+        };
+        let view = build_home_view(Some(&inputs), None, None, &device_pool(evidence));
+
+        assert_eq!(view.devices.len(), 1, "the remembered card, no twin");
+        let card = &view.devices[0];
+        assert_eq!(card.name, "TestBoard1");
+        assert_eq!(card.uid.as_deref(), Some("dev_aaaaaaaaaaaaaaaa"));
+        assert!(matches!(
+            card.state,
+            RosterCardState::ConnectingRetrying { .. }
+        ));
+    }
+
+    #[test]
+    fn failed_read_live_card_keeps_its_identity_and_dedups_the_registry() {
+        // Regression (2026-07-22 HW walk): a content-read failure after a
+        // successful identity read must NOT spawn an anonymous second
+        // card — partial knowledge survives, the live card wears the
+        // remembered name and replaces the offline card.
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "TestBoard1".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 5.0,
+                association: None,
+            })
+            .unwrap();
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+
+        let evidence = live(DeviceSyncState {
+            identity: Some(DeviceIdentity {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "TestBoard1".to_string(),
+            }),
+            content: DeviceContent::Unreadable {
+                detail: "could not read the device: hash package failed".to_string(),
+            },
+        });
+        let view = build_home_view(Some(&inputs), None, None, &device_pool(evidence));
+
+        assert_eq!(view.devices.len(), 1, "one card, not an anonymous twin");
+        let card = &view.devices[0];
+        assert_eq!(card.name, "TestBoard1");
+        assert_eq!(card.uid.as_deref(), Some("dev_aaaaaaaaaaaaaaaa"));
+        assert!(matches!(
+            card.state,
+            RosterCardState::HoldsUnreadableData { .. }
+        ));
+    }
+
+    #[test]
     fn d28_connected_device_keeps_its_card_and_the_project_gets_the_chip() {
         let store = store();
         let summary = store.create("Porch", 1.0).unwrap();
@@ -671,7 +863,7 @@ mod tests {
         });
         evidence.observed_version = Some(3);
         evidence.head_version = Some(5);
-        let view = build_home_view(Some(&inputs), None, None, &evidence);
+        let view = build_home_view(Some(&inputs), None, None, &device_pool(evidence));
 
         // one device card (live, not remembered-offline), with the state
         // derived through the roster evidence function
@@ -727,7 +919,7 @@ mod tests {
             }),
             content: DeviceContent::Empty,
         });
-        let view = build_home_view(Some(&inputs), None, None, &evidence);
+        let view = build_home_view(Some(&inputs), None, None, &device_pool(evidence));
 
         let names: Vec<&str> = view.devices.iter().map(|card| card.name.as_str()).collect();
         assert_eq!(names, vec!["Live one", "newest", "middle", "old"]);
@@ -745,7 +937,7 @@ mod tests {
             }),
             content: DeviceContent::Empty,
         });
-        let view = build_home_view(Some(&inputs), None, None, &blank);
+        let view = build_home_view(Some(&inputs), None, None, &device_pool(blank));
         assert_eq!(view.devices.len(), 1);
         assert_eq!(view.devices[0].state, RosterCardState::ConnectedEmpty);
 
@@ -755,7 +947,7 @@ mod tests {
                 observed: lpc_history::ContentHash::of(b"x"),
             },
         });
-        let view = build_home_view(Some(&inputs), None, None, &anonymous);
+        let view = build_home_view(Some(&inputs), None, None, &device_pool(anonymous));
         assert_eq!(view.devices.len(), 1);
         assert_eq!(view.devices[0].state, RosterCardState::NeedsAName);
         assert_eq!(view.devices[0].name, "Connected device");
@@ -783,7 +975,7 @@ mod tests {
             link: Some(DeviceState::Gone),
             ..HomeDeviceEvidence::default()
         };
-        let view = build_home_view(Some(&inputs), None, None, &evidence);
+        let view = build_home_view(Some(&inputs), None, None, &device_pool(evidence));
         assert_eq!(view.devices.len(), 1);
         assert_eq!(
             view.devices[0].state,
@@ -799,7 +991,7 @@ mod tests {
             None,
             Some("prj_x".to_string()),
             Some(UiIssue::new("boom")),
-            &HomeDeviceEvidence::default(),
+            &HomePoolEvidence::default(),
         );
         assert_eq!(view.opening.as_deref(), Some("prj_x"));
         assert_eq!(view.issue.as_ref().unwrap().message, "boom");
@@ -811,5 +1003,110 @@ mod tests {
                 "  issue: boom".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn sim_session_yields_the_live_sim_card_and_stamps_the_project() {
+        // D36 + the D28 sim arm: a live sim session running a known
+        // project = a Running sim card wearing the project chip, AND the
+        // project card wearing "Running in simulator".
+        let store = store();
+        let summary = store.create("Porch", 1.0).unwrap();
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+
+        let pool = sim_pool(Some(UiDeviceProjectChip {
+            uid: summary.uid.to_string(),
+            name: summary.slug.clone(),
+        }));
+        let view = build_home_view(Some(&inputs), None, None, &pool);
+
+        assert_eq!(view.devices.len(), 1);
+        let card = &view.devices[0];
+        assert!(card.sim, "the card wears the sim presentation");
+        assert_eq!(card.render_key(), "runtime-sim");
+        assert_eq!(card.name, "Simulator");
+        assert_eq!(card.state, RosterCardState::RunningUpToDate);
+        let chip = card.project.as_ref().expect("loaded project chip");
+        assert_eq!(chip.name, summary.slug);
+
+        let project = view
+            .projects
+            .iter()
+            .find(|card| card.uid == summary.uid.to_string())
+            .unwrap();
+        assert!(project.running_in_sim, "the sim arm stamps the project");
+        assert!(project.connected_device.is_none());
+    }
+
+    #[test]
+    fn sim_with_nothing_loaded_reads_connected_empty() {
+        let store = store();
+        store.create("Porch", 1.0).unwrap();
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+
+        let view = build_home_view(Some(&inputs), None, None, &sim_pool(None));
+        assert_eq!(view.devices.len(), 1);
+        let card = &view.devices[0];
+        assert!(card.sim);
+        assert_eq!(card.state, RosterCardState::ConnectedEmpty);
+        assert!(card.project.is_none());
+        assert!(
+            view.projects.iter().all(|card| !card.running_in_sim),
+            "no loaded project, no sim stamp"
+        );
+    }
+
+    #[test]
+    fn sim_and_device_sessions_both_feed_cards_with_the_sim_first() {
+        // Coexistence (P2) reaches the roster (P4): the sim card pins
+        // first among live, the device card keeps its full derivation,
+        // and BOTH D28 pairings stamp their project cards.
+        let store = store();
+        let porch = store.create("Porch", 1.0).unwrap();
+        let sign = store.create("Sign", 2.0).unwrap();
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+
+        let device = live(DeviceSyncState {
+            identity: Some(DeviceIdentity {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "Porch sign".to_string(),
+            }),
+            content: DeviceContent::Known {
+                project_uid: porch.uid.to_string(),
+                slug: porch.slug.clone(),
+                observed: lpc_history::ContentHash::of(b"v"),
+                relation: SyncRelation::AtHead,
+            },
+        });
+        let pool = HomePoolEvidence {
+            devices: vec![device],
+            sim: Some(HomeSimEvidence {
+                project: Some(UiDeviceProjectChip {
+                    uid: sign.uid.to_string(),
+                    name: sign.slug.clone(),
+                }),
+            }),
+        };
+        let view = build_home_view(Some(&inputs), None, None, &pool);
+
+        assert_eq!(view.devices.len(), 2);
+        assert!(view.devices[0].sim, "the sim card leads");
+        assert_eq!(view.devices[0].state, RosterCardState::RunningUpToDate);
+        assert!(!view.devices[1].sim);
+        assert_eq!(view.devices[1].name, "Porch sign");
+        assert_eq!(view.devices[1].state, RosterCardState::RunningUpToDate);
+
+        let by_uid = |uid: &str| {
+            view.projects
+                .iter()
+                .find(|card| card.uid == uid.to_string())
+                .unwrap()
+        };
+        let porch_card = by_uid(&porch.uid.to_string());
+        assert!(porch_card.connected_device.is_some());
+        assert!(!porch_card.running_in_sim);
+        let sign_card = by_uid(&sign.uid.to_string());
+        assert!(sign_card.running_in_sim);
+        assert!(sign_card.connected_device.is_none());
     }
 }

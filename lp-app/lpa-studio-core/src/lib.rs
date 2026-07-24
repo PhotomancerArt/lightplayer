@@ -28,12 +28,12 @@ pub use self::core::view::progress_state::ProgressState;
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
     ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget,
-    DeviceController, DeviceHandle, DeviceOp, DeviceOpenOutcome, DeviceSnapshot, EndpointChoice,
-    ProviderChoice, RuntimeAttachment, SimAttachment, UiDeployChoice, UiDeployView,
+    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice, UiDeployChoice,
+    UiDeployView,
 };
 pub use app::home::{
-    HOME_NODE_ID, HomeDeviceEvidence, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
-    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
+    HOME_NODE_ID, HomeDeviceEvidence, HomeOp, HomePoolEvidence, HomeSimEvidence, UiCardConnection,
+    UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -72,20 +72,26 @@ pub use app::rich_object::{
 pub use app::roster::{
     BundledFirmware, ConnectEvidence, ConnectPhase, DegradedReason, DeviceDetailAffordance,
     DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape,
-    RosterEvidence, derive_roster_card_state, device_rich_object, firmware_update_available,
+    RosterEvidence, SimDetailAffordance, SimRichInput, derive_roster_card_state,
+    device_rich_object, firmware_update_available, sim_rich_object,
+};
+pub use app::runtime_pool::{
+    DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,
+    RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLoadedProject,
 };
 pub use app::server::{
-    LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
-    ServerSnapshot, ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation,
-    StudioOverlayRead, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+    LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
+    ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation, StudioOverlayRead,
+    StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
-    ConsoleCommand, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing,
-    RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK, StudioActor, StudioCommand,
-    StudioController, StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver,
-    StudioViewSender, UiConsoleView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
-    UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
-    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, studio_view_channel,
+    ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
+    LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,
+    StudioActor, StudioCommand, StudioController, StudioHandle, StudioLogSink, StudioSnapshot,
+    StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLogDraft, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget,
+    UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher,
+    studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

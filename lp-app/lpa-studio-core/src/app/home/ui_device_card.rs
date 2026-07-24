@@ -27,15 +27,25 @@ pub struct UiDeviceCard {
     /// evidence for the card's rich-object detail; `None` for remembered
     /// (offline) cards and pre-hello links.
     pub fw: Option<FwProvenance>,
+    /// D36: this card is the live SIMULATOR session, wearing the same card
+    /// grammar with the sim presentation (sim glyph, no connect ceremony,
+    /// no rename, its own rich-object sections). The sim is not a device
+    /// (D22) — `uid` stays `None` and no registry entry ever backs it.
+    pub sim: bool,
 }
 
 impl UiDeviceCard {
     /// Stable identity for keyed rendering. Names are NOT unique — erasing
     /// and re-provisioning a board registers a new `dev_…` uid under the
     /// same name, and a keyed list with duplicate keys panics Dioxus (the
-    /// 2026-07-15 home-gallery crash). Registered cards key by uid; only
-    /// the (single) identity-less live card falls back to its name.
+    /// 2026-07-15 home-gallery crash). Registered cards key by uid; the
+    /// (≤1) sim card keys by a reserved token so a device named
+    /// "Simulator" can never collide with it; only the (single)
+    /// identity-less live card falls back to its name.
     pub fn render_key(&self) -> &str {
+        if self.sim {
+            return "runtime-sim";
+        }
         self.uid.as_deref().unwrap_or(&self.name)
     }
 }

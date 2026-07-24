@@ -13,10 +13,11 @@ use crate::base::{StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 
 /// The gallery home screen (roadmap M4, unconditional at `#/` since M5):
-/// a map of everywhere the user's light lives. The Devices section is the
-/// D27 roster; the connect card opens the VID-filtered chooser directly —
-/// the deploy dialog is never a connect surface (its `NeedsDevice` state
-/// is unreachable from here).
+/// a map of everywhere the user's light lives. The runtime roster leads
+/// the page (SDI addendum: Home reads window-switcher-first,
+/// library-second); the connect card opens the VID-filtered chooser
+/// directly — the deploy dialog is never a connect surface (its
+/// `NeedsDevice` state is unreachable from here).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn HomeGallery(
@@ -29,6 +30,11 @@ pub fn HomeGallery(
     /// granted-ports probe (lpa-link owns the `navigator.serial` FFI).
     #[props(default)]
     has_ever_granted: Option<bool>,
+    /// Story-only override for the roster section's label, so the P4
+    /// visual gate can compare the candidates ("Devices" / "Running" /
+    /// "Open") from screenshots. Product code never passes it.
+    #[props(default)]
+    roster_label: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut drag_active = use_signal(|| 0_i32);
@@ -44,13 +50,17 @@ pub fn HomeGallery(
     // the roster shows whenever it is non-empty or a grant exists
     let device_section_expanded =
         !home.devices.is_empty() || has_ever_granted.or(*probed_grant.read()).unwrap_or(false);
-    // a live (non-offline) card means the flash affordance has a device
-    // context and may open the dialog; otherwise it opens the recovery
-    // chooser first
+    // a live (non-offline) DEVICE card means the flash affordance has a
+    // device context and may open the dialog; otherwise it opens the
+    // recovery chooser first (the sim is not a device — D22 — and never a
+    // flash context)
     let device_connected = home
         .devices
         .iter()
-        .any(|card| !matches!(card.state, RosterCardState::Offline { .. }));
+        .any(|card| !card.sim && !matches!(card.state, RosterCardState::Offline { .. }));
+    // "Devices" holds until the P4 visual gate decides the label; the
+    // override exists for the label-candidate stories only
+    let roster_title = roster_label.unwrap_or_else(|| "Devices".to_string());
     let busy = home.opening.is_some();
     let import_dropped = import_handler(on_action);
     let import_picked = import_dropped.clone();
@@ -77,11 +87,13 @@ pub fn HomeGallery(
                 }
             }
 
-            // --- Devices (the D27 roster) -----------------------------------
+            // --- The runtime roster (D27), TOP of the page (SDI addendum:
+            // the spatial window switcher) — live sim + device sessions
+            // and remembered devices; Projects follow below.
             if device_section_expanded {
                 section { class: "tw:grid tw:gap-3",
                     header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
-                        h2 { class: section_title_class(), "Devices" }
+                        h2 { class: section_title_class(), "{roster_title}" }
                         ActionButton {
                             action: flash_device_action(device_connected),
                             running: false,
@@ -95,6 +107,7 @@ pub fn HomeGallery(
                                 // uid-based: device NAMES repeat (re-provisioned
                                 // boards), and duplicate keys panic the diff
                                 key: "{card.render_key()}",
+                                sim: card.sim,
                                 card,
                                 now_secs,
                                 on_action,

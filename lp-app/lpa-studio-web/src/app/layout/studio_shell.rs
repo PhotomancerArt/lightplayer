@@ -39,7 +39,7 @@ pub fn StudioShell(
         return rsx! {
             main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
                 header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
-                    ShellLogo {}
+                    ShellLogo { on_action }
                     VersionBadge {}
                 }
                 div { class: "tw:grid tw:gap-7",
@@ -54,7 +54,7 @@ pub fn StudioShell(
         return rsx! {
             main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
                 header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
-                    ShellLogo {}
+                    ShellLogo { on_action }
                     VersionBadge {}
                 }
                 div { class: "tw:grid tw:gap-7",
@@ -82,7 +82,7 @@ pub fn StudioShell(
     rsx! {
         main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
             header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
-                ShellLogo {}
+                ShellLogo { on_action }
                 VersionBadge {}
             }
 
@@ -137,16 +137,27 @@ pub fn StudioShell(
 }
 
 /// The shell wordmark; links home. Navigating to `#/` fires `hashchange`,
-/// which the route listener turns into the full return-to-gallery
-/// (disconnect) — the same path as the browser back button.
+/// which the route listener turns into the lens detach (runtime-pool P3:
+/// the editor closes, sessions keep running) — the same path as the
+/// browser back button. The click ALSO dispatches the detach directly:
+/// the D29 device editor lives at `#/` (no URL until M5), so a wordmark
+/// click there changes no hash and the listener never fires — the direct
+/// dispatch is its way home. Detaching an already-detached lens is a
+/// no-op, so the doubled dispatch on project routes is harmless.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ShellLogo() -> Element {
+fn ShellLogo(on_action: EventHandler<UiAction>) -> Element {
     rsx! {
         a {
             class: "tw:text-xs tw:font-bold tw:uppercase tw:text-heading tw:no-underline tw:transition-colors tw:hover:text-strong-foreground",
             href: "#/",
             title: "Back to the gallery",
+            onclick: move |_| {
+                on_action.call(UiAction::from_op(
+                    lpa_studio_core::ProjectController::NODE_ID,
+                    lpa_studio_core::ProjectOp::DetachLens,
+                ));
+            },
             "LightPlayer Studio"
         }
     }

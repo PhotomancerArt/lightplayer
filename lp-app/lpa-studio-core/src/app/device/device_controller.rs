@@ -1,4 +1,4 @@
-//! The editor's DEVICE pane (D23) + the runtime attachment it manages.
+//! The editor's DEVICE pane (D23) + the connect flow / session factory.
 //!
 //! The pre-M5 four-step connect wizard (Select connection / Connect
 //! device / Connect LightPlayer / Open project, with Provider/Endpoint/
@@ -14,9 +14,14 @@
 //!   visually separate firmware section (flash / erase — D15).
 //!
 //! Since M4/P5 the controller also owns the CONNECT FLOW: the provider
-//! catalog (picker state, expressed as [`ConnectFlowState`] for the views)
-//! and the [`RuntimeAttachment`] — a [`DeviceSession`] for hardware, a
-//! worker-io [`SimAttachment`] for the browser simulator.
+//! catalog (picker state, expressed as [`ConnectFlowState`] for the views).
+//! Since the runtime pool (M4 of the device-UX roadmap) it is the session
+//! FACTORY: connect flows build and return a
+//! [`RuntimePayload`](crate::RuntimePayload) — a [`DeviceSession`] for
+//! hardware, a worker-io [`SimAttachment`](crate::SimAttachment) for the
+//! browser simulator — and `StudioController` installs it into the
+//! [`RuntimePool`](crate::RuntimePool). The controller itself is slotless:
+//! sessions live in the pool, the server protocol lives on the session.
 //!
 //! Connect/endpoint flows live inside the deploy dialog (M5); this pane
 //! never renders provider plumbing.
@@ -34,11 +39,11 @@ use crate::app::device::DeployOp;
 use crate::app::device::connect_choices::{provider_auto_connects, provider_choices};
 use crate::app::device::device_event_adapter::console_event_sink;
 use crate::app::device::link_ux::{link_session_logs, map_link_error};
-use crate::app::device::runtime_attachment::{DeviceHandle, RuntimeAttachment, SimAttachment};
+use crate::app::runtime_pool::runtime_session::DeviceHandle;
 use crate::core::view::steps_view::{UiStepState, UiStepView};
 use crate::{
-    ConnectFlowState, ConnectedDeviceSummary, Controller, ControllerId, DeviceOp, DeviceSnapshot,
-    EndpointChoice, ProgressState, ServerController, ServerFailureKind, ServerState, UiAction,
+    ConnectFlowState, ConnectedDeviceSummary, Controller, ControllerId, DeviceOp, EndpointChoice,
+    ProgressState, RuntimePayload, ServerFailureKind, ServerState, SimAttachment, UiAction,
     UiError, UiIssue, UiLogDraft, UiMetric, UiPaneView, UiStatus, UiStepsView, UiViewContent,
 };
 
@@ -51,27 +56,58 @@ pub struct DeviceController {
     /// await (its methods are synchronous and it is owned by value).
     registry: LinkProviderRegistry,
     /// The connect-flow view state (picker/progress/failure). `Connected`
-    /// is entered exactly when [`Self::attachment`] becomes non-`None`.
+    /// is entered exactly when a connect flow hands a live
+    /// [`RuntimePayload`] to the caller.
     flow: ConnectFlowState,
-    /// What the studio is attached to right now.
-    attachment: RuntimeAttachment,
+    /// The remembered device a one-click reconnect was aimed at: the
+    /// connect window renders on THAT card (no transient twin) until the
+    /// identity read lands or the flow resets. Cleared with the flow.
+    pending_reconnect_uid: Option<String>,
     /// Injected timer factory for [`DeviceSession`] deadlines. The default
     /// is IMMEDIATE-READY sleeps (deadlines fire instantly) — fine for
     /// builds with no hardware connectors; the web shell installs its
     /// gloo-backed timers at startup and tests install poll timers.
     timers: DeviceTimers,
-    /// Device console lines observed by the live session's event sink,
-    /// drained into the studio log ring by the controller.
+    /// The MOST RECENT hardware connect's console-log buffer. A fresh
+    /// buffer is minted per connect and travels with the session payload
+    /// (per-session routing, runtime-pool P2); this alias covers the
+    /// window before the payload lands in the pool — and failed connects,
+    /// whose captured boot chatter would otherwise be lost.
     pending_device_logs: Rc<RefCell<Vec<UiLogDraft>>>,
-    pub(crate) server: ServerController,
+}
+
+/// The runtime evidence the device pane derives its sections from, read
+/// off the [`RuntimePool`](crate::RuntimePool) by `StudioController` (the
+/// controller itself is slotless).
+pub(crate) struct DeviceRuntimeEvidence {
+    /// The attached runtime is real hardware (the sim is not a device —
+    /// D22).
+    pub is_hardware: bool,
+    /// The attached runtime is the simulator.
+    pub is_sim: bool,
+    /// The attached hardware's device state, when hardware is attached.
+    pub device_state: Option<DeviceState>,
+    /// The lens session's server protocol state (`Disconnected` when no
+    /// session exists).
+    pub server_state: ServerState,
+}
+
+impl DeviceRuntimeEvidence {
+    fn has_lightplayer_state(&self) -> bool {
+        matches!(self.server_state, ServerState::Connected { .. })
+    }
 }
 
 /// Outcome of [`DeviceController::open_provider`].
 pub enum DeviceOpenOutcome {
     /// Endpoint discovery finished; the picker state carries the choices.
     Opened,
-    /// A single endpoint auto-connected; the attachment is live.
-    Connected { logs: Vec<UiLogDraft> },
+    /// A single endpoint auto-connected; the payload is the live session
+    /// material for the pool.
+    Connected {
+        payload: RuntimePayload,
+        logs: Vec<UiLogDraft>,
+    },
     /// The user cancelled (browser port picker).
     Cancelled { message: String },
 }
@@ -96,10 +132,9 @@ impl DeviceController {
         Self {
             registry,
             flow,
-            attachment: RuntimeAttachment::None,
             timers: DeviceTimers::new(|_| Box::pin(std::future::ready(()))),
             pending_device_logs: Rc::new(RefCell::new(Vec::new())),
-            server: ServerController::new(),
+            pending_reconnect_uid: None,
         }
     }
 
@@ -109,10 +144,6 @@ impl DeviceController {
     /// deadline fire immediately.
     pub fn set_timers(&mut self, timers: DeviceTimers) {
         self.timers = timers;
-    }
-
-    pub fn snapshot(&self) -> DeviceSnapshot {
-        DeviceSnapshot::new(self.flow.clone(), self.server.snapshot())
     }
 
     /// The connect-flow view state (picker/progress/failure).
@@ -129,75 +160,9 @@ impl DeviceController {
             .collect()
     }
 
-    /// Transport label for the attached HARDWARE device ("USB" for serial
-    /// classes), from the connector class metadata. `None` when nothing is
-    /// attached or the runtime is the simulator (never a device — D22).
-    pub(crate) fn transport_label(&self) -> Option<&'static str> {
-        if !self.attachment.is_device() {
-            return None;
-        }
-        match &self.flow {
-            ConnectFlowState::Connected { device } => device.provider_id.transport_label(),
-            _ => None,
-        }
-    }
-
-    pub fn attachment(&self) -> &RuntimeAttachment {
-        &self.attachment
-    }
-
-    /// The live hardware session, when one is attached.
-    pub fn device_session(&self) -> Option<&DeviceSession> {
-        match &self.attachment {
-            RuntimeAttachment::Device(handle) => handle.session(),
-            _ => None,
-        }
-    }
-
-    /// The attached hardware's device state, when hardware is attached.
-    pub fn device_state(&self) -> Option<DeviceState> {
-        match &self.attachment {
-            RuntimeAttachment::Device(handle) => Some(handle.state()),
-            _ => None,
-        }
-    }
-
     /// Drain the console drafts buffered by the session's event sink.
     pub(crate) fn take_pending_device_logs(&mut self) -> Vec<UiLogDraft> {
         core::mem::take(&mut *self.pending_device_logs.borrow_mut())
-    }
-
-    pub fn is_lightplayer_connected(&self) -> bool {
-        self.server.is_connected()
-    }
-
-    pub fn has_lightplayer_state(&self) -> bool {
-        matches!(self.server.snapshot().state, ServerState::Connected { .. })
-    }
-
-    pub fn needs_firmware(&self) -> bool {
-        matches!(
-            self.server.snapshot().state,
-            ServerState::Failed {
-                kind: ServerFailureKind::NoFirmware,
-                ..
-            }
-        )
-    }
-
-    /// Whether the active attachment is real hardware (the sim is not a
-    /// device — D22).
-    pub fn is_hardware_link(&self) -> bool {
-        self.attachment.is_device()
-    }
-
-    /// Whether the active attachment is the simulator.
-    pub fn is_sim_attached(&self) -> bool {
-        self.attachment.is_sim()
-    }
-
-    pub fn has_runtime_attachment(&self) -> bool {
-        !matches!(self.attachment, RuntimeAttachment::None)
     }
 
     // -----------------------------------------------------------------
@@ -205,14 +170,14 @@ impl DeviceController {
     // a SimAttachment)
     // -----------------------------------------------------------------
 
-    /// Reset to the provider catalog. Drops the attachment WITHOUT a
-    /// provider close (`RefreshConnections` semantics).
+    /// Reset to the provider catalog WITHOUT a provider close
+    /// (`RefreshConnections` semantics; the caller drops the pool session).
     pub fn refresh_provider_catalog(&mut self) {
         self.reset_to_provider_selection(None);
     }
 
     fn reset_to_provider_selection(&mut self, issue: Option<UiIssue>) {
-        self.attachment = RuntimeAttachment::None;
+        self.pending_reconnect_uid = None;
         self.flow = ConnectFlowState::SelectingProvider {
             providers: provider_choices(&self.registry),
             issue,
@@ -220,6 +185,7 @@ impl DeviceController {
     }
 
     fn recover_to_provider_selection(&mut self, message: impl Into<String>) {
+        self.pending_reconnect_uid = None;
         self.reset_to_provider_selection(Some(UiIssue::new(message)));
     }
 
@@ -249,8 +215,8 @@ impl DeviceController {
         };
         if endpoints.len() == 1 && provider_auto_connects(provider_id) {
             let endpoint_id = endpoints[0].id.clone();
-            let logs = self.connect_endpoint(provider_id, endpoint_id).await?;
-            return Ok(DeviceOpenOutcome::Connected { logs });
+            let (payload, logs) = self.connect_endpoint(provider_id, endpoint_id).await?;
+            return Ok(DeviceOpenOutcome::Connected { payload, logs });
         }
         Ok(DeviceOpenOutcome::Opened)
     }
@@ -259,7 +225,6 @@ impl DeviceController {
         &mut self,
         provider_id: LinkProviderKind,
     ) -> Result<(), UiError> {
-        self.attachment = RuntimeAttachment::None;
         self.flow = ConnectFlowState::DiscoveringEndpoints {
             provider_id,
             progress: ProgressState::new("Discovering endpoints"),
@@ -294,7 +259,6 @@ impl DeviceController {
 
     #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
     async fn open_browser_serial_provider(&mut self) -> Result<DeviceOpenOutcome, UiError> {
-        self.attachment = RuntimeAttachment::None;
         self.flow = ConnectFlowState::DiscoveringEndpoints {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             progress: ProgressState::new("Requesting browser serial access"),
@@ -331,10 +295,10 @@ impl DeviceController {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
         };
-        let logs = self
+        let (payload, logs) = self
             .connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
             .await?;
-        Ok(DeviceOpenOutcome::Connected { logs })
+        Ok(DeviceOpenOutcome::Connected { payload, logs })
     }
 
     #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
@@ -345,6 +309,13 @@ impl DeviceController {
         ))
     }
 
+    /// The remembered device a one-click reconnect targets, while the
+    /// connect window is open (cleared with the flow): the roster renders
+    /// the connect narration ON that card instead of a transient twin.
+    pub fn pending_reconnect_uid(&self) -> Option<&str> {
+        self.pending_reconnect_uid.as_deref()
+    }
+
     /// One-click reconnect (M1): connect through a serial port this origin
     /// was ALREADY granted — no chooser. Which physical device a grant
     /// belongs to is unknowable pre-connect, so the first granted endpoint
@@ -352,8 +323,11 @@ impl DeviceController {
     /// reconciled from the hello. Falls back to the permission chooser when
     /// no grant exists yet.
     #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-    pub async fn reconnect_granted_device(&mut self) -> Result<DeviceOpenOutcome, UiError> {
-        self.attachment = RuntimeAttachment::None;
+    pub async fn reconnect_granted_device(
+        &mut self,
+        uid: Option<String>,
+    ) -> Result<DeviceOpenOutcome, UiError> {
+        self.pending_reconnect_uid = uid;
         self.flow = ConnectFlowState::DiscoveringEndpoints {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             progress: ProgressState::new("Finding granted serial ports"),
@@ -390,28 +364,33 @@ impl DeviceController {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
         };
-        let logs = self
+        let (payload, logs) = self
             .connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
             .await?;
-        Ok(DeviceOpenOutcome::Connected { logs })
+        Ok(DeviceOpenOutcome::Connected { payload, logs })
     }
 
     #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
-    pub async fn reconnect_granted_device(&mut self) -> Result<DeviceOpenOutcome, UiError> {
+    pub async fn reconnect_granted_device(
+        &mut self,
+        _uid: Option<String>,
+    ) -> Result<DeviceOpenOutcome, UiError> {
         Err(UiError::UnsupportedFeature(
             "browser serial ESP32 access requires the browser-serial-esp32 feature on wasm"
                 .to_string(),
         ))
     }
 
-    /// Connect one endpoint: BrowserWorker becomes a [`SimAttachment`];
-    /// every other kind becomes a hardware [`DeviceSession`] (readiness is
-    /// NOT awaited here — the server attach's first request drives it).
+    /// Connect one endpoint: BrowserWorker becomes a [`SimAttachment`]
+    /// payload; every other kind becomes a hardware [`DeviceSession`]
+    /// payload (readiness is NOT awaited here — the server attach's first
+    /// request drives it). The caller installs the returned payload into
+    /// the pool.
     pub async fn connect_endpoint(
         &mut self,
         provider_id: LinkProviderKind,
         endpoint_id: LinkEndpointId,
-    ) -> Result<Vec<UiLogDraft>, UiError> {
+    ) -> Result<(RuntimePayload, Vec<UiLogDraft>), UiError> {
         let endpoint = self
             .endpoint_choice(provider_id, &endpoint_id)
             .unwrap_or_else(|| EndpointChoice {
@@ -437,13 +416,22 @@ impl DeviceController {
         let result = if provider_id == LinkProviderKind::BrowserWorker {
             open_sim_attachment(connector, &endpoint_id).await
         } else {
-            let sink = console_event_sink(Rc::clone(&self.pending_device_logs));
+            // Per-session console-log routing (runtime-pool P2): mint a
+            // fresh buffer for this connect; the session payload carries
+            // it, and the controller field aliases it for the window
+            // before the pool holds the session (and for failed connects).
+            let console_logs = Rc::new(RefCell::new(Vec::new()));
+            self.pending_device_logs = Rc::clone(&console_logs);
+            let sink = console_event_sink(Rc::clone(&console_logs));
             match DeviceSession::connect(connector, &endpoint_id, self.timers.clone(), sink).await {
                 Ok(session) => {
                     let connector = session.connector();
                     let logs = link_session_logs(&connector, session.session().id())?;
                     Ok((
-                        RuntimeAttachment::Device(DeviceHandle::Session(session)),
+                        RuntimePayload::Device(DeviceHandle::Session {
+                            session,
+                            console_logs,
+                        }),
                         logs,
                     ))
                 }
@@ -451,23 +439,16 @@ impl DeviceController {
             }
         };
 
-        let (attachment, logs) = match result {
+        let (payload, logs) = match result {
             Ok(result) => result,
             Err(error) => {
-                self.attachment = RuntimeAttachment::None;
                 self.recover_to_provider_selection(error.message());
                 return Err(error);
             }
         };
-        let session = match &attachment {
-            RuntimeAttachment::Sim(sim) => sim.session.clone(),
-            RuntimeAttachment::Device(handle) => match handle.session() {
-                Some(session) => session.session(),
-                None => unreachable!("connect_endpoint builds live sessions only"),
-            },
-            RuntimeAttachment::None => unreachable!("connect_endpoint always attaches"),
-        };
-        self.attachment = attachment;
+        let session = payload
+            .link_session()
+            .unwrap_or_else(|| unreachable!("connect_endpoint builds live sessions only"));
         self.flow = ConnectFlowState::Connected {
             device: ConnectedDeviceSummary::new(
                 provider_id,
@@ -476,46 +457,22 @@ impl DeviceController {
                 endpoint.label,
             ),
         };
-        Ok(logs)
+        Ok((payload, logs))
     }
 
-    /// Attach the server protocol to the current runtime: the hardware
-    /// session hands over its readiness-gated channel; the sim keeps its
-    /// worker io.
-    pub(crate) fn attach_server(&mut self, updates: crate::UxUpdateSink) -> Result<(), UiError> {
-        match &self.attachment {
-            RuntimeAttachment::Sim(sim) => self.server.attach_sim_connection(
-                Rc::clone(&sim.connector),
-                &sim.connection,
-                updates,
-            ),
-            RuntimeAttachment::Device(handle) => match handle.session() {
-                Some(session) => {
-                    self.server.attach_device_session(session);
-                    Ok(())
-                }
-                None => Err(UiError::MissingSession(
-                    "hardware attachment has no live device session".to_string(),
-                )),
-            },
-            RuntimeAttachment::None => Err(UiError::MissingSession(
-                "link connection is not open".to_string(),
-            )),
-        }
-    }
-
-    /// Attachment teardown: close the underlying session and return to the
-    /// provider catalog (failure lands on the flow's `Failed` state).
-    pub async fn disconnect(&mut self) -> Result<(), UiError> {
-        let attachment = core::mem::replace(&mut self.attachment, RuntimeAttachment::None);
-        let result = match attachment {
-            RuntimeAttachment::None => Ok(()),
-            RuntimeAttachment::Sim(sim) => sim
+    /// Attachment teardown: close the given session payload (taken out of
+    /// the pool by the caller) and return to the provider catalog (failure
+    /// lands on the flow's `Failed` state).
+    pub async fn disconnect(&mut self, payload: Option<RuntimePayload>) -> Result<(), UiError> {
+        self.pending_reconnect_uid = None;
+        let result = match payload {
+            None => Ok(()),
+            Some(RuntimePayload::Sim(sim)) => sim
                 .connector
                 .close(&sim.session.id)
                 .await
                 .map_err(map_link_error),
-            RuntimeAttachment::Device(handle) => handle.close().await,
+            Some(RuntimePayload::Device(handle)) => handle.close().await,
         };
         match result {
             Ok(()) => {
@@ -555,44 +512,50 @@ impl DeviceController {
     // Views
     // -----------------------------------------------------------------
 
-    /// The editor's device pane (D23). `device_sync` is the connect-time
-    /// pull result; `usual_device` names where this project usually
-    /// lives when nothing is connected.
-    pub fn view(
+    /// The editor's device pane (D23). `runtime` is the pool-derived
+    /// runtime evidence; `device_sync` is the connect-time pull result;
+    /// `usual_device` names where this project usually lives when nothing
+    /// is connected.
+    pub(crate) fn view(
         &self,
+        runtime: &DeviceRuntimeEvidence,
         device_sync: Option<&DeviceSyncState>,
         usual_device: Option<String>,
     ) -> UiPaneView {
-        let sections = if self.is_hardware_link() {
-            let mut sections = vec![self.connected_device_section(device_sync)];
+        let sections = if runtime.is_hardware {
+            let mut sections = vec![self.connected_device_section(runtime, device_sync)];
             sections.push(self.firmware_section());
             sections
         } else {
-            vec![self.disconnected_device_section(usual_device)]
+            vec![self.disconnected_device_section(runtime, usual_device)]
         };
         UiPaneView::new(
             Self::NODE_ID,
             "Device",
-            self.status(device_sync),
+            self.status(runtime, device_sync),
             UiViewContent::Stack(Box::new(UiStepsView::new(sections))),
             Vec::new(),
         )
     }
 
-    fn status(&self, device_sync: Option<&DeviceSyncState>) -> UiStatus {
-        if !self.is_hardware_link() {
+    fn status(
+        &self,
+        runtime: &DeviceRuntimeEvidence,
+        device_sync: Option<&DeviceSyncState>,
+    ) -> UiStatus {
+        if !runtime.is_hardware {
             return UiStatus::neutral("No device");
         }
         // Incompatible firmware outranks the server state: the ONE
         // affordance is reflashing (explicit, never automatic).
-        if matches!(self.device_state(), Some(DeviceState::Incompatible { .. })) {
-            return UiStatus::warning("Reflash needed");
+        if matches!(runtime.device_state, Some(DeviceState::Incompatible { .. })) {
+            return UiStatus::attention("Reflash needed");
         }
-        match &self.server.snapshot().state {
+        match &runtime.server_state {
             ServerState::Failed {
                 kind: ServerFailureKind::NoFirmware,
                 ..
-            } => UiStatus::warning("Ready to flash"),
+            } => UiStatus::attention("Ready to flash"),
             ServerState::Failed { .. } => UiStatus::error("Needs attention"),
             ServerState::Connecting { .. } => UiStatus::working("Connecting"),
             ServerState::Connected { .. } => {
@@ -607,12 +570,16 @@ impl DeviceController {
 
     /// The pane when no hardware is attached: association line, ambient
     /// runtime line, and the dialog entry.
-    fn disconnected_device_section(&self, usual_device: Option<String>) -> UiStepView {
+    fn disconnected_device_section(
+        &self,
+        runtime: &DeviceRuntimeEvidence,
+        usual_device: Option<String>,
+    ) -> UiStepView {
         let mut lines = Vec::new();
         if let Some(usual) = usual_device {
             lines.push(usual);
         }
-        if self.is_sim_attached() && self.has_lightplayer_state() {
+        if runtime.is_sim && runtime.has_lightplayer_state() {
             // D16: name where you are — ambient, not a "device"
             lines.push("Running in the simulator.".to_string());
         }
@@ -629,15 +596,19 @@ impl DeviceController {
 
     /// The pane when hardware is attached: identity, contents relation,
     /// and the push/disconnect actions.
-    fn connected_device_section(&self, device_sync: Option<&DeviceSyncState>) -> UiStepView {
+    fn connected_device_section(
+        &self,
+        runtime: &DeviceRuntimeEvidence,
+        device_sync: Option<&DeviceSyncState>,
+    ) -> UiStepView {
         // Incompatible surfaces here with its reflash-only explanation; the
         // firmware section below carries the affordance.
-        if let Some(DeviceState::Incompatible { reason }) = self.device_state() {
+        if let Some(DeviceState::Incompatible { reason }) = &runtime.device_state {
             return UiStepView::new(Self::SECTION_DEVICE, "Device", UiStepState::NeedsAttention)
                 .with_body(UiViewContent::Issue(UiIssue::new(reason.message())))
                 .with_actions(self.connected_device_actions());
         }
-        let state = match &self.server.snapshot().state {
+        let state = match &runtime.server_state {
             ServerState::Failed { .. } => UiStepState::NeedsAttention,
             ServerState::Connecting { .. } | ServerState::Disconnected => UiStepState::Active,
             ServerState::Connected { .. } => UiStepState::Complete,
@@ -649,11 +620,11 @@ impl DeviceController {
             }
             metrics.push(UiMetric::new("Holds", content_line(&sync.content)));
         }
-        if let ServerState::Connected { protocol } = &self.server.snapshot().state {
+        if let ServerState::Connected { protocol } = &runtime.server_state {
             metrics.push(UiMetric::new("Protocol", protocol));
         }
         let body = if metrics.is_empty() {
-            match &self.server.snapshot().state {
+            match &runtime.server_state {
                 ServerState::Failed {
                     kind: ServerFailureKind::NoFirmware,
                     ..
@@ -703,45 +674,15 @@ impl DeviceController {
     }
 }
 
-/// Test seams: stubbed attachments for view/derivation tests that must not
-/// script a whole fake device.
+/// Test seams: stubbed connect-flow state for view/derivation tests that
+/// must not script a whole fake device (the stub PAYLOADS live on
+/// [`RuntimePayload`]'s test constructors; `StudioController` installs
+/// them into the pool).
 #[cfg(test)]
 impl DeviceController {
-    /// Attach stubbed hardware in the given device state and mark the flow
-    /// `Connected` (Fake provider vocabulary, matching the old
-    /// `set_state(Connected) + set_active_connection` seam).
-    pub(crate) fn set_stub_hardware_for_test(&mut self, state: DeviceState) {
-        use crate::app::device::runtime_attachment::StubDevice;
-        self.attachment = RuntimeAttachment::Device(DeviceHandle::Stub(StubDevice { state }));
-        self.flow = ConnectFlowState::Connected {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::Fake,
-                "fake-runtime",
-                "fake-session",
-                "Fake runtime",
-            ),
-        };
-    }
-
-    /// Attach a stubbed SIMULATOR (record-level fake connector, synthetic
-    /// session records) — the "connected but not hardware" fixture. The
-    /// connector holds no real session, so flows that close it will error;
-    /// fixtures using this only read views and speak through an injected
-    /// server client.
-    pub(crate) fn set_stub_sim_for_test(&mut self) {
-        use lpa_link::providers::fake::FakeProvider;
-        use lpa_link::{LinkCapabilities, LinkConnection, LinkConnectionKind, LinkSession};
-        self.attachment = RuntimeAttachment::Sim(SimAttachment {
-            connector: Rc::new(LinkConnector::Fake(FakeProvider::new())),
-            session: LinkSession::new(
-                "fake-session",
-                LinkProviderKind::Fake,
-                "fake-runtime",
-                LinkConnectionKind::Fake,
-                LinkCapabilities::esp32_serial_base(),
-            ),
-            connection: LinkConnection::fake("fake-runtime", "fake-session"),
-        });
+    /// Mark the flow `Connected` (Fake provider vocabulary, matching the
+    /// old `set_state(Connected) + set_active_connection` seam).
+    pub(crate) fn set_stub_connected_flow_for_test(&mut self) {
         self.flow = ConnectFlowState::Connected {
             device: ConnectedDeviceSummary::new(
                 LinkProviderKind::Fake,
@@ -774,7 +715,7 @@ impl DeviceController {
 async fn open_sim_attachment(
     connector: Rc<LinkConnector>,
     endpoint_id: &LinkEndpointId,
-) -> Result<(RuntimeAttachment, Vec<UiLogDraft>), UiError> {
+) -> Result<(RuntimePayload, Vec<UiLogDraft>), UiError> {
     let session = connector
         .connect(endpoint_id)
         .await
@@ -794,7 +735,7 @@ async fn open_sim_attachment(
         }
     };
     Ok((
-        RuntimeAttachment::Sim(SimAttachment {
+        RuntimePayload::Sim(SimAttachment {
             connector,
             session,
             connection,
@@ -926,7 +867,8 @@ mod tests {
                 ..
             } if issue.message.contains("server handoff failed")
         ));
-        assert!(!device.has_runtime_attachment());
+        // The factory returned no payload, so no session material exists —
+        // the retired `has_runtime_attachment` field read is structural now.
     }
 
     fn fake_endpoint() -> LinkEndpoint {

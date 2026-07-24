@@ -91,6 +91,11 @@ pub struct PulledDeviceCopy {
     /// Root-level `/.lp/device.json`, read live off the device (NOT part
     /// of the pulled project files — identity is device-scoped).
     pub identity: Option<DeviceIdentity>,
+    /// The content read/hash FAILED after the identity read: `files`/
+    /// `observed` are not meaningful; classify as unreadable-with-detail.
+    /// Partial knowledge survives — a failed read is NOT an unknown
+    /// device (the identity above still names it, cards still dedup).
+    pub read_error: Option<String>,
     pub logs: Vec<UiLogDraft>,
 }
 
@@ -134,6 +139,23 @@ pub async fn pull_device_copy(
         Err(error) => return Err(error),
     };
 
+    // From here on, failures are CONTENT-read failures on an identified
+    // device: report them as `read_error` instead of erroring the pull,
+    // so the identity (and with it card dedup/naming) survives.
+    let empty_with_error = |error: Option<String>,
+                            identity: Option<DeviceIdentity>,
+                            logs: Vec<UiLogDraft>| PulledDeviceCopy {
+        storage_id: storage_id.clone(),
+        files: Vec::new(),
+        observed: empty_package_hash(),
+        has_manifest: false,
+        manifest_uid: None,
+        manifest_name: None,
+        identity,
+        read_error: error,
+        logs,
+    };
+
     let pulled = match server
         .pull_changed_files(storage_id_ref, lpc_model::FsVersion::new(0))
         .await
@@ -143,18 +165,11 @@ pub async fn pull_device_copy(
         // error instead of an empty set — treat it as the empty device
         // it is (the current wire returns empty; this is the fallback)
         Err(error) if error.to_string().contains("no such file or directory") => {
-            return Ok(PulledDeviceCopy {
-                storage_id,
-                files: Vec::new(),
-                observed: empty_package_hash(),
-                has_manifest: false,
-                manifest_uid: None,
-                manifest_name: None,
-                identity,
-                logs,
-            });
+            return Ok(empty_with_error(None, identity, logs));
         }
-        Err(error) => return Err(error),
+        Err(error) => {
+            return Ok(empty_with_error(Some(error.to_string()), identity, logs));
+        }
     };
     logs.extend(pulled.logs);
     let files: Vec<(String, Vec<u8>)> = pulled
@@ -166,11 +181,23 @@ pub async fn pull_device_copy(
         })
         .collect();
 
-    let (observed_hex, hash_logs) = server.hash_package(storage_id_ref).await?;
+    let (observed_hex, hash_logs) = match server.hash_package(storage_id_ref).await {
+        Ok(result) => result,
+        Err(error) => {
+            return Ok(empty_with_error(Some(error.to_string()), identity, logs));
+        }
+    };
     logs.extend(hash_logs);
-    let observed: ContentHash = observed_hex
-        .parse()
-        .map_err(|e| UiError::MissingSession(format!("device hash {observed_hex:?}: {e}")))?;
+    let observed: ContentHash = match observed_hex.parse() {
+        Ok(observed) => observed,
+        Err(e) => {
+            return Ok(empty_with_error(
+                Some(format!("device hash {observed_hex:?}: {e}")),
+                identity,
+                logs,
+            ));
+        }
+    };
 
     let manifest = files
         .iter()
@@ -196,6 +223,7 @@ pub async fn pull_device_copy(
         manifest_uid,
         manifest_name,
         identity,
+        read_error: None,
         logs,
     })
 }
