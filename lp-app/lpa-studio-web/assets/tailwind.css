@@ -179,9 +179,6 @@
   .tw\:mx-auto {
     margin-inline: auto;
   }
-  .tw\:-my-1 {
-    margin-block: calc(var(--tw-spacing) * -1);
-  }
   .tw\:-mt-4 {
     margin-top: calc(var(--tw-spacing) * -4);
   }
@@ -190,9 +187,6 @@
   }
   .tw\:mt-2 {
     margin-top: calc(var(--tw-spacing) * 2);
-  }
-  .tw\:-mr-1\.5 {
-    margin-right: calc(var(--tw-spacing) * -1.5);
   }
   .tw\:-mb-4 {
     margin-bottom: calc(var(--tw-spacing) * -4);
@@ -376,9 +370,6 @@
   }
   .tw\:min-h-\[480px\] {
     min-height: 480px;
-  }
-  .tw\:min-h-\[520px\] {
-    min-height: 520px;
   }
   .tw\:min-h-\[560px\] {
     min-height: 560px;

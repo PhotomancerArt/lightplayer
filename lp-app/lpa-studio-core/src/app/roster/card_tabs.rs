@@ -141,8 +141,8 @@ mod tests {
 
     use crate::app::roster::device_rich_object::{DeviceRichInput, device_rich_object};
     use crate::app::roster::roster_card_state::RosterCardState;
-    use crate::app::roster::sim_rich_object::{SimRichInput, sim_rich_object};
-    use crate::app::roster::{BundledFirmware, DeviceDetailAffordance};
+    use crate::app::roster::sim_rich_object::{SimDetailAffordance, SimRichInput, sim_rich_object};
+    use crate::app::roster::{BundledFirmware, DeviceDetailAffordance, RosterAffordance};
 
     use super::*;
 
@@ -218,6 +218,61 @@ mod tests {
         };
         let tabs = device_card_tabs(device_rich_object(&input(&state)));
         assert!(!tab_ids(&tabs).contains(&DeviceCardTab::Danger));
+    }
+
+    #[test]
+    fn offline_device_keeps_reconnect_on_status_and_forget_in_danger() {
+        let state = RosterCardState::Offline {
+            last_seen_at: Some(NOW - 2.0 * 86_400.0),
+        };
+        let mut input = input(&state);
+        input.fw = None;
+        let tabs = device_card_tabs(device_rich_object(&input));
+        assert_eq!(
+            tab_ids(&tabs),
+            vec![
+                DeviceCardTab::Status,
+                DeviceCardTab::Project,
+                DeviceCardTab::Settings,
+                DeviceCardTab::Console,
+                DeviceCardTab::Danger,
+            ]
+        );
+        // the state-table Reconnect stays the Status tab's affordance
+        // (the old whole-card click-to-reconnect retired with M7′)
+        assert_eq!(
+            tab(&tabs, DeviceCardTab::Status).sections[0].affordances,
+            vec![DeviceDetailAffordance::Roster(RosterAffordance::Reconnect)]
+        );
+        // registered + offline → the danger zone is Forget, nothing else
+        assert_eq!(
+            tab(&tabs, DeviceCardTab::Danger).sections[0].affordances,
+            vec![DeviceDetailAffordance::ForgetDevice]
+        );
+        // a Neutral remembered card announces nothing
+        assert!(tabs.iter().all(|tab| tab.badge.is_none()));
+    }
+
+    #[test]
+    fn loaded_sim_gains_the_project_tab() {
+        let tabs = device_card_tabs(sim_rich_object(&SimRichInput {
+            state: &RosterCardState::RunningUpToDate,
+            project_name: Some("porch-sign"),
+            now_secs: NOW,
+        }));
+        assert_eq!(
+            tab_ids(&tabs),
+            vec![
+                DeviceCardTab::Status,
+                DeviceCardTab::Project,
+                DeviceCardTab::Console,
+                DeviceCardTab::Danger,
+            ]
+        );
+        assert_eq!(
+            tab(&tabs, DeviceCardTab::Danger).sections[0].affordances,
+            vec![SimDetailAffordance::StopSimulator]
+        );
     }
 
     #[test]
