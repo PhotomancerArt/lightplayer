@@ -18,6 +18,7 @@
 
 use core::time::Duration;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use lpa_client::BackoffPolicy;
@@ -30,8 +31,12 @@ use crate::app::studio::refresh_cadence::{
 };
 use crate::{
     RuntimeId, ServerFailureKind, ServerState, StudioServerClient, UiError, UiIssue, UiLogDraft,
-    UiLogLevel, UxUpdateSink,
+    UiLogEntry, UiLogLevel, UxUpdateSink,
 };
+
+/// How many stamped lines the per-session console tail retains (D42: the
+/// card's console is a bounded ring, not the full history).
+pub const CONSOLE_TAIL_LEN: usize = 40;
 
 /// What kind of runtime a session is attached to (D22: the sim is not a
 /// device). Derived from the payload; never stored separately.
@@ -208,6 +213,11 @@ pub struct RuntimeSession {
     /// on device sessions — their loaded project is reconcile-bundle
     /// evidence (`device_sync`), never this field.
     sim_loaded_project: Option<SimLoadedProject>,
+    /// The per-device console tail (D42): the last [`CONSOLE_TAIL_LEN`]
+    /// stamped lines this session's drains produced. The card's console
+    /// strip + tab render this; it dies with the session (the console is
+    /// the session's, not the app's).
+    console_tail: VecDeque<UiLogEntry>,
 }
 
 impl RuntimeSession {
@@ -228,6 +238,7 @@ impl RuntimeSession {
             last_heartbeat_at: None,
             heartbeat_device_state: None,
             sim_loaded_project: None,
+            console_tail: VecDeque::new(),
         }
     }
 
@@ -392,6 +403,21 @@ impl RuntimeSession {
             }
             RuntimePayload::Sim(_) => Vec::new(),
         }
+    }
+
+    /// Append stamped lines to this session's console tail (D42), keeping
+    /// only the newest [`CONSOLE_TAIL_LEN`].
+    pub fn push_console_tail(&mut self, entries: impl IntoIterator<Item = UiLogEntry>) {
+        self.console_tail.extend(entries);
+        while self.console_tail.len() > CONSOLE_TAIL_LEN {
+            self.console_tail.pop_front();
+        }
+    }
+
+    /// The per-device console tail, oldest first (D42: the card's console
+    /// strip shows the last line; the Console tab shows the whole tail).
+    pub fn console_tail(&self) -> &VecDeque<UiLogEntry> {
+        &self.console_tail
     }
 
     // -----------------------------------------------------------------

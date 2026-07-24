@@ -911,19 +911,34 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     let view = studio.view();
     assert_eq!(slot_value_display(find_slot(&view, "controls.rate")), "2");
 
-    // The device heartbeat drains a buffered console line into the ring…
+    // The device heartbeat drains a buffered console line into the
+    // SESSION's console tail (D42: the per-device console — session
+    // streams no longer land in the global ring)…
     studio.push_device_console_log_for_test(UiLogDraft::new(
         UiLogLevel::Info,
         UiLogOrigin::Device,
         "standalone frame tick",
     ));
     studio.run_due_heartbeats();
-    assert!(
+    let device_tail_has = |studio: &StudioController, message: &str| {
         studio
+            .runtime_pool_for_test()
+            .device_session()
+            .expect("a device session is attached")
+            .console_tail()
+            .iter()
+            .any(|entry| entry.message == message)
+    };
+    assert!(
+        device_tail_has(&studio, "standalone frame tick"),
+        "the first heartbeat drains the device session's console buffer into its tail"
+    );
+    assert!(
+        !studio
             .logs()
             .iter()
             .any(|entry| entry.message == "standalone frame tick"),
-        "the first heartbeat drains the device session's console buffer"
+        "session console streams stay off the global ring (D42)"
     );
     // …and stays SLOW: a line buffered right after is not drained until
     // the heartbeat interval elapses (the fixed test clock never advances).
@@ -934,10 +949,7 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     ));
     studio.run_due_heartbeats();
     assert!(
-        !studio
-            .logs()
-            .iter()
-            .any(|entry| entry.message == "buffered until the next heartbeat"),
+        !device_tail_has(&studio, "buffered until the next heartbeat"),
         "a heartbeat inside the interval drains nothing"
     );
 }

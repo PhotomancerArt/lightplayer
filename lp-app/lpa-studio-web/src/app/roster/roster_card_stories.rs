@@ -19,11 +19,13 @@ use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
     BundledFirmware, ConnectPhase, DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard,
-    UiDeviceProjectChip,
+    UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
 };
 use lpc_wire::FwProvenance;
 
-use crate::app::home::device_card::DeviceCard;
+use crate::app::home::device_card::{
+    DeviceCard, DeviceCardSheet, erase_device_action, stop_simulator_action,
+};
 
 /// A fixed "now" so the offline recency never drifts in baselines.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -138,7 +140,7 @@ fn needs_firmware_update() -> Element {
 }
 
 #[story(
-    description = "Amber filled edge: holds a project but no stamped identity; naming is the title bar's inline form (card-anchored, never a dialog)."
+    description = "Amber filled edge: holds a project but no stamped identity; the Name-it row (and the title-bar name) open the D41 name-stamping sheet — card-anchored, never a dialog."
 )]
 fn needs_a_name() -> Element {
     sheet(vec![card(RosterCardState::NeedsAName, false)])
@@ -249,6 +251,106 @@ fn danger_tab_simulator() -> Element {
 }
 
 #[story(
+    description = "The erase confirm as a card-resident sheet (D41): the card dims below the title bar (the name stays readable — you always know whose sheet this is), the tint edge stays visible, and Erase wears the error family. THE destructive-confirm pattern — the native confirm() is retired for card actions; Cancel or clicking the backdrop dismisses."
+)]
+fn erase_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(behind_state(), true),
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(DeviceCardTab::Danger),
+                initial_sheet: Some(DeviceCardSheet::Confirm(erase_device_action(
+                    "Luna's porch sign".to_string(),
+                ))),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The name-stamping sheet (D41, spike round 3) on the Needs-a-name card: input + Enter-to-save; naming stamps the uid and returns the card to Status. Supersedes the title-bar form for the unstamped board — a stamped device still renames inline in the title bar."
+)]
+fn name_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(RosterCardState::NeedsAName, false),
+                now_secs: Some(STORY_NOW),
+                initial_sheet: Some(DeviceCardSheet::Name),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The D30 drift-resolution sheet on the Edited-on-device card: adopt (use the device's copy) / keep both / stay, entered from the state-table Review affordance. The deploy-dialog era's verbs, now card-resident — M5-A's minimal dialog routing dissolved into this."
+)]
+fn drift_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(RosterCardState::EditedOnDevice, true),
+                now_secs: Some(STORY_NOW),
+                initial_sheet: Some(DeviceCardSheet::Drift),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The stop-simulator confirm as a card-resident sheet (D41) on the live sim card — the same pattern as erase; the honest cost stays in the copy."
+)]
+fn stop_sim_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: sim_card(true),
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                initial_tab: Some(DeviceCardTab::Danger),
+                initial_sheet: Some(DeviceCardSheet::Confirm(stop_simulator_action())),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The per-device console strip (D42, card mode): the session's newest line rides the card's bottom edge as an ambient one-liner; clicking it jumps to the Console tab. The strip hides while that tab is active."
+)]
+fn console_strip() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card_with_console(RosterCardState::RunningUpToDate, true),
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The Console tab open (D42, card mode): the session's tail read-only, severity as line tint (warn amber, error red), the strip hidden while the tab is active. Display only in P2 — level/filter controls come later."
+)]
+fn console_tab_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card_with_console(RosterCardState::RunningUpToDate, true),
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(DeviceCardTab::Console),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
     description = "The standing amber chip: firmware drift is advisory on any Running row — it badges the Settings tab, never the edge tint (project drift owns the edge)."
 )]
 fn firmware_update_chip() -> Element {
@@ -346,6 +448,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         }),
         fw: None,
         sim: false,
+        console_tail: Vec::new(),
     }
 }
 
@@ -368,6 +471,39 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
         }),
         fw: None,
         sim: true,
+        console_tail: Vec::new(),
+    }
+}
+
+/// The same card carrying a fixed console tail (D42 fixtures): engine
+/// frames with one warn and one error, timestamps pinned to the story
+/// clock so baselines never drift.
+fn device_card_with_console(state: RosterCardState, with_project: bool) -> UiDeviceCard {
+    let line = |offset: f64, level: UiLogLevel, message: &str| {
+        UiLogEntry::new(
+            STORY_NOW + offset,
+            level,
+            UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32"),
+            message,
+        )
+    };
+    UiDeviceCard {
+        console_tail: vec![
+            line(0.0, UiLogLevel::Info, "engine: project loaded · 241 points"),
+            line(1.0, UiLogLevel::Info, "engine: frame 41022 · 60fps"),
+            line(
+                2.0,
+                UiLogLevel::Warn,
+                "engine: frame budget exceeded (21ms)",
+            ),
+            line(
+                3.0,
+                UiLogLevel::Error,
+                "shader: uniform 'rate' out of range",
+            ),
+            line(4.0, UiLogLevel::Info, "engine: frame 41142 · 60fps"),
+        ],
+        ..device_card(state, with_project)
     }
 }
 

@@ -35,38 +35,19 @@ fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
     UiStudioView::new(panes, console)
 }
 
-/// A console view with explicit toolbar state for RuntimeLog stories:
-/// `entries` are shown as-is; `hidden_count`, `min_level`, and the disabled
-/// origins drive the toolbar affordances.
-pub(crate) fn story_console(
-    entries: Vec<UiLogEntry>,
-    hidden_count: usize,
-    min_level: UiLogLevel,
-    disabled_origins: &[UiLogOrigin],
-) -> UiConsoleView {
-    let mut console = UiConsoleView::empty();
-    console.entries = entries;
-    console.hidden_count = hidden_count;
-    console.min_level = min_level;
-    console.origins = UiLogOrigin::ALL
-        .into_iter()
-        .map(|origin| (origin, !disabled_origins.contains(&origin)))
-        .collect();
-    console
-}
-
 pub(crate) fn shell_story(
     mut view: UiStudioView,
     running: bool,
     story_logs: Vec<UiLogEntry>,
 ) -> Element {
+    // the global console UI retired (M7′ P2); the entries still ride the
+    // view so fixtures stay honest about what the controller carries
     view.console.entries.extend(story_logs);
     rsx! {
         StudioShell {
             view,
             running,
             on_action: move |_| {},
-            on_console: move |_| {},
         }
     }
 }
