@@ -88,10 +88,10 @@ pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
     LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,
     StudioActor, StudioCommand, StudioController, StudioHandle, StudioLogSink, StudioSnapshot,
-    StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLogDraft, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget,
-    UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher,
-    studio_view_channel,
+    StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLensRuntime, UiLogDraft,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult,
+    UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
+    ViewPublisher, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

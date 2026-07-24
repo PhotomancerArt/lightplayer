@@ -368,7 +368,7 @@ mod tests {
         );
         pool.session_mut(device)
             .expect("device session")
-            .set_op_in_flight(true);
+            .set_operation(Some("Installing firmware".to_string()));
 
         // Replacing the busy device refuses; the payload comes back.
         let refusal = pool
@@ -385,7 +385,7 @@ mod tests {
         // The operation finishing re-enables the swap.
         pool.session_mut(device)
             .expect("device session")
-            .set_op_in_flight(false);
+            .set_operation(None);
         let replacement = install(
             &mut pool,
             RuntimePayload::stub_device_for_test(ready_state_for_test()),

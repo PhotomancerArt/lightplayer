@@ -376,9 +376,9 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
 /// What clicking the card body does, per state: offline reconnects (M1);
 /// Running-family states with a Known/Adopted project attach the editor
 /// lens to the DEVICE session and open its running project (the D29
-/// click, runtime-pool P3 — no URL until M5); other provisioning-ish
-/// connected states open the deploy dialog WITH the device context;
-/// self-healing/working states are quiet.
+/// click, runtime-pool P3; the view mirror then binds `#/device/<uid>` —
+/// D37); other provisioning-ish connected states open the deploy dialog
+/// WITH the device context; self-healing/working states are quiet.
 fn card_click_action(card: &UiDeviceCard) -> Option<UiAction> {
     match &card.state {
         RosterCardState::Offline { .. } => Some(reconnect_device_action(card.uid.clone())),
@@ -403,11 +403,12 @@ fn card_click_action(card: &UiDeviceCard) -> Option<UiAction> {
 }
 
 /// The D29 click: move the editor lens onto the device session and open
-/// its running project in the editor.
+/// its running project in the editor. The card click targets the attached
+/// session (`uid: None`); the `#/device/<uid>` route passes the uid.
 fn open_device_project_action() -> UiAction {
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
-        ProjectOp::OpenDeviceProject,
+        ProjectOp::OpenDeviceProject { uid: None },
     )
 }
 
@@ -436,12 +437,13 @@ pub(super) fn stop_simulator_action() -> UiAction {
     ))
 }
 
-/// The ≤1 affordance button, wired to what exists TODAY: flows the
-/// vocabulary anticipates but that land later (Set up popup = M8,
-/// troubleshoot popup = M6, D30 drift popup = M5) route to the deploy
-/// dialog with the device context — never a dead button. Click-through
-/// affordances (open editor) render no button; the card body carries the
-/// action.
+/// The ≤1 affordance button, wired to what exists TODAY: Push runs the
+/// in-card push directly (M5 — the button is the D11 consent); flows the
+/// vocabulary anticipates but that land later (Set up = M8, troubleshoot
+/// = M6, D30 rich drift resolution = the M7/M8 reshape) route to the
+/// deploy dialog with the device context — never a dead button.
+/// Click-through affordances (open editor) render no button; the card
+/// body carries the action.
 pub(super) fn device_affordance_action(
     card: &UiDeviceCard,
     affordance: &RosterAffordance,
@@ -456,13 +458,24 @@ pub(super) fn device_affordance_action(
         // click-through: the card click is the action (the D29
         // editor-on-device click)
         RosterAffordance::OpenEditor => return None,
-        // the dialog's Reviewing state carries push + the diverged verbs
-        // until the in-card push / D30 popup land
-        RosterAffordance::PushVersion { .. } => {
-            dialog(card.project.as_ref().map(|chip| chip.uid.clone()))
+        // The in-card push (M5): the button IS the D11 consent — the push
+        // dispatches directly and its progress folds into the card's
+        // Operation-in-flight state. No dialog. (Defensive fallback to the
+        // dialog when the chip is somehow absent — RunningBehind derives
+        // from Known content, so it never should be.)
+        RosterAffordance::PushVersion { .. } => match card.project.as_ref() {
+            Some(chip) => UiAction::from_op(
+                ControllerId::new(DEPLOY_NODE_ID),
+                DeployOp::PushProject {
+                    key: chip.uid.clone(),
+                },
+            )
+            .with_summary("Push your newest version to this device.")
+            .with_icon("upload"),
+            None => dialog(None)
                 .with_summary("Review and push your newest version to this device.")
-                .with_icon("upload")
-        }
+                .with_icon("upload"),
+        },
         RosterAffordance::ResolveDrift => {
             dialog(card.project.as_ref().map(|chip| chip.uid.clone()))
                 .with_summary("Review the device's edited copy against your version.")

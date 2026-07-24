@@ -40,6 +40,13 @@ pub enum DeployOp {
     /// The one mutating confirmation: replace the device's project with
     /// the reviewed head, verify, record the push.
     ConfirmPush,
+    /// Push a library head to the connected device DIRECTLY — no dialog
+    /// (M5): the Running-behind card's Push button IS the D11 consent
+    /// click. Progress folds into the card's Operation-in-flight state
+    /// (the session's in-flight operation narrates the roster card).
+    PushProject {
+        key: String,
+    },
     /// Diverged verb (D11): the device's copy becomes the project's new
     /// head (it was banked at connect).
     AdoptDeviceCopy,
@@ -90,6 +97,13 @@ impl ControllerOp for DeployOp {
                 ActionPriority::Primary,
             )
             .with_icon("upload"),
+            Self::PushProject { .. } => ActionMeta::new(
+                "Push",
+                "Push your newest version to this device. Its current \
+                 contents are already saved in your library.",
+                ActionPriority::Primary,
+            )
+            .with_icon("upload"),
             Self::AdoptDeviceCopy => ActionMeta::new(
                 "Adopt device version",
                 "Make the device's copy this project's newest version.",
@@ -131,6 +145,7 @@ impl ControllerOp for DeployOp {
             | Self::StampIdentity { .. }
             | Self::ChoosePackage { .. }
             | Self::ConfirmPush
+            | Self::PushProject { .. }
             | Self::AdoptDeviceCopy
             | Self::KeepBothFork
             | Self::EraseDevice => ActionClass::Foreground {
