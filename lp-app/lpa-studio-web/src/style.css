@@ -1397,13 +1397,15 @@ label:has(> input:not(:disabled)) {
     filter: drop-shadow(0 16px 40px rgba(0, 0, 0, 0.34));
 }
 
-/* The in-flow trigger while its content is re-parented into the top layer:
-   an invisible placeholder pinned (inline style) to the measured size. */
+/* The in-flow trigger while its visual is re-parented into the top layer:
+   the button keeps its open-state classes, content, and size (so its
+   baseline — and the line box around it — cannot shift and reflow the page)
+   but paints nothing. Opacity, not transparent colors: it also covers
+   explicit fills inside the trigger and the focus ring. This rule is
+   unlayered on purpose — it must beat the utility @layer. */
 .ux-popover-trigger-placeholder {
-    background: transparent;
-    border-color: transparent;
+    opacity: 0;
     box-shadow: none;
-    color: transparent;
 }
 
 /* The trigger's visual in the top layer, painted above the outline fill. */

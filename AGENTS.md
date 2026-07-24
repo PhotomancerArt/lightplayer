@@ -299,6 +299,30 @@ dev server is at a hardcoded port, and never attach to a port you didn't start
 a server on — it may be serving another session's build. Pin a port explicitly
 with `STUDIO_WEB_PORT` (or the matching `*_PORT` env var) when needed.
 
+## Debt tracking
+
+Standing structural burdens live in `docs/debt/`, one slug-named file per
+burden (`story-capture-pipeline.md` — conditions get names; events get
+dates). When you hit a recurring operational pain, CHECK the register
+first — the entry's Workarounds section is the current lore — and APPEND
+to its incident log when you hit it again. File a new entry only for a
+structural, recurring burden (not todos or one-off deferrals). Paydown
+decisions with lasting shape become ADRs the entry links. See
+`docs/debt/README.md`.
+
+## Defect tracking
+
+Durable defects live in `docs/defects/`, one dated file each — ADRs record
+decisions; defects record failures. File one when the bug reached a user or a
+hardware walk, revealed a contract/model gap, produced (or should have
+produced) a regression test, or the lesson outlives the fix. Fix-forward
+trivialities stay commit messages.
+
+When you fix a qualifying bug, write the entry in the same change; when a walk
+or debugging session finds one you don't fix, file it `status: open`. Update
+the index in `docs/defects/README.md` either way. Recurring classes in that
+index are architecture signals — surface them when you see one repeat.
+
 ## Studio UI visual baselines
 
 When a change touches non-generated files under `lp-app/lpa-studio-web/`, run the

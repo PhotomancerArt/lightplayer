@@ -69,7 +69,12 @@ export async function closePort(id) {
     return;
   }
   await session.close();
-  sessions.delete(id);
+  // The entry STAYS: the SerialPort is a persistent grant handle, and the
+  // management flow closes the link session then flashes through the same
+  // id (`getPort`) — deleting here orphaned that port ("Unknown browser
+  // serial session"). Keeping entries also keeps ids stable per port
+  // identity, which `getGrantedPorts` dedupe relies on. `close()` above
+  // released the reader/writer, so no stream stays held.
 }
 
 export async function releasePort(id) {

@@ -42,9 +42,16 @@ pub enum PopoverPlacement {
 /// While open, trigger and panel share one contiguous border: a single SVG
 /// path — the rounded union of their rects (see [`crate::base::outline`]) —
 /// draws the merged fill, border, and shadow in the top layer. Because the
-/// top layer paints above everything, the trigger's content re-parents into
-/// it while open; the in-flow button stays as an invisible size-pinned
-/// placeholder holding layout and keyboard focus. Opening animates by
+/// top layer paints above everything, the trigger's visual re-parents into
+/// it while open; the in-flow button stays as an invisible placeholder
+/// holding layout and keyboard focus. The placeholder keeps its open-state
+/// classes AND its content (painted at `opacity: 0`, size additionally
+/// pinned inline): an emptied button's baseline synthesizes at its bottom
+/// edge instead of the trigger glyph's text baseline, which grew the
+/// surrounding line box by the strut descent and reflowed the page a few
+/// pixels every time a popover opened. Triggers must therefore stay
+/// presentational (icons/text) — the subtree renders twice while open.
+/// Opening animates by
 /// interpolating the panel's input rect and re-unioning each frame
 /// (`prefers-reduced-motion` jumps to the settled shape). Decision record:
 /// `docs/adr/2026-07-15-popover-svg-merged-outline.md`.
@@ -196,12 +203,11 @@ pub fn PopoverButton(
                     }
                     open.toggle();
                 },
-                // While attached, the trigger's content renders in the top
-                // layer instead; this button stays as an invisible same-size
-                // placeholder that keeps layout and keyboard focus.
-                if !attached {
-                    {trigger}
-                }
+                // While attached, the trigger's VISIBLE copy renders in the
+                // top layer; this in-flow button keeps the same classes and
+                // content at opacity 0, so its baseline — and therefore the
+                // surrounding line box — cannot move when the popover opens.
+                {trigger}
             }
             if render_open() {
                 div {
@@ -814,9 +820,12 @@ fn popover_button_class(open: bool, attached: bool, class: &str, open_class: &st
     if !open {
         class.to_string()
     } else if attached {
-        // Content and chrome live in the top layer; the in-flow button is an
-        // invisible placeholder pinned to the trigger's measured size.
-        "ux-popover-trigger-placeholder".to_string()
+        // The visible copy lives in the top layer; the in-flow button keeps
+        // its open-state layout classes and content so its size and baseline
+        // stay EXACTLY as when it was measured, with the placeholder class
+        // (unlayered, so it wins over the utility layer) making it paint
+        // nothing.
+        format!("{open_class} ux-popover-trigger-placeholder")
     } else {
         open_class.to_string()
     }
@@ -828,8 +837,10 @@ fn popover_panel_class(popup_class: &str) -> String {
     format!("{popup_class} ux-popover-panel ux-svg-popover-panel")
 }
 
-/// Inline size pin for the in-flow placeholder button while attached, so
-/// swapping its content into the top layer cannot shift layout.
+/// Inline size pin for the in-flow placeholder button while attached. The
+/// placeholder keeps its own classes and content (which already hold the
+/// size); the pin is a belt-and-suspenders guard that keeps the footprint at
+/// the measured rect the top-layer chrome was positioned against.
 fn trigger_placeholder_style(attached: bool, rect: Option<RectSnapshot>) -> String {
     match (attached, rect) {
         (true, Some(rect)) => format!("width: {:.1}px; height: {:.1}px;", rect.width, rect.height),
@@ -1448,5 +1459,18 @@ mod tests {
         let visible = anchor(100.0, 40.0);
         let left = snap_to_trigger_edges(98.0, visible, panel(46.0));
         assert_eq!(left, 100.0);
+    }
+
+    #[test]
+    fn attached_placeholder_keeps_open_classes() {
+        // The in-flow placeholder must keep the open-state layout classes
+        // (size, display, border) alongside the paint-nothing override — an
+        // emptied/bare button synthesizes its baseline at the bottom edge
+        // and grows the surrounding line box, reflowing the page a few px
+        // (docs/defects/2026-07-23-popover-open-resizes-card.md).
+        let class = popover_button_class(true, true, "rest", "open");
+        assert_eq!(class, "open ux-popover-trigger-placeholder");
+        assert_eq!(popover_button_class(true, false, "rest", "open"), "open");
+        assert_eq!(popover_button_class(false, false, "rest", "open"), "rest");
     }
 }
