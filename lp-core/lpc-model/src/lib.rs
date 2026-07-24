@@ -73,7 +73,10 @@ pub use binding::{
     BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
-pub use bus::{ChannelName, WELL_KNOWN_CHANNELS, WellKnownChannel, well_known_channel};
+pub use bus::{
+    ChannelName, PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL, WELL_KNOWN_CHANNELS,
+    WellKnownChannel, well_known_channel,
+};
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
 /// Legacy semantic value kind used by the pre-slot property model.
 ///
