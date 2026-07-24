@@ -5926,6 +5926,7 @@ version = "40.0.0"
 dependencies = [
  "js-sys",
  "log",
+ "lp-shader",
  "lpir",
  "lps-builtin-ids",
  "lps-builtins",

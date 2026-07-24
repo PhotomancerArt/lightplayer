@@ -61,6 +61,31 @@ cargo test -p lpvm-wasm --no-default-features
 cargo test -p lpvm-wasm
 ```
 
+## Fuel Metering
+
+Emitted modules are fuel-metered so an infinite loop in shader code
+aborts cleanly instead of hanging the host — including the browser sim's
+web worker (see `docs/adr/2026-07-23-sim-wasm-fuel.md`; the unit and
+header contract are shared with the rv32 backend,
+`docs/adr/2026-07-20-lpvm-native-fuel.md`):
+
+- `emit/fuel.rs` inserts a check-then-decrement of the fuel low u32
+  (vmctx+0) before every loop back-edge `br` and a check-only at every
+  function entry. Always on (`WasmOptions::fuel`, default `true`;
+  `false` is for tests/perf comparison only).
+- On observing 0 the check stores `TRAP_CODE_OUT_OF_FUEL` to the vmctx
+  trap slot (offset 8) and executes `unreachable` — the whole call
+  unwinds to the host, which classifies by reading the slot (never the
+  runtime's error message).
+- Both hosts (`rt_wasmtime`, `rt_browser`) arm the header before every
+  guest entry and surface `WasmError::Trap { code, invocation }`
+  (structured access via `lpvm::GuestTrapError`). The synthesised render
+  wrappers re-arm a per-pixel/sample tank, so a trap names the offending
+  pixel. wasmtime store fuel is no longer used.
+- `__lp_get_fuel` is inlined as a direct vmctx load (no import): the
+  native builtin's pointer deref would be a null dereference at the wasm
+  hosts' vmctx offset 0.
+
 ## Architecture
 
 - **`emit/`**: LPIR → WASM emission (copied/adapted from earlier `lps-wasm` layout; crate is `lpvm-wasm`)

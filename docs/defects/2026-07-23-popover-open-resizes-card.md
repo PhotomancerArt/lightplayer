@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-07-22      # how: hardware-walk
-fixed: rides this fix commit (branch claude/runtime-pool-m4, hash at commit time)
+fixed: 09c31f880
 area: lpa-studio-web/base/popover
 class: stand-in-divergence
 related: ["docs/adr/2026-07-15-popover-svg-merged-outline.md"]

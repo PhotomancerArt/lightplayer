@@ -764,7 +764,7 @@ pub fn run(
 ///
 /// Known trap messages this must keep matching:
 /// - lpvm-native out-of-fuel: `native trap: fuel exhausted (invocation N)`
-/// - wasmtime out-of-fuel: `WASM trap: execution fuel exhausted after N units …`
+/// - lpvm-wasm out-of-fuel: `wasm trap: fuel exhausted (invocation N)`
 /// - emulator guest traps: `Trap: …` / `… execution trapped …`
 fn is_trap_error(error_str: &str) -> bool {
     error_str.contains("Trap:")
@@ -1047,13 +1047,16 @@ mod tests {
         assert!(is_trap_error(&msg), "must classify as trap: {msg}");
     }
 
-    /// The wasmtime out-of-fuel message classifies as a trap.
+    /// The real lpvm-wasm out-of-fuel Display string classifies as a trap.
     #[test]
     fn wasm_fuel_trap_message_classifies_as_trap() {
-        // Shape produced by lpvm-wasm's `format_wasm_call_error`.
-        let msg = "WASM trap: execution fuel exhausted after 64000000 units \
-                   while calling `spin_forever`: all fuel consumed by WebAssembly";
-        assert!(is_trap_error(msg), "must classify as trap: {msg}");
+        let msg = lpvm_wasm::WasmError::Trap {
+            code: 1,
+            invocation: 1234,
+        }
+        .to_string();
+        assert_eq!(msg, "wasm trap: fuel exhausted (invocation 1234)");
+        assert!(is_trap_error(&msg), "must classify as trap: {msg}");
     }
 
     /// The emulator instruction-limit backstop is an error, NOT a trap.

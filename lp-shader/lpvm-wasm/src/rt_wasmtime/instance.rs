@@ -7,9 +7,10 @@ use std::sync::Arc;
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
-    DEFAULT_VMCTX_FUEL, LpsValueF32, LpvmBuffer, LpvmInstance, decode_global_read,
-    encode_global_write, encode_uniform_write, encode_uniform_write_q32, global_data_span,
-    validate_compute_tick_sig, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
+    DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpsValueF32, LpvmBuffer, LpvmInstance,
+    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, encode_global_write,
+    encode_uniform_write, encode_uniform_write_q32, global_data_span, validate_compute_tick_sig,
+    validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 use wasmtime::{Instance, Val};
 
@@ -31,8 +32,6 @@ struct RenderTextureEntry {
     name: String,
     func: wasmtime::Func,
 }
-
-const DEFAULT_WASMTIME_EXECUTION_FUEL: u64 = DEFAULT_VMCTX_FUEL * 64;
 
 /// Runnable WASM instance (fuel, shadow stack, linked memory, globals lifecycle).
 pub struct WasmLpvmInstance {
@@ -104,7 +103,9 @@ impl WasmLpvmInstance {
             self.prepare_call(store, mem)?;
             // Pass vmctx pointer (0) as first argument, same as other shader calls
             let wasm_args = vec![Val::I32(0)];
-            func.call(&mut *store, &wasm_args, &mut [])
+            let call_result = func.call(&mut *store, &wasm_args, &mut []);
+            take_trap(store, mem)?;
+            call_result
                 .map_err(|e| WasmError::runtime(format!("WASM trap in __shader_init: {e}")))?;
         }
 
@@ -158,17 +159,25 @@ impl WasmLpvmInstance {
         dst.copy_from_slice(&src);
     }
 
+    /// Arm the vmctx fuel/trap words before a guest entry: full tank in the
+    /// fuel low u32, host-armed invocation index in the high u32, no trap.
+    /// Render wrappers immediately re-arm per pixel/sample with
+    /// `DEFAULT_INVOCATION_FUEL`; `metadata` (vmctx+12) is left untouched.
+    /// The vmctx block sits at guest offset 0 (see `marshal` — the vmctx
+    /// pointer passed as WASM param 0 is 0).
     fn prepare_call(
         &self,
         store: &mut wasmtime::Store<()>,
         linear_memory: wasmtime::Memory,
     ) -> Result<(), WasmError> {
-        // `__lp_get_fuel` reads `VmContext::fuel` as the first u64 in guest linear memory at the
-        // vmctx pointer we pass as WASM param 0 (see `marshal` — currently 0). Wasmtime uses a
-        // larger host-side budget because render-texture now executes an entire frame per call.
-        let fuel_le = DEFAULT_VMCTX_FUEL.to_le_bytes();
+        let mut header = [0u8; 12];
+        header[0..4].copy_from_slice(&(DEFAULT_VMCTX_FUEL as u32).to_le_bytes());
+        header[4..8].copy_from_slice(&INVOCATION_INDEX_ARMED.to_le_bytes());
+        header[8..12].copy_from_slice(&TRAP_CODE_NONE.to_le_bytes());
+        debug_assert_eq!(VMCTX_OFFSET_FUEL, 0);
+        debug_assert_eq!(VMCTX_OFFSET_TRAP, 8);
         linear_memory
-            .write(&mut *store, 0, &fuel_le)
+            .write(&mut *store, VMCTX_OFFSET_FUEL, &header)
             .map_err(|e| WasmError::runtime(format!("failed to write vmctx fuel header: {e}")))?;
         if let Some(base) = self.shadow_stack_base {
             let g = self
@@ -179,9 +188,7 @@ impl WasmLpvmInstance {
                 WasmError::runtime(format!("failed to reset shadow stack pointer: {e}"))
             })?;
         }
-        (*store)
-            .set_fuel(DEFAULT_WASMTIME_EXECUTION_FUEL)
-            .map_err(|e| WasmError::runtime(format!("failed to set fuel: {e}")))
+        Ok(())
     }
 
     fn vmctx_write_bytes(&mut self, offset: usize, data: &[u8]) -> Result<(), WasmError> {
@@ -283,16 +290,34 @@ impl WasmLpvmInstance {
 }
 
 fn format_wasm_call_error(context: &str, error: wasmtime::Error) -> WasmError {
-    if error
-        .downcast_ref::<wasmtime::Trap>()
-        .is_some_and(|trap| *trap == wasmtime::Trap::OutOfFuel)
-    {
-        return WasmError::runtime(format!(
-            "WASM trap: execution fuel exhausted after {DEFAULT_WASMTIME_EXECUTION_FUEL} units while {context}: {error}"
-        ));
-    }
-
     WasmError::runtime(format!("WASM trap while {context}: {error}"))
+}
+
+/// Read the vmctx trap slot after a guest entry; nonzero → typed
+/// [`WasmError::Trap`] carrying the invocation index (fuel high u32).
+///
+/// Must run on BOTH `Ok` and `Err` call returns: an emitted fuel check
+/// aborts with `unreachable`, which arrives as a generic wasmtime trap
+/// error — classification is by the slot, never the message. Return values
+/// from a trapped call are garbage; callers must discard them.
+fn take_trap(
+    store: &mut wasmtime::Store<()>,
+    linear_memory: wasmtime::Memory,
+) -> Result<(), WasmError> {
+    let mut words = [0u8; 8];
+    linear_memory
+        .read(&*store, VMCTX_OFFSET_FUEL + 4, &mut words)
+        .map_err(|e| WasmError::runtime(format!("failed to read vmctx trap slot: {e}")))?;
+    let invocation = u32::from_le_bytes(words[0..4].try_into().expect("4 bytes"));
+    let trap = u32::from_le_bytes(words[4..8].try_into().expect("4 bytes"));
+    if trap == TRAP_CODE_NONE {
+        Ok(())
+    } else {
+        Err(WasmError::Trap {
+            code: trap,
+            invocation,
+        })
+    }
 }
 
 impl LpvmInstance for WasmLpvmInstance {
@@ -379,8 +404,9 @@ impl LpvmInstance for WasmLpvmInstance {
             zero_results_for_type(&return_ty, self.float_mode)
         };
 
-        func.call(&mut *store, &wasm_args, &mut results)
-            .map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
+        let call_result = func.call(&mut *store, &wasm_args, &mut results);
+        take_trap(store, mem)?;
+        call_result.map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
 
         if let Some(frame) = shadow_frame {
             shadow_stack_frame_close(&self.instance, store, frame)?;
@@ -468,8 +494,9 @@ impl LpvmInstance for WasmLpvmInstance {
 
         if matches!(return_ty, LpsType::Void) {
             let mut results: Vec<Val> = Vec::new();
-            func.call(&mut *store, &wasm_args, &mut results)
-                .map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
+            let call_result = func.call(&mut *store, &wasm_args, &mut results);
+            take_trap(store, mem)?;
+            call_result.map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
             if let Some(frame) = shadow_frame {
                 shadow_stack_frame_close(&self.instance, store, frame)?;
             }
@@ -481,8 +508,9 @@ impl LpvmInstance for WasmLpvmInstance {
         } else {
             zero_results_for_type(&return_ty, self.float_mode)
         };
-        func.call(&mut *store, &wasm_args, &mut results)
-            .map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
+        let call_result = func.call(&mut *store, &wasm_args, &mut results);
+        take_trap(store, mem)?;
+        call_result.map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
 
         if let Some(frame) = shadow_frame {
             shadow_stack_frame_close(&self.instance, store, frame)?;
@@ -532,7 +560,9 @@ impl LpvmInstance for WasmLpvmInstance {
         let mem = guard.memory;
         let store = &mut guard.store;
         self.prepare_call(store, mem)?;
-        func.call(&mut *store, &wasm_args, &mut []).map_err(|e| {
+        let call_result = func.call(&mut *store, &wasm_args, &mut []);
+        take_trap(store, mem)?;
+        call_result.map_err(|e| {
             format_wasm_call_error(&format!("rendering texture via `{fn_name}`"), e)
         })?;
         Ok(())
@@ -578,7 +608,9 @@ impl LpvmInstance for WasmLpvmInstance {
         let mem = guard.memory;
         let store = &mut guard.store;
         self.prepare_call(store, mem)?;
-        func.call(&mut *store, &wasm_args, &mut []).map_err(|e| {
+        let call_result = func.call(&mut *store, &wasm_args, &mut []);
+        take_trap(store, mem)?;
+        call_result.map_err(|e| {
             format_wasm_call_error(&format!("rendering samples via `{fn_name}`"), e)
         })?;
         Ok(())
@@ -628,8 +660,555 @@ impl LpvmInstance for WasmLpvmInstance {
             .get_func(&mut *store, name)
             .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
         self.prepare_call(store, mem)?;
-        func.call(&mut *store, &[Val::I32(0)], &mut [])
-            .map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
+        let call_result = func.call(&mut *store, &[Val::I32(0)], &mut []);
+        take_trap(store, mem)?;
+        call_result.map_err(|e| format_wasm_call_error(&format!("calling `{name}`"), e))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Fuel-trap round trips on the wasmtime host, mirroring lpvm-native's
+    //! rt_emu tests (`lpvm-native/src/rt_emu/instance.rs`): same LPIR
+    //! modules, same header contract, same typed-trap expectations.
+
+    use lp_shader::synth::synthesise_render_texture;
+    use lpir::builder::FunctionBuilder;
+    use lpir::{FuncId, IrType, LpirModule, LpirOp};
+    use lps_shared::{
+        FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureStorageFormat,
+    };
+    use lpvm::{
+        DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpvmEngine, LpvmInstance, LpvmModule,
+        TRAP_CODE_OUT_OF_FUEL, VMCTX_OFFSET_FUEL,
+    };
+
+    use crate::error::WasmError;
+    use crate::options::WasmOptions;
+    use crate::rt_wasmtime::WasmLpvmEngine;
+
+    const Q_ONE: i32 = 65536;
+    const Q_HALF: i32 = 32768;
+
+    /// An infinite loop exhausts the default 1M tank and surfaces as the
+    /// typed trap error; the same instance stays usable (arming resets the
+    /// fuel and trap slots on the next entry).
+    #[test]
+    fn infinite_loop_traps_and_instance_stays_reusable() {
+        let (ir, meta) = spin_and_ok_module();
+        let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+
+        let err = inst
+            .call_q32("spin", &[])
+            .expect_err("infinite loop must trap");
+        match &err {
+            WasmError::Trap { code, invocation } => {
+                assert_eq!(*code, TRAP_CODE_OUT_OF_FUEL);
+                // No render wrapper ran, so the index is the host-armed marker.
+                assert_eq!(*invocation, INVOCATION_INDEX_ARMED);
+            }
+            other => panic!("expected WasmError::Trap, got {other:?}"),
+        }
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("trap") && msg.contains("fuel"),
+            "trap message must mention trap + fuel: {msg}"
+        );
+
+        // Next call re-arms and succeeds.
+        let words = inst
+            .call_q32("ok", &[])
+            .expect("instance reusable after trap");
+        assert_eq!(words, vec![42]);
+    }
+
+    /// A loop of N iterations consumes exactly N fuel units: back-edge
+    /// checks decrement by one, entry checks are check-only.
+    #[test]
+    fn counted_loop_consumes_one_fuel_unit_per_backedge() {
+        let (ir, meta) = counted_loop_module();
+        let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+
+        let n = 10;
+        let words = inst.call_q32("count", &[n]).expect("call");
+        assert_eq!(words, vec![n]);
+
+        let fuel_bytes = inst
+            .vmctx_read_bytes(VMCTX_OFFSET_FUEL, 4)
+            .expect("read fuel low");
+        let fuel = u32::from_le_bytes(fuel_bytes[..4].try_into().expect("4 bytes"));
+        assert_eq!(
+            fuel,
+            DEFAULT_VMCTX_FUEL as u32 - n as u32,
+            "expected armed - N after N back-edges"
+        );
+    }
+
+    /// Render-texture path with the real synth wrapper: the pixel that
+    /// loops forever traps with its linear invocation index; pixels before
+    /// it are already written.
+    #[test]
+    fn render_texture_trap_reports_offending_pixel_index() {
+        let k = 2u32; // pixel (2, 0) of a 4x1 texture
+        let (mut ir, mut meta) = render_module_spinning_at(k as i32 * Q_ONE + Q_HALF);
+        let name =
+            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
+                .expect("synth");
+
+        let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+        let mut tex = engine.memory().alloc(4 * 8, 4).expect("alloc texture");
+
+        let err = inst
+            .call_render_texture(&name, &mut tex, 4, 1)
+            .expect_err("pixel k must trap");
+        match &err {
+            WasmError::Trap { code, invocation } => {
+                assert_eq!(*code, TRAP_CODE_OUT_OF_FUEL);
+                assert_eq!(*invocation, k, "invocation index must be the pixel index");
+            }
+            other => panic!("expected WasmError::Trap, got {other:?}"),
+        }
+
+        // Pixels 0 and 1 rendered 1.0 per channel before the trap.
+        let mut before = [0u8; 16];
+        unsafe { tex.read(0, &mut before).expect("read pixels 0..2") };
+        assert!(
+            before.iter().all(|b| *b == 0xFF),
+            "earlier pixels must be written: {before:?}"
+        );
+    }
+
+    /// The legacy `render_frame` export (web-demo's entry point) is called
+    /// raw — no host-side `prepare_call` arming — so with fuel on the
+    /// wrapper must self-arm: a bounded shader renders even from a zeroed
+    /// vmctx header (the per-pixel re-arm supplies the tank).
+    #[test]
+    fn raw_render_frame_export_self_arms_per_pixel() {
+        let (ir, meta) = render_frame_module(None);
+        let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+        let out = engine.memory().alloc(4 * 4, 4).expect("alloc rgba8 out");
+        let out_ptr = i32::try_from(out.guest_base()).expect("out ptr fits i32");
+
+        // The raw path gets no arming; prove the wrapper works from zero.
+        inst.vmctx_write_bytes(VMCTX_OFFSET_FUEL, &[0u8; 12])
+            .expect("zero vmctx header");
+
+        {
+            let mut guard = inst.runtime.lock();
+            let store = &mut guard.store;
+            let func = inst
+                .instance
+                .get_func(&mut *store, "render_frame")
+                .expect("render_frame export");
+            func.call(
+                &mut *store,
+                &[
+                    wasmtime::Val::I32(4),
+                    wasmtime::Val::I32(1),
+                    wasmtime::Val::I32(0),
+                    wasmtime::Val::I32(out_ptr),
+                ],
+                &mut [],
+            )
+            .expect("raw render_frame call must self-arm");
+        }
+
+        let mut bytes = [0u8; 16];
+        unsafe { out.read(0, &mut bytes).expect("read rgba8 out") };
+        assert!(
+            bytes.iter().all(|b| *b == 0xFF),
+            "vec4(1.0) must convert to 0xFF per channel: {bytes:?}"
+        );
+    }
+
+    /// Raw `render_frame` with an infinite pixel: the user render fn's
+    /// emitted checks drain the wrapper-armed per-pixel tank, the trap
+    /// unwinds the whole frame call, and the slot carries the offending
+    /// linear pixel index. Earlier pixels are already written.
+    #[test]
+    fn raw_render_frame_export_traps_on_infinite_pixel() {
+        let k = 2u32; // pixel (2, 0) of a 4x1 frame; wrapper passes x<<16
+        let (ir, meta) = render_frame_module(Some(k as i32 * Q_ONE));
+        let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+        let out = engine.memory().alloc(4 * 4, 4).expect("alloc rgba8 out");
+        let out_ptr = i32::try_from(out.guest_base()).expect("out ptr fits i32");
+
+        {
+            let mut guard = inst.runtime.lock();
+            let store = &mut guard.store;
+            let func = inst
+                .instance
+                .get_func(&mut *store, "render_frame")
+                .expect("render_frame export");
+            let result = func.call(
+                &mut *store,
+                &[
+                    wasmtime::Val::I32(4),
+                    wasmtime::Val::I32(1),
+                    wasmtime::Val::I32(0),
+                    wasmtime::Val::I32(out_ptr),
+                ],
+                &mut [],
+            );
+            assert!(result.is_err(), "infinite pixel must trap the raw call");
+        }
+
+        let words = inst
+            .vmctx_read_bytes(VMCTX_OFFSET_FUEL + 4, 8)
+            .expect("read invocation + trap slot");
+        let invocation = u32::from_le_bytes(words[0..4].try_into().expect("4 bytes"));
+        let trap = u32::from_le_bytes(words[4..8].try_into().expect("4 bytes"));
+        assert_eq!(trap, TRAP_CODE_OUT_OF_FUEL);
+        assert_eq!(invocation, k, "slot must carry the linear pixel index");
+
+        let mut before = [0u8; 8];
+        unsafe { out.read(0, &mut before).expect("read pixels 0..2") };
+        assert!(
+            before.iter().all(|b| *b == 0xFF),
+            "earlier pixels must be written: {before:?}"
+        );
+    }
+
+    /// A bounded shader renders byte-identically with fuel on and off.
+    #[test]
+    fn bounded_render_is_byte_identical_with_fuel_on_and_off() {
+        let with_fuel = bounded_render_bytes(true);
+        let without_fuel = bounded_render_bytes(false);
+        assert_eq!(with_fuel, without_fuel);
+        assert!(
+            with_fuel.iter().any(|b| *b != 0),
+            "sanity: rendered texture must not be all zero"
+        );
+    }
+
+    fn bounded_render_bytes(fuel: bool) -> Vec<u8> {
+        let (mut ir, mut meta) = bounded_render_module();
+        let name =
+            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
+                .expect("synth");
+        let options = WasmOptions {
+            fuel,
+            ..WasmOptions::default()
+        };
+        let engine = WasmLpvmEngine::new(options).expect("engine");
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+        let mut tex = engine.memory().alloc(4 * 2 * 8, 4).expect("alloc texture");
+        inst.call_render_texture(&name, &mut tex, 4, 2)
+            .expect("bounded render");
+        let mut bytes = vec![0u8; 4 * 2 * 8];
+        unsafe { tex.read(0, &mut bytes).expect("read texture") };
+        bytes
+    }
+
+    /// `spin`: void fn looping forever; `ok`: () -> 42.
+    fn spin_and_ok_module() -> (LpirModule, LpsModuleSig) {
+        let mut fb = FunctionBuilder::new("spin", &[]);
+        let scratch = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: scratch,
+            value: 0,
+        });
+        fb.push_loop();
+        fb.push(LpirOp::IaddImm {
+            dst: scratch,
+            src: scratch,
+            imm: 1,
+        });
+        fb.end_loop();
+        fb.push_return(&[]);
+        let spin = fb.finish();
+
+        let mut fb = FunctionBuilder::new("ok", &[IrType::I32]);
+        let r = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: r, value: 42 });
+        fb.push_return(&[r]);
+        let ok = fb.finish();
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), spin);
+        module.functions.insert(FuncId(1), ok);
+
+        let meta = LpsModuleSig {
+            functions: vec![
+                void_sig("spin"),
+                LpsFnSig {
+                    name: String::from("ok"),
+                    return_type: LpsType::Int,
+                    parameters: vec![],
+                    kind: LpsFnKind::UserDefined,
+                },
+            ],
+            ..Default::default()
+        };
+        (module, meta)
+    }
+
+    /// `count(n)`: i = 0; loop { if i >= n break; i += 1 }; return i.
+    fn counted_loop_module() -> (LpirModule, LpsModuleSig) {
+        let mut fb = FunctionBuilder::new("count", &[IrType::I32]);
+        let n = fb.add_param(IrType::I32);
+        let i = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: i, value: 0 });
+        fb.push_loop();
+        {
+            let done = fb.alloc_vreg(IrType::I32);
+            fb.push(LpirOp::IgeS {
+                dst: done,
+                lhs: i,
+                rhs: n,
+            });
+            fb.push_if(done);
+            fb.push(LpirOp::Break);
+            fb.end_if();
+            fb.push(LpirOp::IaddImm {
+                dst: i,
+                src: i,
+                imm: 1,
+            });
+        }
+        fb.end_loop();
+        fb.push_return(&[i]);
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), fb.finish());
+
+        let meta = LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("count"),
+                return_type: LpsType::Int,
+                parameters: vec![FnParam {
+                    name: String::from("n"),
+                    ty: LpsType::Int,
+                    qualifier: ParamQualifier::In,
+                }],
+                kind: LpsFnKind::UserDefined,
+            }],
+            ..Default::default()
+        };
+        (module, meta)
+    }
+
+    /// `render(pos)`: loops forever iff `pos.x == k_center` (Q16.16 bits),
+    /// else returns vec4(1.0).
+    fn render_module_spinning_at(k_center_bits: i32) -> (LpirModule, LpsModuleSig) {
+        let ret_tys = [IrType::F32; 4];
+        let mut fb = FunctionBuilder::new("render", &ret_tys);
+        let px = fb.add_param(IrType::F32);
+        let _py = fb.add_param(IrType::F32);
+
+        let k_bits = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: k_bits,
+            value: k_center_bits,
+        });
+        let kf = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::FfromI32Bits {
+            dst: kf,
+            src: k_bits,
+        });
+        let cond = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::Feq {
+            dst: cond,
+            lhs: px,
+            rhs: kf,
+        });
+        fb.push_if(cond);
+        {
+            // Empty body: the cheapest possible spin, draining the 100k
+            // per-pixel tank in ~100k wasm loop iterations.
+            fb.push_loop();
+            fb.end_loop();
+        }
+        fb.end_if();
+
+        let one_bits = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: one_bits,
+            value: Q_ONE,
+        });
+        let one = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::FfromI32Bits {
+            dst: one,
+            src: one_bits,
+        });
+        fb.push_return(&[one, one, one, one]);
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), fb.finish());
+        (module, render_vec4_meta())
+    }
+
+    /// `render(pos, size, time)` — the 5-scalar-param shape that makes the
+    /// emitter synthesize the legacy `render_frame` wrapper export. Returns
+    /// vec4(1.0); first spins forever iff `pos.x` equals `spin_at_bits`
+    /// (raw Q16.16 bits — the wrapper passes `x << 16`).
+    fn render_frame_module(spin_at_bits: Option<i32>) -> (LpirModule, LpsModuleSig) {
+        let ret_tys = [IrType::F32; 4];
+        let mut fb = FunctionBuilder::new("render", &ret_tys);
+        let px = fb.add_param(IrType::F32);
+        let _py = fb.add_param(IrType::F32);
+        let _w = fb.add_param(IrType::F32);
+        let _h = fb.add_param(IrType::F32);
+        let _t = fb.add_param(IrType::F32);
+
+        if let Some(bits) = spin_at_bits {
+            let k_bits = fb.alloc_vreg(IrType::I32);
+            fb.push(LpirOp::IconstI32 {
+                dst: k_bits,
+                value: bits,
+            });
+            let kf = fb.alloc_vreg(IrType::F32);
+            fb.push(LpirOp::FfromI32Bits {
+                dst: kf,
+                src: k_bits,
+            });
+            let cond = fb.alloc_vreg(IrType::I32);
+            fb.push(LpirOp::Feq {
+                dst: cond,
+                lhs: px,
+                rhs: kf,
+            });
+            fb.push_if(cond);
+            {
+                fb.push_loop();
+                fb.end_loop();
+            }
+            fb.end_if();
+        }
+
+        let one_bits = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: one_bits,
+            value: Q_ONE,
+        });
+        let one = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::FfromI32Bits {
+            dst: one,
+            src: one_bits,
+        });
+        fb.push_return(&[one, one, one, one]);
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), fb.finish());
+
+        let meta = LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("render"),
+                return_type: LpsType::Vec4,
+                parameters: vec![
+                    FnParam {
+                        name: String::from("pos"),
+                        ty: LpsType::Vec2,
+                        qualifier: ParamQualifier::In,
+                    },
+                    FnParam {
+                        name: String::from("size"),
+                        ty: LpsType::Vec2,
+                        qualifier: ParamQualifier::In,
+                    },
+                    FnParam {
+                        name: String::from("time"),
+                        ty: LpsType::Float,
+                        qualifier: ParamQualifier::In,
+                    },
+                ],
+                kind: LpsFnKind::UserDefined,
+            }],
+            ..Default::default()
+        };
+        (module, meta)
+    }
+
+    /// `render(pos)`: 3-iteration counted loop, then vec4(pos.x * 0.25).
+    fn bounded_render_module() -> (LpirModule, LpsModuleSig) {
+        let ret_tys = [IrType::F32; 4];
+        let mut fb = FunctionBuilder::new("render", &ret_tys);
+        let px = fb.add_param(IrType::F32);
+        let _py = fb.add_param(IrType::F32);
+
+        let i = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: i, value: 0 });
+        let three = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: three,
+            value: 3,
+        });
+        fb.push_loop();
+        {
+            let done = fb.alloc_vreg(IrType::I32);
+            fb.push(LpirOp::IgeS {
+                dst: done,
+                lhs: i,
+                rhs: three,
+            });
+            fb.push_if(done);
+            fb.push(LpirOp::Break);
+            fb.end_if();
+            fb.push(LpirOp::IaddImm {
+                dst: i,
+                src: i,
+                imm: 1,
+            });
+        }
+        fb.end_loop();
+
+        let quarter_bits = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: quarter_bits,
+            value: Q_ONE / 4,
+        });
+        let quarter = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::FfromI32Bits {
+            dst: quarter,
+            src: quarter_bits,
+        });
+        let c = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::Fmul {
+            dst: c,
+            lhs: px,
+            rhs: quarter,
+        });
+        fb.push_return(&[c, c, c, c]);
+
+        let mut module = LpirModule::new();
+        module.functions.insert(FuncId(0), fb.finish());
+        (module, render_vec4_meta())
+    }
+
+    fn render_vec4_meta() -> LpsModuleSig {
+        LpsModuleSig {
+            functions: vec![LpsFnSig {
+                name: String::from("render"),
+                return_type: LpsType::Vec4,
+                parameters: vec![FnParam {
+                    name: String::from("pos"),
+                    ty: LpsType::Vec2,
+                    qualifier: ParamQualifier::In,
+                }],
+                kind: LpsFnKind::UserDefined,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn void_sig(name: &str) -> LpsFnSig {
+        LpsFnSig {
+            name: String::from(name),
+            return_type: LpsType::Void,
+            parameters: vec![],
+            kind: LpsFnKind::UserDefined,
+        }
     }
 }

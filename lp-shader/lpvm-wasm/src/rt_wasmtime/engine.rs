@@ -31,8 +31,10 @@ impl WasmLpvmEngine {
     /// New engine (builtins are linked natively from `lps-builtins`).
     pub fn new(compile_options: WasmOptions) -> Result<Self, WasmError> {
         ensure_builtins_referenced();
-        let mut config = wasmtime::Config::new();
-        config.consume_fuel(true);
+        // Runaway-shader metering uses the vmctx fuel checks emitted into the
+        // shader wasm itself (see `emit::fuel`), not wasmtime store fuel — one
+        // metering semantics (loop back-edges) across rv32 and both wasm hosts.
+        let config = wasmtime::Config::new();
         // Deferred wasmtime knobs (revisit when perf or sandboxing demands it):
         //   - config.epoch_interruption(true) for cooperative cancellation
         //   - config.parallel_compilation(true) for multi-threaded compile

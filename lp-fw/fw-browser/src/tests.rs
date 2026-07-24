@@ -5,10 +5,10 @@ use lpc_model::{AsLpPath, AsLpPathBuf, NodeId};
 use lpc_shared::ProjectBuilder;
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
-    ClientRequest, FsRequest, NodeReadQuery, ProjectReadQuery, ProjectReadRequest, ReadLevel,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, WireChannelSampleFormat,
-    WireRuntimeBufferMetadataPayload, WireServerMessage, WireServerMsgBody, json,
-    messages::ClientMessage,
+    ClientRequest, FsRequest, NodeReadQuery, NodeRuntimeStatus, ProjectReadQuery,
+    ProjectReadRequest, ReadLevel, ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery,
+    WireChannelSampleFormat, WireProjectHandle, WireRuntimeBufferMetadataPayload,
+    WireServerMessage, WireServerMsgBody, json, messages::ClientMessage,
 };
 use lpfs::{LpFs, LpFsMemory};
 use serde::Serialize;
@@ -34,13 +34,18 @@ fn runtime_serves_protocol_messages_after_tick() {
 
     let initial = handle_envelope_json(runtime_id, &input).expect("handle protocol_in");
     assert!(initial.contains("queued protocol_in frame"));
+    // The boot hello (unsolicited id 0) rides the FIRST output drain —
+    // `handle_envelope_json` drains queued envelopes, so the hello flushes
+    // here, ahead of any correlated response.
+    assert!(
+        initial.contains("\\\"hello\\\""),
+        "hello missing: {initial}"
+    );
+    assert!(initial.contains("\\\"proto\\\":1"));
 
     let output = tick_runtime(runtime_id, 16).expect("tick runtime");
     assert!(output.contains("protocol_out"));
     assert!(output.contains("listAvailableProjects"));
-    // The boot hello (unsolicited id 0) flushes ahead of the first response.
-    assert!(output.contains("\\\"hello\\\""));
-    assert!(output.contains("\\\"proto\\\":1"));
 }
 
 #[wasm_bindgen_test]
@@ -236,6 +241,170 @@ fn runtime_loads_project_and_renders_output_after_ticks() {
 }
 
 #[wasm_bindgen_test]
+fn fuel_on_bounded_loop_shader_renders() {
+    // Fuel metering is ON by default on the browser CPU tier
+    // (`lpvm_wasm::WasmOptions::default`), and the emitted checks are
+    // check-then-decrement — so if `rt_browser` ever stops arming the vmctx
+    // fuel header in `prepare_call`, an ordinary bounded shader traps at its
+    // very first function entry and the sim goes black. This is THE arming
+    // regression test: a loopy-but-bounded shader must render through the
+    // full product path with fuel on.
+    fw_browser_init_exports(wasm_bindgen::exports());
+    let runtime_id = create_cpu_runtime("fuel-bounded");
+    let mut next_id = 1u64;
+
+    let project_fs = build_project_with_shader(
+        "layout(binding = 0) uniform vec2 outputSize; \
+         layout(binding = 1) uniform float time; \
+         vec4 render(vec2 pos) { \
+             float acc = 0.0; \
+             for (int i = 0; i < 8; i++) { acc += 0.1; } \
+             return vec4(acc, 0.0, 0.0, 1.0); \
+         }",
+    );
+    let handle = push_and_load_project(
+        runtime_id,
+        "fuel-bounded",
+        &project_fs.borrow(),
+        &mut next_id,
+    );
+
+    let nodes_view = read_nodes_view(runtime_id, handle, &mut next_id, 16);
+    let output_id = output_node_id(&nodes_view);
+
+    let view = read_runtime_and_resources(runtime_id, handle, &mut next_id, 40);
+    let sample = read_output_sample(&view, output_id);
+    assert!(sample.runtime_frame_num > 0);
+    assert!(
+        sample.red > 20_000,
+        "bounded-loop shader must render (~0.8 red expected): {}",
+        sample.red
+    );
+    assert_eq!(sample.green, 0);
+}
+
+#[wasm_bindgen_test]
+fn infinite_loop_shader_reports_fuel_error_and_keeps_ticking() {
+    // The original sim-fuel repro: before fuel metering, a `while(true)`
+    // shader spun the worker forever ("timed out waiting for browser worker
+    // protocol output", dead until page refresh). Now the emitted back-edge
+    // checks drain the per-pixel tank, the typed trap surfaces as a node
+    // error naming fuel, and the runtime keeps ticking.
+    fw_browser_init_exports(wasm_bindgen::exports());
+    let runtime_id = create_cpu_runtime("fuel-infinite");
+    let mut next_id = 1u64;
+
+    let project_fs = build_project_with_shader(
+        "layout(binding = 0) uniform vec2 outputSize; \
+         layout(binding = 1) uniform float time; \
+         vec4 render(vec2 pos) { \
+             float acc = 0.0; \
+             while (true) { acc += 0.001; } \
+             return vec4(acc, 0.0, 0.0, 1.0); \
+         }",
+    );
+    let handle = push_and_load_project(
+        runtime_id,
+        "fuel-infinite",
+        &project_fs.borrow(),
+        &mut next_id,
+    );
+
+    // Ticking with the hostile shader must return (bounded work per frame).
+    for _ in 0..3 {
+        tick_runtime(runtime_id, 40).expect("tick with infinite shader must not hang");
+    }
+
+    let nodes_view = read_nodes_view(runtime_id, handle, &mut next_id, 16);
+    let (shader_path, shader_status) = nodes_view
+        .tree
+        .nodes
+        .values()
+        .find(|entry| entry.path.to_string().contains("shader"))
+        .map(|entry| (entry.path.to_string(), entry.status.clone()))
+        .expect("shader node present");
+    match &shader_status {
+        NodeRuntimeStatus::Error(message) => {
+            assert!(
+                message.contains("fuel exhausted"),
+                "{shader_path}: node error must name fuel: {message}"
+            );
+        }
+        other => panic!("{shader_path}: expected fuel node error, got {other:?}"),
+    }
+
+    // The sim survives: the frame counter keeps advancing after the trap.
+    let frame_before = read_runtime_and_resources(runtime_id, handle, &mut next_id, 40)
+        .runtime
+        .as_ref()
+        .expect("runtime status")
+        .project
+        .frame_num;
+    let frame_after = read_runtime_and_resources(runtime_id, handle, &mut next_id, 40)
+        .runtime
+        .as_ref()
+        .expect("runtime status")
+        .project
+        .frame_num;
+    assert!(
+        frame_after > frame_before,
+        "runtime must keep ticking after fuel traps: {frame_before} -> {frame_after}"
+    );
+}
+
+#[wasm_bindgen_test]
+fn get_fuel_builtin_links_and_reads_nonzero_on_browser_path() {
+    // `__lp_get_fuel()` resolves to the fw-browser host module's own
+    // `__lp_vm_get_fuel_q32` export; with the shared-memory arrangement the
+    // vmctx word is offset 0 of this module's linear memory (a VALID vmctx
+    // address there, not a null pointer). A shader gating its output on a
+    // nonzero fuel read proves both linking and that the builtin reads the
+    // armed tank rather than short-circuiting to 0.
+    fw_browser_init_exports(wasm_bindgen::exports());
+    let runtime_id = create_cpu_runtime("fuel-read");
+    let mut next_id = 1u64;
+
+    let project_fs = build_project_with_shader(
+        "layout(binding = 0) uniform vec2 outputSize; \
+         layout(binding = 1) uniform float time; \
+         vec4 render(vec2 pos) { \
+             float lit = int(__lp_get_fuel()) > 0 ? 1.0 : 0.0; \
+             return vec4(lit, 0.0, 0.0, 1.0); \
+         }",
+    );
+    let handle = push_and_load_project(runtime_id, "fuel-read", &project_fs.borrow(), &mut next_id);
+
+    // Render a few frames first, then check the shader compiled and ran
+    // cleanly (a linking failure for the builtin shows up here as the node
+    // error, which is far more diagnostic than a missing output sample).
+    for _ in 0..3 {
+        tick_runtime(runtime_id, 40).expect("tick");
+    }
+    let nodes_view = read_nodes_view(runtime_id, handle, &mut next_id, 16);
+    let (shader_path, shader_status) = nodes_view
+        .tree
+        .nodes
+        .values()
+        .find(|entry| entry.path.to_string().contains("shader"))
+        .map(|entry| (entry.path.to_string(), entry.status.clone()))
+        .expect("shader node present");
+    assert!(
+        matches!(shader_status, NodeRuntimeStatus::Ok),
+        "{shader_path}: __lp_get_fuel shader must compile and run: {shader_status:?}"
+    );
+    let output_id = output_node_id(&nodes_view);
+
+    let view = read_runtime_and_resources(runtime_id, handle, &mut next_id, 40);
+    let sample = read_output_sample(&view, output_id);
+    assert!(sample.runtime_frame_num > 0);
+    assert!(
+        sample.red > 60_000,
+        "__lp_get_fuel() must read the armed tank (red = 1.0 expected): {}",
+        sample.red
+    );
+}
+
+#[wasm_bindgen_test]
 fn file_sync_round_trips_over_the_protocol() {
     // M2b acceptance proof on the BrowserWorker path: push a project into a
     // fresh runtime purely over protocol frames (chunked where needed),
@@ -244,7 +413,7 @@ fn file_sync_round_trips_over_the_protocol() {
     use lpc_wire::server::{FileChangeKind, FileCursor, FsResponse};
 
     fw_browser_init_exports(wasm_bindgen::exports());
-    let runtime_id = create_runtime("file-sync-e2e").expect("create runtime");
+    let runtime_id = create_cpu_runtime("file-sync-e2e");
     let mut next_id = 1u64;
 
     // --- assemble the project: smoke files + one multi-chunk binary file
@@ -445,7 +614,7 @@ fn load_project_tolerates_library_artifacts() {
     fw_browser_init_exports(wasm_bindgen::exports());
 
     let case = |label: &str, add_uid: bool, add_sidecar: bool| {
-        let runtime_id = create_runtime(label).expect("create runtime");
+        let runtime_id = create_cpu_runtime(label);
         let mut next_id = 1u64;
         let project_fs = build_smoke_project();
         for (path, mut content) in collect_project_files(&project_fs.borrow()) {
@@ -585,6 +754,114 @@ fn build_smoke_project() -> Rc<RefCell<LpFsMemory>> {
     builder.fixture_basic(&output_path, &texture_path);
     builder.build();
     fs
+}
+
+/// The smoke project with a custom shader source (see [`build_smoke_project`]).
+fn build_project_with_shader(glsl: &str) -> Rc<RefCell<LpFsMemory>> {
+    let fs = Rc::new(RefCell::new(LpFsMemory::new()));
+    let mut builder = ProjectBuilder::new(fs.clone());
+    builder.clock_basic();
+    let texture_path = builder.texture().width(2).height(2).add(&mut builder);
+    builder.shader(&texture_path).glsl(glsl).add(&mut builder);
+    let output_path = builder.output_basic();
+    builder.fixture_basic(&output_path, &texture_path);
+    builder.build();
+    fs
+}
+
+/// Push `fs` into `/projects/<name>` over protocol frames and load it.
+fn push_and_load_project(
+    runtime_id: u32,
+    name: &str,
+    fs: &LpFsMemory,
+    next_id: &mut u64,
+) -> WireProjectHandle {
+    for (path, content) in collect_project_files(fs) {
+        let full_path = format!("/projects/{name}/{path}").as_path_buf();
+        let responses = send_protocol_request(
+            runtime_id,
+            next_request_id(next_id),
+            ClientRequest::Filesystem(FsRequest::Write {
+                path: full_path,
+                data: content,
+            }),
+            1,
+        );
+        assert!(
+            !responses.is_empty(),
+            "{name}: project write got no response"
+        );
+    }
+
+    let load_response = send_protocol_request(
+        runtime_id,
+        next_request_id(next_id),
+        ClientRequest::LoadProject {
+            path: name.to_string(),
+        },
+        1,
+    )
+    .into_iter()
+    .next()
+    .expect("load project response");
+    match load_response.msg {
+        WireServerMsgBody::LoadProject { handle } => handle,
+        other => panic!("{name}: unexpected load response: {other:?}"),
+    }
+}
+
+/// One node-detail read applied onto a fresh [`ProjectView`].
+fn read_nodes_view(
+    runtime_id: u32,
+    handle: WireProjectHandle,
+    next_id: &mut u64,
+    delta_ms: u32,
+) -> ProjectView {
+    view_from_project_read(send_protocol_request(
+        runtime_id,
+        next_request_id(next_id),
+        ClientRequest::ProjectRead {
+            handle,
+            request: ProjectReadRequest {
+                since: None,
+                queries: vec![ProjectReadQuery::Nodes(NodeReadQuery {
+                    level: ReadLevel::Detail,
+                    nodes: Default::default(),
+                    include_slots: false,
+                })],
+                probes: Vec::new(),
+            },
+        },
+        delta_ms,
+    ))
+}
+
+/// One runtime + resource-payload read applied onto a fresh [`ProjectView`].
+fn read_runtime_and_resources(
+    runtime_id: u32,
+    handle: WireProjectHandle,
+    next_id: &mut u64,
+    delta_ms: u32,
+) -> ProjectView {
+    view_from_project_read(send_protocol_request(
+        runtime_id,
+        next_request_id(next_id),
+        ClientRequest::ProjectRead {
+            handle,
+            request: ProjectReadRequest {
+                since: None,
+                queries: vec![
+                    ProjectReadQuery::Runtime(RuntimeReadQuery),
+                    ProjectReadQuery::Resources(ResourceReadQuery {
+                        level: ReadLevel::Detail,
+                        payloads: ResourcePayloadRead::All,
+                    }),
+                ],
+                probes: Vec::new(),
+            },
+        },
+        delta_ms,
+    ))
 }
 
 fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
