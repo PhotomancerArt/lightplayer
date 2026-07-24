@@ -3,7 +3,6 @@
 pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub(crate) mod device_card;
-pub(crate) mod device_detail_popover;
 pub(crate) mod example_card;
 pub(crate) mod gallery_preview;
 pub mod home_gallery;

@@ -313,7 +313,7 @@ fn assemble_roster(
 /// presentation. The session's existence is the status — Running when a
 /// project is loaded, "Connected — nothing loaded" otherwise; no uid, no
 /// transport, no firmware provenance (the sim is not a device, D22).
-fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
+pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
     let state = if sim.project.is_some() {
         RosterCardState::RunningUpToDate
     } else {
@@ -335,7 +335,7 @@ fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
 /// no live evidence at all, and also when the evidence derives *Offline*
 /// (a `Gone` link or stale sync) — the registry card is the
 /// better-informed offline view (it knows the last sighting).
-fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
+pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
     if live.sync.is_none() && live.link.is_none() && live.connect == ConnectEvidence::Idle {
         return None;
     }

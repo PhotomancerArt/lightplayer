@@ -351,6 +351,43 @@ fn console_tab_open() -> Element {
 }
 
 #[story(
+    description = "D43: the card GROWN into the editor's right-side pane — same component, tall column, icon tabs stay icons, body scrolls, ⇲ shrinks back to the gallery. The console is a permanent expanded bottom region (round 3.5): the Console tab and the strip are gone in pane mode."
+)]
+fn pane_grown_device() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:h-[560px] tw:w-[340px]",
+            DeviceCard {
+                card: device_card_with_console(behind_state(), true),
+                now_secs: Some(STORY_NOW),
+                pane: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "D43: the live sim card grown into the editor pane — sim glyph, the honestly-applicable tabs (no Settings/Performance), the permanent console region at the bottom."
+)]
+fn pane_grown_sim() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:h-[560px] tw:w-[340px]",
+            DeviceCard {
+                card: UiDeviceCard {
+                    console_tail: device_card_with_console(RosterCardState::RunningUpToDate, true)
+                        .console_tail,
+                    ..sim_card(true)
+                },
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                pane: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
     description = "The standing amber chip: firmware drift is advisory on any Running row — it badges the Settings tab, never the edge tint (project drift owns the edge)."
 )]
 fn firmware_update_chip() -> Element {

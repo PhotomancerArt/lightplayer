@@ -27,15 +27,9 @@ use lpa_studio_core::{
     BundledFirmware, CardTabView, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab,
     DeviceController, DeviceDetailAffordance, DeviceOp, DeviceRichInput, HomeOp, LinkProviderKind,
     ProjectController, ProjectOp, RichObjectView, RichSection, RosterAffordance, RosterCardState,
-    RosterCircleShape as CoreShape, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard,
-    UiStatusKind, device_card_tabs, device_rich_object, sim_rich_object,
+    RosterTreatment, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard, UiStatusKind,
+    device_card_tabs, device_rich_object, sim_rich_object,
 };
-// The circle→component mapping (`circle_props`) survives only for the
-// exploration story sheet; its imports ride the same `stories` gate so
-// host clippy (no stories) does not see them as unused.
-#[cfg(feature = "stories")]
-use lpa_studio_core::RosterCircle;
-
 use lpa_studio_core::{UiLogEntry, UiLogLevel};
 
 use crate::app::home::card_sheet::{
@@ -44,8 +38,6 @@ use crate::app::home::card_sheet::{
 use crate::app::home::card_thumb::thumb_swatch_style;
 use crate::app::home::package_card::home_action;
 use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
-#[cfg(feature = "stories")]
-use crate::base::{StatusCircleShape, StatusCircleTone};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, chip_status, quiet_action_class};
 
 /// A card-resident sheet (D41) the card can open: THE destructive-confirm
@@ -115,6 +107,12 @@ pub(crate) fn DeviceCard(
     /// sim rich-object sections.
     #[props(default = false)]
     sim: bool,
+    /// D43 pane mode: the SAME card grown into the editor's right-side
+    /// column — tall body, ⇲ shrinks back to the gallery, and the
+    /// console is a permanent bottom region (round 3.5: the Console tab
+    /// and the strip both disappear).
+    #[props(default = false)]
+    pane: bool,
     /// Studio's bundled firmware image (packaged manifest), when known —
     /// evidence for the advisory "firmware update available" chip on the
     /// Settings tab (and its badge).
@@ -170,7 +168,7 @@ pub(crate) fn DeviceCard(
     let view = RichObjectView::new(sections);
     let edge_tone = view.rollup().tone;
     let tabs = device_card_tabs(view);
-    let edge_shape = card.state.circle().shape;
+    let edge_treatment = card.state.spec().treatment;
 
     // The grow control dispatches the existing editor-attach ops exactly
     // where the old click-arms fired; elsewhere it renders disabled (the
@@ -189,11 +187,18 @@ pub(crate) fn DeviceCard(
 
     let selected = use_signal(move || initial_tab.unwrap_or(DeviceCardTab::Status));
     // a state change may drop the selected tab (e.g. Danger during an
-    // operation): fall back to Status rather than a blank body
+    // operation): fall back to Status rather than a blank body. Pane
+    // mode has no Console tab (round 3.5) — a Console selection lands
+    // on Status.
     let active_tab = tabs
         .iter()
         .find(|tab| tab.tab == selected())
         .map_or(DeviceCardTab::Status, |tab| tab.tab);
+    let active_tab = if pane && active_tab == DeviceCardTab::Console {
+        DeviceCardTab::Status
+    } else {
+        active_tab
+    };
     let mut sheet = use_signal(move || initial_sheet.clone());
 
     let mut renaming = use_signal(|| false);
@@ -217,7 +222,7 @@ pub(crate) fn DeviceCard(
 
     rsx! {
         article {
-            class: device_card_class(faded, edge_shape),
+            class: device_card_class(faded, edge_treatment, pane),
             style: "{edge_style}",
             title: "{status_line}",
             // connected cards are drop targets: project card → device card
@@ -241,7 +246,7 @@ pub(crate) fn DeviceCard(
             },
             // D40 title bar: kind glyph · inline-editable name · transport
             // label · the always-visible grow control.
-            header { class: "tw:flex tw:min-h-9 tw:items-center tw:gap-2 tw:border-b tw:border-border tw:bg-terminal tw:py-1.5 tw:pl-3 tw:pr-1.5",
+            header { class: "tw:flex tw:min-h-9 tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border tw:bg-terminal tw:py-1.5 tw:pl-3 tw:pr-1.5",
                 span { class: "tw:inline-flex tw:flex-none tw:items-center tw:text-muted-foreground",
                     title: if sim { "Simulator" } else { "Device" },
                     StudioIcon { name: glyph, size: 14 }
@@ -324,21 +329,40 @@ pub(crate) fn DeviceCard(
                             "{transport_label}"
                         }
                     }
-                    button {
-                        class: grow_button_class(transport_label.is_empty()),
-                        r#type: "button",
-                        disabled: grow_action.is_none(),
-                        title: if grow_action.is_some() { "Open in the editor" } else { "Nothing to open in the editor yet" },
-                        aria_label: "Open {card.name} in the editor",
-                        onclick: {
-                            let grow_action = grow_action.clone();
-                            move |_| {
-                                if let Some(action) = &grow_action {
-                                    on_action.call(action.clone());
+                    if pane {
+                        // D43: the grown pane's ⇲ shrinks back to the
+                        // gallery — the same route + detach pair the
+                        // shell wordmark uses (the hash may not change).
+                        a {
+                            class: "{grow_button_class(transport_label.is_empty())} tw:no-underline",
+                            href: "#/",
+                            title: "Back to the gallery",
+                            aria_label: "Shrink {card.name} back to the gallery",
+                            onclick: move |_| {
+                                on_action.call(UiAction::from_op(
+                                    ProjectController::NODE_ID,
+                                    ProjectOp::DetachLens,
+                                ));
+                            },
+                            StudioIcon { name: StudioIconName::Shrink, size: 14 }
+                        }
+                    } else {
+                        button {
+                            class: grow_button_class(transport_label.is_empty()),
+                            r#type: "button",
+                            disabled: grow_action.is_none(),
+                            title: if grow_action.is_some() { "Open in the editor" } else { "Nothing to open in the editor yet" },
+                            aria_label: "Open {card.name} in the editor",
+                            onclick: {
+                                let grow_action = grow_action.clone();
+                                move |_| {
+                                    if let Some(action) = &grow_action {
+                                        on_action.call(action.clone());
+                                    }
                                 }
-                            }
-                        },
-                        StudioIcon { name: StudioIconName::Grow, size: 14 }
+                            },
+                            StudioIcon { name: StudioIconName::Grow, size: 14 }
+                        }
                     }
                 }
             }
@@ -348,20 +372,22 @@ pub(crate) fn DeviceCard(
             // open sheet floors the region's height — a short tab body
             // must never clip the panel (the card is overflow-hidden);
             // the drift sheet's three stacked verbs need the tall floor.
-            div { class: match sheet() {
-                    Some(DeviceCardSheet::Drift) => "tw:relative tw:min-h-[290px]",
-                    Some(_) => "tw:relative tw:min-h-[210px]",
-                    None => "tw:relative",
+            div { class: match (pane, sheet()) {
+                    (true, _) => "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
+                    (false, Some(DeviceCardSheet::Drift)) => "tw:relative tw:min-h-[290px]",
+                    (false, Some(_)) => "tw:relative tw:min-h-[210px]",
+                    (false, None) => "tw:relative",
                 },
-                // the icon-tab row (below the title bar — spike anatomy)
+                // the icon-tab row (below the title bar — spike anatomy;
+                // pane mode drops the Console tab, round 3.5)
                 div {
-                    class: "tw:flex tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
+                    class: "tw:flex tw:flex-none tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
                     role: "tablist",
-                    for tab_view in tabs.iter() {
+                    for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
                         {tab_button(tab_view, active_tab, selected)}
                     }
                 }
-                div { class: "tw:grid tw:content-start tw:gap-1.5 tw:p-3",
+                div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
                     match active_tab {
                         DeviceCardTab::Status => rsx! {
                             {status_tab_body(&card, &tabs, chip_muted, on_action, sheet)}
@@ -374,10 +400,26 @@ pub(crate) fn DeviceCard(
                         },
                     }
                 }
+                if pane {
+                    // D42 pane mode (round 3.5): the console is a
+                    // permanent expanded bottom region — a normal console;
+                    // no tab, no strip.
+                    div { class: "ux-console-region",
+                        if card.console_tail.is_empty() {
+                            p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
+                                "No console output yet."
+                            }
+                        } else {
+                            for entry in card.console_tail.iter() {
+                                div { class: console_line_class(entry.level), "{entry.message}" }
+                            }
+                        }
+                    }
+                }
                 // D42's ambient strip: the console's latest line at the
                 // card's bottom edge; clicking jumps to the Console tab,
                 // and the strip HIDES while that tab is active.
-                if active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
+                if !pane && active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
                     {console_strip(&card.console_tail, selected)}
                 }
                 if let Some(active_sheet) = sheet() {
@@ -1083,57 +1125,6 @@ fn wire_sim_card_section(section: RichSection<SimDetailAffordance>) -> RichSecti
     }
 }
 
-/// Map one device section's affordance identities onto concrete
-/// `UiAction`s for this card. Identities without a live flow render no
-/// row (the name-device flow lives in the title bar).
-pub(super) fn wire_section(
-    card: &UiDeviceCard,
-    section: RichSection<DeviceDetailAffordance>,
-) -> RichSection<UiAction> {
-    RichSection {
-        title: section.title,
-        tone: section.tone,
-        lines: section.lines,
-        chip: section.chip,
-        affordances: section
-            .affordances
-            .iter()
-            .filter_map(|affordance| wire_affordance(card, affordance))
-            .collect(),
-        weight: section.weight,
-    }
-}
-
-fn wire_affordance(card: &UiDeviceCard, affordance: &DeviceDetailAffordance) -> Option<UiAction> {
-    match affordance {
-        DeviceDetailAffordance::Roster(affordance) => device_affordance_action(card, affordance),
-        DeviceDetailAffordance::FlashFirmware => Some(flash_device_action_destructive()),
-        DeviceDetailAffordance::EraseDevice => Some(erase_device_action(card.name.clone())),
-        DeviceDetailAffordance::ForgetDevice => card
-            .uid
-            .clone()
-            .map(|uid| forget_device_action(uid, card.name.clone())),
-    }
-}
-
-/// Map one sim section's affordance identities onto concrete `UiAction`s.
-pub(super) fn wire_sim_section(section: RichSection<SimDetailAffordance>) -> RichSection<UiAction> {
-    RichSection {
-        title: section.title,
-        tone: section.tone,
-        lines: section.lines,
-        chip: section.chip,
-        affordances: section
-            .affordances
-            .iter()
-            .map(|affordance| match affordance {
-                SimDetailAffordance::StopSimulator => stop_simulator_action(),
-            })
-            .collect(),
-        weight: section.weight,
-    }
-}
-
 /// The Danger tab's flash row: [`flash_device_action`] with a live
 /// device context, wearing the destructive treatment the tab's rows
 /// share (the inline red zone reads uniformly red).
@@ -1170,44 +1161,29 @@ pub(crate) fn forget_device_action(uid: String, name: String) -> UiAction {
     )
 }
 
-/// Core circle spec → base component props (kept for the exploration
-/// stories' vocabulary sheet; cards themselves render the edge chrome —
-/// `StatusCircle`'s deletion lands with M7′ P3).
-#[cfg(feature = "stories")]
-pub(crate) fn circle_props(circle: RosterCircle) -> (StatusCircleShape, StatusCircleTone) {
-    let shape = match circle.shape {
-        CoreShape::Solid => StatusCircleShape::Solid,
-        CoreShape::Hollow => StatusCircleShape::Hollow,
-        CoreShape::Pulsing => StatusCircleShape::Pulsing,
-    };
-    let tone = match circle.tone {
-        UiStatusKind::Neutral => StatusCircleTone::Neutral,
-        UiStatusKind::Working => StatusCircleTone::Working,
-        UiStatusKind::Good => StatusCircleTone::Good,
-        UiStatusKind::Warning => StatusCircleTone::Warning,
-        UiStatusKind::Attention => StatusCircleTone::Attention,
-        UiStatusKind::Error => StatusCircleTone::Error,
-    };
-    (shape, tone)
-}
-
 /// The card's chrome: the tint edge class per the shape grammar plus the
-/// offline whole-card fade. Body clicks are quiet (no pointer cursor —
-/// the interactive surfaces carry their own).
-fn device_card_class(faded: bool, shape: CoreShape) -> String {
-    let edge = match shape {
-        CoreShape::Solid => "ux-device-edge",
-        CoreShape::Hollow => "ux-device-edge ux-device-edge-remembered",
-        CoreShape::Pulsing => "ux-device-edge ux-device-edge-working",
+/// offline whole-card fade; pane mode (D43) makes the card a tall flex
+/// column. Body clicks are quiet (no pointer cursor — the interactive
+/// surfaces carry their own).
+fn device_card_class(faded: bool, treatment: RosterTreatment, pane: bool) -> String {
+    let edge = match treatment {
+        RosterTreatment::Filled => "ux-device-edge",
+        RosterTreatment::Remembered => "ux-device-edge ux-device-edge-remembered",
+        RosterTreatment::Working => "ux-device-edge ux-device-edge-working",
     };
     let fade = if faded {
         " tw:opacity-70 tw:transition-opacity tw:hover:opacity-100"
     } else {
         ""
     };
+    let grown = if pane {
+        " tw:flex tw:min-h-[560px] tw:flex-col"
+    } else {
+        ""
+    };
     format!(
         // tw:group anchors the pencil's hover reveal
-        "tw:group tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card {edge}{fade}"
+        "tw:group tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card {edge}{fade}{grown}"
     )
 }
 

@@ -25,12 +25,10 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::{RosterCardState, UiStatus};
 
 use crate::app::home::card_thumb::thumb_swatch_style;
-use crate::app::home::device_card::circle_props;
 use crate::app::layout::{PaneChip, PaneChrome, PaneTone, StudioPane};
 use crate::base::{
     DetailPopover, DetailSection, DetailSectionTint, IconMenuTone, PopoverButton, PopoverPlacement,
-    StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon, StudioIconName,
-    detail_popover_card_class, node_kind_icon,
+    StudioIcon, StudioIconName, detail_popover_card_class, node_kind_icon,
 };
 use crate::core::{
     StatusChip, menu_item_action_class, menu_item_destructive_action_class, quiet_action_class,
@@ -42,6 +40,92 @@ use crate::core::{
 // they were private; they are exported now and this spike record consumes
 // the exports. (Finding #1's other half — the card chrome behind a
 // non-icon trigger — dissolved at the gate: Q1 chose the icon trigger.)
+//
+// ERA NOTE (M7′ P3): the circle + popover presentation this sheet
+// explored was SUPERSEDED by the card-as-control-panel (tabs + edge
+// chrome; 2026-07-24 replan). The production `StatusCircle` is deleted;
+// a spike-local copy below keeps this decision record rendering as it
+// did when the decisions were taken.
+
+/// The RETIRED status circle's shape grammar, spike-local (see era note).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StatusCircleShape {
+    Solid,
+    #[allow(dead_code, reason = "the retired grammar, kept whole")]
+    Hollow,
+    #[allow(dead_code, reason = "the retired grammar, kept whole")]
+    Pulsing,
+}
+
+/// The retired circle's tone families, spike-local (see era note).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StatusCircleTone {
+    Neutral,
+    Working,
+    Good,
+    Warning,
+    Attention,
+    Error,
+}
+
+/// The retired 8px status circle, spike-local (see era note).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn StatusCircle(shape: StatusCircleShape, tone: StatusCircleTone) -> Element {
+    let base = "tw:inline-block tw:h-2 tw:w-2 tw:flex-none tw:rounded-full";
+    let paint = match (shape, tone) {
+        (StatusCircleShape::Hollow, StatusCircleTone::Neutral) => {
+            "tw:border tw:border-status-neutral-foreground tw:bg-transparent"
+        }
+        (StatusCircleShape::Hollow, StatusCircleTone::Working) => {
+            "tw:border tw:border-status-working-foreground tw:bg-transparent"
+        }
+        (StatusCircleShape::Hollow, StatusCircleTone::Good) => {
+            "tw:border tw:border-status-good-foreground tw:bg-transparent"
+        }
+        (StatusCircleShape::Hollow, StatusCircleTone::Warning) => {
+            "tw:border tw:border-status-warning-foreground tw:bg-transparent"
+        }
+        (StatusCircleShape::Hollow, StatusCircleTone::Attention) => {
+            "tw:border tw:border-status-attention-foreground tw:bg-transparent"
+        }
+        (StatusCircleShape::Hollow, StatusCircleTone::Error) => {
+            "tw:border tw:border-status-error-foreground tw:bg-transparent"
+        }
+        (_, StatusCircleTone::Neutral) => "tw:bg-status-neutral-foreground",
+        (_, StatusCircleTone::Working) => "tw:bg-status-working-foreground",
+        (_, StatusCircleTone::Good) => "tw:bg-status-good-foreground",
+        (_, StatusCircleTone::Warning) => "tw:bg-status-warning-foreground",
+        (_, StatusCircleTone::Attention) => "tw:bg-status-attention-foreground",
+        (_, StatusCircleTone::Error) => "tw:bg-status-error-foreground",
+    };
+    let motion = match shape {
+        StatusCircleShape::Pulsing => " tw:animate-pulse",
+        StatusCircleShape::Solid | StatusCircleShape::Hollow => "",
+    };
+    rsx! {
+        span { class: "{base} {paint}{motion}" }
+    }
+}
+
+/// The retired core-spec → circle mapping, spike-local (see era note).
+fn circle_props(spec: lpa_studio_core::RosterStateSpec) -> (StatusCircleShape, StatusCircleTone) {
+    use lpa_studio_core::{RosterTreatment, UiStatusKind};
+    let shape = match spec.treatment {
+        RosterTreatment::Filled => StatusCircleShape::Solid,
+        RosterTreatment::Remembered => StatusCircleShape::Hollow,
+        RosterTreatment::Working => StatusCircleShape::Pulsing,
+    };
+    let tone = match spec.tone {
+        UiStatusKind::Neutral => StatusCircleTone::Neutral,
+        UiStatusKind::Working => StatusCircleTone::Working,
+        UiStatusKind::Good => StatusCircleTone::Good,
+        UiStatusKind::Warning => StatusCircleTone::Warning,
+        UiStatusKind::Attention => StatusCircleTone::Attention,
+        UiStatusKind::Error => StatusCircleTone::Error,
+    };
+    (shape, tone)
+}
 
 #[story(
     description = "The centerpiece: the card's status circle IS the popover trigger (no More-menu), open over a Running-behind device. All six sections from the design note's device table — Health, Project, Technical, Performance, Backup, Danger zone — each with its own lines and affordance where the table says so. Advisory facts (the firmware chip) tone a chip, never the circle. All buttons are inert; exploration only."
@@ -331,7 +415,7 @@ fn RichObjectCard(
         observed_version: Some(3),
         head_version: Some(5),
     };
-    let (shape, tone) = circle_props(state.circle());
+    let (shape, tone) = circle_props(state.spec());
     let status_line = state.status_line(0.0);
     let swatch = thumb_swatch_style("prj_3fKq8Zr21bTxYw0A", false);
 

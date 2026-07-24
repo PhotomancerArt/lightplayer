@@ -3,7 +3,7 @@ use dioxus_icons::lucide::{
     Asterisk, Boxes, ChartLine, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot,
     CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, FlaskConical, Folder,
     Funnel, Image, Info, Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed, Maximize2,
-    MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio, Save, Settings, Sparkles,
+    Minimize2, MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio, Save, Settings, Sparkles,
     SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
 };
 
@@ -69,6 +69,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Download => rsx! { Download { size } },
         StudioIconName::Upload => rsx! { Upload { size } },
         StudioIconName::Grow => rsx! { Maximize2 { size } },
+        StudioIconName::Shrink => rsx! { Minimize2 { size } },
         StudioIconName::Console => rsx! { SquareTerminal { size } },
         StudioIconName::Performance => rsx! { ChartLine { size } },
         StudioIconName::Danger => rsx! { TriangleAlert { size } },
@@ -154,6 +155,9 @@ pub enum StudioIconName {
     /// control (D40) — the ONE editor entry (and, at M7′ P3, the
     /// card→pane growth toggle).
     Grow,
+    /// Diagonal collapse arrows: the grown pane's shrink control (D43) —
+    /// back to the gallery card.
+    Shrink,
     /// Terminal: the device card's Console tab (D42).
     Console,
     /// Line chart: the device card's data-adaptive Performance tab.
