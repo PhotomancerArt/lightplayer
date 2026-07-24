@@ -310,12 +310,34 @@ impl ProjectController {
                     .and_then(|value| value.value.as_ref())
                     .map(format_lp_value),
                 value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
-                primary_visual: channel.name == "visual.out",
+                primary_visual: channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL,
                 writers: channel.providers.iter().filter_map(site).collect(),
                 readers: channel.consumers.iter().filter_map(site).collect(),
             })
             .collect();
         Some(crate::UiBusView { channels })
+    }
+
+    /// The project's **primary visual product**: the resolved value of
+    /// `bus:visual.out` (ADR 2026-07-16-primary-visual-product).
+    ///
+    /// Reads the engine's answer off the cached binding graph — the probe
+    /// already resolves the channel by provider priority, so this never
+    /// re-derives precedence client-side. `None` is the defined empty
+    /// state: no graph yet, no provider, an unresolved value, or a
+    /// non-visual product on the channel.
+    pub fn primary_visual_product(&self) -> Option<UiProductRef> {
+        let graph = self.binding_graph()?;
+        let channel = graph
+            .channels
+            .iter()
+            .find(|channel| channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL)?;
+        let value = channel.value.as_ref()?.value.as_ref()?;
+        let lpc_model::LpValue::Product(product) = value else {
+            return None;
+        };
+        matches!(product, lpc_model::ProductRef::Visual(_))
+            .then(|| UiProductRef::from_product_ref(*product))
     }
 
     /// Channels the binding picker offers: every channel observed in the
@@ -389,6 +411,7 @@ impl ProjectController {
 
     /// Project root node controllers into node-pane DTOs in project tree order.
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
+        let primary_visual = self.primary_visual_product();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
@@ -403,6 +426,7 @@ impl ProjectController {
                     &edits,
                     &extra_config,
                     &asset_editor,
+                    primary_visual.as_ref(),
                 )
             })
             .collect()
@@ -1071,6 +1095,7 @@ impl ProjectController {
         inventory: &ProjectInventorySummary,
     ) -> ProjectEditorView {
         let summary = self.sync_summary().unwrap_or_default();
+        let primary_visual = self.primary_visual_product();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
@@ -1087,6 +1112,7 @@ impl ProjectController {
                     &edits,
                     &extra_config,
                     &asset_editor,
+                    primary_visual.as_ref(),
                 )
             })
             .collect::<Vec<_>>();
@@ -1674,6 +1700,10 @@ impl ProjectController {
         for node in &self.root_nodes {
             self.collect_subscribed_products(node, &mut product_refs);
         }
+        // The primary visual streams whenever a project is open — the
+        // project's face is always live regardless of node focus (ADR
+        // 2026-07-16-primary-visual-product; M6 P3).
+        product_refs.extend(self.primary_visual_product());
         product_refs.into_iter().collect()
     }
 
@@ -4041,6 +4071,134 @@ mod tests {
                 .path
                 .to_string(),
             "bindings[seconds].target.some"
+        );
+    }
+
+    fn primary_visual_graph(value: Option<lpc_model::LpValue>) -> lpc_wire::WireBindingGraph {
+        lpc_wire::WireBindingGraph {
+            revision: Revision::new(2),
+            bindings: Vec::new(),
+            channels: vec![lpc_wire::WireBusChannel {
+                name: lpc_model::PRIMARY_VISUAL_CHANNEL.to_string(),
+                kind: Some(lpc_model::Kind::Color),
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value,
+                    error: None,
+                }),
+            }],
+        }
+    }
+
+    fn project_with_graph(graph: lpc_wire::WireBindingGraph) -> ProjectController {
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project
+            .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
+            .unwrap();
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(graph);
+        project
+    }
+
+    #[test]
+    fn primary_visual_product_reads_the_resolved_channel_value() {
+        // The engine already resolved visual.out by provider priority; the
+        // helper reads that answer (ADR 2026-07-16-primary-visual-product).
+        let product = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(5),
+            0,
+        ));
+        let project = project_with_graph(primary_visual_graph(Some(lpc_model::LpValue::Product(
+            product,
+        ))));
+        assert_eq!(
+            project.primary_visual_product(),
+            Some(UiProductRef::Visual {
+                node_id: 5,
+                output: 0
+            })
+        );
+    }
+
+    #[test]
+    fn primary_visual_product_empty_states_are_none() {
+        // No graph yet.
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        assert_eq!(project.primary_visual_product(), None);
+
+        // Channel present but unresolved (no provider produced a value).
+        let project = project_with_graph(primary_visual_graph(None));
+        assert_eq!(project.primary_visual_product(), None);
+
+        // Channel resolved to a non-product value: defined empty, not a guess.
+        let project = project_with_graph(primary_visual_graph(Some(lpc_model::LpValue::F32(1.0))));
+        assert_eq!(project.primary_visual_product(), None);
+    }
+
+    #[test]
+    fn primary_visual_product_presents_live_without_focus() {
+        // The owning node is unfocused with Default intent, but the primary
+        // visual's preview presents as Tracking, not Paused/Untracked.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let product = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(1),
+            0,
+        ));
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(primary_visual_graph(Some(lpc_model::LpValue::Product(
+                product,
+            ))));
+
+        let nodes = project.ui_nodes();
+        let products = node_sections(&nodes[0])
+            .iter()
+            .find_map(|section| match section {
+                UiNodeSection::ProducedProducts(products) => Some(products.clone()),
+                _ => None,
+            })
+            .expect("produced products section");
+        let primary = products
+            .iter()
+            .find(|product| {
+                product.product
+                    == Some(UiProductRef::Visual {
+                        node_id: 1,
+                        output: 0,
+                    })
+            })
+            .expect("primary product row");
+        assert_eq!(primary.tracking, UiProductTrackingState::Tracking);
+    }
+
+    #[test]
+    fn primary_visual_product_is_always_subscribed() {
+        // Nothing focused, no explicit intent: the project's face still
+        // streams (M6 P3 — always-live primary preview).
+        let product = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(1),
+            0,
+        ));
+        let project = project_with_graph(primary_visual_graph(Some(lpc_model::LpValue::Product(
+            product,
+        ))));
+        assert_eq!(
+            project.subscribed_products(),
+            vec![UiProductRef::Visual {
+                node_id: 1,
+                output: 0
+            }]
         );
     }
 
