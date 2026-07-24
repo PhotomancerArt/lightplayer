@@ -5525,6 +5525,7 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "lps-builtin-completions",
+ "lps-glsl",
  "serde",
  "serde_json",
  "syn 2.0.117",

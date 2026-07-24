@@ -182,16 +182,19 @@ function toDiagnostic(state, entry) {
 }
 
 // Convert one façade completion entry into a CodeMirror `Completion`.
-// Entries are plain objects: { label, detail?, type?, info?, snippet? }.
-// A `snippet` (CodeMirror `snippet()` template, e.g. "mix(${x}, ${y}, ${a})")
-// makes accepting insert the template with navigable placeholders; without
-// one, accepting inserts the label verbatim.
+// Entries are plain objects: { label, detail?, type?, info?, snippet?,
+// boost? }. A `snippet` (CodeMirror `snippet()` template, e.g.
+// "mix(${x}, ${y}, ${a})") makes accepting insert the template with
+// navigable placeholders; without one, accepting inserts the label
+// verbatim. `boost` (number, −99..99) biases ranking — user-defined
+// symbols ride above builtins with it.
 function toCompletion(entry) {
   const base = {
     label: entry.label ?? "",
     detail: entry.detail || undefined,
     type: entry.type || undefined,
     info: entry.info || undefined,
+    boost: typeof entry.boost === "number" ? entry.boost : undefined,
   };
   if (entry.snippet) return snippetCompletion(entry.snippet, base);
   return base;
