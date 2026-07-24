@@ -3,11 +3,14 @@
 
 // =============================================================================
 // Fuel trap cascade: the infinite loop lives in a HELPER called from the test
-// function (inlining pinned off so the call is real). The helper's back-edge
-// check writes the trap code and aborts to its epilogue; back in the caller,
-// fuel is still 0, so the caller's own checks (loop back-edge / next call's
-// entry check) abort too — the trap cascades up the call stack and the host
-// reads the trap slot after the outermost return.
+// function (inlining pinned off so the call is real). rv32n/rv32lpn: the
+// helper's back-edge check writes the trap code and aborts to its epilogue;
+// back in the caller, fuel is still 0, so the caller's own checks (loop
+// back-edge / next call's entry check) abort too — the trap cascades up the
+// call stack and the host reads the trap slot after the outermost return.
+// wasm: the helper's back-edge check writes the trap code and executes
+// `unreachable`, which unwinds straight to the host in one shot (no cascade
+// needed); the host reads the trap slot after the call returns.
 // =============================================================================
 
 int spin_helper() {

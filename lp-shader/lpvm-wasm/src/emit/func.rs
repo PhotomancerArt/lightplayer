@@ -167,6 +167,12 @@ fn emit_function_ops(
             .ok_or_else(|| String::from("internal: frame without $sp"))?;
         memory::emit_shadow_prologue(&mut sink, sp, fctx.frame_size);
     }
+    if fctx.module.options.fuel {
+        let vmctx = fctx
+            .vmctx_local
+            .ok_or_else(|| String::from("internal: fuel entry check without vmctx local"))?;
+        crate::emit::fuel::emit_entry_fuel_check(&mut sink, vmctx);
+    }
     for (pc, op) in f.body.iter().enumerate() {
         control::close_loop_inner_at_continuing(&mut sink, ctrl, wasm_open, pc);
         emit_op(&mut sink, ctrl, fctx, ir, f, pc, op, wasm_open)?;

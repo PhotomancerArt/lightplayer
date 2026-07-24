@@ -5,7 +5,9 @@
 // instead of hanging. rv32n/rv32lpn: the back-edge fuel check observes 0,
 // writes trap code 1 to the vmctx trap slot, and jumps to the epilogue; the
 // host reads the slot and reports "native trap: fuel exhausted (invocation N)".
-// wasm: wasmtime store fuel trips with "execution fuel exhausted".
+// wasm: the emitted back-edge check writes the trap code and executes
+// `unreachable`; the host reads the slot and reports
+// "wasm trap: fuel exhausted (invocation N)".
 // =============================================================================
 
 int spin_forever() {

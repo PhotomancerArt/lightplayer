@@ -25,6 +25,12 @@ pub struct WasmOptions {
     /// Default = 1024 pages = 64 MiB. Ignored on the wasm32 (`rt_browser`)
     /// runtime, which uses `WebAssembly.Memory`'s grow on demand.
     pub host_memory_pages: u32,
+
+    /// When true (default), insert fuel checks: check-then-decrement at every
+    /// loop back-edge and check-only at every function entry (mirrors the rv32
+    /// design in `docs/adr/2026-07-20-lpvm-native-fuel.md`). Always on for the
+    /// wasm hosts; `false` exists for tests and perf comparison only.
+    pub fuel: bool,
 }
 
 impl Default for WasmOptions {
@@ -33,6 +39,7 @@ impl Default for WasmOptions {
             float_mode: FloatMode::Q32,
             config: CompilerConfig::default(),
             host_memory_pages: 1024,
+            fuel: true,
         }
     }
 }
