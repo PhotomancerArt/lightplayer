@@ -21,7 +21,10 @@
 //!   [`crate::app::rich_object`].
 //! - [`sim_rich_object`]: the live simulator session as a rich object
 //!   (D36) — the same schema, only the honestly-applicable sections.
+//! - [`card_tabs`]: sections → the card's icon tabs (M7′ — the card as
+//!   control panel; the popover renderers retire, the model survives).
 
+pub mod card_tabs;
 pub mod device_rich_object;
 pub mod firmware_update;
 pub mod roster_affordance;
@@ -30,6 +33,7 @@ pub mod roster_circle;
 pub mod roster_evidence;
 pub mod sim_rich_object;
 
+pub use card_tabs::{CardTabView, DeviceCardTab, device_card_tabs};
 pub use device_rich_object::{DeviceDetailAffordance, DeviceRichInput, device_rich_object};
 pub use firmware_update::{BundledFirmware, firmware_update_available};
 pub use roster_affordance::RosterAffordance;

@@ -70,10 +70,10 @@ pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
 };
 pub use app::roster::{
-    BundledFirmware, ConnectEvidence, ConnectPhase, DegradedReason, DeviceDetailAffordance,
-    DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape,
-    RosterEvidence, SimDetailAffordance, SimRichInput, derive_roster_card_state,
-    device_rich_object, firmware_update_available, sim_rich_object,
+    BundledFirmware, CardTabView, ConnectEvidence, ConnectPhase, DegradedReason, DeviceCardTab,
+    DeviceDetailAffordance, DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle,
+    RosterCircleShape, RosterEvidence, SimDetailAffordance, SimRichInput, derive_roster_card_state,
+    device_card_tabs, device_rich_object, firmware_update_available, sim_rich_object,
 };
 pub use app::runtime_pool::{
     DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,

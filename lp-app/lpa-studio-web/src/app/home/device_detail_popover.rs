@@ -1,27 +1,23 @@
-//! The device card's rich-object detail popover — and the sim card's
-//! ([`SimDetailPopover`]), same anatomy over the sim's sections.
-//!
-//! Q1 of the rich-object spike: the trigger is the NODE-STYLE
-//! affordance-following icon at the header's right edge — a quiet "i"
-//! that escalates with the rolled-up status (the same `DetailPopover`
-//! trigger the node header wears) — while the status circle stays a pure
-//! indicator on the left. The popover carries the device's rich-object
-//! sections ([`device_rich_object`]) in fixed schema order, danger zone
-//! pinned last as the inline red-tinted section (Q5). The interim
-//! More-menu this replaces lived here in `device_card.rs`; its
-//! Flash/Erase/Forget rows migrated into the danger zone.
+//! The device/sim cards' rich-object detail popovers — **retired from
+//! cards** (M7′ P1: the card's icon tabs render the same sections; see
+//! `device_card.rs`). No card mounts these anymore; the components are
+//! kept compiling only until M7′ P3 deletes the file (the ratified
+//! sequencing: P1 unmounts, P3 deletes alongside `StatusCircle` and the
+//! ADR amendments). `DetailPopover`/`RichObjectPane` stay for nodes.
+
+#![allow(
+    dead_code,
+    reason = "unmounted from cards in M7' P1; the file is deleted in P3"
+)]
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    BundledFirmware, DeviceDetailAffordance, DeviceRichInput, RichSection, SimDetailAffordance,
-    SimRichInput, UiAction, UiDeviceCard, device_rich_object, sim_rich_object,
+    BundledFirmware, DeviceRichInput, RichSection, SimRichInput, UiAction, UiDeviceCard,
+    device_rich_object, sim_rich_object,
 };
 
 use crate::app::affordance::{status_trigger_active, status_trigger_style};
-use crate::app::home::device_card::{
-    device_affordance_action, erase_device_action, flash_device_action_destructive,
-    forget_device_action, stop_simulator_action,
-};
+use crate::app::home::device_card::{wire_section, wire_sim_section};
 use crate::base::{DetailPopover, DetailSection};
 use crate::core::RichDetailSection;
 
@@ -53,10 +49,6 @@ pub(crate) fn DeviceDetailPopover(
     let style = status_trigger_style(rollup.tone);
     let active = status_trigger_active(rollup.tone);
     let label = format!("{} details", card.name);
-    // Identity→action wiring happens here, once, so the generic renderer
-    // below never learns device ops. Identities without a live flow (open
-    // editor before M5, name-device — the card's inline form owns it)
-    // render no row.
     let sections: Vec<RichSection<UiAction>> = view
         .sections
         .into_iter()
@@ -70,9 +62,6 @@ pub(crate) fn DeviceDetailPopover(
             tone: style.tone,
             active,
             initially_open,
-            // Identity section, mirroring the node popover's anatomy. The
-            // status word itself lives in the Health section below — never
-            // duplicated here.
             DetailSection {
                 div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-4 tw:py-1",
                     div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
@@ -90,10 +79,8 @@ pub(crate) fn DeviceDetailPopover(
     }
 }
 
-/// The sim card's rich-object detail popover (D36, runtime-pool P4): the
-/// same trigger and section anatomy over [`sim_rich_object`]'s
-/// honestly-applicable sections — Health, Project (when loaded), and the
-/// danger zone carrying Stop simulator (P3's destroy op).
+/// The sim card's rich-object detail popover — retired with the device
+/// popover above (the sim card's tabs carry the sections).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn SimDetailPopover(
@@ -138,55 +125,5 @@ pub(crate) fn SimDetailPopover(
                 RichDetailSection { section, on_action }
             }
         }
-    }
-}
-
-/// Map one sim section's affordance identities onto concrete `UiAction`s.
-fn wire_sim_section(section: RichSection<SimDetailAffordance>) -> RichSection<UiAction> {
-    RichSection {
-        title: section.title,
-        tone: section.tone,
-        lines: section.lines,
-        chip: section.chip,
-        affordances: section
-            .affordances
-            .iter()
-            .map(|affordance| match affordance {
-                SimDetailAffordance::StopSimulator => stop_simulator_action(),
-            })
-            .collect(),
-        weight: section.weight,
-    }
-}
-
-/// Map one section's affordance identities onto concrete `UiAction`s for
-/// this card.
-fn wire_section(
-    card: &UiDeviceCard,
-    section: RichSection<DeviceDetailAffordance>,
-) -> RichSection<UiAction> {
-    RichSection {
-        title: section.title,
-        tone: section.tone,
-        lines: section.lines,
-        chip: section.chip,
-        affordances: section
-            .affordances
-            .iter()
-            .filter_map(|affordance| wire_affordance(card, affordance))
-            .collect(),
-        weight: section.weight,
-    }
-}
-
-fn wire_affordance(card: &UiDeviceCard, affordance: &DeviceDetailAffordance) -> Option<UiAction> {
-    match affordance {
-        DeviceDetailAffordance::Roster(affordance) => device_affordance_action(card, affordance),
-        DeviceDetailAffordance::FlashFirmware => Some(flash_device_action_destructive()),
-        DeviceDetailAffordance::EraseDevice => Some(erase_device_action(card.name.clone())),
-        DeviceDetailAffordance::ForgetDevice => card
-            .uid
-            .clone()
-            .map(|uid| forget_device_action(uid, card.name.clone())),
     }
 }

@@ -14,7 +14,7 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    BundledFirmware, ConnectPhase, DegradedReason, RosterCardState, UiDeviceCard,
+    BundledFirmware, ConnectPhase, DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard,
     UiDeviceProjectChip,
 };
 use lpc_wire::FwProvenance;
@@ -207,7 +207,7 @@ fn simulator_detail_popover() -> Element {
                     card: sim_card(true),
                     now_secs: Some(STORY_NOW),
                     sim: true,
-                    detail_open: true,
+                    initial_tab: Some(DeviceCardTab::Danger),
                     on_action: |_| {},
                 }
             }
@@ -268,7 +268,7 @@ fn device_detail_running_behind() -> Element {
                     ),
                     now_secs: Some(STORY_NOW),
                     bundled_fw: Some(bundled_firmware()),
-                    detail_open: true,
+                    initial_tab: Some(DeviceCardTab::Status),
                     on_action: |_| {},
                 }
             }
@@ -291,7 +291,7 @@ fn device_detail_offline() -> Element {
                         true,
                     ),
                     now_secs: Some(STORY_NOW),
-                    detail_open: true,
+                    initial_tab: Some(DeviceCardTab::Danger),
                     on_action: |_| {},
                 }
             }

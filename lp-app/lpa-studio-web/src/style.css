@@ -127,6 +127,88 @@ label:has(> input:not(:disabled)) {
     cursor: pointer;
 }
 
+/* Device card control-panel chrome (M7′): the tint left edge replaces the
+   status circle on roster cards. The circle's shape grammar re-homes as
+   edge treatments — filled = live, double/faded = remembered, pulsing =
+   working — so state reads without color (line style + motion + the
+   card's own fade). Tone rides `--edge-tint`, set inline from the
+   rich-object rollup (worst-actionable section). */
+
+.ux-device-edge {
+    border-left: 3px solid var(--edge-tint, var(--studio-status-neutral-text));
+}
+
+.ux-device-edge-remembered {
+    border-left-style: double;
+    border-left-color: color-mix(
+        in oklab,
+        var(--edge-tint, var(--studio-status-neutral-text)) 55%,
+        transparent
+    );
+}
+
+.ux-device-edge-working {
+    animation: ux-device-edge-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes ux-device-edge-pulse {
+    0%,
+    100% {
+        border-left-color: var(--edge-tint, var(--studio-status-neutral-text));
+    }
+    50% {
+        border-left-color: color-mix(
+            in oklab,
+            var(--edge-tint, var(--studio-status-neutral-text)) 30%,
+            transparent
+        );
+    }
+}
+
+/* The card's icon-tab row: selection wears the card tint (the Danger tab
+   the error family); the badge dot carries per-tab announcements. */
+
+.ux-device-tab {
+    position: relative;
+    display: inline-flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--studio-color-text-dim);
+}
+
+.ux-device-tab:hover {
+    background: rgb(255 255 255 / 0.06);
+    color: var(--studio-color-text);
+}
+
+.ux-device-tab[aria-selected="true"] {
+    background: color-mix(
+        in oklab,
+        var(--edge-tint, var(--studio-status-neutral-text)) 12%,
+        transparent
+    );
+    color: var(--edge-tint, var(--studio-status-neutral-text));
+}
+
+.ux-device-tab-danger[aria-selected="true"] {
+    background: color-mix(in oklab, var(--studio-status-error-text) 12%, transparent);
+    color: var(--studio-status-error-text);
+}
+
+.ux-device-tab-badge {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+}
+
 /* Slot slider control (config slot editor). */
 
 .ux-slot-slider {
