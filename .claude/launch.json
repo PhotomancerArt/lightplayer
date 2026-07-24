@@ -7,6 +7,13 @@
       "runtimeArgs": ["studio-dev"],
       "port": 27395,
       "autoPort": false
+    },
+    {
+      "name": "spike-device-card",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "27461", "--directory", "spikes/device-card-panel"],
+      "port": 27461,
+      "autoPort": false
     }
   ]
 }
