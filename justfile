@@ -100,7 +100,7 @@ web-demo-smoke out_dir="target/pages/web-demo":
     node scripts/pages/static-site-smoke.mjs \
         --kind web-demo \
         --dir "{{ out_dir }}" \
-        --port "${WEB_DEMO_SMOKE_PORT:-2831}" \
+        --port "${WEB_DEMO_SMOKE_PORT:-0}" \
         --server "${PAGES_SMOKE_SERVER:-required}"
 
 # Deploy web demo to gh-pages branch
@@ -187,7 +187,7 @@ lpa-fs-opfs-test: install-wasm32-target
 fw-browser-smoke: fw-browser-build
     #!/usr/bin/env bash
     set -euo pipefail
-    port="${FW_BROWSER_SMOKE_PORT:-2819}"
+    port="$(scripts/dev-port.sh fw-browser-smoke "${FW_BROWSER_SMOKE_PORT:-}")"
     echo "Serving fw-browser smoke page at http://127.0.0.1:${port}/smoke.html"
     echo "Success: page shows ok and documentElement.dataset.smoke is 'ok'."
     cd lp-fw/fw-browser/www
@@ -329,7 +329,7 @@ studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
-    port="${STUDIO_WEB_PORT:-2820}"
+    port="$(scripts/dev-port.sh studio-dev "${STUDIO_WEB_PORT:-}")"
     public_dir="target/dx/lpa-studio-web/debug/web/public"
     sidecar_dir="{{ studio_assets_dir }}/debug/pkg"
     firmware_dir="{{ studio_assets_dir }}/firmware/esp32c6"
@@ -444,13 +444,13 @@ studio-web-smoke out_dir="target/pages/studio":
     node scripts/pages/static-site-smoke.mjs \
         --kind studio \
         --dir "{{ out_dir }}" \
-        --port "${STUDIO_WEB_SMOKE_PORT:-2830}" \
+        --port "${STUDIO_WEB_SMOKE_PORT:-0}" \
         --server "${PAGES_SMOKE_SERVER:-required}"
 
 studio-web: studio-web-build
     #!/usr/bin/env bash
     set -euo pipefail
-    port="${STUDIO_WEB_PORT:-2820}"
+    port="$(scripts/dev-port.sh studio-web "${STUDIO_WEB_PORT:-}")"
     echo "Serving LightPlayer Studio at http://127.0.0.1:${port}/"
     cd target/dx/lpa-studio-web/release/web/public
     python3 -m http.server "${port}" --bind 127.0.0.1

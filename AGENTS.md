@@ -284,6 +284,21 @@ the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
 `docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
 be migrated unless a separate migration plan asks for it.
 
+## Dev server ports
+
+Multiple agent worktrees share this machine, so dev servers must not assume a
+fixed port. `just studio-dev`, `just studio-web`, and `just fw-browser-smoke`
+pick their port via `scripts/dev-port.sh`: a stable hash of (worktree, service)
+in the 20000–39999 range, so each worktree keeps the same port across restarts.
+Restarting a server evicts the previous one from the same worktree (last-wins);
+a port held by a *different* worktree is never stolen — the script probes
+upward instead. The pages smoke checks use OS-assigned ports.
+
+The URL printed by the recipe is the source of truth. Never assume the Studio
+dev server is at a hardcoded port, and never attach to a port you didn't start
+a server on — it may be serving another session's build. Pin a port explicitly
+with `STUDIO_WEB_PORT` (or the matching `*_PORT` env var) when needed.
+
 ## Debt tracking
 
 Standing structural burdens live in `docs/debt/`, one slug-named file per
