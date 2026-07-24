@@ -913,7 +913,15 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
 
     // The device heartbeat drains a buffered console line into the
     // SESSION's console tail (D42: the per-device console — session
-    // streams no longer land in the global ring)…
+    // streams no longer land in the global ring). Trace/debug
+    // diagnostics stay OFF the tail (the retired console's Info+
+    // display floor; the sim worker's per-tick spam must not drown
+    // the 40-line ring)…
+    studio.push_device_console_log_for_test(UiLogDraft::new(
+        UiLogLevel::Trace,
+        UiLogOrigin::Device,
+        "tick delta=32ms incoming=1 responses=1",
+    ));
     studio.push_device_console_log_for_test(UiLogDraft::new(
         UiLogLevel::Info,
         UiLogOrigin::Device,
@@ -932,6 +940,10 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     assert!(
         device_tail_has(&studio, "standalone frame tick"),
         "the first heartbeat drains the device session's console buffer into its tail"
+    );
+    assert!(
+        !device_tail_has(&studio, "tick delta=32ms incoming=1 responses=1"),
+        "trace diagnostics stay below the tail's Info+ floor"
     );
     assert!(
         !studio
