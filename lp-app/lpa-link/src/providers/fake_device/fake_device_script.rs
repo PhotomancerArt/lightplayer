@@ -77,6 +77,14 @@ pub struct FakeLightPlayerState {
     /// [`lpc_wire::WIRE_PROTO_VERSION`]: mimics firmware built from an
     /// incompatible wire revision.
     pub proto_override: Option<u32>,
+    /// Auto-load the seeded project at boot, like real firmware's
+    /// startup-project resume (fw-esp32 `boot::auto_load_project`): the
+    /// server reports it via `project_list_loaded` from the first request.
+    pub load_project_at_boot: bool,
+    /// Absolute storage dir the seeded project files land in. Defaults to
+    /// [`FAKE_DEVICE_PROJECT_DIR`]; override to mimic a device provisioned
+    /// outside Studio (CLI uploads use other dirs under `/projects/`).
+    pub project_dir: String,
 }
 
 impl FakeLightPlayerState {
@@ -88,6 +96,8 @@ impl FakeLightPlayerState {
             provenance: fake_provenance("fake-firmware"),
             suppress_hello: false,
             proto_override: None,
+            load_project_at_boot: false,
+            project_dir: FAKE_DEVICE_PROJECT_DIR.to_string(),
         }
     }
 
@@ -113,6 +123,21 @@ impl FakeLightPlayerState {
 
     pub fn with_proto_override(mut self, proto: u32) -> Self {
         self.proto_override = Some(proto);
+        self
+    }
+
+    /// Boot with the seeded project LOADED (the real-hardware shape since
+    /// the standalone startup-resume): connect-time probes see a running
+    /// project.
+    pub fn with_loaded_project(mut self) -> Self {
+        self.load_project_at_boot = true;
+        self
+    }
+
+    /// Seed the project into `/projects/<dir>` instead of the default
+    /// slot: mimics a device provisioned outside Studio (CLI upload).
+    pub fn with_project_dir(mut self, dir: &str) -> Self {
+        self.project_dir = format!("/projects/{dir}");
         self
     }
 }

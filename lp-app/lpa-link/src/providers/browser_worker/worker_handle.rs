@@ -186,6 +186,18 @@ impl BrowserWorkerHandle {
             .map_err(|error| LinkError::other(format!("{error:?}")))
     }
 
+    /// Destroy a worker runtime created via
+    /// [`BrowserInputEnvelope::CreateRuntime`], releasing its lease so the
+    /// worker can be recycled.
+    ///
+    /// The worker answers with [`BrowserOutputEnvelope::RuntimeDestroyed`]
+    /// (also for unknown ids — release is idempotent) or refuses with
+    /// [`BrowserOutputEnvelope::PreviewError`] (`frame_id` 0) when the boot
+    /// runtime is targeted.
+    pub fn destroy_runtime(&self, runtime_id: u32) -> Result<(), LinkError> {
+        self.post(&BrowserInputEnvelope::DestroyRuntime { runtime_id })
+    }
+
     pub fn take_outputs(&mut self) -> Vec<BrowserOutputEnvelope> {
         core::mem::take(&mut *self.outputs.borrow_mut())
     }
@@ -302,6 +314,9 @@ fn boot_output_summary(outputs: &[BrowserOutputEnvelope]) -> String {
             runtime_id, label, ..
         } => {
             format!("; last worker output created runtime {runtime_id} ({label})")
+        }
+        BrowserOutputEnvelope::RuntimeDestroyed { runtime_id } => {
+            format!("; last worker output destroyed runtime {runtime_id}")
         }
         BrowserOutputEnvelope::SurfaceAttached { runtime_id } => {
             format!("; last worker output attached a surface to runtime {runtime_id}")

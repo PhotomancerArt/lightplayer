@@ -66,12 +66,16 @@ impl LpvmModule for NativeEmuModule {
             globals_offset,
             snapshot_offset,
             globals_size,
+            armed_fuel: lpvm::DEFAULT_VMCTX_FUEL as u32,
             render_texture_cache: None,
             render_samples_cache: None,
         };
 
-        // Auto-init globals: call __shader_init if it exists, then snapshot
-        let _ = instance.init_globals();
+        // Auto-init globals: call __shader_init if it exists, then snapshot.
+        // Propagated (rt_jit parity) so an init failure — including an
+        // out-of-fuel trap in __shader_init — surfaces instead of leaving
+        // silently uninitialized globals.
+        instance.init_globals()?;
 
         Ok(instance)
     }

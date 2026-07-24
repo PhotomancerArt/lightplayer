@@ -8,6 +8,8 @@
 pub(crate) mod node_ui_stories;
 #[cfg(all(feature = "stories", target_arch = "wasm32"))]
 pub(crate) mod preview_lab;
+#[cfg(feature = "stories")]
+pub(crate) mod rich_object_stories;
 // The preview-lab config/stats models are pure Rust and stay ungated so their
 // unit tests run in default (non-stories) test builds; their only non-test
 // consumer is the stories-gated preview lab.

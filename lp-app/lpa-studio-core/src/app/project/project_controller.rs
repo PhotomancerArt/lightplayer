@@ -1328,7 +1328,13 @@ impl ProjectController {
         let files = handle.read_all_files().map_err(library_ui_error)?;
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
 
-        let loaded = server.open_library_project(&files, &expected_hash).await?;
+        let loaded = server
+            .open_library_project(
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
+                &files,
+                &expected_hash,
+            )
+            .await?;
         context.active = Some(ActiveLibraryProject {
             handle,
             last_synced: loaded.synced_version,

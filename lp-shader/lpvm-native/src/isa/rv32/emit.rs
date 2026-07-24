@@ -854,6 +854,62 @@ impl<'a> EmitContext<'a> {
             VInst::Label(id, _) => {
                 self.record_label(*id)?;
             }
+            VInst::FuelCheck {
+                decrement,
+                trap_label,
+                ..
+            } => {
+                // Fuel check expansion (see `VInst::FuelCheck` docs). Trap
+                // sequence is inlined per site for v1 (7 words per back-edge,
+                // 5 executed on the hot path). Future size optimization: a
+                // per-function shared trap stub (li+sw+jal once, branch to it
+                // from every check site).
+                //
+                //   lw   t0, FUEL(rv)       # fuel low word
+                //   bne  t0, x0, +16        # not exhausted -> skip trap
+                //   li   t1, TRAP_CODE_OUT_OF_FUEL
+                //   sw   t1, TRAP(rv)       # trap code slot
+                //   jal  x0, <epilogue>     # abort: epilogue restores state
+                //   addi t0, t0, -1         # decrement=true only
+                //   sw   t0, FUEL(rv)       # decrement=true only
+                //
+                // Check-then-decrement: the trap fires when a check OBSERVES
+                // 0; reaching exactly 0 on the final decrement and returning
+                // is not a trap.
+                let fuel_off = lpvm::VMCTX_OFFSET_FUEL as i32;
+                let trap_off = lpvm::VMCTX_OFFSET_TRAP as i32;
+                // Reload temp is TEMP2 so the expansion's own scratch
+                // (TEMP0/TEMP1) never aliases the vmctx register.
+                let rv = self.use_vreg(output, inst_idx, 0, Self::TEMP2, src_op)? as u32;
+                let t0 = Self::TEMP0 as u32;
+                let t1 = Self::TEMP1 as u32;
+                self.push_u32(encode_lw(t0, rv, fuel_off), src_op);
+                self.push_u32(encode_bne(t0, 0, 16), src_op);
+                self.push_u32(
+                    encode_addi(t1, 0, lpvm::TRAP_CODE_OUT_OF_FUEL as i32),
+                    src_op,
+                );
+                self.push_u32(encode_sw(t1, rv, trap_off), src_op);
+                let instr_off = self.code.len();
+                if let Some(tgt) = self.label_offset_get(*trap_label) {
+                    let imm = tgt as i32 - instr_off as i32;
+                    if !jal_offset_valid(imm) {
+                        return Err(crate::emit_err!());
+                    }
+                    self.push_u32(encode_jal(0, imm), src_op);
+                } else {
+                    self.push_u32(0, src_op);
+                    self.jal_fixups.push(JalFixup {
+                        instr_offset: instr_off,
+                        target: *trap_label,
+                        rd: 0,
+                    });
+                }
+                if *decrement {
+                    self.push_u32(encode_addi(t0, t0, -1), src_op);
+                    self.push_u32(encode_sw(t0, rv, fuel_off), src_op);
+                }
+            }
         }
         Ok(())
     }
@@ -1032,6 +1088,90 @@ mod tests {
             result.code.len() >= 12,
             "expected at least 3 instructions, got {} bytes",
             result.code.len()
+        );
+    }
+
+    fn emit_and_disasm(input: &str) -> alloc::vec::Vec<alloc::string::String> {
+        let (vinsts, symbols, pool) = vinst::parse(input).unwrap();
+        let mut lowered = crate::lower::LoweredFunction {
+            vinsts,
+            vreg_pool: pool,
+            symbols,
+            loop_regions: Vec::new(),
+            region_tree: crate::region::RegionTree::new(),
+            lpir_slots: Vec::new(),
+        };
+        let root = lowered.region_tree.push(crate::region::Region::Linear {
+            start: 0,
+            end: lowered.vinsts.len() as u16,
+        });
+        lowered.region_tree.root = root;
+
+        let abi = abi::func_abi_rv32(
+            &LpsFnSig {
+                name: alloc::string::String::from("t"),
+                return_type: LpsType::Int,
+                parameters: vec![],
+                kind: LpsFnKind::UserDefined,
+            },
+            None,
+        );
+        let result = crate::emit::emit_lowered(&lowered, &abi).expect("emit_lowered");
+        result
+            .code
+            .chunks_exact(4)
+            .map(|c| {
+                lp_riscv_inst::format_instruction(u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            })
+            .collect()
+    }
+
+    /// Locate the FuelCheck expansion (starts at `lw <reg>, 0(...)`) and
+    /// return the mnemonics from there on.
+    fn mnemonics_from_fuel_lw(asm: &[alloc::string::String]) -> alloc::vec::Vec<&str> {
+        let start = asm
+            .iter()
+            .position(|s| s.starts_with("lw") && s.contains("0("))
+            .expect("expansion must start with lw ..., 0(vmctx)");
+        asm[start..]
+            .iter()
+            .map(|s| s.split_whitespace().next().unwrap_or(""))
+            .collect()
+    }
+
+    #[test]
+    fn emit_fuel_check_decrement_expansion() {
+        let asm = emit_and_disasm("i0 = IConst32 100\nFuelCheck i0, @0, dec\n@0:\nRet");
+        let m = mnemonics_from_fuel_lw(&asm);
+        // lw fuel / bne skip / li(addi) trap-code / sw trap-slot / jal epilogue
+        // / addi -1 / sw fuel  (see VInst::FuelCheck docs)
+        assert!(
+            m.len() >= 7
+                && m[1] == "bne"
+                && m[3] == "sw"
+                && (m[4] == "j" || m[4] == "jal")
+                && m[6] == "sw",
+            "unexpected decrement expansion shape: {m:?}"
+        );
+        // Trap-code store targets the trap slot at vmctx+8.
+        let sw_trap = asm.iter().find(|s| s.starts_with("sw") && s.contains("8("));
+        assert!(sw_trap.is_some(), "expected sw ..., 8(vmctx), got {asm:?}");
+    }
+
+    #[test]
+    fn emit_fuel_check_entry_expansion_no_decrement() {
+        let asm = emit_and_disasm("i0 = IConst32 100\nFuelCheck i0, @0\n@0:\nRet");
+        let m = mnemonics_from_fuel_lw(&asm);
+        // Check-only: lw / bne / li(addi) / sw / jal, then the label target
+        // (epilogue Ret path) — no trailing decrement addi+sw pair.
+        assert!(
+            m.len() >= 5 && m[1] == "bne" && m[3] == "sw" && (m[4] == "j" || m[4] == "jal"),
+            "unexpected entry expansion shape: {m:?}"
+        );
+        assert_ne!(
+            m.get(5).copied(),
+            Some("sw"),
+            "check-only expansion must not store fuel back: {m:?}"
         );
     }
 }

@@ -556,9 +556,12 @@ where
             error: Some(error), ..
         }) = &outcome.value.msg
         {
-            // fs errors cross the wire as display strings; "not found" is
-            // fine (replacing an absent project), anything else isn't
-            if !error.starts_with("File not found") {
+            // fs errors cross the wire as display strings; a missing dir is
+            // fine (replacing an absent project — current firmware reports
+            // success, older LittleFS builds a "no such file or directory"
+            // list_dir error), anything else isn't
+            if !error.starts_with("File not found") && !error.contains("no such file or directory")
+            {
                 return Err(ClientError::Server(format!(
                     "failed to clear {prefix}: {error}"
                 )));

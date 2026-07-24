@@ -117,12 +117,14 @@ fn quiet_class(destructive: bool) -> &'static str {
 }
 
 /// One row of a menu popup. Shared with non-action rows (e.g. web-side
-/// export) via [`menu_item_action_class`].
+/// export) via [`menu_item_action_class`]. Tailwind preflight is not
+/// loaded, so the row must reset the UA button chrome (gray fill, 3D
+/// border) itself — the rest is text plus a hover wash.
 fn menu_item_class(destructive: bool) -> &'static str {
     if destructive {
-        "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+        "tw:flex tw:w-full tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded tw:border-none tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
     } else {
-        "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/5 tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+        "tw:flex tw:w-full tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded tw:border-none tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/5 tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
     }
 }
 
@@ -136,6 +138,13 @@ pub fn quiet_action_class() -> &'static str {
 /// (web-side handlers like export) but must read identically.
 pub fn menu_item_action_class() -> &'static str {
     menu_item_class(false)
+}
+
+/// The destructive menu-row classes, for popup rows that cannot be
+/// `UiAction`s but must wear the danger treatment (P3 rich-object
+/// codification: danger-zone rows without an action model).
+pub fn menu_item_destructive_action_class() -> &'static str {
+    menu_item_class(true)
 }
 
 fn disabled_reason(enablement: &ActionEnablement) -> Option<&str> {

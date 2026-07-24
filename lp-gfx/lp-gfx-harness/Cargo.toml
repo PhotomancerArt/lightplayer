@@ -1,0 +1,25 @@
+[package]
+name = "lp-gfx-harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native lp-server render-loop harness: ticks a real example project on an explicitly selected graphics engine (gpu-f32 | cpu-q32) and reports per-tick sample latency"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-gfx = { path = "../lp-gfx", default-features = false }
+lp-gfx-lpvm = { path = "../lp-gfx-lpvm", default-features = false }
+lp-gfx-wgpu = { path = "../lp-gfx-wgpu" }
+lpa-server = { path = "../../lp-app/lpa-server" }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
+lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
+lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, features = ["naga"] }
+lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
+env_logger = { workspace = true }
+log = { workspace = true }
+pollster = "0.3"
+wgpu = "29"

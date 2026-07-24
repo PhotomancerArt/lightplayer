@@ -544,7 +544,12 @@ async function createCapturePage(cdp) {
           width: viewport.width,
           height: viewport.height,
           deviceScaleFactor: 1,
-          mobile: viewport.width <= 640,
+          // Never emulate a mobile device, even at phone widths: sm means
+          // "narrow desktop window", and Chrome's mobile emulation state leaks
+          // asymmetrically across captures on a reused page (a later md/lg
+          // capture renders number-input text shifted), which made runs
+          // nondeterministic. With mobile off, captures are byte-identical.
+          mobile: false,
         },
         sessionId,
       );

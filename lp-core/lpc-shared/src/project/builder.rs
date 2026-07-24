@@ -56,6 +56,7 @@ pub struct ShaderBuilder {
     _texture_path: LpPathBuf,
     glsl_source: String,
     render_order: i32,
+    visual_bus: String,
 }
 
 /// Builder for output nodes
@@ -116,6 +117,7 @@ impl ProjectBuilder {
                 "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }",
             ),
             render_order: 0,
+            visual_bus: String::from("visual.out"),
         }
     }
 
@@ -285,6 +287,15 @@ impl ShaderBuilder {
         self
     }
 
+    /// Publish the shader's visual product on a custom bus channel
+    /// (defaults to `visual.out`). A channel nothing consumes keeps the
+    /// shader out of the frame render path — useful for tests that trigger
+    /// its renders explicitly (e.g. via render-product probes).
+    pub fn visual_bus(mut self, channel: &str) -> Self {
+        self.visual_bus = String::from(channel);
+        self
+    }
+
     /// Add the shader node to the project
     pub fn add(self, builder: &mut ProjectBuilder) -> LpPathBuf {
         let id = builder.shader_id;
@@ -298,7 +309,7 @@ impl ShaderBuilder {
         let config = ShaderDef {
             source: AssetSlot::path(source_file),
             render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
-            bindings: bus_output_binding_defs("visual.out"),
+            bindings: bus_output_binding_defs(&self.visual_bus),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
             consumed_slots: default_visual_consumed_slots(),

@@ -11,6 +11,7 @@ use lpir::{
 use lps_shared::{
     FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier, TextureStorageFormat,
 };
+use lpvm::{DEFAULT_INVOCATION_FUEL, VMCTX_OFFSET_FUEL};
 
 /// `render_fn_index` was out of bounds for [`LpsModuleSig::functions`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +79,18 @@ pub fn synthesise_render_texture(
     });
     let y = fb.alloc_vreg(IrType::I32);
     fb.push(LpirOp::IconstI32 { dst: y, value: 0 });
+    // Per-invocation fuel metering (lpvm-native): linear pixel counter and
+    // the constant tank size stored into the vmctx header per pixel.
+    let inv_idx = fb.alloc_vreg(IrType::I32);
+    fb.push(LpirOp::IconstI32 {
+        dst: inv_idx,
+        value: 0,
+    });
+    let fuel_budget = fb.alloc_vreg(IrType::I32);
+    fb.push(LpirOp::IconstI32 {
+        dst: fuel_budget,
+        value: DEFAULT_INVOCATION_FUEL as i32,
+    });
 
     let pos_x = fb.alloc_vreg(IrType::I32);
     let x = fb.alloc_vreg(IrType::I32);
@@ -111,6 +124,26 @@ pub fn synthesise_render_texture(
             fb.push_if(cmp_x);
             fb.push(LpirOp::Break);
             fb.end_if();
+
+            // Re-arm the per-invocation fuel tank (fuel low u32, vmctx+0)
+            // and record the current linear pixel index (fuel high u32,
+            // vmctx+4). Placed after the bounds-check Breaks so an exiting
+            // iteration does not re-arm: an exhausted pixel's trap escapes
+            // via the wrapper's own back-edge check (which observes fuel 0)
+            // before the next reset runs. The resets never write the trap
+            // slot — the trap code stays the authoritative host signal.
+            // The wrapper's own loop back-edges cost each pixel's tank a
+            // couple of units; that overhead is part of the budget.
+            fb.push(LpirOp::Store {
+                base: VMCTX_VREG,
+                offset: VMCTX_OFFSET_FUEL as u32,
+                value: fuel_budget,
+            });
+            fb.push(LpirOp::Store {
+                base: VMCTX_VREG,
+                offset: VMCTX_OFFSET_FUEL as u32 + 4,
+                value: inv_idx,
+            });
 
             if needs_reset {
                 emit_globals_reset(&mut fb, meta);
@@ -167,6 +200,11 @@ pub fn synthesise_render_texture(
             fb.push(LpirOp::IaddImm {
                 dst: x,
                 src: x,
+                imm: 1,
+            });
+            fb.push(LpirOp::IaddImm {
+                dst: inv_idx,
+                src: inv_idx,
                 imm: 1,
             });
         }
@@ -358,6 +396,72 @@ mod tests {
         assert_eq!(
             calls_to_render, 1,
             "expected exactly one Call to render in __render_texture body"
+        );
+    }
+
+    /// Per-invocation fuel resets: the wrapper stores the tank constant to
+    /// vmctx+0 and the linear pixel index to vmctx+4, after the bounds-check
+    /// Breaks and before the call to the user render fn.
+    #[test]
+    fn synth_body_arms_per_invocation_fuel_before_render_call() {
+        let (mut ir, mut meta) = make_stub_render_module(LpsType::Vec4);
+        let name =
+            synthesise_render_texture(&mut ir, &mut meta, 0, TextureStorageFormat::Rgba16Unorm)
+                .expect("synth");
+        let synth_fn = ir
+            .functions
+            .values()
+            .find(|f| f.name == name)
+            .expect("synth fn");
+        let body: Vec<&LpirOp> = synth_fn.body.iter().collect();
+
+        let fuel_store = body
+            .iter()
+            .position(|op| {
+                matches!(
+                    op,
+                    LpirOp::Store { base, offset, .. }
+                        if *base == VMCTX_VREG && *offset == VMCTX_OFFSET_FUEL as u32
+                )
+            })
+            .expect("fuel reset store to vmctx+0");
+        let idx_store = body
+            .iter()
+            .position(|op| {
+                matches!(
+                    op,
+                    LpirOp::Store { base, offset, .. }
+                        if *base == VMCTX_VREG && *offset == VMCTX_OFFSET_FUEL as u32 + 4
+                )
+            })
+            .expect("invocation index store to vmctx+4");
+        let last_break = body
+            .iter()
+            .rposition(|op| matches!(op, LpirOp::Break))
+            .expect("bounds-check Break");
+        let call = body
+            .iter()
+            .position(|op| matches!(op, LpirOp::Call { .. }))
+            .expect("call to render");
+
+        assert!(
+            last_break < fuel_store && fuel_store < call,
+            "fuel reset must sit after the bounds-check Breaks and before the render call \
+             (break {last_break}, fuel {fuel_store}, call {call})"
+        );
+        assert!(
+            last_break < idx_store && idx_store < call,
+            "index store must sit after the bounds-check Breaks and before the render call \
+             (break {last_break}, idx {idx_store}, call {call})"
+        );
+
+        // The tank value is the shared budget constant.
+        let budget_const = body.iter().any(|op| {
+            matches!(op, LpirOp::IconstI32 { value, .. } if *value == DEFAULT_INVOCATION_FUEL as i32)
+        });
+        assert!(
+            budget_const,
+            "DEFAULT_INVOCATION_FUEL constant must be materialised"
         );
     }
 

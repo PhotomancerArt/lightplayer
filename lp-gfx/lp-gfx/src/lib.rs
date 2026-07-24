@@ -54,6 +54,7 @@ pub use compute_shader::LpComputeShader;
 pub use gfx_error::GfxError;
 pub use graphics::LpGraphics;
 pub use handle_allocator::{HandleAllocator, HandleBacking};
+pub use lp_shader::{ShaderFuelTrap, ShaderFuelTrapEntry};
 pub use sample_out_handle::SampleOutHandle;
 pub use sample_points_handle::SamplePointsHandle;
 pub use shader::{LpShader, ShaderCompileStats};

@@ -284,6 +284,45 @@ the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
 `docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
 be migrated unless a separate migration plan asks for it.
 
+## Dev server ports
+
+Multiple agent worktrees share this machine, so dev servers must not assume a
+fixed port. `just studio-dev`, `just studio-web`, and `just fw-browser-smoke`
+pick their port via `scripts/dev-port.sh`: a stable hash of (worktree, service)
+in the 20000–39999 range, so each worktree keeps the same port across restarts.
+Restarting a server evicts the previous one from the same worktree (last-wins);
+a port held by a *different* worktree is never stolen — the script probes
+upward instead. The pages smoke checks use OS-assigned ports.
+
+The URL printed by the recipe is the source of truth. Never assume the Studio
+dev server is at a hardcoded port, and never attach to a port you didn't start
+a server on — it may be serving another session's build. Pin a port explicitly
+with `STUDIO_WEB_PORT` (or the matching `*_PORT` env var) when needed.
+
+## Debt tracking
+
+Standing structural burdens live in `docs/debt/`, one slug-named file per
+burden (`story-capture-pipeline.md` — conditions get names; events get
+dates). When you hit a recurring operational pain, CHECK the register
+first — the entry's Workarounds section is the current lore — and APPEND
+to its incident log when you hit it again. File a new entry only for a
+structural, recurring burden (not todos or one-off deferrals). Paydown
+decisions with lasting shape become ADRs the entry links. See
+`docs/debt/README.md`.
+
+## Defect tracking
+
+Durable defects live in `docs/defects/`, one dated file each — ADRs record
+decisions; defects record failures. File one when the bug reached a user or a
+hardware walk, revealed a contract/model gap, produced (or should have
+produced) a regression test, or the lesson outlives the fix. Fix-forward
+trivialities stay commit messages.
+
+When you fix a qualifying bug, write the entry in the same change; when a walk
+or debugging session finds one you don't fix, file it `status: open`. Update
+the index in `docs/defects/README.md` either way. Recurring classes in that
+index are architecture signals — surface them when you see one repeat.
+
 ## Studio UI visual baselines
 
 When a change touches non-generated files under `lp-app/lpa-studio-web/`, run the

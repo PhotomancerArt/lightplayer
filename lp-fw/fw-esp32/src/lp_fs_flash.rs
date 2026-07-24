@@ -348,7 +348,6 @@ impl LpFs for LpFsFlash {
             fn list_recursive<S: littlefs_rust::Storage>(
                 fs: &littlefs_rust::Filesystem<S>,
                 path: &str,
-                prefix: &str,
                 entries: &mut Vec<LpPathBuf>,
             ) -> Result<(), FsError> {
                 let items = fs
@@ -360,24 +359,23 @@ impl LpFs for LpFsFlash {
                     } else {
                         format!("{}/{}", path, item.name)
                     };
-                    let full_lp = if prefix == "/" {
-                        format!("/{full_lfs}")
-                    } else {
-                        format!("{}/{full_lfs}", prefix.trim_end_matches('/'))
-                    };
-                    let full_lp = if !full_lp.starts_with('/') {
-                        format!("/{full_lp}")
-                    } else {
-                        full_lp
-                    };
+                    // `full_lfs` is already the ROOT-relative lfs path
+                    // (`to_lfs_path` strips the leading slash), so the
+                    // canonical LpPath is just "/" + it. Prepending the
+                    // listing prefix here DOUBLED the base for every
+                    // non-root recursive listing ("/projects/studio/
+                    // projects/studio/…"), which broke the chroot view's
+                    // strip and with it on-device hash_package (push
+                    // verification).
+                    let full_lp = format!("/{full_lfs}");
                     entries.push(LpPathBuf::from(full_lp.as_str()));
                     if item.file_type == LfsFileType::Dir {
-                        list_recursive(fs, &full_lfs, prefix, entries)?;
+                        list_recursive(fs, &full_lfs, entries)?;
                     }
                 }
                 Ok(())
             }
-            list_recursive(&inner.fs, lfs_path, prefix, &mut entries)?;
+            list_recursive(&inner.fs, lfs_path, &mut entries)?;
         } else {
             let items = inner
                 .fs

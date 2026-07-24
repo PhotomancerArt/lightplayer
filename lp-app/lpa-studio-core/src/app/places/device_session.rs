@@ -74,6 +74,12 @@ pub enum DeviceContent {
 /// pieces read out of it — and the device-scoped identity read from the
 /// fs root. Pure wire work — no library access.
 pub struct PulledDeviceCopy {
+    /// The project storage dir (under `/projects/`) this pull actually
+    /// read: the device's LOADED project's dir when one is loaded (CLI
+    /// uploads and older pushes use dirs other than the sim's default),
+    /// else the caller's default. Pushes target it so one dir replaces
+    /// in place.
+    pub storage_id: String,
     /// Relative path → bytes (tombstones dropped; a full pull has none).
     pub files: Vec<(String, Vec<u8>)>,
     /// Canonical content hash reported by the device (lph1, /.lp excluded).
@@ -89,12 +95,32 @@ pub struct PulledDeviceCopy {
 }
 
 /// Pull the device's project copy over the wire (full pull from version
-/// zero on the single project storage id), plus the root identity read.
+/// zero), plus the root identity read.
+///
+/// The storage dir is DISCOVERED from the device's loaded project when
+/// one is loaded; `default_storage_id` is the fallback for a device with
+/// nothing loaded (an empty pull either way).
 pub async fn pull_device_copy(
     server: &mut StudioServerClient,
-    storage_id: &str,
+    default_storage_id: &str,
 ) -> Result<PulledDeviceCopy, UiError> {
     let mut logs = Vec::new();
+
+    let storage_id = match server.list_loaded_projects().await {
+        Ok(catalog) => {
+            logs.extend(catalog.logs);
+            catalog
+                .projects
+                .first()
+                .and_then(|choice| storage_id_from_project_path(&choice.project_id))
+        }
+        // discovery is best-effort: a device that can't list still pulls
+        // the default slot (and classifies Unreadable further up if that
+        // fails too)
+        Err(_) => None,
+    };
+    let storage_id = storage_id.unwrap_or_else(|| default_storage_id.to_string());
+    let storage_id_ref = storage_id.as_str();
 
     // Identity first, from the device's fs ROOT: it exists (or not)
     // independently of any project content. A server-reported read error
@@ -109,7 +135,7 @@ pub async fn pull_device_copy(
     };
 
     let pulled = match server
-        .pull_changed_files(storage_id, lpc_model::FsVersion::new(0))
+        .pull_changed_files(storage_id_ref, lpc_model::FsVersion::new(0))
         .await
     {
         Ok(pulled) => pulled,
@@ -118,6 +144,7 @@ pub async fn pull_device_copy(
         // it is (the current wire returns empty; this is the fallback)
         Err(error) if error.to_string().contains("no such file or directory") => {
             return Ok(PulledDeviceCopy {
+                storage_id,
                 files: Vec::new(),
                 observed: empty_package_hash(),
                 has_manifest: false,
@@ -139,7 +166,7 @@ pub async fn pull_device_copy(
         })
         .collect();
 
-    let (observed_hex, hash_logs) = server.hash_package(storage_id).await?;
+    let (observed_hex, hash_logs) = server.hash_package(storage_id_ref).await?;
     logs.extend(hash_logs);
     let observed: ContentHash = observed_hex
         .parse()
@@ -162,6 +189,7 @@ pub async fn pull_device_copy(
         .map(str::to_string);
 
     Ok(PulledDeviceCopy {
+        storage_id,
         files,
         observed,
         has_manifest,
@@ -170,6 +198,16 @@ pub async fn pull_device_copy(
         identity,
         logs,
     })
+}
+
+/// Extract the storage dir from a server-reported project path
+/// (`projects/<dir>` or `/projects/<dir>`). `None` for shapes that don't
+/// live under the projects base — discovery then falls back.
+fn storage_id_from_project_path(path: &str) -> Option<String> {
+    let trimmed = path.trim_start_matches('/');
+    let rest = trimmed.strip_prefix("projects/")?;
+    let dir = rest.trim_matches('/');
+    (!dir.is_empty() && !dir.contains('/')).then(|| dir.to_string())
 }
 
 /// The device's registry entry for this connect, merging what the pull
@@ -191,24 +229,28 @@ pub fn registry_entry_for(
 
 /// Upsert a device into the registry, preserving an existing association
 /// when the incoming entry has none (associations change on push, not on
-/// sight).
+/// sight) — and preserving the registry NAME always: the registry is the
+/// user-facing naming truth (D34), so a sighting never renames a device.
+/// Renames go through [`DeviceRegistry::rename`]; the connect path writes
+/// the registry name back to the device instead of the other way around.
 pub fn upsert_device_merged(
     store: &LibraryStore,
     mut device: RegisteredDevice,
 ) -> Result<(), LibraryError> {
     let registry = DeviceRegistry::new(store.fs_handle());
-    if device.association.is_none() || device.transport.is_empty() {
-        if let Some(existing) = registry
-            .list()?
-            .into_iter()
-            .find(|entry| entry.uid == device.uid)
-        {
-            if device.association.is_none() {
-                device.association = existing.association;
-            }
-            if device.transport.is_empty() {
-                device.transport = existing.transport;
-            }
+    if let Some(existing) = registry
+        .list()?
+        .into_iter()
+        .find(|entry| entry.uid == device.uid)
+    {
+        if device.association.is_none() {
+            device.association = existing.association;
+        }
+        if device.transport.is_empty() {
+            device.transport = existing.transport;
+        }
+        if !existing.name.is_empty() {
+            device.name = existing.name;
         }
     }
     registry.upsert(device)
@@ -675,5 +717,27 @@ mod tests {
         let listed = registry.list().unwrap();
         assert_eq!(listed[0].last_seen_at, 99.0);
         assert_eq!(listed[0].association, seeded.association);
+    }
+
+    #[test]
+    fn registry_name_wins_over_the_sighted_name() {
+        // D34: the user renamed the device (registry) while it was offline;
+        // the next sighting still carries the old on-device name — the
+        // registry name must survive the reconcile (write-back to the
+        // device happens on the connect path, not here).
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        let mut renamed = device();
+        renamed.name = "Luna's sign".to_string();
+        registry.upsert(renamed).unwrap();
+
+        let mut sighting = device();
+        sighting.name = "Porch sign".to_string(); // stale on-device name
+        sighting.last_seen_at = 99.0;
+        upsert_device_merged(&store, sighting).unwrap();
+
+        let listed = registry.list().unwrap();
+        assert_eq!(listed[0].name, "Luna's sign");
+        assert_eq!(listed[0].last_seen_at, 99.0);
     }
 }

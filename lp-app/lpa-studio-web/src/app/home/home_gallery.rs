@@ -1,8 +1,8 @@
-//! The home gallery page: Connected / Your projects / Examples.
+//! The home gallery page: Devices / Projects / Examples.
 
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
-use lpa_studio_core::{HomeOp, UiAction, UiHomeView, ZipBytes};
+use lpa_studio_core::{HomeOp, RosterCardState, UiAction, UiHomeView, ZipBytes};
 
 use crate::app::home::device_card::{
     ConnectDeviceCard, DeviceCard, connect_device_action, flash_device_action,
@@ -13,9 +13,10 @@ use crate::base::{StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 
 /// The gallery home screen (roadmap M4, unconditional at `#/` since M5):
-/// a map of everywhere the user's light lives. The connect card and the
-/// flash link open the deploy dialog — connect, provision, and push all
-/// live there (D22/D24).
+/// a map of everywhere the user's light lives. The Devices section is the
+/// D27 roster; the connect card opens the VID-filtered chooser directly —
+/// the deploy dialog is never a connect surface (its `NeedsDevice` state
+/// is unreachable from here).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn HomeGallery(
@@ -40,8 +41,16 @@ pub fn HomeGallery(
             None => probe_granted_serial_ports().await,
         }
     });
+    // the roster shows whenever it is non-empty or a grant exists
     let device_section_expanded =
         !home.devices.is_empty() || has_ever_granted.or(*probed_grant.read()).unwrap_or(false);
+    // a live (non-offline) card means the flash affordance has a device
+    // context and may open the dialog; otherwise it opens the recovery
+    // chooser first
+    let device_connected = home
+        .devices
+        .iter()
+        .any(|card| !matches!(card.state, RosterCardState::Offline { .. }));
     let busy = home.opening.is_some();
     let import_dropped = import_handler(on_action);
     let import_picked = import_dropped.clone();
@@ -68,13 +77,13 @@ pub fn HomeGallery(
                 }
             }
 
-            // --- Connected ------------------------------------------------
+            // --- Devices (the D27 roster) -----------------------------------
             if device_section_expanded {
                 section { class: "tw:grid tw:gap-3",
                     header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
-                        h2 { class: section_title_class(), "Connected" }
+                        h2 { class: section_title_class(), "Devices" }
                         ActionButton {
-                            action: flash_device_action(),
+                            action: flash_device_action(device_connected),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
@@ -103,7 +112,7 @@ pub fn HomeGallery(
                         on_action,
                     }
                     ActionButton {
-                        action: flash_device_action(),
+                        action: flash_device_action(device_connected),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
@@ -111,10 +120,10 @@ pub fn HomeGallery(
                 }
             }
 
-            // --- Your projects ---------------------------------------------
+            // --- Projects ----------------------------------------------------
             section { class: "tw:grid tw:gap-3",
                 header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
-                    h2 { class: section_title_class(), "Your projects" }
+                    h2 { class: section_title_class(), "Projects" }
                     if home.library_available {
                         div { class: "tw:flex tw:items-center tw:gap-2",
                             // a real button (matching the ActionButton quiet

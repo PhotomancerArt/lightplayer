@@ -1,21 +1,32 @@
 //! Building [`UiHomeView`] from hydrated library inputs, the registry,
 //! and embedded examples.
+//!
+//! The device section is the D27 roster: ONE last-seen-sorted list where
+//! live and remembered devices mix (live first naturally). Every card's
+//! health derives through the M2 evidence function
+//! ([`derive_roster_card_state`]); the D24 collapse is gone — a connected
+//! device holding a known project keeps its device card AND the project
+//! card carries the live chip (D28: one fact, two views).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use lpa_link::DeviceState;
 use lpc_history::EventKind;
 use lpfs::LpFs;
 
 use crate::UiIssue;
 use crate::app::library::{LibraryStore, PackageMeta, PackageProvenance};
 use crate::app::places::{DeviceContent, DeviceRegistry, DeviceSyncState, RegisteredDevice};
+use crate::app::roster::{
+    ConnectEvidence, RosterCardState, RosterEvidence, derive_roster_card_state,
+};
 
 use super::embedded_example::embedded_examples;
-use super::ui_device_card::{UiDeviceCard, UiDeviceCardState};
+use super::ui_device_card::{UiDeviceCard, UiDeviceProjectChip};
 use super::ui_example_card::UiExampleCard;
 use super::ui_home_view::UiHomeView;
-use super::ui_package_card::UiPackageCard;
+use super::ui_package_card::{UiCardConnection, UiPackageCard};
 
 /// The gallery's hydrated library data: built asynchronously from a host
 /// catalog snapshot (`StudioController::refresh_library`) and cached —
@@ -27,6 +38,29 @@ pub struct HomeInputs {
     /// Listing failed — the gallery surfaces this instead of an empty
     /// library.
     pub issue: Option<UiIssue>,
+}
+
+/// Everything the single live session contributes to the roster — the
+/// evidence feeding [`derive_roster_card_state`] for the live card. M4's
+/// runtime pool replaces this with per-runtime evidence without changing
+/// the derivation. Absence of every field is honest evidence of absence
+/// (no live card).
+#[derive(Clone, Debug, Default)]
+pub struct HomeDeviceEvidence {
+    /// Connect-as-pull result, once the pull landed.
+    pub sync: Option<DeviceSyncState>,
+    /// The hardware link's observable state, when a session exists.
+    pub link: Option<DeviceState>,
+    /// What the connect flow is doing right now.
+    pub connect: ConnectEvidence,
+    /// Transport label from the live connector class ("USB" for serial);
+    /// `None` while the provider is still resolving.
+    pub transport: Option<String>,
+    /// The device copy's version number on its project line, looked up at
+    /// absorb time via `ProjectHistory::version_number`.
+    pub observed_version: Option<usize>,
+    /// The local head's version number, for the "Push vN" affordance.
+    pub head_version: Option<usize>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -78,19 +112,14 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
 
 /// Assemble the gallery view model from cached inputs. `inputs` is `None`
 /// when no local store mounted (the gallery still shows examples and the
-/// connect card). `device_sync` is the LIVE device's connect-as-pull
-/// result; D24 unification happens here: a connected device holding a
-/// locally-known project becomes an indication on that project's card,
-/// not a second card.
-/// `live_transport` is the LIVE device's transport label, read from its
-/// connector class metadata by the controller ("USB" for serial classes);
-/// registry cards carry the label recorded at last sight instead.
+/// connect card). `live` is the single live session's evidence; the D28
+/// pairing happens here: a live device holding a known project keeps its
+/// device card AND that project's card gets the [`UiCardConnection`] chip.
 pub fn build_home_view(
     inputs: Option<&HomeInputs>,
     opening: Option<String>,
     issue: Option<UiIssue>,
-    device_sync: Option<&DeviceSyncState>,
-    live_transport: Option<&str>,
+    live: &HomeDeviceEvidence,
 ) -> UiHomeView {
     let examples = dedupe_by_key(
         embedded_examples()
@@ -106,12 +135,9 @@ pub fn build_home_view(
     );
 
     let Some(inputs) = inputs else {
+        let (_, devices) = assemble_roster(&[], live);
         return UiHomeView {
-            devices: dedupe_by_key(
-                unify_devices(&[], device_sync, live_transport).1,
-                |card| card.render_key().to_string(),
-                "device",
-            ),
+            devices: dedupe_by_key(devices, |card| card.render_key().to_string(), "device"),
             projects: Vec::new(),
             examples,
             library_available: false,
@@ -121,25 +147,11 @@ pub fn build_home_view(
     };
 
     let mut projects = inputs.projects.clone();
-    let (unified_onto_project, mut devices) =
-        unify_devices(&inputs.devices, device_sync, live_transport);
-    if let Some((project_uid, connection)) = unified_onto_project {
-        match projects.iter_mut().find(|card| card.uid == project_uid) {
-            Some(card) => card.connected_device = Some(connection),
-            None => {
-                // the project vanished between pull and hydration —
-                // degrade to a plain device card rather than losing the
-                // device from view
-                devices.push(UiDeviceCard {
-                    uid: device_sync.and_then(|sync| {
-                        sync.identity.as_ref().map(|identity| identity.uid.clone())
-                    }),
-                    name: connection.device_name,
-                    transport: live_transport.unwrap_or_default().to_string(),
-                    state: UiDeviceCardState::ConnectedRunning { project: None },
-                });
-            }
-        }
+    let (live_connection, devices) = assemble_roster(&inputs.devices, live);
+    if let Some((project_uid, connection)) = live_connection
+        && let Some(card) = projects.iter_mut().find(|card| card.uid == project_uid)
+    {
+        card.connected_device = Some(connection);
     }
 
     UiHomeView {
@@ -171,90 +183,113 @@ fn dedupe_by_key<T>(cards: Vec<T>, key: impl Fn(&T) -> String, what: &'static st
         .collect()
 }
 
-/// The D24 device-section shape: registry cards minus the live device
-/// (it stops being "remembered" while it's here), plus either a live
-/// device card OR a unification onto a project card.
+/// The D27 roster shape: the live card first, then remembered cards
+/// sorted by last seen (newest first). The live device stops being
+/// "remembered offline" while it's here; its project pairing (when the
+/// contents are a known/adopted library project) returns alongside so the
+/// project card can carry the D28 chip.
 ///
-/// Returns `(project unification, device cards)`.
-fn unify_devices(
+/// Returns `(live project connection, device cards)`.
+fn assemble_roster(
     registry_cards: &[UiDeviceCard],
-    device_sync: Option<&DeviceSyncState>,
-    live_transport: Option<&str>,
-) -> (
-    Option<(String, crate::app::home::UiCardConnection)>,
-    Vec<UiDeviceCard>,
-) {
-    let Some(sync) = device_sync else {
-        return (None, registry_cards.to_vec());
-    };
-    let transport = live_transport.unwrap_or_default().to_string();
-    let live_name = sync
-        .identity
-        .as_ref()
-        .map(|identity| identity.name.clone())
-        .unwrap_or_else(|| "Connected device".to_string());
-    // the live device is not "remembered offline" while it's here
+    live: &HomeDeviceEvidence,
+) -> (Option<(String, UiCardConnection)>, Vec<UiDeviceCard>) {
+    let live_card = live_device_card(live);
+
     let mut devices: Vec<UiDeviceCard> = registry_cards
         .iter()
-        .filter(|card| {
-            !matches!((&card.uid, &sync.identity), (Some(uid), Some(identity)) if *uid == identity.uid)
+        .filter(|card| match (&card.uid, &live_card) {
+            // the live device is not "remembered offline" while it's here
+            (Some(uid), Some(live_card)) => live_card.uid.as_deref() != Some(uid.as_str()),
+            _ => true,
         })
         .cloned()
         .collect();
+    // last-seen sort (stable: hydration order breaks ties); live leads
+    devices.sort_by(|a, b| {
+        last_seen_sort_key(b)
+            .partial_cmp(&last_seen_sort_key(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    match &sync.content {
-        DeviceContent::Known {
-            project_uid,
-            relation,
-            ..
-        } => {
-            return (
-                Some((
-                    project_uid.clone(),
-                    crate::app::home::UiCardConnection {
-                        device_name: live_name,
-                        relation: *relation,
-                    },
-                )),
-                devices,
-            );
-        }
-        DeviceContent::Adopted { project_uid, .. } => {
-            return (
-                Some((
-                    project_uid.clone(),
-                    crate::app::home::UiCardConnection {
-                        device_name: live_name,
-                        relation: lpc_history::SyncRelation::AtHead,
-                    },
-                )),
-                devices,
-            );
-        }
-        DeviceContent::Empty => devices.push(UiDeviceCard {
-            uid: sync.identity.as_ref().map(|identity| identity.uid.clone()),
-            name: live_name,
-            transport,
-            state: UiDeviceCardState::Blank,
-        }),
-        DeviceContent::PendingIdentity { .. } => devices.push(UiDeviceCard {
-            uid: None,
-            name: live_name,
-            transport,
-            state: UiDeviceCardState::ConnectedUnknown {
-                detail: "Holds a project — name this device to keep it".to_string(),
+    let connection = live_card.as_ref().and_then(|card| {
+        let chip = card.project.as_ref()?;
+        let relation = match live.sync.as_ref().map(|sync| &sync.content) {
+            Some(DeviceContent::Known { relation, .. }) => *relation,
+            Some(DeviceContent::Adopted { .. }) => lpc_history::SyncRelation::AtHead,
+            _ => return None,
+        };
+        Some((
+            chip.uid.clone(),
+            UiCardConnection {
+                device_name: card.name.clone(),
+                relation,
             },
-        }),
-        DeviceContent::Unreadable { detail } => devices.push(UiDeviceCard {
-            uid: sync.identity.as_ref().map(|identity| identity.uid.clone()),
-            name: live_name,
-            transport,
-            state: UiDeviceCardState::ConnectedUnknown {
-                detail: detail.clone(),
-            },
-        }),
+        ))
+    });
+    if let Some(card) = live_card {
+        devices.insert(0, card);
     }
-    (None, devices)
+    (connection, devices)
+}
+
+/// The live session's card, derived from evidence. `None` when there is
+/// no live evidence at all, and also when the evidence derives *Offline*
+/// (a `Gone` link or stale sync) — the registry card is the
+/// better-informed offline view (it knows the last sighting).
+fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
+    if live.sync.is_none() && live.link.is_none() && live.connect == ConnectEvidence::Idle {
+        return None;
+    }
+    let state = derive_roster_card_state(&RosterEvidence {
+        link: live.link.as_ref(),
+        content: live.sync.as_ref().map(|sync| &sync.content),
+        observed_version: live.observed_version,
+        head_version: live.head_version,
+        registry: None,
+        connect: live.connect.clone(),
+    });
+    if matches!(state, RosterCardState::Offline { .. }) {
+        return None;
+    }
+    let identity = live.sync.as_ref().and_then(|sync| sync.identity.as_ref());
+    let project = live.sync.as_ref().and_then(|sync| match &sync.content {
+        DeviceContent::Known {
+            project_uid, slug, ..
+        }
+        | DeviceContent::Adopted {
+            project_uid, slug, ..
+        } => Some(UiDeviceProjectChip {
+            uid: project_uid.clone(),
+            name: slug.clone(),
+        }),
+        _ => None,
+    });
+    // hello firmware provenance: Technical evidence for the card's
+    // rich-object detail (Ready links only — a pre-hello link has none)
+    let fw = match &live.link {
+        Some(DeviceState::Ready { hello }) => Some(hello.fw.clone()),
+        _ => None,
+    };
+    Some(UiDeviceCard {
+        uid: identity.map(|identity| identity.uid.clone()),
+        name: identity
+            .map(|identity| identity.name.clone())
+            .unwrap_or_else(|| "Connected device".to_string()),
+        transport: live.transport.clone().unwrap_or_default(),
+        state,
+        project,
+        fw,
+    })
+}
+
+/// Last-seen ordering key: live cards lead, sighted cards follow newest
+/// first, never-sighted cards trail.
+fn last_seen_sort_key(card: &UiDeviceCard) -> f64 {
+    match &card.state {
+        RosterCardState::Offline { last_seen_at } => last_seen_at.unwrap_or(f64::NEG_INFINITY),
+        _ => f64::INFINITY,
+    }
 }
 
 fn package_card(
@@ -293,7 +328,7 @@ fn package_card(
         provenance: meta.and_then(|meta| provenance_line(store, &meta)),
         on_device,
         open_elsewhere: false,  // stamped by the hydration pass
-        connected_device: None, // stamped by D24 unification at view build
+        connected_device: None, // stamped by the D28 pairing at view build
     })
 }
 
@@ -328,25 +363,36 @@ fn provenance_line(store: &LibraryStore, meta: &PackageMeta) -> Option<String> {
     }
 }
 
+/// A remembered device's card, derived through the same evidence function
+/// as the live card (registry-only evidence = offline).
 fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDeviceCard {
-    // the last-known line prefers the project's current name; a deleted
+    // the last-known chip prefers the project's current name; a deleted
     // project's association falls back to its uid
-    let last_known = device.association.as_ref().map(|association| {
+    let project = device.association.as_ref().map(|association| {
         let uid = association.project.to_string();
-        projects
+        let name = projects
             .iter()
             .find_map(|card| (card.uid == uid).then(|| card.slug.clone()))
-            .unwrap_or(uid)
+            .unwrap_or_else(|| uid.clone());
+        UiDeviceProjectChip { uid, name }
+    });
+    let state = derive_roster_card_state(&RosterEvidence {
+        link: None,
+        content: None,
+        observed_version: None,
+        head_version: None,
+        registry: Some(device),
+        connect: ConnectEvidence::Idle,
     });
     UiDeviceCard {
         uid: Some(device.uid.clone()),
         name: device.name.clone(),
         // recorded at last sight from the live session's connector class
         transport: device.transport.clone(),
-        state: UiDeviceCardState::RememberedOffline {
-            last_seen_at: device.last_seen_at,
-            last_known,
-        },
+        state,
+        project,
+        // remembered only: no live hello, no firmware provenance
+        fw: None,
     }
 }
 
@@ -355,8 +401,11 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use lpc_history::{DeviceAssociation, PrefixedUid, UidPrefix};
+    use lpc_history::{DeviceAssociation, PrefixedUid, SyncRelation, UidPrefix};
+    use lpc_wire::{FwProvenance, ServerHello, WIRE_PROTO_VERSION};
     use lpfs::LpFsMemory;
+
+    use crate::app::places::{DeviceIdentity, DeviceSyncState};
 
     use super::*;
 
@@ -374,12 +423,37 @@ mod tests {
 
     fn view_of(store: &LibraryStore) -> UiHomeView {
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
-        build_home_view(Some(&inputs), None, None, None, None)
+        build_home_view(Some(&inputs), None, None, &HomeDeviceEvidence::default())
+    }
+
+    fn ready_link() -> DeviceState {
+        DeviceState::Ready {
+            hello: ServerHello {
+                proto: WIRE_PROTO_VERSION,
+                fw: FwProvenance {
+                    package: "fw-esp32".to_string(),
+                    commit: "abc123456789".to_string(),
+                    dirty: false,
+                    profile: "release-esp32".to_string(),
+                },
+                device_uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+            },
+        }
+    }
+
+    /// Evidence for a live, Ready device carrying `sync`.
+    fn live(sync: DeviceSyncState) -> HomeDeviceEvidence {
+        HomeDeviceEvidence {
+            sync: Some(sync),
+            link: Some(ready_link()),
+            transport: Some("USB".to_string()),
+            ..HomeDeviceEvidence::default()
+        }
     }
 
     #[test]
     fn no_library_still_lists_examples() {
-        let view = build_home_view(None, None, None, None, None);
+        let view = build_home_view(None, None, None, &HomeDeviceEvidence::default());
         assert!(!view.library_available);
         assert!(view.projects.is_empty());
         assert_eq!(view.examples.len(), embedded_examples().len());
@@ -495,18 +569,25 @@ mod tests {
     fn duplicate_card_keys_degrade_to_a_dropped_card_not_a_dead_ui() {
         // A corrupt registry/store that repeats an identity must lose the
         // duplicate card (with a warning), never poison the keyed list.
+        let offline = RosterCardState::Offline {
+            last_seen_at: Some(5.0),
+        };
         let cards = vec![
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
                 name: "one".to_string(),
                 transport: "USB".to_string(),
-                state: UiDeviceCardState::Blank,
+                state: offline.clone(),
+                project: None,
+                fw: None,
             },
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
                 name: "two".to_string(),
                 transport: "USB".to_string(),
-                state: UiDeviceCardState::Blank,
+                state: offline,
+                project: None,
+                fw: None,
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
@@ -515,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn registered_devices_become_remembered_cards_and_parity_lines() {
+    fn registered_devices_become_offline_cards_with_project_chips() {
         let store = store();
         let summary = store.create("Porch", 1.0).unwrap();
         let head = store.open(summary.uid).unwrap().history.head().unwrap();
@@ -540,10 +621,15 @@ mod tests {
         let view = view_of(&store);
         assert_eq!(view.devices.len(), 1);
         assert_eq!(view.devices[0].name, "Luna's porch sign");
-        assert!(matches!(
+        assert_eq!(
             view.devices[0].state,
-            UiDeviceCardState::RememberedOffline { last_seen_at, .. } if last_seen_at == 5.0
-        ));
+            RosterCardState::Offline {
+                last_seen_at: Some(5.0),
+            }
+        );
+        let chip = view.devices[0].project.as_ref().expect("last-known chip");
+        assert_eq!(chip.name, "2026-07-09-1421-porch");
+        assert_eq!(chip.uid, summary.uid.to_string());
 
         let porch = view
             .projects
@@ -554,10 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn d24_connected_device_with_local_project_unifies_onto_one_card() {
-        use crate::app::places::{DeviceContent, DeviceIdentity, DeviceSyncState};
-        use lpc_history::SyncRelation;
-
+    fn d28_connected_device_keeps_its_card_and_the_project_gets_the_chip() {
         let store = store();
         let summary = store.create("Porch", 1.0).unwrap();
         // the device is also remembered in the registry (it must not show
@@ -574,7 +657,7 @@ mod tests {
             .unwrap();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
 
-        let sync = DeviceSyncState {
+        let mut evidence = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
                 uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
                 name: "Porch sign".to_string(),
@@ -585,51 +668,129 @@ mod tests {
                 observed: lpc_history::ContentHash::of(b"v"),
                 relation: SyncRelation::Behind,
             },
-        };
-        let view = build_home_view(Some(&inputs), None, None, Some(&sync), Some("USB"));
+        });
+        evidence.observed_version = Some(3);
+        evidence.head_version = Some(5);
+        let view = build_home_view(Some(&inputs), None, None, &evidence);
 
-        assert!(view.devices.is_empty(), "one card, not two (D24)");
-        let card = view
+        // one device card (live, not remembered-offline), with the state
+        // derived through the roster evidence function
+        assert_eq!(view.devices.len(), 1, "one card, not two (D28)");
+        let card = &view.devices[0];
+        assert_eq!(card.name, "Porch sign");
+        assert_eq!(
+            card.state,
+            RosterCardState::RunningBehind {
+                observed_version: Some(3),
+                head_version: Some(5),
+            }
+        );
+        let chip = card.project.as_ref().expect("live project chip");
+        assert_eq!(chip.name, summary.slug);
+
+        // AND the project card carries the live connection chip
+        let project = view
             .projects
             .iter()
             .find(|card| card.uid == summary.uid.to_string())
             .unwrap();
-        let connection = card.connected_device.as_ref().expect("indication set");
+        let connection = project.connected_device.as_ref().expect("indication set");
         assert_eq!(connection.device_name, "Porch sign");
         assert_eq!(connection.relation, SyncRelation::Behind);
     }
 
     #[test]
-    fn blank_and_unknown_devices_keep_their_own_cards() {
-        use crate::app::places::{DeviceContent, DeviceIdentity, DeviceSyncState};
+    fn roster_sorts_by_last_seen_with_the_live_card_first() {
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        for (seed, name, seen) in [
+            (1u8, "old", 10.0),
+            (2u8, "newest", 300.0),
+            (3u8, "middle", 200.0),
+        ] {
+            registry
+                .upsert(RegisteredDevice {
+                    uid: PrefixedUid::mint(UidPrefix::Device, &[seed; 16]).to_string(),
+                    name: name.to_string(),
+                    transport: "USB".to_string(),
+                    last_seen_at: seen,
+                    association: None,
+                })
+                .unwrap();
+        }
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
 
+        let evidence = live(DeviceSyncState {
+            identity: Some(DeviceIdentity {
+                uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+                name: "Live one".to_string(),
+            }),
+            content: DeviceContent::Empty,
+        });
+        let view = build_home_view(Some(&inputs), None, None, &evidence);
+
+        let names: Vec<&str> = view.devices.iter().map(|card| card.name.as_str()).collect();
+        assert_eq!(names, vec!["Live one", "newest", "middle", "old"]);
+    }
+
+    #[test]
+    fn blank_and_unknown_devices_keep_their_own_cards() {
         let store = store();
         let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
 
-        let blank = DeviceSyncState {
+        let blank = live(DeviceSyncState {
             identity: Some(DeviceIdentity {
                 uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
                 name: "Fresh board".to_string(),
             }),
             content: DeviceContent::Empty,
-        };
-        let view = build_home_view(Some(&inputs), None, None, Some(&blank), Some("USB"));
+        });
+        let view = build_home_view(Some(&inputs), None, None, &blank);
         assert_eq!(view.devices.len(), 1);
-        assert_eq!(view.devices[0].state, UiDeviceCardState::Blank);
+        assert_eq!(view.devices[0].state, RosterCardState::ConnectedEmpty);
 
-        let anonymous = DeviceSyncState {
+        let anonymous = live(DeviceSyncState {
             identity: None,
             content: DeviceContent::PendingIdentity {
                 observed: lpc_history::ContentHash::of(b"x"),
             },
-        };
-        let view = build_home_view(Some(&inputs), None, None, Some(&anonymous), Some("USB"));
+        });
+        let view = build_home_view(Some(&inputs), None, None, &anonymous);
         assert_eq!(view.devices.len(), 1);
-        assert!(matches!(
-            view.devices[0].state,
-            UiDeviceCardState::ConnectedUnknown { .. }
-        ));
+        assert_eq!(view.devices[0].state, RosterCardState::NeedsAName);
         assert_eq!(view.devices[0].name, "Connected device");
+    }
+
+    #[test]
+    fn a_gone_link_yields_no_live_card_only_the_registry_view() {
+        // cable yanked: the link reads Gone; the remembered card (which
+        // knows the last sighting) is the honest view, not a live card
+        // that would say "Not seen yet"
+        let store = store();
+        let registry = DeviceRegistry::new(store.fs_handle());
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 50.0,
+                association: None,
+            })
+            .unwrap();
+        let inputs = hydrate_home_inputs(store.fs_handle(), &[]);
+
+        let evidence = HomeDeviceEvidence {
+            link: Some(DeviceState::Gone),
+            ..HomeDeviceEvidence::default()
+        };
+        let view = build_home_view(Some(&inputs), None, None, &evidence);
+        assert_eq!(view.devices.len(), 1);
+        assert_eq!(
+            view.devices[0].state,
+            RosterCardState::Offline {
+                last_seen_at: Some(50.0),
+            }
+        );
     }
 
     #[test]
@@ -638,8 +799,7 @@ mod tests {
             None,
             Some("prj_x".to_string()),
             Some(UiIssue::new("boom")),
-            None,
-            None,
+            &HomeDeviceEvidence::default(),
         );
         assert_eq!(view.opening.as_deref(), Some("prj_x"));
         assert_eq!(view.issue.as_ref().unwrap().message, "boom");

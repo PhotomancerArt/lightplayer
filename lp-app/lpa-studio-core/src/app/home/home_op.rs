@@ -52,6 +52,22 @@ pub enum HomeOp {
         file_name: String,
         bytes: ZipBytes,
     },
+    /// Rename a device (D34, inline on the card): registry always; a live
+    /// session also writes the identity back to the device.
+    RenameDevice {
+        uid: String,
+        name: String,
+    },
+    /// Forget a remembered device (D34 hygiene, offline-card popup).
+    ForgetDevice {
+        uid: String,
+    },
+    /// Name an anonymous connected device (the Needs-a-name card's inline
+    /// form): mints a `dev_` uid and stamps the identity over the wire —
+    /// card-anchored, never a dialog.
+    NameDevice {
+        name: String,
+    },
 }
 
 impl ControllerOp for HomeOp {
@@ -92,6 +108,25 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Secondary,
             )
             .with_icon("upload"),
+            Self::RenameDevice { .. } => ActionMeta::new(
+                "Rename device",
+                "Rename this device; a connected device is updated too.",
+                ActionPriority::Secondary,
+            )
+            .with_icon("edit"),
+            Self::ForgetDevice { .. } => ActionMeta::new(
+                "Forget device",
+                "Remove this device from the list; connecting it again re-adds it.",
+                ActionPriority::Tertiary,
+            )
+            .with_icon("remove")
+            .destructive(),
+            Self::NameDevice { .. } => ActionMeta::new(
+                "Name device",
+                "Name this device so Studio remembers it.",
+                ActionPriority::Primary,
+            )
+            .with_icon("edit"),
         }
     }
 
@@ -102,11 +137,16 @@ impl ControllerOp for HomeOp {
             Self::OpenPackage { .. } | Self::OpenExample { .. } => ActionClass::Foreground {
                 deadline: PROJECT_LOAD_DEADLINE,
             },
-            // Library CRUD is local store work; the standard budget bounds it.
+            // Library/registry CRUD is local store work (a device rename's
+            // live write-back is one small wire write); the standard budget
+            // bounds it.
             Self::RenamePackage { .. }
             | Self::DuplicatePackage { .. }
             | Self::DeletePackage { .. }
-            | Self::ImportZip { .. } => ActionClass::Foreground {
+            | Self::ImportZip { .. }
+            | Self::RenameDevice { .. }
+            | Self::ForgetDevice { .. }
+            | Self::NameDevice { .. } => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
         }
@@ -169,6 +209,13 @@ mod tests {
             HomeOp::ImportZip {
                 file_name: "a.zip".to_string(),
                 bytes: ZipBytes(vec![1, 2]),
+            },
+            HomeOp::RenameDevice {
+                uid: "dev_1".to_string(),
+                name: "n".to_string(),
+            },
+            HomeOp::ForgetDevice {
+                uid: "dev_1".to_string(),
             },
         ] {
             assert_eq!(

@@ -80,8 +80,14 @@ holds the full context.
 | CI check that a `PROJECT_FORMAT_VERSION` bump lands with a `schemas/history/` snapshot | `2026-07-05-artifact-format-version-and-schema-snapshots` | The first real format bump |
 | CLI adoption of `DeviceSession` (lp-cli still hand-rolls provider/session bundles; `fwcheck`'s boot-line grep dies then) | `2026-07-15-device-session-model` | Device-link M5 (CLI) work begins |
 | Websocket / server-lightplayer connector classes on the capability model | `2026-07-15-device-session-model` | A remote (non-serial) device class becomes real |
-| **Fuel/metering in `lpvm-native`** (back-edge counters in emitted RV32 — the real infinite-loop protection; until then a hung shader rides watchdog-reset → blame → block) | `2026-07-14-shader-auto-apply` | Raised priority — next compiler plan; auto-apply is live without it |
+| Fuel heatmap / GLSL probe synergy (trap pixel = probe selection; vmctx `metadata` reserved for trace state) | `2026-07-20-lpvm-native-fuel` | Probes work begins |
+| Interpreter loop cap (interp target still has unbounded loops; trap filetests guard with `@unsupported(interp)`) | `2026-07-20-lpvm-native-fuel` | interp leaves opt-in oracle duty or hangs a runner |
+| Per-function shared trap stub (shrink back-edge fuel checks from 7 to ~5 words) | `2026-07-20-lpvm-native-fuel` | ESP32 16 KB JIT chunk budget gets tight |
+| Compute-tick / shader-init fuel blame route (traps abort bounded but bypass the panic/blame ledger) | `2026-07-20-lpvm-native-fuel` | Runaway compute shaders show up in practice |
 | Budgeted/async shader compile (spread the ~194 ms device compile across frames instead of one long frame per apply) | `2026-07-14-shader-auto-apply` | The per-apply frame stall matters in practice |
+| Sim-worker recovery layer 2 (timeout-streak detection → terminate+respawn preserving the unsaved-overlay mirror; NotResponding sim roster card; PreviewHost in-flight deadline) | `2026-07-23-sim-wasm-fuel` | M4 runtime-pool implementation begins (requirements already in its plan notes) |
+| Real vmctx block on the browser path (guest shader shares the fw-browser module's linear memory with vmctx at address 0) | `2026-07-23-sim-wasm-fuel` | Browser memory-layout work or probe trace state lands |
+| Per-instance host recovery contexts (typed errors could feed a host blame ledger without panics) | `2026-07-23-per-target-panic-strategy`; `2026-07-04-crash-recovery-model` | Host-side blame for failing shaders becomes a product need |
 
 ## Relationship To Shared Planning
 

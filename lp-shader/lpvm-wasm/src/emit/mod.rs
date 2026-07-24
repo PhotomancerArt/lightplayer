@@ -2,6 +2,7 @@
 
 mod builtin_wasm_import_types;
 mod control;
+mod fuel;
 pub(crate) mod func;
 mod imports;
 mod memory;
@@ -110,9 +111,14 @@ pub(crate) fn emit_module(
     let needs_result_ptr_calls = imports::module_needs_result_ptr_calls(ir);
     let needs_shadow_stack = any_slots || needs_result_ptr_calls;
     let mut import_section = ImportSection::new();
+    // Fuel checks load/store the vmctx header in linear memory at every
+    // function entry, so a fuel-enabled module always needs `env.memory`.
     let needs_memory = !filtered.decls.is_empty()
         || ir.functions.values().any(|f| f.uses_memory())
-        || render_entry.is_some();
+        || render_entry.is_some()
+        || options.fuel
+        // Inline-lowered `__lp_get_fuel` loads the vmctx header directly.
+        || imports::module_inlines_get_fuel(ir);
     let env_memory = if needs_memory {
         let spec = EnvMemorySpec::shader_import_limits();
         let min = spec.initial_pages as u64;
@@ -202,8 +208,11 @@ pub(crate) fn emit_module(
         code.function(&wasm_fn);
     }
     if let Some((render_idx, _)) = render_entry {
+        // Legacy wrapper for web-demo, which calls the raw `render_frame`
+        // export with no host-side arming — so when fuel is on the wrapper
+        // re-arms the vmctx header per pixel itself (see `emit_render_frame`).
         let render_wasm_idx = filtered_fn_count + render_idx as u32;
-        let rf = emit_render_frame(render_wasm_idx, sp_global);
+        let rf = emit_render_frame(render_wasm_idx, sp_global, options.fuel);
         code.function(&rf);
     }
 
@@ -249,7 +258,18 @@ fn find_render_entry(ir: &LpirModule, mode: FloatMode) -> Option<(usize, u32)> {
 /// calls `render`, converts Q16.16 vec4 → RGBA8, stores to linear memory.
 ///
 /// One WASM call per frame instead of W×H JS→WASM transitions.
-fn emit_render_frame(main_fn_idx: u32, sp_global: Option<u32>) -> Function {
+///
+/// Fuel: this hand-written wrapper is the raw-export path (web-demo calls it
+/// directly via `instance.exports`, bypassing any `prepare_call` arming), so
+/// with `fuel` on it arms the vmctx header itself — trap slot cleared at
+/// frame start, per-pixel fuel/invocation re-arm before every `call render`
+/// (mirroring the synth render wrappers in
+/// `lp-shader/src/synth/render_texture.rs`). The wrapper's own x/y loop
+/// back-edges stay unmetered (bounded by the width/height params); an
+/// infinite loop in the user `render` fn is caught by render's emitted
+/// entry/back-edge checks against the per-pixel tank and unwinds out of the
+/// whole frame call.
+fn emit_render_frame(main_fn_idx: u32, sp_global: Option<u32>, fuel: bool) -> Function {
     // params: 0=width  1=height  2=time  3=out_ptr
     // locals: 4=y  5=x  6=ptr  7=r  8=g  9=b  10=a
     let mut f = Function::new([(7, ValType::I32)]);
@@ -257,6 +277,14 @@ fn emit_render_frame(main_fn_idx: u32, sp_global: Option<u32>) -> Function {
 
     if let Some(sp) = sp_global {
         s.i32_const(memory::SHADOW_STACK_BASE).global_set(sp);
+    }
+
+    if fuel {
+        // Clear a stale trap code from a previous (trapped) frame; the
+        // per-pixel re-arms below never touch the trap slot.
+        s.i32_const(0)
+            .i32_const(lpvm::TRAP_CODE_NONE as i32)
+            .i32_store(memory::mem_arg0(lpvm::VMCTX_OFFSET_TRAP as u32, 2));
     }
 
     // ptr = out_ptr
@@ -277,6 +305,18 @@ fn emit_render_frame(main_fn_idx: u32, sp_global: Option<u32>) -> Function {
         s.loop_(BlockType::Empty); // @4 continue
         {
             s.local_get(5).local_get(0).i32_ge_u().br_if(1);
+
+            if fuel {
+                // Per-pixel re-arm: fuel budget → vmctx+0, linear pixel
+                // index (y*width + x) → vmctx+4. Placed after the bounds
+                // checks so an exiting iteration does not re-arm.
+                s.i32_const(0)
+                    .i32_const(lpvm::DEFAULT_INVOCATION_FUEL as i32)
+                    .i32_store(memory::mem_arg0(lpvm::VMCTX_OFFSET_FUEL as u32, 2));
+                s.i32_const(0);
+                s.local_get(4).local_get(0).i32_mul().local_get(5).i32_add();
+                s.i32_store(memory::mem_arg0(lpvm::VMCTX_OFFSET_FUEL as u32 + 4, 2));
+            }
 
             // render(vmctx, x<<16, y<<16, w<<16, h<<16, time)
             s.i32_const(0);

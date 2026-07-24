@@ -6,17 +6,37 @@ export function isSupported() {
   return Boolean(globalThis.navigator?.serial);
 }
 
-export async function grantedPortsCount() {
+// Enumerate the ports this origin was ALREADY granted (no permission
+// prompt), registering each one as a session so the returned {id, label}
+// descriptors are openable without a chooser. Repeat calls return the same
+// ids: navigator.serial.getPorts() yields stable SerialPort object
+// identities, and existing sessions are matched by port identity.
+export async function getGrantedPorts() {
   const serial = globalThis.navigator?.serial;
   if (!serial?.getPorts) {
-    return 0;
+    return [];
   }
+  let ports;
   try {
-    const ports = await serial.getPorts();
-    return ports.length;
+    ports = await serial.getPorts();
   } catch {
-    return 0;
+    return [];
   }
+  if (ports.length === 0) {
+    return [];
+  }
+  const { BrowserEsp32DeviceController } = await loadControllerModule();
+  return ports.map((port) => {
+    for (const [id, session] of sessions) {
+      if (session.port === port) {
+        return { id, label: session.label };
+      }
+    }
+    const id = nextSessionId++;
+    const session = new BrowserEsp32DeviceController({ port });
+    sessions.set(id, session);
+    return { id, label: session.label };
+  });
 }
 
 export async function requestPort() {
@@ -49,7 +69,12 @@ export async function closePort(id) {
     return;
   }
   await session.close();
-  sessions.delete(id);
+  // The entry STAYS: the SerialPort is a persistent grant handle, and the
+  // management flow closes the link session then flashes through the same
+  // id (`getPort`) — deleting here orphaned that port ("Unknown browser
+  // serial session"). Keeping entries also keeps ids stable per port
+  // identity, which `getGrantedPorts` dedupe relies on. `close()` above
+  // released the reader/writer, so no stream stays held.
 }
 
 export async function releasePort(id) {

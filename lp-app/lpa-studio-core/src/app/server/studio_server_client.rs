@@ -121,17 +121,21 @@ impl StudioServerClient {
     /// Open a library project on the runtime: whole-project replace →
     /// hash verification → load → version probe (load-as-push, D19).
     ///
-    /// `expected_hash` is the library copy's canonical hash; a mismatch is
-    /// a hard error (the runtime would be running something other than the
-    /// library head).
+    /// `storage_id` is the runtime's project storage dir under
+    /// `/projects/` — the sim always uses [`DEMO_PROJECT_STORAGE_ID`]; a
+    /// device push targets the storage the device actually runs from so
+    /// one project dir replaces in place. `expected_hash` is the library
+    /// copy's canonical hash; a mismatch is a hard error (the runtime
+    /// would be running something other than the library head).
     pub async fn open_library_project(
         &mut self,
+        storage_id: &str,
         files: &[(String, Vec<u8>)],
         expected_hash: &str,
     ) -> Result<LoadedLibraryProject, UiError> {
         let deploy = self
             .client
-            .replace_and_load_project(DEMO_PROJECT_STORAGE_ID, files)
+            .replace_and_load_project(storage_id, files)
             .await
             .map_err(map_client_error)?;
         let handle = deploy.value;
@@ -139,7 +143,7 @@ impl StudioServerClient {
 
         let hash = self
             .client
-            .hash_package(DEMO_PROJECT_STORAGE_ID)
+            .hash_package(storage_id)
             .await
             .map_err(map_client_error)?;
         logs.extend(map_client_events(hash.events));
@@ -156,10 +160,7 @@ impl StudioServerClient {
         // current fs revision — the baseline for save-as-pull
         let version_probe = self
             .client
-            .pull_changed_files(
-                DEMO_PROJECT_STORAGE_ID,
-                lpc_model::FsVersion::new(i64::MAX - 1),
-            )
+            .pull_changed_files(storage_id, lpc_model::FsVersion::new(i64::MAX - 1))
             .await
             .map_err(map_client_error)?;
         logs.extend(map_client_events(version_probe.events));

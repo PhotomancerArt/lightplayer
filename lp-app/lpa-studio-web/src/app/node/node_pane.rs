@@ -4,7 +4,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::affordance::affordance_pane_tone;
-use crate::app::layout::{PaneChrome, PaneCollapse, StudioPane};
+use crate::app::layout::{PaneCollapse, RichObjectPane};
 use crate::app::node::{
     NodeChildren, NodeDetailPopover, ProducedProducts, ProducedValues, SlotRecordEditor,
 };
@@ -39,14 +39,10 @@ pub fn NodePane(
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
     let dirty = view.header.dirty;
-    // P6 affordance model: the header carries no count chips — the merged
-    // affordance on the detail trigger is the whole announcement, and the
-    // per-bucket counts live in the detail popup.
-    let chrome = PaneChrome {
-        tone: affordance_pane_tone(view.header.affordance(), view.header.status.kind),
-        accent: view.focused,
-        chips: Vec::new(),
-    };
+    // The rollup: the merged affordance tones the header (P6 — no count
+    // chips; the detail trigger is the whole announcement). RichObjectPane
+    // pins that composition.
+    let tone = affordance_pane_tone(view.header.affordance(), view.header.status.kind);
     let surface_class = pane_surface_tint_class(dirty_tint, dirty);
     let header = view.header.clone();
     let title = view.header.title.clone();
@@ -61,7 +57,7 @@ pub fn NodePane(
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
             div { class: surface_class,
-                StudioPane {
+                RichObjectPane {
                     collapse: PaneCollapse {
                         collapsed: collapsed(),
                         expand_label: "Expand node".to_string(),
@@ -80,7 +76,8 @@ pub fn NodePane(
                     },
                     title,
                     title_action: focus_action.clone(),
-                    chrome,
+                    tone,
+                    accent: focused,
                     actions: header_actions,
                     on_action,
                     trailing: rsx! {

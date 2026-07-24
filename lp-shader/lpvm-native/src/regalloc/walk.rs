@@ -1367,4 +1367,70 @@ mod tests {
             );
         }
     }
+
+    /// FuelCheck is a plain use of its vmctx vreg: the walk must allocate it
+    /// to a register like any other use.
+    #[test]
+    fn walk_fuel_check_use_allocated() {
+        let input = "i0 = IConst32 100\nFuelCheck i0, @0, dec\nRet";
+        let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
+        let output = walk_linear(&vinsts, &pool, &make_abi()).unwrap();
+
+        // FuelCheck (inst 1) has no defs, one use (i0) at operand 0.
+        let alloc = output.operand_alloc(1, 0);
+        assert!(
+            alloc.is_reg(),
+            "FuelCheck vmctx use must be in a register, got {alloc:?}"
+        );
+    }
+
+    /// Spilled vmctx: with a 2-register pool and enough live values to evict
+    /// i0, the FuelCheck use must trigger a reload from the spill slot.
+    #[test]
+    fn walk_fuel_check_spilled_vmctx_reload() {
+        let input = "\
+            i0 = IConst32 100\n\
+            i1 = IConst32 2\n\
+            i2 = IConst32 3\n\
+            i3 = Add i1, i2\n\
+            FuelCheck i0, @0, dec\n\
+            Ret i3";
+        let (vinsts, _symbols, pool) = vinst::parse(input).unwrap();
+        let output = walk_linear_with_pool(
+            &vinsts,
+            &pool,
+            &make_abi(),
+            RegPool::with_capacity(crate::isa::IsaTarget::Rv32imac, 2),
+        )
+        .unwrap();
+
+        assert!(
+            output.num_spill_slots >= 1,
+            "expected at least 1 spill slot (i0 evicted)"
+        );
+        // i0's def must go to its spill slot (evicted during backward walk).
+        let i0_def = output.operand_alloc(0, 0);
+        assert!(i0_def.is_stack(), "i0 def should be Stack, got {i0_def:?}");
+        // FuelCheck's vmctx use (inst 4, operand 0) must still land in a
+        // register, fed by a reload edit somewhere between def and use.
+        let fuel_use = output.operand_alloc(4, 0);
+        assert!(
+            fuel_use.is_reg(),
+            "FuelCheck vmctx use should be Reg (reloaded), got {fuel_use:?}"
+        );
+        let has_reload = output.edits.iter().any(|(_, edit)| {
+            matches!(
+                edit,
+                Edit::Move {
+                    from: Alloc::Stack(_),
+                    to: Alloc::Reg(_)
+                }
+            )
+        });
+        assert!(
+            has_reload,
+            "expected a stack->reg reload edit, got edits: {edits:?}",
+            edits = output.edits
+        );
+    }
 }

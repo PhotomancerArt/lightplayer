@@ -263,8 +263,10 @@ fn device_connect_pulls_classifies_and_adopts() {
 
     // a "device": an in-process server whose /projects/studio holds a
     // project the library does NOT know, plus a stamped identity at the
-    // device's fs ROOT (identity is device-scoped, not project content)
-    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    // device's fs ROOT (identity is device-scoped, not project content).
+    // Nothing is loaded — the pull's storage discovery falls back to the
+    // default slot.
+    let server = Rc::new(RefCell::new(device_e2e_server()));
     let device_project_dir = "/projects/studio";
     {
         let server = server.borrow();
@@ -372,7 +374,7 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     use lpc_history::{EventKind, SyncRelation};
 
     // a "device": empty project storage, no identity, firmware answering
-    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let server = Rc::new(RefCell::new(device_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
         inbox: Rc::new(RefCell::new(VecDeque::new())),
@@ -1894,18 +1896,26 @@ const PROJECT_DIR: &str = "/projects/edit-e2e";
 
 /// A real server with a loaded clock + fixture project (no shader, so the
 /// simulator session runs entirely host-side).
-fn edit_e2e_server() -> LpServer {
+/// A "device" fixture: a real in-process server with NOTHING loaded.
+/// Connect-time pulls discover the device's LOADED project, so device
+/// tests must not run the edit-e2e project — an idle device falls back to
+/// the default storage slot, an empty one classifies Empty.
+fn device_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
-    let mut server = LpServer::new(
+    LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
         "projects".as_path(),
         None,
         None,
         graphics,
-    );
+    )
+}
+
+fn edit_e2e_server() -> LpServer {
+    let mut server = device_e2e_server();
 
     for (name, body) in edit_e2e_files() {
         server

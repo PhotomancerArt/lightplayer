@@ -4,10 +4,13 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    UiDeviceCard, UiDeviceCardState, UiExampleCard, UiHomeView, UiIssue, UiPackageCard,
+    RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiIssue,
+    UiPackageCard,
 };
 
 use crate::app::home::HomeGallery;
+use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::gallery_preview::ThumbPreviewBadge;
 
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -56,23 +59,31 @@ fn packages() -> Vec<UiPackageCard> {
 }
 
 fn devices() -> Vec<UiDeviceCard> {
+    // the D27 roster: live first (naturally), then last-seen order
     vec![
         UiDeviceCard {
             uid: Some("dev_7pQr5St89uVwXy2CzDaFbg".to_string()),
             name: "Workbench ESP32".to_string(),
             transport: "USB".to_string(),
-            state: UiDeviceCardState::ConnectedRunning {
-                project: Some("Porch sign".to_string()),
-            },
+            state: RosterCardState::RunningUpToDate,
+            project: Some(UiDeviceProjectChip {
+                uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                name: "2026-07-02-0930-porch-sign".to_string(),
+            }),
+            fw: None,
         },
         UiDeviceCard {
             uid: Some("dev_4hJk6Lm01nPqRs3TuVwXyz".to_string()),
             name: "Luna's porch sign".to_string(),
             transport: "USB".to_string(),
-            state: UiDeviceCardState::RememberedOffline {
-                last_seen_at: STORY_NOW - 3.0 * 86_400.0,
-                last_known: Some("2026-07-02-0930-porch-sign".to_string()),
+            state: RosterCardState::Offline {
+                last_seen_at: Some(STORY_NOW - 3.0 * 86_400.0),
             },
+            project: Some(UiDeviceProjectChip {
+                uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+                name: "2026-07-02-0930-porch-sign".to_string(),
+            }),
+            fw: None,
         },
     ]
 }
@@ -124,28 +135,32 @@ fn populated() -> Element {
 }
 
 #[story]
-fn connected_device_unified_card() -> Element {
-    // D24: the connected device holding a local project = ONE project
-    // card with the connected indication; a blank second board keeps its
-    // own device card
+fn connected_device_and_project_chip() -> Element {
+    // D28 (D24's collapse is gone): a connected device holding a known
+    // project keeps its DEVICE card and the project card carries the live
+    // chip — one fact, two views. A blank second board rides alongside.
     use lpa_studio_core::UiCardConnection;
 
     let mut projects = packages();
     projects[0].connected_device = Some(UiCardConnection {
-        device_name: "Luna's porch sign".to_string(),
-        relation: lpa_studio_core::SyncRelation::AtHead,
-    });
-    projects[1].connected_device = Some(UiCardConnection {
         device_name: "Workbench ESP32".to_string(),
         relation: lpa_studio_core::SyncRelation::Behind,
     });
+    let mut devices = devices();
+    devices[0].state = RosterCardState::RunningBehind {
+        observed_version: Some(3),
+        head_version: Some(5),
+    };
+    devices.push(UiDeviceCard {
+        uid: Some("dev_4hJk6Lm01nPqRs3T".to_string()),
+        name: "Fresh board".to_string(),
+        transport: "USB".to_string(),
+        state: RosterCardState::ReadyToSetUp,
+        project: None,
+        fw: None,
+    });
     let home = UiHomeView {
-        devices: vec![UiDeviceCard {
-            uid: Some("dev_4hJk6Lm01nPqRs3T".to_string()),
-            name: "Fresh board".to_string(),
-            transport: "USB".to_string(),
-            state: UiDeviceCardState::Blank,
-        }],
+        devices,
         projects,
         examples: examples(),
         library_available: true,
@@ -211,6 +226,54 @@ fn opening_a_project() -> Element {
             }
         }
     }
+}
+
+#[story]
+fn live_thumb_states() -> Element {
+    // The live-thumb overlay states, injected statically (story mode has
+    // no PreviewHost and mounts no canvas): placeholder gradient, GPU
+    // tier, CPU fallback with a surfaced reason, and a failed preview.
+    // Live cards derive the same badges from their slot status.
+    rsx! {
+        section { class: "tw:grid tw:w-[720px] tw:grid-cols-4 tw:gap-3.5 tw:p-4",
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb { seed: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(), label: "placeholder".to_string() }
+                p { class: thumb_state_caption_class(), "Placeholder" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+                    label: "gpu".to_string(),
+                    static_badge: Some(ThumbPreviewBadge::Gpu),
+                }
+                p { class: thumb_state_caption_class(), "GPU tier" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
+                    label: "cpu".to_string(),
+                    static_badge: Some(ThumbPreviewBadge::Cpu {
+                        reason: Some("WebGPU unavailable".to_string()),
+                    }),
+                }
+                p { class: thumb_state_caption_class(), "CPU fallback" }
+            }
+            article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
+                CardThumb {
+                    seed: "examples/basic".to_string(),
+                    label: "failed".to_string(),
+                    static_badge: Some(ThumbPreviewBadge::Error {
+                        reason: "deploy: shader compile failed".to_string(),
+                    }),
+                }
+                p { class: thumb_state_caption_class(), "Failed" }
+            }
+        }
+    }
+}
+
+fn thumb_state_caption_class() -> &'static str {
+    "tw:m-0 tw:p-3 tw:text-xs tw:text-muted-foreground"
 }
 
 #[story]

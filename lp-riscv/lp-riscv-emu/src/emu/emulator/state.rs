@@ -25,6 +25,14 @@ use crate::profile::{Collector, Gate, HaltReason, ProfileSession, SessionMetadat
 /// Default RAM start address (0x80000000, matching embive's RAM_OFFSET).
 pub const DEFAULT_RAM_START: u32 = 0x80000000;
 
+/// Default per-call instruction limit for [`Riscv32Emulator::call_function`].
+/// Hard host-side backstop against runaway guest code (infinite loops in
+/// buggy or fuel-off shader compiles). Hosts whose guest code carries its own
+/// execution metering (e.g. `lpvm-native` fuel checks) may raise it with
+/// [`Riscv32Emulator::with_call_instruction_limit`] so the guest-level trap
+/// fires deterministically first.
+pub const DEFAULT_CALL_INSTRUCTION_LIMIT: u64 = 1_000_000;
+
 pub use super::super::memory::DEFAULT_SHARED_START;
 
 /// Result of running one driven frame (host workload driver).
@@ -60,6 +68,9 @@ pub struct Riscv32Emulator {
     pub(super) instruction_count: u64,
     pub(super) cycle_count: u64,
     pub(super) cycle_model: CycleModel,
+    /// Per-call instruction limit enforced by `call_function` /
+    /// `call_function_with_struct_return` (see [`DEFAULT_CALL_INSTRUCTION_LIMIT`]).
+    pub(super) call_instruction_limit: u64,
     pub(super) log_level: LogLevel,
     pub(super) log_buffer: Vec<super::super::logging::InstLog>,
     pub(super) traps: Vec<(u32, TrapCode)>, // sorted by offset (offset, trap_code) pairs
@@ -101,6 +112,7 @@ impl Riscv32Emulator {
             instruction_count: 0,
             cycle_count: 0,
             cycle_model: CycleModel::default(),
+            call_instruction_limit: DEFAULT_CALL_INSTRUCTION_LIMIT,
             log_level: LogLevel::None,
             log_buffer: Vec::new(),
             traps: trap_list,
@@ -138,6 +150,7 @@ impl Riscv32Emulator {
             instruction_count: 0,
             cycle_count: 0,
             cycle_model: CycleModel::default(),
+            call_instruction_limit: DEFAULT_CALL_INSTRUCTION_LIMIT,
             log_level: LogLevel::None,
             log_buffer: Vec::new(),
             traps: trap_list,
@@ -162,6 +175,23 @@ impl Riscv32Emulator {
     pub fn with_cycle_model(mut self, model: CycleModel) -> Self {
         self.cycle_model = model;
         self
+    }
+
+    /// Override the per-call instruction limit (default
+    /// [`DEFAULT_CALL_INSTRUCTION_LIMIT`]) enforced by
+    /// [`Self::call_function`] / [`Self::call_function_with_struct_return`].
+    ///
+    /// Raise this only when the guest code carries its own execution metering
+    /// (e.g. `lpvm-native` fuel checks) that bounds runaway loops first; the
+    /// limit remains the hard host-side backstop either way.
+    pub fn with_call_instruction_limit(mut self, limit: u64) -> Self {
+        self.call_instruction_limit = limit;
+        self
+    }
+
+    /// Mutating form of [`Self::with_call_instruction_limit`].
+    pub fn set_call_instruction_limit(&mut self, limit: u64) {
+        self.call_instruction_limit = limit;
     }
 
     /// Allow misaligned memory access (matches embedded targets like ESP32).

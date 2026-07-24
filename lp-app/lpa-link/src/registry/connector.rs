@@ -9,11 +9,13 @@ use crate::{
     LinkSession,
 };
 
-/// Owned, enum-dispatched provider handle for one connection flow.
+/// Owned, enum-dispatched provider handle shared across connection flows.
 ///
-/// A connector is created per open flow by [`LinkProviderRegistry::create_connector`]
-/// (or handed in preconfigured by tests) and OWNED by whoever drives the
-/// connection — the studio's `DeviceController`/`DeviceSession` since M4. All methods
+/// A connector comes from [`LinkProviderRegistry::create_connector`] — built
+/// once per kind and memoized, so every flow sees the same instance and the
+/// endpoint state it accumulates — or is handed in preconfigured by tests.
+/// The `Rc` is held by whoever drives the connection — the studio's
+/// `DeviceController`/`DeviceSession` since M4. All methods
 /// take `&self` (each provider keeps its state behind internal `RefCell`s
 /// with borrows scoped to synchronous sections), so the owner can hold
 /// `Rc<LinkConnector>` and hand clones to client I/O adapters without any

@@ -298,6 +298,11 @@ pub fn run(
             }
         };
 
+        if trap_expectation.is_some() {
+            // Trap directives drain their whole tank; keep that affordable.
+            inst.arm_trap_test_fuel();
+        }
+
         let _texture_alloc_handles = match texture_fixture::bind_texture_fixtures_for_run(
             &compiled,
             &mut inst,
@@ -422,9 +427,7 @@ pub fn run(
             (Err(e), None) => {
                 // Got an error but didn't expect one - check if it's a trap
                 let error_str = format!("{e:#}");
-                let is_trap = error_str.contains("Trap:")
-                    || error_str.contains("trap")
-                    || error_str.contains("execution trapped");
+                let is_trap = is_trap_error(&error_str);
 
                 // Extract error message and debug section (if present)
                 let error_msg = extract_error_message(&error_str);
@@ -756,6 +759,20 @@ pub fn run(
     Ok((result, stats, unexpected_pass_lines, failed_lines, false))
 }
 
+/// Classify an execution error string as a guest trap (vs a host/runner
+/// error like a parse failure or the emulator instruction-limit backstop).
+///
+/// Known trap messages this must keep matching:
+/// - lpvm-native out-of-fuel: `native trap: fuel exhausted (invocation N)`
+/// - lpvm-wasm out-of-fuel: `wasm trap: fuel exhausted (invocation N)`
+/// - emulator guest traps: `Trap: …` / `… execution trapped …`
+fn is_trap_error(error_str: &str) -> bool {
+    error_str.contains("Trap:")
+        || error_str.contains("trap")
+        || error_str.contains("execution trapped")
+        || error_str.contains("fuel exhausted")
+}
+
 /// Error type for unified error formatting.
 enum ErrorType {
     ExecutionTrap,
@@ -1011,5 +1028,41 @@ fn eprintln_detail_skipped_run_directive(
         );
     } else {
         eprintln!("✓ {file_line}  {body}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The real lpvm-native out-of-fuel Display string classifies as a trap.
+    #[test]
+    fn native_fuel_trap_message_classifies_as_trap() {
+        let msg = lpvm_native::error::NativeError::Trap {
+            code: 1,
+            invocation: 1234,
+        }
+        .to_string();
+        assert_eq!(msg, "native trap: fuel exhausted (invocation 1234)");
+        assert!(is_trap_error(&msg), "must classify as trap: {msg}");
+    }
+
+    /// The real lpvm-wasm out-of-fuel Display string classifies as a trap.
+    #[test]
+    fn wasm_fuel_trap_message_classifies_as_trap() {
+        let msg = lpvm_wasm::WasmError::Trap {
+            code: 1,
+            invocation: 1234,
+        }
+        .to_string();
+        assert_eq!(msg, "wasm trap: fuel exhausted (invocation 1234)");
+        assert!(is_trap_error(&msg), "must classify as trap: {msg}");
+    }
+
+    /// The emulator instruction-limit backstop is an error, NOT a trap.
+    #[test]
+    fn emulator_instruction_limit_is_not_a_trap() {
+        let msg = "Instruction limit exceeded: executed 64000000 instructions (limit: 64000000) at PC 0x00000040";
+        assert!(!is_trap_error(msg), "must not classify as trap: {msg}");
     }
 }

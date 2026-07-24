@@ -32,8 +32,8 @@ pub use app::device::{
     ProviderChoice, RuntimeAttachment, SimAttachment, UiDeployChoice, UiDeployView,
 };
 pub use app::home::{
-    HOME_NODE_ID, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceCardState, UiExampleCard,
-    UiHomeView, UiPackageCard, ZipBytes,
+    HOME_NODE_ID, HomeDeviceEvidence, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
+    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -47,6 +47,12 @@ pub use app::node::{
     UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue,
     UiSlotValueKind,
 };
+#[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
+pub use app::preview_host::{
+    PreviewHostConfig, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus, PreviewSource,
+    PreviewTier,
+};
 pub use app::project::{
     AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
     NodeController, NodeControllerState, NodeRevertOp, PendingAssetEdit, PendingEdit,
@@ -59,6 +65,14 @@ pub use app::project::{
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
     SlotEditOp, SlotKind, UiAffordance, UiAssetContent, UiAssetContentBody, UiPendingEdit,
     UiPendingEditKind, UiPendingEditPhase, UiShaderError,
+};
+pub use app::rich_object::{
+    RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
+};
+pub use app::roster::{
+    BundledFirmware, ConnectEvidence, ConnectPhase, DegradedReason, DeviceDetailAffordance,
+    DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape,
+    RosterEvidence, derive_roster_card_state, device_rich_object, firmware_update_available,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,

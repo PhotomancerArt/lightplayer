@@ -111,6 +111,9 @@ impl WorkerRig {
                         tier_reason,
                     });
                 }
+                BrowserOutputEnvelope::RuntimeDestroyed { runtime_id } => {
+                    self.note(format!("runtime {runtime_id} destroyed"));
+                }
                 BrowserOutputEnvelope::SurfaceAttached { runtime_id } => {
                     self.surfaces_attached.push(runtime_id);
                 }

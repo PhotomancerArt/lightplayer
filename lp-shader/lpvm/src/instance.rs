@@ -35,8 +35,10 @@ use crate::LpvmBuffer;
 /// [`LpvmInstance::set_uniform_q32`] sets the same using pre-encoded [`LpsValueQ32`] words,
 /// matching [`LpvmInstance::call_q32`]. Encoding follows [`crate::LpsModuleSig`] std430 layout.
 pub trait LpvmInstance {
-    /// Error type for execution failures (trap, unknown function, type mismatch).
-    type Error: core::fmt::Display;
+    /// Error type for execution failures (trap, unknown function, type
+    /// mismatch). [`crate::GuestTrapError`] exposes guest traps (e.g.
+    /// out-of-fuel) as data so hosts never match on `Display` text.
+    type Error: core::fmt::Display + crate::GuestTrapError;
 
     /// Call a function by name with marshaled arguments.
     ///

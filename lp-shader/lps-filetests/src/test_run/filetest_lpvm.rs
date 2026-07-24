@@ -106,7 +106,27 @@ impl CompiledShader {
     }
 }
 
+/// Fuel tank armed on emulated-native targets for `EXPECT_TRAP` directives.
+///
+/// Draining the production `DEFAULT_VMCTX_FUEL` (1M back-edge) tank costs
+/// ~16M emulated guest instructions per directive — tens of seconds in a
+/// debug-build emulator. Trap semantics (back-edge check → trap write →
+/// epilogue cascade → host detection) are identical for any budget, so trap
+/// expectations run with a small tank; value-producing directives keep the
+/// production arming (`vmcontext/fuel-read.glsl` and `fuel/consume-*` pin
+/// the 1M contract; the 1M-tank-vs-emulator-limit interaction is covered by
+/// lpvm-native's `default_tank_trap_fires_before_emulator_instruction_limit`).
+const TRAP_TEST_ARMED_FUEL: u32 = 10_000;
+
 impl FiletestInstance {
+    /// Arm a small fuel tank for a directive that expects a trap (no-op on
+    /// targets without host-armed native fuel). See [`TRAP_TEST_ARMED_FUEL`].
+    pub(crate) fn arm_trap_test_fuel(&mut self) {
+        if let Self::NativeFa(i) = self {
+            i.set_armed_fuel(TRAP_TEST_ARMED_FUEL);
+        }
+    }
+
     pub(crate) fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, String> {
         match self {
             Self::Emu(i) => i.call(name, args).map_err(|e| e.to_string()),

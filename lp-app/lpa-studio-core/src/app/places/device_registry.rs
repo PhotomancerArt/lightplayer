@@ -63,6 +63,32 @@ impl DeviceRegistry {
         self.save(&file)
     }
 
+    /// Rename a remembered device (D34). The registry name is the
+    /// user-facing truth: it wins over device-reported names at reconcile
+    /// ([`upsert_device_merged`](super::device_session::upsert_device_merged))
+    /// and is written back to the device when a session is live.
+    pub fn rename(&self, uid: &str, name: &str) -> Result<(), LibraryError> {
+        let mut file = self.load()?;
+        let Some(device) = file.devices.iter_mut().find(|d| d.uid == uid) else {
+            return Err(LibraryError::NotFound(format!("device {uid}")));
+        };
+        device.name = name.to_string();
+        self.save(&file)
+    }
+
+    /// Forget a remembered device (D34 hygiene): remove it from the
+    /// registry. Idempotent — forgetting an unknown uid is a no-op (the
+    /// goal state is already true).
+    pub fn forget(&self, uid: &str) -> Result<(), LibraryError> {
+        let mut file = self.load()?;
+        let before = file.devices.len();
+        file.devices.retain(|d| d.uid != uid);
+        if file.devices.len() == before {
+            return Ok(());
+        }
+        self.save(&file)
+    }
+
     fn load(&self) -> Result<RegistryFile, LibraryError> {
         let fs = self.fs.borrow();
         let bytes = match fs.read_file(REGISTRY_PATH.as_path()) {
@@ -121,5 +147,50 @@ mod tests {
             listed[0].association.as_ref().unwrap().version,
             ContentHash::of(b"v3")
         );
+    }
+
+    #[test]
+    fn rename_edits_the_name_and_refuses_unknown_uids() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_0000000000000001".to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1.0,
+                association: None,
+            })
+            .unwrap();
+
+        registry
+            .rename("dev_0000000000000001", "Luna's sign")
+            .unwrap();
+        assert_eq!(registry.list().unwrap()[0].name, "Luna's sign");
+
+        assert!(matches!(
+            registry.rename("dev_0000000000000002", "x"),
+            Err(LibraryError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn forget_removes_the_entry_and_is_idempotent() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev_0000000000000001".to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1.0,
+                association: None,
+            })
+            .unwrap();
+
+        registry.forget("dev_0000000000000001").unwrap();
+        assert!(registry.list().unwrap().is_empty());
+        // forgetting again (or an unknown uid) is a no-op, not an error
+        registry.forget("dev_0000000000000001").unwrap();
     }
 }
