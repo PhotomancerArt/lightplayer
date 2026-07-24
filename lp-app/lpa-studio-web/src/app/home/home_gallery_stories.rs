@@ -34,6 +34,7 @@ fn packages() -> Vec<UiPackageCard> {
             on_device: Some("Luna's porch sign".to_string()),
             open_elsewhere: false,
             connected_device: None,
+            running_in_sim: false,
         },
         UiPackageCard {
             uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
@@ -44,6 +45,7 @@ fn packages() -> Vec<UiPackageCard> {
             on_device: None,
             open_elsewhere: false,
             connected_device: None,
+            running_in_sim: false,
         },
         UiPackageCard {
             uid: "prj_1aBc3De56fGhIj8KlMnOpq".to_string(),
@@ -54,6 +56,7 @@ fn packages() -> Vec<UiPackageCard> {
             on_device: None,
             open_elsewhere: false,
             connected_device: None,
+            running_in_sim: false,
         },
     ]
 }
@@ -71,6 +74,7 @@ fn devices() -> Vec<UiDeviceCard> {
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
+            sim: false,
         },
         UiDeviceCard {
             uid: Some("dev_4hJk6Lm01nPqRs3TuVwXyz".to_string()),
@@ -84,6 +88,7 @@ fn devices() -> Vec<UiDeviceCard> {
                 name: "2026-07-02-0930-porch-sign".to_string(),
             }),
             fw: None,
+            sim: false,
         },
     ]
 }
@@ -158,6 +163,7 @@ fn connected_device_and_project_chip() -> Element {
         state: RosterCardState::ReadyToSetUp,
         project: None,
         fw: None,
+        sim: false,
     });
     let home = UiHomeView {
         devices,
@@ -274,6 +280,134 @@ fn live_thumb_states() -> Element {
 
 fn thumb_state_caption_class() -> &'static str {
     "tw:m-0 tw:p-3 tw:text-xs tw:text-muted-foreground"
+}
+
+/// The live sim card (D36) as the pool evidence produces it: Running with
+/// the loaded project's chip, or "nothing loaded".
+fn sim_device_card(with_project: bool) -> UiDeviceCard {
+    UiDeviceCard {
+        uid: None,
+        name: "Simulator".to_string(),
+        transport: String::new(),
+        state: if with_project {
+            RosterCardState::RunningUpToDate
+        } else {
+            RosterCardState::ConnectedEmpty
+        },
+        project: with_project.then(|| UiDeviceProjectChip {
+            uid: "prj_3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+            name: "2026-07-02-0930-porch-sign".to_string(),
+        }),
+        fw: None,
+        sim: true,
+    }
+}
+
+/// The sim + live device gallery (runtime-pool P4): the roster leads the
+/// page with both live cards; the sim's project card wears "Running in
+/// simulator" while the device's wears its connected line — the D28
+/// pairings side by side.
+fn sim_and_live_device_home() -> UiHomeView {
+    let mut projects = packages();
+    projects[0].running_in_sim = true;
+    projects[1].connected_device = Some(lpa_studio_core::UiCardConnection {
+        device_name: "Workbench ESP32".to_string(),
+        relation: lpa_studio_core::SyncRelation::AtHead,
+    });
+    let mut device = devices().remove(0);
+    device.project = Some(UiDeviceProjectChip {
+        uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+        name: "2026-07-04-1102-basic".to_string(),
+    });
+    UiHomeView {
+        devices: vec![sim_device_card(true), device],
+        projects,
+        examples: examples(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    }
+}
+
+fn gallery(home: UiHomeView, roster_label: Option<String>) -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            HomeGallery {
+                home,
+                now_secs: Some(STORY_NOW),
+                has_ever_granted: Some(true),
+                roster_label,
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "D36: only the sim session lives — the roster leads with the sim card (Running + project chip) and the loaded project's card wears 'Running in simulator'."
+)]
+fn sim_running_only() -> Element {
+    let mut projects = packages();
+    projects[0].running_in_sim = true;
+    gallery(
+        UiHomeView {
+            devices: vec![sim_device_card(true)],
+            projects,
+            examples: examples(),
+            library_available: true,
+            opening: None,
+            issue: None,
+        },
+        None,
+    )
+}
+
+#[story(
+    description = "Coexistence on the roster (P4): the sim card first among live, a live device beside it, and both D28 project pairings — 'Running in simulator' and the connected line."
+)]
+fn sim_and_live_device() -> Element {
+    gallery(sim_and_live_device_home(), None)
+}
+
+#[story(
+    description = "The sim card alongside a remembered (offline) device: live leads, the offline card keeps its last-seen fade."
+)]
+fn sim_and_offline_device() -> Element {
+    let mut projects = packages();
+    projects[0].running_in_sim = true;
+    let offline = devices().remove(1);
+    gallery(
+        UiHomeView {
+            devices: vec![sim_device_card(true), offline],
+            projects,
+            examples: examples(),
+            library_available: true,
+            opening: None,
+            issue: None,
+        },
+        None,
+    )
+}
+
+#[story(
+    description = "Section-label candidate 'Devices' (the current label) over the top-of-page roster with sim + device cards — the P4 gate compares the three candidates on identical content."
+)]
+fn roster_label_devices() -> Element {
+    gallery(sim_and_live_device_home(), Some("Devices".to_string()))
+}
+
+#[story(
+    description = "Section-label candidate 'Running' over the same top-of-page roster (story-only override; the rendered product label stays 'Devices' until the gate decides)."
+)]
+fn roster_label_running() -> Element {
+    gallery(sim_and_live_device_home(), Some("Running".to_string()))
+}
+
+#[story(
+    description = "Section-label candidate 'Open' over the same top-of-page roster (story-only override; the rendered product label stays 'Devices' until the gate decides)."
+)]
+fn roster_label_open() -> Element {
+    gallery(sim_and_live_device_home(), Some("Open".to_string()))
 }
 
 #[story]

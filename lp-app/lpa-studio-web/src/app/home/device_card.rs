@@ -25,7 +25,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::home::card_thumb::thumb_swatch_style;
-use crate::app::home::device_detail_popover::DeviceDetailPopover;
+use crate::app::home::device_detail_popover::{DeviceDetailPopover, SimDetailPopover};
 use crate::app::home::package_card::home_action;
 use crate::base::{StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, quiet_action_class};
@@ -66,11 +66,24 @@ pub(crate) fn DeviceCard(
     // Needs-a-name opens the SAME inline form the pencil rename uses —
     // naming is card-anchored, never a dialog trip
     let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
-    let click_action = if sim { None } else { card_click_action(&card) };
-    let affordance = card
-        .state
-        .affordance()
-        .and_then(|affordance| device_affordance_action(&card, &affordance));
+    // The sim card's click re-attaches the editor lens to the sim session
+    // (the D29 grammar's sim arm, runtime-pool P4) — only when a project
+    // is loaded (no dead click on an empty sim: there is nothing to open).
+    let click_action = if sim {
+        card.project.is_some().then(open_sim_project_action)
+    } else {
+        card_click_action(&card)
+    };
+    // The state-table affordances are device flows (choose-project routes
+    // to the deploy dialog); the sim card offers none — its click opens
+    // the editor and its danger zone lives in the popover.
+    let affordance = if sim {
+        None
+    } else {
+        card.state
+            .affordance()
+            .and_then(|affordance| device_affordance_action(&card, &affordance))
+    };
     let can_rename = card.uid.is_some() && !sim;
     // the standing advisory chip rides an honest comparison of the
     // bundled image against the hello provenance (never a bare flag)
@@ -135,17 +148,24 @@ pub(crate) fn DeviceCard(
                 span { class: "tw:text-[11px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-muted-foreground",
                     "{transport_label}"
                 }
-                if !sim {
-                    // the rich-object detail trigger (Q1): the node-style
-                    // affordance-following icon at the right edge, riding
-                    // the rollup tone; Flash/Erase/Forget live in its
-                    // danger zone (the More-menu's rows migrated there).
-                    // -mr-1.5 cancels the header's px-3 down to the pane
-                    // pattern's 6px edge inset, so the button's right gap
-                    // matches its top/bottom.
-                    span {
-                        class: "tw:-my-1 tw:-mr-1.5 tw:ml-auto",
-                        onclick: move |event| event.stop_propagation(),
+                // the rich-object detail trigger (Q1): the node-style
+                // affordance-following icon at the right edge, riding
+                // the rollup tone; the danger zone lives in the popover
+                // (device: Flash/Erase/Forget; sim: Stop simulator).
+                // -mr-1.5 cancels the header's px-3 down to the pane
+                // pattern's 6px edge inset, so the button's right gap
+                // matches its top/bottom.
+                span {
+                    class: "tw:-my-1 tw:-mr-1.5 tw:ml-auto",
+                    onclick: move |event| event.stop_propagation(),
+                    if sim {
+                        SimDetailPopover {
+                            card: card.clone(),
+                            now_secs: now,
+                            initially_open: detail_open,
+                            on_action,
+                        }
+                    } else {
                         DeviceDetailPopover {
                             card: card.clone(),
                             now_secs: now,
@@ -389,6 +409,31 @@ fn open_device_project_action() -> UiAction {
         ControllerId::new(ProjectController::NODE_ID),
         ProjectOp::OpenDeviceProject,
     )
+}
+
+/// The sim-card click (the D29 grammar's sim arm, runtime-pool P4):
+/// re-attach the editor lens to the sim session and open what it runs.
+fn open_sim_project_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::OpenSimProject,
+    )
+}
+
+/// Stop the simulator, from the sim card's danger zone (runtime-pool P3's
+/// destroy op). Confirmation states the honest cost: the worker dies, and
+/// applied-but-unsaved edits live on it — anything not saved to the
+/// library is gone.
+pub(super) fn stop_simulator_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::StopSimulator,
+    )
+    .with_confirmation(lpa_studio_core::ActionConfirmation::new(
+        "Stop simulator",
+        "Stop the simulator? Anything not saved to your library is discarded.",
+        "Stop",
+    ))
 }
 
 /// The ≤1 affordance button, wired to what exists TODAY: flows the

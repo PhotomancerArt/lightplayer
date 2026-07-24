@@ -32,8 +32,8 @@ pub use app::device::{
     UiDeployView,
 };
 pub use app::home::{
-    HOME_NODE_ID, HomeDeviceEvidence, HomeOp, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
-    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
+    HOME_NODE_ID, HomeDeviceEvidence, HomeOp, HomePoolEvidence, HomeSimEvidence, UiCardConnection,
+    UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -72,11 +72,12 @@ pub use app::rich_object::{
 pub use app::roster::{
     BundledFirmware, ConnectEvidence, ConnectPhase, DegradedReason, DeviceDetailAffordance,
     DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape,
-    RosterEvidence, derive_roster_card_state, device_rich_object, firmware_update_available,
+    RosterEvidence, SimDetailAffordance, SimRichInput, derive_roster_card_state,
+    device_rich_object, firmware_update_available, sim_rich_object,
 };
 pub use app::runtime_pool::{
     DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,
-    RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment,
+    RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLoadedProject,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,

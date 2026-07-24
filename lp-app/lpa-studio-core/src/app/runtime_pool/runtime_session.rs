@@ -69,6 +69,19 @@ impl RuntimePayload {
     }
 }
 
+/// The project a SIM session currently runs — identity for the live sim
+/// card's chip (D36) and the project card's "Running in simulator"
+/// indication (the D28 grammar's sim arm). Recorded by load-as-push when
+/// the studio opens a library project on the sim; it outlives the editor
+/// lens (the sim keeps running detached) and dies with the session.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimLoadedProject {
+    /// `prj_…` uid — thumbnail seed and the project-card pairing key.
+    pub uid: String,
+    /// Display name (the library slug at open time).
+    pub name: String,
+}
+
 /// The simulator attachment: connector + session + connection handoff.
 /// No states — boot-ready IS the session (D22).
 pub struct SimAttachment {
@@ -187,6 +200,10 @@ pub struct RuntimeSession {
     /// changes through the change gate (view builds read the live state;
     /// the heartbeat's job is marking the view dirty when it moved).
     heartbeat_device_state: Option<DeviceState>,
+    /// What the SIM session runs (see [`SimLoadedProject`]). Always `None`
+    /// on device sessions — their loaded project is reconcile-bundle
+    /// evidence (`device_sync`), never this field.
+    sim_loaded_project: Option<SimLoadedProject>,
 }
 
 impl RuntimeSession {
@@ -206,6 +223,7 @@ impl RuntimeSession {
             backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
             last_heartbeat_at: None,
             heartbeat_device_state: None,
+            sim_loaded_project: None,
         }
     }
 
@@ -262,6 +280,21 @@ impl RuntimeSession {
         match self.device_state() {
             Some(DeviceState::Ready { hello }) => hello.device_uid,
             _ => None,
+        }
+    }
+
+    /// The project this SIM session runs, when one has been pushed onto it
+    /// (`None` on device sessions and on a sim with nothing loaded).
+    pub fn sim_loaded_project(&self) -> Option<&SimLoadedProject> {
+        self.sim_loaded_project.as_ref()
+    }
+
+    /// Record what load-as-push put on this SIM session (the live sim
+    /// card's identity evidence). Ignored on device sessions — their
+    /// loaded project is reconcile evidence, never this field.
+    pub fn set_sim_loaded_project(&mut self, project: Option<SimLoadedProject>) {
+        if self.is_sim() {
+            self.sim_loaded_project = project;
         }
     }
 

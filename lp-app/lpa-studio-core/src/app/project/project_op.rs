@@ -32,6 +32,12 @@ pub enum ProjectOp {
     /// its loaded handle), then sync the mirror. A project open on the sim
     /// quiesces first; the sim session stays in the pool.
     OpenDeviceProject,
+    /// The sim-card click (runtime-pool P4): re-attach the editor lens to
+    /// THE sim session and open what it is running — the D29 grammar's sim
+    /// arm, mirroring [`Self::OpenDeviceProject`]. The mirror rebuilds
+    /// over the session's server-side overlay; a lens on the device
+    /// quiesces first and that session stays in the pool.
+    OpenSimProject,
     /// Commit the pending-edit overlay: persisted edits are written back to
     /// def artifacts; transient edits stay pending (live-only).
     SaveOverlay,
@@ -78,6 +84,11 @@ impl ControllerOp for ProjectOp {
                 "Edit the project this device is running.",
                 ActionPriority::Primary,
             ),
+            Self::OpenSimProject => ActionMeta::new(
+                "Open in editor",
+                "Edit the project running in the simulator.",
+                ActionPriority::Primary,
+            ),
             Self::SaveOverlay => ActionMeta::new(
                 "Save",
                 "Write pending persisted edits back to the project files.",
@@ -110,7 +121,8 @@ impl ControllerOp for ProjectOp {
             // a frame boundary) — that preemption plus the actor's action
             // serialization IS the detach quiesce.
             | Self::DetachLens
-            | Self::OpenDeviceProject => ActionClass::Foreground {
+            | Self::OpenDeviceProject
+            | Self::OpenSimProject => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
             Self::LoadDemoProject => ActionClass::Foreground {
@@ -156,6 +168,7 @@ mod tests {
             ProjectOp::DisconnectProject,
             ProjectOp::DetachLens,
             ProjectOp::OpenDeviceProject,
+            ProjectOp::OpenSimProject,
         ] {
             assert_eq!(
                 op.action_class(),

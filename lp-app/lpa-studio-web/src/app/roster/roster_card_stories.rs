@@ -151,18 +151,55 @@ fn offline() -> Element {
     )])
 }
 
-#[story(description = "D36: same card grammar, sim glyph instead of the transport glyph.")]
+#[story(
+    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph, Running with the loaded project's chip; clicking re-attaches the editor lens to the sim session."
+)]
 fn simulator_runtime() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(RosterCardState::RunningUpToDate, true),
+                card: sim_card(true),
                 now_secs: Some(STORY_NOW),
                 sim: true,
                 on_action: |_| {},
             }
         }
     }])
+}
+
+#[story(
+    description = "D36: the live sim card with nothing loaded — the session exists, no project has been pushed; no dead click (the card body is quiet)."
+)]
+fn simulator_nothing_loaded() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: sim_card(false),
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The sim card's rich-object detail popover, open: Health and the running Project — only the honestly-applicable sections — with Stop simulator pinned last in the red-tinted danger zone (runtime-pool P3's destroy op)."
+)]
+fn simulator_detail_popover() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[420px] tw:p-4",
+            div { class: "tw:w-64",
+                DeviceCard {
+                    card: sim_card(true),
+                    now_secs: Some(STORY_NOW),
+                    sim: true,
+                    detail_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
 }
 
 #[story(description = "The standing amber chip: firmware drift is advisory on any Running row.")]
@@ -285,6 +322,29 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
             name: "porch-sign".to_string(),
         }),
         fw: None,
+        sim: false,
+    }
+}
+
+/// The live sim card fixture (D36): the shape `home_view_builder`'s
+/// `sim_card` produces — Running with the loaded project's chip, or
+/// "nothing loaded".
+fn sim_card(with_project: bool) -> UiDeviceCard {
+    UiDeviceCard {
+        uid: None,
+        name: "Simulator".to_string(),
+        transport: String::new(),
+        state: if with_project {
+            RosterCardState::RunningUpToDate
+        } else {
+            RosterCardState::ConnectedEmpty
+        },
+        project: with_project.then(|| UiDeviceProjectChip {
+            uid: "prj_3fKq8Zr21bTxYw0A".to_string(),
+            name: "porch-sign".to_string(),
+        }),
+        fw: None,
+        sim: true,
     }
 }
 

@@ -1114,6 +1114,100 @@ fn stop_sim_destroys_the_sim_session_and_keeps_the_device() {
         .expect_err("stopping a stopped simulator reports it is not running");
 }
 
+/// Row P4 (pool-fed roster): both sessions live, editor detached → the
+/// home view carries the live SIM card (Running + the loaded project's
+/// chip, pinned first among live) AND the live device card, and the sim's
+/// project card wears the "Running in simulator" stamp (the D28 sim arm);
+/// stop-sim removes the sim card and the stamp while the device card
+/// stays.
+#[test]
+fn home_view_carries_both_pool_cards_and_stop_sim_removes_the_sim_card() {
+    use crate::ProjectOp;
+
+    let (mut studio, _device, _sim_id) = coexisting_sim_and_device();
+    drive(studio.settle_library());
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::DetachLens,
+    )))
+    .expect("lens detach succeeds");
+
+    let view = studio.view();
+    let home = view.home.expect("a detached editor shows the gallery");
+    let sim_card = &home.devices[0];
+    assert!(sim_card.sim, "the sim card pins first among live");
+    assert_eq!(sim_card.state, crate::RosterCardState::RunningUpToDate);
+    let chip = sim_card
+        .project
+        .as_ref()
+        .expect("the sim card wears its loaded project chip");
+    assert_eq!(chip.name, "2026-07-14-0900-sign");
+    let device_card = home
+        .devices
+        .iter()
+        .find(|card| !card.sim && card.name == "Bench board")
+        .expect("the live device keeps its card");
+    assert!(
+        !matches!(device_card.state, crate::RosterCardState::Offline { .. }),
+        "the device card is live, got {:?}",
+        device_card.state
+    );
+    let sign_project = home
+        .projects
+        .iter()
+        .find(|card| card.slug == "2026-07-14-0900-sign")
+        .expect("the sim's project is in the library section");
+    assert!(
+        sign_project.running_in_sim,
+        "the D28 sim arm stamps the project card"
+    );
+
+    // Stop-sim: the sim card and the stamp die with the session.
+    drive(studio.dispatch(device_action(DeviceOp::StopSimulator))).expect("stop-sim succeeds");
+    let view = studio.view();
+    let home = view.home.expect("still on the gallery");
+    assert!(
+        home.devices.iter().all(|card| !card.sim),
+        "the sim card is gone with the session"
+    );
+    assert!(
+        home.devices
+            .iter()
+            .any(|card| !card.sim && card.name == "Bench board"),
+        "the device card stays"
+    );
+    assert!(
+        home.projects.iter().all(|card| !card.running_in_sim),
+        "no session, no 'Running in simulator' stamp"
+    );
+}
+
+/// Row P4-b (the sim-card click): `ProjectOp::OpenSimProject` re-attaches
+/// the editor lens to THE sim session — the pool's attach path, mirror
+/// rebuilt over the session's server-side state.
+#[test]
+fn open_sim_project_reattaches_the_lens_to_the_sim() {
+    use crate::ProjectOp;
+
+    let (mut studio, _device, sim_id) = coexisting_sim_and_device();
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::DetachLens,
+    )))
+    .expect("lens detach succeeds");
+    assert!(studio.view().home.is_some(), "detached editor = gallery");
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::OpenSimProject,
+    )))
+    .expect("the sim-card click reopens the editor on the sim session");
+
+    assert_eq!(studio.runtime_pool_for_test().lens(), Some(sim_id));
+    assert!(studio.view().home.is_none(), "the editor is back");
+}
+
 /// Row P3-d (minimal D29): a device attached with its project LOADED and
 /// library-known → `ProjectOp::OpenDeviceProject` attaches the lens to
 /// the DEVICE session and opens its running project in the editor over

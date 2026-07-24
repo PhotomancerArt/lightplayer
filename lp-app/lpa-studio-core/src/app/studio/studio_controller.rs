@@ -400,21 +400,24 @@ impl StudioController {
             self.home_inputs.as_ref(),
             opening.map(|pending| pending.card_key().to_string()),
             issue,
-            &self.home_device_evidence(),
+            &self.home_pool_evidence(),
         ))
     }
 
-    /// The live DEVICE session's roster evidence (M3; P4 of the runtime
-    /// pool replaces this assembly with per-runtime evidence). Device
-    /// reconcile state reads the device session — never the lens, which
-    /// may be on the sim (P2 coexistence).
-    fn home_device_evidence(&self) -> crate::app::home::HomeDeviceEvidence {
+    /// The runtime pool's roster evidence (P4): one evidence bundle per
+    /// DEVICE session — reconcile state reads the device session, never
+    /// the lens, which may be on the sim (P2 coexistence) — plus the SIM
+    /// session's evidence while it lives (D36: the sim card exists exactly
+    /// as long as the session does). The connect flow's transient evidence
+    /// (a connect in flight before any session exists) rides the device
+    /// entry, exactly as the single-session shape carried it.
+    fn home_pool_evidence(&self) -> crate::app::home::HomePoolEvidence {
         let (observed_version, head_version) = self
             .pool
             .device_session()
             .map(crate::RuntimeSession::device_versions)
             .unwrap_or((None, None));
-        crate::app::home::HomeDeviceEvidence {
+        let device = crate::app::home::HomeDeviceEvidence {
             sync: self.device_sync().cloned(),
             link: self.device_state(),
             connect: self.gallery_connect_evidence(),
@@ -422,6 +425,21 @@ impl StudioController {
             observed_version,
             head_version,
             pending_uid: self.device.pending_reconnect_uid().map(str::to_string),
+        };
+        let sim = self
+            .pool
+            .sim_session()
+            .map(|session| crate::app::home::HomeSimEvidence {
+                project: session
+                    .sim_loaded_project()
+                    .map(|project| crate::UiDeviceProjectChip {
+                        uid: project.uid.clone(),
+                        name: project.name.clone(),
+                    }),
+            });
+        crate::app::home::HomePoolEvidence {
+            devices: vec![device],
+            sim,
         }
     }
 
@@ -2023,6 +2041,7 @@ impl StudioController {
         match result {
             Ok(logs) => {
                 self.record_logs(logs);
+                self.note_sim_loaded_project();
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,
@@ -2058,6 +2077,16 @@ impl StudioController {
                     .device_session()
                     .map(crate::RuntimeSession::id)
                     .ok_or_else(|| UiError::MissingSession("no device is connected".to_string()))?;
+                self.attach_lens(id, updates).await
+            }
+            ProjectOp::OpenSimProject => {
+                let id = self
+                    .pool
+                    .sim_session()
+                    .map(crate::RuntimeSession::id)
+                    .ok_or_else(|| {
+                        UiError::MissingSession("the simulator is not running".to_string())
+                    })?;
                 self.attach_lens(id, updates).await
             }
             ProjectOp::SaveOverlay => {
@@ -2554,6 +2583,7 @@ impl StudioController {
         match result {
             Ok(logs) => {
                 self.record_logs(logs);
+                self.note_sim_loaded_project();
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,
@@ -2576,6 +2606,25 @@ impl StudioController {
     async fn disconnect_project(&mut self) -> UiResult {
         self.project.disconnect();
         Ok(UiNotices::new().with_notice(UiNotice::info("Project disconnected")))
+    }
+
+    /// Record what a just-landed load-as-push put on the lens SIM session
+    /// — the live sim card's identity evidence (D36) and the project
+    /// card's "Running in simulator" pairing key. No-op when the lens is
+    /// not on a sim or the open carried no library identity (the storeless
+    /// demo path); the record outlives the lens (detach keeps the sim
+    /// running) and dies with the session.
+    fn note_sim_loaded_project(&mut self) {
+        let project = self
+            .project
+            .active_library_uid()
+            .zip(self.project.active_library_slug());
+        if let Some((uid, name)) = project
+            && let Ok(session) = self.pool.lens_session_mut()
+            && session.is_sim()
+        {
+            session.set_sim_loaded_project(Some(crate::SimLoadedProject { uid, name }));
+        }
     }
 
     /// Detach the editor lens (runtime-pool P3): the mirror drops, every

@@ -17,7 +17,7 @@ pub mod ui_package_card;
 
 pub use embedded_example::{EmbeddedExample, embedded_example, embedded_examples};
 pub use home_op::{HOME_NODE_ID, HomeOp, ZipBytes};
-pub use home_view_builder::HomeDeviceEvidence;
+pub use home_view_builder::{HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidence};
 pub use ui_device_card::{UiDeviceCard, UiDeviceProjectChip};
 pub use ui_example_card::UiExampleCard;
 pub use ui_home_view::UiHomeView;

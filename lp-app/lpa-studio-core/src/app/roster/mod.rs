@@ -19,6 +19,8 @@
 //! - [`device_rich_object`]: the device as a rich object — the fixed
 //!   section schema behind the card's detail trigger, built on
 //!   [`crate::app::rich_object`].
+//! - [`sim_rich_object`]: the live simulator session as a rich object
+//!   (D36) — the same schema, only the honestly-applicable sections.
 
 pub mod device_rich_object;
 pub mod firmware_update;
@@ -26,6 +28,7 @@ pub mod roster_affordance;
 pub mod roster_card_state;
 pub mod roster_circle;
 pub mod roster_evidence;
+pub mod sim_rich_object;
 
 pub use device_rich_object::{DeviceDetailAffordance, DeviceRichInput, device_rich_object};
 pub use firmware_update::{BundledFirmware, firmware_update_available};
@@ -33,3 +36,4 @@ pub use roster_affordance::RosterAffordance;
 pub use roster_card_state::{ConnectPhase, DegradedReason, RosterCardState};
 pub use roster_circle::{RosterCircle, RosterCircleShape};
 pub use roster_evidence::{ConnectEvidence, RosterEvidence, derive_roster_card_state};
+pub use sim_rich_object::{SimDetailAffordance, SimRichInput, sim_rich_object};

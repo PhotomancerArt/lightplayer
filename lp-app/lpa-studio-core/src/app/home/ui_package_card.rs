@@ -28,6 +28,12 @@ pub struct UiPackageCard {
     /// A LIVE connected device currently holds this project — D24: one
     /// card, connected indication (no separate device card).
     pub connected_device: Option<UiCardConnection>,
+    /// The live SIM session currently runs this project (the D28 grammar's
+    /// sim arm — one fact, two views: the sim card wears the project chip,
+    /// this card wears the "Running in simulator" indication). Independent
+    /// of `connected_device`: a device and the sim can honestly run the
+    /// same project at once.
+    pub running_in_sim: bool,
 }
 
 /// The live-device indication a unified project card carries (D24).
