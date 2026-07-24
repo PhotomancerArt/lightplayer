@@ -370,6 +370,36 @@ fn sim_and_live_device() -> Element {
 }
 
 #[story(
+    description = "The D28 aggregate (M5): ONE project live on both the sim and a device presents 'Live in 2 places' on its card — one line, not two; amber because the device runs behind (the tooltip spells the places out). Chips stay inert pointers — the runtime cards are one glance up."
+)]
+fn project_live_in_two_places() -> Element {
+    // the SAME project on both runtimes: the sim runs it AND the
+    // (behind) device holds it — the two D28 facts aggregate
+    let mut projects = packages();
+    projects[0].running_in_sim = true;
+    projects[0].connected_device = Some(lpa_studio_core::UiCardConnection {
+        device_name: "Workbench ESP32".to_string(),
+        relation: lpa_studio_core::SyncRelation::Behind,
+    });
+    let mut device = devices().remove(0);
+    device.state = RosterCardState::RunningBehind {
+        observed_version: Some(3),
+        head_version: Some(5),
+    };
+    gallery(
+        UiHomeView {
+            devices: vec![sim_device_card(true), device],
+            projects,
+            examples: examples(),
+            library_available: true,
+            opening: None,
+            issue: None,
+        },
+        None,
+    )
+}
+
+#[story(
     description = "The sim card alongside a remembered (offline) device: live leads, the offline card keeps its last-seen fade."
 )]
 fn sim_and_offline_device() -> Element {

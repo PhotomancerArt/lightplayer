@@ -47,14 +47,16 @@ pub(crate) fn PackageCard(
                 move |_| set_dragged_project(uid.clone())
             },
             // Opening a card is NAVIGATION, so it is a real <a> to the
-            // project route: plain click rides the hashchange → open path,
-            // and cmd/middle-click "open in new tab" works natively. The
-            // link stretches over the card (absolute overlay) instead of
-            // wrapping it, so the card menu isn't interactive-inside-
-            // interactive markup; the menu floats above it (z-order).
+            // sim route (D37: the URL points at a runtime — a project
+            // always opens on the sim, never a device takeover): plain
+            // click rides the hashchange → open path, and cmd/middle-click
+            // "open in new tab" works natively. The link stretches over
+            // the card (absolute overlay) instead of wrapping it, so the
+            // card menu isn't interactive-inside-interactive markup; the
+            // menu floats above it (z-order).
             a {
                 class: "tw:absolute tw:inset-0 tw:z-[1]",
-                href: "#/project/{card.slug}",
+                href: "#/sim/{card.slug}",
                 aria_label: "Open {card.slug}",
                 onclick: move |event| {
                     if busy || opening {
@@ -90,22 +92,15 @@ pub(crate) fn PackageCard(
                                 }
                             }
                         }
-                        // D24: the live device rides the project card —
-                        // one card, connected indication
-                        if let Some(connection) = card.connected_device.clone() {
-                            p { class: connected_line_class(connection.relation),
-                                {connected_line(&connection.device_name, connection.relation)}
-                            }
-                        }
-                        // the D28 grammar's sim arm: the sim session runs
-                        // this project (independent of any device — both
-                        // lines may honestly show at once). Load-as-push
-                        // always runs the head, so the sim is current:
-                        // green, like the at-head connected line.
-                        if card.running_in_sim {
-                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground",
-                                "Running in simulator"
-                            }
+                        // D28: the runtime-presence chip — device line,
+                        // sim line, or the "Live in 2 places" aggregate
+                        // when the project runs on BOTH. Chips are
+                        // pointers, deliberately inert: no runtime grab
+                        // from a project card (D29's never-a-surprise-
+                        // takeover); the runtime cards themselves sit one
+                        // glance up in the roster.
+                        if let Some(live) = live_presence_line(&card) {
+                            p { class: live.class, title: live.title, "{live.text}" }
                         }
                         // a fact, not a warning: neutral chip; the card stays
                         // clickable — the open's refusal notice explains
@@ -129,7 +124,7 @@ pub(crate) fn PackageCard(
             div { class: "tw:flex tw:px-3 tw:pb-3",
                 a {
                     class: "{quiet_action_class()} tw:relative tw:z-[2]",
-                    href: "#/project/{card.slug}",
+                    href: "#/sim/{card.slug}",
                     title: "Open this project in the simulator.",
                     onclick: move |event| {
                         if busy || opening {
@@ -274,6 +269,58 @@ pub(crate) fn take_dragged_project() -> Option<String> {
     DRAGGED_PROJECT.with(|cell| cell.borrow_mut().take())
 }
 
+/// One rendered runtime-presence line (the D28 chip family).
+#[derive(Debug, PartialEq, Eq)]
+struct LivePresenceLine {
+    text: String,
+    class: &'static str,
+    /// Tooltip spelling out the places on the aggregate line; `None` when
+    /// the single line already says everything.
+    title: Option<String>,
+}
+
+const LIVE_LINE_GOOD: &str = "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground";
+const LIVE_LINE_ATTENTION: &str = "tw:m-0 tw:truncate tw:text-xs tw:text-status-working-foreground";
+
+/// The card's runtime-presence line (D28, full semantics):
+///
+/// - live device only → the D24 connected line (green only when current —
+///   green = good; behind/diverged read as facts needing attention);
+/// - sim only → "Running in simulator" (load-as-push always runs the
+///   head, so the sim is current: green);
+/// - BOTH → the aggregate "Live in 2 places" (the pool cap makes 2 the
+///   max for now), amber whenever the device side needs attention, with
+///   the tooltip spelling the places out.
+fn live_presence_line(card: &UiPackageCard) -> Option<LivePresenceLine> {
+    match (card.connected_device.as_ref(), card.running_in_sim) {
+        (Some(connection), true) => Some(LivePresenceLine {
+            text: "Live in 2 places".to_string(),
+            class: match connection.relation {
+                SyncRelation::AtHead => LIVE_LINE_GOOD,
+                SyncRelation::Behind | SyncRelation::Diverged => LIVE_LINE_ATTENTION,
+            },
+            title: Some(format!(
+                "{} · running in simulator",
+                connected_line(&connection.device_name, connection.relation)
+            )),
+        }),
+        (Some(connection), false) => Some(LivePresenceLine {
+            text: connected_line(&connection.device_name, connection.relation),
+            class: match connection.relation {
+                SyncRelation::AtHead => LIVE_LINE_GOOD,
+                SyncRelation::Behind | SyncRelation::Diverged => LIVE_LINE_ATTENTION,
+            },
+            title: None,
+        }),
+        (None, true) => Some(LivePresenceLine {
+            text: "Running in simulator".to_string(),
+            class: LIVE_LINE_GOOD,
+            title: None,
+        }),
+        (None, false) => None,
+    }
+}
+
 /// The D24 connected indication: green only when the device is current
 /// (green = good); behind/diverged read as facts needing attention.
 fn connected_line(device_name: &str, relation: SyncRelation) -> String {
@@ -281,15 +328,6 @@ fn connected_line(device_name: &str, relation: SyncRelation) -> String {
         SyncRelation::AtHead => format!("On {device_name} — connected ✓"),
         SyncRelation::Behind => format!("On {device_name} — behind your copy"),
         SyncRelation::Diverged => format!("On {device_name} — edited elsewhere"),
-    }
-}
-
-fn connected_line_class(relation: SyncRelation) -> &'static str {
-    match relation {
-        SyncRelation::AtHead => "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground",
-        SyncRelation::Behind | SyncRelation::Diverged => {
-            "tw:m-0 tw:truncate tw:text-xs tw:text-status-working-foreground"
-        }
     }
 }
 
@@ -301,4 +339,65 @@ pub(crate) fn platform_now_secs() -> f64 {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn platform_now_secs() -> f64 {
     0.0
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_studio_core::UiCardConnection;
+
+    use super::*;
+
+    fn card(connected: Option<SyncRelation>, running_in_sim: bool) -> UiPackageCard {
+        UiPackageCard {
+            uid: "prj_1".to_string(),
+            kind: "Project".to_string(),
+            slug: "2026-07-09-1421-basic".to_string(),
+            last_saved_at: None,
+            provenance: None,
+            on_device: None,
+            open_elsewhere: false,
+            connected_device: connected.map(|relation| UiCardConnection {
+                device_name: "Porch sign".to_string(),
+                relation,
+            }),
+            running_in_sim,
+        }
+    }
+
+    #[test]
+    fn both_runtimes_aggregate_to_live_in_2_places() {
+        // D28 aggregate: one line, not two — the pool cap makes 2 the max
+        let line = live_presence_line(&card(Some(SyncRelation::AtHead), true)).unwrap();
+        assert_eq!(line.text, "Live in 2 places");
+        assert_eq!(line.class, LIVE_LINE_GOOD, "both places current = good");
+        assert_eq!(
+            line.title.as_deref(),
+            Some("On Porch sign — connected ✓ · running in simulator"),
+            "the tooltip spells the places out"
+        );
+    }
+
+    #[test]
+    fn a_behind_device_turns_the_aggregate_amber() {
+        let line = live_presence_line(&card(Some(SyncRelation::Behind), true)).unwrap();
+        assert_eq!(line.text, "Live in 2 places");
+        assert_eq!(
+            line.class, LIVE_LINE_ATTENTION,
+            "one place needing attention colors the aggregate"
+        );
+    }
+
+    #[test]
+    fn single_runtimes_keep_their_own_lines() {
+        let device = live_presence_line(&card(Some(SyncRelation::Behind), false)).unwrap();
+        assert_eq!(device.text, "On Porch sign — behind your copy");
+        assert_eq!(device.class, LIVE_LINE_ATTENTION);
+        assert_eq!(device.title, None);
+
+        let sim = live_presence_line(&card(None, true)).unwrap();
+        assert_eq!(sim.text, "Running in simulator");
+        assert_eq!(sim.class, LIVE_LINE_GOOD);
+
+        assert_eq!(live_presence_line(&card(None, false)), None);
+    }
 }

@@ -67,17 +67,20 @@ pub fn App() -> Element {
     }
 
     let mut view = use_signal(UiStudioView::empty);
-    // The route: parsed from the URL at boot (with the legacy `?project=`
-    // mapping), canonicalized once, then kept in sync bidirectionally —
-    // the view loop below mirrors actor state into the URL, and the
+    // The route: parsed from the URL at boot, canonicalized once, then
+    // kept in sync bidirectionally — the view loop below mirrors the LENS
+    // into the URL (SDI: the URL is the focused document), and the
     // browser-navigation listener dispatches actions for back/forward.
     let mut route = use_signal(router::boot_route);
     use_hook(move || router::replace(&route.peek().clone()));
-    // The (uid, slug) the view currently shows (for the navigation
-    // listener) and whether an open ever started this session (the
+    // What the view currently shows, for the navigation listener: the
+    // open project's (uid, slug), whether the editor is showing, and the
+    // route the lens binds. `saw_opening` guards the go-home fallback (the
     // boot-time home flash must not rewrite the URL that requested a
     // startup reopen).
     let open_ids_now = use_hook(|| Rc::new(RefCell::new(None::<(String, String)>)));
+    let editor_open_now = use_hook(|| Rc::new(Cell::new(false)));
+    let bound_route_now = use_hook(|| Rc::new(RefCell::new(None::<StudioRoute>)));
     let saw_opening = use_hook(|| Rc::new(Cell::new(false)));
     // A route-driven open we dispatched (startup / back-forward / hash nav)
     // that the actor hasn't started yet. While set, stale home views must
@@ -89,6 +92,8 @@ pub fn App() -> Element {
     // spawn the actor once and drive the view signal from its change-gated
     // channel.
     let loop_open_ids = Rc::clone(&open_ids_now);
+    let loop_editor_open = Rc::clone(&editor_open_now);
+    let loop_bound_route = Rc::clone(&bound_route_now);
     let loop_saw_opening = Rc::clone(&saw_opening);
     let loop_pending_route_open = Rc::clone(&pending_route_open);
     let bridge = use_hook(move || {
@@ -111,22 +116,32 @@ pub fn App() -> Element {
                     .open_project_uid
                     .clone()
                     .zip(next.open_project_slug.clone());
+                // The editor is showing exactly when the view built the
+                // pane layout (device-opened projects carry no library
+                // uid, so pane presence — not project identity — is the
+                // gate).
+                let editor_showing = !next.panes.is_empty();
+                loop_editor_open.set(editor_showing);
+                let bound = editor_showing.then(|| router::lens_route(&next)).flatten();
+                *loop_bound_route.borrow_mut() = bound.clone();
                 let opening_now = next
                     .home
                     .as_ref()
                     .is_some_and(|home| home.opening.is_some());
-                if opening_now || next.open_project_uid.is_some() {
+                if opening_now || editor_showing {
                     loop_saw_opening.set(true);
                     // the dispatched open has started; fallbacks may judge it
                     loop_pending_route_open.set(false);
                 }
 
-                // view → route: the URL follows the actor's state; the
-                // slug is the user-facing key the URL carries
+                // view → route: the URL follows the LENS (SDI — the URL is
+                // the focused document): lens on the sim + open project →
+                // #/sim/<slug>; lens on a device → #/device/<uid>.
                 let current = route.peek().clone();
-                if let Some(slug) = &next.open_project_slug {
-                    if !current.project_matches_view(&next) {
-                        let target = StudioRoute::Project { key: slug.clone() };
+                if editor_showing {
+                    if let Some(target) = bound
+                        && target != current
+                    {
                         if matches!(current, StudioRoute::Home) {
                             // a gallery open: a real navigation, so a real
                             // history entry (back returns to the gallery)
@@ -137,19 +152,24 @@ pub fn App() -> Element {
                         }
                         route.set(target);
                     }
-                } else if matches!(current, StudioRoute::Project { .. }) {
-                    // the project went away: panes showing means a failed
-                    // open or a bridge flow took over; home without an
-                    // in-flight open (after one started) means the open
-                    // ended unsuccessfully — either way the URL goes home.
-                    // The boot-time home flash (nothing started yet) keeps
-                    // the route so the startup reopen can use it.
-                    let has_panes = !next.panes.is_empty();
+                    // an unaddressable lens (no slug yet, or a device
+                    // whose identity has not landed) keeps the URL as-is
+                } else if matches!(
+                    current,
+                    StudioRoute::Sim { .. } | StudioRoute::Device { .. }
+                ) {
+                    // the editor went away: home without an in-flight open
+                    // (after one started) means the open ended — the URL
+                    // goes home. The boot-time home flash (nothing started
+                    // yet) keeps the route so the startup re-derivation
+                    // can use it; a route-dispatched open still connecting
+                    // (pending) keeps it too — the gallery's connect
+                    // evidence renders the window honestly in place.
                     let open_ended = next.home.is_some()
                         && !opening_now
                         && loop_saw_opening.get()
                         && !loop_pending_route_open.get();
-                    if has_panes || open_ended {
+                    if open_ended {
                         router::replace(&StudioRoute::Home);
                         route.set(StudioRoute::Home);
                     }
@@ -170,6 +190,8 @@ pub fn App() -> Element {
     // events, so everything arriving here is real user navigation.
     let nav_bridge = bridge.clone();
     let nav_open_ids = Rc::clone(&open_ids_now);
+    let nav_editor_open = Rc::clone(&editor_open_now);
+    let nav_bound_route = Rc::clone(&bound_route_now);
     let nav_pending_route_open = Rc::clone(&pending_route_open);
     let _route_listener = use_hook(move || {
         router::install_route_listener(move || {
@@ -181,7 +203,7 @@ pub fn App() -> Element {
             route.set(new_route.clone());
             match &new_route {
                 StudioRoute::Home => {
-                    if nav_open_ids.borrow().is_some() {
+                    if nav_editor_open.get() {
                         // back to the gallery = lens detach (runtime-pool
                         // P3): the editor closes, every runtime session
                         // keeps running — the sim stays live (self-ticking
@@ -194,16 +216,47 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Project { key } => {
-                    let already_open = nav_open_ids
-                        .borrow()
-                        .as_ref()
-                        .is_some_and(|(uid, slug)| uid == key || slug == key);
-                    if !already_open {
+                StudioRoute::Sim { key } => {
+                    // already the focused document? (the bound route
+                    // carries the slug; the open ids cover a uid-keyed URL)
+                    let already_bound = match &*nav_bound_route.borrow() {
+                        Some(StudioRoute::Sim { key: bound }) => {
+                            bound == key
+                                || nav_open_ids
+                                    .borrow()
+                                    .as_ref()
+                                    .is_some_and(|(uid, _)| uid == key)
+                        }
+                        _ => false,
+                    };
+                    if !already_bound {
+                        // the open-on-sim path: create/reuse the sim
+                        // session and push the head (D19) — or re-attach
+                        // when the sim already runs this project (the
+                        // core's open flow decides from its loaded-project
+                        // record)
                         nav_pending_route_open.set(true);
                         nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
                             HOME_NODE_ID,
                             HomeOp::OpenPackage { key: key.clone() },
+                        )));
+                    }
+                }
+                StudioRoute::Device { uid } => {
+                    let already_bound = matches!(
+                        &*nav_bound_route.borrow(),
+                        Some(StudioRoute::Device { uid: bound }) if bound == uid
+                    );
+                    if !already_bound {
+                        // attach the existing session for this uid, or
+                        // granted-port connect (M1) + attach; the gallery's
+                        // connect evidence renders the window honestly
+                        nav_pending_route_open.set(true);
+                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            ProjectOp::OpenDeviceProject {
+                                uid: Some(uid.clone()),
+                            },
                         )));
                     }
                 }
@@ -244,14 +297,34 @@ pub fn App() -> Element {
                 install_library_listeners(&startup_bridge.tx);
             }
             store_status.set(status);
-            if let StudioRoute::Project { key } = &startup_route {
-                startup_pending_route_open.set(true);
-                startup_bridge
-                    .tx
-                    .send(StudioCommand::Action(UiAction::from_op(
-                        HOME_NODE_ID,
-                        HomeOp::OpenPackage { key: key.clone() },
-                    )));
+            // Reload = re-derivation (D37): the pool died with the page,
+            // so the route rebuilds its runtime — a sim route respawns the
+            // sim and loads the project (the open-on-sim path); a device
+            // route connects the granted port (M1) and attaches, with the
+            // connecting/failed window rendering honestly on the gallery's
+            // device card.
+            match &startup_route {
+                StudioRoute::Sim { key } => {
+                    startup_pending_route_open.set(true);
+                    startup_bridge
+                        .tx
+                        .send(StudioCommand::Action(UiAction::from_op(
+                            HOME_NODE_ID,
+                            HomeOp::OpenPackage { key: key.clone() },
+                        )));
+                }
+                StudioRoute::Device { uid } => {
+                    startup_pending_route_open.set(true);
+                    startup_bridge
+                        .tx
+                        .send(StudioCommand::Action(UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            ProjectOp::OpenDeviceProject {
+                                uid: Some(uid.clone()),
+                            },
+                        )));
+                }
+                StudioRoute::Home | StudioRoute::Stories { .. } => {}
             }
         });
     });
@@ -288,12 +361,14 @@ pub fn App() -> Element {
         console_bridge.tx.send(StudioCommand::Console(command));
     };
 
-    // The URL's intent picks the frame: a project route whose project the
+    // The URL's intent picks the frame: a SIM route whose project the
     // view hasn't reached yet renders the opening frame, not the gallery.
+    // A device route never does — its connecting/failed window renders
+    // honestly on the gallery's device card (the connect evidence).
     let current_view = view.read().clone();
     let current_route = route.read().clone();
-    let opening_frame = matches!(current_route, StudioRoute::Project { .. })
-        && !current_route.project_matches_view(&current_view);
+    let opening_frame = matches!(current_route, StudioRoute::Sim { .. })
+        && !current_route.sim_matches_view(&current_view);
 
     rsx! {
         style { "{STYLE}" }

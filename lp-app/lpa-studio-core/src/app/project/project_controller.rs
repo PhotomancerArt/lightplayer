@@ -1862,7 +1862,7 @@ impl ProjectController {
     }
 
     /// The open library package's slug (drives the web shell's
-    /// `#/project/<slug>` URL).
+    /// `#/sim/<slug>` URL).
     pub fn active_library_slug(&self) -> Option<String> {
         Some(self.library.as_ref()?.active.as_ref()?.handle.slug.clone())
     }

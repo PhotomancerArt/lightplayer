@@ -39,6 +39,6 @@ pub use studio_view_channel::{
     StudioViewReceiver, StudioViewSender, ViewPublisher, studio_view_channel,
 };
 pub use ui_console_view::UiConsoleView;
-pub use ui_studio_view::UiStudioView;
+pub use ui_studio_view::{UiLensRuntime, UiStudioView};
 pub use ux_update::{UxActivityTarget, UxUpdate};
 pub use ux_update_sink::UxUpdateSink;

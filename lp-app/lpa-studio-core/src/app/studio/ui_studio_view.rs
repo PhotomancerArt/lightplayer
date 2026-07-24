@@ -6,6 +6,25 @@ use crate::{
     UxActivityTarget,
 };
 
+/// Which runtime session the editor lens is bound to (D35/D37 — the SDI
+/// record: one lens shown at a time, and **the URL is the focused
+/// document**). The web shell's route reconciliation binds `#/sim/<key>`
+/// and `#/device/<uid>` to this, never to raw project identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UiLensRuntime {
+    /// The lens is on THE sim session. A sim runtime's identity is its
+    /// project: `project_key` is the loaded project's slug (the D37 route
+    /// key), read from the session's loaded-project record so re-attach
+    /// flows (the sim-card click) address the same document; `None` while
+    /// nothing library-backed is loaded (the storeless demo path).
+    Sim { project_key: Option<String> },
+    /// The lens is on the hardware device session. `uid` is the stamped
+    /// `dev_…` identity (the D37 route key) once the hello or the
+    /// connect-as-pull carried it; `None` for a not-yet-identified device
+    /// (no honest address exists — the URL stays put).
+    Device { uid: Option<String> },
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiStudioView {
     pub panes: Vec<UiPaneView>,
@@ -15,11 +34,14 @@ pub struct UiStudioView {
     /// The home gallery, when the shell should render it instead of the
     /// pane layout (no project open, no device flow engaged — M4).
     pub home: Option<Box<crate::app::home::UiHomeView>>,
+    /// The editor lens's runtime binding, when a session holds the lens
+    /// (see [`UiLensRuntime`]); `None` while the editor is detached.
+    pub lens: Option<UiLensRuntime>,
     /// The `prj_…` uid of the open library package, when one backs the
     /// running project (identity for route↔view comparisons).
     pub open_project_uid: Option<String>,
     /// The open package's slug — the user-facing identifier the web shell
-    /// mirrors into `#/project/<slug>` (URL follows the view, covering
+    /// mirrors into `#/sim/<slug>` (URL follows the view, covering
     /// example opens and clearing on disconnect without action plumbing).
     pub open_project_slug: Option<String>,
     /// Connect-as-pull result for the attached DEVICE (never the sim —
@@ -37,6 +59,7 @@ impl UiStudioView {
             panes,
             console,
             home: None,
+            lens: None,
             open_project_uid: None,
             open_project_slug: None,
             device_sync: None,
@@ -46,6 +69,11 @@ impl UiStudioView {
 
     pub fn with_home(mut self, home: Option<crate::app::home::UiHomeView>) -> Self {
         self.home = home.map(Box::new);
+        self
+    }
+
+    pub fn with_lens(mut self, lens: Option<UiLensRuntime>) -> Self {
+        self.lens = lens;
         self
     }
 

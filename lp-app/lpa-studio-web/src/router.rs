@@ -1,7 +1,7 @@
 //! The Studio web router: one owned route model over the URL hash.
 //!
 //! Routes are the app's navigation vocabulary, and they are **history
-//! entries**: opening a project pushes state, the back button returns to
+//! entries**: opening a runtime pushes state, the back button returns to
 //! the gallery, forward reopens. The shell is route-framed and
 //! actor-filled — the route picks which frame renders (gallery, opening
 //! frame, story book); the studio actor's emitted view fills it. The core
@@ -12,24 +12,44 @@
 //!
 //! ```text
 //! #/                     home (the gallery) — also the empty/unknown hash
-//! #/project/<key>        a library project (slug — the user-facing
-//!                        identifier — or a `prj_…` uid as fallback)
+//! #/sim/<project-key>    the editor as a lens on THE sim session running
+//!                        that project (slug — the user-facing identifier —
+//!                        or a `prj_…` uid as fallback). A sim runtime's
+//!                        identity is its project (D37).
+//! #/device/<dev-uid>     the editor as a lens on that device's session;
+//!                        the project comes from the device.
 //! #/stories[/<story-id>] the story book (dev)
 //! ```
 //!
+//! **The URL is the focused document** (the runtime-pool ADR's SDI
+//! record): the model is multi-document — N runtime sessions in the pool —
+//! but the interface is single-document, one editor lens at a time, and
+//! the URL addresses the RUNTIME the lens is on, never a library project.
+//! `#/project/<key>` is deleted outright (no users, no redirect — Yona
+//! 2026-07-16).
+//!
 //! Reconciliation rules (implemented in `web_app.rs`):
-//! - view shows an open library project → route becomes
-//!   `Project(uid)`: a **push** when coming from `Home` (a gallery open —
-//!   new history entry), a **replace** otherwise (boot/forward
-//!   resolution).
-//! - view lost the project → `replace(Home)` once an open had actually
+//! - the editor is showing → the route follows the LENS via
+//!   [`lens_route`]: lens on the sim + open project → `Sim(slug)` (a
+//!   **push** when coming from `Home` — a gallery open, a new history
+//!   entry — a **replace** otherwise); lens on the device → `Device(uid)`.
+//!   A not-yet-identified device has no honest address; the URL stays put.
+//! - the editor went away → `replace(Home)` once an open had actually
 //!   started (`saw_opening`); the boot-time home flash never rewrites the
 //!   URL, or a startup reopen would erase the very route that requested
 //!   it.
 //! - browser navigation (back/forward/manual hash edit) → dispatch: to
-//!   `Home` while a project is open = lens detach (runtime-pool P3: the
-//!   editor closes, every runtime session keeps running — the gallery
-//!   renders live sim/device cards); to `Project` while home = open.
+//!   `Home` while the editor is open = lens detach (runtime-pool P3: the
+//!   editor closes, every runtime session keeps running); to `Sim` = the
+//!   open-on-sim path (create/reuse the sim session and push the head —
+//!   D19 — or re-attach when that project is already the sim's loaded
+//!   project); to `Device` = attach the existing session for that uid, or
+//!   granted-port connect (M1) + attach. Connecting/failed device states
+//!   render honestly on the gallery's cards (their connect evidence) — the
+//!   device route never shows the opening frame.
+//! - reload = re-derivation by the same rules: the pool dies with the
+//!   page, and the route rebuilds its runtime (`Sim` respawns + loads;
+//!   `Device` reconnects the granted port + attaches).
 //!
 //! `navigate`/`replace` update the URL via the History API, which fires
 //! **no** events — the caller updates the route signal itself, so browser
@@ -40,7 +60,7 @@
 //! deliberately not routing (see `story_book.rs`) — they are a harness
 //! seam, frozen so `scripts/studio-story-pngs.mjs` keeps working.
 
-use lpa_studio_core::UiStudioView;
+use lpa_studio_core::{UiLensRuntime, UiStudioView};
 
 /// Where the user is (or is headed) in the Studio shell.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,9 +74,13 @@ use lpa_studio_core::UiStudioView;
 pub(crate) enum StudioRoute {
     /// The gallery.
     Home,
-    /// A library project, open (or opening) in the simulator. The key is
-    /// the slug (preferred) or a `prj_…` uid (machine-stable fallback).
-    Project { key: String },
+    /// The editor as a lens on THE sim session running this project. The
+    /// key is the slug (preferred) or a `prj_…` uid (machine-stable
+    /// fallback). Reload respawns the sim and loads the project.
+    Sim { key: String },
+    /// The editor as a lens on this device's runtime session (`dev_…`
+    /// uid). Reload connects the granted port (M1) and attaches.
+    Device { uid: String },
     /// The story book; `None` selects the book's default story.
     Stories { story_id: Option<String> },
 }
@@ -70,17 +94,24 @@ pub(crate) enum StudioRoute {
 )]
 impl StudioRoute {
     /// Parse a `location.hash` value. Unknown or malformed hashes read as
-    /// `Home` — the URL is user input. A hash-internal query (the story
-    /// book's `?viewport=`) is not part of the route and is stripped; its
-    /// owner parses it from the raw hash.
+    /// `Home` — the URL is user input (this is also where the deleted
+    /// `#/project/<key>` lands: as `Home`, no redirect). A hash-internal
+    /// query (the story book's `?viewport=`) is not part of the route and
+    /// is stripped; its owner parses it from the raw hash.
     pub(crate) fn parse(hash: &str) -> Self {
         let path = hash.trim_start_matches('#');
         let (path, _hash_query) = path.split_once('?').unwrap_or((path, ""));
         let mut segments = path.split('/').filter(|s| !s.is_empty());
         match segments.next() {
-            Some("project") => match segments.next() {
-                Some(key) if segments.next().is_none() => StudioRoute::Project {
+            Some("sim") => match segments.next() {
+                Some(key) if segments.next().is_none() => StudioRoute::Sim {
                     key: key.to_string(),
+                },
+                _ => StudioRoute::Home,
+            },
+            Some("device") => match segments.next() {
+                Some(uid) if segments.next().is_none() => StudioRoute::Device {
+                    uid: uid.to_string(),
                 },
                 _ => StudioRoute::Home,
             },
@@ -99,17 +130,20 @@ impl StudioRoute {
     pub(crate) fn hash(&self) -> String {
         match self {
             StudioRoute::Home => "#/".to_string(),
-            StudioRoute::Project { key } => format!("#/project/{key}"),
+            StudioRoute::Sim { key } => format!("#/sim/{key}"),
+            StudioRoute::Device { uid } => format!("#/device/{uid}"),
             StudioRoute::Stories { story_id: None } => "#/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("#/stories/{id}"),
         }
     }
 
-    /// Whether the emitted view already shows this route's project (the
-    /// key may be either the slug or the uid).
-    pub(crate) fn project_matches_view(&self, view: &UiStudioView) -> bool {
+    /// Whether the emitted view already shows this SIM route's project
+    /// (the key may be either the slug or the uid). Drives the opening
+    /// frame — which only sim routes render; a device route's connecting
+    /// window renders honestly on the gallery's cards instead.
+    pub(crate) fn sim_matches_view(&self, view: &UiStudioView) -> bool {
         match self {
-            StudioRoute::Project { key } => {
+            StudioRoute::Sim { key } => {
                 view.open_project_uid.as_deref() == Some(key)
                     || view.open_project_slug.as_deref() == Some(key)
             }
@@ -118,45 +152,37 @@ impl StudioRoute {
     }
 }
 
-/// The route at page boot: the hash, with one kindness — a legacy
-/// `?project=prj_…` query (the pre-router scheme) maps to its route so
-/// old bookmarks keep reopening. The caller canonicalizes the URL with
-/// [`replace`] afterwards.
+/// The route the LENS binds, when the editor has an addressable one (SDI:
+/// the URL is the focused document). The sim's key is the session's
+/// loaded-project slug (it survives detach, so re-attach flows address
+/// the same document). `None` while the lens is detached, while the sim
+/// runs nothing library-backed (the storeless demo path), and for a
+/// device whose identity has not landed — in each case the caller leaves
+/// the URL alone.
+///
+/// The caller gates on "the editor is showing" (`!view.panes.is_empty()`):
+/// mid-open views (lens claimed, mirror not yet built) must not rewrite
+/// the URL that requested them.
+pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
+    match view.lens.as_ref()? {
+        UiLensRuntime::Sim { project_key } => {
+            project_key.clone().map(|key| StudioRoute::Sim { key })
+        }
+        UiLensRuntime::Device { uid } => uid.clone().map(|uid| StudioRoute::Device { uid }),
+    }
+}
+
+/// The route at page boot: the hash, verbatim. (The pre-router `?project=`
+/// query kindness is gone with `#/project/` itself — same no-users
+/// rationale; [`replace`] still strips the stale params on first write.)
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn boot_route() -> StudioRoute {
-    let hash = current_hash().unwrap_or_default();
-    let route = StudioRoute::parse(&hash);
-    if route != StudioRoute::Home {
-        return route;
-    }
-    if let Some(search) = current_search() {
-        if let Some(uid) = legacy_project_param(&search) {
-            return StudioRoute::Project { key: uid };
-        }
-    }
-    route
+    StudioRoute::parse(&current_hash().unwrap_or_default())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn boot_route() -> StudioRoute {
     StudioRoute::Home
-}
-
-#[cfg_attr(
-    not(target_arch = "wasm32"),
-    allow(
-        dead_code,
-        reason = "called by the wasm boot path; host builds only run the unit tests"
-    )
-)]
-fn legacy_project_param(search: &str) -> Option<String> {
-    search
-        .trim_start_matches('?')
-        .split('&')
-        .filter_map(|pair| pair.split_once('='))
-        .find_map(|(key, value)| {
-            (key == "project" && value.starts_with("prj_")).then(|| value.to_string())
-        })
 }
 
 /// Push a new history entry for `route` and update the URL. Fires no
@@ -265,13 +291,6 @@ fn current_hash() -> Option<String> {
         .and_then(|location| location.hash().ok())
 }
 
-#[cfg(target_arch = "wasm32")]
-fn current_search() -> Option<String> {
-    web_sys::window()
-        .map(|window| window.location())
-        .and_then(|location| location.search().ok())
-}
-
 /// Install the browser-navigation listener: `on_navigate` runs on every
 /// `popstate` and `hashchange` (back/forward, manual edits, plain hash
 /// links). Programmatic [`navigate`]/[`replace`] calls fire neither event,
@@ -322,17 +341,22 @@ impl Drop for RouteListener {
 
 #[cfg(test)]
 mod tests {
+    use lpa_studio_core::{UiConsoleView, UiPaneView, UiStatus, UiViewContent};
+
     use super::*;
 
     #[test]
     fn routes_round_trip_through_their_hash() {
         let routes = [
             StudioRoute::Home,
-            StudioRoute::Project {
+            StudioRoute::Sim {
                 key: "2026-07-09-1421-basic".to_string(),
             },
-            StudioRoute::Project {
+            StudioRoute::Sim {
                 key: "prj_abc123".to_string(),
+            },
+            StudioRoute::Device {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
             },
             StudioRoute::Stories { story_id: None },
             StudioRoute::Stories {
@@ -351,11 +375,24 @@ mod tests {
             "#",
             "#/",
             "#/nope",
-            "#/project",
-            "#/project/prj_x/extra",
+            "#/sim",
+            "#/sim/prj_x/extra",
+            "#/device",
+            "#/device/dev_x/extra",
         ] {
             assert_eq!(StudioRoute::parse(hash), StudioRoute::Home, "{hash:?}");
         }
+    }
+
+    #[test]
+    fn the_deleted_project_route_reads_as_home_with_no_redirect() {
+        // D37: `#/project/<key>` is deleted outright (no users, no
+        // redirect) — it parses as any other unknown hash.
+        assert_eq!(
+            StudioRoute::parse("#/project/2026-07-09-1421-basic"),
+            StudioRoute::Home
+        );
+        assert_eq!(StudioRoute::parse("#/project/prj_abc"), StudioRoute::Home);
     }
 
     #[test]
@@ -375,22 +412,102 @@ mod tests {
     }
 
     #[test]
-    fn legacy_project_param_maps_and_strips() {
-        assert_eq!(
-            legacy_project_param("?project=prj_abc"),
-            Some("prj_abc".to_string())
-        );
-        assert_eq!(
-            StudioRoute::parse("#/project/prj_abc"),
-            StudioRoute::Project {
-                key: "prj_abc".to_string()
-            }
-        );
-        assert_eq!(legacy_project_param("?project=nope"), None);
+    fn legacy_params_strip_and_harness_params_pass() {
         assert_eq!(
             strip_legacy_params("?project=prj_abc&connect=simulator&story-png=1"),
             "?story-png=1"
         );
         assert_eq!(strip_legacy_params("?connect=usb"), "");
+    }
+
+    // -----------------------------------------------------------------
+    // lens_route: the URL is the focused document (SDI)
+    // -----------------------------------------------------------------
+
+    fn editor_view(lens: Option<UiLensRuntime>) -> UiStudioView {
+        let pane = UiPaneView::new(
+            "project",
+            "Project",
+            UiStatus::neutral("Ready"),
+            UiViewContent::Text(String::new()),
+            Vec::new(),
+        );
+        UiStudioView::new(vec![pane], UiConsoleView::empty()).with_lens(lens)
+    }
+
+    #[test]
+    fn lens_on_the_sim_binds_the_sim_route_by_slug() {
+        let view = editor_view(Some(UiLensRuntime::Sim {
+            project_key: Some("2026-07-09-1421-basic".to_string()),
+        }));
+        assert_eq!(
+            lens_route(&view),
+            Some(StudioRoute::Sim {
+                key: "2026-07-09-1421-basic".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn lens_on_a_device_binds_the_device_route_by_uid() {
+        let view = editor_view(Some(UiLensRuntime::Device {
+            uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
+        }));
+        assert_eq!(
+            lens_route(&view),
+            Some(StudioRoute::Device {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn unaddressable_lenses_bind_nothing() {
+        // detached editor: no lens, no route
+        assert_eq!(lens_route(&editor_view(None)), None);
+        // a device whose identity has not landed has no honest address
+        assert_eq!(
+            lens_route(&editor_view(Some(UiLensRuntime::Device { uid: None }))),
+            None
+        );
+        // a sim-run project with no library slug (the storeless demo path)
+        assert_eq!(
+            lens_route(&editor_view(Some(UiLensRuntime::Sim { project_key: None }))),
+            None
+        );
+    }
+
+    #[test]
+    fn sim_route_matches_the_view_by_slug_or_uid_and_device_routes_never_frame() {
+        let view = editor_view(Some(UiLensRuntime::Sim {
+            project_key: Some("2026-07-09-1421-basic".to_string()),
+        }))
+        .with_open_project(
+            Some("prj_abc".to_string()),
+            Some("2026-07-09-1421-basic".to_string()),
+        );
+        for key in ["2026-07-09-1421-basic", "prj_abc"] {
+            assert!(
+                StudioRoute::Sim {
+                    key: key.to_string()
+                }
+                .sim_matches_view(&view),
+                "{key}"
+            );
+        }
+        assert!(
+            !StudioRoute::Sim {
+                key: "other".to_string()
+            }
+            .sim_matches_view(&view)
+        );
+        // device routes render the gallery honestly, never the opening
+        // frame — sim_matches_view is deliberately false for them
+        assert!(
+            !StudioRoute::Device {
+                uid: "dev_aaaaaaaaaaaaaaaa".to_string()
+            }
+            .sim_matches_view(&view)
+        );
     }
 }

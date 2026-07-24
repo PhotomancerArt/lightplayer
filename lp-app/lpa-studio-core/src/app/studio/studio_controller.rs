@@ -358,6 +358,7 @@ impl StudioController {
         if let Some(home) = self.home_view() {
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
+                .with_lens(self.lens_runtime())
                 .with_device_sync(self.device_sync().cloned())
                 .with_deploy(self.deploy_view());
         }
@@ -374,12 +375,40 @@ impl StudioController {
             device_view,
         ];
         UiStudioView::new(panes, self.console_view())
+            .with_lens(self.lens_runtime())
             .with_open_project(
                 self.project.active_library_uid(),
                 self.project.active_library_slug(),
             )
             .with_device_sync(self.device_sync().cloned())
             .with_deploy(self.deploy_view())
+    }
+
+    /// The lens's runtime binding for the view (SDI: the URL is the
+    /// focused document — the web shell's D37 route reconciliation binds
+    /// to this). A device session's `dev_` uid prefers the wire hello and
+    /// falls back to the connect-as-pull identity.
+    fn lens_runtime(&self) -> Option<crate::UiLensRuntime> {
+        self.pool.lens_session().map(|session| {
+            if session.is_sim() {
+                // the session's loaded-project record (not the library
+                // binding) is the key: it survives detach, so re-attach
+                // flows address the same document
+                crate::UiLensRuntime::Sim {
+                    project_key: session
+                        .sim_loaded_project()
+                        .map(|project| project.name.clone()),
+                }
+            } else {
+                let uid = session.device_uid().or_else(|| {
+                    session
+                        .device_sync()
+                        .and_then(|sync| sync.identity.as_ref())
+                        .map(|identity| identity.uid.clone())
+                });
+                crate::UiLensRuntime::Device { uid }
+            }
+        })
     }
 
     /// The home gallery: shown whenever NO project is open — always
@@ -417,10 +446,24 @@ impl StudioController {
             .device_session()
             .map(crate::RuntimeSession::device_versions)
             .unwrap_or((None, None));
+        // A long-running operation on the device session (flash / erase /
+        // push — the same flag that blocks pool replaces) owns the card's
+        // narration; the connect flow narrates otherwise.
+        let connect = match self
+            .pool
+            .device_session()
+            .and_then(|session| session.operation_label().map(str::to_string))
+        {
+            Some(label) => crate::ConnectEvidence::OperationInFlight {
+                label,
+                percent: None,
+            },
+            None => self.gallery_connect_evidence(),
+        };
         let device = crate::app::home::HomeDeviceEvidence {
             sync: self.device_sync().cloned(),
             link: self.device_state(),
-            connect: self.gallery_connect_evidence(),
+            connect,
             transport: self.transport_label().map(str::to_string),
             observed_version,
             head_version,
@@ -1228,6 +1271,41 @@ impl StudioController {
                     }
                 }
             }
+            DeployOp::PushProject { key } => {
+                // The in-card push (M5): the Running-behind card's Push
+                // button is the D11 consent — no dialog. The device must
+                // carry a stamped identity (the Running-family states
+                // guarantee it; the unstamped flows keep their dialog).
+                let device = self
+                    .device_sync()
+                    .and_then(|sync| sync.identity.clone())
+                    .ok_or_else(|| {
+                        UiError::MissingSession("no named device is connected".to_string())
+                    })?;
+                let target = self.resolve_deploy_target(&key).await?;
+                let label = match target.version_number {
+                    Some(version) => format!("Pushing v{version}"),
+                    None => format!("Pushing {}", target.slug),
+                };
+                // The session's in-flight operation both blocks pool
+                // replaces (DQ-A) and narrates the card's
+                // Operation-in-flight state; the progressive view emit
+                // below puts that state on screen while the push runs.
+                self.pool.device_session_mut()?.set_operation(Some(label));
+                self.mark_dirty();
+                updates.emit(UxUpdate::View(self.view()));
+                let result = self.run_device_push(&device, &target).await;
+                if let Ok(session) = self.pool.device_session_mut() {
+                    session.set_operation(None);
+                }
+                self.mark_dirty();
+                result?;
+                self.request_library_refresh();
+                Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                    "Pushed {} to {}",
+                    target.slug, device.name
+                ))))
+            }
             DeployOp::AdoptDeviceCopy => {
                 let (project_uid, observed) = self.reviewing_diverged_copy()?;
                 let host = self.library_host()?;
@@ -1976,6 +2054,23 @@ impl StudioController {
         if let Some(sim) = self.pool.sim_session() {
             let sim_id = sim.id();
             let server_live = matches!(sim.server_state(), ServerState::Connected { .. });
+            // D37/M5 (`#/sim/<key>` — and the project-card click that now
+            // rides it): when the sim ALREADY runs the requested project,
+            // re-attach the lens instead of pushing the head again — the
+            // running session with its server-side overlay IS the document
+            // (SDI); a fresh push would discard applied-but-unsaved edits.
+            // A different (or no) loaded project keeps the D19 head push.
+            let pending_key = match &self.pending_open {
+                Some(PendingOpen::Package(key)) => Some(key.as_str()),
+                _ => None,
+            };
+            let already_running = pending_key.is_some_and(|key| {
+                sim.sim_loaded_project()
+                    .is_some_and(|project| project.uid == key || project.name == key)
+            });
+            if already_running && server_live {
+                return self.attach_lens(sim_id, updates).await;
+            }
             self.pool.set_lens(sim_id);
             if server_live {
                 return self.open_pending_package(updates).await;
@@ -2071,14 +2166,7 @@ impl StudioController {
             ProjectOp::RefreshProject => self.refresh_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
             ProjectOp::DetachLens => self.detach_lens(),
-            ProjectOp::OpenDeviceProject => {
-                let id = self
-                    .pool
-                    .device_session()
-                    .map(crate::RuntimeSession::id)
-                    .ok_or_else(|| UiError::MissingSession("no device is connected".to_string()))?;
-                self.attach_lens(id, updates).await
-            }
+            ProjectOp::OpenDeviceProject { uid } => self.open_device_project(uid, updates).await,
             ProjectOp::OpenSimProject => {
                 let id = self
                     .pool
@@ -2659,6 +2747,77 @@ impl StudioController {
         self.pool.detach_lens();
     }
 
+    /// The D29 attach ([`ProjectOp::OpenDeviceProject`]): put the editor
+    /// lens on the device session and open its running project.
+    ///
+    /// `uid: None` (the card click) targets the attached device session.
+    /// `uid: Some` (the `#/device/<uid>` route — D37) attaches the
+    /// existing session when its identity matches; otherwise it runs the
+    /// M1 granted-port connect first, then attaches. Soft connect endings
+    /// (chooser opened / cancelled) and non-Ready devices return their
+    /// notices without moving the lens — the gallery's connect evidence
+    /// narrates the card honestly; no new UI.
+    async fn open_device_project(
+        &mut self,
+        uid: Option<String>,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        let session_uid = |session: &crate::RuntimeSession| {
+            session.device_uid().or_else(|| {
+                session
+                    .device_sync()
+                    .and_then(|sync| sync.identity.as_ref())
+                    .map(|identity| identity.uid.clone())
+            })
+        };
+        if let Some(session) = self.pool.device_session() {
+            let matches = match &uid {
+                Some(uid) => session_uid(session).as_deref() == Some(uid.as_str()),
+                None => true,
+            };
+            if matches {
+                let id = session.id();
+                return self.attach_lens(id, updates).await;
+            }
+            // A DIFFERENT device is attached: refuse rather than tear it
+            // down on a possibly-failing reconnect — routes never
+            // sacrifice a live session (explicit disconnect affordances
+            // keep that meaning).
+            return Err(UiError::UnsupportedAction(
+                "A different device is connected — disconnect it first".to_string(),
+            ));
+        }
+        let Some(uid) = uid else {
+            return Err(UiError::MissingSession(
+                "no device is connected".to_string(),
+            ));
+        };
+        // Route reload (D37): connect through the granted port (M1's
+        // direct path; the full auto-connect ladder is M6), then attach.
+        let outcome = self.device.reconnect_granted_device(Some(uid)).await;
+        let mut notices = self
+            .settle_connect_outcome(crate::RuntimeKind::Device, outcome, updates.clone())
+            .await?;
+        let connected = self
+            .pool
+            .device_session()
+            .is_some_and(crate::RuntimeSession::is_connected);
+        if !connected {
+            // Chooser opened, cancelled, or a non-Ready device (blank /
+            // foreign / incompatible): the card carries the state; the
+            // lens stays where it is.
+            return Ok(notices);
+        }
+        let id = self
+            .pool
+            .device_session()
+            .map(crate::RuntimeSession::id)
+            .unwrap_or_else(|| unreachable!("a connected device session exists"));
+        let attach = self.attach_lens(id, updates).await?;
+        notices.notices.extend(attach.notices);
+        Ok(notices)
+    }
+
     /// Attach the editor lens to session `id` and rebuild the mirror
     /// against that session's client via the existing connect sequence
     /// (`connect_running_project` → `sync_loaded_project`), for BOTH kinds
@@ -2928,8 +3087,10 @@ impl StudioController {
         if let Some(session) = self.pool.session_mut(device_id) {
             session.disconnect_server();
             // The pool refuses a same-kind replace while this runs (DQ-A
-            // swap semantics); cleared when the manage half settles.
-            session.set_op_in_flight(true);
+            // swap semantics), and the label narrates the device card's
+            // Operation-in-flight lane; cleared when the manage half
+            // settles.
+            session.set_operation(Some(spec.progress_label.to_string()));
         }
         let captured_logs = Rc::new(RefCell::new(Vec::new()));
         let target = device_section_target(DeviceController::SECTION_DEVICE);
@@ -2953,7 +3114,7 @@ impl StudioController {
                 Some(session) => session,
                 None => {
                     if let Some(session) = self.pool.session_mut(device_id) {
-                        session.set_op_in_flight(false);
+                        session.set_operation(None);
                     }
                     return Err(UiError::MissingSession(
                         "no hardware device session for management".to_string(),
@@ -2962,9 +3123,10 @@ impl StudioController {
             };
             session.manage(spec.request, event_sink).await
         };
-        // The manage half settled (either way): session replaces unblock.
+        // The manage half settled (either way): session replaces unblock
+        // and the card's operation narration clears.
         if let Some(session) = self.pool.session_mut(device_id) {
-            session.set_op_in_flight(false);
+            session.set_operation(None);
         }
         let management = match manage_result {
             Ok(management) => management,
