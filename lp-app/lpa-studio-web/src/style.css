@@ -295,6 +295,34 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-error-text);
 }
 
+/* SPIKE A — View Transitions (scene direction): arrangement flips
+   morph shared-named elements (the device card ⇄ pane pair). The
+   duration rides a var so the evaluation can slow it; reduced motion
+   collapses every transition to an instant swap. */
+
+:root {
+    --vt-duration: 320ms;
+}
+
+::view-transition-group(*) {
+    animation-duration: var(--vt-duration);
+    animation-timing-function: cubic-bezier(0.3, 0.9, 0.3, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation-duration: calc(var(--vt-duration) * 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*),
+    ::view-transition-image-pair(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+        animation: none !important;
+    }
+}
+
 /* Pane mode (D43, round 3.5): the console is a permanent expanded
    bottom region — a normal console; the tab and strip are gone. */
 
