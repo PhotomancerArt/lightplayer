@@ -33,6 +33,11 @@ use crate::{
     UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
+/// How often the quiet PortHeld retry re-attempts the granted attach
+/// (D32: "quiet periodic retry" — calm enough to never fight the other
+/// holder, fast enough that closing the other tab feels responsive).
+const PORT_HELD_RETRY_SECS: f64 = 5.0;
+
 pub struct StudioController {
     device: DeviceController,
     /// The runtime sessions the studio is attached to, plus the editor
@@ -84,6 +89,9 @@ pub struct StudioController {
     /// The open deploy dialog, when there is one (M5). Pure state — the
     /// controller executes its effects through the existing seams.
     deploy: Option<DeploySession>,
+    /// When the next quiet PortHeld retry is due (D32; `None` while no
+    /// port is held). Epoch seconds on the injected clock.
+    port_held_retry_at: Option<f64>,
     /// Injected randomness for identity minting (`dev_` uids). The web
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
@@ -133,6 +141,7 @@ impl StudioController {
             library_refresh_pending: false,
             pending_open: None,
             deploy: None,
+            port_held_retry_at: None,
             random: Rc::new(clock_fallback_random),
         }
     }
@@ -527,14 +536,36 @@ impl StudioController {
     }
 
     /// The connect flow narrated as roster evidence: a hardware provider
-    /// mid-discovery/connect pulses the live card ("Connecting…"). The
-    /// sim's flow never reaches the roster (the sim is not a device, D22);
-    /// `Failed` surfaces as the gallery issue chip, not as card evidence
-    /// (the retry ladder that would earn `NotResponding` is M6).
+    /// mid-discovery/connect pulses the live card ("Connecting…"), the
+    /// ladder's second rung pulses "Resetting…" (M6), a held port shows
+    /// the In-use-elsewhere card, and an exhausted ladder the honest
+    /// Not-responding card. The sim's flow never reaches the roster (the
+    /// sim is not a device, D22); `Failed` — an ERROR ending, not a
+    /// ladder ending — stays the gallery issue chip.
     fn gallery_connect_evidence(&self) -> crate::ConnectEvidence {
         let provider_id = match self.device.flow_state() {
             ConnectFlowState::DiscoveringEndpoints { provider_id, .. } => *provider_id,
             ConnectFlowState::Connecting { endpoint, .. } => endpoint.provider_id,
+            ConnectFlowState::Retrying { endpoint, .. } => {
+                if endpoint.provider_id.transport_label().is_some() {
+                    return crate::ConnectEvidence::Connecting {
+                        phase: crate::ConnectPhase::Resetting,
+                    };
+                }
+                return crate::ConnectEvidence::Idle;
+            }
+            ConnectFlowState::PortHeld { endpoint } => {
+                if endpoint.provider_id.transport_label().is_some() {
+                    return crate::ConnectEvidence::PortHeldElsewhere;
+                }
+                return crate::ConnectEvidence::Idle;
+            }
+            ConnectFlowState::Unresponsive { endpoint } => {
+                if endpoint.provider_id.transport_label().is_some() {
+                    return crate::ConnectEvidence::Failed;
+                }
+                return crate::ConnectEvidence::Idle;
+            }
             // SelectingEndpoint is a parked picker, not work in flight
             _ => return crate::ConnectEvidence::Idle,
         };
@@ -1843,11 +1874,7 @@ impl StudioController {
                     "Connecting",
                     "Opening device endpoint",
                 );
-                let outcome = self
-                    .device
-                    .connect_endpoint(provider_id, endpoint_id)
-                    .await
-                    .map(|(payload, logs)| DeviceOpenOutcome::Connected { payload, logs });
+                let outcome = self.device.connect_endpoint(provider_id, endpoint_id).await;
                 self.settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
                     .await
             }
@@ -1859,6 +1886,72 @@ impl StudioController {
                 self.settle_connect_outcome(crate::RuntimeKind::Device, outcome, updates)
                     .await
             }
+            DeviceOp::AutoConnect => self.run_auto_connect(updates).await,
+        }
+    }
+
+    /// D32 auto-connect (M6): the attach sweep dispatched at app load and
+    /// on the serial hotplug event. Attach + pull + show, nothing else —
+    /// and strictly idempotent: a live device session (the `#/device/…`
+    /// route may already have connected) or a busy connect flow makes it
+    /// a silent no-op. Card attribution targets the most-recently-seen
+    /// remembered device (best effort; the hello reconciles identity).
+    async fn run_auto_connect(&mut self, updates: UxUpdateSink) -> UiResult {
+        if self.pool.device_session().is_some() {
+            return Ok(UiNotices::new());
+        }
+        if matches!(
+            self.device.flow_state(),
+            ConnectFlowState::DiscoveringEndpoints { .. }
+                | ConnectFlowState::Connecting { .. }
+                | ConnectFlowState::Retrying { .. }
+        ) {
+            return Ok(UiNotices::new());
+        }
+        let pending_uid = self.most_recently_seen_device_uid();
+        let outcome = self.device.auto_connect_granted(pending_uid).await;
+        self.settle_connect_outcome(crate::RuntimeKind::Device, outcome, updates)
+            .await
+    }
+
+    /// The remembered device the auto-connect sweep attributes its
+    /// narration to: the hydrated gallery's most recently seen card.
+    fn most_recently_seen_device_uid(&self) -> Option<String> {
+        let inputs = self.home_inputs.as_ref()?;
+        inputs
+            .devices
+            .iter()
+            .max_by(|a, b| {
+                let key = |card: &crate::UiDeviceCard| match &card.state {
+                    crate::RosterCardState::Offline { last_seen_at } => {
+                        last_seen_at.unwrap_or(f64::NEG_INFINITY)
+                    }
+                    _ => f64::INFINITY,
+                };
+                key(a)
+                    .partial_cmp(&key(b))
+                    .unwrap_or(core::cmp::Ordering::Equal)
+            })
+            .and_then(|card| card.uid.clone())
+    }
+
+    /// The quiet periodic retry for a port held elsewhere (D32): runs on
+    /// the tick cadence, re-attempting the granted attach at most every
+    /// [`PORT_HELD_RETRY_SECS`]. Leaves every other flow state alone.
+    pub async fn run_due_connect_retry(&mut self) {
+        if !matches!(self.device.flow_state(), ConnectFlowState::PortHeld { .. }) {
+            self.port_held_retry_at = None;
+            return;
+        }
+        let now = (self.now_secs)();
+        match self.port_held_retry_at {
+            None => self.port_held_retry_at = Some(now + PORT_HELD_RETRY_SECS),
+            Some(due) if now >= due => {
+                self.port_held_retry_at = Some(now + PORT_HELD_RETRY_SECS);
+                let _ = self.run_auto_connect(UxUpdateSink::noop()).await;
+                self.mark_dirty();
+            }
+            Some(_) => {}
         }
     }
 
@@ -1886,6 +1979,14 @@ impl StudioController {
                 self.record_logs(logs);
                 let id = self.install_session(payload).await?;
                 self.attach_runtime(id, updates).await
+            }
+            Ok(DeviceOpenOutcome::SoftFailed) => {
+                // M6: the ladder's honest ending lives on the CARD
+                // (PortHeld/Unresponsive flow states → card evidence);
+                // nothing toasts, nothing errors.
+                self.pool.remove_kind(kind);
+                self.mark_dirty();
+                Ok(UiNotices::new())
             }
             Err(error) => {
                 self.pool.remove_kind(kind);
@@ -2192,6 +2293,13 @@ impl StudioController {
                 let id = self.install_session(payload).await?;
                 self.attach_runtime(id, updates).await
             }
+            Ok(DeviceOpenOutcome::SoftFailed) => {
+                // unreachable in practice: the ladder is hardware-only
+                self.pool.remove_kind(crate::RuntimeKind::Sim);
+                Err(UiError::MissingSession(
+                    "the simulator did not connect".to_string(),
+                ))
+            }
             Ok(DeviceOpenOutcome::Opened) => {
                 self.pool.remove_kind(crate::RuntimeKind::Sim);
                 Err(UiError::MissingSession(
@@ -2363,6 +2471,15 @@ impl StudioController {
             Ok(DeviceOpenOutcome::Cancelled { message }) => {
                 self.pool.remove_kind(crate::RuntimeKind::Device);
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+            }
+            Ok(DeviceOpenOutcome::SoftFailed) => {
+                // The ladder exhausted during a recovery open: the card
+                // narrates Not-responding; the dialog user gets one calm
+                // pointer instead of a raw error.
+                self.pool.remove_kind(crate::RuntimeKind::Device);
+                Ok(UiNotices::new().with_notice(UiNotice::info(
+                    "The device did not respond. Check the cable, or hold BOOT while plugging in.",
+                )))
             }
             // Recovery open: the DeviceSession exists (monitor/management
             // reachable; BlankFlash/Bootloader are fine end states) but the
@@ -3339,6 +3456,11 @@ impl StudioController {
     /// The runtime pool, for e2e assertions about session coexistence.
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
         &self.pool
+    }
+
+    /// The connect-flow state, for ladder assertions (M6).
+    pub(crate) fn device_flow_state_for_test(&self) -> &ConnectFlowState {
+        self.device.flow_state()
     }
 
     /// Push a console line into the DEVICE session's buffer, as the live
@@ -4478,9 +4600,12 @@ mod tests {
             },
         );
 
-        let result = block_on_ready(studio.dispatch_with_updates(action, sink));
+        let result = drive(studio.dispatch_with_updates(action, sink));
 
-        assert!(matches!(result, Err(UiError::Link(_))));
+        // M6: the ladder ends SOFT — no error, no toast, no issue chip.
+        // The honest ending is the card's Not-responding state.
+        let notices = result.expect("ladder endings are soft");
+        assert!(notices.notices.is_empty(), "no toast from the ladder");
         assert!(updates.borrow().iter().any(|update| {
             matches!(
                 update,
@@ -4496,25 +4621,21 @@ mod tests {
                     && activity.title == "Opening device session"
             )
         }));
-        let last_view = updates
-            .borrow()
-            .iter()
-            .rev()
-            .find_map(|update| match update {
-                UxUpdate::View(view) => Some(view.clone()),
-                _ => None,
-            })
-            .expect("dispatch should emit a final view");
-        // the failed connect lands back on provider selection, which is home
-        // under M4 — the issue rides the gallery instead of a pane status
-        let home = last_view
-            .home
-            .expect("provider selection with an issue shows home");
+        assert!(matches!(
+            studio.device_flow_state_for_test(),
+            ConnectFlowState::Unresponsive { .. }
+        ));
+        let home = studio.view().home.expect("the gallery still shows");
+        assert!(home.issue.is_none(), "no gallery issue chip either");
         assert!(
-            home.issue
-                .expect("the connect failure surfaces on home")
-                .message
-                .contains("Failed to open serial port.")
+            home.devices
+                .iter()
+                .any(|card| card.state == crate::RosterCardState::NotResponding),
+            "the ladder's honest ending is the Not-responding card: {:?}",
+            home.devices
+                .iter()
+                .map(|card| card.state.clone())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -4770,6 +4891,26 @@ mod tests {
             Poll::Ready(output) => output,
             Poll::Pending => panic!("test future unexpectedly yielded"),
         }
+    }
+
+    /// Poll to completion for futures that legitimately yield (the M6
+    /// ladder's poll-timer backoff between connect attempts).
+    fn drive<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        for _ in 0..10_000 {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                return output;
+            }
+            // the poll timers run on the real clock (the ladder backoff
+            // is 750 ms) — breathe instead of spinning
+            std::thread::sleep(core::time::Duration::from_millis(1));
+        }
+        panic!("test future did not settle in 10k polls");
     }
 
     struct NoopWake;

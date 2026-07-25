@@ -56,6 +56,11 @@ pub(crate) enum DeviceCardSheet {
     /// adopt / keep-both / stay (the deploy-dialog era's verbs, card-
     /// resident; M5-A's minimal dialog routing dissolves into this).
     Drift,
+    /// The troubleshooting sheet on the Not-responding card (M6 — the
+    /// ladder's honest ending): concrete basic instructions plus the
+    /// Reconnect and recovery-flash escapes. Card-resident per D41
+    /// (supersedes the contract-era "merged-outline popup" language).
+    Troubleshoot,
 }
 
 /// What a rendered affordance row does. Sheet rows carry a display-only
@@ -375,6 +380,9 @@ pub(crate) fn DeviceCard(
             div { class: match (pane, sheet()) {
                     (true, _) => "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
                     (false, Some(DeviceCardSheet::Drift)) => "tw:relative tw:min-h-[290px]",
+                    // title + three instruction bullets + three stacked
+                    // buttons — the tallest sheet
+                    (false, Some(DeviceCardSheet::Troubleshoot)) => "tw:relative tw:min-h-[370px]",
                     (false, Some(_)) => "tw:relative tw:min-h-[210px]",
                     (false, None) => "tw:relative",
                 },
@@ -673,6 +681,57 @@ fn device_card_sheet_view(
                 on_action,
             }
         },
+        DeviceCardSheet::Troubleshoot => rsx! {
+            TroubleshootSheet { uid: card.uid.clone(), sheet, on_action }
+        },
+    }
+}
+
+/// The troubleshooting sheet (M6): what to try when the ladder ended on
+/// Not-responding. Instructions stay concrete and short (the MVP bar);
+/// Reconnect re-runs the ladder, the recovery flash opens the chooser
+/// without attaching.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn TroubleshootSheet(
+    uid: Option<String>,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let reconnect = reconnect_device_action(uid);
+    let recovery_flash = flash_device_action(false);
+    rsx! {
+        CardSheet { on_dismiss: move |_| sheet.set(None),
+            CardSheetTitle { text: "Device not responding" }
+            ul { class: "tw:m-0 tw:mb-3 tw:grid tw:list-disc tw:gap-1 tw:pl-4 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                li { "Check the USB cable — charge-only cables never carry data." }
+                li { "Unplug the device, plug it back in, then Reconnect." }
+                li { "Still stuck? Hold BOOT while plugging in, then flash the firmware." }
+            }
+            div { class: "tw:grid tw:justify-end tw:gap-2",
+                CardSheetButton {
+                    label: "Reconnect",
+                    tone: SheetButtonTone::Primary,
+                    onclick: move |_| {
+                        sheet.set(None);
+                        on_action.call(reconnect.clone());
+                    },
+                }
+                CardSheetButton {
+                    label: "Flash firmware…",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| {
+                        sheet.set(None);
+                        on_action.call(recovery_flash.clone());
+                    },
+                }
+                CardSheetButton {
+                    label: "Close",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| sheet.set(None),
+                }
+            }
+        }
     }
 }
 
@@ -1087,6 +1146,18 @@ fn wire_card_affordance(
             .with_summary("Stamp a name onto this board so Studio remembers it.")
             .with_icon("edit");
             Some(CardRowAction::Sheet(DeviceCardSheet::Name, display))
+        }
+        // M6: the Not-responding card's affordance opens the
+        // troubleshooting sheet (display action is meta-only).
+        DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot) => {
+            let display = UiAction::from_op(
+                ControllerId::new(DEPLOY_NODE_ID),
+                DeployOp::OpenDialog { target_key: None },
+            )
+            .with_label(RosterAffordance::Troubleshoot.label())
+            .with_summary("Steps to try when the device is not responding.")
+            .with_icon("zap");
+            Some(CardRowAction::Sheet(DeviceCardSheet::Troubleshoot, display))
         }
         DeviceDetailAffordance::Roster(affordance) => {
             device_affordance_action(card, affordance).map(CardRowAction::from_action)
