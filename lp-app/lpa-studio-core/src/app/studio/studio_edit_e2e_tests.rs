@@ -564,8 +564,8 @@ fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
 }
 
 #[test]
-fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
-    use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployState};
+fn card_native_stamp_pushes_and_records_end_to_end() {
+    use crate::app::device::{DEPLOY_NODE_ID, DeployOp};
     use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
     use crate::app::places::{DeviceContent, DeviceRegistry};
     use lpc_history::{EventKind, SyncRelation};
@@ -610,22 +610,22 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
 
     let deploy_action = |op: DeployOp| UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op);
 
-    // open the dialog: firmware yes, identity no → NeedsIdentity
-    drive(controller.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
-    let view = controller.view();
-    let deploy = view.deploy.as_ref().expect("dialog open");
-    assert!(
-        matches!(deploy.state, DeployState::NeedsIdentity { .. }),
-        "empty unstamped device asks for a name, got {:?}",
-        deploy.state
-    );
-    assert_eq!(deploy.choices.len(), 1, "the picker offers the library");
+    // firmware yes, identity no → the Needs-a-name evidence (M8′: the
+    // name sheet is the stamping surface; there is no dialog — this
+    // test runs with a project open, so the card mapping itself is
+    // pinned by the roster tests and the link e2e)
+    let sync = controller.device_sync().expect("connect-as-pull landed");
+    assert_eq!(sync.identity, None, "unstamped");
+    assert_eq!(sync.content, DeviceContent::Empty, "empty");
 
-    // stamp: writes /.lp/device.json at the device's fs ROOT + registry
-    // entry
-    drive(controller.dispatch(deploy_action(DeployOp::StampIdentity {
-        name: "Luna's porch sign".to_string(),
-    })))
+    // stamp (the name sheet's op): writes /.lp/device.json at the
+    // device's fs ROOT + registry entry
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(crate::app::home::HOME_NODE_ID),
+        crate::HomeOp::NameDevice {
+            name: "Luna's porch sign".to_string(),
+        },
+    )))
     .unwrap();
     let stamped_identity = {
         let bytes = server
@@ -643,35 +643,24 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     );
     let registry = DeviceRegistry::new(store.fs_handle());
     assert_eq!(registry.list().unwrap().len(), 1);
-    assert!(matches!(
-        controller.view().deploy.as_ref().unwrap().state,
-        DeployState::ChoosingPackage { .. }
-    ));
 
-    // choose the project → Reviewing
-    drive(controller.dispatch(deploy_action(DeployOp::ChoosePackage {
+    // push (the Project-tab picker's op): replace-and-load on the
+    // device, hash-verified; the ROOT identity survives untouched (push
+    // never re-stamps — the replace only clears the storage dir);
+    // history + association recorded; device now AtHead
+    let outcome = drive(controller.dispatch(deploy_action(DeployOp::PushProject {
         key: summary.uid.to_string(),
     })))
     .unwrap();
-    assert!(matches!(
-        controller.view().deploy.as_ref().unwrap().state,
-        DeployState::Reviewing { .. }
-    ));
-
-    // push: replace-and-load on the device, hash-verified; the ROOT
-    // identity survives untouched (push never re-stamps — the replace
-    // only clears the storage dir); history + association recorded;
-    // device now AtHead
-    drive(controller.dispatch(deploy_action(DeployOp::ConfirmPush))).unwrap();
-    let view = controller.view();
-    let DeployState::Done { device, pushed } = &view.deploy.as_ref().unwrap().state else {
-        panic!(
-            "push completes, got {:?}",
-            view.deploy.as_ref().unwrap().state
-        );
-    };
-    assert_eq!(device.name, "Luna's porch sign");
-    assert_eq!(pushed.slug, summary.slug);
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("Pushed")
+                && notice.message.contains("Luna's porch sign")),
+        "the push reports its result, got {:?}",
+        outcome.notices
+    );
 
     let device_manifest = String::from_utf8(
         server

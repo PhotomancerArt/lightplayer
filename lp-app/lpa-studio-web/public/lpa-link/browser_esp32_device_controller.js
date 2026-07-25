@@ -310,7 +310,12 @@ export class BrowserEsp32DeviceController {
         await this.port.open({ baudRate });
         log?.("lpa-link", `Serial port ${this.label}`);
       } catch (secondError) {
-        throw new Error(`Failed to open serial port: ${errorMessage(secondError)}`);
+        // The DOMException name leads so the Rust side can classify a
+        // HELD port (NetworkError) apart from an unresponsive board
+        // (M6/D32 — the In-use-elsewhere card vs the retry ladder).
+        throw new Error(
+          `${secondError?.name ?? "Error"}: Failed to open serial port: ${errorMessage(secondError)}`,
+        );
       }
     }
   }
