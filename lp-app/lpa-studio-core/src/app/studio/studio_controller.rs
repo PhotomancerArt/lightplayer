@@ -11,10 +11,7 @@ use lpa_link::{
 use crate::app::device::device_controller::DeviceRuntimeEvidence;
 use crate::app::device::device_event_adapter::management_event_sink;
 use crate::app::device::link_ux::management_result_logs;
-use crate::app::device::{
-    DEPLOY_NODE_ID, DeployOp, DeploySession, DeployState, DeployTarget, DeviceOpenOutcome,
-    UiDeployChoice, UiDeployView,
-};
+use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployTarget, DeviceOpenOutcome};
 use crate::app::home::home_view_builder::HomeInputs;
 use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
@@ -32,6 +29,11 @@ use crate::{
     UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress,
     UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
+
+/// How often the quiet PortHeld retry re-attempts the granted attach
+/// (D32: "quiet periodic retry" — calm enough to never fight the other
+/// holder, fast enough that closing the other tab feels responsive).
+const PORT_HELD_RETRY_SECS: f64 = 5.0;
 
 pub struct StudioController {
     device: DeviceController,
@@ -81,9 +83,9 @@ pub struct StudioController {
     /// while the simulator opens, and tells the connect flow which package
     /// to push instead of probing running projects.
     pending_open: Option<PendingOpen>,
-    /// The open deploy dialog, when there is one (M5). Pure state — the
-    /// controller executes its effects through the existing seams.
-    deploy: Option<DeploySession>,
+    /// When the next quiet PortHeld retry is due (D32; `None` while no
+    /// port is held). Epoch seconds on the injected clock.
+    port_held_retry_at: Option<f64>,
     /// Injected randomness for identity minting (`dev_` uids). The web
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
@@ -145,7 +147,7 @@ impl StudioController {
             home_inputs: None,
             library_refresh_pending: false,
             pending_open: None,
-            deploy: None,
+            port_held_retry_at: None,
             random: Rc::new(clock_fallback_random),
             settings: crate::app::settings::SettingsStore::default(),
             on_user_settings: None,
@@ -450,28 +452,42 @@ impl StudioController {
     /// pull draining its client, so the heartbeat keeps its buffered wire
     /// logs from accumulating unboundedly) — whose interval elapsed:
     /// drain the session's buffered wire and console log lines into the
-    /// ring and surface device-state changes through the change gate. No
-    /// wire operation rides a heartbeat — the session's background
-    /// monitor / self-ticking worker fills the buffers — so a tick that
-    /// fans into lens-refresh + heartbeats still issues at most one wire
-    /// op per session.
+    /// session's own console tail (D42 — the per-device console; the
+    /// global ring no longer carries session streams) and surface
+    /// device-state changes through the change gate. No wire operation
+    /// rides a heartbeat — the session's background monitor /
+    /// self-ticking worker fills the buffers — so a tick that fans into
+    /// lens-refresh + heartbeats still issues at most one wire op per
+    /// session.
     pub fn run_due_heartbeats(&mut self) {
         let now = (self.now_secs)();
         let lens = self.pool.lens();
-        let mut drained = Vec::new();
-        let mut state_changed = false;
+        let mut stamped = Vec::new();
+        let mut changed = false;
         for session in self.pool.sessions_mut() {
             let lens_bound = Some(session.id()) == lens;
             if (session.is_sim() && lens_bound) || !session.heartbeat_due(now) {
                 continue;
             }
             session.mark_heartbeat(now);
-            drained.extend(session.take_pending_logs());
+            let mut drained = session.take_pending_logs();
             drained.extend(session.take_device_console_logs());
-            state_changed |= session.note_device_state_change();
+            if !drained.is_empty() {
+                stamped.clear();
+                stamped.extend(drained.into_iter().map(|draft| draft.stamp(now)));
+                // the devtools mirror still sees every session line (the
+                // hook is a field read — disjoint from the pool borrow)
+                if let Some(hook) = &self.on_entry {
+                    for entry in &stamped {
+                        hook(entry);
+                    }
+                }
+                session.push_console_tail(stamped.drain(..));
+                changed = true;
+            }
+            changed |= session.note_device_state_change();
         }
-        self.record_logs(drained);
-        if state_changed {
+        if changed {
             self.mark_dirty();
         }
     }
@@ -486,7 +502,6 @@ impl StudioController {
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
                 .with_device_sync(self.device_sync().cloned())
-                .with_deploy(self.deploy_view())
                 .with_settings(self.settings.ui_view());
         }
         let device_view = self.device.view(
@@ -512,7 +527,7 @@ impl StudioController {
                 self.project.active_library_slug(),
             )
             .with_device_sync(self.device_sync().cloned())
-            .with_deploy(self.deploy_view())
+            .with_lens_card(self.lens_device_card())
             .with_settings(self.settings.ui_view())
     }
 
@@ -530,6 +545,25 @@ impl StudioController {
             },
             setup: (!ready).then(|| crate::provider_guidance(self.settings.agent_provider())),
             cost_rates: self.settings.agent_cost_rates(),
+        }
+    }
+
+    /// The LENS session's card (D43): the grown control panel the editor
+    /// docks as its right-side pane. The same construction the gallery
+    /// roster uses — one derivation, both scales.
+    fn lens_device_card(&self) -> Option<crate::UiDeviceCard> {
+        let session = self.pool.lens_session()?;
+        let evidence = self.home_pool_evidence();
+        if session.is_sim() {
+            evidence
+                .sim
+                .as_ref()
+                .map(crate::app::home::home_view_builder::sim_card)
+        } else {
+            evidence
+                .devices
+                .first()
+                .and_then(crate::app::home::home_view_builder::live_device_card)
         }
     }
 
@@ -617,6 +651,11 @@ impl StudioController {
             observed_version,
             head_version,
             pending_uid: self.device.pending_reconnect_uid().map(str::to_string),
+            console_tail: self
+                .pool
+                .device_session()
+                .map(|session| session.console_tail().iter().cloned().collect())
+                .unwrap_or_default(),
         };
         let sim = self
             .pool
@@ -628,6 +667,7 @@ impl StudioController {
                         uid: project.uid.clone(),
                         name: project.name.clone(),
                     }),
+                console_tail: session.console_tail().iter().cloned().collect(),
             });
         crate::app::home::HomePoolEvidence {
             devices: vec![device],
@@ -636,14 +676,36 @@ impl StudioController {
     }
 
     /// The connect flow narrated as roster evidence: a hardware provider
-    /// mid-discovery/connect pulses the live card ("Connecting…"). The
-    /// sim's flow never reaches the roster (the sim is not a device, D22);
-    /// `Failed` surfaces as the gallery issue chip, not as card evidence
-    /// (the retry ladder that would earn `NotResponding` is M6).
+    /// mid-discovery/connect pulses the live card ("Connecting…"), the
+    /// ladder's second rung pulses "Resetting…" (M6), a held port shows
+    /// the In-use-elsewhere card, and an exhausted ladder the honest
+    /// Not-responding card. The sim's flow never reaches the roster (the
+    /// sim is not a device, D22); `Failed` — an ERROR ending, not a
+    /// ladder ending — stays the gallery issue chip.
     fn gallery_connect_evidence(&self) -> crate::ConnectEvidence {
         let provider_id = match self.device.flow_state() {
             ConnectFlowState::DiscoveringEndpoints { provider_id, .. } => *provider_id,
             ConnectFlowState::Connecting { endpoint, .. } => endpoint.provider_id,
+            ConnectFlowState::Retrying { endpoint, .. } => {
+                if endpoint.provider_id.transport_label().is_some() {
+                    return crate::ConnectEvidence::Connecting {
+                        phase: crate::ConnectPhase::Resetting,
+                    };
+                }
+                return crate::ConnectEvidence::Idle;
+            }
+            ConnectFlowState::PortHeld { endpoint } => {
+                if endpoint.provider_id.transport_label().is_some() {
+                    return crate::ConnectEvidence::PortHeldElsewhere;
+                }
+                return crate::ConnectEvidence::Idle;
+            }
+            ConnectFlowState::Unresponsive { endpoint } => {
+                if endpoint.provider_id.transport_label().is_some() {
+                    return crate::ConnectEvidence::Failed;
+                }
+                return crate::ConnectEvidence::Idle;
+            }
             // SelectingEndpoint is a parked picker, not work in flight
             _ => return crate::ConnectEvidence::Idle,
         };
@@ -734,6 +796,33 @@ impl StudioController {
         self.mark_dirty();
     }
 
+    /// Stamp a batch of one SESSION's drained lines into that session's
+    /// console tail (D42 — the per-device console's recording point).
+    /// The devtools mirror still sees every line; the global ring does
+    /// not carry session streams anymore. Falls back to the ring when
+    /// the session is already gone (its card is gone too).
+    fn record_session_logs(&mut self, id: crate::RuntimeId, drafts: Vec<UiLogDraft>) {
+        if drafts.is_empty() {
+            return;
+        }
+        if self.pool.session_mut(id).is_none() {
+            self.record_logs(drafts);
+            return;
+        }
+        let timestamp = (self.now_secs)();
+        let stamped: Vec<UiLogEntry> = drafts
+            .into_iter()
+            .map(|draft| draft.stamp(timestamp))
+            .collect();
+        for entry in &stamped {
+            self.notify_entry(entry);
+        }
+        if let Some(session) = self.pool.session_mut(id) {
+            session.push_console_tail(stamped);
+        }
+        self.mark_dirty();
+    }
+
     /// Stamp a batch of producer drafts (all with one clock read — they
     /// arrived together) into the ring and mark the view dirty. No-op for an
     /// empty batch so a quiet passive refresh stays change-gated out. The
@@ -807,7 +896,7 @@ impl StudioController {
     }
 
     /// What the attached device holds (connect-as-pull result), for the
-    /// pane, cards, and deploy dialog. `None` while no hardware is
+    /// pane and cards. `None` while no hardware is
     /// attached (the sim carries no reconcile bundle — D22). A pool read
     /// since the runtime-pool extraction: the bundle lives on the DEVICE
     /// session, wherever the lens is (P2 coexistence).
@@ -1159,122 +1248,6 @@ impl StudioController {
         })
     }
 
-    /// The dialog view model, when the dialog is open.
-    fn deploy_view(&self) -> Option<UiDeployView> {
-        let session = self.deploy.as_ref()?;
-        let choices = self
-            .home_inputs
-            .as_ref()
-            .map(|inputs| {
-                inputs
-                    .projects
-                    .iter()
-                    .map(|card| UiDeployChoice {
-                        uid: card.uid.clone(),
-                        slug: card.slug.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Some(UiDeployView {
-            state: session.state.clone(),
-            choices,
-            connect_actions: self.deploy_connect_actions(),
-        })
-    }
-
-    /// Hardware connect actions for the dialog's `NeedsDevice` state:
-    /// mid-selection link states surface their endpoint choices; settled
-    /// states offer the CATALOG's hardware device classes (connect +
-    /// recovery open), derived from descriptors/capabilities — no provider
-    /// kind is hardcoded. The simulator is never offered — it is not a
-    /// device (D22). Copy stays ESP32-shaped until another hardware class
-    /// exists (naming is M7's redesign).
-    fn deploy_connect_actions(&self) -> Vec<UiAction> {
-        let device_node = self.device.node_id();
-        match self.device.flow_state() {
-            ConnectFlowState::SelectingEndpoint {
-                provider_id,
-                endpoints,
-            } => endpoints
-                .iter()
-                .map(|endpoint| {
-                    UiAction::from_op(
-                        device_node.clone(),
-                        crate::DeviceOp::ConnectEndpoint {
-                            provider_id: *provider_id,
-                            endpoint_id: endpoint.id.clone(),
-                        },
-                    )
-                    .with_label(format!("Open {}", endpoint.label))
-                    .with_summary(endpoint.summary.clone())
-                })
-                .collect(),
-            _ => self
-                .device
-                .hardware_device_kinds()
-                .into_iter()
-                .flat_map(|provider_id| {
-                    [
-                        UiAction::from_op(
-                            device_node.clone(),
-                            crate::DeviceOp::OpenProvider { provider_id },
-                        )
-                        .with_label("Connect ESP32")
-                        .with_summary("Connect an ESP32 over USB.")
-                        .with_icon("usb")
-                        .with_priority(crate::ActionPriority::Primary),
-                        UiAction::from_op(
-                            device_node.clone(),
-                            crate::DeviceOp::OpenProviderForRecovery { provider_id },
-                        )
-                        .with_label("Open for flashing")
-                        .with_summary("Open the ESP32 connection without attaching LightPlayer.")
-                        .with_icon("usb")
-                        .with_priority(crate::ActionPriority::Secondary),
-                    ]
-                })
-                .collect(),
-        }
-    }
-
-    /// The dialog's environment snapshot (entry-state derivation input).
-    ///
-    /// Derived from the runtime attachment + device-session state (M4/P5):
-    /// hardware counts as connected while its session is not `Gone` (the
-    /// sim never counts — D22); firmware is available exactly when the
-    /// session reached `Ready` AND the server protocol answered.
-    fn deploy_environment(&self) -> crate::app::device::DeployEnvironment {
-        let device_state = self.device_state();
-        let device_link_connected =
-            self.is_hardware_attached() && !matches!(device_state, Some(DeviceState::Gone));
-        // The server-protocol read targets the DEVICE session — the dialog
-        // conceptually targets hardware, and the lens may be on the sim
-        // (P2 coexistence).
-        let device_server_connected = self
-            .pool
-            .device_session()
-            .is_some_and(|session| matches!(session.server_state(), ServerState::Connected { .. }));
-        let firmware_available = device_link_connected
-            && matches!(device_state, Some(DeviceState::Ready { .. }))
-            && device_server_connected;
-        crate::app::device::DeployEnvironment {
-            device_link_connected,
-            firmware_available,
-            device_sync: self.device_sync().cloned(),
-        }
-    }
-
-    /// Re-derive the open dialog's step after the environment changed
-    /// (connects, disconnects, pull results).
-    fn rederive_deploy(&mut self) {
-        let env = self.deploy_environment();
-        if let Some(session) = self.deploy.as_mut() {
-            session.rederive(&env);
-            self.mark_dirty();
-        }
-    }
-
     /// Resolve a slug-or-uid key to a concrete push target from a fresh
     /// library snapshot.
     async fn resolve_deploy_target(&mut self, key: &str) -> Result<DeployTarget, UiError> {
@@ -1300,131 +1273,12 @@ impl StudioController {
 
     async fn execute_deploy_op(&mut self, op: DeployOp, updates: UxUpdateSink) -> UiResult {
         match op {
-            DeployOp::OpenDialog { target_key } => {
-                let target = match target_key {
-                    Some(key) => Some(self.resolve_deploy_target(&key).await?),
-                    // No explicit target: when the device already runs a
-                    // project the library KNOWS, default the dialog onto it
-                    // — the review step, not the picker (an honest default;
-                    // choosing a different project stays one click away in
-                    // Reviewing). A failed resolve (project deleted, no
-                    // library) falls back to the picker.
-                    None => match self.device_sync().map(|sync| &sync.content) {
-                        Some(
-                            DeviceContent::Known { project_uid, .. }
-                            | DeviceContent::Adopted { project_uid, .. },
-                        ) => {
-                            let uid = project_uid.clone();
-                            self.resolve_deploy_target(&uid).await.ok()
-                        }
-                        _ => None,
-                    },
-                };
-                self.deploy = Some(DeploySession::open(&self.deploy_environment(), target));
-                Ok(UiNotices::new())
-            }
-            DeployOp::CloseDialog => {
-                if self
-                    .deploy
-                    .as_ref()
-                    .is_some_and(|session| session.close_blocked())
-                {
-                    return Err(UiError::UnsupportedAction(
-                        "A device operation is still running — let it finish first".to_string(),
-                    ));
-                }
-                self.deploy = None;
-                Ok(UiNotices::new())
-            }
-            DeployOp::FlashFirmware => {
-                let resume = self.deploy_state_now()?;
-                self.deploy_session()?
-                    .begin_flash()
-                    .map_err(deploy_transition_error)?;
-                updates.emit(UxUpdate::View(self.view()));
-                let result = self.provision_firmware(updates).await;
-                let env = self.deploy_environment();
-                match result {
-                    Ok(outcome) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.flash_finished(&env, true);
-                        }
-                        Ok(outcome)
-                    }
-                    Err(error) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.fail(format!("Flashing failed: {error}"), resume);
-                        }
-                        Err(error)
-                    }
-                }
-            }
-            DeployOp::StampIdentity { name } => {
-                let resume = self.deploy_state_now()?;
-                self.deploy_session()?
-                    .begin_stamp(name.clone())
-                    .map_err(deploy_transition_error)?;
-                updates.emit(UxUpdate::View(self.view()));
-                let result = self.run_identity_stamp(name.trim().to_string()).await;
-                let env = self.deploy_environment();
-                match result {
-                    Ok(identity) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.stamp_finished(&env);
-                        }
-                        Ok(UiNotices::new().with_notice(UiNotice::info(format!(
-                            "This device is now \"{}\"",
-                            identity.name
-                        ))))
-                    }
-                    Err(error) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.fail(format!("Naming the device failed: {error}"), resume);
-                        }
-                        Err(error)
-                    }
-                }
-            }
-            DeployOp::ChoosePackage { key } => {
-                let target = self.resolve_deploy_target(&key).await?;
-                let env = self.deploy_environment();
-                self.deploy_session()?
-                    .choose_target(&env, target)
-                    .map_err(deploy_transition_error)?;
-                Ok(UiNotices::new())
-            }
-            DeployOp::ConfirmPush => {
-                let resume = self.deploy_state_now()?;
-                let (device, target) = self
-                    .deploy_session()?
-                    .begin_push()
-                    .map_err(deploy_transition_error)?;
-                updates.emit(UxUpdate::View(self.view()));
-                let result = self.run_device_push(&device, &target).await;
-                match result {
-                    Ok(()) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.push_finished();
-                        }
-                        self.request_library_refresh();
-                        Ok(UiNotices::new().with_notice(UiNotice::info(format!(
-                            "Pushed {} to {}",
-                            target.slug, device.name
-                        ))))
-                    }
-                    Err(error) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.fail(format!("Push failed: {error}"), resume);
-                        }
-                        Err(error)
-                    }
-                }
-            }
             DeployOp::PushProject { key } => {
-                // The in-card push (M5): the Running-behind card's Push
-                // button is the D11 consent — no dialog. The device must
-                // carry a stamped identity (the Running-family states
-                // guarantee it; the unstamped flows keep their dialog).
+                // The direct push (M5; since M8′ the ONLY push): the
+                // dispatching gesture is the D11 consent. The device must
+                // carry a stamped identity (the Running-family states and
+                // the picker's Connected-empty guarantee it; unstamped
+                // boards go through the name sheet first).
                 let device = self
                     .device_sync()
                     .and_then(|sync| sync.identity.clone())
@@ -1456,7 +1310,7 @@ impl StudioController {
                 ))))
             }
             DeployOp::AdoptDeviceCopy => {
-                let (project_uid, observed) = self.reviewing_diverged_copy()?;
+                let (project_uid, observed) = self.diverged_device_copy()?;
                 let host = self.library_host()?;
                 host.catalog(CatalogOp::AdoptObservedVersion {
                     project_uid,
@@ -1466,16 +1320,18 @@ impl StudioController {
                 .map_err(|error| self.library_error_with_name(error))?;
                 self.request_library_refresh();
                 self.refresh_device_sync().await;
-                self.rederive_deploy();
                 Ok(UiNotices::new()
                     .with_notice(UiNotice::info("The device's version is now the newest")))
             }
             DeployOp::KeepBothFork => {
-                let (project_uid, observed) = self.reviewing_diverged_copy()?;
-                let device_name = match self.deploy_state_now()? {
-                    DeployState::Reviewing { device, .. } => device.name,
-                    _ => "device".to_string(),
-                };
+                let (project_uid, observed) = self.diverged_device_copy()?;
+                // the fork's name: the live session's stamped identity
+                // (the D30 sheet is the one entry since M8′)
+                let device_name = self
+                    .device_sync()
+                    .and_then(|sync| sync.identity.as_ref())
+                    .map(|identity| identity.name.clone())
+                    .unwrap_or_else(|| "device".to_string());
                 let host = self.library_host()?;
                 let outcome = host
                     .catalog(CatalogOp::ForkObservedVersion {
@@ -1494,60 +1350,23 @@ impl StudioController {
                     .with_notice(UiNotice::info(format!("Saved the device's copy as {slug}"))))
             }
             DeployOp::EraseDevice => {
-                // reachable from the card's actions popover (no dialog) as
-                // well as from the dialog; only an open dialog carries
-                // failure-resume state
-                let resume = self.deploy.as_ref().map(|session| session.state.clone());
-                let result = self.reset_to_blank(updates).await;
-                let env = self.deploy_environment();
-                match result {
-                    Ok(outcome) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.rederive(&env);
-                        }
-                        Ok(outcome)
-                    }
-                    Err(error) => {
-                        if let (Some(session), Some(resume)) = (self.deploy.as_mut(), resume) {
-                            session.fail(format!("Erase failed: {error}"), resume);
-                        }
-                        Err(error)
-                    }
-                }
-            }
-            DeployOp::RetryFailed => {
-                self.deploy_session()?
-                    .retry()
-                    .map_err(deploy_transition_error)?;
-                Ok(UiNotices::new())
+                // from the card's Danger tab, behind the D41 confirm sheet
+                self.reset_to_blank(updates).await
             }
         }
     }
 
-    /// The open session, or the friendly no-dialog error.
-    fn deploy_session(&mut self) -> Result<&mut DeploySession, UiError> {
-        self.deploy
-            .as_mut()
-            .ok_or_else(|| UiError::UnsupportedAction("The device dialog is not open".to_string()))
-    }
-
-    fn deploy_state_now(&mut self) -> Result<DeployState, UiError> {
-        Ok(self.deploy_session()?.state.clone())
-    }
-
-    /// The (project, observed hash) a diverged review is looking at.
-    fn reviewing_diverged_copy(&mut self) -> Result<(String, lpc_history::ContentHash), UiError> {
-        match self.deploy_state_now()? {
-            DeployState::Reviewing {
-                on_device:
-                    DeviceContent::Known {
-                        project_uid,
-                        observed,
-                        relation: lpc_history::SyncRelation::Diverged,
-                        ..
-                    },
+    /// The diverged copy an adopt/keep-both verb targets: the live
+    /// device session's sync evidence (the D30 card sheet is the one
+    /// entry since M8′ — there is no dialog).
+    fn diverged_device_copy(&mut self) -> Result<(String, lpc_history::ContentHash), UiError> {
+        match self.device_sync().map(|sync| &sync.content) {
+            Some(DeviceContent::Known {
+                project_uid,
+                observed,
+                relation: lpc_history::SyncRelation::Diverged,
                 ..
-            } => Ok((project_uid, observed)),
+            }) => Ok((project_uid.clone(), *observed)),
             _ => Err(UiError::UnsupportedAction(
                 "The device's copy is not diverged".to_string(),
             )),
@@ -1685,7 +1504,6 @@ impl StudioController {
 
         // 4. the device now runs the pushed head
         self.refresh_device_sync().await;
-        self.rederive_deploy();
         Ok(())
     }
 
@@ -1900,11 +1718,7 @@ impl StudioController {
                     "Connecting",
                     "Opening device endpoint",
                 );
-                let outcome = self
-                    .device
-                    .connect_endpoint(provider_id, endpoint_id)
-                    .await
-                    .map(|(payload, logs)| DeviceOpenOutcome::Connected { payload, logs });
+                let outcome = self.device.connect_endpoint(provider_id, endpoint_id).await;
                 self.settle_connect_outcome(runtime_kind_for(provider_id), outcome, updates)
                     .await
             }
@@ -1916,6 +1730,72 @@ impl StudioController {
                 self.settle_connect_outcome(crate::RuntimeKind::Device, outcome, updates)
                     .await
             }
+            DeviceOp::AutoConnect => self.run_auto_connect(updates).await,
+        }
+    }
+
+    /// D32 auto-connect (M6): the attach sweep dispatched at app load and
+    /// on the serial hotplug event. Attach + pull + show, nothing else —
+    /// and strictly idempotent: a live device session (the `#/device/…`
+    /// route may already have connected) or a busy connect flow makes it
+    /// a silent no-op. Card attribution targets the most-recently-seen
+    /// remembered device (best effort; the hello reconciles identity).
+    async fn run_auto_connect(&mut self, updates: UxUpdateSink) -> UiResult {
+        if self.pool.device_session().is_some() {
+            return Ok(UiNotices::new());
+        }
+        if matches!(
+            self.device.flow_state(),
+            ConnectFlowState::DiscoveringEndpoints { .. }
+                | ConnectFlowState::Connecting { .. }
+                | ConnectFlowState::Retrying { .. }
+        ) {
+            return Ok(UiNotices::new());
+        }
+        let pending_uid = self.most_recently_seen_device_uid();
+        let outcome = self.device.auto_connect_granted(pending_uid).await;
+        self.settle_connect_outcome(crate::RuntimeKind::Device, outcome, updates)
+            .await
+    }
+
+    /// The remembered device the auto-connect sweep attributes its
+    /// narration to: the hydrated gallery's most recently seen card.
+    fn most_recently_seen_device_uid(&self) -> Option<String> {
+        let inputs = self.home_inputs.as_ref()?;
+        inputs
+            .devices
+            .iter()
+            .max_by(|a, b| {
+                let key = |card: &crate::UiDeviceCard| match &card.state {
+                    crate::RosterCardState::Offline { last_seen_at } => {
+                        last_seen_at.unwrap_or(f64::NEG_INFINITY)
+                    }
+                    _ => f64::INFINITY,
+                };
+                key(a)
+                    .partial_cmp(&key(b))
+                    .unwrap_or(core::cmp::Ordering::Equal)
+            })
+            .and_then(|card| card.uid.clone())
+    }
+
+    /// The quiet periodic retry for a port held elsewhere (D32): runs on
+    /// the tick cadence, re-attempting the granted attach at most every
+    /// [`PORT_HELD_RETRY_SECS`]. Leaves every other flow state alone.
+    pub async fn run_due_connect_retry(&mut self) {
+        if !matches!(self.device.flow_state(), ConnectFlowState::PortHeld { .. }) {
+            self.port_held_retry_at = None;
+            return;
+        }
+        let now = (self.now_secs)();
+        match self.port_held_retry_at {
+            None => self.port_held_retry_at = Some(now + PORT_HELD_RETRY_SECS),
+            Some(due) if now >= due => {
+                self.port_held_retry_at = Some(now + PORT_HELD_RETRY_SECS);
+                let _ = self.run_auto_connect(UxUpdateSink::noop()).await;
+                self.mark_dirty();
+            }
+            Some(_) => {}
         }
     }
 
@@ -1943,6 +1823,14 @@ impl StudioController {
                 self.record_logs(logs);
                 let id = self.install_session(payload).await?;
                 self.attach_runtime(id, updates).await
+            }
+            Ok(DeviceOpenOutcome::SoftFailed) => {
+                // M6: the ladder's honest ending lives on the CARD
+                // (PortHeld/Unresponsive flow states → card evidence);
+                // nothing toasts, nothing errors.
+                self.pool.remove_kind(kind);
+                self.mark_dirty();
+                Ok(UiNotices::new())
             }
             Err(error) => {
                 self.pool.remove_kind(kind);
@@ -2249,6 +2137,13 @@ impl StudioController {
                 let id = self.install_session(payload).await?;
                 self.attach_runtime(id, updates).await
             }
+            Ok(DeviceOpenOutcome::SoftFailed) => {
+                // unreachable in practice: the ladder is hardware-only
+                self.pool.remove_kind(crate::RuntimeKind::Sim);
+                Err(UiError::MissingSession(
+                    "the simulator did not connect".to_string(),
+                ))
+            }
             Ok(DeviceOpenOutcome::Opened) => {
                 self.pool.remove_kind(crate::RuntimeKind::Sim);
                 Err(UiError::MissingSession(
@@ -2549,13 +2444,21 @@ impl StudioController {
                 self.pool.remove_kind(crate::RuntimeKind::Device);
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
+            Ok(DeviceOpenOutcome::SoftFailed) => {
+                // The ladder exhausted during a recovery open: the card
+                // narrates Not-responding; the dialog user gets one calm
+                // pointer instead of a raw error.
+                self.pool.remove_kind(crate::RuntimeKind::Device);
+                Ok(UiNotices::new().with_notice(UiNotice::info(
+                    "The device did not respond. Check the cable, or hold BOOT while plugging in.",
+                )))
+            }
             // Recovery open: the DeviceSession exists (monitor/management
             // reachable; BlankFlash/Bootloader are fine end states) but the
             // app protocol is deliberately NOT attached.
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
                 self.install_session(payload).await?;
-                self.rederive_deploy();
                 updates.emit(UxUpdate::View(self.view()));
                 Ok(UiNotices::new().with_notice(UiNotice::info("Device opened for flashing")))
             }
@@ -2720,7 +2623,6 @@ impl StudioController {
                                 session.fail_no_firmware();
                             }
                             // now the dialog's Blank state is the truth
-                            self.rederive_deploy();
                             return Ok(UiNotices::new().with_notice(UiNotice::info(
                                 "No LightPlayer firmware detected; flash firmware onto the selected ESP32",
                             )));
@@ -2738,7 +2640,6 @@ impl StudioController {
                             if let Some(session) = self.pool.session_mut(id) {
                                 session.fail(error.to_string());
                             }
-                            self.rederive_deploy();
                             return Ok(UiNotices::new().with_notice(UiNotice::info(
                                 "Device firmware is incompatible with this Studio; update the firmware",
                             )));
@@ -2779,14 +2680,12 @@ impl StudioController {
                 if !is_sim {
                     self.refresh_device_sync().await;
                 }
-                self.rederive_deploy();
                 Ok(outcome)
             }
             Err(error) => {
                 if let Some(session) = self.pool.session_mut(id) {
                     session.fail(error.to_string());
                 }
-                self.rederive_deploy();
                 Err(error)
             }
         }
@@ -3014,16 +2913,22 @@ impl StudioController {
     }
 
     /// Drop the mirror's session binding: drain the departing lens
-    /// session's buffered wire logs into the ring (nothing strands while
-    /// detached), reset the mirror (edit state lives with the lens — Q1/Q4
-    /// of the roadmap DQ record), release the lens id. Sessions untouched.
+    /// session's buffered wire logs into its console tail (D42 — the
+    /// card's console carries them once the gallery shows; nothing
+    /// strands while detached), reset the mirror (edit state lives with
+    /// the lens — Q1/Q4 of the roadmap DQ record), release the lens id.
+    /// Sessions untouched.
     fn quiesce_lens(&mut self) {
+        let lens = self.pool.lens();
         let pending = self
             .pool
             .lens_session_mut()
             .map(|session| session.take_pending_logs())
             .unwrap_or_default();
-        self.record_logs(pending);
+        match lens {
+            Some(id) => self.record_session_logs(id, pending),
+            None => self.record_logs(pending),
+        }
         self.project.reset();
         self.pool.detach_lens();
     }
@@ -3216,10 +3121,15 @@ impl StudioController {
     }
 
     fn record_project_sync_run(&mut self, sync: &ProjectSyncRun) {
-        // New log lines are a local change the next gate should surface even
-        // if the project revision did not move; `record_logs` marks dirty and
-        // no-ops on an empty batch.
-        self.record_logs(sync.logs.clone());
+        // New log lines are a local change the next gate should surface
+        // even if the project revision did not move; recording marks dirty
+        // and no-ops on an empty batch. The lines are the LENS session's
+        // stream, so they land on its console tail (D42) — the card's
+        // console has the history when the gallery next shows.
+        match self.pool.lens() {
+            Some(id) => self.record_session_logs(id, sync.logs.clone()),
+            None => self.record_logs(sync.logs.clone()),
+        }
     }
 
     async fn disconnect_device(&mut self) -> UiResult {
@@ -3238,7 +3148,6 @@ impl StudioController {
                 self.device.disconnect(Some(session.into_payload())).await?;
             }
         }
-        self.rederive_deploy();
         Ok(UiNotices::new().with_notice(UiNotice::info("Device disconnected")))
     }
 
@@ -3515,6 +3424,11 @@ impl StudioController {
         &self.pool
     }
 
+    /// The connect-flow state, for ladder assertions (M6).
+    pub(crate) fn device_flow_state_for_test(&self) -> &ConnectFlowState {
+        self.device.flow_state()
+    }
+
     /// Push a console line into the DEVICE session's buffer, as the live
     /// event sink would (heartbeat-drain tests).
     pub(crate) fn push_device_console_log_for_test(&mut self, draft: UiLogDraft) {
@@ -3643,10 +3557,6 @@ fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> Ui
     } else {
         UiNotice::warning(needs_attention)
     }
-}
-
-fn deploy_transition_error(error: crate::app::device::InvalidTransition) -> UiError {
-    UiError::UnsupportedAction(error.to_string())
 }
 
 /// Which pool slot a connect flow is aimed at: the browser-worker provider
@@ -3996,59 +3906,6 @@ mod tests {
     }
 
     #[test]
-    fn deploy_environment_derives_from_attachment_and_session_state() {
-        use crate::app::runtime_pool::runtime_session::ready_state_for_test;
-        use lpa_link::DeviceState;
-
-        // no attachment: nothing connected
-        let studio = StudioController::new(|| 0.0);
-        let env = studio.deploy_environment();
-        assert!(!env.device_link_connected);
-        assert!(!env.firmware_available);
-
-        // sim attachment: never a device (D22)
-        let mut studio = StudioController::new(|| 0.0);
-        studio.set_stub_sim_for_test();
-        studio.set_server_state_for_test(ServerState::Connected {
-            protocol: "sim".to_string(),
-        });
-        let env = studio.deploy_environment();
-        assert!(!env.device_link_connected);
-        assert!(!env.firmware_available);
-
-        // hardware Ready + server Connected: firmware available
-        let mut studio = connected_studio();
-        let env = studio.deploy_environment();
-        assert!(env.device_link_connected);
-        assert!(env.firmware_available);
-
-        // hardware Ready but the server protocol has not answered
-        studio.set_server_state_for_test(ServerState::Disconnected);
-        let env = studio.deploy_environment();
-        assert!(env.device_link_connected);
-        assert!(!env.firmware_available, "Ready needs a connected server");
-
-        // hardware BlankFlash: connected, no firmware (dialog's Blank)
-        let mut studio = connected_studio();
-        studio.set_stub_device_for_test(DeviceState::BlankFlash);
-        let env = studio.deploy_environment();
-        assert!(env.device_link_connected);
-        assert!(!env.firmware_available);
-
-        // hardware Gone: the link no longer counts as connected
-        let mut studio = connected_studio();
-        studio.set_stub_device_for_test(DeviceState::Gone);
-        let env = studio.deploy_environment();
-        assert!(!env.device_link_connected);
-        assert!(!env.firmware_available);
-
-        // server Connected alone (Ready session) stays the happy path
-        let mut studio = connected_studio();
-        studio.set_stub_device_for_test(ready_state_for_test());
-        assert!(studio.deploy_environment().firmware_available);
-    }
-
-    #[test]
     fn incompatible_device_surfaces_reflash_affordance_in_the_pane() {
         use lpa_link::{DeviceState, IncompatibleReason};
 
@@ -4349,11 +4206,8 @@ mod tests {
             action.op_as::<ProjectOp>(),
             Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
         )));
-        // the pane's door to the deploy dialog + session control
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<crate::app::device::DeployOp>(),
-            Some(crate::app::device::DeployOp::OpenDialog { .. })
-        )));
+        // the pane keeps only the session verb (M8′: pushing lives on
+        // the cards)
         assert!(
             actions.iter().any(|action| matches!(
                 action.op_as::<DeviceOp>(),
@@ -4747,9 +4601,12 @@ mod tests {
             },
         );
 
-        let result = block_on_ready(studio.dispatch_with_updates(action, sink));
+        let result = drive(studio.dispatch_with_updates(action, sink));
 
-        assert!(matches!(result, Err(UiError::Link(_))));
+        // M6: the ladder ends SOFT — no error, no toast, no issue chip.
+        // The honest ending is the card's Not-responding state.
+        let notices = result.expect("ladder endings are soft");
+        assert!(notices.notices.is_empty(), "no toast from the ladder");
         assert!(updates.borrow().iter().any(|update| {
             matches!(
                 update,
@@ -4765,25 +4622,21 @@ mod tests {
                     && activity.title == "Opening device session"
             )
         }));
-        let last_view = updates
-            .borrow()
-            .iter()
-            .rev()
-            .find_map(|update| match update {
-                UxUpdate::View(view) => Some(view.clone()),
-                _ => None,
-            })
-            .expect("dispatch should emit a final view");
-        // the failed connect lands back on provider selection, which is home
-        // under M4 — the issue rides the gallery instead of a pane status
-        let home = last_view
-            .home
-            .expect("provider selection with an issue shows home");
+        assert!(matches!(
+            studio.device_flow_state_for_test(),
+            ConnectFlowState::Unresponsive { .. }
+        ));
+        let home = studio.view().home.expect("the gallery still shows");
+        assert!(home.issue.is_none(), "no gallery issue chip either");
         assert!(
-            home.issue
-                .expect("the connect failure surfaces on home")
-                .message
-                .contains("Failed to open serial port.")
+            home.devices
+                .iter()
+                .any(|card| card.state == crate::RosterCardState::NotResponding),
+            "the ladder's honest ending is the Not-responding card: {:?}",
+            home.devices
+                .iter()
+                .map(|card| card.state.clone())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -5039,6 +4892,26 @@ mod tests {
             Poll::Ready(output) => output,
             Poll::Pending => panic!("test future unexpectedly yielded"),
         }
+    }
+
+    /// Poll to completion for futures that legitimately yield (the M6
+    /// ladder's poll-timer backoff between connect attempts).
+    fn drive<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        for _ in 0..10_000 {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                return output;
+            }
+            // the poll timers run on the real clock (the ladder backoff
+            // is 750 ms) — breathe instead of spinning
+            std::thread::sleep(core::time::Duration::from_millis(1));
+        }
+        panic!("test future did not settle in 10k polls");
     }
 
     struct NoopWake;

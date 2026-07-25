@@ -2,6 +2,7 @@
 
 use lpc_wire::FwProvenance;
 
+use crate::UiLogEntry;
 use crate::app::roster::RosterCardState;
 
 /// A device card. Visually distinct from package cards by contract: the
@@ -32,6 +33,10 @@ pub struct UiDeviceCard {
     /// no rename, its own rich-object sections). The sim is not a device
     /// (D22) — `uid` stays `None` and no registry entry ever backs it.
     pub sim: bool,
+    /// The session's per-device console tail (D42), oldest first — the
+    /// card's console strip and Console tab render this. Always empty on
+    /// remembered (offline) cards: no session, no console.
+    pub console_tail: Vec<UiLogEntry>,
 }
 
 impl UiDeviceCard {
