@@ -18,15 +18,24 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    BundledFirmware, CardOp, CardUiState, ConnectPhase, DegradedReason, DeviceCardTab,
-    RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin,
-    UiLogSource,
+    BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase, DegradedReason,
+    DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry, UiLogLevel,
+    UiLogOrigin, UiLogSource,
 };
 use lpc_wire::FwProvenance;
 
-use crate::app::home::device_card::{
-    DeviceCard, DeviceCardSheet, erase_device_action, stop_simulator_action,
-};
+use crate::app::home::device_card::DeviceCard;
+
+/// Story helper: a card view-state opened on a given tab / sheet (the
+/// capture equivalent of the retired `initial_tab`/`initial_sheet` props —
+/// stories now drive the SAME core state the live app does).
+fn opened(tab: DeviceCardTab, sheet: Option<CardSheet>) -> CardUiState {
+    CardUiState {
+        tab,
+        sheet,
+        op: None,
+    }
+}
 
 /// A fixed "now" so the offline recency never drifts in baselines.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -122,7 +131,10 @@ fn project_picker_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(RosterCardState::ConnectedEmpty, false),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Project, None),
+                    ..device_card(RosterCardState::ConnectedEmpty, false)
+                },
                 now_secs: Some(STORY_NOW),
                 project_choices: vec![
                     UiDeviceProjectChip {
@@ -134,7 +146,6 @@ fn project_picker_open() -> Element {
                         name: "2026-07-18-bedroom-lamp".to_string(),
                     },
                 ],
-                initial_tab: Some(DeviceCardTab::Project),
                 on_action: |_| {},
             }
         }
@@ -189,9 +200,11 @@ fn troubleshoot_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(RosterCardState::NotResponding, false),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Status, Some(CardSheet::Troubleshoot)),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_sheet: Some(DeviceCardSheet::Troubleshoot),
                 on_action: |_| {},
             }
         }
@@ -256,10 +269,12 @@ fn settings_tab_running() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card_with_fw(RosterCardState::RunningUpToDate, true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Settings, None),
+                    ..device_card_with_fw(RosterCardState::RunningUpToDate, true)
+                },
                 now_secs: Some(STORY_NOW),
                 bundled_fw: Some(bundled_firmware()),
-                initial_tab: Some(DeviceCardTab::Settings),
                 on_action: |_| {},
             }
         }
@@ -287,10 +302,12 @@ fn danger_tab_simulator() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: sim_card(true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Danger, None),
+                    ..sim_card(true)
+                },
                 now_secs: Some(STORY_NOW),
                 sim: true,
-                initial_tab: Some(DeviceCardTab::Danger),
                 on_action: |_| {},
             }
         }
@@ -304,12 +321,11 @@ fn erase_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(behind_state(), true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Danger, Some(CardSheet::Confirm(CardVerb::Erase))),
+                    ..device_card(behind_state(), true)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_tab: Some(DeviceCardTab::Danger),
-                initial_sheet: Some(DeviceCardSheet::Confirm(erase_device_action(
-                    "Luna's porch sign".to_string(),
-                ))),
                 on_action: |_| {},
             }
         }
@@ -323,9 +339,11 @@ fn name_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(RosterCardState::NeedsAName, false),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Status, Some(CardSheet::Name)),
+                    ..device_card(RosterCardState::NeedsAName, false)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_sheet: Some(DeviceCardSheet::Name),
                 on_action: |_| {},
             }
         }
@@ -339,9 +357,11 @@ fn drift_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(RosterCardState::EditedOnDevice, true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Status, Some(CardSheet::Drift)),
+                    ..device_card(RosterCardState::EditedOnDevice, true)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_sheet: Some(DeviceCardSheet::Drift),
                 on_action: |_| {},
             }
         }
@@ -355,11 +375,12 @@ fn stop_sim_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: sim_card(true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Danger, Some(CardSheet::Confirm(CardVerb::StopSim))),
+                    ..sim_card(true)
+                },
                 now_secs: Some(STORY_NOW),
                 sim: true,
-                initial_tab: Some(DeviceCardTab::Danger),
-                initial_sheet: Some(DeviceCardSheet::Confirm(stop_simulator_action())),
                 on_action: |_| {},
             }
         }
@@ -430,9 +451,11 @@ fn console_tab_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card_with_console(RosterCardState::RunningUpToDate, true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Console, None),
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_tab: Some(DeviceCardTab::Console),
                 on_action: |_| {},
             }
         }
@@ -538,9 +561,11 @@ fn tabbed(state: RosterCardState, with_project: bool, tab: DeviceCardTab) -> Ele
     rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(state, with_project),
+                card: UiDeviceCard {
+                    ui: opened(tab, None),
+                    ..device_card(state, with_project)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_tab: Some(tab),
                 on_action: |_| {},
             }
         }

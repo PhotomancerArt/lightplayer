@@ -1886,7 +1886,7 @@ impl StudioController {
                 crate::RosterCardState::OperationInFlight { percent, .. } => *percent,
                 _ => None,
             };
-            card.ui.op = Some(crate::CardOp::new(label, percent.map(|p| p as u8)));
+            card.ui.op = Some(crate::CardOp::new(label, percent));
         }
         card
     }
