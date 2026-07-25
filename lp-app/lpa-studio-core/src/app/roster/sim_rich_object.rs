@@ -56,7 +56,7 @@ pub fn sim_rich_object(input: &SimRichInput<'_>) -> RichObjectView<SimDetailAffo
 fn health_section(input: &SimRichInput<'_>) -> RichSection<SimDetailAffordance> {
     RichSection {
         title: "Health".to_string(),
-        tone: input.state.circle().tone,
+        tone: input.state.spec().tone,
         lines: vec![RichLine::new(
             "status",
             input.state.status_line(input.now_secs),

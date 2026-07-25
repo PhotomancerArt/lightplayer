@@ -13,8 +13,8 @@
 //!   is the whole announcement, and counts/status words live in the
 //!   detail popover;
 //! - the detail popover slot sits at the header's right edge, its trigger
-//!   styled by the same rollup (`affordance_trigger_style` /
-//!   `status_trigger_style`).
+//!   styled by the same rollup (`affordance_trigger_style`; the device
+//!   arm retired with the card-as-control-panel — M7′).
 //!
 //! The node pane is the first consumer (pixel-identical — node story
 //! baselines are the fidelity test); the M7 runtime pane renders the

@@ -46,11 +46,13 @@ pub struct UiStudioView {
     pub open_project_slug: Option<String>,
     /// Connect-as-pull result for the attached DEVICE (never the sim —
     /// D22): identity + content classification. Feeds the device pane,
-    /// gallery cards, and the deploy dialog (M5).
+    /// gallery cards, and the device-push verbs (M5/M8′).
     pub device_sync: Option<crate::app::places::DeviceSyncState>,
-    /// The deploy dialog, when open — rendered as a modal overlay over
-    /// whatever the shell shows (M5).
-    pub deploy: Option<Box<crate::app::device::UiDeployView>>,
+    /// The LENS session's card, for the editor layout (D43: the grown
+    /// device card IS the editor's right-side pane). Same construction
+    /// as the gallery roster's live cards; `None` while no lens session
+    /// exists (the shell falls back to the device pane surface).
+    pub lens_card: Option<Box<crate::app::home::UiDeviceCard>>,
     /// The layered-settings slice (effective values, provenance, override
     /// state) for the shell's settings popover.
     pub settings: crate::app::settings::UiSettingsView,
@@ -66,7 +68,7 @@ impl UiStudioView {
             open_project_uid: None,
             open_project_slug: None,
             device_sync: None,
-            deploy: None,
+            lens_card: None,
             settings: crate::app::settings::UiSettingsView::default(),
         }
     }
@@ -95,8 +97,8 @@ impl UiStudioView {
         self
     }
 
-    pub fn with_deploy(mut self, deploy: Option<crate::app::device::UiDeployView>) -> Self {
-        self.deploy = deploy.map(Box::new);
+    pub fn with_lens_card(mut self, card: Option<crate::app::home::UiDeviceCard>) -> Self {
+        self.lens_card = card.map(Box::new);
         self
     }
 

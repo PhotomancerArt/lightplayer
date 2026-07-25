@@ -66,6 +66,8 @@ pub struct HomeSimEvidence {
     /// the card's chip and the project card's "Running in simulator"
     /// pairing key.
     pub project: Option<UiDeviceProjectChip>,
+    /// The session's console tail (D42), oldest first.
+    pub console_tail: Vec<crate::UiLogEntry>,
 }
 
 /// Everything one live DEVICE session contributes to the roster — the
@@ -92,6 +94,8 @@ pub struct HomeDeviceEvidence {
     /// evidence renders ON that card (uid + name adopted from the
     /// registry) instead of spawning a transient anonymous twin.
     pub pending_uid: Option<String>,
+    /// The session's console tail (D42), oldest first.
+    pub console_tail: Vec<crate::UiLogEntry>,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -309,7 +313,7 @@ fn assemble_roster(
 /// presentation. The session's existence is the status — Running when a
 /// project is loaded, "Connected — nothing loaded" otherwise; no uid, no
 /// transport, no firmware provenance (the sim is not a device, D22).
-fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
+pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
     let state = if sim.project.is_some() {
         RosterCardState::RunningUpToDate
     } else {
@@ -323,6 +327,7 @@ fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         project: sim.project.clone(),
         fw: None,
         sim: true,
+        console_tail: sim.console_tail.clone(),
     }
 }
 
@@ -330,7 +335,7 @@ fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
 /// no live evidence at all, and also when the evidence derives *Offline*
 /// (a `Gone` link or stale sync) — the registry card is the
 /// better-informed offline view (it knows the last sighting).
-fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
+pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
     if live.sync.is_none() && live.link.is_none() && live.connect == ConnectEvidence::Idle {
         return None;
     }
@@ -339,6 +344,10 @@ fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
         content: live.sync.as_ref().map(|sync| &sync.content),
         observed_version: live.observed_version,
         head_version: live.head_version,
+        unstamped: live
+            .sync
+            .as_ref()
+            .is_some_and(|sync| sync.identity.is_none()),
         registry: None,
         connect: live.connect.clone(),
     });
@@ -374,6 +383,7 @@ fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
         project,
         fw,
         sim: false,
+        console_tail: live.console_tail.clone(),
     })
 }
 
@@ -476,6 +486,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         content: None,
         observed_version: None,
         head_version: None,
+        unstamped: false,
         registry: Some(device),
         connect: ConnectEvidence::Idle,
     });
@@ -489,6 +500,8 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         // remembered only: no live hello, no firmware provenance
         fw: None,
         sim: false,
+        // no session, no console (D42: the console is the session's)
+        console_tail: Vec::new(),
     }
 }
 
@@ -559,7 +572,10 @@ mod tests {
     fn sim_pool(project: Option<UiDeviceProjectChip>) -> HomePoolEvidence {
         HomePoolEvidence {
             devices: Vec::new(),
-            sim: Some(HomeSimEvidence { project }),
+            sim: Some(HomeSimEvidence {
+                project,
+                console_tail: Vec::new(),
+            }),
         }
     }
 
@@ -693,6 +709,7 @@ mod tests {
                 project: None,
                 fw: None,
                 sim: false,
+                console_tail: Vec::new(),
             },
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
@@ -702,6 +719,7 @@ mod tests {
                 project: None,
                 fw: None,
                 sim: false,
+                console_tail: Vec::new(),
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
@@ -1085,6 +1103,7 @@ mod tests {
                     uid: sign.uid.to_string(),
                     name: sign.slug.clone(),
                 }),
+                console_tail: Vec::new(),
             }),
         };
         let view = build_home_view(Some(&inputs), None, None, &pool);

@@ -2,7 +2,7 @@
 //!
 //! [`DeviceController`] drives this alongside the runtime pool: the flow
 //! narrates the catalog → discovery → endpoint → connect sequence for the
-//! views (gallery issue chip, deploy dialog endpoint choices), while the
+//! views (gallery issue chip, card connect narration), while the
 //! pool's [`RuntimeSession`] holds what actually got connected.
 //! `Connected` is entered exactly when a connect flow hands a live
 //! session payload to the pool.
@@ -33,6 +33,27 @@ pub enum ConnectFlowState {
     Connecting {
         endpoint: EndpointChoice,
         progress: ProgressState,
+    },
+    /// The connect retry ladder's middle rung (M6, the D31 replacement):
+    /// the first attempt failed, the automatic reset ran (opening a
+    /// session resets the board — DTR/RTS), and a second attempt is in
+    /// flight. The card narrates "Resetting…" through
+    /// [`ConnectEvidence::Connecting`](crate::ConnectEvidence).
+    Retrying {
+        endpoint: EndpointChoice,
+        progress: ProgressState,
+    },
+    /// The port's open failed as held-by-another-holder (D32 soft
+    /// failure): the card shows In-use-elsewhere and a quiet periodic
+    /// retry runs on the tick cadence. Never a toast.
+    PortHeld {
+        endpoint: EndpointChoice,
+    },
+    /// The ladder exhausted without a live session: the card shows the
+    /// honest Not-responding state; Troubleshoot is its affordance.
+    /// Distinct from [`Self::Failed`] — no gallery issue chip shouts.
+    Unresponsive {
+        endpoint: EndpointChoice,
     },
     Connected {
         device: ConnectedDeviceSummary,

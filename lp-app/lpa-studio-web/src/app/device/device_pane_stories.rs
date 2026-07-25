@@ -72,10 +72,15 @@ pub(crate) fn disconnected_with_association() -> Element {
             .with_body(UiViewContent::text(
                 "Usually on Luna's porch sign.\nRunning in the simulator.",
             ))
-            .with_actions(vec![UiAction::from_op(
-                ControllerId::new(DEPLOY_NODE_ID),
-                DeployOp::OpenDialog { target_key: None },
-            )]),
+            .with_actions(vec![
+                UiAction::from_op(
+                    ControllerId::new(DeviceController::NODE_ID),
+                    DeviceOp::OpenProvider {
+                        provider_id: lpa_link::LinkProviderKind::BrowserSerialEsp32,
+                    },
+                )
+                .with_label("Connect device…"),
+            ]),
         ],
     ))
 }
@@ -98,9 +103,11 @@ pub(crate) fn connected_at_head() -> Element {
             .with_actions(vec![
                 UiAction::from_op(
                     ControllerId::new(DEPLOY_NODE_ID),
-                    DeployOp::OpenDialog { target_key: None },
+                    DeployOp::PushProject {
+                        key: "prj_fixture".to_string(),
+                    },
                 )
-                .with_label("Push to device…"),
+                .with_label("Push to device"),
                 UiAction::from_op(
                     ControllerId::new(DeviceController::NODE_ID),
                     DeviceOp::DisconnectDevice,
@@ -126,8 +133,8 @@ pub(crate) fn ready_to_flash() -> Element {
                 "No LightPlayer firmware is running on this device.",
             ))
             .with_actions(vec![UiAction::from_op(
-                ControllerId::new(DEPLOY_NODE_ID),
-                DeployOp::OpenDialog { target_key: None },
+                ControllerId::new(DeviceController::NODE_ID),
+                DeviceOp::ProvisionFirmware,
             )]),
             firmware_section(),
         ],
@@ -183,8 +190,8 @@ pub(crate) fn unresponsive() -> Element {
 fn connected_actions() -> Vec<UiAction> {
     vec![
         UiAction::from_op(
-            ControllerId::new(DEPLOY_NODE_ID),
-            DeployOp::OpenDialog { target_key: None },
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ProvisionFirmware,
         )
         .with_label("Push to device…"),
         UiAction::from_op(
