@@ -8,7 +8,7 @@
 //!
 //! - **Disconnected** (or the runtime is the sim): where this project
 //!   usually lives (registry association), the ambient runtime line
-//!   ("Running in the simulator"), and the door to the deploy dialog.
+//!   ("Running in the simulator"), and the connect affordance.
 //! - **Connected**: the device's identity and its contents related to
 //!   the library (connect-as-pull, D8), push/dialog actions, and a
 //!   visually separate firmware section (flash / erase — D15).
@@ -23,7 +23,7 @@
 //! [`RuntimePool`](crate::RuntimePool). The controller itself is slotless:
 //! sessions live in the pool, the server protocol lives on the session.
 //!
-//! Connect/endpoint flows live inside the deploy dialog (M5); this pane
+//! Connect/endpoint flows narrate on the gallery cards (M6/M8′); this pane
 //! never renders provider plumbing.
 
 use std::cell::RefCell;
@@ -35,7 +35,6 @@ use lpa_link::{
     LinkProviderKind,
 };
 
-use crate::app::device::DeployOp;
 use crate::app::device::connect_choices::{provider_auto_connects, provider_choices};
 use crate::app::device::device_event_adapter::console_event_sink;
 use crate::app::device::link_ux::{link_session_logs, map_link_error};
@@ -161,15 +160,6 @@ impl DeviceController {
     /// The connect-flow view state (picker/progress/failure).
     pub fn flow_state(&self) -> &ConnectFlowState {
         &self.flow
-    }
-
-    /// Hardware device classes in this build's catalog (descriptors whose
-    /// class can flash firmware), for the deploy dialog's connect actions.
-    pub(crate) fn hardware_device_kinds(&self) -> Vec<LinkProviderKind> {
-        crate::app::device::connect_choices::hardware_device_descriptors(&self.registry)
-            .into_iter()
-            .map(|descriptor| descriptor.kind)
-            .collect()
     }
 
     /// Drain the console drafts buffered by the session's event sink.
@@ -727,10 +717,19 @@ impl DeviceController {
         }
         UiStepView::new(Self::SECTION_DEVICE, "Device", UiStepState::Pending)
             .with_body(UiViewContent::text(lines.join("\n")))
-            .with_actions(vec![UiAction::from_op(
-                ControllerId::new(crate::app::device::DEPLOY_NODE_ID),
-                DeployOp::OpenDialog { target_key: None },
-            )])
+            // M8′: the dialog is gone — the pane's door is the connect
+            // flow itself (the gallery card carries everything else)
+            .with_actions(vec![
+                UiAction::from_op(
+                    self.node_id(),
+                    DeviceOp::OpenProvider {
+                        provider_id: LinkProviderKind::BrowserSerialEsp32,
+                    },
+                )
+                .with_label("Connect device…")
+                .with_summary("Connect a LightPlayer device over USB.")
+                .with_icon("usb"),
+            ])
     }
 
     /// The pane when hardware is attached: identity, contents relation,
@@ -780,14 +779,9 @@ impl DeviceController {
     }
 
     fn connected_device_actions(&self) -> Vec<UiAction> {
+        // M8′: pushing lives on the CARDS (the gallery's Push and the
+        // Project-tab picker); the pane keeps only the session verb.
         vec![
-            UiAction::from_op(
-                ControllerId::new(crate::app::device::DEPLOY_NODE_ID),
-                DeployOp::OpenDialog { target_key: None },
-            )
-            .with_label("Push to device…")
-            .with_summary("Review and push a project to this device.")
-            .with_icon("upload"),
             UiAction::from_op(self.node_id(), DeviceOp::DisconnectDevice)
                 .with_label("Disconnect")
                 .with_summary("Close the device session."),

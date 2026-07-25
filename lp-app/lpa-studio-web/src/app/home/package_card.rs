@@ -40,7 +40,7 @@ pub(crate) fn PackageCard(
     rsx! {
         article {
             class: package_card_class(opening),
-            // drag a project onto a device card = deploy dialog pre-filled
+            // drag a project onto a device card = the push-confirm sheet
             draggable: true,
             ondragstart: {
                 let uid = card.uid.clone();
@@ -166,15 +166,18 @@ fn PackageCardMenu(card: UiPackageCard, on_action: EventHandler<UiAction>) -> El
         "Delete",
     ));
 
+    // M8′ (dialog-free): the menu row IS the D11 consent, exactly like
+    // the card's Push button — the push runs directly, progress on the
+    // device card's Operation-in-flight lane.
     let push_to_device = card.connected_device.as_ref().map(|connection| {
         UiAction::from_op(
             ControllerId::new(DEPLOY_NODE_ID),
-            DeployOp::OpenDialog {
-                target_key: Some(card.uid.clone()),
+            DeployOp::PushProject {
+                key: card.uid.clone(),
             },
         )
-        .with_label(format!("Push to {}…", connection.device_name))
-        .with_summary("Review and push this project to the connected device.")
+        .with_label(format!("Push to {}", connection.device_name))
+        .with_summary("Push this project to the connected device.")
         .with_icon("upload")
     });
 

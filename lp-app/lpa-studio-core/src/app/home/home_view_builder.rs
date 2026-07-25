@@ -344,6 +344,10 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         content: live.sync.as_ref().map(|sync| &sync.content),
         observed_version: live.observed_version,
         head_version: live.head_version,
+        unstamped: live
+            .sync
+            .as_ref()
+            .is_some_and(|sync| sync.identity.is_none()),
         registry: None,
         connect: live.connect.clone(),
     });
@@ -482,6 +486,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         content: None,
         observed_version: None,
         head_version: None,
+        unstamped: false,
         registry: Some(device),
         connect: ConnectEvidence::Idle,
     });

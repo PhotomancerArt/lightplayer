@@ -6,7 +6,6 @@
 
 pub(crate) mod affordance;
 pub mod bus;
-pub mod deploy;
 pub mod device;
 pub mod home;
 pub mod layout;
@@ -17,7 +16,6 @@ pub mod roster;
 pub(crate) mod story_fixtures;
 
 pub use bus::BusPaneBody;
-pub use deploy::DeployDialog;
 pub use home::{HomeGallery, ProjectOpeningFrame};
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;

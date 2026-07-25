@@ -16,7 +16,7 @@ use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 /// a map of everywhere the user's light lives. The runtime roster leads
 /// the page (SDI addendum: Home reads window-switcher-first,
 /// library-second); the connect card opens the VID-filtered chooser
-/// directly — the deploy dialog is never a connect surface (its
+/// directly — connecting is never a dialog trip (the old dialog's
 /// `NeedsDevice` state is unreachable from here).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -110,6 +110,16 @@ pub fn HomeGallery(
                                 sim: card.sim,
                                 card,
                                 now_secs,
+                                // M8′: the Project-tab picker's choices
+                                // (empty-device cards offer the library)
+                                project_choices: home
+                                    .projects
+                                    .iter()
+                                    .map(|project| lpa_studio_core::UiDeviceProjectChip {
+                                        uid: project.uid.clone(),
+                                        name: project.slug.clone(),
+                                    })
+                                    .collect::<Vec<_>>(),
                                 on_action,
                             }
                         }

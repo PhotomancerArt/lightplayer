@@ -27,8 +27,8 @@ use lpa_studio_core::{
     BundledFirmware, CardTabView, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab,
     DeviceController, DeviceDetailAffordance, DeviceOp, DeviceRichInput, HomeOp, LinkProviderKind,
     ProjectController, ProjectOp, RichObjectView, RichSection, RosterAffordance, RosterCardState,
-    RosterTreatment, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard, UiStatusKind,
-    device_card_tabs, device_rich_object, sim_rich_object,
+    RosterTreatment, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard,
+    UiDeviceProjectChip, UiStatusKind, device_card_tabs, device_rich_object, sim_rich_object,
 };
 use lpa_studio_core::{UiLogEntry, UiLogLevel};
 
@@ -63,13 +63,17 @@ pub(crate) enum DeviceCardSheet {
     Troubleshoot,
 }
 
-/// What a rendered affordance row does. Sheet rows carry a display-only
-/// action (label/icon/destructive chrome) that never dispatches — the
-/// sheet's own confirm does.
+/// What a rendered affordance row does. Sheet and tab rows carry a
+/// display-only action (label/icon/destructive chrome) that never
+/// dispatches — the sheet's own confirm (or the opened tab's content)
+/// carries the flow.
 #[derive(Clone, PartialEq)]
 enum CardRowAction {
     Dispatch(UiAction),
     Sheet(DeviceCardSheet, UiAction),
+    /// Select a card tab (M8′: "Choose a project" jumps to the
+    /// Project-tab picker).
+    SelectTab(DeviceCardTab, UiAction),
 }
 
 impl CardRowAction {
@@ -123,6 +127,11 @@ pub(crate) fn DeviceCard(
     /// Settings tab (and its badge).
     #[props(default)]
     bundled_fw: Option<BundledFirmware>,
+    /// The library projects the Project-tab picker offers on an empty
+    /// device (M8′: "choose a project" — list → push; no dialog). The
+    /// gallery passes its hydrated project list; empty hides the picker.
+    #[props(default)]
+    project_choices: Vec<UiDeviceProjectChip>,
     /// Open with this tab selected (story captures only).
     #[props(default)]
     initial_tab: Option<DeviceCardTab>,
@@ -172,7 +181,24 @@ pub(crate) fn DeviceCard(
     };
     let view = RichObjectView::new(sections);
     let edge_tone = view.rollup().tone;
-    let tabs = device_card_tabs(view);
+    let mut tabs = device_card_tabs(view);
+    // M8′: the Connected-empty device offers the Project-tab PICKER —
+    // the tab exists exactly when there is something honest to offer
+    // (choices in the library), mirroring the data-adaptive rule.
+    let picker_mode = !sim
+        && matches!(card.state, RosterCardState::ConnectedEmpty)
+        && !project_choices.is_empty()
+        && !tabs.iter().any(|tab| tab.tab == DeviceCardTab::Project);
+    if picker_mode {
+        tabs.insert(
+            1,
+            CardTabView {
+                tab: DeviceCardTab::Project,
+                sections: Vec::new(),
+                badge: None,
+            },
+        );
+    }
     let edge_treatment = card.state.spec().treatment;
 
     // The grow control dispatches the existing editor-attach ops exactly
@@ -231,22 +257,36 @@ pub(crate) fn DeviceCard(
             style: "{edge_style}",
             title: "{status_line}",
             // connected cards are drop targets: project card → device card
-            // opens the deploy dialog pre-filled (replace preview)
+            // opens the push-confirm sheet (M8′ — the drop aims, the
+            // sheet's verb consents)
             ondragover: move |event| {
                 if droppable {
                     event.prevent_default();
                 }
             },
-            ondrop: move |event| {
-                if !droppable {
-                    return;
-                }
-                event.prevent_default();
-                if let Some(key) = super::package_card::take_dragged_project() {
-                    on_action.call(UiAction::from_op(
-                        ControllerId::new(DEPLOY_NODE_ID),
-                        DeployOp::OpenDialog { target_key: Some(key) },
-                    ));
+            ondrop: {
+                let name = card.name.clone();
+                move |event: DragEvent| {
+                    if !droppable {
+                        return;
+                    }
+                    event.prevent_default();
+                    // M8′: the drop opens the push-confirm SHEET (D41) —
+                    // dropping aims, the sheet's verb is the D11 consent.
+                    if let Some(key) = super::package_card::take_dragged_project() {
+                        sheet.set(Some(DeviceCardSheet::Confirm(
+                            push_project_action(key).with_confirmation(
+                                lpa_studio_core::ActionConfirmation::new(
+                                    "Push this project",
+                                    format!(
+                                        "Push the dropped project to \"{name}\"? It replaces \
+                                         what the device runs now."
+                                    ),
+                                    "Push",
+                                ),
+                            ),
+                        )));
+                    }
                 }
             },
             // D40 title bar: kind glyph · inline-editable name · transport
@@ -398,13 +438,16 @@ pub(crate) fn DeviceCard(
                 div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
                     match active_tab {
                         DeviceCardTab::Status => rsx! {
-                            {status_tab_body(&card, &tabs, chip_muted, on_action, sheet)}
+                            {status_tab_body(&card, &tabs, chip_muted, on_action, sheet, selected)}
                         },
                         DeviceCardTab::Console => rsx! {
                             {console_tab_body(&card.console_tail)}
                         },
+                        DeviceCardTab::Project if picker_mode => rsx! {
+                            {project_picker_body(&project_choices, on_action)}
+                        },
                         _ => rsx! {
-                            {sections_tab_body(&tabs, active_tab, on_action, sheet)}
+                            {sections_tab_body(&tabs, active_tab, on_action, sheet, selected)}
                         },
                     }
                 }
@@ -534,6 +577,7 @@ fn status_tab_body(
     chip_muted: bool,
     on_action: EventHandler<UiAction>,
     sheet: Signal<Option<DeviceCardSheet>>,
+    selected: Signal<DeviceCardTab>,
 ) -> Element {
     let health = tabs
         .iter()
@@ -577,7 +621,7 @@ fn status_tab_body(
         for section in health {
             for row in section.affordances.iter() {
                 div { class: "tw:mt-1",
-                    {row_button(row, ActionButtonVariant::Quiet, on_action, sheet)}
+                    {row_button(row, ActionButtonVariant::Quiet, on_action, sheet, selected)}
                 }
             }
         }
@@ -592,6 +636,7 @@ fn sections_tab_body(
     active_tab: DeviceCardTab,
     on_action: EventHandler<UiAction>,
     sheet: Signal<Option<DeviceCardSheet>>,
+    selected: Signal<DeviceCardTab>,
 ) -> Element {
     let sections = tabs
         .iter()
@@ -625,6 +670,7 @@ fn sections_tab_body(
                         if menu_rows { ActionButtonVariant::MenuItem } else { ActionButtonVariant::Quiet },
                         on_action,
                         sheet,
+                        selected,
                     )}
                 }
             }
@@ -633,13 +679,15 @@ fn sections_tab_body(
 }
 
 /// One affordance row: dispatch rows fire `on_action`; sheet rows open
-/// their card sheet instead (the display action never dispatches — its
-/// confirmation, if any, was stripped at wiring).
+/// their card sheet, tab rows select their tab (the display action
+/// never dispatches — its confirmation, if any, was stripped at
+/// wiring).
 fn row_button(
     row: &CardRowAction,
     variant: ActionButtonVariant,
     on_action: EventHandler<UiAction>,
     mut sheet: Signal<Option<DeviceCardSheet>>,
+    mut selected: Signal<DeviceCardTab>,
 ) -> Element {
     match row {
         CardRowAction::Dispatch(action) => rsx! {
@@ -653,6 +701,17 @@ fn row_button(
                     running: false,
                     variant,
                     on_action: move |_| sheet.set(Some(kind.clone())),
+                }
+            }
+        }
+        CardRowAction::SelectTab(tab, display) => {
+            let tab = *tab;
+            rsx! {
+                ActionButton {
+                    action: display.clone(),
+                    running: false,
+                    variant,
+                    on_action: move |_| selected.set(tab),
                 }
             }
         }
@@ -960,8 +1019,7 @@ pub(crate) fn reconnect_device_action(uid: Option<String>) -> UiAction {
 }
 
 /// Connect = the VID-filtered browser chooser, directly (D32's filter
-/// rides `requestPort`). The deploy dialog is no longer a connect
-/// surface: it opens only WITH a device context.
+/// rides `requestPort`).
 pub(crate) fn connect_device_action() -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
@@ -974,16 +1032,17 @@ pub(crate) fn connect_device_action() -> UiAction {
     .with_icon("usb")
 }
 
-/// "Flash firmware…", the quiet secondary affordance (D33 demotion): with
-/// a device connected it opens the dialog's firmware flows (device
-/// context present — never `NeedsDevice`); with nothing connected it
+/// "Flash firmware…", the quiet secondary affordance (D33 demotion,
+/// dialog-free since M8′): with a device connected it runs the flash
+/// directly (the card's Operation-in-flight lane narrates; the
+/// confirmation renders as the D41 sheet); with nothing connected it
 /// opens the recovery chooser (link-only open, no app attach), after
 /// which the card's own state carries the flow.
 pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(
-            ControllerId::new(DEPLOY_NODE_ID),
-            DeployOp::OpenDialog { target_key: None },
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ProvisionFirmware,
         )
     } else {
         UiAction::from_op(
@@ -997,6 +1056,50 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
         .with_label("Flash firmware…")
         .with_summary("Install or repair LightPlayer firmware on an ESP32.")
         .with_icon("zap")
+}
+
+/// The in-card push op for one library project (M5's lane; M8′ reuses
+/// it for the picker rows and the drop-confirm sheet).
+fn push_project_action(key: String) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::PushProject { key },
+    )
+    .with_label("Push")
+    .with_summary("Push this project to the device.")
+    .with_icon("upload")
+}
+
+/// The Project-tab PICKER (M8′, contract §3): the library projects as
+/// menu rows — one click pushes (the click is the D11 consent, exactly
+/// like the in-card Push). Rendered only on the Connected-empty card.
+fn project_picker_body(
+    choices: &[UiDeviceProjectChip],
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    rsx! {
+        p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
+            "Put a project on this device:"
+        }
+        div { class: "tw:grid",
+            for chip in choices.iter() {
+                {
+                    let action = push_project_action(chip.uid.clone())
+                        .with_label(chip.name.clone())
+                        .with_summary(format!("Push {} to this device.", chip.name))
+                        .with_icon("play");
+                    rsx! {
+                        ActionButton {
+                            action,
+                            running: false,
+                            variant: ActionButtonVariant::MenuItem,
+                            on_action,
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The D29 editor entry, now dispatched from the grow control (⤢): move
@@ -1035,62 +1138,69 @@ pub(crate) fn stop_simulator_action() -> UiAction {
     ))
 }
 
-/// The ≤1 affordance, wired to what exists TODAY: Push runs the in-card
-/// push directly (M5 — the button is the D11 consent); flows the
-/// vocabulary anticipates but that land later (Set up = M8′,
-/// troubleshoot = M6, D30 rich drift resolution = the M7′ P2 sheet)
-/// route to the deploy dialog with the device context — never a dead
-/// button. The editor identity renders no button — the grow control is
-/// the editor entry.
+/// The ≤1 affordance, fully card-native (M8′ — the deploy dialog is
+/// gone): Push runs the in-card push (M5, the button is the D11
+/// consent); Set-up and Update run the ONE flash effect
+/// (`DeviceOp::ProvisionFirmware` — the card's Operation-in-flight lane
+/// narrates, the confirmation renders as the D41 sheet); sheet-homed
+/// flows (drift, name, troubleshoot) and the Project-tab picker are
+/// intercepted in `wire_card_affordance` before this runs. The editor
+/// identity renders no button — the grow control is the editor entry.
 pub(super) fn device_affordance_action(
     card: &UiDeviceCard,
     affordance: &RosterAffordance,
 ) -> Option<UiAction> {
-    let dialog = |target_key: Option<String>| {
-        UiAction::from_op(
-            ControllerId::new(DEPLOY_NODE_ID),
-            DeployOp::OpenDialog { target_key },
-        )
-    };
     let action = match affordance {
         // the grow control (⤢) is the editor entry — no row
         RosterAffordance::OpenEditor => return None,
         // The in-card push (M5): the button IS the D11 consent — the push
         // dispatches directly and its progress folds into the card's
-        // Operation-in-flight state. No dialog. (Defensive fallback to the
-        // dialog when the chip is somehow absent — RunningBehind derives
-        // from Known content, so it never should be.)
-        RosterAffordance::PushVersion { .. } => match card.project.as_ref() {
-            Some(chip) => UiAction::from_op(
+        // Operation-in-flight state. A missing chip means no honest push
+        // target — no row (RunningBehind derives from Known content, so
+        // it never should be missing).
+        RosterAffordance::PushVersion { .. } => {
+            let chip = card.project.as_ref()?;
+            UiAction::from_op(
                 ControllerId::new(DEPLOY_NODE_ID),
                 DeployOp::PushProject {
                     key: chip.uid.clone(),
                 },
             )
             .with_summary("Push your newest version to this device.")
-            .with_icon("upload"),
-            None => dialog(None)
-                .with_summary("Review and push your newest version to this device.")
-                .with_icon("upload"),
-        },
-        RosterAffordance::ResolveDrift => {
-            dialog(card.project.as_ref().map(|chip| chip.uid.clone()))
-                .with_summary("Review the device's edited copy against your version.")
-                .with_icon("edit")
+            .with_icon("upload")
         }
-        RosterAffordance::Troubleshoot => dialog(None)
-            .with_summary("Repair or reflash this device.")
-            .with_icon("zap"),
-        RosterAffordance::ChooseProject => dialog(None)
-            .with_summary("Choose a project to put on this device.")
-            .with_icon("play"),
-        RosterAffordance::SetUp => dialog(None)
-            .with_summary("Install LightPlayer firmware on this board.")
-            .with_icon("zap"),
-        RosterAffordance::UpdateFirmware => dialog(None)
-            .with_summary("Install this build's firmware on the device.")
-            .with_icon("zap"),
-        // rendered as the card's inline name form, not an action button
+        // intercepted upstream: the D30 sheet / the troubleshoot sheet /
+        // the Project-tab picker (`wire_card_affordance`)
+        RosterAffordance::ResolveDrift
+        | RosterAffordance::Troubleshoot
+        | RosterAffordance::ChooseProject => return None,
+        // M8′: provisioning IS the flash, worn per context. The device
+        // state gates which affordance surfaces it; the effect is one.
+        RosterAffordance::SetUp => UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ProvisionFirmware,
+        )
+        .with_summary("Install LightPlayer firmware on this board.")
+        .with_icon("zap")
+        .with_confirmation(lpa_studio_core::ActionConfirmation::new(
+            "Set up this board",
+            "Installs the packaged LightPlayer firmware. The flash takes \
+             about a minute — the card shows progress and you can walk away.",
+            "Set up",
+        )),
+        RosterAffordance::UpdateFirmware => UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ProvisionFirmware,
+        )
+        .with_summary("Install this build's firmware on the device.")
+        .with_icon("zap")
+        .with_confirmation(lpa_studio_core::ActionConfirmation::new(
+            "Update firmware",
+            "Installs this Studio build's firmware over the device's older \
+             build. The card shows progress; the device restarts after.",
+            "Update",
+        )),
+        // rendered as the card's naming flows, not an action button
         RosterAffordance::NameDevice => return None,
         RosterAffordance::Reconnect => reconnect_device_action(card.uid.clone())
             .with_summary("Reconnect over the granted serial port.")
@@ -1137,6 +1247,15 @@ fn wire_card_affordance(
                     .with_icon("edit");
             Some(CardRowAction::Sheet(DeviceCardSheet::Drift, display))
         }
+        // M8′: "Choose a project" jumps to the Project-tab picker (the
+        // list of library projects → push) — no popup, no dialog.
+        DeviceDetailAffordance::Roster(RosterAffordance::ChooseProject) => {
+            let display = home_action(HomeOp::OpenPackage { key: String::new() })
+                .with_label(RosterAffordance::ChooseProject.label())
+                .with_summary("Choose a project to put on this device.")
+                .with_icon("play");
+            Some(CardRowAction::SelectTab(DeviceCardTab::Project, display))
+        }
         // The name-stamping sheet (an unstamped board's one naming flow).
         DeviceDetailAffordance::Roster(RosterAffordance::NameDevice) => {
             let display = home_action(HomeOp::NameDevice {
@@ -1151,8 +1270,8 @@ fn wire_card_affordance(
         // troubleshooting sheet (display action is meta-only).
         DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot) => {
             let display = UiAction::from_op(
-                ControllerId::new(DEPLOY_NODE_ID),
-                DeployOp::OpenDialog { target_key: None },
+                ControllerId::new(DeviceController::NODE_ID),
+                DeviceOp::ProvisionFirmware,
             )
             .with_label(RosterAffordance::Troubleshoot.label())
             .with_summary("Steps to try when the device is not responding.")

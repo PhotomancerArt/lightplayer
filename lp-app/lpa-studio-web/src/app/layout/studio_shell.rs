@@ -33,7 +33,6 @@ pub fn StudioShell(
         open_project_slug: _,
         // rendered by the device pane (M5)
         device_sync: _,
-        deploy,
         lens_card,
     } = view;
 
@@ -59,9 +58,6 @@ pub fn StudioShell(
                 div { class: "tw:grid tw:gap-7",
                     HomeGallery { home: *home, now_secs, on_action }
                 }
-            }
-            if let Some(deploy) = deploy {
-                crate::app::DeployDialog { deploy: *deploy, on_action }
             }
         };
     }
@@ -139,9 +135,6 @@ pub fn StudioShell(
                     }
                 }
             }
-        }
-        if let Some(deploy) = deploy {
-            crate::app::DeployDialog { deploy: *deploy, on_action }
         }
     }
 }
