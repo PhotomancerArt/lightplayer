@@ -8,8 +8,7 @@ use lp_shader::TextureBindingSpecs;
 use lps_shared::{LpsValueF32, TextureShapeHint, TextureStorageFormat};
 
 use crate::gpu_graphics::GpuShared;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::sample_pass::SamplePass;
+use crate::sample_pass::{SamplePass, grid_dims};
 use crate::texture_backing::{gpu_format, gpu_texture_mut};
 use crate::uniform_layout::{TextureGlobal, UniformTable, reflect_textures, reflect_uniforms};
 use crate::uniform_writer::encode_uniforms;
@@ -40,15 +39,12 @@ pub struct GpuShader {
     shared: Arc<GpuShared>,
     /// Authored GLSL, kept for the lazily-built sample pipeline (the sample
     /// unit re-assembles from source with a different wrapper `main`).
-    #[cfg(not(target_arch = "wasm32"))]
     authored: String,
     /// Compile-time texture specs, kept so the sample unit lowers texture
     /// call sites identically to the render unit.
-    #[cfg(not(target_arch = "wasm32"))]
     texture_specs: TextureBindingSpecs,
-    /// Sample-point pass (native LED-output path), built on the first
-    /// `sample_rgba16` call — render-only consumers never pay for it.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Sample-point pass, built on the first `sample_rgba16` /
+    /// `sample_to_grid` call — render-only consumers never pay for it.
     sample_pass: Option<SamplePass>,
     /// Validated naga module (drives uniform encoding offsets).
     module: naga::Module,
@@ -219,16 +215,13 @@ impl GpuShader {
 
         Ok(Self {
             shared,
-            #[cfg(not(target_arch = "wasm32"))]
             authored: String::from(authored),
             module: compiled.module,
             table,
             textures: texture_globals,
             pipeline,
             bindings,
-            #[cfg(not(target_arch = "wasm32"))]
             texture_specs: textures.clone(),
-            #[cfg(not(target_arch = "wasm32"))]
             sample_pass: None,
         })
     }
@@ -237,7 +230,6 @@ impl GpuShader {
     /// wrapper unit, check its uniform interface matches the render unit's
     /// (same authored declarations — a mismatch means the assembler broke),
     /// and build the point-list pipeline over the shared bind group layout.
-    #[cfg(not(target_arch = "wasm32"))]
     fn ensure_sample_pass(&mut self) -> Result<(), GfxError> {
         if self.sample_pass.is_none() {
             let compiled =
@@ -264,6 +256,35 @@ impl GpuShader {
             ));
         }
         Ok(())
+    }
+
+    /// Per-call uniform prep shared by every draw path: write the encoded
+    /// uniform tree into the instance buffer and build the per-call bind
+    /// group when texture bindings force one (`None` when the prebuilt
+    /// static group applies — pair with `bindings.static_bind_group`).
+    fn write_uniforms(&self, uniforms: &LpsValueF32) -> Result<Option<wgpu::BindGroup>, GfxError> {
+        let encoded = encode_uniforms(&self.module, &self.table, uniforms)?;
+        let texture_views = self.resolve_texture_views(uniforms)?;
+        let mut per_call_bind_group = None;
+        if let Some(bindings) = &self.bindings {
+            if let Some(shader_uniforms) = &bindings.uniforms {
+                for ((_, bytes), &offset) in encoded.iter().zip(&shader_uniforms.offsets) {
+                    self.shared
+                        .queue
+                        .write_buffer(&shader_uniforms.buffer, offset, bytes);
+                }
+            }
+            if bindings.static_bind_group.is_none() {
+                per_call_bind_group = Some(build_bind_group(
+                    &self.shared.device,
+                    &bindings.layout,
+                    &self.table,
+                    bindings.uniforms.as_ref(),
+                    &texture_views,
+                ));
+            }
+        }
+        Ok(per_call_bind_group)
     }
 
     /// Filetest probe render: draw into a fresh `width`×1 target and return
@@ -303,28 +324,7 @@ impl GpuShader {
             "lp-gfx-wgpu probe target",
         );
 
-        let encoded = encode_uniforms(&self.module, &self.table, uniforms)?;
-        let texture_views = self.resolve_texture_views(uniforms)?;
-
-        let mut per_render_bind_group = None;
-        if let Some(bindings) = &self.bindings {
-            if let Some(shader_uniforms) = &bindings.uniforms {
-                for ((_, bytes), &offset) in encoded.iter().zip(&shader_uniforms.offsets) {
-                    self.shared
-                        .queue
-                        .write_buffer(&shader_uniforms.buffer, offset, bytes);
-                }
-            }
-            if bindings.static_bind_group.is_none() {
-                per_render_bind_group = Some(build_bind_group(
-                    &self.shared.device,
-                    &bindings.layout,
-                    &self.table,
-                    bindings.uniforms.as_ref(),
-                    &texture_views,
-                ));
-            }
-        }
+        let per_render_bind_group = self.write_uniforms(uniforms)?;
 
         let mut encoder = self
             .shared
@@ -446,32 +446,11 @@ impl LpShader for GpuShader {
             )));
         }
 
-        let encoded = encode_uniforms(&self.module, &self.table, uniforms)?;
-        let texture_views = self.resolve_texture_views(uniforms)?;
-        let backing = gpu_texture_mut(target)?;
-
         // Rebuilt per render when texture bindings are present (the bound
         // textures may change between frames); otherwise the prebuilt
         // static group.
-        let mut per_render_bind_group = None;
-        if let Some(bindings) = &self.bindings {
-            if let Some(shader_uniforms) = &bindings.uniforms {
-                for ((_, bytes), &offset) in encoded.iter().zip(&shader_uniforms.offsets) {
-                    self.shared
-                        .queue
-                        .write_buffer(&shader_uniforms.buffer, offset, bytes);
-                }
-            }
-            if bindings.static_bind_group.is_none() {
-                per_render_bind_group = Some(build_bind_group(
-                    &self.shared.device,
-                    &bindings.layout,
-                    &self.table,
-                    bindings.uniforms.as_ref(),
-                    &texture_views,
-                ));
-            }
-        }
+        let per_render_bind_group = self.write_uniforms(uniforms)?;
+        let backing = gpu_texture_mut(target)?;
 
         let mut encoder = self
             .shared
@@ -532,27 +511,7 @@ impl LpShader for GpuShader {
 
         // Uniform writes + bind group exactly as the render path builds
         // them (shared layout; textures resolve per call).
-        let encoded = encode_uniforms(&self.module, &self.table, uniforms)?;
-        let texture_views = self.resolve_texture_views(uniforms)?;
-        let mut per_call_bind_group = None;
-        if let Some(bindings) = &self.bindings {
-            if let Some(shader_uniforms) = &bindings.uniforms {
-                for ((_, bytes), &offset) in encoded.iter().zip(&shader_uniforms.offsets) {
-                    self.shared
-                        .queue
-                        .write_buffer(&shader_uniforms.buffer, offset, bytes);
-                }
-            }
-            if bindings.static_bind_group.is_none() {
-                per_call_bind_group = Some(build_bind_group(
-                    &self.shared.device,
-                    &bindings.layout,
-                    &self.table,
-                    bindings.uniforms.as_ref(),
-                    &texture_views,
-                ));
-            }
-        }
+        let per_call_bind_group = self.write_uniforms(uniforms)?;
 
         let point_coords = &sample_points(points)?.0;
         let out_channels = &mut sample_out_mut(out)?.0;
@@ -587,6 +546,73 @@ impl LpShader for GpuShader {
             "sample_rgba16 is unavailable on the browser GPU tier (blocking readback is \
              native-only; LED-output sampling runs on native servers or the CPU tier)",
         )))
+    }
+
+    /// Evaluate the shader at the caller's Q16.16 points into the resident
+    /// row-major grid behind `target` via the sample pass (see
+    /// [`crate::sample_pass`]). No readback — the grid stays on the GPU as
+    /// the input to the LED splat op, on wasm32 and native alike.
+    fn sample_to_grid(
+        &mut self,
+        points: &mut SamplePointsHandle,
+        target: &mut TextureHandle,
+        uniforms: &LpsValueF32,
+    ) -> Result<(), GfxError> {
+        use crate::sample_backing::sample_points;
+        use crate::texture_backing::gpu_texture;
+
+        if target.format() != TextureStorageFormat::Rgba16Unorm {
+            return Err(GfxError::Render(format!(
+                "sample_to_grid: grid targets are RGBA16 render targets; got {:?}",
+                target.format()
+            )));
+        }
+        let count = points.count();
+        let max_dim = self.shared.device.limits().max_texture_dimension_2d;
+        if count == 0 || u64::from(count) > u64::from(max_dim) * u64::from(max_dim) {
+            return Err(GfxError::Render(format!(
+                "sample_to_grid: {count} points do not fit a sample grid (1 to {max_dim} x \
+                 {max_dim} points on this device)"
+            )));
+        }
+        let (width, height) = grid_dims(count, max_dim);
+        if (target.width(), target.height()) != (width, height) {
+            return Err(GfxError::Render(format!(
+                "sample_to_grid: target is {} x {}, expected the {width} x {height} grid for \
+                 {count} points (allocate via LpGraphics::sample_grid_dims)",
+                target.width(),
+                target.height()
+            )));
+        }
+        self.ensure_sample_pass()?;
+
+        let per_call_bind_group = self.write_uniforms(uniforms)?;
+
+        let point_coords = &sample_points(points)?.0;
+        let target_view = gpu_texture(target)?.view.clone();
+        let Self {
+            shared,
+            bindings,
+            sample_pass,
+            ..
+        } = self;
+        let bind_group = per_call_bind_group.as_ref().or_else(|| {
+            bindings
+                .as_ref()
+                .and_then(|bindings| bindings.static_bind_group.as_ref())
+        });
+        sample_pass
+            .as_mut()
+            .expect("sample pass was ensured above")
+            .render_grid(
+                shared,
+                point_coords,
+                bind_group,
+                &target_view,
+                width,
+                height,
+            );
+        Ok(())
     }
 }
 

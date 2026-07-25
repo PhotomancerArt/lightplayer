@@ -3,18 +3,20 @@
 use std::sync::{Arc, OnceLock};
 
 use lp_gfx::{
-    GfxError, HandleAllocator, HandleBacking, LpComputeShader, LpGraphics, LpShader,
-    SampleOutHandle, SamplePointsHandle, ShaderCompileOptions, ShaderSemantics, TextureData,
-    TextureHandle,
+    GfxError, HandleAllocator, HandleBacking, LedSplatInstance, LedSplatParams, LpComputeShader,
+    LpGraphics, LpShader, SampleOutHandle, SamplePointsHandle, ShaderCompileOptions,
+    ShaderSemantics, TextureData, TextureHandle,
 };
 use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32, TextureStorageFormat};
 
 use crate::blend::{BlendPipeline, blend_textures_gpu};
+use crate::led_splat::{LedSplatPipeline, splat_leds_gpu};
 use crate::read_back::read_back_texture;
 use crate::render::GpuShader;
 use crate::sample_backing::{
     CpuSampleOut, CpuSamplePoints, sample_out, sample_out_mut, sample_points, sample_points_mut,
 };
+use crate::sample_pass::grid_dims;
 use crate::texture_backing::{GpuTexture, gpu_channels, gpu_texture, gpu_texture_mut};
 use crate::texture_registry::{RegisteredTexture, TextureRegistry};
 
@@ -44,6 +46,7 @@ impl GpuGraphics {
                 device,
                 queue,
                 blend_pipeline: OnceLock::new(),
+                led_splat_pipeline: OnceLock::new(),
                 surface_blit_pipeline: OnceLock::new(),
                 textures: TextureRegistry::new(),
             }),
@@ -309,6 +312,58 @@ impl LpGraphics for GpuGraphics {
         blend_textures_gpu(&self.shared, previous, active, alpha, target)
     }
 
+    fn sample_grid_dims(&self, count: u32) -> Result<(u32, u32), GfxError> {
+        let max_dim = self.shared.device.limits().max_texture_dimension_2d;
+        if count == 0 || u64::from(count) > u64::from(max_dim) * u64::from(max_dim) {
+            return Err(GfxError::Backend(format!(
+                "sample_grid_dims: {count} points do not fit a sample grid (1 to {max_dim} x \
+                 {max_dim} points on this device)"
+            )));
+        }
+        Ok(grid_dims(count, max_dim))
+    }
+
+    fn splat_leds(
+        &self,
+        grid: &TextureHandle,
+        instances: &[LedSplatInstance],
+        params: &LedSplatParams,
+        target: &mut TextureHandle,
+    ) -> Result<(), GfxError> {
+        if target.format() != TextureStorageFormat::Rgba16Unorm
+            || grid.format() != TextureStorageFormat::Rgba16Unorm
+        {
+            return Err(GfxError::Backend(format!(
+                "splat_leds: grid and target must be RGBA16 render targets; got grid {:?}, \
+                 target {:?}",
+                grid.format(),
+                target.format()
+            )));
+        }
+        let grid_texels = u64::from(grid.width()) * u64::from(grid.height());
+        if let Some(instance) = instances
+            .iter()
+            .find(|instance| u64::from(instance.grid_index) >= grid_texels)
+        {
+            return Err(GfxError::Backend(format!(
+                "splat_leds: grid_index {} is out of bounds for the {} x {} grid",
+                instance.grid_index,
+                grid.width(),
+                grid.height()
+            )));
+        }
+        let (target_width, target_height) = (target.width(), target.height());
+        splat_leds_gpu(
+            &self.shared,
+            gpu_texture(grid)?,
+            instances,
+            params,
+            gpu_texture(target)?,
+            target_width,
+            target_height,
+        )
+    }
+
     fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError> {
         read_back_texture(
             &self.shared.device,
@@ -395,6 +450,8 @@ pub(crate) struct GpuShared {
     pub(crate) queue: wgpu::Queue,
     /// Fixed blend pipeline, built on first use (not a shader cache).
     pub(crate) blend_pipeline: OnceLock<BlendPipeline>,
+    /// Fixed LED splat pipelines + accumulator, built on first use.
+    pub(crate) led_splat_pipeline: OnceLock<LedSplatPipeline>,
     /// Fixed surface-present pipeline, built on first use for the surface
     /// format (one surface format per device).
     pub(crate) surface_blit_pipeline: OnceLock<crate::surface_blit::SurfaceBlitPipeline>,
@@ -448,6 +505,28 @@ mod tests {
 
     fn rgba16_bytes(channels: &[u16]) -> Vec<u8> {
         channels.iter().flat_map(|v| v.to_le_bytes()).collect()
+    }
+
+    /// Adapter-gated device with a constrained `max_texture_dimension_2d`
+    /// (exercises sample-grid row wrapping at test scale).
+    fn test_gpu_with_max_dim(max_dim: u32) -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        }))
+        .ok()?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("lp-gfx-wgpu limited tests"),
+            required_limits: wgpu::Limits {
+                max_texture_dimension_2d: max_dim,
+                ..wgpu::Limits::default()
+            },
+            ..Default::default()
+        }))
+        .ok()?;
+        Some((device, queue))
     }
 
     #[test]
@@ -946,6 +1025,157 @@ void tick() {
                 let expected = ((i as f64 / 16.0) * 65536.0).floor() as u16;
                 assert_eq!(sampled[i * 4], expected, "count {count}, point {i}");
             }
+        }
+    }
+
+    #[test]
+    fn sample_to_grid_matches_the_readback_sample_path() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        let mut shader = graphics
+            .compile_shader(
+                "layout(binding = 0) uniform vec2 outputSize;\n\
+                 vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.25, 1.0); }\n",
+                &options,
+            )
+            .expect("compiles");
+        // The same fractional Q16.16 points the readback-path test uses.
+        let coords = [0, 0, (2 << 16) + 32768, (3 << 16) + 32768, 4 << 16, 1 << 16];
+        let mut points = graphics.create_sample_points(3).expect("points");
+        graphics
+            .write_sample_points(&mut points, &coords)
+            .expect("write points");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![(String::from("outputSize"), LpsValueF32::Vec2([4.0, 4.0]))],
+        };
+
+        // Readback path (native LED output)...
+        let mut out = graphics.create_sample_out(3).expect("out");
+        shader
+            .sample_rgba16(&mut points, &mut out, &uniforms)
+            .expect("samples");
+        let sampled = graphics.read_sample_out(&out).expect("read out");
+
+        // ...and the resident grid, read back only to compare.
+        let (width, height) = graphics.sample_grid_dims(3).expect("dims");
+        assert_eq!((width, height), (3, 1));
+        let mut grid = graphics
+            .create_render_target(width, height)
+            .expect("grid target");
+        shader
+            .sample_to_grid(&mut points, &mut grid, &uniforms)
+            .expect("sample to grid");
+        let grid_channels: Vec<u16> = graphics
+            .read_back(&grid)
+            .expect("read back")
+            .bytes()
+            .chunks_exact(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+
+        assert_eq!(
+            grid_channels, sampled,
+            "resident grid texel i must equal readback sample i"
+        );
+    }
+
+    #[test]
+    fn sample_to_grid_rejects_mismatched_targets() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        let mut shader = graphics
+            .compile_shader("vec4 render(vec2 pos) { return vec4(0.5); }", &options)
+            .expect("compiles");
+        let mut points = graphics.create_sample_points(3).expect("points");
+        let mut target = graphics.create_render_target(4, 1).expect("target");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![],
+        };
+        match shader.sample_to_grid(&mut points, &mut target, &uniforms) {
+            Err(GfxError::Render(message)) => {
+                assert!(
+                    message.contains("3 x 1"),
+                    "names the expected grid: {message}"
+                );
+            }
+            other => panic!("expected grid-dims render error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sample_grid_dims_rejects_empty_and_oversized_grids() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        assert!(graphics.sample_grid_dims(0).is_err(), "zero points");
+        assert_eq!(graphics.sample_grid_dims(1).expect("dims"), (1, 1));
+        assert_eq!(graphics.sample_grid_dims(241).expect("dims"), (241, 1));
+    }
+
+    #[test]
+    fn sample_to_grid_wraps_rows_at_the_device_limit() {
+        // A device constrained to 64-texel textures forces the ~dome-scale
+        // row wrap at test scale: 100 points land in a 64 × 2 grid.
+        let Some((device, queue)) = test_gpu_with_max_dim(64) else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let graphics = GpuGraphics::new(
+            device,
+            queue,
+            Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga)),
+        );
+        assert_eq!(graphics.sample_grid_dims(100).expect("dims"), (64, 2));
+        assert!(
+            graphics.sample_grid_dims(64 * 64 + 1).is_err(),
+            "grids beyond max_dim x max_dim are rejected"
+        );
+
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        let mut shader = graphics
+            .compile_shader(
+                "vec4 render(vec2 pos) { return vec4(pos.x / 256.0, pos.y / 256.0, 0.25, 1.0); }",
+                &options,
+            )
+            .expect("compiles");
+        let coords: Vec<i32> = (0..100i32).flat_map(|i| [i << 16, (2 * i) << 16]).collect();
+        let mut points = graphics.create_sample_points(100).expect("points");
+        graphics
+            .write_sample_points(&mut points, &coords)
+            .expect("write points");
+        let mut grid = graphics.create_render_target(64, 2).expect("grid target");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![],
+        };
+        shader
+            .sample_to_grid(&mut points, &mut grid, &uniforms)
+            .expect("sample to grid");
+        let channels: Vec<u16> = graphics
+            .read_back(&grid)
+            .expect("read back")
+            .bytes()
+            .chunks_exact(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        for i in 0..100usize {
+            // Point i evaluates to (i/256, 2i/256, …) — exact in f32 — and
+            // must land in row-major texel i across the row wrap.
+            assert_eq!(channels[i * 4], (i * 256) as u16, "point {i} red");
+            assert_eq!(channels[i * 4 + 1], (i * 512) as u16, "point {i} green");
+            assert_eq!(channels[i * 4 + 2], 16384, "point {i} blue");
         }
     }
 

@@ -38,6 +38,27 @@ pub trait LpShader: Send + Sync {
         )))
     }
 
+    /// Run the shader at caller-provided Q16.16 pixel-space points into a
+    /// **resident grid**: point `i`'s result lands in row-major texel `i`
+    /// of `target`, and the grid stays on the GPU (no readback) — the
+    /// wasm-capable input to [`crate::LpGraphics::splat_leds`].
+    ///
+    /// `target` must be a render target allocated by
+    /// [`crate::LpGraphics::create_render_target`] with exactly the
+    /// dimensions [`crate::LpGraphics::sample_grid_dims`] reports for the
+    /// point count. Backends without a resident-grid path keep this
+    /// default error.
+    fn sample_to_grid(
+        &mut self,
+        _points: &mut SamplePointsHandle,
+        _target: &mut TextureHandle,
+        _uniforms: &LpsValueF32,
+    ) -> Result<(), GfxError> {
+        Err(GfxError::Render(String::from(
+            "shader backend does not support resident sample grids",
+        )))
+    }
+
     fn compile_stats(&self) -> Option<ShaderCompileStats> {
         None
     }

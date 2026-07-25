@@ -9,6 +9,7 @@ use lps_shared::TextureStorageFormat;
 
 use crate::compute_shader::LpComputeShader;
 use crate::gfx_error::GfxError;
+use crate::led_splat::{LedSplatInstance, LedSplatParams};
 use crate::sample_out_handle::SampleOutHandle;
 use crate::sample_points_handle::SamplePointsHandle;
 use crate::shader::LpShader;
@@ -115,6 +116,46 @@ pub trait LpGraphics: Send + Sync {
         alpha: f32,
         target: &mut TextureHandle,
     ) -> Result<(), GfxError>;
+
+    /// Row-major grid dimensions for a resident sample grid of `count`
+    /// points: `W = min(count, device limit)`, `H = ceil(count / W)`.
+    ///
+    /// Callers allocate the grid target with these dimensions (via
+    /// [`Self::create_render_target`]) before rendering into it with
+    /// [`LpShader::sample_to_grid`](crate::LpShader::sample_to_grid).
+    /// Backends without a resident-grid path keep this default error.
+    fn sample_grid_dims(&self, _count: u32) -> Result<(u32, u32), GfxError> {
+        Err(GfxError::Backend(String::from(
+            "graphics backend does not support resident sample grids",
+        )))
+    }
+
+    /// Draw soft additive LED splats into `target`: one camera-facing quad
+    /// per instance, colored by fetching the instance's `grid_index` texel
+    /// from `grid` (a resident sample grid — see
+    /// [`LpShader::sample_to_grid`](crate::LpShader::sample_to_grid) — or
+    /// any same-format texture). Quads position through
+    /// [`LedSplatParams::view_proj`], scale by instance radius ×
+    /// [`LedSplatParams::radius_scale`], shade with a soft radial falloff,
+    /// and accumulate additively over
+    /// [`LedSplatParams::clear_color`].
+    ///
+    /// A member of the **GPU-resident texture-op family** (see
+    /// [`Self::blend_textures`]): on accelerated backends neither the grid
+    /// nor the target leaves the GPU. Backends without the op keep this
+    /// default error (the CPU preview tier rasterizes splats host-side from
+    /// bytes instead).
+    fn splat_leds(
+        &self,
+        _grid: &TextureHandle,
+        _instances: &[LedSplatInstance],
+        _params: &LedSplatParams,
+        _target: &mut TextureHandle,
+    ) -> Result<(), GfxError> {
+        Err(GfxError::Backend(String::from(
+            "graphics backend does not support the LED splat op",
+        )))
+    }
 
     /// Read a texture back as owned CPU bytes.
     ///
