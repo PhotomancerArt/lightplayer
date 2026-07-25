@@ -107,9 +107,37 @@ fn operation_pushing() -> Element {
     )])
 }
 
-#[story(description = "Green filled edge: live link, nothing loaded.")]
+#[story(
+    description = "Green filled edge: live link, nothing loaded; Choose-a-project jumps to the Project-tab picker (M8′)."
+)]
 fn connected_empty() -> Element {
     sheet(vec![card(RosterCardState::ConnectedEmpty, false)])
+}
+
+#[story(
+    description = "The Project-tab PICKER on the Connected-empty card (M8′, contract §3): the library's projects as menu rows — one click pushes (the click is the D11 consent). No popup, no dialog; the tab exists only while the library has something to offer."
+)]
+fn project_picker_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(RosterCardState::ConnectedEmpty, false),
+                now_secs: Some(STORY_NOW),
+                project_choices: vec![
+                    UiDeviceProjectChip {
+                        uid: "prj_3fKq8Zr21bTxYw0A".to_string(),
+                        name: "porch-sign".to_string(),
+                    },
+                    UiDeviceProjectChip {
+                        uid: "prj_9dLm2Xw44cRvZq1B".to_string(),
+                        name: "2026-07-18-bedroom-lamp".to_string(),
+                    },
+                ],
+                initial_tab: Some(DeviceCardTab::Project),
+                on_action: |_| {},
+            }
+        }
+    }])
 }
 
 #[story(

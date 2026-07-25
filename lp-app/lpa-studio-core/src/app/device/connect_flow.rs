@@ -2,7 +2,7 @@
 //!
 //! [`DeviceController`] drives this alongside the runtime pool: the flow
 //! narrates the catalog → discovery → endpoint → connect sequence for the
-//! views (gallery issue chip, deploy dialog endpoint choices), while the
+//! views (gallery issue chip, card connect narration), while the
 //! pool's [`RuntimeSession`] holds what actually got connected.
 //! `Connected` is entered exactly when a connect flow hands a live
 //! session payload to the pool.
