@@ -463,14 +463,17 @@ pub(crate) fn DeviceCard(
             // open sheet floors the region's height — a short tab body
             // must never clip the panel (the card is overflow-hidden);
             // the drift sheet's three stacked verbs need the tall floor.
-            div { class: match (pane, active_sheet.as_ref()) {
-                    (true, _) => "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
-                    (false, Some(DeviceCardSheet::Drift)) => "tw:relative tw:min-h-[290px]",
+            div { class: match (pane, active_sheet.as_ref(), card.ui.op.is_some()) {
+                    (true, _, _) => "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
+                    // an op overlay covers this region — floor it so the
+                    // progress bar + technical terminal have room to read
+                    (false, _, true) => "tw:relative tw:min-h-[240px]",
+                    (false, Some(DeviceCardSheet::Drift), _) => "tw:relative tw:min-h-[290px]",
                     // title + three instruction bullets + three stacked
                     // buttons — the tallest sheet
-                    (false, Some(DeviceCardSheet::Troubleshoot)) => "tw:relative tw:min-h-[370px]",
-                    (false, Some(_)) => "tw:relative tw:min-h-[210px]",
-                    (false, None) => "tw:relative",
+                    (false, Some(DeviceCardSheet::Troubleshoot), _) => "tw:relative tw:min-h-[370px]",
+                    (false, Some(_), _) => "tw:relative tw:min-h-[210px]",
+                    (false, None, _) => "tw:relative",
                 },
                 // the icon-tab row (below the title bar — spike anatomy;
                 // pane mode drops the Console tab, round 3.5)
