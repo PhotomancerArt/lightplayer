@@ -10,7 +10,7 @@
 //! the panel dismisses; the panel is a compact centered column.
 //!
 //! This replaces the native `confirm()` treatment for card-resident
-//! actions only — non-card surfaces (the deploy dialog, node panes)
+//! actions only — non-card surfaces (node panes, toolbars)
 //! keep the [`ActionButton`](crate::core::ActionButton) confirm path.
 
 use dioxus::prelude::*;

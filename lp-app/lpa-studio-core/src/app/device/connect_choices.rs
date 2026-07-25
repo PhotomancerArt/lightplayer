@@ -1,12 +1,12 @@
 //! Picker view models derived from the link CATALOG.
 //!
-//! "What can I connect to?" — the deploy dialog and the connect flow read
+//! "What can I connect to?" — the connect flow and gallery affordances read
 //! these choices until M7 redesigns connect UX. Everything here derives
 //! from [`LinkProviderRegistry`] descriptors; nothing holds live provider
 //! state.
 
 use lpa_link::providers::{LinkProviderDescriptor, LinkProviderRegistry};
-use lpa_link::{LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkOperation, LinkProviderKind};
+use lpa_link::{LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
 
 /// One provider the picker can open.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -89,22 +89,6 @@ pub(crate) fn provider_choices(registry: &LinkProviderRegistry) -> Vec<ProviderC
 }
 
 /// Catalog descriptors for HARDWARE device classes: providers whose class
-/// can flash firmware (the deploy dialog's connect + recovery affordances
-/// are flash-shaped). Simulators and diagnostics-only classes never
-/// surface here.
-pub(crate) fn hardware_device_descriptors(
-    registry: &LinkProviderRegistry,
-) -> Vec<LinkProviderDescriptor> {
-    registry
-        .descriptors()
-        .into_iter()
-        .filter(|descriptor| {
-            descriptor
-                .capabilities
-                .supports(LinkOperation::FlashFirmware)
-        })
-        .collect()
-}
 
 /// Whether the provider class can hand a server protocol connection to the
 /// studio (everything but the record-level fake today).

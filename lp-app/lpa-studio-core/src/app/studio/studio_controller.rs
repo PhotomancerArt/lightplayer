@@ -11,10 +11,7 @@ use lpa_link::{
 use crate::app::device::device_controller::DeviceRuntimeEvidence;
 use crate::app::device::device_event_adapter::management_event_sink;
 use crate::app::device::link_ux::management_result_logs;
-use crate::app::device::{
-    DEPLOY_NODE_ID, DeployOp, DeploySession, DeployState, DeployTarget, DeviceOpenOutcome,
-    UiDeployChoice, UiDeployView,
-};
+use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployTarget, DeviceOpenOutcome};
 use crate::app::home::home_view_builder::HomeInputs;
 use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
@@ -86,9 +83,6 @@ pub struct StudioController {
     /// while the simulator opens, and tells the connect flow which package
     /// to push instead of probing running projects.
     pending_open: Option<PendingOpen>,
-    /// The open deploy dialog, when there is one (M5). Pure state — the
-    /// controller executes its effects through the existing seams.
-    deploy: Option<DeploySession>,
     /// When the next quiet PortHeld retry is due (D32; `None` while no
     /// port is held). Epoch seconds on the injected clock.
     port_held_retry_at: Option<f64>,
@@ -140,7 +134,6 @@ impl StudioController {
             home_inputs: None,
             library_refresh_pending: false,
             pending_open: None,
-            deploy: None,
             port_held_retry_at: None,
             random: Rc::new(clock_fallback_random),
         }
@@ -382,8 +375,7 @@ impl StudioController {
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
-                .with_device_sync(self.device_sync().cloned())
-                .with_deploy(self.deploy_view());
+                .with_device_sync(self.device_sync().cloned());
         }
         let device_view = self.device.view(
             &self.device_runtime_evidence(),
@@ -404,7 +396,6 @@ impl StudioController {
                 self.project.active_library_slug(),
             )
             .with_device_sync(self.device_sync().cloned())
-            .with_deploy(self.deploy_view())
             .with_lens_card(self.lens_device_card())
     }
 
@@ -756,7 +747,7 @@ impl StudioController {
     }
 
     /// What the attached device holds (connect-as-pull result), for the
-    /// pane, cards, and deploy dialog. `None` while no hardware is
+    /// pane and cards. `None` while no hardware is
     /// attached (the sim carries no reconcile bundle — D22). A pool read
     /// since the runtime-pool extraction: the bundle lives on the DEVICE
     /// session, wherever the lens is (P2 coexistence).
@@ -1108,122 +1099,6 @@ impl StudioController {
         })
     }
 
-    /// The dialog view model, when the dialog is open.
-    fn deploy_view(&self) -> Option<UiDeployView> {
-        let session = self.deploy.as_ref()?;
-        let choices = self
-            .home_inputs
-            .as_ref()
-            .map(|inputs| {
-                inputs
-                    .projects
-                    .iter()
-                    .map(|card| UiDeployChoice {
-                        uid: card.uid.clone(),
-                        slug: card.slug.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Some(UiDeployView {
-            state: session.state.clone(),
-            choices,
-            connect_actions: self.deploy_connect_actions(),
-        })
-    }
-
-    /// Hardware connect actions for the dialog's `NeedsDevice` state:
-    /// mid-selection link states surface their endpoint choices; settled
-    /// states offer the CATALOG's hardware device classes (connect +
-    /// recovery open), derived from descriptors/capabilities — no provider
-    /// kind is hardcoded. The simulator is never offered — it is not a
-    /// device (D22). Copy stays ESP32-shaped until another hardware class
-    /// exists (naming is M7's redesign).
-    fn deploy_connect_actions(&self) -> Vec<UiAction> {
-        let device_node = self.device.node_id();
-        match self.device.flow_state() {
-            ConnectFlowState::SelectingEndpoint {
-                provider_id,
-                endpoints,
-            } => endpoints
-                .iter()
-                .map(|endpoint| {
-                    UiAction::from_op(
-                        device_node.clone(),
-                        crate::DeviceOp::ConnectEndpoint {
-                            provider_id: *provider_id,
-                            endpoint_id: endpoint.id.clone(),
-                        },
-                    )
-                    .with_label(format!("Open {}", endpoint.label))
-                    .with_summary(endpoint.summary.clone())
-                })
-                .collect(),
-            _ => self
-                .device
-                .hardware_device_kinds()
-                .into_iter()
-                .flat_map(|provider_id| {
-                    [
-                        UiAction::from_op(
-                            device_node.clone(),
-                            crate::DeviceOp::OpenProvider { provider_id },
-                        )
-                        .with_label("Connect ESP32")
-                        .with_summary("Connect an ESP32 over USB.")
-                        .with_icon("usb")
-                        .with_priority(crate::ActionPriority::Primary),
-                        UiAction::from_op(
-                            device_node.clone(),
-                            crate::DeviceOp::OpenProviderForRecovery { provider_id },
-                        )
-                        .with_label("Open for flashing")
-                        .with_summary("Open the ESP32 connection without attaching LightPlayer.")
-                        .with_icon("usb")
-                        .with_priority(crate::ActionPriority::Secondary),
-                    ]
-                })
-                .collect(),
-        }
-    }
-
-    /// The dialog's environment snapshot (entry-state derivation input).
-    ///
-    /// Derived from the runtime attachment + device-session state (M4/P5):
-    /// hardware counts as connected while its session is not `Gone` (the
-    /// sim never counts — D22); firmware is available exactly when the
-    /// session reached `Ready` AND the server protocol answered.
-    fn deploy_environment(&self) -> crate::app::device::DeployEnvironment {
-        let device_state = self.device_state();
-        let device_link_connected =
-            self.is_hardware_attached() && !matches!(device_state, Some(DeviceState::Gone));
-        // The server-protocol read targets the DEVICE session — the dialog
-        // conceptually targets hardware, and the lens may be on the sim
-        // (P2 coexistence).
-        let device_server_connected = self
-            .pool
-            .device_session()
-            .is_some_and(|session| matches!(session.server_state(), ServerState::Connected { .. }));
-        let firmware_available = device_link_connected
-            && matches!(device_state, Some(DeviceState::Ready { .. }))
-            && device_server_connected;
-        crate::app::device::DeployEnvironment {
-            device_link_connected,
-            firmware_available,
-            device_sync: self.device_sync().cloned(),
-        }
-    }
-
-    /// Re-derive the open dialog's step after the environment changed
-    /// (connects, disconnects, pull results).
-    fn rederive_deploy(&mut self) {
-        let env = self.deploy_environment();
-        if let Some(session) = self.deploy.as_mut() {
-            session.rederive(&env);
-            self.mark_dirty();
-        }
-    }
-
     /// Resolve a slug-or-uid key to a concrete push target from a fresh
     /// library snapshot.
     async fn resolve_deploy_target(&mut self, key: &str) -> Result<DeployTarget, UiError> {
@@ -1249,131 +1124,12 @@ impl StudioController {
 
     async fn execute_deploy_op(&mut self, op: DeployOp, updates: UxUpdateSink) -> UiResult {
         match op {
-            DeployOp::OpenDialog { target_key } => {
-                let target = match target_key {
-                    Some(key) => Some(self.resolve_deploy_target(&key).await?),
-                    // No explicit target: when the device already runs a
-                    // project the library KNOWS, default the dialog onto it
-                    // — the review step, not the picker (an honest default;
-                    // choosing a different project stays one click away in
-                    // Reviewing). A failed resolve (project deleted, no
-                    // library) falls back to the picker.
-                    None => match self.device_sync().map(|sync| &sync.content) {
-                        Some(
-                            DeviceContent::Known { project_uid, .. }
-                            | DeviceContent::Adopted { project_uid, .. },
-                        ) => {
-                            let uid = project_uid.clone();
-                            self.resolve_deploy_target(&uid).await.ok()
-                        }
-                        _ => None,
-                    },
-                };
-                self.deploy = Some(DeploySession::open(&self.deploy_environment(), target));
-                Ok(UiNotices::new())
-            }
-            DeployOp::CloseDialog => {
-                if self
-                    .deploy
-                    .as_ref()
-                    .is_some_and(|session| session.close_blocked())
-                {
-                    return Err(UiError::UnsupportedAction(
-                        "A device operation is still running — let it finish first".to_string(),
-                    ));
-                }
-                self.deploy = None;
-                Ok(UiNotices::new())
-            }
-            DeployOp::FlashFirmware => {
-                let resume = self.deploy_state_now()?;
-                self.deploy_session()?
-                    .begin_flash()
-                    .map_err(deploy_transition_error)?;
-                updates.emit(UxUpdate::View(self.view()));
-                let result = self.provision_firmware(updates).await;
-                let env = self.deploy_environment();
-                match result {
-                    Ok(outcome) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.flash_finished(&env, true);
-                        }
-                        Ok(outcome)
-                    }
-                    Err(error) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.fail(format!("Flashing failed: {error}"), resume);
-                        }
-                        Err(error)
-                    }
-                }
-            }
-            DeployOp::StampIdentity { name } => {
-                let resume = self.deploy_state_now()?;
-                self.deploy_session()?
-                    .begin_stamp(name.clone())
-                    .map_err(deploy_transition_error)?;
-                updates.emit(UxUpdate::View(self.view()));
-                let result = self.run_identity_stamp(name.trim().to_string()).await;
-                let env = self.deploy_environment();
-                match result {
-                    Ok(identity) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.stamp_finished(&env);
-                        }
-                        Ok(UiNotices::new().with_notice(UiNotice::info(format!(
-                            "This device is now \"{}\"",
-                            identity.name
-                        ))))
-                    }
-                    Err(error) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.fail(format!("Naming the device failed: {error}"), resume);
-                        }
-                        Err(error)
-                    }
-                }
-            }
-            DeployOp::ChoosePackage { key } => {
-                let target = self.resolve_deploy_target(&key).await?;
-                let env = self.deploy_environment();
-                self.deploy_session()?
-                    .choose_target(&env, target)
-                    .map_err(deploy_transition_error)?;
-                Ok(UiNotices::new())
-            }
-            DeployOp::ConfirmPush => {
-                let resume = self.deploy_state_now()?;
-                let (device, target) = self
-                    .deploy_session()?
-                    .begin_push()
-                    .map_err(deploy_transition_error)?;
-                updates.emit(UxUpdate::View(self.view()));
-                let result = self.run_device_push(&device, &target).await;
-                match result {
-                    Ok(()) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.push_finished();
-                        }
-                        self.request_library_refresh();
-                        Ok(UiNotices::new().with_notice(UiNotice::info(format!(
-                            "Pushed {} to {}",
-                            target.slug, device.name
-                        ))))
-                    }
-                    Err(error) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.fail(format!("Push failed: {error}"), resume);
-                        }
-                        Err(error)
-                    }
-                }
-            }
             DeployOp::PushProject { key } => {
-                // The in-card push (M5): the Running-behind card's Push
-                // button is the D11 consent — no dialog. The device must
-                // carry a stamped identity (the Running-family states
-                // guarantee it; the unstamped flows keep their dialog).
+                // The direct push (M5; since M8′ the ONLY push): the
+                // dispatching gesture is the D11 consent. The device must
+                // carry a stamped identity (the Running-family states and
+                // the picker's Connected-empty guarantee it; unstamped
+                // boards go through the name sheet first).
                 let device = self
                     .device_sync()
                     .and_then(|sync| sync.identity.clone())
@@ -1415,23 +1171,18 @@ impl StudioController {
                 .map_err(|error| self.library_error_with_name(error))?;
                 self.request_library_refresh();
                 self.refresh_device_sync().await;
-                self.rederive_deploy();
                 Ok(UiNotices::new()
                     .with_notice(UiNotice::info("The device's version is now the newest")))
             }
             DeployOp::KeepBothFork => {
                 let (project_uid, observed) = self.diverged_device_copy()?;
-                // the fork's name: the dialog's device summary when one is
-                // open, else the live session's stamped identity (the D30
-                // sheet path)
-                let device_name = match self.deploy_state_now() {
-                    Ok(DeployState::Reviewing { device, .. }) => device.name,
-                    _ => self
-                        .device_sync()
-                        .and_then(|sync| sync.identity.as_ref())
-                        .map(|identity| identity.name.clone())
-                        .unwrap_or_else(|| "device".to_string()),
-                };
+                // the fork's name: the live session's stamped identity
+                // (the D30 sheet is the one entry since M8′)
+                let device_name = self
+                    .device_sync()
+                    .and_then(|sync| sync.identity.as_ref())
+                    .map(|identity| identity.name.clone())
+                    .unwrap_or_else(|| "device".to_string());
                 let host = self.library_host()?;
                 let outcome = host
                     .catalog(CatalogOp::ForkObservedVersion {
@@ -1450,75 +1201,16 @@ impl StudioController {
                     .with_notice(UiNotice::info(format!("Saved the device's copy as {slug}"))))
             }
             DeployOp::EraseDevice => {
-                // reachable from the card's actions popover (no dialog) as
-                // well as from the dialog; only an open dialog carries
-                // failure-resume state
-                let resume = self.deploy.as_ref().map(|session| session.state.clone());
-                let result = self.reset_to_blank(updates).await;
-                let env = self.deploy_environment();
-                match result {
-                    Ok(outcome) => {
-                        if let Some(session) = self.deploy.as_mut() {
-                            session.rederive(&env);
-                        }
-                        Ok(outcome)
-                    }
-                    Err(error) => {
-                        if let (Some(session), Some(resume)) = (self.deploy.as_mut(), resume) {
-                            session.fail(format!("Erase failed: {error}"), resume);
-                        }
-                        Err(error)
-                    }
-                }
-            }
-            DeployOp::RetryFailed => {
-                self.deploy_session()?
-                    .retry()
-                    .map_err(deploy_transition_error)?;
-                Ok(UiNotices::new())
+                // from the card's Danger tab, behind the D41 confirm sheet
+                self.reset_to_blank(updates).await
             }
         }
     }
 
-    /// The open session, or the friendly no-dialog error.
-    fn deploy_session(&mut self) -> Result<&mut DeploySession, UiError> {
-        self.deploy
-            .as_mut()
-            .ok_or_else(|| UiError::UnsupportedAction("The device dialog is not open".to_string()))
-    }
-
-    fn deploy_state_now(&mut self) -> Result<DeployState, UiError> {
-        Ok(self.deploy_session()?.state.clone())
-    }
-
-    /// The (project, observed hash) a diverged review is looking at.
-    fn reviewing_diverged_copy(&mut self) -> Result<(String, lpc_history::ContentHash), UiError> {
-        match self.deploy_state_now()? {
-            DeployState::Reviewing {
-                on_device:
-                    DeviceContent::Known {
-                        project_uid,
-                        observed,
-                        relation: lpc_history::SyncRelation::Diverged,
-                        ..
-                    },
-                ..
-            } => Ok((project_uid, observed)),
-            _ => Err(UiError::UnsupportedAction(
-                "The device's copy is not diverged".to_string(),
-            )),
-        }
-    }
-
-    /// The diverged copy an adopt/keep-both verb targets. An open
-    /// Reviewing dialog wins (its snapshot is what the user is looking
-    /// at); otherwise the live device session's own sync evidence carries
-    /// the same facts — the D30 card sheet dispatches these verbs with no
-    /// dialog open (M7′ P2).
+    /// The diverged copy an adopt/keep-both verb targets: the live
+    /// device session's sync evidence (the D30 card sheet is the one
+    /// entry since M8′ — there is no dialog).
     fn diverged_device_copy(&mut self) -> Result<(String, lpc_history::ContentHash), UiError> {
-        if self.deploy.is_some() {
-            return self.reviewing_diverged_copy();
-        }
         match self.device_sync().map(|sync| &sync.content) {
             Some(DeviceContent::Known {
                 project_uid,
@@ -1663,7 +1355,6 @@ impl StudioController {
 
         // 4. the device now runs the pushed head
         self.refresh_device_sync().await;
-        self.rederive_deploy();
         Ok(())
     }
 
@@ -2487,7 +2178,6 @@ impl StudioController {
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
                 self.record_logs(logs);
                 self.install_session(payload).await?;
-                self.rederive_deploy();
                 updates.emit(UxUpdate::View(self.view()));
                 Ok(UiNotices::new().with_notice(UiNotice::info("Device opened for flashing")))
             }
@@ -2652,7 +2342,6 @@ impl StudioController {
                                 session.fail_no_firmware();
                             }
                             // now the dialog's Blank state is the truth
-                            self.rederive_deploy();
                             return Ok(UiNotices::new().with_notice(UiNotice::info(
                                 "No LightPlayer firmware detected; flash firmware onto the selected ESP32",
                             )));
@@ -2670,7 +2359,6 @@ impl StudioController {
                             if let Some(session) = self.pool.session_mut(id) {
                                 session.fail(error.to_string());
                             }
-                            self.rederive_deploy();
                             return Ok(UiNotices::new().with_notice(UiNotice::info(
                                 "Device firmware is incompatible with this Studio; update the firmware",
                             )));
@@ -2711,14 +2399,12 @@ impl StudioController {
                 if !is_sim {
                     self.refresh_device_sync().await;
                 }
-                self.rederive_deploy();
                 Ok(outcome)
             }
             Err(error) => {
                 if let Some(session) = self.pool.session_mut(id) {
                     session.fail(error.to_string());
                 }
-                self.rederive_deploy();
                 Err(error)
             }
         }
@@ -3181,7 +2867,6 @@ impl StudioController {
                 self.device.disconnect(Some(session.into_payload())).await?;
             }
         }
-        self.rederive_deploy();
         Ok(UiNotices::new().with_notice(UiNotice::info("Device disconnected")))
     }
 
@@ -3552,10 +3237,6 @@ fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> Ui
     }
 }
 
-fn deploy_transition_error(error: crate::app::device::InvalidTransition) -> UiError {
-    UiError::UnsupportedAction(error.to_string())
-}
-
 /// Which pool slot a connect flow is aimed at: the browser-worker provider
 /// is THE simulator; every other provider class is hardware.
 fn runtime_kind_for(provider_id: LinkProviderKind) -> crate::RuntimeKind {
@@ -3846,59 +3527,6 @@ mod tests {
             vec!["one".to_string(), "two".to_string(), "three".to_string()],
             "the hook fires exactly once per entry, in ring order"
         );
-    }
-
-    #[test]
-    fn deploy_environment_derives_from_attachment_and_session_state() {
-        use crate::app::runtime_pool::runtime_session::ready_state_for_test;
-        use lpa_link::DeviceState;
-
-        // no attachment: nothing connected
-        let studio = StudioController::new(|| 0.0);
-        let env = studio.deploy_environment();
-        assert!(!env.device_link_connected);
-        assert!(!env.firmware_available);
-
-        // sim attachment: never a device (D22)
-        let mut studio = StudioController::new(|| 0.0);
-        studio.set_stub_sim_for_test();
-        studio.set_server_state_for_test(ServerState::Connected {
-            protocol: "sim".to_string(),
-        });
-        let env = studio.deploy_environment();
-        assert!(!env.device_link_connected);
-        assert!(!env.firmware_available);
-
-        // hardware Ready + server Connected: firmware available
-        let mut studio = connected_studio();
-        let env = studio.deploy_environment();
-        assert!(env.device_link_connected);
-        assert!(env.firmware_available);
-
-        // hardware Ready but the server protocol has not answered
-        studio.set_server_state_for_test(ServerState::Disconnected);
-        let env = studio.deploy_environment();
-        assert!(env.device_link_connected);
-        assert!(!env.firmware_available, "Ready needs a connected server");
-
-        // hardware BlankFlash: connected, no firmware (dialog's Blank)
-        let mut studio = connected_studio();
-        studio.set_stub_device_for_test(DeviceState::BlankFlash);
-        let env = studio.deploy_environment();
-        assert!(env.device_link_connected);
-        assert!(!env.firmware_available);
-
-        // hardware Gone: the link no longer counts as connected
-        let mut studio = connected_studio();
-        studio.set_stub_device_for_test(DeviceState::Gone);
-        let env = studio.deploy_environment();
-        assert!(!env.device_link_connected);
-        assert!(!env.firmware_available);
-
-        // server Connected alone (Ready session) stays the happy path
-        let mut studio = connected_studio();
-        studio.set_stub_device_for_test(ready_state_for_test());
-        assert!(studio.deploy_environment().firmware_available);
     }
 
     #[test]
@@ -4202,11 +3830,8 @@ mod tests {
             action.op_as::<ProjectOp>(),
             Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
         )));
-        // the pane's door to the deploy dialog + session control
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<crate::app::device::DeployOp>(),
-            Some(crate::app::device::DeployOp::OpenDialog { .. })
-        )));
+        // the pane keeps only the session verb (M8′: pushing lives on
+        // the cards)
         assert!(
             actions.iter().any(|action| matches!(
                 action.op_as::<DeviceOp>(),

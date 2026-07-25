@@ -27,9 +27,8 @@ pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
-    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget,
-    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice, UiDeployChoice,
-    UiDeployView,
+    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployTarget,
+    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
 };
 pub use app::home::{
     HOME_NODE_ID, HomeDeviceEvidence, HomeOp, HomePoolEvidence, HomeSimEvidence, UiCardConnection,
