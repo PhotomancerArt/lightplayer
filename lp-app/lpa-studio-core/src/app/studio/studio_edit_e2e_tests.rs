@@ -442,6 +442,127 @@ fn device_connect_pulls_classifies_and_adopts() {
     );
 }
 
+/// The D30 card sheet's verbs (M7′ P2): adopt-device-copy and
+/// keep-both-fork dispatch with NO deploy dialog open — the diverged copy
+/// resolves from the live device session's own sync evidence, and the
+/// fork names itself after the device's stamped identity.
+#[test]
+fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
+    use crate::app::device::{DEPLOY_NODE_ID, DeployOp};
+    use crate::app::library::{LibraryStore, MemoryLibraryHost};
+    use crate::app::places::DeviceContent;
+    use lpc_history::SyncRelation;
+
+    // The same "device" fixture as the adopt e2e above: an in-process
+    // server holding an unknown project plus a stamped identity.
+    let server = Rc::new(RefCell::new(device_e2e_server()));
+    let device_project_dir = "/projects/studio";
+    {
+        let server = server.borrow();
+        let fs = server.base_fs();
+        fs.write_file(
+            format!("{device_project_dir}/project.json").as_path(),
+            br#"{"kind":"Project","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
+        )
+        .unwrap();
+        fs.write_file(
+            format!("{device_project_dir}/shader.glsl").as_path(),
+            b"wild",
+        )
+        .unwrap();
+        fs.write_file(
+            "/.lp/device.json".as_path(),
+            br#"{"uid":"dev_aaaaaaaaaaaaaaaa","name":"Bench board"}"#,
+        )
+        .unwrap();
+    }
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    controller.set_stub_device_for_test(
+        crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+    );
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [3u8; 16]),
+        Rc::new(|| "2026-07-10-1000".to_string()),
+    );
+    let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
+    controller.attach_library(host.clone());
+
+    // connect-as-pull adopts, then the device copy changes behind our
+    // back → Diverged (the EditedOnDevice card)
+    drive(controller.refresh_device_sync());
+    {
+        let server = server.borrow();
+        server
+            .base_fs()
+            .write_file(
+                format!("{device_project_dir}/shader.glsl").as_path(),
+                b"changed on device",
+            )
+            .unwrap();
+    }
+    drive(controller.refresh_device_sync());
+    let sync = controller.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(*relation, SyncRelation::Diverged);
+
+    // ADOPT, with no dialog ever opened: the device's copy becomes the
+    // project's new head, and the handler's own re-sync lands on AtHead.
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::AdoptDeviceCopy,
+    )))
+    .expect("adopt works straight from the card sheet");
+    let sync = controller.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(
+        *relation,
+        SyncRelation::AtHead,
+        "adopting made the device copy the head"
+    );
+
+    // Diverge again, then KEEP BOTH: the fork lands as a second library
+    // project named after the device.
+    {
+        let server = server.borrow();
+        server
+            .base_fs()
+            .write_file(
+                format!("{device_project_dir}/shader.glsl").as_path(),
+                b"changed on device again",
+            )
+            .unwrap();
+    }
+    drive(controller.refresh_device_sync());
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::KeepBothFork,
+    )))
+    .expect("keep-both works straight from the card sheet");
+    let summaries = store.list().unwrap();
+    assert_eq!(summaries.len(), 2, "the fork is a second project");
+    assert!(
+        summaries
+            .iter()
+            .any(|summary| summary.slug.contains("bench-board")),
+        "the fork is named after the device: {:?}",
+        summaries
+            .iter()
+            .map(|summary| summary.slug.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployState};

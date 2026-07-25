@@ -1,52 +1,52 @@
 //! The roster card vocabulary sheet: one story per direction.md state row,
 //! plus the sim-card variant (D36), the standing firmware chip, and the
-//! rich-object detail popover (the card's node-style detail trigger,
-//! open).
+//! control-panel tabs open (Project / Settings / Danger — the sections
+//! the retired detail popover carried, now card-resident; M7′ D39–D41).
 //!
 //! These stories are the visual-gate surface for the card grammar. Each
 //! renders through the ONE shared card renderer
 //! ([`DeviceCard`](crate::app::home::device_card::DeviceCard)) — the same
 //! component the live gallery uses — fed by the core view-model
 //! ([`RosterCardState`]), so the sheet can never drift from either the
-//! vocabulary or the shipped card.
+//! vocabulary or the shipped card. State reads off the tint LEFT EDGE —
+//! filled = live, double/faded = remembered, pulsing = working (the
+//! retired circle's shape grammar, re-homed) — plus the D40 title bar
+//! (kind glyph · inline name · transport · the always-visible grow ⤢).
+//! There is no status circle.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    BundledFirmware, ConnectPhase, DegradedReason, RosterCardState, UiDeviceCard,
-    UiDeviceProjectChip,
+    BundledFirmware, ConnectPhase, DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard,
+    UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
 };
 use lpc_wire::FwProvenance;
 
-use crate::app::home::device_card::DeviceCard;
+use crate::app::home::device_card::{
+    DeviceCard, DeviceCardSheet, erase_device_action, stop_simulator_action,
+};
 
 /// A fixed "now" so the offline recency never drifts in baselines.
 const STORY_NOW: f64 = 1_800_000_000.0;
 
-#[story(description = "Green solid: running the local project's tip.")]
+#[story(description = "Green filled edge: running the local project's tip.")]
 fn running_up_to_date() -> Element {
     sheet(vec![card(RosterCardState::RunningUpToDate, true)])
 }
 
-#[story(description = "Amber solid: running an older version; Push is the D11 consent.")]
+#[story(description = "Amber filled edge: running an older version; Push is the D11 consent.")]
 fn running_behind() -> Element {
-    sheet(vec![card(
-        RosterCardState::RunningBehind {
-            observed_version: Some(3),
-            head_version: Some(5),
-        },
-        true,
-    )])
+    sheet(vec![card(behind_state(), true)])
 }
 
-#[story(description = "Amber solid: a genuine fork, already banked at connect (D8/D30).")]
+#[story(description = "Amber filled edge: a genuine fork, already banked at connect (D8/D30).")]
 fn edited_on_device() -> Element {
     sheet(vec![card(RosterCardState::EditedOnDevice, true)])
 }
 
 #[story(
-    description = "Amber solid: crash recovery / safe mode (vocabulary slot — no live signal yet)."
+    description = "Amber filled edge: crash recovery / safe mode (vocabulary slot — no live signal yet)."
 )]
 fn degraded() -> Element {
     sheet(vec![
@@ -65,7 +65,7 @@ fn degraded() -> Element {
     ])
 }
 
-#[story(description = "Amber pulsing: the connect retry ladder is working.")]
+#[story(description = "Amber pulsing edge: the connect retry ladder is working.")]
 fn connecting_retrying() -> Element {
     sheet(vec![
         card(
@@ -83,7 +83,7 @@ fn connecting_retrying() -> Element {
     ])
 }
 
-#[story(description = "Amber pulsing: a long-running operation the user can walk away from.")]
+#[story(description = "Amber pulsing edge: a long-running operation the user can walk away from.")]
 fn operation_in_flight() -> Element {
     sheet(vec![card(
         RosterCardState::OperationInFlight {
@@ -107,13 +107,13 @@ fn operation_pushing() -> Element {
     )])
 }
 
-#[story(description = "Green solid: live link, nothing loaded.")]
+#[story(description = "Green filled edge: live link, nothing loaded.")]
 fn connected_empty() -> Element {
     sheet(vec![card(RosterCardState::ConnectedEmpty, false)])
 }
 
 #[story(
-    description = "Amber solid: content Studio cannot read — detail as sub-line; replace or erase."
+    description = "Amber filled edge: content Studio cannot read — detail as sub-line; replace or erase."
 )]
 fn holds_unreadable_data() -> Element {
     sheet(vec![card(
@@ -124,48 +124,47 @@ fn holds_unreadable_data() -> Element {
     )])
 }
 
-#[story(description = "Amber solid: blank flash — provisioning turns it into a Device.")]
+#[story(description = "Amber filled edge: blank flash — provisioning turns it into a Device.")]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])
 }
 
-#[story(description = "Amber solid: recognized non-LightPlayer firmware, safe to replace.")]
+#[story(description = "Amber filled edge: recognized non-LightPlayer firmware, safe to replace.")]
 fn other_firmware() -> Element {
     sheet(vec![card(RosterCardState::OtherFirmware, false)])
 }
 
-#[story(description = "Amber solid: wrong wire protocol — reflash is the only remedy.")]
+#[story(description = "Amber filled edge: wrong wire protocol — reflash is the only remedy.")]
 fn needs_firmware_update() -> Element {
     sheet(vec![card(RosterCardState::NeedsFirmwareUpdate, false)])
 }
 
-#[story(description = "Amber solid: holds a project but no stamped identity.")]
+#[story(
+    description = "Amber filled edge: holds a project but no stamped identity; the Name-it row (and the title-bar name) open the D41 name-stamping sheet — card-anchored, never a dialog."
+)]
 fn needs_a_name() -> Element {
     sheet(vec![card(RosterCardState::NeedsAName, false)])
 }
 
-#[story(description = "Red solid: no classification within the deadline; troubleshoot.")]
+#[story(description = "Red filled edge: no classification within the deadline; troubleshoot.")]
 fn not_responding() -> Element {
     sheet(vec![card(RosterCardState::NotResponding, false)])
 }
 
-#[story(description = "Gray solid: the port is held by another tab; quiet auto-retry.")]
+#[story(description = "Gray filled edge: the port is held by another tab; quiet auto-retry.")]
 fn in_use_elsewhere() -> Element {
     sheet(vec![card(RosterCardState::InUseElsewhere, false)])
 }
 
-#[story(description = "Gray hollow, faded: remembered only; click reconnects.")]
+#[story(
+    description = "Gray remembered edge (double line, whole card faded): remembered only; Reconnect lives on the Status tab as the state-table affordance (the old click-to-reconnect is retired)."
+)]
 fn offline() -> Element {
-    sheet(vec![card(
-        RosterCardState::Offline {
-            last_seen_at: Some(STORY_NOW - 2.0 * 86_400.0),
-        },
-        true,
-    )])
+    sheet(vec![card(offline_state(), true)])
 }
 
 #[story(
-    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph, Running with the loaded project's chip; clicking re-attaches the editor lens to the sim session."
+    description = "D36: the LIVE sim card (runtime-pool P4) — same card grammar, sim glyph in the title bar, Running with the loaded project's chip; the grow control (⤢) re-attaches the editor lens to the sim session."
 )]
 fn simulator_runtime() -> Element {
     sheet(vec![rsx! {
@@ -181,7 +180,7 @@ fn simulator_runtime() -> Element {
 }
 
 #[story(
-    description = "D36: the live sim card with nothing loaded — the session exists, no project has been pushed; no dead click (the card body is quiet)."
+    description = "D36: the live sim card with nothing loaded — the session exists, no project has been pushed; the grow control renders disabled (always visible, never a dead click)."
 )]
 fn simulator_nothing_loaded() -> Element {
     sheet(vec![rsx! {
@@ -197,25 +196,200 @@ fn simulator_nothing_loaded() -> Element {
 }
 
 #[story(
-    description = "The sim card's rich-object detail popover, open: Health and the running Project — only the honestly-applicable sections — with Stop simulator pinned last in the red-tinted danger zone (runtime-pool P3's destroy op)."
+    description = "The Project tab open on a live Running-behind device: the drift facts (running v3, your copy v5) as fact rows with the Attention badge dot on the tab. Opening in the editor stays the grow control — the tab renders no duplicate row."
 )]
-fn simulator_detail_popover() -> Element {
-    rsx! {
-        div { class: "tw:min-h-[420px] tw:p-4",
-            div { class: "tw:w-64",
-                DeviceCard {
-                    card: sim_card(true),
-                    now_secs: Some(STORY_NOW),
-                    sim: true,
-                    detail_open: true,
-                    on_action: |_| {},
-                }
-            }
-        }
-    }
+fn project_tab_running_behind() -> Element {
+    sheet(vec![tabbed(behind_state(), true, DeviceCardTab::Project)])
 }
 
-#[story(description = "The standing amber chip: firmware drift is advisory on any Running row.")]
+#[story(
+    description = "The Settings tab open on a live Running device: the Technical facts (uid, transport, firmware provenance) with the advisory firmware-update chip — the chip badges the Settings tab, never the Status tab or the edge tint."
+)]
+fn settings_tab_running() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card_with_fw(RosterCardState::RunningUpToDate, true),
+                now_secs: Some(STORY_NOW),
+                bundled_fw: Some(bundled_firmware()),
+                initial_tab: Some(DeviceCardTab::Settings),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The Danger tab open on a live Running-behind device: Flash firmware and Erase as destructive menu rows (confirmation on the actions). The tab wears the error family when selected and never badges — Danger never shouts."
+)]
+fn danger_tab_running_behind() -> Element {
+    sheet(vec![tabbed(behind_state(), true, DeviceCardTab::Danger)])
+}
+
+#[story(
+    description = "The Danger tab open on an offline (remembered) device: Forget is the only row (D34 hygiene) — no flash or erase without a live manageable link."
+)]
+fn danger_tab_offline() -> Element {
+    sheet(vec![tabbed(offline_state(), true, DeviceCardTab::Danger)])
+}
+
+#[story(
+    description = "The Danger tab open on the live sim card: Stop simulator as the destructive menu row (runtime-pool P3's destroy op; confirmation states the honest cost)."
+)]
+fn danger_tab_simulator() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: sim_card(true),
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                initial_tab: Some(DeviceCardTab::Danger),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The erase confirm as a card-resident sheet (D41): the card dims below the title bar (the name stays readable — you always know whose sheet this is), the tint edge stays visible, and Erase wears the error family. THE destructive-confirm pattern — the native confirm() is retired for card actions; Cancel or clicking the backdrop dismisses."
+)]
+fn erase_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(behind_state(), true),
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(DeviceCardTab::Danger),
+                initial_sheet: Some(DeviceCardSheet::Confirm(erase_device_action(
+                    "Luna's porch sign".to_string(),
+                ))),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The name-stamping sheet (D41, spike round 3) on the Needs-a-name card: input + Enter-to-save; naming stamps the uid and returns the card to Status. Supersedes the title-bar form for the unstamped board — a stamped device still renames inline in the title bar."
+)]
+fn name_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(RosterCardState::NeedsAName, false),
+                now_secs: Some(STORY_NOW),
+                initial_sheet: Some(DeviceCardSheet::Name),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The D30 drift-resolution sheet on the Edited-on-device card: adopt (use the device's copy) / keep both / stay, entered from the state-table Review affordance. The deploy-dialog era's verbs, now card-resident — M5-A's minimal dialog routing dissolved into this."
+)]
+fn drift_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(RosterCardState::EditedOnDevice, true),
+                now_secs: Some(STORY_NOW),
+                initial_sheet: Some(DeviceCardSheet::Drift),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The stop-simulator confirm as a card-resident sheet (D41) on the live sim card — the same pattern as erase; the honest cost stays in the copy."
+)]
+fn stop_sim_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: sim_card(true),
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                initial_tab: Some(DeviceCardTab::Danger),
+                initial_sheet: Some(DeviceCardSheet::Confirm(stop_simulator_action())),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The per-device console strip (D42, card mode): the session's newest line rides the card's bottom edge as an ambient one-liner; clicking it jumps to the Console tab. The strip hides while that tab is active."
+)]
+fn console_strip() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card_with_console(RosterCardState::RunningUpToDate, true),
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The Console tab open (D42, card mode): the session's tail read-only, severity as line tint (warn amber, error red), the strip hidden while the tab is active. Display only in P2 — level/filter controls come later."
+)]
+fn console_tab_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card_with_console(RosterCardState::RunningUpToDate, true),
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(DeviceCardTab::Console),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "D43: the card GROWN into the editor's right-side pane — same component, tall column, icon tabs stay icons, body scrolls, ⇲ shrinks back to the gallery. The console is a permanent expanded bottom region (round 3.5): the Console tab and the strip are gone in pane mode."
+)]
+fn pane_grown_device() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:h-[560px] tw:w-[340px]",
+            DeviceCard {
+                card: device_card_with_console(behind_state(), true),
+                now_secs: Some(STORY_NOW),
+                pane: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "D43: the live sim card grown into the editor pane — sim glyph, the honestly-applicable tabs (no Settings/Performance), the permanent console region at the bottom."
+)]
+fn pane_grown_sim() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:h-[560px] tw:w-[340px]",
+            DeviceCard {
+                card: UiDeviceCard {
+                    console_tail: device_card_with_console(RosterCardState::RunningUpToDate, true)
+                        .console_tail,
+                    ..sim_card(true)
+                },
+                now_secs: Some(STORY_NOW),
+                sim: true,
+                pane: true,
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The standing amber chip: firmware drift is advisory on any Running row — it badges the Settings tab, never the edge tint (project drift owns the edge)."
+)]
 fn firmware_update_chip() -> Element {
     // the chip rides only an honest comparison: clean builds, differing
     // commits (dirty or unknown on either side suppresses it) — the card
@@ -231,17 +405,11 @@ fn firmware_update_chip() -> Element {
                 }
             }
         },
-        // project drift owns the circle; the firmware chip stays advisory
+        // project drift owns the edge tint; the firmware chip stays advisory
         rsx! {
             div { class: "tw:w-64",
                 DeviceCard {
-                    card: device_card_with_fw(
-                        RosterCardState::RunningBehind {
-                            observed_version: Some(3),
-                            head_version: Some(5),
-                        },
-                        true,
-                    ),
+                    card: device_card_with_fw(behind_state(), true),
                     now_secs: Some(STORY_NOW),
                     bundled_fw: Some(bundled_firmware()),
                     on_action: |_| {},
@@ -249,54 +417,6 @@ fn firmware_update_chip() -> Element {
             }
         },
     ])
-}
-
-#[story(
-    description = "The rich-object detail popover on a live Running-behind device, open from the card's node-style trigger (Q1: the affordance-following icon on the right; the circle stays a pure indicator). Fixed schema order — Health, Project, Technical — with the danger zone pinned last as the inline red-tinted section (Q5): Flash firmware and Erase migrated here from the interim More-menu. The advisory firmware chip tones the Technical section, never the trigger."
-)]
-fn device_detail_running_behind() -> Element {
-    rsx! {
-        div { class: "tw:min-h-[640px] tw:p-4",
-            div { class: "tw:w-64",
-                DeviceCard {
-                    card: device_card_with_fw(
-                        RosterCardState::RunningBehind {
-                            observed_version: Some(3),
-                            head_version: Some(5),
-                        },
-                        true,
-                    ),
-                    now_secs: Some(STORY_NOW),
-                    bundled_fw: Some(bundled_firmware()),
-                    detail_open: true,
-                    on_action: |_| {},
-                }
-            }
-        }
-    }
-}
-
-#[story(
-    description = "The rich-object detail popover on an offline (remembered) device: quiet trigger, Neutral rollup; Health carries Reconnect, Project shows the last-ran copy, Technical keeps the registered identity, and the danger zone holds Forget (the offline card's old More-menu row)."
-)]
-fn device_detail_offline() -> Element {
-    rsx! {
-        div { class: "tw:min-h-[520px] tw:p-4",
-            div { class: "tw:w-64",
-                DeviceCard {
-                    card: device_card(
-                        RosterCardState::Offline {
-                            last_seen_at: Some(STORY_NOW - 2.0 * 86_400.0),
-                        },
-                        true,
-                    ),
-                    now_secs: Some(STORY_NOW),
-                    detail_open: true,
-                    on_action: |_| {},
-                }
-            }
-        }
-    }
 }
 
 /// Lay story cards out on the sheet.
@@ -324,6 +444,35 @@ fn card(state: RosterCardState, with_project: bool) -> Element {
     }
 }
 
+/// A device card opened on a control-panel tab (the tabs-open stories).
+fn tabbed(state: RosterCardState, with_project: bool, tab: DeviceCardTab) -> Element {
+    rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(state, with_project),
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(tab),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+/// The Running-behind fixture the drift stories share.
+fn behind_state() -> RosterCardState {
+    RosterCardState::RunningBehind {
+        observed_version: Some(3),
+        head_version: Some(5),
+    }
+}
+
+/// The offline fixture: remembered two days ago against the fixed clock.
+fn offline_state() -> RosterCardState {
+    RosterCardState::Offline {
+        last_seen_at: Some(STORY_NOW - 2.0 * 86_400.0),
+    }
+}
+
 fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
     UiDeviceCard {
         uid: Some("dev_7pQr5St89uVwXy2C".to_string()),
@@ -336,6 +485,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         }),
         fw: None,
         sim: false,
+        console_tail: Vec::new(),
     }
 }
 
@@ -358,11 +508,44 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
         }),
         fw: None,
         sim: true,
+        console_tail: Vec::new(),
+    }
+}
+
+/// The same card carrying a fixed console tail (D42 fixtures): engine
+/// frames with one warn and one error, timestamps pinned to the story
+/// clock so baselines never drift.
+fn device_card_with_console(state: RosterCardState, with_project: bool) -> UiDeviceCard {
+    let line = |offset: f64, level: UiLogLevel, message: &str| {
+        UiLogEntry::new(
+            STORY_NOW + offset,
+            level,
+            UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32"),
+            message,
+        )
+    };
+    UiDeviceCard {
+        console_tail: vec![
+            line(0.0, UiLogLevel::Info, "engine: project loaded · 241 points"),
+            line(1.0, UiLogLevel::Info, "engine: frame 41022 · 60fps"),
+            line(
+                2.0,
+                UiLogLevel::Warn,
+                "engine: frame budget exceeded (21ms)",
+            ),
+            line(
+                3.0,
+                UiLogLevel::Error,
+                "shader: uniform 'rate' out of range",
+            ),
+            line(4.0, UiLogLevel::Info, "engine: frame 41142 · 60fps"),
+        ],
+        ..device_card(state, with_project)
     }
 }
 
 /// The same card carrying hello firmware provenance (live-link Technical
-/// evidence for the popover and the chip comparison).
+/// evidence for the Settings tab and the chip comparison).
 fn device_card_with_fw(state: RosterCardState, with_project: bool) -> UiDeviceCard {
     UiDeviceCard {
         fw: Some(FwProvenance {

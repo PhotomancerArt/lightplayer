@@ -1,11 +1,26 @@
 # ADR: The rich-object pattern — sections, rollup, surfaces
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-07-24 — see the M7′ note below)
 - **Date:** 2026-07-17
 - **Deciders:** Photomancer
 - **Supersedes:** None (builds on
   `2026-07-16-device-card-state-vocabulary.md`)
-- **Superseded by:** None
+- **Superseded by:** None (the MODEL stands; the card-surface
+  PRESENTATION is partially superseded — see the M7′ note)
+
+> **M7′ amendment (2026-07-24, card-as-control-panel — D39–D43).** The
+> rich-object MODEL survives intact: `RichSection` / `RichObjectView` /
+> the worst-actionable rollup are now the device card's **tab and badge
+> model** (`roster/card_tabs.rs` groups the fixed schema titles onto icon
+> tabs; tab badges derive exactly as the rollup does). What this ADR
+> decided about the card-surface PRESENTATION is superseded: the detail
+> popover on cards (Q1's circle-adjacent trigger) and the status circle
+> are gone — the card IS the control panel (tinted left-edge chrome +
+> icon tabs + card-resident sheets), per the 2026-07-24 replan
+> (`Planning/lp2025/2026-07-24-m7m8-replan/agenda.md`). Q4 (fixed schema
+> order) and Q5 (danger inline, red, never shouting) carry over into the
+> tabs unchanged. `RichObjectPane`/`DetailPopover` REMAIN the pattern for
+> nodes — nothing about node surfaces changes.
 
 ## Context
 

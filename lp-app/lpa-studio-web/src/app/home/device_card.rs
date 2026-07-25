@@ -1,40 +1,101 @@
 //! Device roster cards for the gallery's *Devices* section — and the
 //! story sheet's vocabulary cards (one renderer, both surfaces).
 //!
-//! Deliberately distinct from package cards: a hardware header (status
-//! circle · transport glyph · project chip) instead of a thumbnail — a
-//! device must never read as "just another project". Everything shown is
-//! read off the core view-model ([`RosterCardState`]): circle, status
-//! line, sub-line, and the ≤1 affordance all come from core, so the
-//! renderer can never drift from the vocabulary.
+//! M7′ (card-as-control-panel, D39–D43): the card IS the device's control
+//! panel. Anatomy, per the ratified spike (`spikes/device-card-panel/`):
 //!
-//! Anatomy (direction.md "Card grammar", amended 2026-07-17): header row
-//! = status circle · transport glyph+label · the rich-object detail
-//! trigger at the right edge (Q1: node-style affordance-following icon —
-//! see `device_detail_popover.rs`); body = device name with
-//! pencil-on-hover inline rename (D34) · status line (health only) · ≤1
-//! sub-line · project chip (identity, not status; muted last-known on
-//! offline/error — moved out of the title bar for space) · ≤1 affordance
-//! button (Q2); offline whole-card fade.
+//! - **Tint left edge** carries state — tone from the rich-object rollup
+//!   (worst-actionable section), treatment from the retired circle's
+//!   shape grammar (filled = live, double/faded = remembered, pulsing =
+//!   working), so state reads without color. No status circle.
+//! - **D40 title bar**: kind glyph LEFT of the name (device/sim),
+//!   inline-editable name (the D34 rename and the name-stamping flow,
+//!   re-homed here), transport text label right, always-visible GROW ⤢ —
+//!   the ONE editor entry (`OpenDeviceProject`/`OpenSimProject`); the
+//!   old whole-card editor click is retired, body clicks are quiet.
+//! - **Icon-tab row** below the title renders the rich-object sections
+//!   per the ratified mapping ([`device_card_tabs`]); tab badges derive
+//!   from the rollup families. The detail popovers are no longer
+//!   reachable from cards (deletion lands with M7′ P3).
+//!
+//! Everything shown still reads off the core view-model
+//! ([`RosterCardState`] → [`device_rich_object`]/[`sim_rich_object`]),
+//! so the renderer can never drift from the vocabulary.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    BundledFirmware, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceController, DeviceOp, HomeOp,
-    LinkProviderKind, ProjectController, ProjectOp, RosterAffordance, RosterCardState,
-    RosterCircle, RosterCircleShape as CoreShape, UiAction, UiDeviceCard, UiStatus, UiStatusKind,
+    BundledFirmware, CardTabView, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab,
+    DeviceController, DeviceDetailAffordance, DeviceOp, DeviceRichInput, HomeOp, LinkProviderKind,
+    ProjectController, ProjectOp, RichObjectView, RichSection, RosterAffordance, RosterCardState,
+    RosterTreatment, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard, UiStatusKind,
+    device_card_tabs, device_rich_object, sim_rich_object,
 };
+use lpa_studio_core::{UiLogEntry, UiLogLevel};
 
+use crate::app::home::card_sheet::{
+    CardSheet, CardSheetButton, CardSheetButtons, CardSheetMessage, CardSheetTitle, SheetButtonTone,
+};
 use crate::app::home::card_thumb::thumb_swatch_style;
-use crate::app::home::device_detail_popover::{DeviceDetailPopover, SimDetailPopover};
 use crate::app::home::package_card::home_action;
-use crate::base::{StatusCircle, StatusCircleShape, StatusCircleTone, StudioIcon, StudioIconName};
-use crate::core::{ActionButton, ActionButtonVariant, StatusChip, quiet_action_class};
+use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
+use crate::core::{ActionButton, ActionButtonVariant, StatusChip, chip_status, quiet_action_class};
 
-/// One roster card. Clicking an offline card reconnects through an
-/// already-granted serial port with no chooser (M1); clicking a
-/// Running-family card opens its project in the editor ON the device
-/// session (the D29 click, runtime-pool P3); other connected cards open
-/// the deploy dialog with the device context; working states are quiet.
+/// A card-resident sheet (D41) the card can open: THE destructive-confirm
+/// pattern for card actions, the name-stamping sheet, and the D30 drift
+/// sheet. One at a time; the title bar is always spared.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum DeviceCardSheet {
+    /// A destructive confirm: title/message/verb come from the action's
+    /// own [`lpa_studio_core::ActionConfirmation`]; Confirm dispatches it.
+    Confirm(UiAction),
+    /// The name-stamping sheet (NeedsAName — ratified spike round 3).
+    /// Supersedes the title-bar-form entry for the unstamped board;
+    /// renaming a STAMPED device stays the title bar's inline edit.
+    Name,
+    /// The D30 drift-resolution sheet on the Edited-on-device card:
+    /// adopt / keep-both / stay (the deploy-dialog era's verbs, card-
+    /// resident; M5-A's minimal dialog routing dissolves into this).
+    Drift,
+}
+
+/// What a rendered affordance row does. Sheet rows carry a display-only
+/// action (label/icon/destructive chrome) that never dispatches — the
+/// sheet's own confirm does.
+#[derive(Clone, PartialEq)]
+enum CardRowAction {
+    Dispatch(UiAction),
+    Sheet(DeviceCardSheet, UiAction),
+}
+
+impl CardRowAction {
+    /// Wrap a wired action: one that demands confirmation becomes a
+    /// confirm-sheet row (D41 replaces the native `confirm()` on cards);
+    /// anything else dispatches directly.
+    fn from_action(action: UiAction) -> Self {
+        if action.meta().confirmation.is_some() {
+            let display = strip_confirmation(action.clone());
+            Self::Sheet(DeviceCardSheet::Confirm(action), display)
+        } else {
+            Self::Dispatch(action)
+        }
+    }
+}
+
+/// The same action without its confirmation gate — sheet rows render
+/// through [`ActionButton`], which would otherwise fire the native
+/// `confirm()` before our sheet ever opened.
+fn strip_confirmation(action: UiAction) -> UiAction {
+    let meta = lpa_studio_core::ActionMeta {
+        confirmation: None,
+        ..action.meta().clone()
+    };
+    action.with_meta(meta)
+}
+
+/// One roster card: the device (or live sim session) as a tabbed control
+/// panel. The grow control is the editor entry; the tabs carry status,
+/// project, settings, console (P2), and the danger zone; body clicks are
+/// quiet (drop targets stay live).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceCard(
@@ -42,74 +103,127 @@ pub(crate) fn DeviceCard(
     /// Fixed clock for stories; `None` uses the platform clock.
     #[props(default)]
     now_secs: Option<f64>,
-    /// D36 sim-runtime presentation (story sheet today): sim glyph
-    /// instead of the transport, no connect ceremony.
+    /// D36 sim-runtime presentation: sim glyph, no rename/stamp flows,
+    /// sim rich-object sections.
     #[props(default = false)]
     sim: bool,
+    /// D43 pane mode: the SAME card grown into the editor's right-side
+    /// column — tall body, ⇲ shrinks back to the gallery, and the
+    /// console is a permanent bottom region (round 3.5: the Console tab
+    /// and the strip both disappear).
+    #[props(default = false)]
+    pane: bool,
     /// Studio's bundled firmware image (packaged manifest), when known —
-    /// evidence for the standing amber "firmware update available" chip
-    /// and the popover's Technical section.
+    /// evidence for the advisory "firmware update available" chip on the
+    /// Settings tab (and its badge).
     #[props(default)]
     bundled_fw: Option<BundledFirmware>,
-    /// Open the detail popover on mount (story captures only).
-    #[props(default = false)]
-    detail_open: bool,
+    /// Open with this tab selected (story captures only).
+    #[props(default)]
+    initial_tab: Option<DeviceCardTab>,
+    /// Open with this card sheet showing (story captures only).
+    #[props(default)]
+    initial_sheet: Option<DeviceCardSheet>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(super::package_card::platform_now_secs);
-    let (circle_shape, circle_tone) = circle_props(card.state.circle());
     let status_line = card.state.status_line(now);
-    let sub_line = card.state.sub_line();
     let faded = matches!(card.state, RosterCardState::Offline { .. });
     // last-known, not current, on offline/error cards (card grammar)
     let chip_muted = faded || matches!(card.state, RosterCardState::NotResponding);
-    // Needs-a-name opens the SAME inline form the pencil rename uses —
-    // naming is card-anchored, never a dialog trip
+    // Needs-a-name opens the name-stamping SHEET (D41 — ratified spike
+    // round 3); renaming a stamped device stays the title-bar inline edit
     let name_inline = !sim && matches!(card.state, RosterCardState::NeedsAName);
-    // The sim card's click re-attaches the editor lens to the sim session
-    // (the D29 grammar's sim arm, runtime-pool P4) — only when a project
-    // is loaded (no dead click on an empty sim: there is nothing to open).
-    let click_action = if sim {
-        card.project.is_some().then(open_sim_project_action)
-    } else {
-        card_click_action(&card)
-    };
-    // The state-table affordances are device flows (choose-project routes
-    // to the deploy dialog); the sim card offers none — its click opens
-    // the editor and its danger zone lives in the popover.
-    let affordance = if sim {
-        None
-    } else {
-        card.state
-            .affordance()
-            .and_then(|affordance| device_affordance_action(&card, &affordance))
-    };
     let can_rename = card.uid.is_some() && !sim;
-    // the standing advisory chip rides an honest comparison of the
-    // bundled image against the hello provenance (never a bare flag)
-    let fw_update = match (&bundled_fw, &card.fw) {
-        (Some(bundled), Some(fw)) => bundled.update_available(fw),
-        _ => false,
-    };
     let droppable = !sim && !faded;
 
-    let mut renaming = use_signal(|| false);
-    let rename_reset = if name_inline {
-        String::new()
+    // The rich-object view: sections wired to concrete rows here (the
+    // one identity→action hop — a row dispatches or opens a card sheet),
+    // rollup tone for the edge, then the ratified sections→tabs grouping.
+    let sections: Vec<RichSection<CardRowAction>> = if sim {
+        sim_rich_object(&SimRichInput {
+            state: &card.state,
+            project_name: card.project.as_ref().map(|chip| chip.name.as_str()),
+            now_secs: now,
+        })
+        .sections
+        .into_iter()
+        .map(wire_sim_card_section)
+        .collect()
     } else {
-        card.name.clone()
+        device_rich_object(&DeviceRichInput {
+            state: &card.state,
+            uid: card.uid.as_deref(),
+            transport: &card.transport,
+            project_name: card.project.as_ref().map(|chip| chip.name.as_str()),
+            fw: card.fw.as_ref(),
+            bundled_fw: bundled_fw.as_ref(),
+            now_secs: now,
+        })
+        .sections
+        .into_iter()
+        .map(|section| wire_card_section(&card, section))
+        .collect()
     };
+    let view = RichObjectView::new(sections);
+    let edge_tone = view.rollup().tone;
+    let tabs = device_card_tabs(view);
+    let edge_treatment = card.state.spec().treatment;
+
+    // The grow control dispatches the existing editor-attach ops exactly
+    // where the old click-arms fired; elsewhere it renders disabled (the
+    // control is always VISIBLE — D40 — never a dead click).
+    let grow_action = if sim {
+        card.project.is_some().then(open_sim_project_action)
+    } else {
+        matches!(
+            card.state,
+            RosterCardState::RunningUpToDate
+                | RosterCardState::RunningBehind { .. }
+                | RosterCardState::EditedOnDevice
+        )
+        .then(open_device_project_action)
+    };
+
+    let selected = use_signal(move || initial_tab.unwrap_or(DeviceCardTab::Status));
+    // a state change may drop the selected tab (e.g. Danger during an
+    // operation): fall back to Status rather than a blank body. Pane
+    // mode has no Console tab (round 3.5) — a Console selection lands
+    // on Status.
+    let active_tab = tabs
+        .iter()
+        .find(|tab| tab.tab == selected())
+        .map_or(DeviceCardTab::Status, |tab| tab.tab);
+    let active_tab = if pane && active_tab == DeviceCardTab::Console {
+        DeviceCardTab::Status
+    } else {
+        active_tab
+    };
+    let mut sheet = use_signal(move || initial_sheet.clone());
+
+    let mut renaming = use_signal(|| false);
+    let rename_reset = card.name.clone();
     let mut rename_value = use_signal(|| rename_reset.clone());
 
-    let (glyph, transport_label) = if sim {
-        (StudioIconName::Simulator, "Simulator".to_string())
+    let edge_style = format!(
+        "--edge-tint: var(--studio-status-{}-text);",
+        status_family(edge_tone)
+    );
+    let glyph = if sim {
+        StudioIconName::Simulator
     } else {
-        (StudioIconName::Usb, card.transport.clone())
+        StudioIconName::Usb
+    };
+    let transport_label = if sim {
+        "Simulator".to_string()
+    } else {
+        card.transport.clone()
     };
 
     rsx! {
         article {
-            class: device_card_class(faded, click_action.is_some() || name_inline),
+            class: device_card_class(faded, edge_treatment, pane),
+            style: "{edge_style}",
             title: "{status_line}",
             // connected cards are drop targets: project card → device card
             // opens the deploy dialog pre-filled (replace preview)
@@ -130,81 +244,38 @@ pub(crate) fn DeviceCard(
                     ));
                 }
             },
-            onclick: {
-                let click_action = click_action.clone();
-                move |_| {
-                    if name_inline {
-                        renaming.set(true);
-                    } else if let Some(action) = &click_action {
-                        on_action.call(action.clone());
-                    }
-                }
-            },
-            header { class: "tw:flex tw:items-center tw:gap-2 tw:border-b tw:border-border tw:bg-terminal tw:px-3 tw:py-2",
-                StatusCircle { shape: circle_shape, tone: circle_tone }
-                span { class: "tw:inline-flex tw:items-center tw:text-muted-foreground",
+            // D40 title bar: kind glyph · inline-editable name · transport
+            // label · the always-visible grow control.
+            header { class: "tw:flex tw:min-h-9 tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border tw:bg-terminal tw:py-1.5 tw:pl-3 tw:pr-1.5",
+                span { class: "tw:inline-flex tw:flex-none tw:items-center tw:text-muted-foreground",
+                    title: if sim { "Simulator" } else { "Device" },
                     StudioIcon { name: glyph, size: 14 }
                 }
-                span { class: "tw:text-[11px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-muted-foreground",
-                    "{transport_label}"
-                }
-                // the rich-object detail trigger (Q1): the node-style
-                // affordance-following icon at the right edge, riding
-                // the rollup tone; the danger zone lives in the popover
-                // (device: Flash/Erase/Forget; sim: Stop simulator).
-                // -mr-1.5 cancels the header's px-3 down to the pane
-                // pattern's 6px edge inset, so the button's right gap
-                // matches its top/bottom.
-                span {
-                    class: "tw:-my-1 tw:-mr-1.5 tw:ml-auto",
-                    onclick: move |event| event.stop_propagation(),
-                    if sim {
-                        SimDetailPopover {
-                            card: card.clone(),
-                            now_secs: now,
-                            initially_open: detail_open,
-                            on_action,
-                        }
-                    } else {
-                        DeviceDetailPopover {
-                            card: card.clone(),
-                            now_secs: now,
-                            bundled_fw: bundled_fw.clone(),
-                            initially_open: detail_open,
-                            on_action,
-                        }
-                    }
-                }
-            }
-            div { class: "tw:grid tw:gap-0.5 tw:p-3",
                 if renaming() {
                     form {
-                        class: "tw:flex tw:gap-2",
-                        onclick: move |event| event.stop_propagation(),
+                        class: "tw:flex tw:min-w-0 tw:flex-1 tw:gap-2",
                         onsubmit: {
                             let uid = card.uid.clone();
                             move |event: FormEvent| {
                                 event.prevent_default();
                                 let name = rename_value.read().trim().to_string();
-                                if !name.is_empty() {
-                                    // stamped devices rename; an anonymous
-                                    // device (Needs a name) stamps
-                                    let op = match &uid {
-                                        Some(uid) => HomeOp::RenameDevice {
-                                            uid: uid.clone(),
-                                            name,
-                                        },
-                                        None => HomeOp::NameDevice { name },
-                                    };
-                                    on_action.call(home_action(op));
+                                if !name.is_empty()
+                                    && let Some(uid) = &uid
+                                {
+                                    // stamped devices rename inline; the
+                                    // unstamped board's naming is the D41
+                                    // sheet, never this form
+                                    on_action.call(home_action(HomeOp::RenameDevice {
+                                        uid: uid.clone(),
+                                        name,
+                                    }));
                                 }
                                 renaming.set(false);
                             }
                         },
                         input {
-                            class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-0.5 tw:text-sm tw:text-strong-foreground",
+                            class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-card tw:px-2 tw:py-0.5 tw:text-sm tw:text-strong-foreground",
                             autofocus: true,
-                            placeholder: if name_inline { "e.g. Porch sign" } else { "" },
                             value: "{rename_value}",
                             oninput: move |event| rename_value.set(event.value()),
                             onkeydown: {
@@ -220,84 +291,580 @@ pub(crate) fn DeviceCard(
                         button {
                             class: quiet_action_class(),
                             r#type: "submit",
-                            if name_inline { "Name" } else { "Rename" }
+                            "Rename"
                         }
                     }
                 } else {
-                    span { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
-                        p { class: device_name_class(faded), "{card.name}" }
-                        if can_rename {
-                            // pencil-on-hover → inline rename (D34)
-                            button {
-                                class: "tw:invisible tw:inline-flex tw:cursor-pointer tw:items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0.5 tw:text-muted-foreground tw:group-hover:visible tw:hover:text-strong-foreground",
-                                r#type: "button",
-                                title: "Rename this device",
-                                aria_label: "Rename {card.name}",
-                                onclick: {
-                                    let name = card.name.clone();
-                                    move |event: MouseEvent| {
-                                        event.stop_propagation();
-                                        rename_value.set(name.clone());
-                                        renaming.set(true);
-                                    }
-                                },
-                                StudioIcon { name: StudioIconName::Edited, size: 12 }
-                            }
-                        }
-                    }
-                }
-                p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-dim-foreground", "{status_line}" }
-                if let Some(sub_line) = sub_line {
-                    p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-subtle-foreground", "{sub_line}" }
-                }
-                if let Some(chip) = card.project.clone() {
-                    // identity, not status: the project the device holds
-                    // (or last ran — muted on offline/error cards). Lives
-                    // in the BODY, not the title bar (Yona 2026-07-17:
-                    // header space is precious, the chip read oddly there)
-                    span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5",
-                        span {
-                            class: "tw:inline-block tw:h-3 tw:w-3 tw:flex-none tw:rounded-[3px]",
-                            style: thumb_swatch_style(&chip.uid, chip_muted),
-                        }
-                        span { class: chip_name_class(chip_muted), "{chip.name}" }
-                    }
-                }
-                if fw_update {
-                    div { class: "tw:mt-1",
-                        StatusChip { status: UiStatus::attention("Firmware update available") }
-                    }
-                }
-                if let Some(action) = affordance {
-                    div { class: "tw:mt-1",
-                        span {
-                            onclick: move |event| event.stop_propagation(),
-                            ActionButton {
-                                action,
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
-                        }
-                    }
-                }
-                if name_inline && !renaming() {
-                    // the Needs-a-name affordance: opens the inline form
-                    // above (card-anchored naming, never a dialog)
-                    div { class: "tw:mt-1",
-                        button {
-                            class: quiet_action_class(),
-                            r#type: "button",
-                            onclick: move |event| {
-                                event.stop_propagation();
+                    p {
+                        class: device_name_class(faded, can_rename || name_inline),
+                        title: if can_rename { "Rename this device" } else if name_inline { "Name this device" } else { "" },
+                        onclick: move |_| {
+                            if can_rename {
                                 renaming.set(true);
+                            } else if name_inline {
+                                sheet.set(Some(DeviceCardSheet::Name));
+                            }
+                        },
+                        "{card.name}"
+                    }
+                    if can_rename {
+                        // pencil-on-hover → inline rename (D34)
+                        button {
+                            class: "tw:invisible tw:inline-flex tw:cursor-pointer tw:items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0.5 tw:text-muted-foreground tw:group-hover:visible tw:hover:text-strong-foreground",
+                            r#type: "button",
+                            title: "Rename this device",
+                            aria_label: "Rename {card.name}",
+                            onclick: {
+                                let name = card.name.clone();
+                                move |_| {
+                                    rename_value.set(name.clone());
+                                    renaming.set(true);
+                                }
                             },
-                            "Name this device…"
+                            StudioIcon { name: StudioIconName::Edited, size: 12 }
+                        }
+                    }
+                    if !transport_label.is_empty() {
+                        span { class: "tw:ml-auto tw:flex-none tw:text-[11px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-dim-foreground",
+                            "{transport_label}"
+                        }
+                    }
+                    if pane {
+                        // D43: the grown pane's ⇲ shrinks back to the
+                        // gallery — the same route + detach pair the
+                        // shell wordmark uses (the hash may not change).
+                        a {
+                            class: "{grow_button_class(transport_label.is_empty())} tw:no-underline",
+                            href: "#/",
+                            title: "Back to the gallery",
+                            aria_label: "Shrink {card.name} back to the gallery",
+                            onclick: move |_| {
+                                on_action.call(UiAction::from_op(
+                                    ProjectController::NODE_ID,
+                                    ProjectOp::DetachLens,
+                                ));
+                            },
+                            StudioIcon { name: StudioIconName::Shrink, size: 14 }
+                        }
+                    } else {
+                        button {
+                            class: grow_button_class(transport_label.is_empty()),
+                            r#type: "button",
+                            disabled: grow_action.is_none(),
+                            title: if grow_action.is_some() { "Open in the editor" } else { "Nothing to open in the editor yet" },
+                            aria_label: "Open {card.name} in the editor",
+                            onclick: {
+                                let grow_action = grow_action.clone();
+                                move |_| {
+                                    if let Some(action) = &grow_action {
+                                        on_action.call(action.clone());
+                                    }
+                                }
+                            },
+                            StudioIcon { name: StudioIconName::Grow, size: 14 }
                         }
                     }
                 }
             }
+            // Everything below the title bar shares one wrapper: a D41
+            // sheet dims exactly this region, so the name above it stays
+            // readable (spike round 3: sheets spare the title bar). An
+            // open sheet floors the region's height — a short tab body
+            // must never clip the panel (the card is overflow-hidden);
+            // the drift sheet's three stacked verbs need the tall floor.
+            div { class: match (pane, sheet()) {
+                    (true, _) => "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
+                    (false, Some(DeviceCardSheet::Drift)) => "tw:relative tw:min-h-[290px]",
+                    (false, Some(_)) => "tw:relative tw:min-h-[210px]",
+                    (false, None) => "tw:relative",
+                },
+                // the icon-tab row (below the title bar — spike anatomy;
+                // pane mode drops the Console tab, round 3.5)
+                div {
+                    class: "tw:flex tw:flex-none tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
+                    role: "tablist",
+                    for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
+                        {tab_button(tab_view, active_tab, selected)}
+                    }
+                }
+                div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
+                    match active_tab {
+                        DeviceCardTab::Status => rsx! {
+                            {status_tab_body(&card, &tabs, chip_muted, on_action, sheet)}
+                        },
+                        DeviceCardTab::Console => rsx! {
+                            {console_tab_body(&card.console_tail)}
+                        },
+                        _ => rsx! {
+                            {sections_tab_body(&tabs, active_tab, on_action, sheet)}
+                        },
+                    }
+                }
+                if pane {
+                    // D42 pane mode (round 3.5): the console is a
+                    // permanent expanded bottom region — a normal console;
+                    // no tab, no strip.
+                    div { class: "ux-console-region",
+                        if card.console_tail.is_empty() {
+                            p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
+                                "No console output yet."
+                            }
+                        } else {
+                            for entry in card.console_tail.iter() {
+                                div { class: console_line_class(entry.level), "{entry.message}" }
+                            }
+                        }
+                    }
+                }
+                // D42's ambient strip: the console's latest line at the
+                // card's bottom edge; clicking jumps to the Console tab,
+                // and the strip HIDES while that tab is active.
+                if !pane && active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
+                    {console_strip(&card.console_tail, selected)}
+                }
+                if let Some(active_sheet) = sheet() {
+                    {device_card_sheet_view(&active_sheet, &card, sheet, selected, on_action)}
+                }
+            }
         }
+    }
+}
+
+/// The D42 strip: one mono line (the tail's newest entry), full width,
+/// quiet; the one expansion mechanism is jumping to the Console tab.
+fn console_strip(tail: &[UiLogEntry], mut selected: Signal<DeviceCardTab>) -> Element {
+    let line = tail
+        .last()
+        .map(|entry| entry.message.clone())
+        .unwrap_or_default();
+    rsx! {
+        button {
+            class: "ux-console-strip",
+            r#type: "button",
+            title: "Open the console tab",
+            onclick: move |event| {
+                event.stop_propagation();
+                selected.set(DeviceCardTab::Console);
+            },
+            span { class: "ux-console-strip-line", "› {line}" }
+            span { class: "tw:flex-none tw:text-[10px] tw:text-dim-foreground", "▲" }
+        }
+    }
+}
+
+/// The Console tab (D42, card mode): the session's tail, read-only.
+/// Level/filtering controls are display-only in P2 — severity shows as
+/// line tint, nothing else.
+fn console_tab_body(tail: &[UiLogEntry]) -> Element {
+    if tail.is_empty() {
+        return rsx! {
+            p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
+                "No console output yet."
+            }
+        };
+    }
+    rsx! {
+        div { class: "ux-console-lines",
+            for entry in tail {
+                div { class: console_line_class(entry.level), "{entry.message}" }
+            }
+        }
+    }
+}
+
+/// Severity tint for a console line (the shared status families).
+fn console_line_class(level: UiLogLevel) -> &'static str {
+    match level {
+        UiLogLevel::Trace | UiLogLevel::Debug => "ux-console-line-dim",
+        UiLogLevel::Info => "",
+        UiLogLevel::Warn => "ux-console-line-warn",
+        UiLogLevel::Error => "ux-console-line-error",
+    }
+}
+
+/// One icon tab: selection wears the card tint (`.ux-device-tab` — the
+/// Danger tab the error family), the badge dot the per-tab announcement.
+fn tab_button<A>(
+    tab_view: &CardTabView<A>,
+    active_tab: DeviceCardTab,
+    mut selected: Signal<DeviceCardTab>,
+) -> Element {
+    let tab = tab_view.tab;
+    let label = tab.label();
+    let badge_style = tab_view.badge.map(|badge| {
+        format!(
+            "background: var(--studio-status-{}-text);",
+            status_family(badge)
+        )
+    });
+    rsx! {
+        button {
+            class: if tab == DeviceCardTab::Danger { "ux-device-tab ux-device-tab-danger" } else { "ux-device-tab" },
+            r#type: "button",
+            role: "tab",
+            aria_selected: tab == active_tab,
+            title: "{label}",
+            aria_label: "{label}",
+            onclick: move |event| {
+                event.stop_propagation();
+                selected.set(tab);
+            },
+            StudioIcon { name: tab_icon(tab), size: 14 }
+            if let Some(badge_style) = badge_style {
+                span { class: "ux-device-tab-badge", style: "{badge_style}" }
+            }
+        }
+    }
+}
+
+/// The Status tab: the Health section with the status line up front, the
+/// project chip as identity, and the state-table affordance — today's
+/// card body, re-homed.
+fn status_tab_body(
+    card: &UiDeviceCard,
+    tabs: &[CardTabView<CardRowAction>],
+    chip_muted: bool,
+    on_action: EventHandler<UiAction>,
+    sheet: Signal<Option<DeviceCardSheet>>,
+) -> Element {
+    let health = tabs
+        .iter()
+        .find(|tab| tab.tab == DeviceCardTab::Status)
+        .map(|tab| tab.sections.as_slice())
+        .unwrap_or_default();
+    rsx! {
+        for section in health {
+            for line in section.lines.iter() {
+                if line.label == "status" {
+                    // the headline: tinted like the edge (the spike's
+                    // status line), never a bare kv row
+                    p { class: "tw:m-0 tw:truncate tw:text-xs tw:font-semibold",
+                        style: "color: var(--edge-tint);",
+                        "{line.value}"
+                    }
+                } else {
+                    p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-subtle-foreground",
+                        "{line.value}"
+                    }
+                }
+            }
+            if let Some(chip) = section.chip.as_ref() {
+                div { class: "tw:mt-1",
+                    StatusChip { status: chip_status(chip) }
+                }
+            }
+        }
+        if let Some(chip) = card.project.clone() {
+            // identity, not status: the project the device holds (or last
+            // ran — muted on offline/error cards); the drift facts live on
+            // the Project tab
+            span { class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5",
+                span {
+                    class: "tw:inline-block tw:h-3 tw:w-3 tw:flex-none tw:rounded-[3px]",
+                    style: thumb_swatch_style(&chip.uid, chip_muted),
+                }
+                span { class: chip_name_class(chip_muted), "{chip.name}" }
+            }
+        }
+        for section in health {
+            for row in section.affordances.iter() {
+                div { class: "tw:mt-1",
+                    {row_button(row, ActionButtonVariant::Quiet, on_action, sheet)}
+                }
+            }
+        }
+    }
+}
+
+/// A non-Status tab's body: the tab's sections as compact fact rows +
+/// advisory chip + affordances. Danger rows render as destructive menu
+/// rows (inspector-row convention); other affordances as quiet chips.
+fn sections_tab_body(
+    tabs: &[CardTabView<CardRowAction>],
+    active_tab: DeviceCardTab,
+    on_action: EventHandler<UiAction>,
+    sheet: Signal<Option<DeviceCardSheet>>,
+) -> Element {
+    let sections = tabs
+        .iter()
+        .find(|tab| tab.tab == active_tab)
+        .map(|tab| tab.sections.as_slice())
+        .unwrap_or_default();
+    let menu_rows = active_tab == DeviceCardTab::Danger;
+    rsx! {
+        for section in sections {
+            if !section.lines.is_empty() {
+                dl { class: "tw:m-0 tw:grid tw:min-w-0 tw:gap-1 tw:text-xs",
+                    for line in section.lines.iter() {
+                        div { class: "tw:grid tw:min-w-0 tw:grid-cols-[72px_minmax(0,1fr)] tw:gap-2",
+                            dt { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                                "{line.label}"
+                            }
+                            dd { class: "tw:m-0 tw:min-w-0 tw:font-mono tw:text-muted-foreground tw:break-words",
+                                "{line.value}"
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(chip) = section.chip.as_ref() {
+                div { StatusChip { status: chip_status(chip) } }
+            }
+            for row in section.affordances.iter() {
+                div {
+                    {row_button(
+                        row,
+                        if menu_rows { ActionButtonVariant::MenuItem } else { ActionButtonVariant::Quiet },
+                        on_action,
+                        sheet,
+                    )}
+                }
+            }
+        }
+    }
+}
+
+/// One affordance row: dispatch rows fire `on_action`; sheet rows open
+/// their card sheet instead (the display action never dispatches — its
+/// confirmation, if any, was stripped at wiring).
+fn row_button(
+    row: &CardRowAction,
+    variant: ActionButtonVariant,
+    on_action: EventHandler<UiAction>,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+) -> Element {
+    match row {
+        CardRowAction::Dispatch(action) => rsx! {
+            ActionButton { action: action.clone(), running: false, variant, on_action }
+        },
+        CardRowAction::Sheet(kind, display) => {
+            let kind = kind.clone();
+            rsx! {
+                ActionButton {
+                    action: display.clone(),
+                    running: false,
+                    variant,
+                    on_action: move |_| sheet.set(Some(kind.clone())),
+                }
+            }
+        }
+    }
+}
+
+/// Render the active card sheet (D41).
+fn device_card_sheet_view(
+    active: &DeviceCardSheet,
+    card: &UiDeviceCard,
+    sheet: Signal<Option<DeviceCardSheet>>,
+    selected: Signal<DeviceCardTab>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    match active {
+        DeviceCardSheet::Confirm(action) => rsx! {
+            ConfirmSheet { action: action.clone(), sheet, on_action }
+        },
+        DeviceCardSheet::Name => rsx! {
+            NameDeviceSheet { sheet, selected, on_action }
+        },
+        DeviceCardSheet::Drift => rsx! {
+            DriftSheet {
+                project_name: card.project.as_ref().map(|chip| chip.name.clone()),
+                sheet,
+                on_action,
+            }
+        },
+    }
+}
+
+/// The destructive-confirm sheet: copy from the action's own
+/// [`lpa_studio_core::ActionConfirmation`] (title · message · verb);
+/// Confirm dispatches the action with the gate stripped (the sheet WAS
+/// the gate).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ConfirmSheet(
+    action: UiAction,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let meta = action.meta().clone();
+    let confirmation = meta.confirmation.clone().unwrap_or_else(|| {
+        // defensive: a confirm sheet over an unconfirmed action still
+        // reads sensibly (label as title, summary as body)
+        lpa_studio_core::ActionConfirmation::new(
+            meta.label.clone(),
+            meta.summary.clone(),
+            meta.label.clone(),
+        )
+    });
+    let tone = if meta.destructive {
+        SheetButtonTone::Destructive
+    } else {
+        SheetButtonTone::Primary
+    };
+    let confirmed = strip_confirmation(action);
+    rsx! {
+        CardSheet { on_dismiss: move |_| sheet.set(None),
+            CardSheetTitle { text: confirmation.title.clone() }
+            CardSheetMessage { text: confirmation.message.clone() }
+            CardSheetButtons {
+                CardSheetButton {
+                    label: "Cancel",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| sheet.set(None),
+                }
+                CardSheetButton {
+                    label: confirmation.confirm_label.clone(),
+                    tone,
+                    onclick: move |_| {
+                        sheet.set(None);
+                        on_action.call(confirmed.clone());
+                    },
+                }
+            }
+        }
+    }
+}
+
+/// The name-stamping sheet (NeedsAName — spike round 3): input +
+/// Enter-to-save; naming stamps the uid and the card returns to Status.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NameDeviceSheet(
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    mut selected: Signal<DeviceCardTab>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut name = use_signal(String::new);
+    rsx! {
+        CardSheet { on_dismiss: move |_| sheet.set(None),
+            CardSheetTitle { text: "Name this device" }
+            CardSheetMessage { text: "Studio remembers it by name; the name is stamped onto the board." }
+            form {
+                onsubmit: move |event: FormEvent| {
+                    event.prevent_default();
+                    save_device_name(name, sheet, selected, on_action);
+                },
+                input {
+                    class: "tw:mb-3 tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    autofocus: true,
+                    placeholder: "e.g. Porch sign",
+                    value: "{name}",
+                    oninput: move |event| name.set(event.value()),
+                    onkeydown: move |event: KeyboardEvent| {
+                        if event.key() == Key::Escape {
+                            sheet.set(None);
+                        }
+                    },
+                }
+                CardSheetButtons {
+                    CardSheetButton {
+                        label: "Cancel",
+                        tone: SheetButtonTone::Quiet,
+                        onclick: move |_| sheet.set(None),
+                    }
+                    CardSheetButton {
+                        label: "Name device",
+                        tone: SheetButtonTone::Primary,
+                        onclick: move |_| save_device_name(name, sheet, selected, on_action),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The name sheet's save: a non-empty name dispatches the stamp op,
+/// closes the sheet, and returns the card to Status (spike round 3).
+fn save_device_name(
+    name: Signal<String>,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    mut selected: Signal<DeviceCardTab>,
+    on_action: EventHandler<UiAction>,
+) {
+    let value = name.read().trim().to_string();
+    if value.is_empty() {
+        return;
+    }
+    on_action.call(home_action(HomeOp::NameDevice { name: value }));
+    sheet.set(None);
+    selected.set(DeviceCardTab::Status);
+}
+
+/// The D30 drift-resolution sheet on the Edited-on-device card: adopt /
+/// keep-both / stay. The verbs are the deploy-dialog era's ops —
+/// `AdoptDeviceCopy` and `KeepBothFork` now resolve the diverged copy
+/// from the live session when no dialog is open.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DriftSheet(
+    project_name: Option<String>,
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let subject = project_name.unwrap_or_else(|| "This project".to_string());
+    let message = format!(
+        "\"{subject}\" was edited on the device, so its copy differs from yours. \
+         The device's copy was already saved to your library at connect."
+    );
+    rsx! {
+        CardSheet { on_dismiss: move |_| sheet.set(None),
+            CardSheetTitle { text: "Edited on device" }
+            CardSheetMessage { text: message }
+            div { class: "tw:grid tw:justify-end tw:gap-2",
+                CardSheetButton {
+                    label: "Use the device's copy",
+                    tone: SheetButtonTone::Primary,
+                    onclick: move |_| dispatch_drift_verb(sheet, on_action, DeployOp::AdoptDeviceCopy),
+                }
+                CardSheetButton {
+                    label: "Keep both",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| dispatch_drift_verb(sheet, on_action, DeployOp::KeepBothFork),
+                }
+                CardSheetButton {
+                    label: "Stay",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| sheet.set(None),
+                }
+            }
+        }
+    }
+}
+
+/// Dispatch one D30 verb and close the sheet.
+fn dispatch_drift_verb(
+    mut sheet: Signal<Option<DeviceCardSheet>>,
+    on_action: EventHandler<UiAction>,
+    op: DeployOp,
+) {
+    sheet.set(None);
+    on_action.call(UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op));
+}
+
+/// The tab's icon (icon tabs at card scale; labels arrive in pane mode).
+fn tab_icon(tab: DeviceCardTab) -> StudioIconName {
+    match tab {
+        DeviceCardTab::Status => StudioIconName::Play,
+        DeviceCardTab::Project => StudioIconName::NodeKind(NodeKindIcon::Project),
+        DeviceCardTab::Settings => StudioIconName::Settings,
+        DeviceCardTab::Performance => StudioIconName::Performance,
+        DeviceCardTab::Console => StudioIconName::Console,
+        DeviceCardTab::Danger => StudioIconName::Danger,
+    }
+}
+
+/// The status family's token name — the edge tint and badge dots ride the
+/// shared `--studio-status-*` families (attention-orange for health;
+/// yellow/purple stay node meanings, never borrowed here).
+fn status_family(tone: UiStatusKind) -> &'static str {
+    match tone {
+        UiStatusKind::Neutral => "neutral",
+        UiStatusKind::Working => "working",
+        UiStatusKind::Good => "good",
+        UiStatusKind::Warning => "warning",
+        UiStatusKind::Attention => "attention",
+        UiStatusKind::Error => "error",
     }
 }
 
@@ -373,38 +940,10 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
         .with_icon("zap")
 }
 
-/// What clicking the card body does, per state: offline reconnects (M1);
-/// Running-family states with a Known/Adopted project attach the editor
-/// lens to the DEVICE session and open its running project (the D29
-/// click, runtime-pool P3; the view mirror then binds `#/device/<uid>` —
-/// D37); other provisioning-ish connected states open the deploy dialog
-/// WITH the device context; self-healing/working states are quiet.
-fn card_click_action(card: &UiDeviceCard) -> Option<UiAction> {
-    match &card.state {
-        RosterCardState::Offline { .. } => Some(reconnect_device_action(card.uid.clone())),
-        RosterCardState::ConnectingRetrying { .. }
-        | RosterCardState::OperationInFlight { .. }
-        | RosterCardState::InUseElsewhere => None,
-        // handled in the renderer: click opens the inline name form
-        RosterCardState::NeedsAName => None,
-        // D29: the device is running a project the library knows
-        // (RunningUpToDate/RunningBehind derive from Known/Adopted;
-        // EditedOnDevice is the banked diverged copy) — the click opens
-        // it in the editor on the device's own session. Push/resolve
-        // stay one click away on the card's affordance button.
-        RosterCardState::RunningUpToDate
-        | RosterCardState::RunningBehind { .. }
-        | RosterCardState::EditedOnDevice => Some(open_device_project_action()),
-        _ => Some(UiAction::from_op(
-            ControllerId::new(DEPLOY_NODE_ID),
-            DeployOp::OpenDialog { target_key: None },
-        )),
-    }
-}
-
-/// The D29 click: move the editor lens onto the device session and open
-/// its running project in the editor. The card click targets the attached
-/// session (`uid: None`); the `#/device/<uid>` route passes the uid.
+/// The D29 editor entry, now dispatched from the grow control (⤢): move
+/// the editor lens onto the device session and open its running project.
+/// The card targets the attached session (`uid: None`); the
+/// `#/device/<uid>` route passes the uid.
 fn open_device_project_action() -> UiAction {
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
@@ -412,7 +951,7 @@ fn open_device_project_action() -> UiAction {
     )
 }
 
-/// The sim-card click (the D29 grammar's sim arm, runtime-pool P4):
+/// The sim card's grow (the D29 grammar's sim arm, runtime-pool P4):
 /// re-attach the editor lens to the sim session and open what it runs.
 fn open_sim_project_action() -> UiAction {
     UiAction::from_op(
@@ -421,11 +960,11 @@ fn open_sim_project_action() -> UiAction {
     )
 }
 
-/// Stop the simulator, from the sim card's danger zone (runtime-pool P3's
+/// Stop the simulator, from the sim card's Danger tab (runtime-pool P3's
 /// destroy op). Confirmation states the honest cost: the worker dies, and
 /// applied-but-unsaved edits live on it — anything not saved to the
 /// library is gone.
-pub(super) fn stop_simulator_action() -> UiAction {
+pub(crate) fn stop_simulator_action() -> UiAction {
     UiAction::from_op(
         ControllerId::new(DeviceController::NODE_ID),
         DeviceOp::StopSimulator,
@@ -437,13 +976,13 @@ pub(super) fn stop_simulator_action() -> UiAction {
     ))
 }
 
-/// The ≤1 affordance button, wired to what exists TODAY: Push runs the
-/// in-card push directly (M5 — the button is the D11 consent); flows the
-/// vocabulary anticipates but that land later (Set up = M8, troubleshoot
-/// = M6, D30 rich drift resolution = the M7/M8 reshape) route to the
-/// deploy dialog with the device context — never a dead button.
-/// Click-through affordances (open editor) render no button; the card
-/// body carries the action.
+/// The ≤1 affordance, wired to what exists TODAY: Push runs the in-card
+/// push directly (M5 — the button is the D11 consent); flows the
+/// vocabulary anticipates but that land later (Set up = M8′,
+/// troubleshoot = M6, D30 rich drift resolution = the M7′ P2 sheet)
+/// route to the deploy dialog with the device context — never a dead
+/// button. The editor identity renders no button — the grow control is
+/// the editor entry.
 pub(super) fn device_affordance_action(
     card: &UiDeviceCard,
     affordance: &RosterAffordance,
@@ -455,8 +994,7 @@ pub(super) fn device_affordance_action(
         )
     };
     let action = match affordance {
-        // click-through: the card click is the action (the D29
-        // editor-on-device click)
+        // the grow control (⤢) is the editor entry — no row
         RosterAffordance::OpenEditor => return None,
         // The in-card push (M5): the button IS the D11 consent — the push
         // dispatches directly and its progress folds into the card's
@@ -502,19 +1040,104 @@ pub(super) fn device_affordance_action(
     Some(action.with_label(affordance.label()))
 }
 
-/// The danger zone's flash row: [`flash_device_action`] with a live
-/// device context, wearing the destructive treatment the zone's rows
-/// share (Q5 — the inline-tinted zone reads uniformly red).
+/// Map one device section's affordance identities onto card ROWS (M7′
+/// P2): confirm-carrying actions and the name/drift flows become sheet
+/// rows (D41); everything else dispatches. (`wire_section` below keeps
+/// the popover-era `UiAction` wiring compiling until P3 deletes the
+/// popover.)
+fn wire_card_section(
+    card: &UiDeviceCard,
+    section: RichSection<DeviceDetailAffordance>,
+) -> RichSection<CardRowAction> {
+    RichSection {
+        title: section.title,
+        tone: section.tone,
+        lines: section.lines,
+        chip: section.chip,
+        affordances: section
+            .affordances
+            .iter()
+            .filter_map(|affordance| wire_card_affordance(card, affordance))
+            .collect(),
+        weight: section.weight,
+    }
+}
+
+fn wire_card_affordance(
+    card: &UiDeviceCard,
+    affordance: &DeviceDetailAffordance,
+) -> Option<CardRowAction> {
+    match affordance {
+        // D30: the drift sheet (the deploy-dialog routing dissolved into
+        // it). The display action is meta-only — the sheet's verbs fire.
+        DeviceDetailAffordance::Roster(RosterAffordance::ResolveDrift) => {
+            let display =
+                UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::AdoptDeviceCopy)
+                    .with_label(RosterAffordance::ResolveDrift.label())
+                    .with_summary("Review the device's edited copy against your version.")
+                    .with_icon("edit");
+            Some(CardRowAction::Sheet(DeviceCardSheet::Drift, display))
+        }
+        // The name-stamping sheet (an unstamped board's one naming flow).
+        DeviceDetailAffordance::Roster(RosterAffordance::NameDevice) => {
+            let display = home_action(HomeOp::NameDevice {
+                name: String::new(),
+            })
+            .with_label("Name this device…")
+            .with_summary("Stamp a name onto this board so Studio remembers it.")
+            .with_icon("edit");
+            Some(CardRowAction::Sheet(DeviceCardSheet::Name, display))
+        }
+        DeviceDetailAffordance::Roster(affordance) => {
+            device_affordance_action(card, affordance).map(CardRowAction::from_action)
+        }
+        DeviceDetailAffordance::FlashFirmware => {
+            Some(CardRowAction::from_action(flash_device_action_destructive()))
+        }
+        DeviceDetailAffordance::EraseDevice => Some(CardRowAction::from_action(
+            erase_device_action(card.name.clone()),
+        )),
+        DeviceDetailAffordance::ForgetDevice => card
+            .uid
+            .clone()
+            .map(|uid| CardRowAction::from_action(forget_device_action(uid, card.name.clone()))),
+    }
+}
+
+/// Map one sim section's affordance identities onto card rows (the
+/// stop-simulator confirm rides the D41 sheet).
+fn wire_sim_card_section(section: RichSection<SimDetailAffordance>) -> RichSection<CardRowAction> {
+    RichSection {
+        title: section.title,
+        tone: section.tone,
+        lines: section.lines,
+        chip: section.chip,
+        affordances: section
+            .affordances
+            .iter()
+            .map(|affordance| match affordance {
+                SimDetailAffordance::StopSimulator => {
+                    CardRowAction::from_action(stop_simulator_action())
+                }
+            })
+            .collect(),
+        weight: section.weight,
+    }
+}
+
+/// The Danger tab's flash row: [`flash_device_action`] with a live
+/// device context, wearing the destructive treatment the tab's rows
+/// share (the inline red zone reads uniformly red).
 pub(super) fn flash_device_action_destructive() -> UiAction {
     let action = flash_device_action(true);
     let meta = action.meta().clone().destructive();
     action.with_meta(meta)
 }
 
-/// Erase the device's flash entirely, from the danger zone.
-/// Confirmation states the honest facts: full wipe; anything Studio could
-/// read was banked at connect (D8) — unreadable content is gone for good.
-pub(super) fn erase_device_action(name: String) -> UiAction {
+/// Erase the device's flash entirely, from the Danger tab. Confirmation
+/// states the honest facts: full wipe; anything Studio could read was
+/// banked at connect (D8) — unreadable content is gone for good.
+pub(crate) fn erase_device_action(name: String) -> UiAction {
     UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::EraseDevice).with_confirmation(
         lpa_studio_core::ActionConfirmation::new(
             "Erase device",
@@ -527,8 +1150,8 @@ pub(super) fn erase_device_action(name: String) -> UiAction {
     )
 }
 
-/// The forget action (D34 hygiene) for the offline card's danger zone.
-pub(super) fn forget_device_action(uid: String, name: String) -> UiAction {
+/// The forget action (D34 hygiene) for the offline card's Danger tab.
+pub(crate) fn forget_device_action(uid: String, name: String) -> UiAction {
     home_action(HomeOp::ForgetDevice { uid }).with_confirmation(
         lpa_studio_core::ActionConfirmation::new(
             "Forget device",
@@ -538,38 +1161,30 @@ pub(super) fn forget_device_action(uid: String, name: String) -> UiAction {
     )
 }
 
-/// Core circle spec → base component props (the one consumer-side hop —
-/// base primitives stay independent of `lpa-studio-core`).
-pub(crate) fn circle_props(circle: RosterCircle) -> (StatusCircleShape, StatusCircleTone) {
-    let shape = match circle.shape {
-        CoreShape::Solid => StatusCircleShape::Solid,
-        CoreShape::Hollow => StatusCircleShape::Hollow,
-        CoreShape::Pulsing => StatusCircleShape::Pulsing,
+/// The card's chrome: the tint edge class per the shape grammar plus the
+/// offline whole-card fade; pane mode (D43) makes the card a tall flex
+/// column. Body clicks are quiet (no pointer cursor — the interactive
+/// surfaces carry their own).
+fn device_card_class(faded: bool, treatment: RosterTreatment, pane: bool) -> String {
+    let edge = match treatment {
+        RosterTreatment::Filled => "ux-device-edge",
+        RosterTreatment::Remembered => "ux-device-edge ux-device-edge-remembered",
+        RosterTreatment::Working => "ux-device-edge ux-device-edge-working",
     };
-    let tone = match circle.tone {
-        UiStatusKind::Neutral => StatusCircleTone::Neutral,
-        UiStatusKind::Working => StatusCircleTone::Working,
-        UiStatusKind::Good => StatusCircleTone::Good,
-        UiStatusKind::Warning => StatusCircleTone::Warning,
-        UiStatusKind::Attention => StatusCircleTone::Attention,
-        UiStatusKind::Error => StatusCircleTone::Error,
+    let fade = if faded {
+        " tw:opacity-70 tw:transition-opacity tw:hover:opacity-100"
+    } else {
+        ""
     };
-    (shape, tone)
-}
-
-fn device_card_class(faded: bool, clickable: bool) -> &'static str {
-    // tw:group anchors the pencil's hover reveal
-    match (faded, clickable) {
-        (true, _) => {
-            "tw:group tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-70 tw:transition-opacity tw:hover:opacity-100"
-        }
-        (false, true) => {
-            "tw:group tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
-        }
-        (false, false) => {
-            "tw:group tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card"
-        }
-    }
+    let grown = if pane {
+        " tw:flex tw:min-h-[560px] tw:flex-col"
+    } else {
+        ""
+    };
+    format!(
+        // tw:group anchors the pencil's hover reveal
+        "tw:group tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card {edge}{fade}{grown}"
+    )
 }
 
 fn chip_name_class(muted: bool) -> &'static str {
@@ -580,10 +1195,29 @@ fn chip_name_class(muted: bool) -> &'static str {
     }
 }
 
-fn device_name_class(faded: bool) -> &'static str {
-    if faded {
-        "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-muted-foreground"
+fn device_name_class(faded: bool, editable: bool) -> &'static str {
+    match (faded, editable) {
+        (true, true) => {
+            "tw:m-0 tw:min-w-0 tw:cursor-text tw:truncate tw:text-sm tw:font-semibold tw:text-muted-foreground"
+        }
+        (true, false) => {
+            "tw:m-0 tw:min-w-0 tw:truncate tw:text-sm tw:font-semibold tw:text-muted-foreground"
+        }
+        (false, true) => {
+            "tw:m-0 tw:min-w-0 tw:cursor-text tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground"
+        }
+        (false, false) => {
+            "tw:m-0 tw:min-w-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground"
+        }
+    }
+}
+
+/// The grow control's chrome; hugs the header's right edge when no
+/// transport label sits beside it.
+fn grow_button_class(push_right: bool) -> &'static str {
+    if push_right {
+        "tw:ml-auto tw:inline-flex tw:h-6 tw:w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded tw:border-0 tw:bg-transparent tw:text-dim-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:opacity-40"
     } else {
-        "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground"
+        "tw:inline-flex tw:h-6 tw:w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded tw:border-0 tw:bg-transparent tw:text-dim-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:opacity-40"
     }
 }
