@@ -7,6 +7,7 @@
 //! the web crate renders it and dispatches [`HomeOp`]s back through the
 //! normal action path.
 
+pub mod card_ui_state;
 pub mod embedded_example;
 pub mod home_op;
 pub mod home_view_builder;
@@ -15,6 +16,7 @@ pub mod ui_example_card;
 pub mod ui_home_view;
 pub mod ui_package_card;
 
+pub use card_ui_state::{CardOp, CardSheet, CardUiOp, CardUiState, CardVerb};
 pub use embedded_example::{EmbeddedExample, embedded_example, embedded_examples};
 pub use home_op::{HOME_NODE_ID, HomeOp, ZipBytes};
 pub use home_view_builder::{HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidence};

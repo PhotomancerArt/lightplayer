@@ -86,6 +86,13 @@ pub struct StudioController {
     /// When the next quiet PortHeld retry is due (D32; `None` while no
     /// port is held). Epoch seconds on the injected clock.
     port_held_retry_at: Option<f64>,
+    /// Per-card UI view-state (selected tab, open sheet), keyed by the
+    /// card's `identity_key()`. Core-owned so it survives the card ⇄ pane
+    /// growth and session replaces, and is e2e-drivable (2026-07-25
+    /// re-home). Pruned lazily: absent keys default; a stale key just
+    /// never re-reads. The in-place `op` is NOT stored here — it derives
+    /// live from the session's `operation_label`.
+    card_ui: std::collections::HashMap<String, crate::CardUiState>,
     /// Injected randomness for identity minting (`dev_` uids). The web
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
@@ -135,6 +142,7 @@ impl StudioController {
             library_refresh_pending: false,
             pending_open: None,
             port_held_retry_at: None,
+            card_ui: std::collections::HashMap::new(),
             random: Rc::new(clock_fallback_random),
         }
     }
@@ -405,7 +413,7 @@ impl StudioController {
     fn lens_device_card(&self) -> Option<crate::UiDeviceCard> {
         let session = self.pool.lens_session()?;
         let evidence = self.home_pool_evidence();
-        if session.is_sim() {
+        let card = if session.is_sim() {
             evidence
                 .sim
                 .as_ref()
@@ -415,7 +423,8 @@ impl StudioController {
                 .devices
                 .first()
                 .and_then(crate::app::home::home_view_builder::live_device_card)
-        }
+        };
+        card.map(|card| self.overlay_card_ui(card))
     }
 
     /// The lens's runtime binding for the view (SDI: the URL is the
@@ -459,12 +468,20 @@ impl StudioController {
             ConnectFlowState::Failed { issue } => Some(issue.clone()),
             _ => None,
         };
-        Some(home_view_builder::build_home_view(
+        let mut view = home_view_builder::build_home_view(
             self.home_inputs.as_ref(),
             opening.map(|pending| pending.card_key().to_string()),
             issue,
             &self.home_pool_evidence(),
-        ))
+        );
+        // Overlay each card's persisted UI view-state + live op (the
+        // builder leaves `ui` default; identity keys the overlay).
+        view.devices = view
+            .devices
+            .into_iter()
+            .map(|card| self.overlay_card_ui(card))
+            .collect();
+        Some(view)
     }
 
     /// The runtime pool's roster evidence (P4): one evidence bundle per
@@ -1819,7 +1836,59 @@ impl StudioController {
                     identity.name
                 ))))
             }
+            HomeOp::CardUi(op) => {
+                self.apply_card_ui_op(op);
+                Ok(UiNotices::new())
+            }
         }
+    }
+
+    /// Apply a card UI view-state mutation (2026-07-25 re-home): flip the
+    /// entry keyed by the card's identity and mark the view dirty. Pure
+    /// and synchronous — no wire, no library.
+    fn apply_card_ui_op(&mut self, op: crate::CardUiOp) {
+        use crate::CardUiOp;
+        let entry = self.card_ui.entry(op.card().to_string()).or_default();
+        match op {
+            CardUiOp::SelectTab { tab, .. } => entry.tab = tab,
+            CardUiOp::OpenSheet { sheet, .. } => entry.sheet = Some(sheet),
+            CardUiOp::CloseSheet { .. } => entry.sheet = None,
+        }
+        self.mark_dirty();
+    }
+
+    /// Overlay each card's persisted UI view-state (tab + sheet) and its
+    /// live in-place op onto a freshly-built roster card. The builder
+    /// leaves `ui` default; identity keys the lookup. The `op` derives
+    /// from the attached session's `operation_label` (the same flag the
+    /// Operation-in-flight card state reads) so the in-place progress and
+    /// the edge treatment never disagree.
+    fn overlay_card_ui(&self, mut card: crate::UiDeviceCard) -> crate::UiDeviceCard {
+        if let Some(saved) = self.card_ui.get(card.identity_key()) {
+            card.ui = saved.clone();
+        }
+        // the live op: the session whose card this is, mid-operation
+        let op_label = if card.sim {
+            self.pool
+                .sim_session()
+                .and_then(|session| session.operation_label().map(str::to_string))
+        } else {
+            self.pool
+                .device_session()
+                .filter(|_| {
+                    card.uid.is_some()
+                        || matches!(card.state, crate::RosterCardState::OperationInFlight { .. })
+                })
+                .and_then(|session| session.operation_label().map(str::to_string))
+        };
+        if let Some(label) = op_label {
+            let percent = match &card.state {
+                crate::RosterCardState::OperationInFlight { percent, .. } => *percent,
+                _ => None,
+            };
+            card.ui.op = Some(crate::CardOp::new(label, percent.map(|p| p as u8)));
+        }
+        card
     }
 
     /// The live half of a device rename (D34): when the renamed device is

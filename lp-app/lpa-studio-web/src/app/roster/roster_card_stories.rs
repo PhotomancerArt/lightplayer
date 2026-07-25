@@ -532,6 +532,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         fw: None,
         sim: false,
         console_tail: Vec::new(),
+        ui: Default::default(),
     }
 }
 
@@ -555,6 +556,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
         fw: None,
         sim: true,
         console_tail: Vec::new(),
+        ui: Default::default(),
     }
 }
 

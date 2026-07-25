@@ -3,6 +3,7 @@
 use lpc_wire::FwProvenance;
 
 use crate::UiLogEntry;
+use crate::app::home::card_ui_state::CardUiState;
 use crate::app::roster::RosterCardState;
 
 /// A device card. Visually distinct from package cards by contract: the
@@ -37,21 +38,37 @@ pub struct UiDeviceCard {
     /// card's console strip and Console tab render this. Always empty on
     /// remembered (offline) cards: no session, no console.
     pub console_tail: Vec<UiLogEntry>,
+    /// The card's UI view-state (selected tab, open sheet, in-place op).
+    /// Core-owned + keyed by [`Self::identity_key`], so it survives the
+    /// card ⇄ pane growth and session replaces. The gallery/lens builder
+    /// leaves this default; the controller overlays the persisted state.
+    pub ui: CardUiState,
 }
 
 impl UiDeviceCard {
-    /// Stable identity for keyed rendering. Names are NOT unique — erasing
-    /// and re-provisioning a board registers a new `dev_…` uid under the
-    /// same name, and a keyed list with duplicate keys panics Dioxus (the
-    /// 2026-07-15 home-gallery crash). Registered cards key by uid; the
-    /// (≤1) sim card keys by a reserved token so a device named
-    /// "Simulator" can never collide with it; only the (single)
-    /// identity-less live card falls back to its name.
-    pub fn render_key(&self) -> &str {
+    /// The card's CANONICAL identity — the ONE key both the UI-state map
+    /// and the scene-fork's `view-transition-name` consume (2026-07-25
+    /// alignment). Names are NOT unique (erase + re-provision mints a new
+    /// `dev_…` uid under the same name; a keyed list with duplicate keys
+    /// panics Dioxus — the 2026-07-15 crash). Registered/stamped cards
+    /// key by uid; the (≤1) sim card by a reserved token.
+    ///
+    /// FALLBACK CAVEAT (fork-flagged, upgrade before/with the morph):
+    /// an identity-less LIVE card (a board mid-provision, before its uid
+    /// is stamped) still falls back to its display NAME — a rename can
+    /// re-key it. The robust fix is to fall back to the session's
+    /// `RuntimeId` (stable across the session); that threads the id onto
+    /// the card and lands in the fork-coordination pass before P2.
+    pub fn identity_key(&self) -> &str {
         if self.sim {
             return "runtime-sim";
         }
         self.uid.as_deref().unwrap_or(&self.name)
+    }
+
+    /// Back-compat alias for keyed rendering — the same canonical key.
+    pub fn render_key(&self) -> &str {
+        self.identity_key()
     }
 }
 

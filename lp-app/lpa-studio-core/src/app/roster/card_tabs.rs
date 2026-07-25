@@ -26,8 +26,10 @@ use crate::UiStatusKind;
 use crate::app::rich_object::{RichObjectView, RichSection, RichWeight};
 
 /// The card's icon tabs, in their fixed order.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DeviceCardTab {
+    /// The card's front door — the stable default a fresh card opens on.
+    #[default]
     Status,
     Project,
     Settings,

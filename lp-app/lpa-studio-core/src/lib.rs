@@ -31,8 +31,9 @@ pub use app::device::{
     DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
 };
 pub use app::home::{
-    HOME_NODE_ID, HomeDeviceEvidence, HomeOp, HomePoolEvidence, HomeSimEvidence, UiCardConnection,
-    UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
+    CardOp, CardSheet, CardUiOp, CardUiState, CardVerb, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
+    HomePoolEvidence, HomeSimEvidence, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
+    UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,

@@ -22,6 +22,7 @@ use crate::app::roster::{
     ConnectEvidence, RosterCardState, RosterEvidence, derive_roster_card_state,
 };
 
+use super::card_ui_state::CardUiState;
 use super::embedded_example::embedded_examples;
 use super::ui_device_card::{UiDeviceCard, UiDeviceProjectChip};
 use super::ui_example_card::UiExampleCard;
@@ -328,6 +329,7 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         fw: None,
         sim: true,
         console_tail: sim.console_tail.clone(),
+        ui: CardUiState::default(),
     }
 }
 
@@ -384,6 +386,7 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         fw,
         sim: false,
         console_tail: live.console_tail.clone(),
+        ui: CardUiState::default(),
     })
 }
 
@@ -502,6 +505,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
+        ui: CardUiState::default(),
     }
 }
 
@@ -710,6 +714,7 @@ mod tests {
                 fw: None,
                 sim: false,
                 console_tail: Vec::new(),
+                ui: CardUiState::default(),
             },
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
@@ -720,6 +725,7 @@ mod tests {
                 fw: None,
                 sim: false,
                 console_tail: Vec::new(),
+                ui: CardUiState::default(),
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");
