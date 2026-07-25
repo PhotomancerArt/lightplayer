@@ -71,6 +71,18 @@
   .rowbtn.destructive { color: var(--error); }
   .rowbtn.primary { color: var(--good); }
 
+  /* ---- in-card setup form (new/blank device — no sheet, no confirm) - */
+  .setup-field { display: grid; gap: 4px; font-size: 10.5px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em; }
+  .setup-field input { background: #0b0e12; border: 1px solid var(--border); border-radius: 7px;
+    color: var(--text); font-size: 13px; padding: 7px 9px; text-transform: none; letter-spacing: normal; }
+  .setup-field input:focus { border-color: var(--good); outline: none; }
+  .flashbtn { appearance: none; margin-top: 4px; width: 100%; border: 1px solid var(--good);
+    background: var(--good-bg); color: var(--good); border-radius: 8px; padding: 9px; font-size: 13px;
+    font-weight: 600; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; justify-content: center; }
+  .termtoggle { appearance: none; border: 0; background: transparent; color: var(--dim); font-size: 11px;
+    cursor: pointer; text-align: left; padding: 2px 0; }
+
   /* ---- ELEVATE-THE-CARD progress (the direction Yona picked) ------- */
   /* During a heavy op the SAME card lifts out of the grid, grows, and
      centers over a dimmed stage. Not a separate dialog — the card itself
@@ -86,7 +98,9 @@
   .prog .fill { height: 100%; width: 0%; background: var(--attn); border-radius: 5px; transition: width .4s linear; }
   .prog .pct { font-family: var(--mono); font-size: 12px; color: var(--muted); }
   .prog .walk { color: var(--dim); font-size: 11.5px; }
-  .prog .console { font-family: var(--mono); font-size: 10.5px; color: var(--dim); max-height: 60px; overflow: hidden; }
+  .prog .console { font-family: var(--mono); font-size: 10.5px; color: #9aa79a; line-height: 1.55;
+    background: #07080a; border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px;
+    max-height: 96px; overflow: hidden; }
   .elev-actions { display: flex; justify-content: flex-end; gap: 8px; }
   .elev-actions button { appearance: none; border: 1px solid var(--border-strong); background: transparent;
     color: var(--muted); border-radius: 7px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
@@ -120,13 +134,15 @@
 <body>
   <h1>Device reset / flash / provision lifecycle — design spike</h1>
   <p class="hint">
-    Post-M8′ walk feedback (Yona). Three flows, one direction: heavy device
-    operations (flash / erase / factory-reset) <b>elevate the card</b> —
-    the same card lifts from the grid and grows into the focal point with
-    prominent, walk-away-safe progress. No app-level dialog (that grammar
-    was deleted). Explores: (A) provision a blank board, (B) factory-reset
-    from the editor and recover, (C) firmware update. Cards are ~320px
-    (the new gallery min-size). Click the buttons; everything is inert.
+    Post-M8′ walk feedback (Yona, iterated). Setup is <b>in the card</b>:
+    a new device's tab IS the setup form — a date-based default name +
+    one Flash button, no popup, no confirm, no separate naming. Heavy ops
+    (flash / erase / reset) then <b>elevate the card</b> — the same card
+    lifts and grows into a focal, walk-away-safe progress panel with a
+    collapsible terminal. Destructive ops (erase) keep a confirm; a blank
+    board doesn't. Explores: (A) set up a new device, (B) factory-reset
+    from the editor + recover, (C) firmware update. Cards are ~320px.
+    Click the buttons (or the stage) to step; everything is inert.
   </p>
 
   <div class="flows" id="flows"></div>
@@ -146,12 +162,10 @@ let flow = "A";
 let step = 0;
 
 const FLOWS = {
-  A: { name: "A · Provision a blank board", steps: [
-    "A blank ESP32 was just connected — the card offers Set up.",
-    "Set up → confirm sheet (the ratified D41 confirm; not a dialog).",
-    "Flashing: the card ELEVATES — grows, centers, prominent progress. Walk-away-safe.",
-    "Flashed, unstamped → the card asks for a name (D41 name sheet).",
-    "Named + running. Back in the grid at rest.",
+  A: { name: "A · Set up a new device", steps: [
+    "A blank ESP32 — the device tab IS the setup UI: a date-based default name (editable) + one Flash button. No popup, no confirm, no separate naming step.",
+    "One click → the SAME pane becomes flash progress with a small terminal (collapsible; shown by default).",
+    "Flashed + named. Connected, ready for a project.",
   ]},
   B: { name: "B · Factory-reset from the editor", steps: [
     "You're in the editor (the card grew into the right pane). Danger tab → Erase.",
@@ -202,9 +216,10 @@ function progressCard(name, label, pct, restingStatus){
       <div class="prog">
         <div class="label">${label}</div>
         <div class="track"><div class="fill" style="width:${pct}%"></div></div>
-        <div class="pct">${pct}%</div>
-        <div class="walk">You can leave this — it keeps running, and the card shows progress in the gallery.</div>
-        <div class="console">esptool: writing at 0x10000 (${pct}%)<br>esptool: verifying…</div>
+        <div class="pct">${pct}% · about 40s left</div>
+        <div class="walk">You can leave this — it keeps running; the card shows progress in the gallery.</div>
+        <button class="termtoggle" onclick="const c=this.nextElementSibling; c.hidden=!c.hidden; this.textContent=(c.hidden?'▸ Show details':'▾ Hide details')">▾ Hide details</button>
+        <div class="console">esptool.py v4.5.0<br>Connecting…<br>Chip is ESP32-C6 (QFN40)<br>Erasing flash…<br>Writing at 0x00010000 (${pct}%)<br>Verifying…</div>
       </div>
       <div class="elev-actions"><button onclick="next()">Dismiss (keep running)</button></div>
     </div>
@@ -229,49 +244,33 @@ function render(){
 function galleryCrumb(){ return `<span class="home">LightPlayer Studio</span>`; }
 function editorCrumb(name){ return `<span class="home">LightPlayer Studio</span> ▸ <b>${name}</b> · editor`; }
 
+const DEFAULT_NAME = "2026-07-25 13:08 LightPlayer";
 function renderA(surface, crumb){
   crumb.innerHTML = galleryCrumb();
   if(step===0){
+    // The device tab IS the setup UI — no sheet, no confirm, one click.
+    // A blank board has nothing to lose, so flashing needs no confirmation;
+    // the name is prefilled with a date-based default you can edit in place.
     surface.innerHTML = `<div class="gallery">
       <article class="dcard" data-s="setup">
         ${header("New device","USB")}${tabs("play")}
         <div class="body">
-          <div class="statusline">Ready to set up</div>
-          <div class="subline">A blank ESP32. Install firmware to make it a device.</div>
-          <button class="rowbtn primary" onclick="next()">${ICON.play} Set up…</button>
+          <div class="statusline">Set up this device</div>
+          <div class="subline">A blank ESP32. Flash LightPlayer firmware — one click; about a minute.</div>
+          <label class="setup-field">Name
+            <input type="text" value="${DEFAULT_NAME}">
+          </label>
+          <button class="flashbtn" onclick="next()">⚡ Flash firmware</button>
         </div>
       </article></div>`;
   } else if(step===1){
-    surface.innerHTML = `<div class="gallery">
-      <article class="dcard" data-s="setup">
-        ${header("New device","USB")}${tabs("play")}
-        <div class="body"><div class="statusline">Ready to set up</div></div>
-        <div class="sheet"><div class="panel">
-          <h3>Set up this device</h3>
-          <p>Install LightPlayer firmware onto this ESP32. Takes about a minute; you can walk away.</p>
-          <div class="row"><button onclick="prev()">Cancel</button><button class="primary" onclick="next()">Set up</button></div>
-        </div></div>
-      </article></div>`;
-  } else if(step===2){
-    surface.innerHTML = `<div class="gallery"><article class="dcard" data-s="working">${header("New device","USB")}${tabs("play")}<div class="body"><div class="statusline">Installing firmware… 42%</div></div></article></div>`;
-    elevate(progressCard("New device","Installing firmware…",42,"setup"));
-  } else if(step===3){
-    surface.innerHTML = `<div class="gallery">
-      <article class="dcard" data-s="setup">
-        ${header("New device","USB")}${tabs("play")}
-        <div class="body"><div class="statusline">Needs a name</div></div>
-        <div class="sheet"><div class="panel">
-          <h3>Name this device</h3>
-          <p>Studio remembers it by name; the name is stamped onto the board.</p>
-          <input type="text" placeholder="e.g. Porch sign" value="Porch sign">
-          <div class="row"><button onclick="prev()">Cancel</button><button class="primary" onclick="next()">Name device</button></div>
-        </div></div>
-      </article></div>`;
+    surface.innerHTML = `<div class="gallery"><article class="dcard" data-s="working">${header(DEFAULT_NAME,"USB")}${tabs("play")}<div class="body"><div class="statusline">Installing firmware… 42%</div></div></article></div>`;
+    elevate(progressCard(DEFAULT_NAME,"Installing firmware…",42,"setup"));
   } else {
     surface.innerHTML = `<div class="gallery">
       <article class="dcard" data-s="running">
-        ${header("Porch sign","USB")}${tabs("play")}
-        <div class="body"><div class="statusline">Running</div><div class="subline">◧ porch-sign</div></div>
+        ${header(DEFAULT_NAME,"USB")}${tabs("play")}
+        <div class="body"><div class="statusline">Running</div><div class="subline">Connected — no project yet. Open one to get going.</div></div>
       </article></div>`;
   }
 }
