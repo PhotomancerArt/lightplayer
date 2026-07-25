@@ -68,6 +68,11 @@ pub enum HomeOp {
     NameDevice {
         name: String,
     },
+    /// Mutate a card's UI VIEW-STATE (select tab / open or close a sheet).
+    /// A pure, synchronous view-state change — no wire, no library — kept
+    /// core-owned so it survives the card ⇄ pane growth and is
+    /// e2e-drivable (2026-07-25 re-home).
+    CardUi(crate::app::home::card_ui_state::CardUiOp),
 }
 
 impl ControllerOp for HomeOp {
@@ -127,6 +132,11 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Primary,
             )
             .with_icon("edit"),
+            Self::CardUi(_) => ActionMeta::new(
+                "Card view",
+                "Change what this card is showing.",
+                ActionPriority::Tertiary,
+            ),
         }
     }
 
@@ -147,6 +157,12 @@ impl ControllerOp for HomeOp {
             | Self::RenameDevice { .. }
             | Self::ForgetDevice { .. }
             | Self::NameDevice { .. } => ActionClass::Foreground {
+                deadline: PROJECT_ACTION_DEADLINE,
+            },
+            // A pure view-state flip — synchronous, no wire; run it
+            // inline like any local gesture (the standard budget never
+            // engages because the handler never awaits).
+            Self::CardUi(_) => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
         }
