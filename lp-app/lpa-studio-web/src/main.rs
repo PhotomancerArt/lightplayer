@@ -8,6 +8,7 @@ mod local_store;
 mod router;
 #[cfg(feature = "stories")]
 mod stories;
+mod view_transition;
 mod web_app;
 
 fn main() {

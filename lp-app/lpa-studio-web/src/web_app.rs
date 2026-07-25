@@ -174,7 +174,21 @@ pub fn App() -> Element {
                     }
                 }
 
-                view.set(next);
+                // SPIKE A: an ARRANGEMENT flip (gallery ⇄ editor) runs
+                // inside a view transition so shared-named elements (the
+                // device card ⇄ pane) morph; same-arrangement updates
+                // (ticks, edits) set the signal directly — no snapshots
+                // on the hot path.
+                let arrangement_flip = {
+                    let current = view.peek();
+                    current.home.is_some() != next.home.is_some()
+                        || current.panes.is_empty() != next.panes.is_empty()
+                };
+                if arrangement_flip {
+                    crate::view_transition::with_view_transition(move || view.set(next));
+                } else {
+                    view.set(next);
+                }
             }
         });
         spawn(actor.run());

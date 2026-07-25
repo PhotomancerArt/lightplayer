@@ -210,9 +210,25 @@ pub(crate) fn DeviceCard(
     let rename_reset = card.name.clone();
     let mut rename_value = use_signal(|| rename_reset.clone());
 
+    // SPIKE A: a stable per-identity view-transition-name pairs the
+    // gallery card with the grown pane across arrangement flips, so the
+    // browser morphs the box (the frame carries identity; the body
+    // crossfades). Sanitized: fallback render keys are display names.
+    let vt_name: String = card
+        .render_key()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
     let edge_style = format!(
-        "--edge-tint: var(--studio-status-{}-text);",
-        status_family(edge_tone)
+        "--edge-tint: var(--studio-status-{}-text); view-transition-name: card-{};",
+        status_family(edge_tone),
+        vt_name,
     );
     let glyph = if sim {
         StudioIconName::Simulator
