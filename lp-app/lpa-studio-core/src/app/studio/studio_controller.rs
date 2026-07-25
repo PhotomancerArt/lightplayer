@@ -324,28 +324,42 @@ impl StudioController {
     /// pull draining its client, so the heartbeat keeps its buffered wire
     /// logs from accumulating unboundedly) — whose interval elapsed:
     /// drain the session's buffered wire and console log lines into the
-    /// ring and surface device-state changes through the change gate. No
-    /// wire operation rides a heartbeat — the session's background
-    /// monitor / self-ticking worker fills the buffers — so a tick that
-    /// fans into lens-refresh + heartbeats still issues at most one wire
-    /// op per session.
+    /// session's own console tail (D42 — the per-device console; the
+    /// global ring no longer carries session streams) and surface
+    /// device-state changes through the change gate. No wire operation
+    /// rides a heartbeat — the session's background monitor /
+    /// self-ticking worker fills the buffers — so a tick that fans into
+    /// lens-refresh + heartbeats still issues at most one wire op per
+    /// session.
     pub fn run_due_heartbeats(&mut self) {
         let now = (self.now_secs)();
         let lens = self.pool.lens();
-        let mut drained = Vec::new();
-        let mut state_changed = false;
+        let mut stamped = Vec::new();
+        let mut changed = false;
         for session in self.pool.sessions_mut() {
             let lens_bound = Some(session.id()) == lens;
             if (session.is_sim() && lens_bound) || !session.heartbeat_due(now) {
                 continue;
             }
             session.mark_heartbeat(now);
-            drained.extend(session.take_pending_logs());
+            let mut drained = session.take_pending_logs();
             drained.extend(session.take_device_console_logs());
-            state_changed |= session.note_device_state_change();
+            if !drained.is_empty() {
+                stamped.clear();
+                stamped.extend(drained.into_iter().map(|draft| draft.stamp(now)));
+                // the devtools mirror still sees every session line (the
+                // hook is a field read — disjoint from the pool borrow)
+                if let Some(hook) = &self.on_entry {
+                    for entry in &stamped {
+                        hook(entry);
+                    }
+                }
+                session.push_console_tail(stamped.drain(..));
+                changed = true;
+            }
+            changed |= session.note_device_state_change();
         }
-        self.record_logs(drained);
-        if state_changed {
+        if changed {
             self.mark_dirty();
         }
     }
@@ -382,6 +396,26 @@ impl StudioController {
             )
             .with_device_sync(self.device_sync().cloned())
             .with_deploy(self.deploy_view())
+            .with_lens_card(self.lens_device_card())
+    }
+
+    /// The LENS session's card (D43): the grown control panel the editor
+    /// docks as its right-side pane. The same construction the gallery
+    /// roster uses — one derivation, both scales.
+    fn lens_device_card(&self) -> Option<crate::UiDeviceCard> {
+        let session = self.pool.lens_session()?;
+        let evidence = self.home_pool_evidence();
+        if session.is_sim() {
+            evidence
+                .sim
+                .as_ref()
+                .map(crate::app::home::home_view_builder::sim_card)
+        } else {
+            evidence
+                .devices
+                .first()
+                .and_then(crate::app::home::home_view_builder::live_device_card)
+        }
     }
 
     /// The lens's runtime binding for the view (SDI: the URL is the
@@ -468,6 +502,11 @@ impl StudioController {
             observed_version,
             head_version,
             pending_uid: self.device.pending_reconnect_uid().map(str::to_string),
+            console_tail: self
+                .pool
+                .device_session()
+                .map(|session| session.console_tail().iter().cloned().collect())
+                .unwrap_or_default(),
         };
         let sim = self
             .pool
@@ -479,6 +518,7 @@ impl StudioController {
                         uid: project.uid.clone(),
                         name: project.name.clone(),
                     }),
+                console_tail: session.console_tail().iter().cloned().collect(),
             });
         crate::app::home::HomePoolEvidence {
             devices: vec![device],
@@ -582,6 +622,33 @@ impl StudioController {
         let entry = draft.stamp((self.now_secs)());
         self.notify_entry(&entry);
         self.logs.push(entry);
+        self.mark_dirty();
+    }
+
+    /// Stamp a batch of one SESSION's drained lines into that session's
+    /// console tail (D42 — the per-device console's recording point).
+    /// The devtools mirror still sees every line; the global ring does
+    /// not carry session streams anymore. Falls back to the ring when
+    /// the session is already gone (its card is gone too).
+    fn record_session_logs(&mut self, id: crate::RuntimeId, drafts: Vec<UiLogDraft>) {
+        if drafts.is_empty() {
+            return;
+        }
+        if self.pool.session_mut(id).is_none() {
+            self.record_logs(drafts);
+            return;
+        }
+        let timestamp = (self.now_secs)();
+        let stamped: Vec<UiLogEntry> = drafts
+            .into_iter()
+            .map(|draft| draft.stamp(timestamp))
+            .collect();
+        for entry in &stamped {
+            self.notify_entry(entry);
+        }
+        if let Some(session) = self.pool.session_mut(id) {
+            session.push_console_tail(stamped);
+        }
         self.mark_dirty();
     }
 
@@ -1307,7 +1374,7 @@ impl StudioController {
                 ))))
             }
             DeployOp::AdoptDeviceCopy => {
-                let (project_uid, observed) = self.reviewing_diverged_copy()?;
+                let (project_uid, observed) = self.diverged_device_copy()?;
                 let host = self.library_host()?;
                 host.catalog(CatalogOp::AdoptObservedVersion {
                     project_uid,
@@ -1322,10 +1389,17 @@ impl StudioController {
                     .with_notice(UiNotice::info("The device's version is now the newest")))
             }
             DeployOp::KeepBothFork => {
-                let (project_uid, observed) = self.reviewing_diverged_copy()?;
-                let device_name = match self.deploy_state_now()? {
-                    DeployState::Reviewing { device, .. } => device.name,
-                    _ => "device".to_string(),
+                let (project_uid, observed) = self.diverged_device_copy()?;
+                // the fork's name: the dialog's device summary when one is
+                // open, else the live session's stamped identity (the D30
+                // sheet path)
+                let device_name = match self.deploy_state_now() {
+                    Ok(DeployState::Reviewing { device, .. }) => device.name,
+                    _ => self
+                        .device_sync()
+                        .and_then(|sync| sync.identity.as_ref())
+                        .map(|identity| identity.name.clone())
+                        .unwrap_or_else(|| "device".to_string()),
                 };
                 let host = self.library_host()?;
                 let outcome = host
@@ -1399,6 +1473,28 @@ impl StudioController {
                     },
                 ..
             } => Ok((project_uid, observed)),
+            _ => Err(UiError::UnsupportedAction(
+                "The device's copy is not diverged".to_string(),
+            )),
+        }
+    }
+
+    /// The diverged copy an adopt/keep-both verb targets. An open
+    /// Reviewing dialog wins (its snapshot is what the user is looking
+    /// at); otherwise the live device session's own sync evidence carries
+    /// the same facts — the D30 card sheet dispatches these verbs with no
+    /// dialog open (M7′ P2).
+    fn diverged_device_copy(&mut self) -> Result<(String, lpc_history::ContentHash), UiError> {
+        if self.deploy.is_some() {
+            return self.reviewing_diverged_copy();
+        }
+        match self.device_sync().map(|sync| &sync.content) {
+            Some(DeviceContent::Known {
+                project_uid,
+                observed,
+                relation: lpc_history::SyncRelation::Diverged,
+                ..
+            }) => Ok((project_uid.clone(), *observed)),
             _ => Err(UiError::UnsupportedAction(
                 "The device's copy is not diverged".to_string(),
             )),
@@ -2733,16 +2829,22 @@ impl StudioController {
     }
 
     /// Drop the mirror's session binding: drain the departing lens
-    /// session's buffered wire logs into the ring (nothing strands while
-    /// detached), reset the mirror (edit state lives with the lens — Q1/Q4
-    /// of the roadmap DQ record), release the lens id. Sessions untouched.
+    /// session's buffered wire logs into its console tail (D42 — the
+    /// card's console carries them once the gallery shows; nothing
+    /// strands while detached), reset the mirror (edit state lives with
+    /// the lens — Q1/Q4 of the roadmap DQ record), release the lens id.
+    /// Sessions untouched.
     fn quiesce_lens(&mut self) {
+        let lens = self.pool.lens();
         let pending = self
             .pool
             .lens_session_mut()
             .map(|session| session.take_pending_logs())
             .unwrap_or_default();
-        self.record_logs(pending);
+        match lens {
+            Some(id) => self.record_session_logs(id, pending),
+            None => self.record_logs(pending),
+        }
         self.project.reset();
         self.pool.detach_lens();
     }
@@ -2935,10 +3037,15 @@ impl StudioController {
     }
 
     fn record_project_sync_run(&mut self, sync: &ProjectSyncRun) {
-        // New log lines are a local change the next gate should surface even
-        // if the project revision did not move; `record_logs` marks dirty and
-        // no-ops on an empty batch.
-        self.record_logs(sync.logs.clone());
+        // New log lines are a local change the next gate should surface
+        // even if the project revision did not move; recording marks dirty
+        // and no-ops on an empty batch. The lines are the LENS session's
+        // stream, so they land on its console tail (D42) — the card's
+        // console has the history when the gallery next shows.
+        match self.pool.lens() {
+            Some(id) => self.record_session_logs(id, sync.logs.clone()),
+            None => self.record_logs(sync.logs.clone()),
+        }
     }
 
     async fn disconnect_device(&mut self) -> UiResult {

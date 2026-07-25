@@ -66,6 +66,12 @@ each new agent session re-learns the incantations from memory notes.
   The wedge is now story-specific, not load-correlated: the exit
   criteria's "resume-instead-of-restart" exists (used today) but the
   per-story hang deserves its own diagnosis.
+- 2026-07-24 — M7′ single capture (the circle→edge churn, 867
+  viewports): quiet machine, concurrency 1, 120s timeout — run 1 died
+  on a CDP `Page.navigate` timeout at `project-workspace/overview`
+  (lg) — a DIFFERENT project-workspace sheet than the July-24 wedge,
+  same heavy-sheet family. Run 2 resumed from disk and completed
+  clean. Two-run capture is now the working norm.
 
 **Exit criteria** — All of: (1) captures complete deterministically at
 default concurrency on a loaded machine, or run somewhere isolated

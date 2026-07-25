@@ -96,7 +96,9 @@ pub fn rich_section_tint(tone: UiStatusKind) -> DetailSectionTint {
     }
 }
 
-fn chip_status(chip: &RichChip) -> UiStatus {
+/// Advisory chip → `StatusChip` status (shared with the device card's
+/// tab renderer).
+pub(crate) fn chip_status(chip: &RichChip) -> UiStatus {
     match chip.tone {
         UiStatusKind::Neutral => UiStatus::neutral(chip.text.clone()),
         UiStatusKind::Working => UiStatus::working(chip.text.clone()),

@@ -1,10 +1,8 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{
-    ConsoleCommand, DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent,
-};
+use lpa_studio_core::{DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::layout::VersionBadge;
-use crate::app::{HomeGallery, ProjectNodeWorkspace, ProjectOpeningFrame, RuntimeLog};
+use crate::app::{HomeGallery, ProjectNodeWorkspace, ProjectOpeningFrame};
 use crate::core::PaneView;
 
 #[component]
@@ -21,11 +19,13 @@ pub fn StudioShell(
     #[props(default = false)]
     opening_frame: bool,
     on_action: EventHandler<UiAction>,
-    on_console: EventHandler<ConsoleCommand>,
 ) -> Element {
     let UiStudioView {
         panes,
-        console,
+        // The global console UI retired with M7′ P2 (D42): device/sim
+        // streams live on their cards; app-level entries keep their
+        // devtools mirror (`web_app::log_to_js_console`).
+        console: _,
         home,
         // consumed by the web shell's URL sync, not the layout
         lens: _,
@@ -34,6 +34,7 @@ pub fn StudioShell(
         // rendered by the device pane (M5)
         device_sync: _,
         deploy,
+        lens_card,
     } = view;
 
     if opening_frame && panes.is_empty() {
@@ -43,10 +44,7 @@ pub fn StudioShell(
                     ShellLogo { on_action }
                     VersionBadge {}
                 }
-                div { class: "tw:grid tw:gap-7",
-                    ProjectOpeningFrame {}
-                    RuntimeLog { console, on_console }
-                }
+                div { class: "tw:grid tw:gap-7", ProjectOpeningFrame {} }
             }
         };
     }
@@ -60,7 +58,6 @@ pub fn StudioShell(
                 }
                 div { class: "tw:grid tw:gap-7",
                     HomeGallery { home: *home, now_secs, on_action }
-                    RuntimeLog { console, on_console }
                 }
             }
             if let Some(deploy) = deploy {
@@ -118,7 +115,20 @@ pub fn StudioShell(
                 }
 
                 div { class: "tw:order-3 tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",
-                    if let Some(device) = device {
+                    if let Some(card) = lens_card {
+                        // D43: the LENS session's card, grown — the same
+                        // control panel the gallery shows, docked as the
+                        // editor's right-side pane. The old device pane
+                        // surface renders only while no lens session
+                        // exists (defensive: the editor implies a lens).
+                        crate::app::home::device_card::DeviceCard {
+                            sim: card.sim,
+                            pane: true,
+                            card: *card,
+                            now_secs,
+                            on_action,
+                        }
+                    } else if let Some(device) = device {
                         PaneView {
                             key: "{device.node_id}",
                             view: device,
@@ -127,7 +137,6 @@ pub fn StudioShell(
                             on_action,
                         }
                     }
-                    RuntimeLog { console, on_console }
                 }
             }
         }

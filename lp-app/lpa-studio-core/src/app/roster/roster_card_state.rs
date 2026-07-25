@@ -9,7 +9,7 @@ use crate::UiStatusKind;
 use crate::core::time_ago::time_ago;
 
 use super::roster_affordance::RosterAffordance;
-use super::roster_circle::{RosterCircle, RosterCircleShape};
+use super::roster_state_spec::{RosterStateSpec, RosterTreatment};
 
 /// Where a roster card (device or live sim runtime) stands, in the
 /// honest card vocabulary. Derived by
@@ -98,15 +98,16 @@ pub enum ConnectPhase {
 }
 
 impl RosterCardState {
-    /// The status circle for this state (direction.md state table).
+    /// The state's presentation spec (direction.md state table) — the
+    /// retired circle's grammar, carried by the card's tint edge now.
     ///
-    /// Precedence rule: the circle shows the worst ACTIONABLE state;
+    /// Precedence rule: the spec shows the worst ACTIONABLE state;
     /// secondary facts (firmware drift on a Running row) demote to chips —
     /// see [`super::firmware_update_available`].
-    pub fn circle(&self) -> RosterCircle {
-        let (shape, tone) = match self {
+    pub fn spec(&self) -> RosterStateSpec {
+        let (treatment, tone) = match self {
             Self::RunningUpToDate | Self::ConnectedEmpty => {
-                (RosterCircleShape::Solid, UiStatusKind::Good)
+                (RosterTreatment::Filled, UiStatusKind::Good)
             }
             Self::RunningBehind { .. }
             | Self::EditedOnDevice
@@ -116,16 +117,16 @@ impl RosterCardState {
             | Self::NeedsFirmwareUpdate
             | Self::NeedsAName
             | Self::HoldsUnreadableData { .. } => {
-                (RosterCircleShape::Solid, UiStatusKind::Attention)
+                (RosterTreatment::Filled, UiStatusKind::Attention)
             }
             Self::ConnectingRetrying { .. } | Self::OperationInFlight { .. } => {
-                (RosterCircleShape::Pulsing, UiStatusKind::Attention)
+                (RosterTreatment::Working, UiStatusKind::Attention)
             }
-            Self::NotResponding => (RosterCircleShape::Solid, UiStatusKind::Error),
-            Self::InUseElsewhere => (RosterCircleShape::Solid, UiStatusKind::Neutral),
-            Self::Offline { .. } => (RosterCircleShape::Hollow, UiStatusKind::Neutral),
+            Self::NotResponding => (RosterTreatment::Filled, UiStatusKind::Error),
+            Self::InUseElsewhere => (RosterTreatment::Filled, UiStatusKind::Neutral),
+            Self::Offline { .. } => (RosterTreatment::Remembered, UiStatusKind::Neutral),
         };
-        RosterCircle { shape, tone }
+        RosterStateSpec { treatment, tone }
     }
 
     /// The card's status line (health only — never project names).
@@ -221,30 +222,30 @@ mod tests {
 
     #[test]
     fn circles_follow_the_direction_table() {
-        let solid = |tone| RosterCircle {
-            shape: RosterCircleShape::Solid,
+        let solid = |tone| RosterStateSpec {
+            treatment: RosterTreatment::Filled,
             tone,
         };
         assert_eq!(
-            RosterCardState::RunningUpToDate.circle(),
+            RosterCardState::RunningUpToDate.spec(),
             solid(UiStatusKind::Good)
         );
         assert_eq!(
-            RosterCardState::ConnectedEmpty.circle(),
+            RosterCardState::ConnectedEmpty.spec(),
             solid(UiStatusKind::Good)
         );
         assert_eq!(
-            RosterCardState::NotResponding.circle(),
+            RosterCardState::NotResponding.spec(),
             solid(UiStatusKind::Error)
         );
         assert_eq!(
-            RosterCardState::InUseElsewhere.circle(),
+            RosterCardState::InUseElsewhere.spec(),
             solid(UiStatusKind::Neutral)
         );
         assert_eq!(
-            RosterCardState::Offline { last_seen_at: None }.circle(),
-            RosterCircle {
-                shape: RosterCircleShape::Hollow,
+            RosterCardState::Offline { last_seen_at: None }.spec(),
+            RosterStateSpec {
+                treatment: RosterTreatment::Remembered,
                 tone: UiStatusKind::Neutral,
             }
         );
@@ -259,9 +260,9 @@ mod tests {
             },
         ] {
             assert_eq!(
-                working.circle(),
-                RosterCircle {
-                    shape: RosterCircleShape::Pulsing,
+                working.spec(),
+                RosterStateSpec {
+                    treatment: RosterTreatment::Working,
                     tone: UiStatusKind::Attention,
                 }
             );
@@ -281,7 +282,7 @@ mod tests {
             RosterCardState::NeedsFirmwareUpdate,
             RosterCardState::NeedsAName,
         ] {
-            assert_eq!(attention.circle(), solid(UiStatusKind::Attention));
+            assert_eq!(attention.spec(), solid(UiStatusKind::Attention));
         }
     }
 

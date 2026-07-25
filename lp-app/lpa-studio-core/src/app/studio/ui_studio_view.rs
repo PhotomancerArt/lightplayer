@@ -51,6 +51,11 @@ pub struct UiStudioView {
     /// The deploy dialog, when open — rendered as a modal overlay over
     /// whatever the shell shows (M5).
     pub deploy: Option<Box<crate::app::device::UiDeployView>>,
+    /// The LENS session's card, for the editor layout (D43: the grown
+    /// device card IS the editor's right-side pane). Same construction
+    /// as the gallery roster's live cards; `None` while no lens session
+    /// exists (the shell falls back to the device pane surface).
+    pub lens_card: Option<Box<crate::app::home::UiDeviceCard>>,
 }
 
 impl UiStudioView {
@@ -64,6 +69,7 @@ impl UiStudioView {
             open_project_slug: None,
             device_sync: None,
             deploy: None,
+            lens_card: None,
         }
     }
 
@@ -93,6 +99,11 @@ impl UiStudioView {
 
     pub fn with_deploy(mut self, deploy: Option<crate::app::device::UiDeployView>) -> Self {
         self.deploy = deploy.map(Box::new);
+        self
+    }
+
+    pub fn with_lens_card(mut self, card: Option<crate::app::home::UiDeviceCard>) -> Self {
+        self.lens_card = card.map(Box::new);
         self
     }
 

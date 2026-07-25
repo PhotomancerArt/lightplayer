@@ -29,9 +29,8 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    ConsoleCommand, DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp,
-    STUDIO_LOG_SINK, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
-    UiLogLevel, UiStudioView,
+    DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp, STUDIO_LOG_SINK, StudioActor,
+    StudioCommand, StudioController, UiAction, UiLogEntry, UiLogLevel, UiStudioView,
 };
 
 const STYLE: &str = include_str!("style.css");
@@ -346,21 +345,6 @@ pub fn App() -> Element {
         action_bridge.tx.send(StudioCommand::Action(action));
     };
 
-    // Console toolbar gestures ride the same ordered command queue as
-    // actions; the actor applies them synchronously and never coalesces them.
-    let console_bridge = bridge.clone();
-    let on_console = move |command: ConsoleCommand| {
-        // The display threshold doubles as the *capture* floor: raise or lower
-        // the global `log::` max level to match, so `debug!`/`trace!` producers
-        // short-circuit inside the macro when hidden instead of formatting and
-        // queuing output the console would only drop. Reveal below the current
-        // floor is therefore forward-only, by design.
-        if let ConsoleCommand::SetMinLevel(level) = command {
-            log::set_max_level(capture_level_for(level));
-        }
-        console_bridge.tx.send(StudioCommand::Console(command));
-    };
-
     // The URL's intent picks the frame: a SIM route whose project the
     // view hasn't reached yet renders the opening frame, not the gallery.
     // A device route never does — its connecting/failed window renders
@@ -381,7 +365,6 @@ pub fn App() -> Element {
             running: false,
             opening_frame,
             on_action,
-            on_console,
         }
     }
 }
@@ -474,11 +457,12 @@ fn now_secs() -> f64 {
 /// spawns, so `log::` macros anywhere on the wasm side are captured and later
 /// drained into the console ring by the actor.
 ///
-/// The initial max level matches the console filter's default threshold
-/// (`Info`): the display threshold is also the *capture* floor, so producers
-/// below it never format or queue output. `on_console` keeps the two in sync
-/// as the user moves the filter. An already-installed logger is tolerated with
-/// a JS-console warning, never a panic.
+/// The max level is the *capture* floor (`Info` — mirroring core's
+/// `LogFilter` default), so producers below it never format or queue
+/// output. The global console UI that used to move this floor retired
+/// with M7′ P2; the floor is fixed until a per-device level control
+/// lands. An already-installed logger is tolerated with a JS-console
+/// warning, never a panic.
 fn install_log_sink() {
     match log::set_logger(&STUDIO_LOG_SINK) {
         // `Info` mirrors `LogFilter::default().min_level` in core.
