@@ -129,9 +129,13 @@ where
     /// `make_timer` is the platform timer factory used to build each pull's
     /// progress deadline. Call [`StudioActor::run`] to drive the loop (wasm:
     /// under `spawn_local`; tests: under a bare waker).
-    pub fn new(controller: StudioController, make_timer: MakeTimer) -> (Self, StudioHandle) {
+    pub fn new(mut controller: StudioController, make_timer: MakeTimer) -> (Self, StudioHandle) {
         let (tx, commands) = command_channel();
         let (view_out, view) = studio_view_channel();
+        // Agent run futures report progress (and stage edits) through the
+        // same command queue the UI feeds; hand the controller a sender
+        // before it takes ownership.
+        controller.set_agent_command_sender(tx.clone());
         // Seed the shared delay from the controller's initial per-session
         // policy so the UI timer has a sane first interval before the
         // first batch runs.
@@ -181,6 +185,12 @@ where
         }
         for command in plan.console {
             self.controller.apply_console_command(command);
+        }
+        for command in plan.settings {
+            self.controller.apply_settings_command(command);
+        }
+        for feedback in plan.agent {
+            self.controller.apply_agent_feedback(feedback);
         }
         for action in plan.actions {
             self.run_action(action).await;
@@ -389,6 +399,12 @@ where
 /// (coalesced to at most one), and whether shutdown was requested.
 struct CommandPlan {
     console: Vec<ConsoleCommand>,
+    /// Settings mutations/loads, applied synchronously in queue order
+    /// (each is a distinct gesture or layer arrival; never coalesced).
+    settings: Vec<crate::SettingsCommand>,
+    /// Agent run feedback, applied synchronously in queue order (event
+    /// order is the transcript order; never coalesced).
+    agent: Vec<crate::AgentFeedback>,
     actions: Vec<UiAction>,
     tick: bool,
     shutdown: bool,
@@ -403,6 +419,8 @@ struct CommandPlan {
 impl CommandPlan {
     fn from_batch(batch: Vec<StudioCommand>) -> Self {
         let mut console = Vec::new();
+        let mut settings = Vec::new();
+        let mut agent = Vec::new();
         let mut actions = Vec::new();
         let mut tick = false;
         let mut shutdown = false;
@@ -429,6 +447,8 @@ impl CommandPlan {
                 // gesture whose relative order matters (e.g. Clear between
                 // two level changes).
                 StudioCommand::Console(command) => console.push(command),
+                StudioCommand::Settings(command) => settings.push(command),
+                StudioCommand::Agent(feedback) => agent.push(feedback),
                 // Coalesce: many queued ticks collapse to one pull.
                 StudioCommand::RefreshTick => tick = true,
                 StudioCommand::Shutdown => shutdown = true,
@@ -436,6 +456,8 @@ impl CommandPlan {
         }
         Self {
             console,
+            settings,
+            agent,
             actions,
             tick,
             shutdown,
@@ -527,10 +549,14 @@ fn command_preempts_passive(command: &StudioCommand) -> bool {
         // in-flight pull: console mutations are display-side and can wait for
         // the batch after the pull completes.
         // An attachment is synchronous installation work, same as console;
-        // a cross-tab library ping is background gallery staleness.
+        // a cross-tab library ping is background gallery staleness;
+        // settings are synchronous store mutations, same as console;
+        // agent feedback is a synchronous mirror mutation, same as console.
         StudioCommand::AttachLibrary(_)
         | StudioCommand::LibraryChanged
         | StudioCommand::Console(_)
+        | StudioCommand::Settings(_)
+        | StudioCommand::Agent(_)
         | StudioCommand::RefreshTick
         | StudioCommand::Shutdown => false,
     }

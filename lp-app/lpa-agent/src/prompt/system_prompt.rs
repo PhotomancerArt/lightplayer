@@ -1,0 +1,183 @@
+//! System prompt assembly from [`ShaderContext`] + a static template.
+//!
+//! Rebuilt every turn so the injected current source tracks staged edits.
+//! Snapshot-tested against `system_prompt_snapshot.md` (regenerate with
+//! `LPA_AGENT_UPDATE_SNAPSHOTS=1 cargo test -p lpa-agent`).
+
+use std::fmt::Write as _;
+
+use crate::prompt::builtin_reference::builtin_reference;
+use crate::tool::iterate_host::ShaderContext;
+
+/// Build the full system prompt for one turn.
+pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String {
+    let mut p = String::new();
+
+    // 1. Role.
+    p.push_str(
+        "You are a shader authoring assistant for LightPlayer, working on ONE \
+         shader inside a LightPlayer project. The user controls physical LED \
+         fixtures with this shader. Assume the user likely cannot read GLSL: \
+         explain results in terms of what the lights do (colors, motion, \
+         brightness, position), not code. Keep replies short and concrete.\n\n",
+    );
+
+    // 2. Entry contract and dialect.
+    p.push_str(
+        "## Shader contract\n\
+         \n\
+         - The entry point is `vec4 render(vec2 pos)`. `pos` is in pixel space \
+         (0..outputSize); returned components are RGBA in [0, 1].\n\
+         - By convention the uniforms `vec2 outputSize` and `float time` exist \
+         when declared; declare uniforms with `layout(binding = N) uniform ...`.\n\
+         - The dialect is GLSL compiled by naga's `glsl-in` frontend (the \
+         LightPlayer dialect): no textures unless declared, no derivatives, \
+         no `discard`.\n\
+         - If a compile fails, the running device keeps the last good shader \
+         (keep-last-good); nothing breaks, but your edit is not live until it \
+         compiles.\n\n",
+    );
+
+    // 3. Injected context.
+    p.push_str("## Current context\n\n");
+    let _ = writeln!(p, "- Project: {}", ctx.project_name);
+    let _ = writeln!(p, "- Shader node: {}", ctx.node_name);
+    match &ctx.fixture {
+        Some(f) => {
+            let _ = writeln!(
+                p,
+                "- Fixture: {} ({} LEDs, {} mapping)",
+                f.name, f.led_count, f.mapping_kind
+            );
+        }
+        None => p.push_str("- Fixture: none wired to this shader yet\n"),
+    }
+    if ctx.bindings.is_empty() {
+        p.push_str("- Declared bindings: none\n");
+    } else {
+        p.push_str("- Declared bindings:\n");
+        for b in &ctx.bindings {
+            let _ = writeln!(p, "  - `{}` ({}) = {}", b.name, b.ty, b.value);
+        }
+    }
+    p.push_str("\nCurrent shader source:\n\n```glsl\n");
+    p.push_str(current_source);
+    if !current_source.ends_with('\n') {
+        p.push('\n');
+    }
+    p.push_str("```\n\n");
+
+    // 4. Builtin reference.
+    p.push_str(
+        "## Builtin functions\n\
+         \n\
+         Beyond standard GLSL builtins, these LightPlayer functions are \
+         available (callable from the shader and from probe expressions):\n\n",
+    );
+    p.push_str(&builtin_reference());
+    p.push('\n');
+
+    // 5. Tool doctrine.
+    p.push_str(
+        "## Working method\n\
+         \n\
+         - Iterate in small steps with the `iterate` tool: one focused change \
+         per call, with a `note` describing the intent.\n\
+         - Verify with probes before making claims about behavior — probe, \
+         don't assert from memory.\n\
+         - A health report comes back on every call. React to NaN/Inf counts \
+         and to a high near-black fraction (dark output usually means a bug, \
+         not a mood).\n\
+         - Probe values are oracle semantics: a CPU f32 reference \
+         interpreter. GPU output may differ in last-ulp ways; do not chase \
+         tiny numeric differences.\n\
+         - Your edits land as unsaved changes in the user's editor; the user \
+         can Save or revert them. Say what you changed.\n\
+         - Your write surface is THIS shader's source only. For anything else \
+         (adding bindings, wiring buses, fixtures, other nodes), advise the \
+         user on what to do — do not attempt it.\n\n",
+    );
+
+    // 6. Caps and the reduce rule.
+    p.push_str(
+        "## Experiment budget\n\
+         \n\
+         Caps per `iterate` call: 8 probes, 4096 evaluations per probe \
+         (|domain| x |vary|), 64 raw rows total for `reduce: none`, 16384 \
+         total evaluations. Probes over budget are skipped with a reason. \
+         Evaluation takes seconds at maximum size, so design domains that fit \
+         the question: use `stats` or `histogram` reductions for anything \
+         bigger than a handful of points, and keep raw-row probes tiny.\n",
+    );
+
+    p
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::iterate_host::{BindingInfo, FixtureSummary};
+
+    const SNAPSHOT_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/prompt/system_prompt_snapshot.md"
+    );
+
+    /// Snapshot of the fully assembled prompt. Regenerate with
+    /// `LPA_AGENT_UPDATE_SNAPSHOTS=1 cargo test -p lpa-agent`.
+    #[test]
+    fn prompt_matches_snapshot() {
+        let ctx = ShaderContext {
+            project_name: "Radiance Dome".into(),
+            node_name: "dome-waves".into(),
+            fixture: Some(FixtureSummary {
+                name: "dome".into(),
+                led_count: 241,
+                mapping_kind: "2D grid".into(),
+            }),
+            bindings: vec![
+                BindingInfo {
+                    name: "time".into(),
+                    ty: "float".into(),
+                    value: "12.5".into(),
+                },
+                BindingInfo {
+                    name: "cfg.speed".into(),
+                    ty: "float".into(),
+                    value: "1.0".into(),
+                },
+            ],
+        };
+        let source = "layout(binding = 0) uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(sin(time), 0.0, 0.0, 1.0);\n}\n";
+        let prompt = build_system_prompt(&ctx, source);
+
+        if std::env::var("LPA_AGENT_UPDATE_SNAPSHOTS").is_ok() {
+            std::fs::write(SNAPSHOT_PATH, &prompt).expect("write snapshot");
+        }
+        let expected = std::fs::read_to_string(SNAPSHOT_PATH)
+            .expect("snapshot file exists (regenerate with LPA_AGENT_UPDATE_SNAPSHOTS=1)");
+        assert_eq!(
+            prompt, expected,
+            "prompt drifted from snapshot; regenerate with LPA_AGENT_UPDATE_SNAPSHOTS=1"
+        );
+    }
+
+    #[test]
+    fn prompt_covers_required_sections() {
+        let prompt = build_system_prompt(&ShaderContext::default(), "vec4 render(vec2 pos) {}");
+        for needle in [
+            "vec4 render(vec2 pos)",
+            "cannot read GLSL",
+            "keep-last-good",
+            "## Builtin functions",
+            "lpfn_hsv2rgb",
+            "probe, \
+         don't assert from memory",
+            "unsaved changes",
+            "THIS shader's source only",
+            "16384",
+        ] {
+            assert!(prompt.contains(needle), "missing {needle:?}");
+        }
+    }
+}

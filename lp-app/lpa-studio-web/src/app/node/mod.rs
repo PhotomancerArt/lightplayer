@@ -1,5 +1,8 @@
 //! Studio node UI components and colocated node UI stories.
 
+mod agent_chat;
+#[cfg(feature = "stories")]
+pub(crate) mod agent_chat_stories;
 mod asset_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod asset_editor_stories;
@@ -25,6 +28,7 @@ mod produced_products;
 pub(crate) mod produced_value_stories;
 mod produced_value_view;
 mod produced_values;
+mod shader_editor_tabs;
 mod slot_affine2d_field;
 mod slot_detail_button;
 mod slot_dimensions_field;
@@ -53,6 +57,7 @@ pub(crate) mod slot_value_editor_stories;
 mod slot_vector_fields;
 pub(crate) mod value_display;
 
+pub use agent_chat::AgentChatPane;
 pub use asset_editor::AssetEditor;
 pub(crate) use binding_authoring_section::BindingAuthoringSection;
 pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
@@ -64,6 +69,7 @@ pub use produced_product_view::ProducedProductView;
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;
+pub use shader_editor_tabs::{ShaderEditorTab, ShaderEditorTabs};
 pub use slot_affine2d_field::Affine2dSlotField;
 pub(crate) use slot_detail_button::{
     SlotDetailButton, SlotDetailRevert, primary_affordance, slot_row_class,

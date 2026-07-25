@@ -51,6 +51,9 @@ pub struct UiStudioView {
     /// The deploy dialog, when open — rendered as a modal overlay over
     /// whatever the shell shows (M5).
     pub deploy: Option<Box<crate::app::device::UiDeployView>>,
+    /// The layered-settings slice (effective values, provenance, override
+    /// state) for the shell's settings popover.
+    pub settings: crate::app::settings::UiSettingsView,
 }
 
 impl UiStudioView {
@@ -64,6 +67,7 @@ impl UiStudioView {
             open_project_slug: None,
             device_sync: None,
             deploy: None,
+            settings: crate::app::settings::UiSettingsView::default(),
         }
     }
 
@@ -93,6 +97,11 @@ impl UiStudioView {
 
     pub fn with_deploy(mut self, deploy: Option<crate::app::device::UiDeployView>) -> Self {
         self.deploy = deploy.map(Box::new);
+        self
+    }
+
+    pub fn with_settings(mut self, settings: crate::app::settings::UiSettingsView) -> Self {
+        self.settings = settings;
         self
     }
 

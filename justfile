@@ -341,6 +341,12 @@ studio-dev: install-wasm32-target studio-firmware-package-esp32c6
         mkdir -p "${public_dir}/firmware/esp32c6"
         cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/esp32c6/manifest.json"
         cp "${firmware_dir}"/*.bin "${public_dir}/firmware/esp32c6/"
+        # Host settings layer (P4): machine-level settings become the app's
+        # dev-settings.json (fetched at boot; 404 => no host layer). Edits
+        # appear on the next reload via this 1s loop.
+        if [[ -f "${HOME}/.lightplayer/settings.json" ]]; then
+            cp "${HOME}/.lightplayer/settings.json" "${public_dir}/dev-settings.json"
+        fi
     }
     (
         while true; do

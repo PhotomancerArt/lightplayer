@@ -30,8 +30,8 @@ use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
     ConsoleCommand, DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp,
-    STUDIO_LOG_SINK, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
-    UiLogLevel, UiStudioView,
+    STUDIO_LOG_SINK, SettingsCommand, StudioActor, StudioCommand, StudioController, UiAction,
+    UiLogEntry, UiLogLevel, UiStudioView,
 };
 
 const STYLE: &str = include_str!("style.css");
@@ -108,6 +108,38 @@ pub fn App() -> Element {
         // builds keep the core's clock-derived fallback.
         #[cfg(target_arch = "wasm32")]
         controller.set_random(crate::library_host_opfs::random_bytes);
+        // Layered settings (P4): the persisted user layer loads
+        // synchronously before the actor spawns (settings are effective
+        // before panes render), and user mutations write back through the
+        // hook. The host layer (dev-settings.json) is fetched below.
+        if let Some(json) = crate::settings_io::load_user_settings_json() {
+            controller.load_user_settings_json(&json);
+        }
+        controller.set_on_user_settings(crate::settings_io::store_user_settings_json);
+        // Shader agent (P5/P8): run futures ride the browser's
+        // single-threaded executor; the provider streams SSE over the
+        // browser fetch transport — Anthropic or OpenAI-compatible per the
+        // resolved settings. Both are wasm-only — host builds of this
+        // crate only run unit tests and never spawn the actor.
+        #[cfg(target_arch = "wasm32")]
+        {
+            use lpa_studio_core::AgentProviderConfig;
+            controller.set_agent_spawner(wasm_bindgen_futures::spawn_local);
+            controller.set_agent_provider_factory(|config| match config {
+                AgentProviderConfig::Anthropic(config) => {
+                    Box::new(lpa_agent::AnthropicProvider::new(
+                        config.clone(),
+                        lpa_agent::provider::WebFetchTransport,
+                    ))
+                }
+                AgentProviderConfig::OpenAiCompat(config) => {
+                    Box::new(lpa_agent::OpenAiCompatProvider::new(
+                        config.clone(),
+                        lpa_agent::provider::WebFetchTransport,
+                    ))
+                }
+            });
+        }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
         spawn(async move {
@@ -179,6 +211,16 @@ pub fn App() -> Element {
             }
         });
         spawn(actor.run());
+        // The host settings layer: a same-origin dev-settings.json fetch
+        // (absent everywhere but the dev server / a future Electron host).
+        let settings_tx = handle.tx.clone();
+        spawn(async move {
+            if let Some(host) = crate::settings_io::fetch_dev_settings().await {
+                settings_tx.send(StudioCommand::Settings(SettingsCommand::HostLayerLoaded(
+                    host,
+                )));
+            }
+        });
         StudioBridge {
             tx: handle.tx,
             delay: handle.delay,
@@ -361,6 +403,13 @@ pub fn App() -> Element {
         console_bridge.tx.send(StudioCommand::Console(command));
     };
 
+    // Settings popover gestures ride the same ordered command queue; the
+    // actor applies them synchronously, like console commands.
+    let settings_bridge = bridge.clone();
+    let on_settings = move |command: SettingsCommand| {
+        settings_bridge.tx.send(StudioCommand::Settings(command));
+    };
+
     // The URL's intent picks the frame: a SIM route whose project the
     // view hasn't reached yet renders the opening frame, not the gallery.
     // A device route never does — its connecting/failed window renders
@@ -382,6 +431,7 @@ pub fn App() -> Element {
             opening_frame,
             on_action,
             on_console,
+            on_settings,
         }
     }
 }

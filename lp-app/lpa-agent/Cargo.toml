@@ -1,0 +1,57 @@
+[package]
+name = "lpa-agent"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Model-facing shader agent core: provider abstraction, agent loop, iterate tool, system prompt"
+
+[dependencies]
+futures-util = "0.3"
+lp-collection = { workspace = true, features = ["serde"] }
+lps-builtins = { path = "../../lp-shader/lps-builtins" }
+lps-probe = { path = "../../lp-shader/lps-probe" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# Host SSE transport for evals/tests (feature `host-transport`; never on wasm).
+# reqwest 0.12 is already in the workspace dependency graph (via dioxus-fullstack).
+reqwest = { version = "0.12", default-features = false, features = [
+    "stream",
+    "rustls-tls",
+], optional = true }
+tokio = { version = "1", features = ["time"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "AbortController",
+    "AbortSignal",
+    "Headers",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Window",
+    "WorkerGlobalScope",
+] }
+
+[dev-dependencies]
+futures-executor = "0.3"
+# Runtime for the live eval harness (tests/evals.rs); reqwest needs a tokio
+# reactor. Host-only (dev), never built for wasm targets.
+tokio = { version = "1", features = ["rt", "time"] }
+
+[features]
+default = []
+# Host (non-wasm) Anthropic SSE transport over reqwest; used by evals and
+# integration tests. The wasm transport needs no feature — it is target-gated.
+host-transport = ["dep:reqwest", "dep:tokio"]
+
+[lints]
+workspace = true

@@ -8,8 +8,8 @@ use lps_q32::q32::Q32;
 
 use super::entry::PixelMappingEntry;
 use super::overlap::circle::circle_pixel_overlap;
-use super::points::generate_mapping_points;
 use super::structure::PrecomputedMapping;
+use lpc_model::nodes::fixture::generate_mapping_points;
 
 /// Compute pre-computed mapping from configuration
 ///

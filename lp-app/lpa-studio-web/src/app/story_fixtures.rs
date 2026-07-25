@@ -67,6 +67,7 @@ pub(crate) fn shell_story(
             running,
             on_action: move |_| {},
             on_console: move |_| {},
+            on_settings: move |_| {},
         }
     }
 }

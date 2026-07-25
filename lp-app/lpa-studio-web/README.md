@@ -52,6 +52,55 @@ packages `fw-browser` with wasm-bindgen, packages the ESP32-C6 firmware assets
 used by browser flashing, mirrors those generated assets into Dioxus' dev
 public directory, and serves `http://127.0.0.1:2820/` through `dx serve`.
 
+### Dev settings (`~/.lightplayer/settings.json`)
+
+Studio settings are layered: **user overrides (localStorage) > host-provided
+(`/dev-settings.json`) > baked defaults**. `studio-dev`'s 1-second asset sync
+loop copies `~/.lightplayer/settings.json` (if present) to
+`dev-settings.json` in the served public directory, so a machine-level file
+gives every worktree's dev server a working agent configuration with no
+key-pasting. Example:
+
+```json
+{
+  "agent": {
+    "provider": "anthropic",
+    "anthropic_api_key": "sk-ant-…",
+    "model": "claude-sonnet-5"
+  }
+}
+```
+
+`provider` selects the model API: `"anthropic"` (the default),
+`"openai"` (`openai_api_key` + `model` required), or `"custom"` — any
+OpenAI-compatible server (`custom_base_url` required, e.g.
+`http://localhost:11434/v1` for Ollama; `custom_api_key` optional; `model`
+required). Optional `price_input_per_mtok` / `price_output_per_mtok`
+($/MTok, f64) override the built-in pricing table behind the chat's ~$
+usage estimate. A custom example:
+
+```json
+{
+  "agent": {
+    "provider": "custom",
+    "custom_base_url": "http://localhost:11434/v1",
+    "model": "llama3.2"
+  }
+}
+```
+
+The app fetches `dev-settings.json` relative to its own origin at boot; a 404
+(deployed builds, plain `dx serve`) simply means no host layer. The
+host-provided layer is a *channel contract*, not a dev-server hack: an
+Electron shell would read the same file and supply the same JSON shape via
+IPC/preload. The header gear popover edits the user layer (provider
+selection, per-provider API keys/base URL, model id, cost rates), which
+persists in this browser's localStorage under `lp.settings.v1` — as plain
+text; unencrypted localStorage is the accepted v1 posture for keys. The
+merge/provenance logic and the per-provider onboarding copy live in
+`lpa-studio-core/src/app/settings/`; the browser IO edges live in
+`src/settings_io.rs`.
+
 Use `just studio-web-build` or `just studio-web` for the release/static build
 path. `dx build` writes Studio app assets under
 `target/dx/lpa-studio-web/{debug,release}/web/public/`, while `public/`
