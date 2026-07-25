@@ -49,6 +49,13 @@ use crate::{
 
 use crate::app::places::{DeviceContent, DeviceSyncState};
 
+use crate::app::device::link_ux::is_port_held_error;
+
+/// The breath between the ladder's two connect attempts (M6): long
+/// enough for the OS to release the port after a failed open, short
+/// enough that the "Resetting…" narration doesn't feel stuck.
+const CONNECT_RETRY_BACKOFF: core::time::Duration = core::time::Duration::from_millis(750);
+
 pub struct DeviceController {
     /// Catalog + factory: consulted when a flow needs the picker list or
     /// the kind's shared connector (memoized per kind, so endpoint state
@@ -110,6 +117,11 @@ pub enum DeviceOpenOutcome {
     },
     /// The user cancelled (browser port picker).
     Cancelled { message: String },
+    /// The connect ladder ended without a session (M6): the flow narrates
+    /// the honest state on the CARD (`PortHeld` → In-use-elsewhere,
+    /// `Unresponsive` → Not-responding). Soft by design — no error
+    /// propagates, no toast, no issue chip (D32 / the D31 replacement).
+    SoftFailed,
 }
 
 impl DeviceController {
@@ -215,8 +227,7 @@ impl DeviceController {
         };
         if endpoints.len() == 1 && provider_auto_connects(provider_id) {
             let endpoint_id = endpoints[0].id.clone();
-            let (payload, logs) = self.connect_endpoint(provider_id, endpoint_id).await?;
-            return Ok(DeviceOpenOutcome::Connected { payload, logs });
+            return self.connect_endpoint(provider_id, endpoint_id).await;
         }
         Ok(DeviceOpenOutcome::Opened)
     }
@@ -295,10 +306,8 @@ impl DeviceController {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
         };
-        let (payload, logs) = self
-            .connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
-            .await?;
-        Ok(DeviceOpenOutcome::Connected { payload, logs })
+        self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
+            .await
     }
 
     #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
@@ -364,10 +373,8 @@ impl DeviceController {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
         };
-        let (payload, logs) = self
-            .connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
-            .await?;
-        Ok(DeviceOpenOutcome::Connected { payload, logs })
+        self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
+            .await
     }
 
     #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
@@ -381,16 +388,88 @@ impl DeviceController {
         ))
     }
 
+    /// D32 auto-connect (M6): the attach sweep. Like
+    /// [`Self::reconnect_granted_device`] but strictly silent — no grant
+    /// means no chooser and no error (the sweep simply has nothing to
+    /// do), and discovery failures reset the flow quietly. `pending_uid`
+    /// is the best-effort card attribution (the most-recently-seen
+    /// registered device — grants can't be mapped to identities
+    /// pre-connect, so the hello reconciles the truth).
+    #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+    pub async fn auto_connect_granted(
+        &mut self,
+        pending_uid: Option<String>,
+    ) -> Result<DeviceOpenOutcome, UiError> {
+        self.pending_reconnect_uid = pending_uid;
+        self.flow = ConnectFlowState::DiscoveringEndpoints {
+            provider_id: LinkProviderKind::BrowserSerialEsp32,
+            progress: ProgressState::new("Finding granted serial ports"),
+        };
+        let result = match self
+            .registry
+            .create_connector(LinkProviderKind::BrowserSerialEsp32)
+        {
+            Ok(connector) => match &*connector {
+                LinkConnector::BrowserSerialEsp32(provider) => provider
+                    .discover_granted_endpoints()
+                    .await
+                    .map_err(map_link_error),
+                _ => Err(UiError::Link(
+                    "browser serial connector has the wrong provider type".to_string(),
+                )),
+            },
+            Err(error) => Err(map_link_error(error)),
+        };
+        let endpoints = match result {
+            Ok(endpoints) => endpoints,
+            Err(_) => {
+                // soft and silent (D32): a sweep that cannot even
+                // enumerate grants leaves no trace
+                self.reset_to_provider_selection(None);
+                return Ok(DeviceOpenOutcome::Opened);
+            }
+        };
+        let Some(endpoint) = endpoints.into_iter().next() else {
+            self.reset_to_provider_selection(None);
+            return Ok(DeviceOpenOutcome::Opened);
+        };
+        let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
+        let endpoint_id = endpoint_choice.id.clone();
+        self.flow = ConnectFlowState::SelectingEndpoint {
+            provider_id: LinkProviderKind::BrowserSerialEsp32,
+            endpoints: vec![endpoint_choice],
+        };
+        self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
+            .await
+    }
+
+    #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
+    pub async fn auto_connect_granted(
+        &mut self,
+        _pending_uid: Option<String>,
+    ) -> Result<DeviceOpenOutcome, UiError> {
+        // host builds have no Web Serial: the sweep is a silent no-op
+        Ok(DeviceOpenOutcome::Opened)
+    }
+
     /// Connect one endpoint: BrowserWorker becomes a [`SimAttachment`]
     /// payload; every other kind becomes a hardware [`DeviceSession`]
     /// payload (readiness is NOT awaited here — the server attach's first
     /// request drives it). The caller installs the returned payload into
     /// the pool.
+    ///
+    /// Hardware connects walk the RETRY LADDER (M6, the D31 replacement):
+    /// try → on failure the automatic reset runs and a second, narrated
+    /// attempt follows (opening a session resets the board) → on repeated
+    /// failure the honest `Unresponsive` state lands on the card. A port
+    /// held by another holder short-circuits to `PortHeld` (D32 soft
+    /// failure — the quiet periodic retry takes over). Ladder endings are
+    /// [`DeviceOpenOutcome::SoftFailed`], never errors.
     pub async fn connect_endpoint(
         &mut self,
         provider_id: LinkProviderKind,
         endpoint_id: LinkEndpointId,
-    ) -> Result<(RuntimePayload, Vec<UiLogDraft>), UiError> {
+    ) -> Result<DeviceOpenOutcome, UiError> {
         let endpoint = self
             .endpoint_choice(provider_id, &endpoint_id)
             .unwrap_or_else(|| EndpointChoice {
@@ -413,39 +492,66 @@ impl DeviceController {
                 return Err(error);
             }
         };
-        let result = if provider_id == LinkProviderKind::BrowserWorker {
-            open_sim_attachment(connector, &endpoint_id).await
-        } else {
-            // Per-session console-log routing (runtime-pool P2): mint a
-            // fresh buffer for this connect; the session payload carries
-            // it, and the controller field aliases it for the window
-            // before the pool holds the session (and for failed connects).
-            let console_logs = Rc::new(RefCell::new(Vec::new()));
-            self.pending_device_logs = Rc::clone(&console_logs);
-            let sink = console_event_sink(Rc::clone(&console_logs));
-            match DeviceSession::connect(connector, &endpoint_id, self.timers.clone(), sink).await {
-                Ok(session) => {
-                    let connector = session.connector();
-                    let logs = link_session_logs(&connector, session.session().id())?;
-                    Ok((
-                        RuntimePayload::Device(DeviceHandle::Session {
-                            session,
-                            console_logs,
-                        }),
-                        logs,
-                    ))
+        let (payload, logs) = if provider_id == LinkProviderKind::BrowserWorker {
+            match open_sim_attachment(connector, &endpoint_id).await {
+                Ok(result) => result,
+                Err(error) => {
+                    self.recover_to_provider_selection(error.message());
+                    return Err(error);
                 }
-                Err(error) => Err(map_link_error(error)),
+            }
+        } else {
+            let mut retried = false;
+            loop {
+                match self
+                    .connect_hardware_session(&connector, &endpoint_id)
+                    .await
+                {
+                    Ok(result) => break result,
+                    Err(error) if is_port_held_error(&error) => {
+                        // D32 soft failure: the card shows In-use-
+                        // elsewhere; the tick-cadence retry takes over.
+                        self.flow = ConnectFlowState::PortHeld {
+                            endpoint: endpoint.clone(),
+                        };
+                        return Ok(DeviceOpenOutcome::SoftFailed);
+                    }
+                    Err(error) if !retried => {
+                        // Rung 2: the reconnect ITSELF resets the board
+                        // (DTR/RTS on open) — narrate it and go again
+                        // after a breath so the OS releases the port.
+                        retried = true;
+                        self.pending_device_logs.borrow_mut().push(UiLogDraft::new(
+                            crate::UiLogLevel::Info,
+                            crate::UiLogOrigin::Link,
+                            format!(
+                                "connect failed ({}); resetting and retrying",
+                                error.message()
+                            ),
+                        ));
+                        self.flow = ConnectFlowState::Retrying {
+                            endpoint: endpoint.clone(),
+                            progress: ProgressState::new("Resetting and retrying"),
+                        };
+                        self.timers.sleep(CONNECT_RETRY_BACKOFF).await;
+                    }
+                    Err(error) => {
+                        // Ladder exhausted: the honest card state, not a
+                        // toast (explicit and auto connects alike).
+                        self.pending_device_logs.borrow_mut().push(UiLogDraft::new(
+                            crate::UiLogLevel::Warn,
+                            crate::UiLogOrigin::Link,
+                            format!("device not responding: {}", error.message()),
+                        ));
+                        self.flow = ConnectFlowState::Unresponsive {
+                            endpoint: endpoint.clone(),
+                        };
+                        return Ok(DeviceOpenOutcome::SoftFailed);
+                    }
+                }
             }
         };
 
-        let (payload, logs) = match result {
-            Ok(result) => result,
-            Err(error) => {
-                self.recover_to_provider_selection(error.message());
-                return Err(error);
-            }
-        };
         let session = payload
             .link_session()
             .unwrap_or_else(|| unreachable!("connect_endpoint builds live sessions only"));
@@ -457,7 +563,40 @@ impl DeviceController {
                 endpoint.label,
             ),
         };
-        Ok((payload, logs))
+        Ok(DeviceOpenOutcome::Connected { payload, logs })
+    }
+
+    /// One hardware connect attempt (one ladder rung): mint the
+    /// per-session console buffer, open the [`DeviceSession`].
+    async fn connect_hardware_session(
+        &mut self,
+        connector: &Rc<LinkConnector>,
+        endpoint_id: &LinkEndpointId,
+    ) -> Result<(RuntimePayload, Vec<UiLogDraft>), UiError> {
+        // Per-session console-log routing (runtime-pool P2): a fresh
+        // buffer per attempt; the session payload carries it, and the
+        // controller field aliases it for the window before the pool
+        // holds the session (and for failed connects, whose captured
+        // boot chatter would otherwise be lost).
+        let console_logs = Rc::new(RefCell::new(Vec::new()));
+        self.pending_device_logs = Rc::clone(&console_logs);
+        let sink = console_event_sink(Rc::clone(&console_logs));
+        match DeviceSession::connect(Rc::clone(connector), endpoint_id, self.timers.clone(), sink)
+            .await
+        {
+            Ok(session) => {
+                let connector = session.connector();
+                let logs = link_session_logs(&connector, session.session().id())?;
+                Ok((
+                    RuntimePayload::Device(DeviceHandle::Session {
+                        session,
+                        console_logs,
+                    }),
+                    logs,
+                ))
+            }
+            Err(error) => Err(map_link_error(error)),
+        }
     }
 
     /// Attachment teardown: close the given session payload (taken out of
@@ -820,11 +959,20 @@ mod tests {
         );
 
         // A per-call fresh provider would never see the armed error and
-        // would fail with endpoint-not-found instead.
+        // would fail with endpoint-not-found instead. Under the M6 ladder
+        // the armed error ends SOFT (Unresponsive), with the error text
+        // preserved in the connect's console drafts.
+        assert!(matches!(result, Ok(DeviceOpenOutcome::SoftFailed)));
         assert!(matches!(
-            &result,
-            Err(UiError::Link(message)) if message.contains("armed on the shared instance")
+            device.flow_state(),
+            ConnectFlowState::Unresponsive { .. }
         ));
+        assert!(
+            device
+                .take_pending_device_logs()
+                .iter()
+                .any(|draft| draft.message.contains("armed on the shared instance"))
+        );
     }
 
     #[test]
@@ -848,7 +996,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_connection_handoff_returns_to_provider_selection_with_issue() {
+    fn failed_connection_handoff_walks_the_ladder_to_unresponsive() {
         let mut device = DeviceController::with_registry(registry_with_fake(
             FakeProvider::new()
                 .with_endpoint(fake_endpoint())
@@ -859,16 +1007,20 @@ mod tests {
             device.connect_endpoint(LinkProviderKind::Fake, LinkEndpointId::new("fake-runtime")),
         );
 
-        assert!(matches!(result, Err(UiError::Link(_))));
+        // M6: hardware connect failures end SOFT on the card, not as an
+        // error — the ladder retried once (reset rides the reconnect).
+        assert!(matches!(result, Ok(DeviceOpenOutcome::SoftFailed)));
         assert!(matches!(
             device.flow_state(),
-            ConnectFlowState::SelectingProvider {
-                issue: Some(issue),
-                ..
-            } if issue.message.contains("server handoff failed")
+            ConnectFlowState::Unresponsive { .. }
         ));
-        // The factory returned no payload, so no session material exists —
-        // the retired `has_runtime_attachment` field read is structural now.
+        // the error text survives in the connect's console drafts
+        assert!(
+            device
+                .take_pending_device_logs()
+                .iter()
+                .any(|draft| draft.message.contains("server handoff failed"))
+        );
     }
 
     fn fake_endpoint() -> LinkEndpoint {

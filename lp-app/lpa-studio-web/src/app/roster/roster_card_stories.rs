@@ -146,9 +146,27 @@ fn needs_a_name() -> Element {
     sheet(vec![card(RosterCardState::NeedsAName, false)])
 }
 
-#[story(description = "Red filled edge: no classification within the deadline; troubleshoot.")]
+#[story(
+    description = "Red filled edge: the connect ladder's honest ending (try → reset+retry → not responding; M6) — the Troubleshoot affordance opens the card-resident instructions sheet."
+)]
 fn not_responding() -> Element {
     sheet(vec![card(RosterCardState::NotResponding, false)])
+}
+
+#[story(
+    description = "The troubleshooting sheet (M6, D41) on the Not-responding card: concrete basic instructions (cable, replug, hold BOOT) with Reconnect re-running the ladder and the recovery flash one row below."
+)]
+fn troubleshoot_sheet_open() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: device_card(RosterCardState::NotResponding, false),
+                now_secs: Some(STORY_NOW),
+                initial_sheet: Some(DeviceCardSheet::Troubleshoot),
+                on_action: |_| {},
+            }
+        }
+    }])
 }
 
 #[story(description = "Gray filled edge: the port is held by another tab; quiet auto-retry.")]
