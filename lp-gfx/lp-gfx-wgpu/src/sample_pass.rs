@@ -22,18 +22,27 @@
 //! pipeline reuses the render pipeline's bind group layout and uniform
 //! buffer as-is.
 //!
-//! Native only: results come back through the blocking buffer map in
-//! [`crate::read_back`], then quantize with the CPU packing rule into the
-//! caller's RGBA16 buffer. The browser tier cannot block on a map and LED
-//! output is not a browser product path, so wasm32 keeps an explicit error
-//! (see `LpShader::sample_rgba16` in [`crate::render`]).
+//! # Two exits
+//!
+//! - [`SamplePass::render_grid`] renders the grid into a caller-provided
+//!   target view and **leaves it on the GPU** — wasm-capable, the resident
+//!   input to the LED splat op (`LpShader::sample_to_grid`).
+//! - [`SamplePass::run`] renders into an internal grid target and reads it
+//!   back through the blocking buffer map in [`crate::read_back`], then
+//!   quantizes with the CPU packing rule into the caller's RGBA16 buffer.
+//!   Native only: the browser tier cannot block on a map (see
+//!   `LpShader::sample_rgba16` in [`crate::render`]).
 
+#[cfg(not(target_arch = "wasm32"))]
 use lp_gfx::GfxError;
 use lps_shared::TextureStorageFormat;
 
 use crate::gpu_graphics::GpuShared;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::read_back::read_back_f32;
-use crate::texture_backing::{GpuTexture, gpu_format, quantize_unorm16};
+use crate::texture_backing::gpu_format;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::texture_backing::{GpuTexture, quantize_unorm16};
 
 /// Hand-written point-list vertex stage. Attribute 0 is the precomputed
 /// clip-space position of target grid texel `i`; attribute 1 is the
@@ -56,21 +65,39 @@ fn vs_main(@location(0) clip_pos: vec2<f32>, @location(1) point: vec2<f32>) -> V
 /// Bytes per sample vertex: `clip_pos: vec2<f32>` + `point: vec2<f32>`.
 const VERTEX_STRIDE: u64 = 16;
 
-/// The compiled sample pipeline plus its per-count resources. Built lazily
-/// on the first `sample_rgba16` call (render-only consumers — the gallery —
-/// never pay for it); resources are rebuilt only when the point count
-/// changes.
-pub(crate) struct SamplePass {
-    pipeline: wgpu::RenderPipeline,
-    resources: Option<SampleResources>,
+/// Row-major grid dimensions for `count` sample points under a device's
+/// `max_texture_dimension_2d`: `W = min(count, max_dim)`,
+/// `H = ceil(count / W)`. `count` must be nonzero and at most
+/// `max_dim × max_dim` (callers validate and error above this).
+pub(crate) fn grid_dims(count: u32, max_dim: u32) -> (u32, u32) {
+    let width = count.min(max_dim);
+    (width, count.div_ceil(width))
 }
 
-/// Vertex buffer and row-major `W × H` grid target for one point count.
-struct SampleResources {
+/// The compiled sample pipeline plus its per-count resources. Built lazily
+/// on the first sampling call (render-only consumers — the gallery — never
+/// pay for it); resources are rebuilt only when the point count changes.
+pub(crate) struct SamplePass {
+    pipeline: wgpu::RenderPipeline,
+    /// Point vertex buffer, rebuilt when the point count changes.
+    vertices: Option<VertexBuffer>,
+    /// Internal grid target for the readback path ([`Self::run`], native
+    /// LED output); the resident path renders into caller targets instead.
+    #[cfg(not(target_arch = "wasm32"))]
+    readback_target: Option<ReadbackTarget>,
+}
+
+/// Vertex buffer for one point count.
+struct VertexBuffer {
     count: u32,
+    buffer: wgpu::Buffer,
+}
+
+/// Row-major `W × H` grid target for the readback path.
+#[cfg(not(target_arch = "wasm32"))]
+struct ReadbackTarget {
     width: u32,
     height: u32,
-    vertex_buffer: wgpu::Buffer,
     target: GpuTexture,
 }
 
@@ -146,61 +173,57 @@ impl SamplePass {
 
         Self {
             pipeline,
-            resources: None,
+            vertices: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            readback_target: None,
         }
     }
 
     /// Evaluate the shader at `points_q16` (`count × 2` Q16.16 coordinates)
-    /// and quantize the results into `out` (`count × 4` RGBA16 channels).
-    /// The caller has already written the uniform buffer behind
-    /// `bind_group`.
-    pub(crate) fn run(
+    /// into the row-major `width × height` grid behind `target_view`,
+    /// leaving the result on the GPU (the resident path — wasm-capable).
+    /// The caller has already validated `0 < count ≤ width × height`,
+    /// written the uniform buffer behind `bind_group`, and passed a view
+    /// over a `gpu_format(Rgba16Unorm)` render attachment.
+    pub(crate) fn render_grid(
         &mut self,
         shared: &GpuShared,
         points_q16: &[i32],
         bind_group: Option<&wgpu::BindGroup>,
-        out: &mut [u16],
-    ) -> Result<(), GfxError> {
+        target_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+    ) {
         debug_assert_eq!(points_q16.len() % 2, 0);
-        debug_assert_eq!(out.len(), points_q16.len() * 2);
         let count = (points_q16.len() / 2) as u32;
-        if count == 0 {
-            return Ok(());
-        }
-        let max_dim = shared.device.limits().max_texture_dimension_2d;
-        if u64::from(count) > u64::from(max_dim) * u64::from(max_dim) {
-            return Err(GfxError::Render(format!(
-                "sample_rgba16: {count} points exceed the device's maximum sample-target grid \
-                 ({max_dim} x {max_dim})"
-            )));
-        }
+        debug_assert!(count > 0);
+        debug_assert!(u64::from(count) <= u64::from(width) * u64::from(height));
 
-        self.ensure_resources(shared, count);
-        let resources = self
-            .resources
+        self.ensure_vertices(shared, count);
+        let vertices = self
+            .vertices
             .as_ref()
-            .expect("sample resources were just ensured");
-        let (width, height) = (resources.width, resources.height);
+            .expect("sample vertex buffer was just ensured");
 
         // Vertex i: clip-space center of grid texel (i % W, i / W), then the
         // Q16.16 point as f32 pixel coordinates (exact for |coord| < 2^24
         // texels). Texel row 0 is the top of the target, which is clip-space
         // +y, so rows map top-down.
-        let mut vertices = Vec::with_capacity(points_q16.len() / 2 * 4);
+        let mut vertex_floats = Vec::with_capacity(points_q16.len() / 2 * 4);
         for (i, point) in points_q16.chunks_exact(2).enumerate() {
             let col = i as u32 % width;
             let row = i as u32 / width;
             let clip_x = (col as f32 + 0.5) / width as f32 * 2.0 - 1.0;
             let clip_y = 1.0 - (row as f32 + 0.5) / height as f32 * 2.0;
-            vertices.push(clip_x);
-            vertices.push(clip_y);
-            vertices.push((f64::from(point[0]) / 65536.0) as f32);
-            vertices.push((f64::from(point[1]) / 65536.0) as f32);
+            vertex_floats.push(clip_x);
+            vertex_floats.push(clip_y);
+            vertex_floats.push((f64::from(point[0]) / 65536.0) as f32);
+            vertex_floats.push((f64::from(point[1]) / 65536.0) as f32);
         }
-        let vertex_bytes: Vec<u8> = vertices.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let vertex_bytes: Vec<u8> = vertex_floats.iter().flat_map(|v| v.to_le_bytes()).collect();
         shared
             .queue
-            .write_buffer(&resources.vertex_buffer, 0, &vertex_bytes);
+            .write_buffer(&vertices.buffer, 0, &vertex_bytes);
 
         let mut encoder = shared
             .device
@@ -209,7 +232,7 @@ impl SamplePass {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("lp-gfx-wgpu sample"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &resources.target.view,
+                    view: target_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -226,18 +249,63 @@ impl SamplePass {
             if let Some(bind_group) = bind_group {
                 pass.set_bind_group(0, bind_group, &[]);
             }
-            pass.set_vertex_buffer(0, resources.vertex_buffer.slice(..));
+            pass.set_vertex_buffer(0, vertices.buffer.slice(..));
             pass.draw(0..count, 0..1);
         }
         shared.queue.submit([encoder.finish()]);
+    }
+
+    /// Evaluate the shader at `points_q16` (`count × 2` Q16.16 coordinates)
+    /// and quantize the results into `out` (`count × 4` RGBA16 channels)
+    /// through the blocking readback (native LED output). The caller has
+    /// already written the uniform buffer behind `bind_group`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn run(
+        &mut self,
+        shared: &GpuShared,
+        points_q16: &[i32],
+        bind_group: Option<&wgpu::BindGroup>,
+        out: &mut [u16],
+    ) -> Result<(), GfxError> {
+        debug_assert_eq!(out.len(), points_q16.len() * 2);
+        let count = (points_q16.len() / 2) as u32;
+        if count == 0 {
+            return Ok(());
+        }
+        let max_dim = shared.device.limits().max_texture_dimension_2d;
+        if u64::from(count) > u64::from(max_dim) * u64::from(max_dim) {
+            return Err(GfxError::Render(format!(
+                "sample_rgba16: {count} points exceed the device's maximum sample-target grid \
+                 ({max_dim} x {max_dim})"
+            )));
+        }
+        let (width, height) = grid_dims(count, max_dim);
+
+        self.ensure_readback_target(shared, width, height);
+        // Split-borrow: render_grid needs `&mut self` for the vertex
+        // buffer, so the target view is cloned out first (wgpu views are
+        // internally refcounted).
+        let target_view = self
+            .readback_target
+            .as_ref()
+            .expect("sample readback target was just ensured")
+            .target
+            .view
+            .clone();
+        self.render_grid(shared, points_q16, bind_group, &target_view, width, height);
 
         // Row-major readback: texel (col, row) is index row * W + col, so
         // channels line up with `out` directly; the final row's unused tail
         // (count not divisible by W) falls off the zip.
+        let target = &self
+            .readback_target
+            .as_ref()
+            .expect("sample readback target was just ensured")
+            .target;
         let pixels = read_back_f32(
             &shared.device,
             &shared.queue,
-            &resources.target,
+            target,
             width,
             height,
             TextureStorageFormat::Rgba16Unorm,
@@ -249,21 +317,29 @@ impl SamplePass {
         Ok(())
     }
 
-    fn ensure_resources(&mut self, shared: &GpuShared, count: u32) {
+    fn ensure_vertices(&mut self, shared: &GpuShared, count: u32) {
         if self
-            .resources
+            .vertices
             .as_ref()
-            .is_none_or(|resources| resources.count != count)
+            .is_none_or(|vertices| vertices.count != count)
         {
-            let max_dim = shared.device.limits().max_texture_dimension_2d;
-            let width = count.min(max_dim);
-            let height = count.div_ceil(width);
-            let vertex_buffer = shared.device.create_buffer(&wgpu::BufferDescriptor {
+            let buffer = shared.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("lp-gfx-wgpu sample points"),
                 size: u64::from(count) * VERTEX_STRIDE,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
+            self.vertices = Some(VertexBuffer { count, buffer });
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn ensure_readback_target(&mut self, shared: &GpuShared, width: u32, height: u32) {
+        if self
+            .readback_target
+            .as_ref()
+            .is_none_or(|readback| (readback.width, readback.height) != (width, height))
+        {
             let target = GpuTexture::new(
                 &shared.device,
                 width,
@@ -271,11 +347,9 @@ impl SamplePass {
                 TextureStorageFormat::Rgba16Unorm,
                 "lp-gfx-wgpu sample target",
             );
-            self.resources = Some(SampleResources {
-                count,
+            self.readback_target = Some(ReadbackTarget {
                 width,
                 height,
-                vertex_buffer,
                 target,
             });
         }
