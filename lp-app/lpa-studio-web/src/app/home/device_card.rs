@@ -476,6 +476,48 @@ pub(crate) fn DeviceCard(
                 if let Some(active_sheet) = sheet() {
                     {device_card_sheet_view(&active_sheet, &card, sheet, selected, on_action)}
                 }
+                // In-place op progress (device-lifecycle P2): the LAST
+                // child of the body wrapper, so it covers the tab row and
+                // body (the title bar above is spared) — a heavy op takes
+                // over the card here, never an app-level modal.
+                if let Some(op) = card.ui.op.as_ref() {
+                    {card_op_overlay(op, &card.console_tail)}
+                }
+            }
+        }
+    }
+}
+
+/// The in-place op overlay (device-lifecycle P2): the card's own progress
+/// while a heavy op runs on it — a label, a determinate-or-indeterminate
+/// bar, and the session's console tail as a collapsible technical terminal
+/// (open by default; Yona likes seeing it). It covers the tabs and blurs
+/// the body, so the card reads as busy without an elevated dialog.
+fn card_op_overlay(op: &lpa_studio_core::CardOp, tail: &[UiLogEntry]) -> Element {
+    let bar_class = if op.percent.is_some() {
+        "ux-card-op-bar"
+    } else {
+        "ux-card-op-bar is-indeterminate"
+    };
+    let fill_style = op
+        .percent
+        .map(|pct| format!("width: {}%;", pct.min(100)))
+        .unwrap_or_default();
+    rsx! {
+        div { class: "ux-card-op", role: "status", aria_busy: "true",
+            span { class: "ux-card-op-label", "{op.label}" }
+            div { class: bar_class,
+                span { style: "{fill_style}" }
+            }
+            details { class: "ux-card-op-term", open: true,
+                summary { "Technical details" }
+                if tail.is_empty() {
+                    div { "Waiting for device output…" }
+                } else {
+                    for entry in tail.iter() {
+                        div { class: console_line_class(entry.level), "{entry.message}" }
+                    }
+                }
             }
         }
     }

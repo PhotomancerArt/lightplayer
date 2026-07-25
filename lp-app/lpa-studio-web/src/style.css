@@ -329,6 +329,98 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-error-text);
 }
 
+/* In-place op progress (device-lifecycle P2): a heavy op — flash / erase /
+   factory-reset — takes over the card body IN PLACE, never an app-level
+   modal. It covers the tab row and blurs the body behind it (the title bar,
+   a sibling above this wrapper, is spared) so the tabs read as
+   inaccessible while it runs. The op mirrors the session's operation label
+   and the same console tail, shown as a technical terminal. */
+
+.ux-card-op {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: color-mix(in srgb, var(--studio-color-terminal) 78%, transparent);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+
+.ux-card-op-label {
+    flex: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--studio-color-text);
+}
+
+.ux-card-op-bar {
+    position: relative;
+    flex: none;
+    height: 6px;
+    overflow: hidden;
+    background: var(--studio-color-border);
+    border-radius: 3px;
+}
+
+.ux-card-op-bar > span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    display: block;
+    height: 100%;
+    background: var(--studio-color-accent);
+    border-radius: 3px;
+    transition: width 200ms ease;
+}
+
+/* Indeterminate: a slice that sweeps the track when no percent is known. */
+.ux-card-op-bar.is-indeterminate > span {
+    width: 35%;
+    animation: ux-card-op-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes ux-card-op-sweep {
+    0% { left: -35%; }
+    100% { left: 100%; }
+}
+
+.ux-card-op-term {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    overflow-y: auto;
+    padding: 8px 10px;
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    background: var(--studio-color-terminal);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 4px;
+}
+
+.ux-card-op-term > summary {
+    cursor: pointer;
+    color: var(--studio-color-text-muted);
+    list-style: revert;
+}
+
+.ux-card-op-term > div {
+    overflow: hidden;
+    padding: 1.5px 0;
+    color: var(--studio-color-text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ux-card-op-term > .ux-console-line-warn {
+    color: var(--studio-status-warning-text);
+}
+
+.ux-card-op-term > .ux-console-line-error {
+    color: var(--studio-status-error-text);
+}
+
 /* Slot slider control (config slot editor). */
 
 .ux-slot-slider {

@@ -18,8 +18,9 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    BundledFirmware, ConnectPhase, DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard,
-    UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
+    BundledFirmware, CardOp, CardUiState, ConnectPhase, DegradedReason, DeviceCardTab,
+    RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiLogSource,
 };
 use lpc_wire::FwProvenance;
 
@@ -359,6 +360,48 @@ fn stop_sim_sheet_open() -> Element {
                 sim: true,
                 initial_tab: Some(DeviceCardTab::Danger),
                 initial_sheet: Some(DeviceCardSheet::Confirm(stop_simulator_action())),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The in-place op overlay (device-lifecycle P2): a firmware install takes over the card BODY where it runs — the tab row is covered and the body blurred behind it, the title bar spared — with a determinate bar and the session's console tail as an open technical terminal. Never an app-level modal."
+)]
+fn op_overlay_determinate() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: CardUiState {
+                        op: Some(CardOp::new("Installing firmware…", Some(62))),
+                        ..CardUiState::default()
+                    },
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The in-place op overlay with no known percent (device-lifecycle P2): the bar sweeps indeterminately while an erase runs, technical details streaming below."
+)]
+fn op_overlay_indeterminate() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: CardUiState {
+                        op: Some(CardOp::new("Erasing device…", None)),
+                        ..CardUiState::default()
+                    },
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
+                now_secs: Some(STORY_NOW),
                 on_action: |_| {},
             }
         }
