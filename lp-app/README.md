@@ -19,6 +19,10 @@ logic.
   server or firmware target.
 - `lpa-link` — low-level endpoint/link layer for discovery, status,
   management, diagnostics, logs, and opening server/client connections.
+- `lpa-agent` — model-facing shader-agent core: `ModelProvider` abstraction
+  (Anthropic + OpenAI-compatible streaming providers), the agentic session
+  loop, and the single `iterate` tool bound to `lps-probe` via an injected
+  host trait.
 - `lpa-studio-core` — headless Studio application core. It owns lower-level
   services and exposes Studio controllers, views, node states, typed actions,
   logs, and project summaries to UI shells.

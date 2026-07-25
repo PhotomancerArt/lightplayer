@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ConsoleCommand, DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent,
+    ConsoleCommand, DeviceController, SettingsCommand, UiAction, UiPaneView, UiStudioView,
+    UiViewContent,
 };
 
-use crate::app::layout::VersionBadge;
+use crate::app::layout::{StudioSettingsPopover, VersionBadge};
 use crate::app::{HomeGallery, ProjectNodeWorkspace, ProjectOpeningFrame, RuntimeLog};
 use crate::core::PaneView;
 
@@ -22,6 +23,7 @@ pub fn StudioShell(
     opening_frame: bool,
     on_action: EventHandler<UiAction>,
     on_console: EventHandler<ConsoleCommand>,
+    on_settings: EventHandler<SettingsCommand>,
 ) -> Element {
     let UiStudioView {
         panes,
@@ -34,6 +36,7 @@ pub fn StudioShell(
         // rendered by the device pane (M5)
         device_sync: _,
         deploy,
+        settings,
     } = view;
 
     if opening_frame && panes.is_empty() {
@@ -42,6 +45,7 @@ pub fn StudioShell(
                 header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
                     ShellLogo { on_action }
                     VersionBadge {}
+                    StudioSettingsPopover { settings, on_settings }
                 }
                 div { class: "tw:grid tw:gap-7",
                     ProjectOpeningFrame {}
@@ -57,6 +61,7 @@ pub fn StudioShell(
                 header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
                     ShellLogo { on_action }
                     VersionBadge {}
+                    StudioSettingsPopover { settings, on_settings }
                 }
                 div { class: "tw:grid tw:gap-7",
                     HomeGallery { home: *home, now_secs, on_action }
@@ -85,6 +90,7 @@ pub fn StudioShell(
             header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
                 ShellLogo { on_action }
                 VersionBadge {}
+                StudioSettingsPopover { settings, on_settings }
             }
 
             section { class: "{layout_class}",

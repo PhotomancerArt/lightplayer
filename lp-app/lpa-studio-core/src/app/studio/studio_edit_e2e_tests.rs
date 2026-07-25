@@ -1835,7 +1835,7 @@ fn successive_shader_applies_each_reach_the_engine() {
     );
 }
 
-const ASSET_SHADER_V1: &str =
+pub(crate) const ASSET_SHADER_V1: &str =
     "uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
 const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
 const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
@@ -1843,7 +1843,7 @@ const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(v
 /// Find the shader node's inline asset editor anywhere in the editor DTO
 /// tree: it rides `UiSlotAsset::inline_editor` on the node's (or a child
 /// node's) asset slot sections.
-fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
+pub(crate) fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
     let editor = view
         .panes
         .iter()
@@ -1887,7 +1887,7 @@ fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
         .expect("shader node exposes an inline asset editor")
 }
 
-fn asset_e2e_server() -> LpServer {
+pub(crate) fn asset_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -2064,7 +2064,7 @@ fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
         .collect()
 }
 
-fn project_action(op: ProjectOp) -> StudioCommand {
+pub(crate) fn project_action(op: ProjectOp) -> StudioCommand {
     StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         op,
@@ -2149,7 +2149,7 @@ fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
         .expect("project editor pane")
 }
 
-fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
+pub(crate) fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
     let editor = project_editor(view);
     (editor.dirty.persisted, editor.dirty.transient)
 }
@@ -2313,7 +2313,7 @@ impl ServerTransport for CollectTransport {
 
 /// Drive a future to completion with a self-waking waker (bounded, so a hung
 /// future fails the test instead of the suite).
-fn drive<F: Future>(future: F) -> F::Output {
+pub(crate) fn drive<F: Future>(future: F) -> F::Output {
     struct NoopWake;
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}

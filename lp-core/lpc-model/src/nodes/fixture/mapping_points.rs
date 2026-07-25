@@ -1,8 +1,14 @@
 //! Mapping point generation from configuration
+//!
+//! Generates LED sample points (texture-space centers + radii) from a
+//! [`MappingConfig`]. Lives in the model crate so both the engine and
+//! Studio-side tooling can share the generator.
 
 use alloc::vec::Vec;
 use libm;
-use lpc_model::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
+
+use crate::nodes::fixture::{MappingConfig, PathSpec, RingOrder};
+use crate::{MapSlot, ValueSlot, XySlot};
 
 /// Mapping point representing a single LED sampling location
 #[derive(Debug, Clone)]
@@ -13,6 +19,8 @@ pub struct MappingPoint {
 }
 
 /// Generate mapping points from MappingConfig
+///
+/// SvgPath mappings yield no sample points yet.
 pub fn generate_mapping_points(
     config: &MappingConfig,
     texture_width: u32,
@@ -86,7 +94,7 @@ fn generate_ring_array_points(
     diameter: f32,
     start_ring_inclusive: u32,
     end_ring_exclusive: u32,
-    ring_lamp_counts: &lpc_model::MapSlot<u32, lpc_model::ValueSlot<u32>>,
+    ring_lamp_counts: &MapSlot<u32, ValueSlot<u32>>,
     offset_angle: f32,
     order: RingOrder,
     sample_diameter: f32,
@@ -160,7 +168,7 @@ fn generate_ring_array_points(
 
 fn generate_point_list_points(
     first_channel: u32,
-    point_list: &lpc_model::MapSlot<u32, lpc_model::XySlot>,
+    point_list: &MapSlot<u32, XySlot>,
     sample_diameter: f32,
     texture_width: u32,
     texture_height: u32,
@@ -185,31 +193,7 @@ fn generate_point_list_points(
 mod tests {
     use super::*;
     use alloc::vec;
-
-    // Test helper: create RingArray path spec
-    fn create_ring_array_path(
-        center: (f32, f32),
-        diameter: f32,
-        start_ring: u32,
-        end_ring: u32,
-        ring_lamp_counts: Vec<u32>,
-        offset_angle: f32,
-        order: RingOrder,
-    ) -> PathSpec {
-        PathSpec::ring_array_counts(
-            [center.0, center.1],
-            diameter,
-            start_ring,
-            end_ring,
-            &ring_lamp_counts,
-            offset_angle,
-            order,
-        )
-    }
-
-    fn create_mapping_config(paths: Vec<PathSpec>) -> MappingConfig {
-        MappingConfig::path_points_vec(paths, 2.0)
-    }
+    use alloc::vec::Vec;
 
     #[test]
     fn test_single_ring_center() {
@@ -526,5 +510,30 @@ mod tests {
         let ring2_radius =
             ((points[9].center[0] - 0.5).powi(2) + (points[9].center[1] - 0.5).powi(2)).sqrt();
         assert!(ring2_radius > ring1_radius);
+    }
+
+    // Test helper: create RingArray path spec
+    fn create_ring_array_path(
+        center: (f32, f32),
+        diameter: f32,
+        start_ring: u32,
+        end_ring: u32,
+        ring_lamp_counts: Vec<u32>,
+        offset_angle: f32,
+        order: RingOrder,
+    ) -> PathSpec {
+        PathSpec::ring_array_counts(
+            [center.0, center.1],
+            diameter,
+            start_ring,
+            end_ring,
+            &ring_lamp_counts,
+            offset_angle,
+            order,
+        )
+    }
+
+    fn create_mapping_config(paths: Vec<PathSpec>) -> MappingConfig {
+        MappingConfig::path_points_vec(paths, 2.0)
     }
 }

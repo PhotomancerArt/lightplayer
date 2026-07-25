@@ -1,0 +1,70 @@
+//! [`AgentOp`]: chat-surface gestures riding the normal action queue.
+//!
+//! The web layer never constructs these directly — [`crate::UiAgentView`]
+//! prebuilds the actions ([`crate::UiAgentView::send_action`] /
+//! [`crate::UiAgentView::stop_action`]) so no domain types leak into the
+//! view, mirroring [`crate::UiAssetEditor::apply_action`].
+
+use core::any::Any;
+
+use lpc_model::ArtifactLocation;
+
+use crate::{
+    ActionClass, ActionMeta, ActionPriority, ControllerOp, PROJECT_EDITOR_ACTION_DEADLINE,
+};
+
+/// A gesture on one shader's agent chat, targeting the shader through its
+/// source artifact (the same identity the inline editor edits by).
+#[derive(Clone, Debug, PartialEq)]
+pub enum AgentOp {
+    /// Send one user message: resolve the shader's context, then spawn the
+    /// agent run (the dispatch itself returns immediately; progress arrives
+    /// as [`crate::AgentFeedback`] commands).
+    Send {
+        artifact: ArtifactLocation,
+        text: String,
+    },
+    /// Flip the running session's abort flag (the Stop button).
+    Stop { artifact: ArtifactLocation },
+}
+
+impl ControllerOp for AgentOp {
+    fn default_action_meta(&self) -> ActionMeta {
+        match self {
+            Self::Send { .. } => ActionMeta::new(
+                "Send",
+                "Send a message to the shader agent.",
+                ActionPriority::Primary,
+            ),
+            Self::Stop { .. } => ActionMeta::new(
+                "Stop",
+                "Stop the running agent turn.",
+                ActionPriority::Secondary,
+            ),
+        }
+    }
+
+    fn action_class(&self) -> ActionClass {
+        // Editor-foreground, like the inline editor's Apply: preempts a
+        // passive refresh so a Send/Stop never queues behind a slow pull.
+        ActionClass::Foreground {
+            deadline: PROJECT_EDITOR_ACTION_DEADLINE,
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn ControllerOp> {
+        Box::new(self.clone())
+    }
+
+    fn eq_op(&self, other: &dyn ControllerOp) -> bool {
+        other.as_any().downcast_ref::<Self>() == Some(self)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}

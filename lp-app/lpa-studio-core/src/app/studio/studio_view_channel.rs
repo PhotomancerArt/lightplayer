@@ -107,6 +107,12 @@ impl CommandReceiver {
     pub fn register_waker(&self, waker: &Waker) {
         self.inner.borrow_mut().waker = Some(waker.clone());
     }
+
+    /// Drain everything currently queued without awaiting (test helper).
+    #[cfg(test)]
+    pub(crate) fn try_recv_all_for_test(&self) -> Vec<StudioCommand> {
+        self.inner.borrow_mut().items.drain(..).collect()
+    }
 }
 
 struct RecvCoalesced<'a> {
