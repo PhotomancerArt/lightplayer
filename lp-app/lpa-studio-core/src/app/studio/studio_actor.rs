@@ -193,6 +193,9 @@ where
             // op per batch.
             self.run_refresh_tick().await;
             self.controller.run_due_heartbeats();
+            // D32 (M6): the quiet PortHeld retry rides the same cadence —
+            // a no-op unless a held port's retry interval elapsed.
+            self.controller.run_due_connect_retry().await;
         }
         // Re-hydrate the gallery / release closed projects' locks when due
         // (attach or LibraryChanged with no action in the batch; actions

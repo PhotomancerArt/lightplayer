@@ -59,6 +59,11 @@ pub struct RosterEvidence<'a> {
     pub observed_version: Option<usize>,
     /// The local head's version number, for the "Push vN" affordance.
     pub head_version: Option<usize>,
+    /// The connect-as-pull landed WITHOUT a stamped identity (M8′): an
+    /// EMPTY unstamped board must ask for its name before anything can
+    /// be pushed to it (the provisioning order: flash → name → choose).
+    /// `false` while no sync landed or when an identity exists.
+    pub unstamped: bool,
     /// The registry entry, when the device is remembered.
     pub registry: Option<&'a RegisteredDevice>,
     /// What the connect flow / management operation is doing right now.
@@ -130,6 +135,10 @@ fn running_state(evidence: &RosterEvidence<'_>) -> RosterCardState {
             SyncRelation::Diverged => RosterCardState::EditedOnDevice,
         },
         Some(DeviceContent::Adopted { .. }) => RosterCardState::RunningUpToDate,
+        // An empty UNSTAMPED board names itself before anything else
+        // (M8′ provisioning order: flash → name → choose — a push needs
+        // the identity); a stamped empty board offers the picker.
+        Some(DeviceContent::Empty) if evidence.unstamped => RosterCardState::NeedsAName,
         Some(DeviceContent::Empty) => RosterCardState::ConnectedEmpty,
         Some(DeviceContent::PendingIdentity { .. }) => RosterCardState::NeedsAName,
         Some(DeviceContent::Unreadable { detail }) => RosterCardState::HoldsUnreadableData {
@@ -399,9 +408,28 @@ mod tests {
             content: None,
             observed_version: None,
             head_version: None,
+            unstamped: false,
             registry: None,
             connect: ConnectEvidence::Idle,
         }
+    }
+
+    #[test]
+    fn empty_unstamped_board_asks_for_a_name_before_the_picker() {
+        // M8′ provisioning order: flash → NAME → choose — a push needs
+        // the stamped identity, so the empty unstamped board's card is
+        // Needs-a-name; the stamped empty board offers the picker.
+        let ready = ready_link();
+        let mut unstamped = evidence();
+        unstamped.link = Some(&ready);
+        unstamped.content = Some(&DeviceContent::Empty);
+        unstamped.unstamped = true;
+        assert_eq!(derive(&unstamped), RosterCardState::NeedsAName);
+
+        let mut stamped = evidence();
+        stamped.link = Some(&ready);
+        stamped.content = Some(&DeviceContent::Empty);
+        assert_eq!(derive(&stamped), RosterCardState::ConnectedEmpty);
     }
 
     fn ready_link() -> DeviceState {
