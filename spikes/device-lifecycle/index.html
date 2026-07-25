@@ -62,6 +62,8 @@
     border: 0; border-radius: 6px; background: transparent; color: var(--dim); cursor: pointer; font-size: 12px; }
   .tab[aria-selected=true] { color: var(--tint); background: var(--tint-bg); }
   .tab.danger[aria-selected=true] { color: var(--error); background: var(--error-bg); }
+  /* tabs are inaccessible while a heavy op runs in the card body */
+  .tabs.disabled { opacity: .3; pointer-events: none; }
   .body { flex: 1; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
   .statusline { color: var(--tint); font-size: 12.5px; font-weight: 600; }
   .subline { color: var(--muted); font-size: 12px; }
@@ -137,12 +139,13 @@
     Post-M8′ walk feedback (Yona, iterated). Setup is <b>in the card</b>:
     a new device's tab IS the setup form — a date-based default name +
     one Flash button, no popup, no confirm, no separate naming. Heavy ops
-    (flash / erase / reset) then <b>elevate the card</b> — the same card
-    lifts and grows into a focal, walk-away-safe progress panel with a
-    collapsible terminal. Destructive ops (erase) keep a confirm; a blank
-    board doesn't. Explores: (A) set up a new device, (B) factory-reset
-    from the editor + recover, (C) firmware update. Cards are ~320px.
-    Click the buttons (or the stage) to step; everything is inert.
+    (flash / erase / reset) then <b>take over that same card in place</b>
+    — the card stays in the grid, its body becomes progress + a
+    collapsible terminal, and the tabs go inaccessible until it finishes.
+    No lift, no dim, no app-level modal. Destructive ops (erase) keep a
+    confirm; a blank board doesn't. Explores: (A) set up a new device,
+    (B) factory-reset from the editor + recover, (C) firmware update.
+    Cards are ~320px. Click the buttons (or the stage) to step.
   </p>
 
   <div class="flows" id="flows"></div>
@@ -169,14 +172,14 @@ const FLOWS = {
   ]},
   B: { name: "B · Factory-reset from the editor", steps: [
     "You're in the editor (the card grew into the right pane). Danger tab → Erase.",
-    "Erase confirm. On confirm the editor is SEVERED — the project is no longer on this device.",
-    "Erasing: the card elevates over the (greyed) editor with progress.",
+    "Erase confirm (destructive → keeps its confirm). On confirm the editor is SEVERED — the project is no longer on this device.",
+    "Erasing: the same pane becomes progress in place (tabs disabled); the editor stays greyed.",
     "Erased → auto-reconnect → you're returned to the gallery, focused on the now-blank card.",
     "The blank card offers Set up — the recovery loop closes.",
   ]},
   C: { name: "C · Firmware update", steps: [
     "A running device advertises a firmware update (advisory chip on Settings).",
-    "Update → confirm. Same elevate-the-card progress as a fresh flash.",
+    "Update → the same in-place progress as a fresh flash. (Open: confirm on a device that's running?)",
     "Updated → the device restarts → running again.",
   ]},
 };
@@ -194,9 +197,29 @@ function header(name, transport, grow){
     <span class="grow">${grow||ICON.grow}</span>
   </header>`;
 }
-function tabs(active, danger){
+function tabs(active, disabled){
   const t = [["play",ICON.play],["folder",ICON.folder],["gear",ICON.gear],["term",ICON.term],["warn",ICON.warn]];
-  return `<div class="tabs">${t.map(([k,g])=>`<button class="tab ${k==='warn'?'danger':''}" aria-selected="${k===active}">${g}</button>`).join("")}</div>`;
+  return `<div class="tabs${disabled?' disabled':''}">${t.map(([k,g])=>`<button class="tab ${k==='warn'?'danger':''}" aria-selected="${k===active}">${g}</button>`).join("")}</div>`;
+}
+
+// The heavy-op progress lives IN the card body, in place — the card
+// stays in the grid, the tabs go inaccessible (Yona: "just replace that
+// same pane"). No lift, no dim, no app-level modal.
+function flashingCard(name, label, pct, tall){
+  return `<article class="dcard" data-s="working"${tall?' style="height:100%"':''}>
+    ${header(name, "USB")}
+    ${tabs(null, true)}
+    <div class="body">
+      <div class="prog">
+        <div class="label">${label}</div>
+        <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+        <div class="pct">${pct}% · about 40s left</div>
+        <div class="walk">You can switch to another card — this keeps running and shows its progress here.</div>
+        <button class="termtoggle" onclick="const c=this.nextElementSibling;c.hidden=!c.hidden;this.textContent=(c.hidden?'▸ Show details':'▾ Hide details')">▾ Hide details</button>
+        <div class="console">esptool.py v4.5.0<br>Connecting…<br>Chip is ESP32-C6 (QFN40)<br>Erasing flash…<br>Writing at 0x00010000 (${pct}%)<br>Verifying…</div>
+      </div>
+    </div>
+  </article>`;
 }
 function elevate(html){
   const stage = document.getElementById("stage");
@@ -264,8 +287,8 @@ function renderA(surface, crumb){
         </div>
       </article></div>`;
   } else if(step===1){
-    surface.innerHTML = `<div class="gallery"><article class="dcard" data-s="working">${header(DEFAULT_NAME,"USB")}${tabs("play")}<div class="body"><div class="statusline">Installing firmware… 42%</div></div></article></div>`;
-    elevate(progressCard(DEFAULT_NAME,"Installing firmware…",42,"setup"));
+    // the SAME card, in place — its body becomes progress, tabs disabled
+    surface.innerHTML = `<div class="gallery">${flashingCard(DEFAULT_NAME,"Installing firmware…",42)}</div>`;
   } else {
     surface.innerHTML = `<div class="gallery">
       <article class="dcard" data-s="running">
@@ -282,22 +305,25 @@ function renderB(surface, crumb){
     const canvas = severed
       ? `<div class="sever-note"><b>Porch sign was erased.</b>The project is no longer on this device. Reconnecting…</div>`
       : `LED canvas`;
+    let paneCard;
+    if(step===2){
+      // erasing: same in-place progress treatment, in the editor pane
+      paneCard = flashingCard("Porch sign","Erasing device…",60,true);
+    } else {
+      paneCard = `<article class="dcard" data-s="running" style="height:100%;">
+        ${header("Porch sign","USB",ICON.shrink)}${tabs("warn")}
+        <div class="body">
+          <button class="rowbtn destructive" onclick="next()">🗑 Erase device…</button>
+          <button class="rowbtn destructive">⚡ Flash firmware…</button>
+        </div>
+      </article>`;
+    }
     surface.innerHTML = `<div class="editor ${severed?'severed':''}">
       <div class="canvas">${canvas}</div>
-      <div class="pane">
-        <article class="dcard" data-s="${step===2?'working':'running'}" style="height:100%;">
-          ${header("Porch sign","USB",ICON.shrink)}${tabs(step===0?'warn':'play', true)}
-          <div class="body">
-            ${step===0 ? `<button class="rowbtn destructive" onclick="next()">🗑 Erase device…</button>
-                          <button class="rowbtn destructive">⚡ Flash firmware…</button>` : ``}
-            ${step===2 ? `<div class="statusline">Erasing… 60%</div>` : ``}
-            ${step===1 ? `<div class="statusline" style="color:var(--error)">Erasing…</div>` : ``}
-          </div>
-        </article>
-      </div>
+      <div class="pane">${paneCard}</div>
     </div>`;
     if(step===1){
-      // confirm sheet on the pane card
+      // erase is DESTRUCTIVE — it keeps its confirm sheet (card-resident)
       const pane = surface.querySelector(".pane .dcard");
       pane.insertAdjacentHTML("beforeend", `<div class="sheet"><div class="panel">
         <h3>Erase Porch sign?</h3>
@@ -305,7 +331,6 @@ function renderB(surface, crumb){
         <div class="row"><button onclick="prev()">Cancel</button><button class="destructive" onclick="next()">Erase</button></div>
       </div></div>`);
     }
-    if(step===2){ elevate(progressCard("Porch sign","Erasing device…",60,"blank")); }
   } else {
     // returned to gallery, focused on the blank card
     crumb.innerHTML = galleryCrumb();
@@ -336,8 +361,7 @@ function renderC(surface, crumb){
         </div>
       </article></div>`;
   } else if(step===1){
-    surface.innerHTML = `<div class="gallery"><article class="dcard" data-s="working">${header("Porch sign","USB")}${tabs("gear")}<div class="body"><div class="statusline">Updating firmware… 78%</div></div></article></div>`;
-    elevate(progressCard("Porch sign","Updating firmware…",78,"running"));
+    surface.innerHTML = `<div class="gallery">${flashingCard("Porch sign","Updating firmware…",78)}</div>`;
   } else {
     surface.innerHTML = `<div class="gallery"><article class="dcard" data-s="running">${header("Porch sign","USB")}${tabs("play")}<div class="body"><div class="statusline">Running</div><div class="subline">◧ porch-sign · up to date</div></div></article></div>`;
   }
