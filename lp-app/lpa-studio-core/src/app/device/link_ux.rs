@@ -16,6 +16,21 @@ pub(crate) fn map_link_error(error: LinkError) -> UiError {
     }
 }
 
+/// Whether a connect failure means the port is HELD by another holder
+/// (another tab or process) rather than a device that isn't answering
+/// (M6, D32 soft failure — routes to the In-use-elsewhere card, never
+/// the retry ladder).
+///
+/// The browser glue rethrows `port.open()` failures with the
+/// `DOMException` name prefixed; Chromium reports an OS-held port as a
+/// `NetworkError` and a same-context double-open as `InvalidStateError`.
+/// The classification is textual by necessity — the error crossed the
+/// JS boundary as a string.
+pub(crate) fn is_port_held_error(error: &UiError) -> bool {
+    let message = error.message();
+    message.contains("NetworkError") || message.contains("InvalidStateError")
+}
+
 /// A session's provider logs + diagnostics as console drafts.
 pub(crate) fn link_session_logs(
     connector: &LinkConnector,
@@ -161,6 +176,18 @@ mod tests {
         assert_eq!(map_link_log_level(LinkLogLevel::Info), UiLogLevel::Info);
         assert_eq!(map_link_log_level(LinkLogLevel::Warn), UiLogLevel::Warn);
         assert_eq!(map_link_log_level(LinkLogLevel::Error), UiLogLevel::Error);
+    }
+
+    #[test]
+    fn port_held_classification_keys_on_the_domexception_name() {
+        // the browser glue rethrows with the DOMException name prefixed
+        let held = UiError::Link(
+            "link session failed: NetworkError: Failed to open serial port: unable to open"
+                .to_string(),
+        );
+        assert!(is_port_held_error(&held));
+        let unresponsive = UiError::Link("connect deadline elapsed".to_string());
+        assert!(!is_port_held_error(&unresponsive));
     }
 
     #[test]

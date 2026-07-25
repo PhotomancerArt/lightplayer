@@ -365,6 +365,9 @@
   .tw\:min-h-\[320px\] {
     min-height: 320px;
   }
+  .tw\:min-h-\[370px\] {
+    min-height: 370px;
+  }
   .tw\:min-h-\[420px\] {
     min-height: 420px;
   }
@@ -573,6 +576,9 @@
   }
   .tw\:cursor-wait {
     cursor: wait;
+  }
+  .tw\:list-disc {
+    list-style-type: disc;
   }
   .tw\:list-none {
     list-style-type: none;

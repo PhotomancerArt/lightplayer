@@ -325,6 +325,22 @@ pub fn App() -> Element {
                 }
                 StudioRoute::Home | StudioRoute::Stories { .. } => {}
             }
+            // D32 auto-connect (M6): the load-time attach sweep — queued
+            // AFTER the route dispatch, so a `#/device/<uid>` reload's own
+            // connect runs first and the sweep no-ops on the live session
+            // (the core guard makes it idempotent). Attach + pull + show,
+            // nothing else; failures land softly on card evidence.
+            startup_bridge
+                .tx
+                .send(StudioCommand::Action(UiAction::from_op(
+                    lpa_studio_core::DeviceController::NODE_ID,
+                    lpa_studio_core::DeviceOp::AutoConnect,
+                )));
+            // Hotplug (M6): a granted port (re)appearing re-runs the
+            // sweep; a departing port hastens the Gone classification
+            // with a tick. Listener lifetime = page lifetime (forget).
+            #[cfg(target_arch = "wasm32")]
+            install_serial_hotplug(&startup_bridge.tx);
         });
     });
 
@@ -380,6 +396,36 @@ fn make_pull_timer(delay: Duration) -> TimeoutFuture {
 /// the session's injected factory (the `make_pull_timer` pattern).
 fn make_device_timers() -> DeviceTimers {
     DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
+}
+
+/// M6 (D32): the `navigator.serial` hotplug listeners. A `connect`
+/// event (a granted port re-appearing) re-runs the auto-connect sweep;
+/// a `disconnect` sends a tick so the Gone classification lands without
+/// waiting for the next cadence beat.
+#[cfg(target_arch = "wasm32")]
+fn install_serial_hotplug(tx: &CommandSender) {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
+
+    let connect_tx = tx.clone();
+    let on_connect = Closure::wrap(Box::new(move || {
+        connect_tx.send(StudioCommand::Action(UiAction::from_op(
+            lpa_studio_core::DeviceController::NODE_ID,
+            lpa_studio_core::DeviceOp::AutoConnect,
+        )));
+    }) as Box<dyn FnMut()>);
+    let tick_tx = tx.clone();
+    let on_disconnect = Closure::wrap(Box::new(move || {
+        tick_tx.send(StudioCommand::RefreshTick);
+    }) as Box<dyn FnMut()>);
+    let installed = lpa_link::providers::browser_serial_esp32::install_serial_events(
+        on_connect.as_ref().unchecked_ref(),
+        on_disconnect.as_ref().unchecked_ref(),
+    );
+    if installed {
+        on_connect.forget();
+        on_disconnect.forget();
+    }
 }
 
 /// Wire the cross-tab library refresh triggers (M4b): a BroadcastChannel

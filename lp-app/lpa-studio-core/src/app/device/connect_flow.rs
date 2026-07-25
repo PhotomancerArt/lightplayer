@@ -34,6 +34,27 @@ pub enum ConnectFlowState {
         endpoint: EndpointChoice,
         progress: ProgressState,
     },
+    /// The connect retry ladder's middle rung (M6, the D31 replacement):
+    /// the first attempt failed, the automatic reset ran (opening a
+    /// session resets the board — DTR/RTS), and a second attempt is in
+    /// flight. The card narrates "Resetting…" through
+    /// [`ConnectEvidence::Connecting`](crate::ConnectEvidence).
+    Retrying {
+        endpoint: EndpointChoice,
+        progress: ProgressState,
+    },
+    /// The port's open failed as held-by-another-holder (D32 soft
+    /// failure): the card shows In-use-elsewhere and a quiet periodic
+    /// retry runs on the tick cadence. Never a toast.
+    PortHeld {
+        endpoint: EndpointChoice,
+    },
+    /// The ladder exhausted without a live session: the card shows the
+    /// honest Not-responding state; Troubleshoot is its affordance.
+    /// Distinct from [`Self::Failed`] — no gallery issue chip shouts.
+    Unresponsive {
+        endpoint: EndpointChoice,
+    },
     Connected {
         device: ConnectedDeviceSummary,
     },
