@@ -2096,6 +2096,126 @@ fn push_progress_stays_on_the_live_card() {
     );
 }
 
+/// The auto-fast-forward fixture (§3c-1): "Porch" installed, a device
+/// remembered with a push association at the given version, and the fake
+/// board holding an EDITED copy of those files. Returns the studio (with
+/// library attached, not yet connected), the endpoint, and the project uid.
+fn diverged_board_fixture(
+    local_moves_after_push: bool,
+) -> (StudioController, FakeEsp32Device, LinkEndpointId, String) {
+    use crate::app::places::{DeviceRegistry, RegisteredDevice};
+
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let pushed_head = store.open(summary.uid).unwrap().history.head().unwrap();
+    let board_files: Vec<(String, Vec<u8>)> = store
+        .open(summary.uid)
+        .unwrap()
+        .read_all_files()
+        .unwrap()
+        .into_iter()
+        .map(|(path, bytes)| {
+            if path.contains("shader.glsl") {
+                (path, b"edited on the board".to_vec())
+            } else {
+                (path, bytes)
+            }
+        })
+        .collect();
+    // the push marker: what WE last pushed to this board is v1
+    DeviceRegistry::new(store.fs_handle())
+        .upsert(RegisteredDevice {
+            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            name: "Bench board".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 1.0,
+            association: Some(lpc_history::DeviceAssociation {
+                device: "dev_aaaaaaaaaaaaaaaa".parse().unwrap(),
+                project: summary.uid,
+                version: pushed_head,
+                at: 1.0,
+            }),
+        })
+        .unwrap();
+    if local_moves_after_push {
+        use lpc_model::AsLpPath;
+        let mut handle = store.open(summary.uid).unwrap();
+        handle
+            .apply_update("/shader.glsl".as_path(), Some(b"local v2"))
+            .unwrap();
+        handle.record_save(2.0).unwrap().expect("head advanced");
+    }
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(board_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    (studio, device, endpoint_id, summary.uid.to_string())
+}
+
+/// §3c-1 happy path: the board's copy diverges but the push marker still
+/// equals the local head (nothing local happened since the push) — the
+/// connect adopts the board's edits automatically; no Edited-on-device
+/// decision, the card lands Running-up-to-date.
+#[test]
+fn connect_auto_fast_forwards_a_pure_board_extension() {
+    let (mut studio, _device, endpoint_id, _uid) = diverged_board_fixture(false);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    let sync = studio.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(
+        *relation,
+        lpc_history::SyncRelation::AtHead,
+        "the pure extension fast-forwarded without asking"
+    );
+    let view = studio.view();
+    let home = view.home.expect("gallery view");
+    assert!(
+        home.devices
+            .iter()
+            .any(|card| matches!(card.state, crate::RosterCardState::RunningUpToDate)),
+        "the card landed Running-up-to-date: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// §3c-1 counter-case: local ALSO moved since the push — a genuine fork.
+/// No auto-adopt; the card still asks (Edited-on-device).
+#[test]
+fn connect_keeps_a_true_fork_for_the_user() {
+    let (mut studio, _device, endpoint_id, _uid) = diverged_board_fixture(true);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    let sync = studio.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(
+        *relation,
+        lpc_history::SyncRelation::Diverged,
+        "a genuine fork must never auto-resolve"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------

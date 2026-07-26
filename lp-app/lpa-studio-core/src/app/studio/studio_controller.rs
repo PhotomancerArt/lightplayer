@@ -1062,6 +1062,18 @@ impl StudioController {
             (Some(uid), Ok(host)) => match host.catalog_snapshot().await {
                 Ok(fs) => {
                     let store = crate::app::library::LibraryStore::read_only(fs);
+                    // The device's last-push marker (§3c-1): what WE last
+                    // pushed to this board, per its registry association —
+                    // the auto-fast-forward base, read off the same
+                    // snapshot.
+                    let association = identity.as_ref().and_then(|id| {
+                        crate::app::places::DeviceRegistry::new(store.fs_handle())
+                            .list()
+                            .ok()?
+                            .into_iter()
+                            .find(|entry| entry.uid == id.uid)?
+                            .association
+                    });
                     match store.list() {
                         Ok(summaries) => summaries
                             .into_iter()
@@ -1070,7 +1082,7 @@ impl StudioController {
                                 // relation + line version numbers (the
                                 // roster's "Running vN"/"Push vN" evidence)
                                 // in one handle open
-                                let (relation, versions) = store
+                                let (relation, versions, head) = store
                                     .open(summary.uid)
                                     .map(|handle| {
                                         let history = &handle.history;
@@ -1082,10 +1094,15 @@ impl StudioController {
                                                     .head()
                                                     .and_then(|head| history.version_number(head)),
                                             ),
+                                            history.head(),
                                         )
                                     })
-                                    .unwrap_or((lpc_history::SyncRelation::Diverged, (None, None)));
-                                (summary, relation, versions)
+                                    .unwrap_or((
+                                        lpc_history::SyncRelation::Diverged,
+                                        (None, None),
+                                        None,
+                                    ));
+                                (summary, relation, versions, head, association)
                             }),
                         Err(_) => None,
                     }
@@ -1095,19 +1112,19 @@ impl StudioController {
             _ => None,
         };
 
-        if let Some((summary, relation, versions)) = local {
+        if let Some((summary, relation, versions, head, association)) = local {
             if let Ok(session) = self.pool.device_session_mut() {
                 session.set_device_versions(versions);
             }
-            let content = DeviceContent::Known {
-                project_uid: summary.uid.to_string(),
-                slug: summary.slug.clone(),
-                observed: pulled.observed,
-                relation,
-            };
             let Some(identity_value) = identity.clone() else {
                 // anonymous hardware: classification only (the wizard
                 // stamps an identity, then this re-runs)
+                let content = DeviceContent::Known {
+                    project_uid: summary.uid.to_string(),
+                    slug: summary.slug.clone(),
+                    observed: pulled.observed,
+                    relation,
+                };
                 return Ok(DeviceSyncState { identity, content });
             };
             let device_uid: lpc_history::PrefixedUid = identity_value.uid.parse().map_err(|e| {
@@ -1120,7 +1137,9 @@ impl StudioController {
                 &pulled.files,
                 now,
             )?;
-            if !handled {
+            let banked = if handled {
+                true
+            } else {
                 let host = self.library_host()?;
                 let op = CatalogOp::RecordDeviceObservation {
                     project_uid: summary.uid.to_string(),
@@ -1132,19 +1151,80 @@ impl StudioController {
                     observed: pulled.observed,
                     files: pulled.files.clone(),
                 };
-                if let Err(error) = host.catalog(op).await {
-                    // open in another tab (or busy): that tab owns the
-                    // history — classify only, don't bank from here
-                    self.push_log(UiLogDraft::new(
-                        UiLogLevel::Info,
-                        UiLogOrigin::Studio,
-                        format!(
-                            "device observation for {} not banked: {error}",
-                            summary.slug
-                        ),
-                    ));
+                match host.catalog(op).await {
+                    Ok(_) => true,
+                    Err(error) => {
+                        // open in another tab (or busy): that tab owns the
+                        // history — classify only, don't bank from here
+                        self.push_log(UiLogDraft::new(
+                            UiLogLevel::Info,
+                            UiLogOrigin::Studio,
+                            format!(
+                                "device observation for {} not banked: {error}",
+                                summary.slug
+                            ),
+                        ));
+                        false
+                    }
+                }
+            };
+
+            // AUTO FAST-FORWARD (§3c-1): the board's copy diverges, but
+            // what we last pushed to THIS board is still our head — local
+            // never moved, so the banked copy is a pure extension of it.
+            // Adopt it without asking (the old head stays in history);
+            // Edited-on-device is reserved for genuine forks. Skipped
+            // when banking didn't happen (another tab owns the history) —
+            // the card then asks, which is always safe.
+            let mut relation = relation;
+            if relation == lpc_history::SyncRelation::Diverged
+                && banked
+                && head.is_some()
+                && association.as_ref().is_some_and(|assoc| {
+                    assoc.project == summary.uid && Some(assoc.version) == head
+                })
+            {
+                let host = self.library_host()?;
+                match host
+                    .catalog(CatalogOp::AdoptObservedVersion {
+                        project_uid: summary.uid.to_string(),
+                        observed: pulled.observed,
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        relation = lpc_history::SyncRelation::AtHead;
+                        // adopt appended the observed copy as the new head
+                        let new_head = versions.1.map(|n| n + 1);
+                        if let Ok(session) = self.pool.device_session_mut() {
+                            session.set_device_versions((new_head, new_head));
+                        }
+                        self.push_log(UiLogDraft::new(
+                            UiLogLevel::Info,
+                            UiLogOrigin::Studio,
+                            format!(
+                                "Pulled your edits from {} — {} is up to date",
+                                identity_value.name, summary.slug
+                            ),
+                        ));
+                    }
+                    Err(error) => {
+                        // stays Diverged: the card asks, nothing is lost
+                        self.push_log(UiLogDraft::new(
+                            UiLogLevel::Warn,
+                            UiLogOrigin::Studio,
+                            format!("auto fast-forward for {} failed: {error}", summary.slug),
+                        ));
+                    }
                 }
             }
+
+            let content = DeviceContent::Known {
+                project_uid: summary.uid.to_string(),
+                slug: summary.slug.clone(),
+                observed: pulled.observed,
+                relation,
+            };
             self.request_library_refresh();
             return Ok(DeviceSyncState { identity, content });
         }
