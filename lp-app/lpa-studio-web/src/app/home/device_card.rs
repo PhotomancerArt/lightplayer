@@ -680,8 +680,7 @@ fn card_op_overlay(
             }
         };
     }
-    let indeterminate =
-        op.percent.is_none() || matches!(op.phase, CardOpPhase::AwaitingDevice);
+    let indeterminate = op.percent.is_none() || matches!(op.phase, CardOpPhase::AwaitingDevice);
     let bar_class = if indeterminate {
         "ux-card-op-bar is-indeterminate"
     } else {
