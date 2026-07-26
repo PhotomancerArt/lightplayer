@@ -186,7 +186,12 @@ mod tests {
 
     #[test]
     fn backup_rides_the_project_tab_on_the_diverged_card() {
-        let tabs = device_card_tabs(device_rich_object(&input(&RosterCardState::EditedOnDevice)));
+        let tabs = device_card_tabs(device_rich_object(&input(
+            &RosterCardState::EditedOnDevice {
+                local_saved_at: None,
+                pushed_at: None,
+            },
+        )));
         let project = tab(&tabs, DeviceCardTab::Project);
         let titles: Vec<&str> = project
             .sections

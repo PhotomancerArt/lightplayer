@@ -42,8 +42,9 @@ use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip, chip_status, quiet_action_class};
 
 /// A card-resident sheet (D41) the card can open: THE destructive-confirm
-/// pattern for card actions, the name-stamping sheet, and the D30 drift
-/// sheet. One at a time; the title bar is always spared.
+/// pattern for card actions and the name-stamping sheet. One at a time;
+/// the title bar is always spared. (The D30 drift sheet is GONE — §3c-2:
+/// the diverged card's verbs live on its face.)
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum DeviceCardSheet {
     /// A destructive confirm: title/message/verb come from the action's
@@ -53,10 +54,6 @@ pub(crate) enum DeviceCardSheet {
     /// Supersedes the title-bar-form entry for the unstamped board;
     /// renaming a STAMPED device stays the title bar's inline edit.
     Name,
-    /// The D30 drift-resolution sheet on the Edited-on-device card:
-    /// adopt / keep-both / stay (the deploy-dialog era's verbs, card-
-    /// resident; M5-A's minimal dialog routing dissolves into this).
-    Drift,
     /// The troubleshooting sheet on the Not-responding card (M6 — the
     /// ladder's honest ending): concrete basic instructions plus the
     /// Reconnect and recovery-flash escapes. Card-resident per D41
@@ -126,7 +123,6 @@ fn sheet_to_web(sheet: &CardSheetState, card: &UiDeviceCard) -> DeviceCardSheet 
     match sheet {
         CardSheetState::Confirm(verb) => DeviceCardSheet::Confirm(verb_to_action(verb, card)),
         CardSheetState::Name => DeviceCardSheet::Name,
-        CardSheetState::Drift => DeviceCardSheet::Drift,
         CardSheetState::Troubleshoot => DeviceCardSheet::Troubleshoot,
     }
 }
@@ -352,7 +348,7 @@ pub(crate) fn DeviceCard(
             card.state,
             RosterCardState::RunningUpToDate
                 | RosterCardState::RunningBehind { .. }
-                | RosterCardState::EditedOnDevice
+                | RosterCardState::EditedOnDevice { .. }
         )
         .then(open_device_project_action)
     };
@@ -566,7 +562,6 @@ pub(crate) fn DeviceCard(
                     // an op overlay covers this region — floor it so the
                     // progress bar + technical terminal have room to read
                     (false, _, true) => "tw:relative tw:min-h-[240px]",
-                    (false, Some(DeviceCardSheet::Drift), _) => "tw:relative tw:min-h-[290px]",
                     // title + three instruction bullets + three stacked
                     // buttons — the tallest sheet
                     (false, Some(DeviceCardSheet::Troubleshoot), _) => "tw:relative tw:min-h-[370px]",
@@ -838,7 +833,10 @@ fn status_tab_body(
                         "{line.value}"
                     }
                 } else {
-                    p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-subtle-foreground",
+                    // the §3a explain-the-situation line WRAPS — truncating
+                    // an explanation defeats it (2026-07-26: the drift
+                    // story clipped mid-sentence)
+                    p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
                         "{line.value}"
                     }
                 }
@@ -982,13 +980,6 @@ fn device_card_sheet_view(
         },
         DeviceCardSheet::Name => rsx! {
             NameDeviceSheet { card_key, on_action }
-        },
-        DeviceCardSheet::Drift => rsx! {
-            DriftSheet {
-                project_name: card.project.as_ref().map(|chip| chip.name.clone()),
-                card_key,
-                on_action,
-            }
         },
         DeviceCardSheet::Troubleshoot => rsx! {
             TroubleshootSheet { uid: card.uid.clone(), card_key, on_action }
@@ -1189,63 +1180,6 @@ fn save_device_name(name: Signal<String>, card_key: &str, on_action: EventHandle
     }
     on_action.call(home_action(HomeOp::NameDevice { name: value }));
     on_action.call(close_sheet_action(card_key));
-}
-
-/// The D30 drift-resolution sheet on the Edited-on-device card: adopt /
-/// keep-both / stay. The verbs are the deploy-dialog era's ops —
-/// `AdoptDeviceCopy` and `KeepBothFork` now resolve the diverged copy
-/// from the live session when no dialog is open.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn DriftSheet(
-    project_name: Option<String>,
-    card_key: String,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let subject = project_name.unwrap_or_else(|| "This project".to_string());
-    let message = format!(
-        "\"{subject}\" was edited on the device, so its copy differs from yours. \
-         The device's copy was already saved to your library at connect."
-    );
-    rsx! {
-        CardSheet {
-            on_dismiss: {
-                let card_key = card_key.clone();
-                move |_| on_action.call(close_sheet_action(&card_key))
-            },
-            CardSheetTitle { text: "Edited on device" }
-            CardSheetMessage { text: message }
-            div { class: "tw:grid tw:justify-end tw:gap-2",
-                CardSheetButton {
-                    label: "Use the device's copy",
-                    tone: SheetButtonTone::Primary,
-                    onclick: {
-                        let card_key = card_key.clone();
-                        move |_| dispatch_drift_verb(&card_key, on_action, DeployOp::AdoptDeviceCopy)
-                    },
-                }
-                CardSheetButton {
-                    label: "Keep both",
-                    tone: SheetButtonTone::Quiet,
-                    onclick: {
-                        let card_key = card_key.clone();
-                        move |_| dispatch_drift_verb(&card_key, on_action, DeployOp::KeepBothFork)
-                    },
-                }
-                CardSheetButton {
-                    label: "Stay",
-                    tone: SheetButtonTone::Quiet,
-                    onclick: move |_| on_action.call(close_sheet_action(&card_key)),
-                }
-            }
-        }
-    }
-}
-
-/// Dispatch one D30 verb and close the sheet.
-fn dispatch_drift_verb(card_key: &str, on_action: EventHandler<UiAction>, op: DeployOp) {
-    on_action.call(close_sheet_action(card_key));
-    on_action.call(UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op));
 }
 
 /// The tab's icon (icon tabs at card scale; labels arrive in pane mode).
@@ -1461,10 +1395,26 @@ pub(super) fn device_affordance_action(
             .with_summary("Push your newest version to this device.")
             .with_icon("upload")
         }
-        // intercepted upstream: the D30 sheet / the troubleshoot sheet /
-        // the Project-tab picker / the wipe confirm (`wire_card_affordance`)
-        RosterAffordance::ResolveDrift
-        | RosterAffordance::Troubleshoot
+        // §3c-2: the diverged card's verbs live ON the face and dispatch
+        // directly — both are non-destructive by construction (adopt keeps
+        // the old head in history; keep-both forks), so neither needs a
+        // gate. The copy SAYS so, which is what makes one click feel safe.
+        RosterAffordance::UseBoardCopy => {
+            UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::AdoptDeviceCopy)
+                .with_summary(
+                    "Make the board's copy your newest version — your local \
+                     changes stay in your project history.",
+                )
+                .with_icon("download")
+        }
+        RosterAffordance::KeepBoth => {
+            UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::KeepBothFork)
+                .with_summary("Save the board's copy as its own project.")
+                .with_icon("copy")
+        }
+        // intercepted upstream: the troubleshoot sheet / the Project-tab
+        // picker / the wipe confirm (`wire_card_affordance`)
+        RosterAffordance::Troubleshoot
         | RosterAffordance::ChooseProject
         | RosterAffordance::WipeProject => return None,
         // M8′ + device-lifecycle P2: provisioning IS the flash, worn per
@@ -1528,16 +1478,6 @@ fn wire_card_affordance(
     affordance: &DeviceDetailAffordance,
 ) -> Option<CardRowAction> {
     match affordance {
-        // D30: the drift sheet (the deploy-dialog routing dissolved into
-        // it). The display action is meta-only — the sheet's verbs fire.
-        DeviceDetailAffordance::Roster(RosterAffordance::ResolveDrift) => {
-            let display =
-                UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), DeployOp::AdoptDeviceCopy)
-                    .with_label(RosterAffordance::ResolveDrift.label())
-                    .with_summary("Review the device's edited copy against your version.")
-                    .with_icon("edit");
-            Some(CardRowAction::Sheet(CardSheetState::Drift, display))
-        }
         // M8′: "Choose a project" jumps to the Project-tab picker (the
         // list of library projects → push) — no popup, no dialog.
         DeviceDetailAffordance::Roster(RosterAffordance::ChooseProject) => {

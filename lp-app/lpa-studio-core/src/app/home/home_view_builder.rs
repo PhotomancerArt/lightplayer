@@ -90,6 +90,10 @@ pub struct HomeDeviceEvidence {
     pub observed_version: Option<usize>,
     /// The local head's version number, for the "Push vN" affordance.
     pub head_version: Option<usize>,
+    /// When the local head was last saved (§3c-3 drift copy).
+    pub local_saved_at: Option<f64>,
+    /// When we last pushed to this device (its registry association).
+    pub pushed_at: Option<f64>,
     /// The remembered device a one-click reconnect targets: while the
     /// connect window is open and no identity has landed, the live
     /// evidence renders ON that card (uid + name adopted from the
@@ -346,6 +350,8 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         content: live.sync.as_ref().map(|sync| &sync.content),
         observed_version: live.observed_version,
         head_version: live.head_version,
+        local_saved_at: live.local_saved_at,
+        pushed_at: live.pushed_at,
         unstamped: live
             .sync
             .as_ref()
@@ -489,6 +495,8 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         content: None,
         observed_version: None,
         head_version: None,
+        local_saved_at: None,
+        pushed_at: None,
         unstamped: false,
         registry: Some(device),
         connect: ConnectEvidence::Idle,

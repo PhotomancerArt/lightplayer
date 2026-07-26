@@ -657,6 +657,11 @@ impl StudioController {
             .device_session()
             .map(crate::RuntimeSession::device_versions)
             .unwrap_or((None, None));
+        let (local_saved_at, pushed_at) = self
+            .pool
+            .device_session()
+            .map(crate::RuntimeSession::device_drift_times)
+            .unwrap_or((None, None));
         // A long-running operation on the device session (flash / erase /
         // push — the same flag that blocks pool replaces) owns the card's
         // narration; the connect flow narrates otherwise.
@@ -678,6 +683,8 @@ impl StudioController {
             transport: self.transport_label().map(str::to_string),
             observed_version,
             head_version,
+            local_saved_at,
+            pushed_at,
             pending_uid: self.device.pending_reconnect_uid().map(str::to_string),
             console_tail: self
                 .pool
@@ -1082,27 +1089,35 @@ impl StudioController {
                                 // relation + line version numbers (the
                                 // roster's "Running vN"/"Push vN" evidence)
                                 // in one handle open
-                                let (relation, versions, head) = store
+                                let (relation, versions, head, head_saved_at) = store
                                     .open(summary.uid)
                                     .map(|handle| {
                                         let history = &handle.history;
+                                        let head = history.head();
                                         (
                                             history.classify(pulled.observed),
                                             (
                                                 history.version_number(pulled.observed),
-                                                history
-                                                    .head()
-                                                    .and_then(|head| history.version_number(head)),
+                                                head.and_then(|head| history.version_number(head)),
                                             ),
-                                            history.head(),
+                                            head,
+                                            head.and_then(|head| history.saved_at(head)),
                                         )
                                     })
                                     .unwrap_or((
                                         lpc_history::SyncRelation::Diverged,
                                         (None, None),
                                         None,
+                                        None,
                                     ));
-                                (summary, relation, versions, head, association)
+                                (
+                                    summary,
+                                    relation,
+                                    versions,
+                                    head,
+                                    head_saved_at,
+                                    association,
+                                )
                             }),
                         Err(_) => None,
                     }
@@ -1112,9 +1127,17 @@ impl StudioController {
             _ => None,
         };
 
-        if let Some((summary, relation, versions, head, association)) = local {
+        if let Some((summary, relation, versions, head, head_saved_at, association)) = local {
+            // §3c-3 drift wall-clock: the local head's save time + when we
+            // last pushed to THIS board (its association) — the
+            // Edited-on-device card's plain-words comparison.
+            let pushed_at = association
+                .as_ref()
+                .filter(|assoc| assoc.project == summary.uid)
+                .map(|assoc| assoc.at);
             if let Ok(session) = self.pool.device_session_mut() {
                 session.set_device_versions(versions);
+                session.set_device_drift_times((head_saved_at, pushed_at));
             }
             let Some(identity_value) = identity.clone() else {
                 // anonymous hardware: classification only (the wizard

@@ -13,8 +13,14 @@ pub enum RosterAffordance {
     /// Running, behind: the push button IS the D11 consent click.
     /// `version` is the local head's version number for the "Push vN" label.
     PushVersion { version: Option<usize> },
-    /// Edited on device: click → editor + the D30 diverged popup.
-    ResolveDrift,
+    /// Edited on device, on the card FACE (§3c-2 — the D30 sheet is
+    /// gone): adopt the board's copy as the new head. Non-destructive by
+    /// construction — the old head stays in project history — so it
+    /// dispatches without a gate.
+    UseBoardCopy,
+    /// Edited on device, the face's second verb: keep both (fork the
+    /// board's copy into its own project).
+    KeepBoth,
     /// Degraded / Not responding: troubleshooting instructions popup.
     Troubleshoot,
     /// Connected, empty: project picker popup.
@@ -42,7 +48,8 @@ impl RosterAffordance {
             Self::OpenEditor => "Open in editor".to_string(),
             // §3a: no version jargon — the Project facts carry distance.
             Self::PushVersion { .. } => "Push the latest".to_string(),
-            Self::ResolveDrift => "Review".to_string(),
+            Self::UseBoardCopy => "Use board copy".to_string(),
+            Self::KeepBoth => "Keep both".to_string(),
             Self::Troubleshoot => "Troubleshoot".to_string(),
             Self::ChooseProject => "Choose a project".to_string(),
             Self::WipeProject => "Wipe project…".to_string(),

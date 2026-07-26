@@ -50,9 +50,17 @@ fn running_behind() -> Element {
     sheet(vec![card(behind_state(), true)])
 }
 
-#[story(description = "Amber filled edge: a genuine fork, already banked at connect (D8/D30).")]
+#[story(
+    description = "Amber filled edge: a genuine fork, already banked at connect (D8). §3c-2: BOTH verbs ride the face — Use board copy (adopt = overwrite-with-history) and Keep both (fork) — plus the editor CTA; the sub-line speaks the drift times in plain words. No Review hop, no sheet, no Stay (walking away is staying)."
+)]
 fn edited_on_device() -> Element {
-    sheet(vec![card(RosterCardState::EditedOnDevice, true)])
+    sheet(vec![card(
+        RosterCardState::EditedOnDevice {
+            local_saved_at: Some(STORY_NOW - 240.0),
+            pushed_at: Some(STORY_NOW - 7_200.0),
+        },
+        true,
+    )])
 }
 
 #[story(
@@ -344,24 +352,6 @@ fn name_sheet_open() -> Element {
                 card: UiDeviceCard {
                     ui: opened(DeviceCardTab::Status, Some(CardSheet::Name)),
                     ..device_card(RosterCardState::NeedsAName, false)
-                },
-                now_secs: Some(STORY_NOW),
-                on_action: |_| {},
-            }
-        }
-    }])
-}
-
-#[story(
-    description = "The D30 drift-resolution sheet on the Edited-on-device card: adopt (use the device's copy) / keep both / stay, entered from the state-table Review affordance. The deploy-dialog era's verbs, now card-resident — M5-A's minimal dialog routing dissolved into this."
-)]
-fn drift_sheet_open() -> Element {
-    sheet(vec![rsx! {
-        div { class: "tw:w-64",
-            DeviceCard {
-                card: UiDeviceCard {
-                    ui: opened(DeviceCardTab::Status, Some(CardSheet::Drift)),
-                    ..device_card(RosterCardState::EditedOnDevice, true)
                 },
                 now_secs: Some(STORY_NOW),
                 on_action: |_| {},
