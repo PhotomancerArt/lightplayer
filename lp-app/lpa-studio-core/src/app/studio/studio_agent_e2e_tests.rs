@@ -73,6 +73,12 @@ fn agent_turn_stages_an_overlay_edit_end_to_end() {
     assert_eq!(agent.availability, UiAgentAvailability::Ready);
     assert_eq!(agent.status, UiAgentStatus::Idle);
     assert!(agent.turns.is_empty());
+    // The shader card's FACE carries the same chat (node-card P3: the
+    // agent section relocated onto the face decorates from the same
+    // session state).
+    let face_agent = face_agent_view(&snapshot);
+    assert_eq!(face_agent.availability, UiAgentAvailability::Ready);
+    assert!(face_agent.turns.is_empty());
 
     // Send. The dispatch resolves context, fetches the source body, and
     // spawns exactly one run future.
@@ -123,6 +129,8 @@ fn agent_turn_stages_an_overlay_edit_end_to_end() {
         (agent.usage.input_tokens, agent.usage.output_tokens),
         (60, 40)
     );
+    // The face's chat sees the SAME transcript — one session, two hosts.
+    assert_eq!(face_agent_view(&snapshot).turns.len(), agent.turns.len());
 
     // The staged edit went through the ONE overlay write path: the editor
     // content shadows to the agent's source, dirty, and the save panel
@@ -301,4 +309,25 @@ fn agent_view(view: &UiStudioView) -> UiAgentView {
     find_asset_editor(view)
         .agent
         .expect("GLSL editor carries the agent chat DTO")
+}
+
+/// The decorated agent chat DTO on the shader node's card face (node-card
+/// P3: the face's agent section).
+fn face_agent_view(view: &UiStudioView) -> UiAgentView {
+    let editor = view
+        .panes
+        .iter()
+        .find_map(|pane| match &pane.body {
+            crate::UiViewContent::ProjectEditor(editor) => Some(editor),
+            _ => None,
+        })
+        .expect("project editor pane");
+    editor
+        .nodes
+        .iter()
+        .find_map(|node| match &node.face {
+            Some(crate::UiNodeFace::Shader(face)) => face.agent.clone(),
+            _ => None,
+        })
+        .expect("shader face carries the agent chat DTO")
 }

@@ -55,6 +55,17 @@ pub enum PopoverPlacement {
 /// interpolating the panel's input rect and re-unioning each frame
 /// (`prefers-reduced-motion` jumps to the settled shape). Decision record:
 /// `docs/adr/2026-07-15-popover-svg-merged-outline.md`.
+///
+/// **Anchored mode** (`anchor_id` + `anchor_visual`, node-card P2c item 3:
+/// "the control IS the trigger"): the merged outline anchors on an EXTERNAL
+/// in-flow element — `anchor_id` names it — instead of the trigger button's
+/// own rect, and `anchor_visual` (a live copy of that element's content)
+/// renders in the top layer over the anchor while open. The in-flow trigger
+/// button (e.g. a corner ⓘ hint inside the anchor) still toggles, and hides
+/// behind the existing placeholder treatment while open — without the size
+/// pin, since the measured rect is the anchor's, not the button's. Clicks
+/// inside the anchored visual do NOT dismiss (it hosts interactive
+/// controls); the backdrop and the trigger still close.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PopoverButton(
@@ -67,6 +78,14 @@ pub fn PopoverButton(
     #[props(default = String::new())] chrome_class: String,
     #[props(default = PopoverPlacement::BottomEnd)] placement: PopoverPlacement,
     #[props(default = false)] initially_open: bool,
+    /// Anchored mode: id of the in-flow element whose rect anchors the
+    /// merged outline (instead of the trigger button's own rect).
+    #[props(default = None)]
+    anchor_id: Option<String>,
+    /// Anchored mode: the top-layer visual painted over the anchor while
+    /// open — a live copy of the anchored element's content.
+    #[props(default = None)]
+    anchor_visual: Option<Element>,
     children: Element,
 ) -> Element {
     let mut open = use_signal(|| initially_open);
@@ -74,6 +93,10 @@ pub fn PopoverButton(
         let id = NEXT_POPOVER_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-popover-trigger-{id}")
     });
+    // Anchored mode measures the external anchor element; regular mode
+    // measures the trigger button itself.
+    let anchored = anchor_id.is_some();
+    let measured_id = anchor_id.unwrap_or_else(|| trigger_id.clone());
     let panel_id = use_hook(|| {
         let id = NEXT_POPOVER_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-popover-panel-{id}")
@@ -101,7 +124,7 @@ pub fn PopoverButton(
     // until then the trigger keeps its normal open look so nothing flashes.
     let attached = render_open() && current_position.visible && t > 0.0;
     let button_class = popover_button_class(open(), attached, &class, &open_class);
-    let trigger_placeholder = trigger_placeholder_style(attached, trigger_rect());
+    let trigger_placeholder = trigger_placeholder_style(attached, anchored, trigger_rect());
     let panel_class = popover_panel_class(&popup_class);
     let (outline, panel_clip) = if attached {
         trigger_rect()
@@ -117,16 +140,18 @@ pub fn PopoverButton(
     let content_style = panel_content_style(t);
     let (grad_stop_near, grad_stop_far) = gradient_stops(current_position.side);
     let trigger_visual_style = open_trigger_style(trigger_rect());
-    let trigger_for_layer = trigger.clone();
+    // The visual re-parented into the top layer while open: the anchored
+    // element's live copy in anchored mode, the trigger's clone otherwise.
+    let trigger_for_layer = anchor_visual.unwrap_or_else(|| trigger.clone());
 
-    let trigger_id_for_click = trigger_id.clone();
-    let trigger_id_for_effect = trigger_id.clone();
+    let measured_id_for_click = measured_id.clone();
+    let measured_id_for_effect = measured_id.clone();
     let panel_id_for_effect = panel_id.clone();
     let layer_id_for_effect = layer_id.clone();
     let auto_update_for_effect = auto_update.clone();
-    let trigger_id_for_layer_mount = trigger_id.clone();
+    let measured_id_for_layer_mount = measured_id.clone();
     let panel_id_for_layer_mount = panel_id.clone();
-    let trigger_id_for_panel_mount = trigger_id.clone();
+    let measured_id_for_panel_mount = measured_id.clone();
     let panel_id_for_panel_mount = panel_id.clone();
     let layer_id_for_layer_mount = layer_id.clone();
     let layer_id_for_panel_mount = layer_id.clone();
@@ -146,7 +171,7 @@ pub fn PopoverButton(
                 render_open.set(true);
             }
             measure_trigger_with_stabilization(
-                trigger_id_for_effect.clone(),
+                measured_id_for_effect.clone(),
                 panel_id_for_effect.clone(),
                 panel_size,
                 trigger_rect,
@@ -156,7 +181,7 @@ pub fn PopoverButton(
             );
             ensure_popover_auto_update(
                 auto_update_for_effect.clone(),
-                trigger_id_for_effect.clone(),
+                measured_id_for_effect.clone(),
                 panel_id_for_effect.clone(),
                 layer_id_for_effect.clone(),
                 panel_size,
@@ -194,8 +219,10 @@ pub fn PopoverButton(
                     event.stop_propagation();
                     if !open() {
                         // Measure synchronously so the placeholder can pin the
-                        // trigger's size on the very first attached frame.
-                        if let Some(rect) = trigger_rect_by_id(&trigger_id_for_click) {
+                        // trigger's size on the very first attached frame (in
+                        // anchored mode: so the anchor visual lands on the
+                        // anchor's rect immediately).
+                        if let Some(rect) = trigger_rect_by_id(&measured_id_for_click) {
                             if !rect.is_empty() {
                                 trigger_rect.set(Some(rect));
                             }
@@ -216,7 +243,7 @@ pub fn PopoverButton(
                     "popover": "manual",
                     onmounted: move |_| {
                         show_popover_layer(&layer_id_for_layer_mount);
-                        let trigger_id_for_panel = trigger_id_for_layer_mount.clone();
+                        let trigger_id_for_panel = measured_id_for_layer_mount.clone();
                         let panel_id_for_panel = panel_id_for_layer_mount.clone();
                         spawn(async move {
                             measure_trigger_once(
@@ -275,7 +302,7 @@ pub fn PopoverButton(
                         onclick: move |event| event.stop_propagation(),
                         onmounted: move |event| {
                             show_popover_layer(&layer_id_for_panel_mount);
-                            let trigger_id_for_panel = trigger_id_for_panel_mount.clone();
+                            let trigger_id_for_panel = measured_id_for_panel_mount.clone();
                             let panel_id_for_panel = panel_id_for_panel_mount.clone();
                             let panel_element = event.data();
                             spawn(async move {
@@ -301,11 +328,23 @@ pub fn PopoverButton(
                         },
                         div { style: "{content_style}", {children} }
                     }
-                    // The trigger's visual, re-parented into the top layer so
-                    // it paints above the outline fill (the top layer covers
-                    // the in-flow button). Presentational only: clicking it
-                    // closes, focus stays on the in-flow placeholder button.
-                    if attached {
+                    // The trigger's visual (anchored mode: the anchor's live
+                    // copy), re-parented into the top layer so it paints
+                    // above the outline fill (the top layer covers the
+                    // in-flow original). Regular triggers are presentational:
+                    // clicking closes, focus stays on the in-flow placeholder
+                    // button. An anchored visual hosts interactive controls,
+                    // so its clicks do NOT dismiss — the backdrop still does.
+                    if attached && anchored {
+                        div {
+                            class: "ux-popover-open-trigger",
+                            style: "{trigger_visual_style}",
+                            onclick: move |event| {
+                                event.stop_propagation();
+                            },
+                            {trigger_for_layer}
+                        }
+                    } else if attached {
                         div {
                             class: "ux-popover-open-trigger {open_class}",
                             style: "{trigger_visual_style}",
@@ -338,6 +377,12 @@ pub fn IconPopoverButton(
     #[props(default = String::new())] chrome_class: String,
     #[props(default = PopoverPlacement::BottomEnd)] placement: PopoverPlacement,
     #[props(default = false)] initially_open: bool,
+    /// Anchored mode pass-through (see [`PopoverButton`]).
+    #[props(default = None)]
+    anchor_id: Option<String>,
+    /// Anchored mode pass-through (see [`PopoverButton`]).
+    #[props(default = None)]
+    anchor_visual: Option<Element>,
     children: Element,
 ) -> Element {
     rsx! {
@@ -353,6 +398,8 @@ pub fn IconPopoverButton(
             chrome_class,
             placement,
             initially_open,
+            anchor_id,
+            anchor_visual,
             {children}
         }
     }
@@ -840,10 +887,14 @@ fn popover_panel_class(popup_class: &str) -> String {
 /// Inline size pin for the in-flow placeholder button while attached. The
 /// placeholder keeps its own classes and content (which already hold the
 /// size); the pin is a belt-and-suspenders guard that keeps the footprint at
-/// the measured rect the top-layer chrome was positioned against.
-fn trigger_placeholder_style(attached: bool, rect: Option<RectSnapshot>) -> String {
-    match (attached, rect) {
-        (true, Some(rect)) => format!("width: {:.1}px; height: {:.1}px;", rect.width, rect.height),
+/// the measured rect the top-layer chrome was positioned against. Anchored
+/// mode never pins: the measured rect is the ANCHOR's, not the button's —
+/// pinning would blow the (hidden) trigger hint up to the anchor's size.
+fn trigger_placeholder_style(attached: bool, anchored: bool, rect: Option<RectSnapshot>) -> String {
+    match (attached, anchored, rect) {
+        (true, false, Some(rect)) => {
+            format!("width: {:.1}px; height: {:.1}px;", rect.width, rect.height)
+        }
         _ => String::new(),
     }
 }
@@ -1472,5 +1523,22 @@ mod tests {
         assert_eq!(class, "open ux-popover-trigger-placeholder");
         assert_eq!(popover_button_class(true, false, "rest", "open"), "open");
         assert_eq!(popover_button_class(false, false, "rest", "open"), "rest");
+    }
+
+    #[test]
+    fn anchored_placeholder_never_pins_the_anchor_rect() {
+        // The measured rect in anchored mode belongs to the ANCHOR element;
+        // pinning it onto the hidden trigger hint would resize the hint to
+        // the whole control (P2c item 3).
+        let rect = RectSnapshot {
+            x: 10.0,
+            y: 10.0,
+            width: 240.0,
+            height: 80.0,
+        };
+        let pinned = trigger_placeholder_style(true, false, Some(rect));
+        assert!(pinned.contains("width: 240.0px"));
+        assert_eq!(trigger_placeholder_style(true, true, Some(rect)), "");
+        assert_eq!(trigger_placeholder_style(false, false, Some(rect)), "");
     }
 }

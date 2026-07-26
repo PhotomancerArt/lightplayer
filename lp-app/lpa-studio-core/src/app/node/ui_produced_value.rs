@@ -8,6 +8,10 @@ use crate::{
 /// A non-product output rendered as a compact value box.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiProducedValue {
+    /// Stable slot-path key of the produced slot (e.g. `active_entry`),
+    /// empty for hand-built rows. Kind-face derivations key on this — the
+    /// label is presentation and may be humanized/renamed freely.
+    pub key: String,
     /// Human-readable value label.
     pub label: String,
     /// Current formatted value.
@@ -28,6 +32,7 @@ impl UiProducedValue {
     /// Create a produced value.
     pub fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
+            key: String::new(),
             label: label.into(),
             value: value.into(),
             detail: None,
@@ -36,6 +41,12 @@ impl UiProducedValue {
             dirty: UiNodeDirtyState::Clean,
             authoring: None,
         }
+    }
+
+    /// Set the stable produced-slot key.
+    pub fn with_key(mut self, key: impl Into<String>) -> Self {
+        self.key = key.into();
+        self
     }
 
     /// Add type, unit, or runtime detail.

@@ -536,6 +536,7 @@ impl SlotController {
         let value = self.value()?;
         let ui_value = UiSlotValue::from_lp_value(value);
         let mut produced = UiProducedValue::new(self.label.clone(), ui_value.display);
+        produced.key = self.ui_key();
         produced.detail = Some(ui_value.kind.type_label().to_string());
         produced.unit = self.ui_unit();
         produced.binding = self.ui_produced_binding();
@@ -1019,6 +1020,10 @@ impl SlotController {
             if let Some(description) = shape.meta.description.as_ref() {
                 value = value.with_detail(description.clone());
             }
+            value.panel = shape.meta.panel;
+            if let Some(unit) = shape.meta.unit.as_ref() {
+                value = value.with_unit(ui_slot_unit(unit));
+            }
         }
         value
     }
@@ -1453,6 +1458,12 @@ fn owned_value_shape(shape: SlotValueShapeView<'_>) -> SlotValueShape {
     }
 }
 
+/// Structured unit metadata from a shape's authored unit label: recognized
+/// labels get their long form, anything else displays verbatim.
+pub(in crate::app::project) fn ui_slot_unit(label: &str) -> UiSlotUnit {
+    UiSlotUnit::from_known_label(label).unwrap_or_else(|| UiSlotUnit::new(label, label))
+}
+
 fn ui_editor_hint(editor: &ValueEditorHint) -> UiSlotEditorHint {
     match editor {
         ValueEditorHint::Plain
@@ -1470,6 +1481,11 @@ fn ui_editor_hint(editor: &ValueEditorHint) -> UiSlotEditorHint {
             step: step.map(|value| value.0),
         },
         ValueEditorHint::Slider { min, max, step } => UiSlotEditorHint::Slider {
+            min: min.0,
+            max: max.0,
+            step: step.map(|value| value.0),
+        },
+        ValueEditorHint::Knob { min, max, step } => UiSlotEditorHint::Knob {
             min: min.0,
             max: max.0,
             step: step.map(|value| value.0),

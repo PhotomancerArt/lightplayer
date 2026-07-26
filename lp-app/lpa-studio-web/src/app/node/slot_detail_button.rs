@@ -47,6 +47,20 @@ pub fn SlotDetailButton(
     /// section when present alongside a dispatch conduit.
     #[props(default = None)]
     authoring: Option<lpa_studio_core::UiBindingAuthoring>,
+    /// Popup placement; panel controls center the aspect card under the
+    /// anchored control, slot rows keep the end alignment.
+    #[props(default = PopoverPlacement::BottomEnd)]
+    placement: PopoverPlacement,
+    /// Anchored mode (P2c item 3, panel controls): the id of the control
+    /// element whose outline merges with the aspect card — the control IS
+    /// the trigger, and opening reads as diving into it. Slot-row popovers
+    /// pass nothing and are unchanged.
+    #[props(default = None)]
+    anchor_id: Option<String>,
+    /// Anchored mode: the control's live top-layer copy (see
+    /// `PopoverButton`).
+    #[props(default = None)]
+    anchor_visual: Option<Element>,
 ) -> Element {
     let affordance = primary_affordance(&aspects);
     let style = slot_affordance_style(affordance);
@@ -74,9 +88,11 @@ pub fn SlotDetailButton(
                 label: menu_label.clone(),
                 title: menu_label,
                 tone: style.tone,
-                placement: PopoverPlacement::BottomEnd,
+                placement,
                 active: style.active,
                 initially_open,
+                anchor_id,
+                anchor_visual,
                 for aspect in aspects {
                     if !(fold_binding && aspect.kind == UiSlotAspectKind::Binding) {
                         SlotDetailSection {

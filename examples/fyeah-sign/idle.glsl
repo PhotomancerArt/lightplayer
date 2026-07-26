@@ -1,5 +1,7 @@
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float time;
+layout(binding = 2) uniform float speed;
+layout(binding = 3) uniform float glow;
 
 vec3 paletteRainbow(float t) {
     float r = 0.33333;
@@ -47,20 +49,23 @@ vec2 movingNoise(vec2 coord, float t) {
 
 vec4 render(vec2 pos) {
     const vec2 REF_SIZE = vec2(32.0, 32.0);
+    // Front-panel knobs: `speed` scales the animation clock, `glow` scales
+    // the rainbow highlight (defaults 1.0 / 0.5 reproduce the original).
+    float t = time * speed;
     vec2 uv = pos / outputSize;
     vec2 virtCoord = pos * REF_SIZE / outputSize;
     vec2 center = REF_SIZE * 0.5;
     vec2 fromCenter = virtCoord - center;
 
-    float zoom = mix(0.040, 0.070, 0.5 + 0.5 * sin(time * 0.32));
-    float drift = sin(time * 0.18);
-    vec2 coord = center + fromCenter * zoom + vec2(drift * 0.60, time * 0.075);
+    float zoom = mix(0.040, 0.070, 0.5 + 0.5 * sin(t * 0.32));
+    float drift = sin(t * 0.18);
+    vec2 coord = center + fromCenter * zoom + vec2(drift * 0.60, t * 0.075);
 
-    vec2 tv = movingNoise(coord, time);
-    float bands = 0.5 + 0.5 * sin((uv.x + uv.y) * 7.0 + time * 0.85 + tv.x * 6.2831853);
-    float breath = 0.72 + 0.18 * sin(time * 0.75);
+    vec2 tv = movingNoise(coord, t);
+    float bands = 0.5 + 0.5 * sin((uv.x + uv.y) * 7.0 + t * 0.85 + tv.x * 6.2831853);
+    float breath = 0.72 + 0.18 * sin(t * 0.75);
 
-    float palettePhase = mod(time, 18.0) * 0.16666667;
+    float palettePhase = mod(t, 18.0) * 0.16666667;
     float palette = min(floor(palettePhase), 2.0);
     float nextPalette = palette + 1.0;
     if (nextPalette > 2.5) {
@@ -70,6 +75,6 @@ vec4 render(vec2 pos) {
 
     vec3 color = mix(applyPalette(tv.x, palette), applyPalette(tv.x, nextPalette), blend);
     color *= mix(0.48, 1.0, bands) * tv.y * breath;
-    color += paletteRainbow(fract(tv.x + 0.20)) * smoothstep(0.88, 1.0, bands) * 0.16;
+    color += paletteRainbow(fract(tv.x + 0.20)) * smoothstep(0.88, 1.0, bands) * (0.32 * glow);
     return vec4(clamp(color, 0.0, 1.0), 1.0);
 }

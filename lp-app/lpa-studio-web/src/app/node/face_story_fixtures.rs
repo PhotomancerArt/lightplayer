@@ -1,0 +1,474 @@
+//! Shared fixtures for node-card face and panel-control stories.
+//!
+//! Everything here is hand-built mock DTO data mirroring what the real
+//! face derivation (`node_face_builder`) produces, so the stories stay a
+//! faithful design record. Panel-control aspects are derived through a real
+//! `UiConfigSlot` (`visible_aspects()`), so the corner ⓘ popover content is
+//! byte-identical to what the backing slot row would show.
+
+use lpa_studio_core::{
+    ArtifactLocation, ControllerId, ProjectEditorOp, ProjectNodeAddress, ProjectSlotAddress,
+    ProjectSlotRoot, SlotPath, UiAction, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
+    UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor, UiAssetEditorKind,
+    UiBindingEndpoint, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPanelControl, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview, UiProductPreviewFrame,
+    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotFieldState, UiSlotSourceState,
+    UiSlotUnit, UiSlotValue, UiStatus,
+};
+
+use crate::app::node::node_story_fixtures::control_preview_product;
+
+/// Story-only slot address so panel fields render wired (dispatch goes to
+/// the story's no-op handler).
+pub(crate) fn story_slot_address(path: &str) -> ProjectSlotAddress {
+    ProjectSlotAddress::new(
+        ProjectNodeAddress::parse("/fyeah_sign.show/aurora.shader")
+            .expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    )
+}
+
+/// One knob control. Aspects (the ⓘ popover) ride the equivalent config
+/// slot, so panel and row present identical detail.
+pub(crate) fn knob_control(
+    label: &str,
+    value: f32,
+    min: f32,
+    max: f32,
+    state: UiSlotFieldState,
+    source: UiSlotSourceState,
+) -> UiPanelControl {
+    let slot_value = UiSlotValue::f32(value);
+    let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
+        .with_state(state.clone())
+        .with_source(source);
+    UiPanelControl {
+        label: label.to_string(),
+        address: Some(story_slot_address(&format!("controls.{label}"))),
+        widget: UiPanelWidget::Knob {
+            min,
+            max,
+            step: None,
+        },
+        value: slot_value,
+        unit: None,
+        state,
+        aspects: aspect_slot.visible_aspects(),
+    }
+}
+
+/// The fixture face's dominant brightness fader (0–255, like
+/// `FixtureDef.brightness`).
+pub(crate) fn fader_control(
+    value: f32,
+    state: UiSlotFieldState,
+    source: UiSlotSourceState,
+) -> UiPanelControl {
+    let slot_value = UiSlotValue::f32(value);
+    let aspect_slot = UiConfigSlot::value("brightness", "brightness", slot_value.clone())
+        .with_state(state.clone())
+        .with_source(source);
+    UiPanelControl {
+        label: "brightness".to_string(),
+        address: Some(story_slot_address("brightness.some")),
+        widget: UiPanelWidget::Fader {
+            min: 0.0,
+            max: 255.0,
+            step: Some(1.0),
+        },
+        value: slot_value,
+        unit: None,
+        state,
+        aspects: aspect_slot.visible_aspects(),
+    }
+}
+
+/// One pill toggle control.
+pub(crate) fn toggle_control(
+    label: &str,
+    value: bool,
+    state: UiSlotFieldState,
+    source: UiSlotSourceState,
+) -> UiPanelControl {
+    let slot_value = UiSlotValue::bool(value);
+    let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
+        .with_state(state.clone())
+        .with_source(source);
+    UiPanelControl {
+        label: label.to_string(),
+        address: Some(story_slot_address(&format!("controls.{label}"))),
+        widget: UiPanelWidget::Toggle,
+        value: slot_value,
+        unit: None,
+        state,
+        aspects: aspect_slot.visible_aspects(),
+    }
+}
+
+/// Bus binding used by every "bound" control state.
+pub(crate) fn bound_source() -> UiSlotSourceState {
+    UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:master-tempo"))
+}
+
+/// The shader face's knob row: bound speed (violet), plain hue, live-edited
+/// scale, and the mirror toggle.
+pub(crate) fn shader_controls(speed_bound: bool) -> Vec<UiPanelControl> {
+    let speed_source = if speed_bound {
+        bound_source()
+    } else {
+        UiSlotSourceState::Unset
+    };
+    vec![
+        knob_control(
+            "speed",
+            1.6,
+            0.0,
+            4.0,
+            UiSlotFieldState::editable(),
+            speed_source,
+        ),
+        knob_control(
+            "hue",
+            0.32,
+            0.0,
+            1.0,
+            UiSlotFieldState::editable(),
+            UiSlotSourceState::Unset,
+        ),
+        knob_control(
+            "scale",
+            2.0,
+            0.0,
+            4.0,
+            UiSlotFieldState::editable()
+                .with_dirty(UiNodeDirtyState::Dirty)
+                .with_live(true),
+            UiSlotSourceState::Unset,
+        ),
+        toggle_control(
+            "mirror",
+            true,
+            UiSlotFieldState::editable(),
+            UiSlotSourceState::Unset,
+        ),
+    ]
+}
+
+/// Wide aurora-ish visual hero for the shader face (deterministic bytes).
+pub(crate) fn shader_hero_product() -> UiProducedProduct {
+    UiProducedProduct::visual("output")
+        .with_detail("256 x 256")
+        .with_tracking(UiProductTrackingState::Tracking)
+        .with_frame(UiProductPreviewFrame::new(16, 7))
+        .with_preview(aurora_preview(48, 21, 0.0))
+}
+
+/// Deterministic aurora-ish pixel field (the spike's preview vibe) at a
+/// story-friendly resolution.
+pub(crate) fn aurora_preview(width: u32, height: u32, seed: f32) -> UiProductPreview {
+    let mut bytes = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let u = x as f32 / width.max(1) as f32;
+            let v = y as f32 / height.max(1) as f32;
+            let field =
+                ((u * 6.0 + seed).sin() + ((u + v) * 4.0 + seed * 2.0).sin() + (v * 7.0).sin())
+                    / 3.0
+                    * 0.5
+                    + 0.5;
+            bytes.push((20.0 + 60.0 * field) as u8);
+            bytes.push((40.0 + 180.0 * field) as u8);
+            bytes.push((70.0 + 150.0 * (1.0 - field * 0.5)) as u8);
+        }
+    }
+    UiProductPreview::VisualSrgb8 {
+        width,
+        height,
+        revision: 104,
+        bytes: bytes.into(),
+    }
+}
+
+const AURORA_GLSL: &str = "\
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float time;
+layout(binding = 2) uniform float speed;
+
+vec4 render(vec2 pos) {
+    vec2 uv = pos / outputSize;
+    float rim = smoothstep(0.35, 0.95, length(uv - 0.5));
+    float drift = time * speed * mix(1.0, 0.25, rim);
+    return vec4(0.2 + 0.8 * sin(drift + uv.xyx), 1.0);
+}
+";
+
+/// The code drawer's inline GLSL editor.
+pub(crate) fn shader_code_editor() -> UiAssetEditor {
+    UiAssetEditor {
+        artifact: ArtifactLocation::file("/aurora.glsl"),
+        kind: UiAssetEditorKind::Glsl,
+        source: "aurora.glsl".to_string(),
+        content: Some(UiAssetContent::from_bytes(AURORA_GLSL.as_bytes(), true, 4)),
+        in_flight: false,
+        failure: None,
+        shader_error: None,
+        uniforms: vec![
+            UiShaderUniform {
+                name: "time".to_string(),
+                glsl_type: "float".to_string(),
+            },
+            UiShaderUniform {
+                name: "speed".to_string(),
+                glsl_type: "float".to_string(),
+            },
+        ],
+        agent: None,
+    }
+}
+
+/// Condensed idle chat for the shader face.
+pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
+    let turns = match status {
+        UiAgentStatus::Streaming => vec![
+            UiAgentTurn::User {
+                text: "make the ribbons drift slower near the edges".to_string(),
+            },
+            UiAgentTurn::Assistant {
+                text: "Easing the drift toward the rim and re-checking the".to_string(),
+            },
+        ],
+        _ => vec![
+            UiAgentTurn::User {
+                text: "make the ribbons drift slower near the edges".to_string(),
+            },
+            UiAgentTurn::Tool(UiAgentToolRow {
+                id: "tu_1".to_string(),
+                note: Some("ease drift toward the rim".to_string()),
+                done: true,
+                staged: true,
+                shader_ok: Some(true),
+                probes: 2,
+                warnings: 0,
+                error: None,
+                detail: "{\n  \"probes\": 2,\n  \"shader_ok\": true\n}".to_string(),
+            }),
+            UiAgentTurn::Assistant {
+                text: "Done — falloff now eases the drift toward the rim. \
+                       Staged as an unsaved edit."
+                    .to_string(),
+            },
+        ],
+    };
+    UiAgentView {
+        artifact: ArtifactLocation::file("/aurora.glsl"),
+        availability: UiAgentAvailability::Ready,
+        setup: None,
+        status,
+        turns,
+        usage: UiAgentUsage {
+            input_tokens: 2841,
+            output_tokens: 512,
+        },
+        estimated_cost: Some("~$0.0162".to_string()),
+    }
+}
+
+/// Advanced-drawer sections for the shader card: today's slot rows,
+/// unchanged.
+pub(crate) fn shader_sections() -> Vec<UiNodeSection> {
+    vec![UiNodeSection::ConfigSlots(vec![
+        UiConfigSlot::value("source", "Source", UiSlotValue::string("aurora.glsl"))
+            .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+        UiConfigSlot::value("speed", "Speed", UiSlotValue::f32(1.6)).with_source(bound_source()),
+        UiConfigSlot::value("hue", "Hue", UiSlotValue::f32(0.32)),
+        UiConfigSlot::value("scale", "Scale", UiSlotValue::f32(2.0)),
+        UiConfigSlot::value(
+            "output_size",
+            "Output size",
+            UiSlotValue::string("256 x 256"),
+        ),
+    ])]
+}
+
+/// The complete shader face.
+pub(crate) fn shader_face(speed_bound: bool, agent_status: UiAgentStatus) -> UiShaderFace {
+    UiShaderFace {
+        preview: shader_hero_product(),
+        controls: shader_controls(speed_bound),
+        agent: Some(shader_agent_view(agent_status)),
+        code_drawer: Some(shader_code_editor()),
+    }
+}
+
+/// A full shader node card view with the face installed (stories exercise
+/// the `NodePane` face branch this way; controllers still seed `None`).
+pub(crate) fn shader_node_view(speed_bound: bool, agent_status: UiAgentStatus) -> UiNodeView {
+    let header = UiNodeHeader::new("Aurora", "Shader", "/fyeah_sign.show/aurora.shader")
+        .with_source("aurora.glsl")
+        .with_status(UiStatus::good("Running"))
+        .with_summary("GPU");
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(shader_sections())])
+        .with_node_id("shader-aurora");
+    view.face = Some(UiNodeFace::Shader(shader_face(speed_bound, agent_status)));
+    view
+}
+
+/// The complete fixture face (ring lamp preview + dominant fader).
+pub(crate) fn fixture_face() -> UiFixtureFace {
+    UiFixtureFace {
+        preview: control_preview_product("output"),
+        brightness: fader_control(
+            184.0,
+            UiSlotFieldState::editable(),
+            UiSlotSourceState::Unset,
+        ),
+    }
+}
+
+/// Advanced-drawer sections for the fixture card.
+pub(crate) fn fixture_sections() -> Vec<UiNodeSection> {
+    vec![UiNodeSection::ConfigSlots(vec![
+        UiConfigSlot::value("mapping", "Mapping", UiSlotValue::string("ring · 241 pts")),
+        UiConfigSlot::value("input", "Input", UiSlotValue::string("Evening set")).with_source(
+            UiSlotSourceState::Bound(UiBindingEndpoint::new("playlist:evening-set")),
+        ),
+        UiConfigSlot::value("driver", "Driver", UiSlotValue::string("auto")),
+        UiConfigSlot::value("channel", "Channel", UiSlotValue::string("D10")),
+    ])]
+}
+
+/// A full fixture node card view with the face installed.
+pub(crate) fn fixture_node_view() -> UiNodeView {
+    let header = UiNodeHeader::new("Halo ring", "Fixture", "/fyeah_sign.show/halo.fixture")
+        .with_source("halo.json")
+        .with_status(UiStatus::good("Running"))
+        .with_summary("241 LEDs");
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(fixture_sections())])
+        .with_node_id("fixture-halo");
+    view.face = Some(UiNodeFace::Fixture(fixture_face()));
+    view
+}
+
+/// Playlist entries: three timed entries plus one cue entry; Aurora (key 1)
+/// is playing. Every entry carries the child-select action the P4
+/// derivation attaches (clicking a chip focuses the entry's child node).
+pub(crate) fn playlist_entries() -> Vec<UiPlaylistEntry> {
+    vec![
+        UiPlaylistEntry {
+            key: 0,
+            name: "Sunrise".to_string(),
+            duration_ms: Some(180_000),
+            cue: false,
+            thumb: Some(aurora_preview(18, 10, 3.1)),
+            action: Some(entry_select_action("Sunrise")),
+        },
+        UiPlaylistEntry {
+            key: 1,
+            name: "Aurora".to_string(),
+            duration_ms: Some(270_000),
+            cue: false,
+            thumb: Some(aurora_preview(18, 10, 4.8)),
+            action: Some(entry_select_action("Aurora")),
+        },
+        UiPlaylistEntry {
+            key: 2,
+            name: "Embers".to_string(),
+            duration_ms: Some(165_000),
+            cue: false,
+            thumb: Some(aurora_preview(18, 10, 6.5)),
+            action: Some(entry_select_action("Embers")),
+        },
+        UiPlaylistEntry {
+            key: 3,
+            name: "Tide".to_string(),
+            duration_ms: None,
+            cue: true,
+            thumb: Some(aurora_preview(18, 10, 8.2)),
+            action: Some(entry_select_action("Tide")),
+        },
+    ]
+}
+
+/// The node-select action a strip entry dispatches (story mock — dispatch
+/// goes to the story's no-op handler).
+fn entry_select_action(name: &str) -> UiAction {
+    UiAction::from_op(ControllerId::new("story.project"), ProjectEditorOp::Focus)
+        .with_label(format!("Select {name}"))
+}
+
+/// The playlist face with Aurora active.
+pub(crate) fn playlist_face() -> UiPlaylistFace {
+    UiPlaylistFace {
+        entries: playlist_entries(),
+        active: Some(1),
+    }
+}
+
+/// The active child: Aurora's own shader card (face and all), rendered
+/// BELOW the playlist card as a sibling (P2c item 2).
+pub(crate) fn playlist_active_child() -> UiNodeChild {
+    let mut child = UiNodeChild::new("Aurora", "Shader", "./aurora.json")
+        .active("playing, 1:12 remaining")
+        .with_sections(shader_sections());
+    child.face = Some(UiNodeFace::Shader(shader_face(true, UiAgentStatus::Idle)));
+    child
+}
+
+/// Advanced-drawer sections for the playlist card.
+pub(crate) fn playlist_sections() -> Vec<UiNodeSection> {
+    vec![UiNodeSection::ConfigSlots(vec![
+        UiConfigSlot::value(
+            "mode",
+            "Mode",
+            UiSlotValue::string("sequence · crossfade 2s"),
+        ),
+        UiConfigSlot::value("entries", "Entries", UiSlotValue::u32(4))
+            .with_detail("4 child invocations"),
+        UiConfigSlot::value(
+            "default_fade",
+            "Default fade",
+            UiSlotValue::f32(0.35).with_unit(UiSlotUnit::seconds()),
+        ),
+    ])]
+}
+
+/// A full playlist node card view with the face installed. `children`
+/// carries EXACTLY the active child — the story-level stand-in for the P4
+/// derivation invariant (one rendering of the active child, zero of the
+/// others); it renders below the card as a sibling.
+pub(crate) fn playlist_node_face_view() -> UiNodeView {
+    let header = UiNodeHeader::new(
+        "Evening set",
+        "Playlist",
+        "/fyeah_sign.show/evening.playlist",
+    )
+    .with_source("evening.json")
+    .with_status(UiStatus::good("Running"))
+    .with_summary("playing 2/4");
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(playlist_sections())])
+        .with_node_id("playlist-evening")
+        .with_children(vec![playlist_active_child()]);
+    view.face = Some(UiNodeFace::Playlist(playlist_face()));
+    view
+}
+
+/// An empty playlist card (no entries authored yet).
+pub(crate) fn empty_playlist_node_view() -> UiNodeView {
+    let header = UiNodeHeader::new(
+        "Evening set",
+        "Playlist",
+        "/fyeah_sign.show/evening.playlist",
+    )
+    .with_source("evening.json")
+    .with_status(UiStatus::neutral("Idle"))
+    .with_summary("no entries");
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(playlist_sections())])
+        .with_node_id("playlist-empty");
+    view.face = Some(UiNodeFace::Playlist(UiPlaylistFace {
+        entries: Vec::new(),
+        active: None,
+    }));
+    view
+}
