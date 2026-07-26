@@ -1,5 +1,5 @@
 ---
-status: paying-down
+status: retired      # 2026-07-26: all five exit criteria met; see status section
 since: 2026-07-08      # first recorded capture pain (M4-gallery era)
 logged: 2026-07-23
 area: studio-web/story-capture
@@ -144,6 +144,9 @@ pinned CI runner ✓; (2) clean ephemeral runners make restart cheap and
 the in-script retry/resume is retained ✓; (3) CI check always compares
 the committed tree against a fresh build — the `-if-needed` blind spot
 is structurally gone (helper deleted) ✓; (4) blocking CI job, pipefail
-guarded ✓; (5) churner set: pending the cutover green-run evidence —
-flip this entry to `retired` when the post-cutover re-run shows the
-historical churners byte-identical/tolerated.
+guarded ✓; (5) churner set EMPTY ✓ — after the settling-race fixes
+(font gate, focus blur, select reflow, stable-pair), PR #139 run 10
+(2026-07-26) reproduced all 894 committed baselines byte-identically
+on a fresh runner. All criteria met; entry retired. Chip
+task_16a65557 (deterministic slot-story drift) is resolved by the same
+fixes.
