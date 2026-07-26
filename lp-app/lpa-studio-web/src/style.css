@@ -356,6 +356,21 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-color-text);
 }
 
+.ux-card-op-label-failed {
+    color: var(--studio-status-error-text);
+}
+
+/* The Failed phase's ONE exit (model §2 I4). */
+.ux-card-op-exit {
+    padding: 5px 12px;
+    font-size: 12.5px;
+    color: var(--studio-color-accent);
+    cursor: pointer;
+    background: #1d232b;
+    border: 1px solid color-mix(in srgb, var(--studio-color-accent) 45%, var(--studio-color-border));
+    border-radius: 6px;
+}
+
 .ux-card-op-bar {
     position: relative;
     flex: none;

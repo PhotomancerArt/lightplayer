@@ -16,7 +16,7 @@ pub mod ui_example_card;
 pub mod ui_home_view;
 pub mod ui_package_card;
 
-pub use card_ui_state::{CardOp, CardSheet, CardUiOp, CardUiState, CardVerb};
+pub use card_ui_state::{CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb};
 pub use embedded_example::{EmbeddedExample, embedded_example, embedded_examples};
 pub use home_op::{HOME_NODE_ID, HomeOp, ZipBytes};
 pub use home_view_builder::{HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidence};

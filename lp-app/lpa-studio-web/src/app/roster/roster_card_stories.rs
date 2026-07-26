@@ -409,6 +409,52 @@ fn op_overlay_determinate() -> Element {
 }
 
 #[story(
+    description = "The op flow's AwaitingDevice phase (state-flow model §2 I2): the op's EXPECTED disconnect — the board is rebooting after a flash — and the overlay stays up with the reconnect narration. The session is gone; the card-owned flow isn't."
+)]
+fn op_overlay_awaiting_device() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: CardUiState {
+                        op: Some(CardOp::awaiting("Waiting for firmware boot")),
+                        ..CardUiState::default()
+                    },
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The op flow's Failed phase (state-flow model §2 I4): the error in the terminal and ONE exit to the nearest stable state — no in-place Retry, no silent fallback, no refresh."
+)]
+fn op_overlay_failed() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: CardUiState {
+                        op: Some(CardOp::failed(
+                            "Flashing firmware failed",
+                            "esptool: timed out waiting for packet header",
+                            "Back to set up",
+                        )),
+                        ..CardUiState::default()
+                    },
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
     description = "The in-place op overlay with no known percent (device-lifecycle P2): the bar sweeps indeterminately while an erase runs, technical details streaming below."
 )]
 fn op_overlay_indeterminate() -> Element {
