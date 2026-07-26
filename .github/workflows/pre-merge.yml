@@ -339,13 +339,33 @@ jobs:
         id: story_check
         shell: bash
         env:
-          # Runners have 4 vCPUs and nothing else competing; the local wedges
-          # documented in the debt entry were load-induced, not inherent.
+          # Runners have 4 vCPUs and nothing else competing, so keep the
+          # default concurrency — but apply the debt entry's proven timeout
+          # lore: navigations of the release wasm bundle can legitimately
+          # stall well past 30s once many pages have cycled, and attempts are
+          # cheap because completed captures resume from disk.
           STUDIO_STORY_PNGS_CONCURRENCY: 4
+          STUDIO_STORY_CDP_TIMEOUT_MS: 120000
+          STUDIO_STORY_CAPTURE_ATTEMPTS: 4
         run: cd lp2025 && just studio-story-check 2>&1 | tee "$RUNNER_TEMP/story-check.log"
 
-      - name: Upload fresh captures (story-images-fresh)
+      # Only a COMPLETE comparison may publish an artifact: a crashed partial
+      # capture staged via story-pull would delete every baseline it didn't
+      # reach. The capture script writes .check-complete only after comparing
+      # a full capture set.
+      - name: Detect completed comparison
+        id: check_complete
         if: failure() && steps.story_check.outcome == 'failure'
+        shell: bash
+        run: |
+          if [ -f lp2025/lp-app/lpa-studio-web/story-images/.new/.check-complete ]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload fresh captures (story-images-fresh)
+        if: failure() && steps.check_complete.outputs.complete == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: story-images-fresh
@@ -357,7 +377,7 @@ jobs:
           include-hidden-files: true
 
       - name: Story drift summary
-        if: failure() && steps.story_check.outcome == 'failure'
+        if: failure() && steps.check_complete.outputs.complete == 'true'
         shell: bash
         run: |
           {
@@ -368,6 +388,21 @@ jobs:
             echo
             echo '```'
             tail -80 "$RUNNER_TEMP/story-check.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture crash summary
+        if: failure() && steps.check_complete.outputs.complete == 'false'
+        shell: bash
+        run: |
+          {
+            echo "## Story capture crashed (no artifact)"
+            echo
+            echo 'The capture did not complete, so no baseline artifact was uploaded —'
+            echo 'this is a pipeline failure, not story drift. See the log tail below.'
+            echo
+            echo '```'
+            tail -40 "$RUNNER_TEMP/story-check.log"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

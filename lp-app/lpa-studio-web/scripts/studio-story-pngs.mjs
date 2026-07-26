@@ -197,6 +197,11 @@ try {
   }
   const storyIds = filterStoryIds(discoveredStoryIds, storyFilters);
 
+  // Clear any sentinel from a previous completed check so a crashed capture
+  // can't inherit it (the sentinel is rewritten after a complete comparison).
+  if (mode === "check") {
+    await rm(path.join(captureDir, ".check-complete"), { force: true });
+  }
   const files = await captureStoriesWithRetry(storyIds, captureDir);
   await optimizePngs(files, { required: mode !== "pngs" });
 
@@ -205,6 +210,13 @@ try {
     console.log(`Story baselines: ${path.relative(repoRoot, outputDir)}`);
   } else if (mode === "check") {
     const ok = await compareBaselines(storyIds, baselineDir, outputDir);
+    // Sentinel: the comparison ran over a COMPLETE capture. Consumers of the
+    // fresh-capture set (the CI artifact and `story-pull`) require this so a
+    // crashed partial capture can't masquerade as story drift — staging a
+    // partial set would delete every baseline it didn't reach.
+    if (storyFilters.length === 0) {
+      await writeFile(path.join(outputDir, ".check-complete"), `${new Date().toISOString()}\n`);
+    }
     if (!ok) {
       console.error("\nStory baselines differ. Run `just studio-story-baselines` to update them.");
       process.exitCode = 1;

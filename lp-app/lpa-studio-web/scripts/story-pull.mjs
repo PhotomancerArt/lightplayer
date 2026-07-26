@@ -117,7 +117,18 @@ try {
     downloadDir,
   ]);
 
-  const downloaded = (await readdir(downloadDir)).filter((name) => !name.startsWith("."));
+  const downloadedAll = await readdir(downloadDir);
+  // The capture script writes .check-complete only after comparing a COMPLETE
+  // capture set. Without it this artifact is a partial capture from a crashed
+  // run — staging it would delete every baseline the capture didn't reach.
+  if (!downloadedAll.includes(".check-complete")) {
+    fail(
+      `Artifact "${ARTIFACT_NAME}" from run ${sourceRun.databaseId} has no .check-complete ` +
+        "sentinel — it is a partial capture from a crashed run. Not staging it.\n" +
+        "Fix or re-run the validate-stories job and pull again.",
+    );
+  }
+  const downloaded = downloadedAll.filter((name) => !name.startsWith("."));
   if (downloaded.length === 0) {
     fail(`Artifact "${ARTIFACT_NAME}" from run ${sourceRun.databaseId} is empty.`);
   }
