@@ -37,6 +37,7 @@ pub use log_list::LogList;
 pub use metric_grid::MetricGrid;
 pub use progress_bar::ProgressBar;
 pub use rich_detail::RichDetailSection;
+pub(crate) use rich_detail::chip_status;
 pub use status_chip::StatusChip;
 pub use terminal_output::TerminalOutput;
 pub use view::activity_view::ActivityView;

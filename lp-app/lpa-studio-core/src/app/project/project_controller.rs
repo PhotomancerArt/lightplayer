@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
+use crate::app::project::agent_support::{AgentShaderBinding, AgentShaderTarget};
 use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -539,13 +540,7 @@ impl ProjectController {
     /// (`lpc_model::resolve_artifact_specifier`), so Apply targets the same
     /// artifact the engine reads.
     fn asset_editor(&self, node: &NodeController, asset: &UiSlotAsset) -> Option<UiAssetEditor> {
-        let def_artifact = self.def_artifacts.get(&node.target().node_id)?;
-        let path = resolve_artifact_specifier(
-            def_artifact.file_path().as_path(),
-            &ArtifactSpec::path(asset.source.as_str()),
-        )
-        .ok()?;
-        let artifact = ArtifactLocation::file(path);
+        let artifact = self.resolve_node_asset_artifact(node, asset.source.as_str())?;
         let pending = self.asset_edit_buffer.get(&artifact);
         let in_flight = matches!(
             pending.map(|edit| &edit.phase),
@@ -572,7 +567,92 @@ impl ProjectController {
             failure,
             shader_error,
             uniforms: shader_uniforms(node),
+            // Decorated by the studio controller's view build (the agent
+            // sub-controller owns chat state; this walk stays project-pure).
+            agent: None,
         })
+    }
+
+    /// Resolve one node's asset `source` path to its artifact, exactly like
+    /// the server resolves def asset references (the same resolution the
+    /// inline editor's Apply targets).
+    fn resolve_node_asset_artifact(
+        &self,
+        node: &NodeController,
+        source: &str,
+    ) -> Option<ArtifactLocation> {
+        let def_artifact = self.def_artifacts.get(&node.target().node_id)?;
+        let path = resolve_artifact_specifier(
+            def_artifact.file_path().as_path(),
+            &ArtifactSpec::path(source),
+        )
+        .ok()?;
+        Some(ArtifactLocation::file(path))
+    }
+
+    /// The shader node whose resolved `source` asset is `artifact`, with
+    /// the identity/bindings context the agent's run start needs. `None`
+    /// when no shader node uses the artifact (or the def-artifact map has
+    /// not landed yet).
+    pub(crate) fn agent_shader_target(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<AgentShaderTarget> {
+        self.find_agent_shader(&self.root_nodes, artifact)
+    }
+
+    fn find_agent_shader(
+        &self,
+        nodes: &[NodeController],
+        artifact: &ArtifactLocation,
+    ) -> Option<AgentShaderTarget> {
+        for node in nodes {
+            if node.kind().eq_ignore_ascii_case("shader")
+                && let Some(source) = shader_source_path(node)
+                && self.resolve_node_asset_artifact(node, &source).as_ref() == Some(artifact)
+            {
+                return Some(AgentShaderTarget {
+                    node_address: node.address().to_string(),
+                    node_label: node.label().to_string(),
+                    bindings: agent_shader_bindings(node),
+                });
+            }
+            if let Some(found) = self.find_agent_shader(node.children(), artifact) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Every fixture node with a known def artifact, as `(label, def
+    /// artifact)` — the agent's led-point gather parses those defs.
+    pub(crate) fn agent_fixture_defs(&self) -> Vec<(String, ArtifactLocation)> {
+        fn collect(
+            nodes: &[NodeController],
+            defs: &BTreeMap<NodeId, ArtifactLocation>,
+            out: &mut Vec<(String, ArtifactLocation)>,
+        ) {
+            for node in nodes {
+                if node.kind().eq_ignore_ascii_case("fixture")
+                    && let Some(artifact) = defs.get(&node.target().node_id)
+                {
+                    out.push((node.label().to_string(), artifact.clone()));
+                }
+                collect(node.children(), defs, out);
+            }
+        }
+        let mut out = Vec::new();
+        collect(&self.root_nodes, &self.def_artifacts, &mut out);
+        out
+    }
+
+    /// Human-readable project name for the agent's system prompt (the
+    /// synced root label, like the project pane title).
+    pub(crate) fn agent_project_name(&self) -> String {
+        match &self.state {
+            ProjectState::Ready { project_id, .. } => self.project_name(project_id),
+            _ => "project".to_string(),
+        }
     }
 
     /// Project-level aggregate [`DirtySummary`], derived per node from the
@@ -3002,6 +3082,74 @@ fn shader_uniforms(node: &NodeController) -> Vec<UiShaderUniform> {
         });
     }
     uniforms
+}
+
+/// The authored `source` path of a shader node's GLSL asset slot: the first
+/// string-valued `source` field in the node's slot tree (the `ShaderDef`
+/// root's asset slot; shader defs nest no other `source` fields above it).
+fn shader_source_path(node: &NodeController) -> Option<String> {
+    fn find(slot: &SlotController) -> Option<String> {
+        if matches!(
+            slot.address().path.segments().last(),
+            Some(SlotPathSegment::Field(field)) if field.as_str() == "source"
+        ) && let Some(lpc_model::LpValue::String(path)) = slot.value()
+        {
+            return Some(path.clone());
+        }
+        slot.children().iter().find_map(find)
+    }
+    node.slots().iter().find_map(find)
+}
+
+/// The agent's binding table for a shader node: uniform name, GLSL type
+/// (as [`shader_uniforms`] maps it), and the authored default display when
+/// one exists (uniform values are bus-driven at runtime).
+fn agent_shader_bindings(node: &NodeController) -> Vec<AgentShaderBinding> {
+    fn last_field_is(slot: &SlotController, name: &str) -> bool {
+        matches!(
+            slot.address().path.segments().last(),
+            Some(SlotPathSegment::Field(field)) if field.as_str() == name
+        )
+    }
+
+    fn find_consumed_map(slot: &SlotController) -> Option<&SlotController> {
+        if slot.kind() == SlotKind::Map && last_field_is(slot, "consumed") {
+            return Some(slot);
+        }
+        slot.children().iter().find_map(find_consumed_map)
+    }
+
+    let uniforms = shader_uniforms(node);
+    let Some(consumed) = node.slots().iter().find_map(find_consumed_map) else {
+        return Vec::new();
+    };
+    uniforms
+        .into_iter()
+        .map(|uniform| {
+            let default = consumed
+                .children()
+                .iter()
+                .find(|entry| {
+                    matches!(
+                        entry.address().path.segments().last(),
+                        Some(SlotPathSegment::Key(SlotMapKey::String(name))) if *name == uniform.name
+                    )
+                })
+                .and_then(|entry| {
+                    entry
+                        .children()
+                        .iter()
+                        .find(|child| last_field_is(child, "default"))
+                        .and_then(SlotController::value)
+                        .map(format_lp_value)
+                });
+            AgentShaderBinding {
+                name: uniform.name,
+                ty: uniform.glsl_type,
+                value: default,
+            }
+        })
+        .collect()
 }
 
 fn default_focus_node_mut(nodes: &mut [NodeController]) -> Option<&mut NodeController> {

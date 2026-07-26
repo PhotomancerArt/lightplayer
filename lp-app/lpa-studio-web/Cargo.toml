@@ -22,9 +22,13 @@ js-sys = "0.3"
 log = { workspace = true }
 lpa-client = { path = "../lpa-client", default-features = false }
 lpa-link = { path = "../lpa-link", features = ["browser-worker"] }
+lpa-agent = { path = "../lpa-agent" }
 lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+# Markdown parsing for agent chat replies (parser only; rendering goes
+# through Dioxus nodes — never raw HTML).
+pulldown-cmark = { version = "0.13", default-features = false }
 lps-builtin-completions = { path = "../../lp-shader/lps-builtin-completions" }
 lps-glsl = { path = "../../lp-shader/lps-glsl" }
 serde = { version = "1", features = ["derive"] }
@@ -54,6 +58,7 @@ web-sys = { version = "0.3", features = [
     "OffscreenCanvas",
     "Performance",
     "PointerEvent",
+    "Storage",
     "StorageManager",
     "Url",
     "VisibilityState",

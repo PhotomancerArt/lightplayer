@@ -1,8 +1,8 @@
 //! The home gallery (roadmap M4): everywhere the user's light lives.
 
+pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub(crate) mod device_card;
-pub(crate) mod device_detail_popover;
 pub(crate) mod example_card;
 pub(crate) mod gallery_preview;
 pub mod home_gallery;

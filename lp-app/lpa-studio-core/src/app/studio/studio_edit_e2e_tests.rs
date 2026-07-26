@@ -442,9 +442,130 @@ fn device_connect_pulls_classifies_and_adopts() {
     );
 }
 
+/// The D30 card sheet's verbs (M7′ P2): adopt-device-copy and
+/// keep-both-fork dispatch with NO deploy dialog open — the diverged copy
+/// resolves from the live device session's own sync evidence, and the
+/// fork names itself after the device's stamped identity.
 #[test]
-fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
-    use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployState};
+fn d30_verbs_resolve_divergence_without_the_deploy_dialog() {
+    use crate::app::device::{DEPLOY_NODE_ID, DeployOp};
+    use crate::app::library::{LibraryStore, MemoryLibraryHost};
+    use crate::app::places::DeviceContent;
+    use lpc_history::SyncRelation;
+
+    // The same "device" fixture as the adopt e2e above: an in-process
+    // server holding an unknown project plus a stamped identity.
+    let server = Rc::new(RefCell::new(device_e2e_server()));
+    let device_project_dir = "/projects/studio";
+    {
+        let server = server.borrow();
+        let fs = server.base_fs();
+        fs.write_file(
+            format!("{device_project_dir}/project.json").as_path(),
+            br#"{"kind":"Project","uid":"prj_devicedevicedevi","name":"Porch Wild","nodes":{}}"#,
+        )
+        .unwrap();
+        fs.write_file(
+            format!("{device_project_dir}/shader.glsl").as_path(),
+            b"wild",
+        )
+        .unwrap();
+        fs.write_file(
+            "/.lp/device.json".as_path(),
+            br#"{"uid":"dev_aaaaaaaaaaaaaaaa","name":"Bench board"}"#,
+        )
+        .unwrap();
+    }
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    controller.set_stub_device_for_test(
+        crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+    );
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [3u8; 16]),
+        Rc::new(|| "2026-07-10-1000".to_string()),
+    );
+    let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 5.0)));
+    controller.attach_library(host.clone());
+
+    // connect-as-pull adopts, then the device copy changes behind our
+    // back → Diverged (the EditedOnDevice card)
+    drive(controller.refresh_device_sync());
+    {
+        let server = server.borrow();
+        server
+            .base_fs()
+            .write_file(
+                format!("{device_project_dir}/shader.glsl").as_path(),
+                b"changed on device",
+            )
+            .unwrap();
+    }
+    drive(controller.refresh_device_sync());
+    let sync = controller.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(*relation, SyncRelation::Diverged);
+
+    // ADOPT, with no dialog ever opened: the device's copy becomes the
+    // project's new head, and the handler's own re-sync lands on AtHead.
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::AdoptDeviceCopy,
+    )))
+    .expect("adopt works straight from the card sheet");
+    let sync = controller.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(
+        *relation,
+        SyncRelation::AtHead,
+        "adopting made the device copy the head"
+    );
+
+    // Diverge again, then KEEP BOTH: the fork lands as a second library
+    // project named after the device.
+    {
+        let server = server.borrow();
+        server
+            .base_fs()
+            .write_file(
+                format!("{device_project_dir}/shader.glsl").as_path(),
+                b"changed on device again",
+            )
+            .unwrap();
+    }
+    drive(controller.refresh_device_sync());
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(DEPLOY_NODE_ID),
+        DeployOp::KeepBothFork,
+    )))
+    .expect("keep-both works straight from the card sheet");
+    let summaries = store.list().unwrap();
+    assert_eq!(summaries.len(), 2, "the fork is a second project");
+    assert!(
+        summaries
+            .iter()
+            .any(|summary| summary.slug.contains("bench-board")),
+        "the fork is named after the device: {:?}",
+        summaries
+            .iter()
+            .map(|summary| summary.slug.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn card_native_stamp_pushes_and_records_end_to_end() {
+    use crate::app::device::{DEPLOY_NODE_ID, DeployOp};
     use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
     use crate::app::places::{DeviceContent, DeviceRegistry};
     use lpc_history::{EventKind, SyncRelation};
@@ -489,22 +610,22 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
 
     let deploy_action = |op: DeployOp| UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op);
 
-    // open the dialog: firmware yes, identity no → NeedsIdentity
-    drive(controller.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
-    let view = controller.view();
-    let deploy = view.deploy.as_ref().expect("dialog open");
-    assert!(
-        matches!(deploy.state, DeployState::NeedsIdentity { .. }),
-        "empty unstamped device asks for a name, got {:?}",
-        deploy.state
-    );
-    assert_eq!(deploy.choices.len(), 1, "the picker offers the library");
+    // firmware yes, identity no → the Needs-a-name evidence (M8′: the
+    // name sheet is the stamping surface; there is no dialog — this
+    // test runs with a project open, so the card mapping itself is
+    // pinned by the roster tests and the link e2e)
+    let sync = controller.device_sync().expect("connect-as-pull landed");
+    assert_eq!(sync.identity, None, "unstamped");
+    assert_eq!(sync.content, DeviceContent::Empty, "empty");
 
-    // stamp: writes /.lp/device.json at the device's fs ROOT + registry
-    // entry
-    drive(controller.dispatch(deploy_action(DeployOp::StampIdentity {
-        name: "Luna's porch sign".to_string(),
-    })))
+    // stamp (the name sheet's op): writes /.lp/device.json at the
+    // device's fs ROOT + registry entry
+    drive(controller.dispatch(UiAction::from_op(
+        ControllerId::new(crate::app::home::HOME_NODE_ID),
+        crate::HomeOp::NameDevice {
+            name: "Luna's porch sign".to_string(),
+        },
+    )))
     .unwrap();
     let stamped_identity = {
         let bytes = server
@@ -522,35 +643,24 @@ fn deploy_dialog_stamps_pushes_and_records_end_to_end() {
     );
     let registry = DeviceRegistry::new(store.fs_handle());
     assert_eq!(registry.list().unwrap().len(), 1);
-    assert!(matches!(
-        controller.view().deploy.as_ref().unwrap().state,
-        DeployState::ChoosingPackage { .. }
-    ));
 
-    // choose the project → Reviewing
-    drive(controller.dispatch(deploy_action(DeployOp::ChoosePackage {
+    // push (the Project-tab picker's op): replace-and-load on the
+    // device, hash-verified; the ROOT identity survives untouched (push
+    // never re-stamps — the replace only clears the storage dir);
+    // history + association recorded; device now AtHead
+    let outcome = drive(controller.dispatch(deploy_action(DeployOp::PushProject {
         key: summary.uid.to_string(),
     })))
     .unwrap();
-    assert!(matches!(
-        controller.view().deploy.as_ref().unwrap().state,
-        DeployState::Reviewing { .. }
-    ));
-
-    // push: replace-and-load on the device, hash-verified; the ROOT
-    // identity survives untouched (push never re-stamps — the replace
-    // only clears the storage dir); history + association recorded;
-    // device now AtHead
-    drive(controller.dispatch(deploy_action(DeployOp::ConfirmPush))).unwrap();
-    let view = controller.view();
-    let DeployState::Done { device, pushed } = &view.deploy.as_ref().unwrap().state else {
-        panic!(
-            "push completes, got {:?}",
-            view.deploy.as_ref().unwrap().state
-        );
-    };
-    assert_eq!(device.name, "Luna's porch sign");
-    assert_eq!(pushed.slug, summary.slug);
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("Pushed")
+                && notice.message.contains("Luna's porch sign")),
+        "the push reports its result, got {:?}",
+        outcome.notices
+    );
 
     let device_manifest = String::from_utf8(
         server
@@ -1835,7 +1945,7 @@ fn successive_shader_applies_each_reach_the_engine() {
     );
 }
 
-const ASSET_SHADER_V1: &str =
+pub(crate) const ASSET_SHADER_V1: &str =
     "uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
 const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
 const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
@@ -1843,7 +1953,7 @@ const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(v
 /// Find the shader node's inline asset editor anywhere in the editor DTO
 /// tree: it rides `UiSlotAsset::inline_editor` on the node's (or a child
 /// node's) asset slot sections.
-fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
+pub(crate) fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
     let editor = view
         .panes
         .iter()
@@ -1887,7 +1997,7 @@ fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
         .expect("shader node exposes an inline asset editor")
 }
 
-fn asset_e2e_server() -> LpServer {
+pub(crate) fn asset_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -2064,7 +2174,7 @@ fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
         .collect()
 }
 
-fn project_action(op: ProjectOp) -> StudioCommand {
+pub(crate) fn project_action(op: ProjectOp) -> StudioCommand {
     StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         op,
@@ -2149,7 +2259,7 @@ fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
         .expect("project editor pane")
 }
 
-fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
+pub(crate) fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
     let editor = project_editor(view);
     (editor.dirty.persisted, editor.dirty.transient)
 }
@@ -2313,7 +2423,7 @@ impl ServerTransport for CollectTransport {
 
 /// Drive a future to completion with a self-waking waker (bounded, so a hung
 /// future fails the test instead of the suite).
-fn drive<F: Future>(future: F) -> F::Output {
+pub(crate) fn drive<F: Future>(future: F) -> F::Output {
     struct NoopWake;
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}

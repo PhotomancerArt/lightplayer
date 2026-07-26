@@ -1,3 +1,8 @@
+// Duplicated in lps-probe (src/canonical_unit.rs): `rename_lpfn_prefix`,
+// `canonical_unit_source`, and the `references_lpfn` boundary check. Not
+// re-imported here to keep the filetests oracle self-contained (anyhow-based
+// Oracle stays filetests-only).
+
 //! Float oracle: canonical GLSL → `lps-frontend` (naga) → LPIR → f32
 //! interpretation (`lpir::interpret`).
 //!

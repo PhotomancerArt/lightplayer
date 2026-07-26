@@ -16,7 +16,7 @@ use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 /// a map of everywhere the user's light lives. The runtime roster leads
 /// the page (SDI addendum: Home reads window-switcher-first,
 /// library-second); the connect card opens the VID-filtered chooser
-/// directly — the deploy dialog is never a connect surface (its
+/// directly — connecting is never a dialog trip (the old dialog's
 /// `NeedsDevice` state is unreachable from here).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -101,7 +101,7 @@ pub fn HomeGallery(
                             on_action,
                         }
                     }
-                    div { class: card_grid_class(),
+                    div { class: device_grid_class(),
                         for card in home.devices.clone() {
                             DeviceCard {
                                 // uid-based: device NAMES repeat (re-provisioned
@@ -110,6 +110,16 @@ pub fn HomeGallery(
                                 sim: card.sim,
                                 card,
                                 now_secs,
+                                // M8′: the Project-tab picker's choices
+                                // (empty-device cards offer the library)
+                                project_choices: home
+                                    .projects
+                                    .iter()
+                                    .map(|project| lpa_studio_core::UiDeviceProjectChip {
+                                        uid: project.uid.clone(),
+                                        name: project.slug.clone(),
+                                    })
+                                    .collect::<Vec<_>>(),
                                 on_action,
                             }
                         }
@@ -288,4 +298,15 @@ fn section_title_class() -> &'static str {
 
 fn card_grid_class() -> &'static str {
     "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] tw:gap-3.5"
+}
+
+/// The DEVICE roster grid (Yona hardware-walk feedback): wider columns
+/// and a stretched row floor so a card is phone-screen-sized by default
+/// (~320px each way) and the common operations — tab switches, opening a
+/// sheet — resize the card WITHIN its footprint instead of reflowing the
+/// page. Cards stretch to the row (grid default `align-items: stretch`),
+/// so the min-height lives on the row, not the card component. Projects/
+/// Examples keep the compact grid.
+fn device_grid_class() -> &'static str {
+    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] tw:gap-3.5 tw:[grid-auto-rows:minmax(320px,auto)]"
 }

@@ -5398,6 +5398,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-agent"
+version = "40.0.0"
+dependencies = [
+ "futures-executor",
+ "futures-util",
+ "gloo-timers",
+ "js-sys",
+ "lp-collection 1.0.0",
+ "lps-builtins",
+ "lps-probe",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "lpa-client"
 version = "40.0.0"
 dependencies = [
@@ -5485,9 +5505,11 @@ name = "lpa-studio-core"
 version = "40.0.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "js-sys",
  "log",
  "lp-gfx-lpvm",
+ "lpa-agent",
  "lpa-client",
  "lpa-link",
  "lpa-server",
@@ -5497,6 +5519,7 @@ dependencies = [
  "lpc-view",
  "lpc-wire",
  "lpfs",
+ "lps-probe",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -5517,6 +5540,7 @@ dependencies = [
  "gloo-timers",
  "js-sys",
  "log",
+ "lpa-agent",
  "lpa-client",
  "lpa-fs-opfs",
  "lpa-link",
@@ -5526,6 +5550,7 @@ dependencies = [
  "lpfs",
  "lps-builtin-completions",
  "lps-glsl",
+ "pulldown-cmark",
  "serde",
  "serde_json",
  "syn 2.0.117",
@@ -5602,6 +5627,7 @@ dependencies = [
  "base64 0.22.1",
  "hashbrown 0.15.5",
  "jsonschema",
+ "libm",
  "lp-collection 1.0.0",
  "lpc-slot-codegen",
  "lpc-slot-macros",
@@ -5831,6 +5857,21 @@ dependencies = [
  "lp-collection 1.0.0",
  "lpir",
  "lps-shared",
+]
+
+[[package]]
+name = "lps-probe"
+version = "40.0.0"
+dependencies = [
+ "libm",
+ "lp-collection 1.0.0",
+ "lpir",
+ "lps-builtins",
+ "lps-frontend",
+ "lps-shared",
+ "lpvm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -7277,6 +7318,17 @@ checksum = "6f42ea446cab60335f76979ec15e12619a2165b5ae2c12166bef27d283a9fadf"
 dependencies = [
  "idna",
  "psl-types",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+dependencies = [
+ "bitflags 2.11.0",
+ "memchr",
+ "unicase",
 ]
 
 [[package]]

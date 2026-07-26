@@ -25,11 +25,15 @@ pub use lpc_history::{ContentHash, SyncRelation};
 
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
+pub use app::agent::{
+    AgentController, AgentCostRates, AgentFeedback, AgentOp, AgentProviderConfig, AgentRunContext,
+    AgentSessionKey, AgentTaskFuture, AgentViewContext, UiAgentAvailability, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
+};
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
-    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployState, DeployTarget,
-    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice, UiDeployChoice,
-    UiDeployView,
+    ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployTarget,
+    DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
 };
 pub use app::home::{
     HOME_NODE_ID, HomeDeviceEvidence, HomeOp, HomePoolEvidence, HomeSimEvidence, UiCardConnection,
@@ -70,10 +74,10 @@ pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
 };
 pub use app::roster::{
-    BundledFirmware, ConnectEvidence, ConnectPhase, DegradedReason, DeviceDetailAffordance,
-    DeviceRichInput, RosterAffordance, RosterCardState, RosterCircle, RosterCircleShape,
-    RosterEvidence, SimDetailAffordance, SimRichInput, derive_roster_card_state,
-    device_rich_object, firmware_update_available, sim_rich_object,
+    BundledFirmware, CardTabView, ConnectEvidence, ConnectPhase, DegradedReason, DeviceCardTab,
+    DeviceDetailAffordance, DeviceRichInput, RosterAffordance, RosterCardState, RosterEvidence,
+    RosterStateSpec, RosterTreatment, SimDetailAffordance, SimRichInput, derive_roster_card_state,
+    device_card_tabs, device_rich_object, firmware_update_available, sim_rich_object,
 };
 pub use app::runtime_pool::{
     DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId, RuntimeKind, RuntimePayload,
@@ -83,6 +87,11 @@ pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
     ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation, StudioOverlayRead,
     StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+};
+pub use app::settings::{
+    AgentProvider, AgentProviderGuidance, AgentSettings, DEFAULT_AGENT_MODEL, SettingsCommand,
+    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiSettingsView,
+    provider_guidance,
 };
 pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,

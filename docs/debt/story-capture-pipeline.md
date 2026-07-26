@@ -44,6 +44,14 @@ each new agent session re-learns the incantations from memory notes.
   `code-editor` (chip task_16a65557 tracks the churn itself).
 
 **Incident log**
+- 2026-07-25 — shader-agent merge captures: three consecutive CDP
+  navigate timeouts (30s, then 90s) at concurrency 1, wedge story
+  varying per run. Root aggravation: **seven zombie headless Chromes**
+  accumulated from the failed passes themselves — each failure leaks
+  Chrome processes that starve the next attempt. Fix: `pkill -f
+  -- --headless` before retrying + the documented 120s timeout; passed
+  first try on a clean slate. Lesson: check for leaked Chromes FIRST
+  when captures wedge repeatedly.
 - 2026-07-08 — M4-gallery era: baseline regeneration flakes noted at
   first gallery visual gate (CDP timeout, retries needed).
 - 2026-07-16 — capture flake during M2 story-sheet work; retry passed.
@@ -66,6 +74,12 @@ each new agent session re-learns the incantations from memory notes.
   The wedge is now story-specific, not load-correlated: the exit
   criteria's "resume-instead-of-restart" exists (used today) but the
   per-story hang deserves its own diagnosis.
+- 2026-07-24 — M7′ single capture (the circle→edge churn, 867
+  viewports): quiet machine, concurrency 1, 120s timeout — run 1 died
+  on a CDP `Page.navigate` timeout at `project-workspace/overview`
+  (lg) — a DIFFERENT project-workspace sheet than the July-24 wedge,
+  same heavy-sheet family. Run 2 resumed from disk and completed
+  clean. Two-run capture is now the working norm.
 
 **Exit criteria** — All of: (1) captures complete deterministically at
 default concurrency on a loaded machine, or run somewhere isolated

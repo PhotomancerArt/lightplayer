@@ -122,15 +122,14 @@ impl FixtureNode {
             .as_ref()
             .is_none_or(|(ver, _)| *ver != mapping_ver);
         if stale {
-            let points =
-                crate::nodes::fixture::mapping::generate_mapping_points(&self.mapping, 1, 1)
-                    .into_iter()
-                    .map(|point| DirectSamplePoint {
-                        channel: point.channel,
-                        x_norm_q16: normalized_f32_to_q16(point.center[0]),
-                        y_norm_q16: normalized_f32_to_q16(point.center[1]),
-                    })
-                    .collect();
+            let points = lpc_model::nodes::fixture::generate_mapping_points(&self.mapping, 1, 1)
+                .into_iter()
+                .map(|point| DirectSamplePoint {
+                    channel: point.channel,
+                    x_norm_q16: normalized_f32_to_q16(point.center[0]),
+                    y_norm_q16: normalized_f32_to_q16(point.center[1]),
+                })
+                .collect();
             self.direct_points = Some((mapping_ver, points));
         }
     }
@@ -547,7 +546,7 @@ impl ControlNode for FixtureNode {
             .last_settings
             .ok_or_else(|| NodeError::msg("fixture display layout missing cached settings"))?;
         let revision = self.control_display_layout_revision(settings, ctx);
-        let points = crate::nodes::fixture::mapping::generate_mapping_points(
+        let points = lpc_model::nodes::fixture::generate_mapping_points(
             &self.mapping,
             settings.width,
             settings.height,
