@@ -87,6 +87,10 @@ holds the full context.
 | Budgeted/async shader compile (spread the ~194 ms device compile across frames instead of one long frame per apply) | `2026-07-14-shader-auto-apply` | The per-apply frame stall matters in practice |
 | Sim-worker recovery layer 2 (timeout-streak detection → terminate+respawn preserving the unsaved-overlay mirror; NotResponding sim roster card; PreviewHost in-flight deadline) | `2026-07-23-sim-wasm-fuel`; `2026-07-24-runtime-pool` | Next sim-runtime lifecycle work (the pool landed without it; requirements in the M4 plan notes) |
 | Live sim-card frames: core-owned present service for pool sessions sharing PreviewHost's CPU blit seam + the gallery routing rule (sim frames instead of a preview lease) | `2026-07-24-runtime-pool` | The roadmap's live-thumbnails item is prioritized |
+| In-card setup FORM (blank device tab as a date-named `YYYY-MM-DD HH:MM LightPlayer` name field + Flash button); only the one-click provision dispatch landed | `2026-07-26-card-view-state-ownership` | The provisioning UX gets its next pass |
+| Node-arm UI signals re-home (this ADR did the device-card arm only) | `2026-07-26-card-view-state-ownership` | The state audit's node wave begins |
+| Scene-fork `view-transition-name` switches to `identity_key()` (one canonical per-card key) | `2026-07-26-card-view-state-ownership` | `claude/spike-view-transitions` lands |
+| Post-reset auto-reconnect tuning + factory-reset stuck-state root cause (editor-sever/return-to-gallery half is in) | `2026-07-26-card-view-state-ownership` | The device reset/flash flow is re-tested on hardware |
 | Real vmctx block on the browser path (guest shader shares the fw-browser module's linear memory with vmctx at address 0) | `2026-07-23-sim-wasm-fuel` | Browser memory-layout work or probe trace state lands |
 | Per-instance host recovery contexts (typed errors could feed a host blame ledger without panics) | `2026-07-23-per-target-panic-strategy`; `2026-07-04-crash-recovery-model` | Host-side blame for failing shaders becomes a product need |
 
