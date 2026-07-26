@@ -114,3 +114,42 @@ async fn remove_missing_errors() {
     let result = remove_path(&dir, LpPath::new("/nope.txt")).await;
     assert!(result.is_err());
 }
+
+/// The write must persist exactly the bytes passed — no view-length
+/// confusion. Guards the WebKit whole-buffer bug (`write()` on a wasm
+/// memory view wrote the entire heap): with the JS-owned copy in
+/// `write_file` this size is exact on every engine.
+#[wasm_bindgen_test]
+async fn write_persists_exact_length() {
+    let dir = fresh_test_dir("t-exact-length").await;
+    let payload = vec![0x42u8; 4096];
+    write_file(&dir, LpPath::new("/exact.bin"), &payload)
+        .await
+        .unwrap();
+    let tree = tree_map(load_tree(&dir).await.unwrap());
+    assert_eq!(tree["/exact.bin"].len(), payload.len());
+    assert_eq!(tree["/exact.bin"], payload);
+}
+
+/// Corrupt-store recovery: a file no legitimate package could contain
+/// (pre-fix WebKit wrote the whole wasm heap into every file) is skipped
+/// by the mount instead of being loaded into memory.
+#[wasm_bindgen_test]
+async fn load_tree_skips_implausibly_large_files() {
+    let dir = fresh_test_dir("t-oversize").await;
+    write_file(&dir, LpPath::new("/ok.json"), b"{}")
+        .await
+        .unwrap();
+    // 17 MiB of zeros — just over the 16 MiB cap.
+    let huge = vec![0u8; 17 * 1024 * 1024];
+    write_file(&dir, LpPath::new("/heap-dump.json"), &huge)
+        .await
+        .unwrap();
+
+    let tree = tree_map(load_tree(&dir).await.unwrap());
+    assert!(tree.contains_key("/ok.json"));
+    assert!(
+        !tree.contains_key("/heap-dump.json"),
+        "oversized file must be skipped, not loaded"
+    );
+}

@@ -1,3 +1,7 @@
+// Duplicated in lps-probe (src/interp_harness.rs), adapted there: string
+// diagnostics instead of anyhow, no texture specs, persistent VMContext
+// across calls. Not re-imported here because those signatures diverge.
+
 //! `interp.f32` filetest backend: GLSL → `lps-frontend` (naga) → LPIR →
 //! `lpir::interpret` in native f32, reusing the M2 conformance-oracle path.
 //!
@@ -120,7 +124,9 @@ impl InterpShader {
                 &mut handler,
                 &vmctx_image,
                 0,
-                lpir::DEFAULT_MAX_DEPTH,
+                // Oracle path: trusted filetest sources run without an op
+                // budget by design.
+                lpir::InterpLimits::unlimited(),
             )
             .map_err(|e| format!("interp: {SHADER_INIT_FN}: {e}"))?;
             vmctx_image = out.vmctx_bytes;
@@ -207,7 +213,9 @@ impl InterpInstance {
             &mut handler,
             &self.vmctx_image,
             sret_size,
-            lpir::DEFAULT_MAX_DEPTH,
+            // Oracle path: trusted filetest sources run without an op budget
+            // by design.
+            lpir::InterpLimits::unlimited(),
         )
         .map_err(|e| format!("interp: {name}: {e}"))?;
 

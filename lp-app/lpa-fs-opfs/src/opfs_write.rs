@@ -71,8 +71,15 @@ async fn write_via_writable(
         .dyn_into()
         .map_err(|e| OpfsError::new("create_writable", path.as_str().to_string(), e))?;
 
+    // Copy into a JS-owned array before writing. `write_with_u8_array`
+    // passes a Uint8Array VIEW over wasm linear memory, and WebKit's
+    // `write()` ignores the view's offset/length and writes the entire
+    // underlying buffer (observed on WebKit 26.5; Chrome honors the view)
+    // — passing wasm memory directly dumps the whole wasm heap into every
+    // file. The copy's buffer is exactly `bytes`, so either reading works.
+    let copy = js_sys::Uint8Array::from(bytes);
     let write_promise = stream
-        .write_with_u8_array(bytes)
+        .write_with_buffer_source(&copy)
         .map_err(|e| OpfsError::new("write", path.as_str().to_string(), e))?;
     JsFuture::from(write_promise)
         .await
