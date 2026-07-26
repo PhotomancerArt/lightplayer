@@ -1416,6 +1416,83 @@ fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
     );
 }
 
+/// The state-audit's promise, end-to-end: a card's tab and sheet are
+/// CORE view-state, drivable past the dispatch boundary — no widget
+/// signals involved. The e2e opens the Danger tab and the erase confirm
+/// purely through `HomeOp::CardUi` and reads them back off the view.
+#[test]
+fn card_tab_and_sheet_drive_through_core_ops() {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{CardSheet, CardUiOp, CardVerb, DeviceCardTab, HomeOp};
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
+            "dev_aaaaaaaaaaaaaaaa",
+            "Bench board",
+        )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let card_key = {
+        let view = studio.view();
+        let home = view.home.as_ref().expect("gallery showing");
+        let card = home
+            .devices
+            .iter()
+            .find(|card| !card.sim)
+            .expect("the connected device card");
+        assert_eq!(card.ui.tab, DeviceCardTab::Status, "fresh card = Status");
+        card.identity_key().to_string()
+    };
+
+    let card_ui = |op: CardUiOp| {
+        UiAction::from_op(ControllerId::new(HOME_NODE_ID), HomeOp::CardUi(op))
+    };
+    drive(studio.dispatch(card_ui(CardUiOp::SelectTab {
+        card: card_key.clone(),
+        tab: DeviceCardTab::Danger,
+    })))
+    .expect("tab select dispatches");
+    drive(studio.dispatch(card_ui(CardUiOp::OpenSheet {
+        card: card_key.clone(),
+        sheet: CardSheet::Confirm(CardVerb::Erase),
+    })))
+    .expect("sheet open dispatches");
+
+    let view = studio.view();
+    let card = view
+        .home
+        .as_ref()
+        .expect("gallery showing")
+        .devices
+        .iter()
+        .find(|card| card.identity_key() == card_key)
+        .expect("the same card by identity");
+    assert_eq!(card.ui.tab, DeviceCardTab::Danger);
+    assert_eq!(card.ui.sheet, Some(CardSheet::Confirm(CardVerb::Erase)));
+
+    drive(studio.dispatch(card_ui(CardUiOp::CloseSheet {
+        card: card_key.clone(),
+    })))
+    .expect("sheet close dispatches");
+    let view = studio.view();
+    let card = view
+        .home
+        .as_ref()
+        .expect("gallery showing")
+        .devices
+        .iter()
+        .find(|card| card.identity_key() == card_key)
+        .expect("the same card");
+    assert_eq!(card.ui.sheet, None, "the sheet closed through core");
+    assert_eq!(
+        card.ui.tab,
+        DeviceCardTab::Danger,
+        "the tab survives the sheet round-trip"
+    );
+}
+
 /// Journey B (state-flow model §1-B, contrast): erasing a DIFFERENT
 /// device leaves the editor alone — the sever is specific to the lens's
 /// own device. A sim-lens editor stays open and bound through a hardware
