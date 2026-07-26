@@ -1712,6 +1712,7 @@ impl StudioController {
             DeviceOp::ProvisionFirmware { setup_name } => {
                 self.provision_firmware(updates, setup_name).await
             }
+            DeviceOp::WipeProject => self.wipe_project().await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
             DeviceOp::RefreshConnections => {
                 // Drop the session (no provider close) + catalog refresh.
@@ -3381,6 +3382,38 @@ impl StudioController {
             }
         }
         Ok(outcome)
+    }
+
+    /// Wipe the device's PROJECT storage back to blank over the live wire
+    /// (the Holds-unreadable-data card's way out — model rev 2026-07-26:
+    /// the way out is BLANK, never push-over). Firmware stays; the
+    /// re-pull reclassifies the board as Connected-empty (landing I3).
+    /// The unreadable content cannot be banked (that's what unreadable
+    /// means) — the confirm sheet's copy says so plainly; raw-image
+    /// backup is the model-§5 backlog item.
+    async fn wipe_project(&mut self) -> UiResult {
+        let storage_id = self
+            .pool
+            .device_session()
+            .and_then(|session| session.device_storage_id().map(str::to_string))
+            .ok_or_else(|| {
+                UiError::MissingSession("no device project storage to wipe".to_string())
+            })?;
+        let logs = self
+            .pool
+            .device_session_mut()?
+            .client_mut()?
+            .replace_project_files(
+                &storage_id,
+                Vec::<lpa_client::project_deploy::ProjectDeployFile>::new(),
+            )
+            .await?;
+        self.record_logs(logs);
+        self.refresh_device_sync().await;
+        self.mark_dirty();
+        Ok(UiNotices::new().with_notice(UiNotice::info(
+            "Wiped — this board is empty now. Pick a project to put on it.",
+        )))
     }
 
     async fn reset_to_blank(&mut self, updates: UxUpdateSink) -> UiResult {
