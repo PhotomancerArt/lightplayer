@@ -8,7 +8,6 @@ use lpa_link::{
     DeviceState, LinkManagementRequest, LinkManagementResult, LinkProvider, LinkProviderKind,
 };
 
-use crate::app::device::device_controller::DeviceRuntimeEvidence;
 use crate::app::device::device_event_adapter::management_event_sink;
 use crate::app::device::link_ux::management_result_logs;
 use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployTarget, DeviceOpenOutcome};
@@ -227,11 +226,6 @@ impl StudioController {
             .and_then(crate::RuntimeSession::device_state)
     }
 
-    /// Whether the attached runtime is real hardware.
-    fn is_hardware_attached(&self) -> bool {
-        self.pool.device_session().is_some()
-    }
-
     /// The live hardware [`lpa_link::DeviceSession`], when one is attached
     /// (test stubs have none).
     fn hardware_session(&self) -> Option<&lpa_link::DeviceSession> {
@@ -255,22 +249,6 @@ impl StudioController {
     }
 
     /// The pool-derived runtime evidence the device pane renders from.
-    /// The server-protocol slice is the DEVICE session's when hardware is
-    /// attached (the pane is about hardware), the lens session's otherwise
-    /// (the "Running in the simulator" ambient line).
-    fn device_runtime_evidence(&self) -> DeviceRuntimeEvidence {
-        let server_state = match self.pool.device_session() {
-            Some(device) => device.server_state().clone(),
-            None => self.server_snapshot().state,
-        };
-        DeviceRuntimeEvidence {
-            is_hardware: self.is_hardware_attached(),
-            is_sim: self.pool.sim_session().is_some(),
-            device_state: self.device_state(),
-            server_state,
-        }
-    }
-
     /// The delay before the next passive tick: the MINIMUM over sessions
     /// (runtime-pool P2, per-session tick policy).
     ///
@@ -385,17 +363,14 @@ impl StudioController {
                 .with_lens(self.lens_runtime())
                 .with_device_sync(self.device_sync().cloned());
         }
-        let device_view = self.device.view(
-            &self.device_runtime_evidence(),
-            self.device_sync(),
-            self.usual_device_line(),
-        );
         // gallery-always (D24): home covers every no-project state, so the
-        // pane layout exists only for an open project
+        // pane layout exists only for an open project. The device surface
+        // is its card (the D43 lens card the editor docks; the gallery
+        // roster otherwise) — never a pane. The pre-M5 device step-stack
+        // pane retired with M6/M7′/M8′.
         let panes = vec![
             self.project.view(self.has_lightplayer_state()),
             self.bus_pane(),
-            device_view,
         ];
         UiStudioView::new(panes, self.console_view())
             .with_lens(self.lens_runtime())
@@ -1099,21 +1074,6 @@ impl StudioController {
             log::warn!("device registry upsert failed: {error}");
         }
         self.request_library_refresh();
-    }
-
-    /// Where the open project usually lives: the registered device whose
-    /// association points at it, for the pane's disconnected state (D23).
-    fn usual_device_line(&self) -> Option<String> {
-        let slug = self.project.active_library_slug()?;
-        let inputs = self.home_inputs.as_ref()?;
-        inputs.devices.iter().find_map(|device| {
-            let offline = matches!(device.state, crate::RosterCardState::Offline { .. });
-            let holds_it = device
-                .project
-                .as_ref()
-                .is_some_and(|chip| chip.name == slug);
-            (offline && holds_it).then(|| format!("Usually on {}.", device.name))
-        })
     }
 
     /// Resolve a slug-or-uid key to a concrete push target from a fresh
@@ -3480,11 +3440,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::core::status::UiStatusKind;
     use crate::{
         ConnectFlowState, ControllerId, ProjectController, ProjectEditorOp, ProjectEditorTarget,
         ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTarget, ProjectState,
-        ProjectSyncPhase, ServerFailureKind, ServerState, StudioServerClient, UiIssue,
+        ProjectSyncPhase, ServerState, StudioServerClient,
     };
 
     #[test]
@@ -3595,57 +3554,6 @@ mod tests {
             *seen.borrow(),
             vec!["one".to_string(), "two".to_string(), "three".to_string()],
             "the hook fires exactly once per entry, in ring order"
-        );
-    }
-
-    #[test]
-    fn incompatible_device_surfaces_reflash_affordance_in_the_pane() {
-        use lpa_link::{DeviceState, IncompatibleReason};
-
-        let mut studio = connected_studio();
-        studio.set_stub_device_for_test(DeviceState::Incompatible {
-            reason: IncompatibleReason::NoHello,
-        });
-
-        let view = studio.view();
-        let device_pane = view
-            .panes
-            .iter()
-            .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
-            .expect("device pane");
-        assert_eq!(device_pane.status.kind, UiStatusKind::Attention);
-        assert_eq!(device_pane.status.label, "Reflash needed");
-        // The ONE affordance: reflash (explicit, never automatic).
-        let actions = view_actions(&view);
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
-        )));
-        // The device section explains the incompatibility as an issue.
-        let UiViewContent::Stack(stack) = &device_pane.body else {
-            panic!("device pane renders a stack");
-        };
-        let device_section = stack
-            .sections
-            .iter()
-            .find(|section| section.id == DeviceController::SECTION_DEVICE)
-            .expect("device section");
-        assert!(matches!(
-            &device_section.body,
-            UiViewContent::Issue(issue) if issue.message.contains("reflash the firmware")
-        ));
-    }
-
-    #[test]
-    fn initial_actions_target_device_node() {
-        let studio = StudioController::new(|| 0.0);
-
-        let actions = studio.actions();
-
-        assert!(
-            actions
-                .iter()
-                .all(|action| action.node_id().as_str() == DeviceController::NODE_ID)
         );
     }
 
@@ -3856,97 +3764,30 @@ mod tests {
     }
 
     #[test]
-    fn no_firmware_marks_the_device_pane_ready_to_flash() {
-        // an open project whose device link answers without firmware:
-        // the pane escalates to the flash affordance (the dialog's Blank
-        // state is the full wizard; the pane mirrors the status)
-        let mut studio = connected_studio();
-        studio.set_server_state_for_test(ServerState::Failed {
-            issue: UiIssue::new("No LightPlayer firmware detected."),
-            kind: ServerFailureKind::NoFirmware,
-        });
-
-        let view = studio.view();
-        let device_pane = view
-            .panes
-            .iter()
-            .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
-            .expect("device pane");
-        assert_eq!(device_pane.status.kind, UiStatusKind::Attention);
-        assert_eq!(device_pane.status.label, "Ready to flash");
-        let actions = view_actions(&view);
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
-        )));
-    }
-
-    #[test]
     fn loaded_project_gets_project_pane() {
         let studio = connected_studio();
 
         let view = studio.view();
         let actions = view_actions(&view);
 
-        assert_eq!(view.panes.len(), 3);
+        // The device surface is the card (D43 lens card / gallery
+        // roster), never a pane — the layout is project + bus only. The
+        // pre-M5 device step-stack pane retired with M6/M7′/M8′; firmware
+        // and session recovery live on the card (see
+        // `home::device_card` + `studio_link_e2e_tests`).
+        assert_eq!(view.panes.len(), 2);
         assert_eq!(view.panes[0].node_id.as_str(), ProjectController::NODE_ID);
         assert_eq!(view.panes[1].node_id.as_str(), "bus");
-        assert_eq!(view.panes[2].node_id.as_str(), DeviceController::NODE_ID);
-        // D23: the pane is about hardware — one device section plus the
-        // visually separate firmware section; the wizard steps are gone
-        assert_eq!(device_section_ids(&view), vec!["device", "firmware"]);
+        assert!(
+            view.panes
+                .iter()
+                .all(|pane| pane.node_id.as_str() != DeviceController::NODE_ID)
+        );
+        // the project pane never carries the running-project entry verbs
         assert!(!actions.iter().any(|action| matches!(
             action.op_as::<ProjectOp>(),
             Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
         )));
-        // the pane keeps only the session verb (M8′: pushing lives on
-        // the cards)
-        assert!(
-            actions.iter().any(|action| matches!(
-                action.op_as::<DeviceOp>(),
-                Some(DeviceOp::DisconnectDevice)
-            ))
-        );
-    }
-
-    #[test]
-    fn device_pane_offers_firmware_ops_separately() {
-        let studio = connected_studio();
-
-        let actions = view_actions(&studio.view());
-
-        // firmware ops live in their own section (D15), away from deploy
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
-        )));
-        assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
-        );
-        // the wizard's connect plumbing is gone
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ConnectLightPlayer | DeviceOp::OpenProvider { .. })
-        )));
-    }
-
-    #[test]
-    fn loaded_project_keeps_management_recovery_actions_visible() {
-        let studio = connected_studio();
-
-        let actions = view_actions(&studio.view());
-        // recovery stays reachable from the editor's firmware section
-        assert!(actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
-        )));
-        assert!(
-            actions
-                .iter()
-                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
-        );
     }
 
     #[test]
@@ -4445,22 +4286,6 @@ mod tests {
             )),
         );
         view
-    }
-
-    fn device_section_ids(view: &UiStudioView) -> Vec<&str> {
-        let device_pane = view
-            .panes
-            .iter()
-            .find(|pane| pane.node_id.as_str() == DeviceController::NODE_ID)
-            .expect("device pane should exist");
-        let UiViewContent::Stack(stack) = &device_pane.body else {
-            panic!("device pane should render stack");
-        };
-        stack
-            .sections
-            .iter()
-            .map(|section| section.id.as_str())
-            .collect()
     }
 
     fn registry_with_fake_connect_error(message: impl Into<String>) -> LinkProviderRegistry {

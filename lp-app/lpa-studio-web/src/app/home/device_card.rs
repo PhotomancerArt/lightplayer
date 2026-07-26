@@ -917,11 +917,7 @@ fn TroubleshootSheet(
 /// the gate).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ConfirmSheet(
-    action: UiAction,
-    card_key: String,
-    on_action: EventHandler<UiAction>,
-) -> Element {
+fn ConfirmSheet(action: UiAction, card_key: String, on_action: EventHandler<UiAction>) -> Element {
     let meta = action.meta().clone();
     let confirmation = meta.confirmation.clone().unwrap_or_else(|| {
         // defensive: a confirm sheet over an unconfirmed action still

@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::stories::story::StoryDescriptor;
 
-pub const DEFAULT_STORY_ID: &str = "studio/layout/studio-shell/simulator-idle";
+pub const DEFAULT_STORY_ID: &str = "studio/home/home-gallery/populated";
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/story_registry.generated.rs"));

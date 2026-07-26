@@ -6,7 +6,6 @@
 
 pub(crate) mod affordance;
 pub mod bus;
-pub mod device;
 pub mod home;
 pub mod layout;
 pub mod node;

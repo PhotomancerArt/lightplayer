@@ -7,8 +7,6 @@ pub mod studio_pane;
 #[cfg(feature = "stories")]
 pub(crate) mod studio_pane_stories;
 pub mod studio_shell;
-#[cfg(feature = "stories")]
-pub(crate) mod studio_shell_stories;
 pub mod version_badge;
 #[cfg(feature = "stories")]
 pub(crate) mod version_badge_stories;
