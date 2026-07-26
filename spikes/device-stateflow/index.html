@@ -189,9 +189,10 @@ J.push({ id:"A", title:"A · BLANK BOARD → RUNNING PROJECT", budget:"2 clicks 
       body: statusLine("Set up complete")+
         `<p class="sub-line">Nothing loaded yet — pick any project or example below to put on it.</p>`}),
     arrow("auto","gallery cards grow the affordance while an empty device is present"),
-    pkgCard({state:"gallery project card AS the chooser (rev A-5)", name:"porch-sign", kind:"Project · v5, today 1:05 PM",
+    pkgCard({state:"gallery project card AS the chooser (settled: explicit buttons)", name:"porch-sign", kind:"Project · edited today, 1:05 PM",
       action:`<span class="btn primary">⚡ Put on "2026-07-26 14:30…"</span>
-        <p class="sub-line">No empty device? The same click starts a sim instead.</p>`}),
+        <span class="btn">▶ Open in a new sim</span>
+        <p class="sub-line">One button per empty device + one for a sim — the target is always named, never guessed.</p>`}),
     arrow("user","one click on the project card"),
     card({state:"OperationInFlight · Running", tint:"amber", pulsing:true, name:"2026-07-26 14:30 Light…", tabs:"lean",
       op: op({label:"Pushing porch-sign v1…", pct:34, cancel:true,
