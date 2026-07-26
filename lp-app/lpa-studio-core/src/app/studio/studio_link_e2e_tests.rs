@@ -364,7 +364,10 @@ fn blank_flash_classifies_flashes_and_reaches_needs_a_name() {
     // Scripted flash via the real manage() path (the card's Set-up
     // affordance): the device reboots as LightPlayer, the controller
     // reconnects, and the empty unstamped device lands on Needs-a-name.
-    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware { setup_name: None }))).unwrap();
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        setup_name: None,
+    })))
+    .unwrap();
     let home = studio.view().home.expect("gallery still shows");
     assert!(
         home.devices
@@ -523,7 +526,10 @@ fn incompatible_no_hello_reflashes_through_the_card() {
     );
 
     // Flash → reboot → Ready (the flashed build speaks the current proto).
-    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware { setup_name: None }))).unwrap();
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        setup_name: None,
+    })))
+    .unwrap();
     assert!(
         matches!(
             studio.device_state_for_test(),
@@ -581,7 +587,10 @@ fn incompatible_proto_mismatch_reflashes_through_the_card() {
             .any(|card| card.state == crate::RosterCardState::NeedsFirmwareUpdate)
     );
 
-    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware { setup_name: None }))).unwrap();
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        setup_name: None,
+    })))
+    .unwrap();
     assert!(matches!(
         studio.device_state_for_test(),
         Some(DeviceState::Ready { .. })
@@ -1446,9 +1455,8 @@ fn card_tab_and_sheet_drive_through_core_ops() {
         card.identity_key().to_string()
     };
 
-    let card_ui = |op: CardUiOp| {
-        UiAction::from_op(ControllerId::new(HOME_NODE_ID), HomeOp::CardUi(op))
-    };
+    let card_ui =
+        |op: CardUiOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), HomeOp::CardUi(op));
     drive(studio.dispatch(card_ui(CardUiOp::SelectTab {
         card: card_key.clone(),
         tab: DeviceCardTab::Danger,

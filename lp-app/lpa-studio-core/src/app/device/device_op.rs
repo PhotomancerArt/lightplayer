@@ -42,7 +42,9 @@ pub enum DeviceOp {
     /// lands and the wire is up, the controller stamps this name so the
     /// happy path never detours through Needs-a-name. `None` = a plain
     /// flash / firmware update (already-stamped or recovery contexts).
-    ProvisionFirmware { setup_name: Option<String> },
+    ProvisionFirmware {
+        setup_name: Option<String>,
+    },
     /// Wipe the device's project storage back to blank (the
     /// Holds-unreadable-data card's way out — state-flow model rev
     /// 2026-07-26: the way out is BLANK, never push-over). Firmware
