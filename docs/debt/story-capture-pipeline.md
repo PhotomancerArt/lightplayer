@@ -44,6 +44,13 @@ each new agent session re-learns the incantations from memory notes.
   `code-editor` (chip task_16a65557 tracks the churn itself).
 
 **Incident log**
+- 2026-07-26 — node-card P2/P2b captures: even with a clean process slate and
+  concurrency 1 + 120s, full runs decay and wedge after ~700+ navigations
+  (wedge story varies per run — positional, not story-specific; the failing
+  story rendered fine in isolation). **The script's fingerprinted RESUME is
+  the fix**: re-running the same command kept 764/894 completed viewports and
+  finished the tail first try. Lesson: resume beats restart — sweep leaked
+  processes, then just re-run; do not diagnose the wedge story itself.
 - 2026-07-25 — shader-agent merge captures: three consecutive CDP
   navigate timeouts (30s, then 90s) at concurrency 1, wedge story
   varying per run. Root aggravation: **seven zombie headless Chromes**

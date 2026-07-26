@@ -24,6 +24,14 @@ pub fn DetailPopover(
     #[props(default = PopoverPlacement::BottomEnd)] placement: PopoverPlacement,
     #[props(default = false)] active: bool,
     #[props(default = false)] initially_open: bool,
+    /// Anchored mode pass-through (see `PopoverButton`): the detail card
+    /// merges its outline with an external anchor element — "diving into
+    /// the control" (node-card P2c item 3).
+    #[props(default = None)]
+    anchor_id: Option<String>,
+    /// Anchored mode pass-through (see `PopoverButton`).
+    #[props(default = None)]
+    anchor_visual: Option<Element>,
     children: Element,
 ) -> Element {
     rsx! {
@@ -35,6 +43,8 @@ pub fn DetailPopover(
             placement,
             active,
             initially_open,
+            anchor_id,
+            anchor_visual,
             popup_class: detail_popover_card_class().to_string(),
             {children}
         }

@@ -71,6 +71,12 @@ pub(crate) fn format_value_editor_hint(editor: &ValueEditorHint) -> Option<Strin
                 .unwrap_or_default();
             Some(format!("slider {}..{}{step}", min.0, max.0))
         }
+        ValueEditorHint::Knob { min, max, step } => {
+            let step = step
+                .map(|step| format!(", step {}", step.0))
+                .unwrap_or_default();
+            Some(format!("knob {}..{}{step}", min.0, max.0))
+        }
         ValueEditorHint::Xy => Some(String::from("xy")),
         ValueEditorHint::Dimensions => Some(String::from("dimensions")),
         ValueEditorHint::Affine2d => Some(String::from("affine 2d")),

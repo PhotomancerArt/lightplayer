@@ -6,9 +6,10 @@ use lpa_studio_core::{
 use crate::app::affordance::affordance_pane_tone;
 use crate::app::layout::{PaneCollapse, RichObjectPane};
 use crate::app::node::{
-    NodeChildren, NodeDetailPopover, ProducedProducts, ProducedValues, SlotRecordEditor,
+    NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
+    SlotRecordEditor,
 };
-use crate::base::{StudioIcon, node_kind_icon};
+use crate::base::{Platform, StudioIcon, node_kind_icon};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -33,6 +34,20 @@ pub fn NodePane(
     #[props(default)]
     pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
+    /// Open the face's code drawer on first render (stories).
+    #[props(default = false)]
+    face_code_drawer_open: bool,
+    /// Open the face's advanced drawer on first render (stories).
+    #[props(default = false)]
+    face_advanced_drawer_open: bool,
+    /// Pin this face control's corner ⓘ popover open on first render
+    /// (stories).
+    #[props(default = None)]
+    face_detail_open_control: Option<String>,
+    /// Platform for the face code editor's shortcut hints; stories pin it
+    /// for deterministic captures.
+    #[props(default = None)]
+    face_platform: Option<Platform>,
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
@@ -50,9 +65,18 @@ pub fn NodePane(
     let focused = view.focused;
     let select_action = view.action.clone();
     let select_kind = view.header.kind.clone();
+    // The node KIND, right-aligned before the ⓘ like the device card's
+    // transport label (P2b item 3) — small muted lowercase identity text,
+    // not status.
+    let kind_label = view.header.kind.clone();
     let focus_action = view.action.clone();
     let issues = view.issues.clone();
     let header_actions = view.header_actions.clone();
+    // Face + drawers replace the generic tab/section body when the
+    // controller supplies a kind-specific face (shader/fixture/playlist
+    // today); every other kind keeps the classic sections fallback.
+    let face = view.face.clone();
+    let face_sections = main_tab_sections(&view);
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
@@ -81,6 +105,11 @@ pub fn NodePane(
                     actions: header_actions,
                     on_action,
                     trailing: rsx! {
+                        if !kind_label.is_empty() {
+                            span { class: "tw:self-center tw:whitespace-nowrap tw:pl-2 tw:pr-1 tw:text-[11px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-dim-foreground",
+                                "{kind_label}"
+                            }
+                        }
                         if tabs.len() > 1 {
                             NodeTabs {
                                 tabs: tabs.clone(),
@@ -104,36 +133,54 @@ pub fn NodePane(
                                 }
                             }
                         }
-                        match active_body {
-                            Some(UiNodeTabBody::Sections(sections)) => rsx! {
-                                div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
-                                    for (index, section) in sections.into_iter().enumerate() {
-                                        NodeSection {
-                                            section,
-                                            first: index == 0,
-                                            focus_action: focus_action.clone(),
-                                            on_action,
-                                            pending_edits: pending_edits.clone(),
-                                            dirty_tint,
+                        if let Some(face) = face.clone() {
+                            NodeFaceBody {
+                                face,
+                                sections: face_sections.clone(),
+                                code_drawer_open: face_code_drawer_open,
+                                advanced_drawer_open: face_advanced_drawer_open,
+                                detail_open_control: face_detail_open_control.clone(),
+                                platform: face_platform,
+                                pending_edits: pending_edits.clone(),
+                                dirty_tint,
+                                on_action,
+                            }
+                        } else {
+                            match active_body {
+                                Some(UiNodeTabBody::Sections(sections)) => rsx! {
+                                    div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
+                                        for (index, section) in sections.into_iter().enumerate() {
+                                            NodeSection {
+                                                section,
+                                                first: index == 0,
+                                                focus_action: focus_action.clone(),
+                                                on_action,
+                                                pending_edits: pending_edits.clone(),
+                                                dirty_tint,
+                                            }
                                         }
                                     }
-                                }
-                            },
-                            Some(UiNodeTabBody::Text { title, body }) => rsx! {
-                                section { class: "tw:grid tw:min-w-0 tw:gap-2",
-                                    h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
-                                    pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
-                                        code { "{body}" }
+                                },
+                                Some(UiNodeTabBody::Text { title, body }) => rsx! {
+                                    section { class: "tw:grid tw:min-w-0 tw:gap-2",
+                                        h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
+                                        pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                                            code { "{body}" }
+                                        }
                                     }
-                                }
-                            },
-                            None => rsx! {
-                                p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
-                            },
+                                },
+                                None => rsx! {
+                                    p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
+                                },
+                            }
                         }
                     },
                 }
             }
+            // Children always render OUTSIDE the pane as sibling cards —
+            // the playlist face included: its view carries exactly the
+            // ACTIVE child (the face derivation enforces the invariant —
+            // one rendering of the active child, zero of the others).
             if !collapsed() && !view.children.is_empty() {
                 NodeChildren {
                     items: view.children.clone(),
@@ -246,6 +293,18 @@ pub fn NodeSection(
             }
         },
     }
+}
+
+/// The main tab's sections — the face's advanced drawer hosts them
+/// unchanged (today's slot-row view behind the last lid).
+fn main_tab_sections(view: &UiNodeView) -> Vec<UiNodeSection> {
+    view.tabs
+        .iter()
+        .find_map(|tab| match &tab.body {
+            UiNodeTabBody::Sections(sections) => Some(sections.clone()),
+            UiNodeTabBody::Text { .. } => None,
+        })
+        .unwrap_or_default()
 }
 
 fn section_class(body_class: &'static str, first: bool) -> String {

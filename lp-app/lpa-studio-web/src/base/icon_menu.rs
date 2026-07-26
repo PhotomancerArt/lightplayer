@@ -15,6 +15,12 @@ pub fn IconMenuButton(
     #[props(default = IconMenuVisualState::Rest)] visual_state: IconMenuVisualState,
     #[props(default = false)] initially_open: bool,
     #[props(default = default_icon_menu_popup_class().to_string())] popup_class: String,
+    /// Anchored mode pass-through (see `PopoverButton`).
+    #[props(default = None)]
+    anchor_id: Option<String>,
+    /// Anchored mode pass-through (see `PopoverButton`).
+    #[props(default = None)]
+    anchor_visual: Option<Element>,
     children: Element,
 ) -> Element {
     let class = icon_menu_visual_class(tone, active, visual_state);
@@ -32,6 +38,8 @@ pub fn IconMenuButton(
             chrome_class: chrome_class.to_string(),
             placement,
             initially_open,
+            anchor_id,
+            anchor_visual,
             {children}
         }
     }

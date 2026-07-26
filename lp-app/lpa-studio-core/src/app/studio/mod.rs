@@ -11,6 +11,10 @@ pub mod studio_controller;
 /// dev-dependency; never part of the wasm lib build).
 #[cfg(test)]
 mod studio_edit_e2e_tests;
+/// End-to-end node-card face tests: controller-derived shader/fixture faces
+/// with live knob/fader edits over the real overlay path (node-card P3).
+#[cfg(test)]
+mod studio_face_e2e_tests;
 /// End-to-end tests through the REAL link path (provider → endpoint →
 /// connect → readiness → pull) against the scripted byte-level fake device.
 #[cfg(all(test, not(target_arch = "wasm32")))]

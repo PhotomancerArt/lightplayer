@@ -92,11 +92,16 @@ holds the full context.
 | Worker offload for probe evaluation (also the pragmatic bound on infinite-loop shaders until interp fuel) | `2026-07-25-shader-probe-experiment-api`; `2026-07-25-studio-shader-agent-architecture` | Live walks show probe-eval jank, or the interp fuel bound lands here first |
 | lps-glsl as a linter pass over the probe unit (better spans than the naga oracle) | `2026-07-25-shader-probe-experiment-api` | Span quality on probe/agent diagnostics becomes a complaint |
 | Frontend dialect gap: engine frontends accept bare uniforms, the probe oracle (naga) requires `layout(binding=N)` — a shader can render on-engine yet fail health | `2026-07-25-shader-probe-experiment-api` | A live gate or demo shader hits it; align or lint in the agent path |
-| Probe/agent-activity visualization (render probe domains/results on the preview) | `2026-07-25-studio-shader-agent-architecture` | M6 capture lands or the node-UX pass begins; likely its own plan |
-| Full shader-node UX pass toward preview + chat (this slice added only the tab strip + dirty dot) | `2026-07-25-studio-shader-agent-architecture` | The separately-running design spike concludes |
+| Probe/agent-activity visualization (render probe domains/results on the preview) | `2026-07-25-studio-shader-agent-architecture` | M6 capture lands (the node-UX pass landed 2026-07-26 as `node-card-faces` without it); likely its own plan |
 | Live-sim binding push (agent binding overrides reach only the probe oracle today; transient push needs visible indication + auto-clear) | `2026-07-25-studio-shader-agent-architecture` | Outward-from-GLSL capability work begins |
 | In-web local model provider (the reason `ModelProvider` exists) | `2026-07-25-studio-shader-agent-architecture` | A credible in-browser model is worth serving |
 | Unreserve the `iterate` tool's `capture` field | `2026-07-25-studio-shader-agent-architecture` | The M6 preview snapshot seam lands |
+| Shader face perf line (cycle model exists engine-side; face reserves no space yet) | `2026-07-26-node-card-faces` | The perf-line run of work is prioritized |
+| Playlist strip evolutions: timeline view, cue-trigger UI, autoplay-to-cue controls | `2026-07-26-node-card-faces` | Playlist interaction work resumes |
+| "Activate entry by click" wire op (strip chips can only select the child today; engine switches entries via trigger ControlMessages/timed advance only) | `2026-07-26-node-card-faces` | Playlist interaction work resumes, or a walk asks for click-to-activate |
+| Fixture mapping editor drawer (face's planned custom drawer; fixture has only advanced today) | `2026-07-26-node-card-faces` | Fixture mapping UX work begins |
+| Drawer open-state re-home into CardUiState (view-local signals today) | `2026-07-26-node-card-faces` | The ui-state-audit plan lands |
+| Node-card refinement round (bound-knob live bus value, friendly panel-ⓘ titles, entry-thumb warming, story-fixture selection look, knob keyboard support, hardware placard walk) | `2026-07-26-node-card-faces` | The post-landing refinement round is scheduled |
 
 ## Relationship To Shared Planning
 

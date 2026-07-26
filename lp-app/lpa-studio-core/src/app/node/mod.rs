@@ -12,6 +12,7 @@
 //! browser-local state. Those belong to the project controller tree and the web
 //! component tree respectively.
 
+mod face;
 mod ui_asset_editor;
 mod ui_binding_authoring;
 mod ui_config_slot;
@@ -36,6 +37,10 @@ mod ui_slot_source_state;
 mod ui_slot_unit;
 mod ui_slot_value;
 
+pub use face::{
+    UiFixtureFace, UiNodeFace, UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
+    UiShaderFace,
+};
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};
 pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody, UiSlotOptionality};
@@ -92,6 +97,20 @@ mod tests {
         assert!(view.has_sections());
         assert!(view.has_children());
         assert_eq!(view.tabs[0].label, "main");
+    }
+
+    #[test]
+    fn node_view_and_child_seed_no_kind_face() {
+        // Node-card P1 seam: faces exist as vocabulary only; every
+        // constructor seeds `None` so all cards render the generic fallback.
+        let view = UiNodeView::new(
+            UiNodeHeader::new("Blast", "Shader", "/show/blast"),
+            vec![UiNodeTab::main(Vec::new())],
+        );
+        let child = UiNodeChild::new("blast", "Shader", "./blast.json");
+
+        assert_eq!(view.face, None);
+        assert_eq!(child.face, None);
     }
 
     #[test]
