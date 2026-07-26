@@ -1361,7 +1361,10 @@ fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
         FakeLightPlayerState::new()
             .with_project_files(sign_files)
             .with_loaded_project()
-            .with_identity(FakeDeviceIdentity::new("dev_aaaaaaaaaaaaaaaa", "Bench board")),
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
     ));
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
     studio.attach_library(host);
@@ -1405,7 +1408,11 @@ fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
             .iter()
             .any(|notice| notice.message.contains("no longer on this device")),
         "the sever is explained: {:?}",
-        outcome.notices.iter().map(|n| &n.message).collect::<Vec<_>>()
+        outcome
+            .notices
+            .iter()
+            .map(|n| &n.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1437,7 +1444,10 @@ fn runtime_reset_from_the_editor_keeps_the_lens_bound() {
         FakeLightPlayerState::new()
             .with_project_files(sign_files)
             .with_loaded_project()
-            .with_identity(FakeDeviceIdentity::new("dev_bbbbbbbbbbbbbbbb", "Bench board")),
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_bbbbbbbbbbbbbbbb",
+                "Bench board",
+            )),
     ));
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
     studio.attach_library(host);
