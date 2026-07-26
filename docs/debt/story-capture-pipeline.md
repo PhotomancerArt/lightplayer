@@ -83,6 +83,29 @@ these apply only to local SCRATCH captures; canonical baselines come from the
   same heavy-sheet family. Run 2 resumed from disk and completed
   clean. Two-run capture is now the working norm.
 
+- 2026-07-26 — **THE WEDGE ROOT-CAUSED: `python3 -m http.server` hangs
+  under capture load.** The class that plagued this pipeline since
+  2026-07-08 ("heavy end-of-queue sheets", story-specific wedges,
+  load-correlation) finally reproduced deterministically in a 4-cpu
+  Linux container and was caught alive: when a CDP timeout kills a
+  Chrome page mid-download, the python worker thread serving it blocks
+  FOREVER in a kernel socket send (`sock_alloc_send_pskb`) and the
+  server stops answering entirely (curl → empty reply). One transiently
+  slow story → timeout → page recycled mid-response → server wedges →
+  every later navigation on every page/browser times out. This explains
+  the red herrings: wedges followed the capture frontier (not stories),
+  fresh pages AND fresh browsers inherited the wedge (shared server),
+  thresholds varied with load, and the renderer main thread sat in
+  pthread_cond_timedwait waiting on fetches that never finished. Fix:
+  the capture script now serves the site itself (in-process node static
+  server, `response.close → stream.destroy`); python3 is no longer a
+  dependency. A defense-in-depth browser restart every
+  STUDIO_STORY_BROWSER_RESTART_EVERY captures (default 120, ~1-2s,
+  resume from disk) also landed while browser aging was the leading
+  theory. Also from the same debugging arc: a crashed partial capture
+  could masquerade as drift (fixed via .check-complete sentinel gating
+  the CI artifact and story-pull), and pinned Chrome-for-Testing needs
+  the AppArmor userns sysctl on ubuntu-24.04 runners.
 - 2026-07-26 — **PAYDOWN**: capture moved to CI
   (ADR `../adr/2026-07-26-ci-canonical-story-capture.md`). `validate-stories`
   job captures on a pinned x64 runner (Chrome for Testing 151.0.7922.47,
