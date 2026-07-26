@@ -6,6 +6,7 @@ pub mod exploration;
 mod library_host_opfs;
 mod local_store;
 mod router;
+mod settings_io;
 #[cfg(feature = "stories")]
 mod stories;
 mod web_app;

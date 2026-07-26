@@ -25,6 +25,11 @@ pub use lpc_history::{ContentHash, SyncRelation};
 
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
+pub use app::agent::{
+    AgentController, AgentCostRates, AgentFeedback, AgentOp, AgentProviderConfig, AgentRunContext,
+    AgentSessionKey, AgentTaskFuture, AgentViewContext, UiAgentAvailability, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
+};
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
     ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp, DeployTarget,
@@ -83,6 +88,11 @@ pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
     ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation, StudioOverlayRead,
     StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+};
+pub use app::settings::{
+    AgentProvider, AgentProviderGuidance, AgentSettings, DEFAULT_AGENT_MODEL, SettingsCommand,
+    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiSettingsView,
+    provider_guidance,
 };
 pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,

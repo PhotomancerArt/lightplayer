@@ -10,7 +10,9 @@
 use std::rc::Rc;
 
 use crate::UiAction;
+use crate::app::agent::AgentFeedback;
 use crate::app::library::LibraryHost;
+use crate::app::settings::SettingsCommand;
 use crate::app::studio::console_command::ConsoleCommand;
 
 /// The injected library host riding the command queue (Debug-opaque: a
@@ -39,6 +41,14 @@ pub enum StudioCommand {
     /// the actor ahead of the batch's actions; never coalesced away, unlike
     /// `RefreshTick`, because each is a distinct user gesture.
     Console(ConsoleCommand),
+    /// A settings mutation or layer load (the shell's settings popover, the
+    /// boot `dev-settings.json` fetch). Applied synchronously by the actor
+    /// ahead of the batch's actions, in queue order, like `Console`.
+    Settings(SettingsCommand),
+    /// Progress from a spawned agent run (streamed events, run end). Applied
+    /// synchronously by the actor in queue order, like `Console` — each
+    /// message mutates the agent session mirror and marks the view dirty.
+    Agent(AgentFeedback),
     /// The library changed under us (another tab's catalog transaction or
     /// save, via the host's BroadcastChannel). Coalescable like
     /// `RefreshTick`: the actor schedules one gallery re-hydration.

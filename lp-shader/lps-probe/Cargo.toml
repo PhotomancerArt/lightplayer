@@ -1,0 +1,22 @@
+[package]
+name = "lps-probe"
+description = "Experiment/probe evaluation for GLSL shaders on the LPIR f32 interpreter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
+libm = "0.2"
+lpir = { path = "../lpir" }
+lps-builtins = { path = "../lps-builtins" }
+lps-frontend = { path = "../lps-frontend" }
+lps-shared = { path = "../lps-shared" }
+lpvm = { path = "../lpvm" }
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }

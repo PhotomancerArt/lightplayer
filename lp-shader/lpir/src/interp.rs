@@ -48,6 +48,10 @@ pub enum InterpError {
     FunctionNotFound(String),
     Import(String),
     StackOverflow,
+    /// The caller-supplied op budget ([`InterpLimits::fuel`]) ran out.
+    FuelExhausted {
+        limit: u64,
+    },
     Internal(String),
 }
 
@@ -57,6 +61,11 @@ impl fmt::Display for InterpError {
             InterpError::FunctionNotFound(name) => write!(f, "function not found: @{name}"),
             InterpError::Import(msg) => write!(f, "{msg}"),
             InterpError::StackOverflow => write!(f, "call stack overflow"),
+            InterpError::FuelExhausted { limit } => write!(
+                f,
+                "op budget of {limit} exhausted — the code likely contains an \
+                 infinite or excessively long loop"
+            ),
             InterpError::Internal(msg) => write!(f, "internal interpreter error: {msg}"),
         }
     }
@@ -66,6 +75,43 @@ impl core::error::Error for InterpError {}
 
 pub const DEFAULT_MAX_DEPTH: usize = 256;
 
+/// Execution limits: call depth plus an optional op budget ("fuel", one unit
+/// per executed LPIR op across all frames). The interpreter has no other
+/// termination guarantee, so hosts running untrusted code (e.g. lps-probe on
+/// the Studio wasm main thread) must set `fuel`; oracle paths that need exact
+/// unbounded semantics (filetests) opt out via [`InterpLimits::unlimited`].
+#[derive(Clone, Copy, Debug)]
+pub struct InterpLimits {
+    pub max_depth: usize,
+    /// `None` = unlimited; `Some(n)` errors with [`InterpError::FuelExhausted`]
+    /// after `n` ops.
+    pub fuel: Option<u64>,
+}
+
+impl Default for InterpLimits {
+    fn default() -> Self {
+        Self::unlimited()
+    }
+}
+
+impl InterpLimits {
+    /// Default depth limit, no op budget.
+    pub const fn unlimited() -> Self {
+        Self {
+            max_depth: DEFAULT_MAX_DEPTH,
+            fuel: None,
+        }
+    }
+
+    /// Default depth limit with an op budget.
+    pub const fn with_fuel(fuel: u64) -> Self {
+        Self {
+            max_depth: DEFAULT_MAX_DEPTH,
+            fuel: Some(fuel),
+        }
+    }
+}
+
 /// Run `func_name` on `module` with `args`.
 pub fn interpret(
     module: &LpirModule,
@@ -73,7 +119,7 @@ pub fn interpret(
     args: &[Value],
     imports: &mut dyn ImportHandler,
 ) -> Result<Vec<Value>, InterpError> {
-    interpret_with_depth(module, func_name, args, imports, DEFAULT_MAX_DEPTH)
+    interpret_with_limits(module, func_name, args, imports, InterpLimits::unlimited())
 }
 
 pub fn interpret_with_depth(
@@ -82,6 +128,25 @@ pub fn interpret_with_depth(
     args: &[Value],
     imports: &mut dyn ImportHandler,
     max_depth: usize,
+) -> Result<Vec<Value>, InterpError> {
+    interpret_with_limits(
+        module,
+        func_name,
+        args,
+        imports,
+        InterpLimits {
+            max_depth,
+            fuel: None,
+        },
+    )
+}
+
+pub fn interpret_with_limits(
+    module: &LpirModule,
+    func_name: &str,
+    args: &[Value],
+    imports: &mut dyn ImportHandler,
+    limits: InterpLimits,
 ) -> Result<Vec<Value>, InterpError> {
     let func = module
         .functions
@@ -96,7 +161,10 @@ pub fn interpret_with_depth(
     // One linear stack shared by all frames so slot addresses stay valid
     // across calls (out-parameters, sret pointers).
     let mut stack: Vec<u8> = Vec::new();
-    exec_func(module, func, &full, imports, 0, max_depth, &mut stack)
+    let mut fuel = limits.fuel.unwrap_or(0);
+    exec_func(
+        module, func, &full, imports, 0, limits, &mut fuel, &mut stack,
+    )
 }
 
 /// Result of an [`interpret_entry`] run.
@@ -138,7 +206,7 @@ pub fn interpret_entry(
     imports: &mut dyn ImportHandler,
     vmctx_image: &[u8],
     sret_size: usize,
-    max_depth: usize,
+    limits: InterpLimits,
 ) -> Result<EntryOutput, InterpError> {
     let func = module
         .functions
@@ -164,7 +232,10 @@ pub fn interpret_entry(
     let mut stack: Vec<u8> = Vec::with_capacity(sret_base + sret_size);
     stack.extend_from_slice(vmctx_image);
     stack.resize(sret_base + sret_size, 0);
-    let values = exec_func(module, func, &full, imports, 0, max_depth, &mut stack)?;
+    let mut fuel = limits.fuel.unwrap_or(0);
+    let values = exec_func(
+        module, func, &full, imports, 0, limits, &mut fuel, &mut stack,
+    )?;
     let sret_bytes = stack[sret_base..sret_base + sret_size].to_vec();
     let vmctx_bytes = stack[..vmctx_image.len()].to_vec();
     Ok(EntryOutput {
@@ -174,16 +245,21 @@ pub fn interpret_entry(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "internal recursion helper; threads shared run state (limits, fuel, stack)"
+)]
 fn exec_func(
     module: &LpirModule,
     func: &IrFunction,
     args: &[Value],
     imports: &mut dyn ImportHandler,
     depth: usize,
-    max_depth: usize,
+    limits: InterpLimits,
+    fuel: &mut u64,
     stack: &mut Vec<u8>,
 ) -> Result<Vec<Value>, InterpError> {
-    if depth > max_depth {
+    if depth > limits.max_depth {
         return Err(InterpError::StackOverflow);
     }
     let h = func.hidden_param_slots() as usize;
@@ -235,6 +311,14 @@ fn exec_func(
     let mut ctrl: Vec<Ctrl> = Vec::new();
 
     while pc < func.body.len() {
+        // One fuel unit per dispatched op (including control ops), shared
+        // across all frames of the run.
+        if let Some(limit) = limits.fuel {
+            if *fuel == 0 {
+                return Err(InterpError::FuelExhausted { limit });
+            }
+            *fuel -= 1;
+        }
         if let Some(Ctrl::SwitchArm { end, merge }) = ctrl.last() {
             let (e, m) = (*end, *merge);
             if pc == e {
@@ -420,7 +504,8 @@ fn exec_func(
                         &call_args,
                         imports,
                         depth + 1,
-                        max_depth,
+                        limits,
+                        fuel,
                         stack,
                     )?
                 } else {

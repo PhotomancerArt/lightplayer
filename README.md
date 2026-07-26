@@ -71,6 +71,11 @@ To get started with development:
 
 See `just --list` for all available commands.
 
+4. **Machine-level Studio dev settings** (shader-agent API keys, model
+   overrides) live in `~/.lightplayer/settings.json`; `just studio-dev` syncs
+   them into the served app. See "Dev settings" in
+   [`lp-app/lpa-studio-web/README.md`](lp-app/lpa-studio-web/README.md).
+
 # Repository Structure
 
 ## CLI (`lp-cli/`)

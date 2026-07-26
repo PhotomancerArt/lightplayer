@@ -13,8 +13,8 @@ use crate::app::node::slot_option_presence::{
 use crate::app::node::{
     AssetEditor, BindingChip, BindingChipDirection, EnumVariantField, MapAddEntry,
     MapEntryKeyField, MapEntryRemoveButton, OptionPresenceActionButton, OptionPresenceCell,
-    OptionPresenceCheckbox, OptionPresenceStyle, SlotDetailButton, SlotDetailRevert,
-    SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
+    OptionPresenceCheckbox, OptionPresenceStyle, ShaderEditorTabs, SlotDetailButton,
+    SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -427,6 +427,13 @@ fn AssetSlotEditor(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     if let Some(editor) = asset.inline_editor.clone() {
+        // GLSL editors decorated with an agent chat DTO get the
+        // Agent | Code tab strip; everything else stays the plain editor.
+        if editor.agent.is_some() {
+            return rsx! {
+                ShaderEditorTabs { editor, on_action }
+            };
+        }
         return rsx! {
             AssetEditor { editor, on_action }
         };

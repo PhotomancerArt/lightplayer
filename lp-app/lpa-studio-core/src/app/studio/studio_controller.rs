@@ -97,6 +97,19 @@ pub struct StudioController {
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
     random: Rc<dyn Fn() -> [u8; 16]>,
+    /// The layered settings store (user > host > baked defaults). Pure
+    /// state: the platform edges load its layers and persist the user
+    /// layer via [`Self::set_on_user_settings`].
+    settings: crate::app::settings::SettingsStore,
+    /// Persistence hook for the user settings layer, invoked with the
+    /// layer's JSON whenever a user-driven settings mutation changes it.
+    /// The web shell installs a localStorage writer; an Electron shell
+    /// would install its own sink. Layer *loads* never fire it.
+    on_user_settings: Option<Box<dyn Fn(&str)>>,
+    /// The shader agent's per-node chat sessions (P5). Pure state plus
+    /// injected platform facilities (spawner, provider factory); runs are
+    /// spawned tasks reporting back through the actor's command queue.
+    agent: crate::AgentController,
 }
 
 /// What a home card asked to open.
@@ -144,6 +157,119 @@ impl StudioController {
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
             random: Rc::new(clock_fallback_random),
+            settings: crate::app::settings::SettingsStore::default(),
+            on_user_settings: None,
+            agent: crate::AgentController::new(),
+        }
+    }
+
+    /// Install the platform spawner for agent run futures (the web shell
+    /// passes `spawn_local`). Install before the actor takes ownership.
+    pub fn set_agent_spawner(&mut self, spawner: impl Fn(crate::AgentTaskFuture) + 'static) {
+        self.agent.set_spawner(spawner);
+    }
+
+    /// Install the agent's model-provider factory (the web shell matches
+    /// the config variant and builds the corresponding provider over the
+    /// browser fetch transport; tests inject scripted fakes). Install
+    /// before the actor takes ownership.
+    pub fn set_agent_provider_factory(
+        &mut self,
+        factory: impl Fn(&crate::AgentProviderConfig) -> Box<dyn lpa_agent::ModelProvider> + 'static,
+    ) {
+        self.agent.set_provider_factory(factory);
+    }
+
+    /// Hand the agent sub-controller the actor's command sender (called by
+    /// `StudioActor::new`); run futures report progress through it.
+    pub(crate) fn set_agent_command_sender(
+        &mut self,
+        tx: crate::app::studio::studio_view_channel::CommandSender,
+    ) {
+        self.agent.set_command_sender(tx);
+    }
+
+    /// Fold one spawned-run feedback message into the agent state and mark
+    /// the view dirty (the actor applies these synchronously, in order).
+    pub fn apply_agent_feedback(&mut self, feedback: crate::AgentFeedback) {
+        self.agent.apply_feedback(feedback);
+        self.mark_dirty();
+    }
+
+    /// Install the platform's user-settings persistence sink (localStorage
+    /// on the web), invoked with the user layer's JSON after every
+    /// user-driven settings mutation. Install it before the actor takes
+    /// ownership of the controller.
+    pub fn set_on_user_settings(&mut self, hook: impl Fn(&str) + 'static) {
+        self.on_user_settings = Some(Box::new(hook));
+    }
+
+    /// Install the persisted user settings layer from its JSON document
+    /// (the boot localStorage read — call before the actor spawns so
+    /// settings are effective before panes render). A parse error logs one
+    /// warning and leaves the layer empty.
+    pub fn load_user_settings_json(&mut self, json: &str) {
+        match crate::StudioSettings::from_json_str(json) {
+            Ok(settings) => self.settings.set_user_layer(settings),
+            Err(error) => log::warn!("stored settings ignored (unreadable): {error}"),
+        }
+    }
+
+    /// The layered settings store (effective values for feature code; the
+    /// UI reads the view's settings slice instead).
+    pub fn settings(&self) -> &crate::app::settings::SettingsStore {
+        &self.settings
+    }
+
+    /// Apply one settings command: layer loads replace a whole overlay;
+    /// user mutations also persist the user layer through the
+    /// [`Self::set_on_user_settings`] hook. Always marks the view dirty.
+    pub fn apply_settings_command(&mut self, command: crate::SettingsCommand) {
+        use crate::SettingsCommand;
+        match command {
+            SettingsCommand::HostLayerLoaded(settings) => self.settings.set_host_layer(settings),
+            SettingsCommand::UserLayerLoaded(settings) => self.settings.set_user_layer(settings),
+            SettingsCommand::SetAgentProvider(provider) => {
+                self.settings.set_agent_provider(provider);
+                self.persist_user_settings();
+            }
+            SettingsCommand::SetAgentAnthropicApiKey(key) => {
+                self.settings.set_agent_anthropic_api_key(key);
+                self.persist_user_settings();
+            }
+            SettingsCommand::SetAgentOpenAiApiKey(key) => {
+                self.settings.set_agent_openai_api_key(key);
+                self.persist_user_settings();
+            }
+            SettingsCommand::SetAgentCustomBaseUrl(base_url) => {
+                self.settings.set_agent_custom_base_url(base_url);
+                self.persist_user_settings();
+            }
+            SettingsCommand::SetAgentCustomApiKey(key) => {
+                self.settings.set_agent_custom_api_key(key);
+                self.persist_user_settings();
+            }
+            SettingsCommand::SetAgentModel(model) => {
+                self.settings.set_agent_model(model);
+                self.persist_user_settings();
+            }
+            SettingsCommand::SetAgentPriceInputPerMtok(value) => {
+                self.settings.set_agent_price_input_per_mtok(value);
+                self.persist_user_settings();
+            }
+            SettingsCommand::SetAgentPriceOutputPerMtok(value) => {
+                self.settings.set_agent_price_output_per_mtok(value);
+                self.persist_user_settings();
+            }
+        }
+        self.mark_dirty();
+    }
+
+    /// Push the current user layer through the persistence hook (no-op
+    /// while none is installed, e.g. in tests).
+    fn persist_user_settings(&self) {
+        if let Some(hook) = &self.on_user_settings {
+            hook(&self.settings.user_layer().to_json_string());
         }
     }
 
@@ -383,7 +509,8 @@ impl StudioController {
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
-                .with_device_sync(self.device_sync().cloned());
+                .with_device_sync(self.device_sync().cloned())
+                .with_settings(self.settings.ui_view());
         }
         let device_view = self.device.view(
             &self.device_runtime_evidence(),
@@ -392,11 +519,15 @@ impl StudioController {
         );
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
-        let panes = vec![
-            self.project.view(self.has_lightplayer_state()),
-            self.bus_pane(),
-            device_view,
-        ];
+        let mut project_pane = self.project.view(self.has_lightplayer_state());
+        // Decorate every GLSL inline editor with its agent chat DTO (the
+        // project walk stays agent-free; chat state lives on this
+        // controller's agent sub-state).
+        if let UiViewContent::ProjectEditor(editor) = &mut project_pane.body {
+            self.agent
+                .decorate_editor_view(editor, self.pool.lens(), &self.agent_view_context());
+        }
+        let panes = vec![project_pane, self.bus_pane(), device_view];
         UiStudioView::new(panes, self.console_view())
             .with_lens(self.lens_runtime())
             .with_open_project(
@@ -405,6 +536,24 @@ impl StudioController {
             )
             .with_device_sync(self.device_sync().cloned())
             .with_lens_card(self.lens_device_card())
+            .with_settings(self.settings.ui_view())
+    }
+
+    /// The settings-derived slice the agent view decoration needs:
+    /// availability (Ready ⇔ the selected provider is sufficiently
+    /// configured), the provider's setup guidance while it is not, and the
+    /// cost rates for the usage estimate.
+    fn agent_view_context(&self) -> crate::AgentViewContext {
+        let ready = self.settings.agent_ready();
+        crate::AgentViewContext {
+            availability: if ready {
+                crate::UiAgentAvailability::Ready
+            } else {
+                crate::UiAgentAvailability::NeedsKey
+            },
+            setup: (!ready).then(|| crate::provider_guidance(self.settings.agent_provider())),
+            cost_rates: self.settings.agent_cost_rates(),
+        }
     }
 
     /// The LENS session's card (D43): the grown control panel the editor
@@ -1475,6 +1624,10 @@ impl StudioController {
             let op = action.into_op::<HomeOp>()?;
             return self.execute_home_op(op, updates).await;
         }
+        if node_id.as_str() == crate::AgentController::NODE_ID {
+            let op = action.into_op::<crate::AgentOp>()?;
+            return self.execute_agent_op(op).await;
+        }
         if node_id.as_str() == DEPLOY_NODE_ID {
             let op = action.into_op::<DeployOp>()?;
             return self.execute_deploy_op(op, updates).await;
@@ -2184,6 +2337,134 @@ impl StudioController {
         };
         self.record_logs(run.logs);
         Ok(UiNotices::new())
+    }
+
+    /// Agent chat gestures (P5). `Stop` flips the running session's abort
+    /// flag; `Send` resolves the shader's run context (source body, fixture
+    /// mapping points, binding table) and spawns the agent run — the
+    /// dispatch returns immediately, progress arrives as
+    /// [`crate::AgentFeedback`] commands.
+    async fn execute_agent_op(&mut self, op: crate::AgentOp) -> UiResult {
+        match op {
+            crate::AgentOp::Stop { artifact } => {
+                self.agent.request_stop(self.pool.lens(), &artifact);
+                Ok(UiNotices::new())
+            }
+            crate::AgentOp::Send { artifact, text } => self.agent_send(artifact, text).await,
+        }
+    }
+
+    async fn agent_send(
+        &mut self,
+        artifact: lpc_model::ArtifactLocation,
+        text: String,
+    ) -> UiResult {
+        let Some(runtime) = self.pool.lens() else {
+            return Err(UiError::MissingSession(
+                "the agent needs an open project".to_string(),
+            ));
+        };
+        let Some(config) = self.settings.agent_provider_config() else {
+            return Err(UiError::UnsupportedFeature(
+                "the agent isn't set up yet — configure a provider in Settings (the gear icon)"
+                    .to_string(),
+            ));
+        };
+        let Some(provider) = self.agent.build_provider(&config) else {
+            return Err(UiError::UnsupportedFeature(
+                "the agent provider is not installed in this build".to_string(),
+            ));
+        };
+        let target = self.project.agent_shader_target(&artifact).ok_or_else(|| {
+            UiError::UnsupportedAction(format!(
+                "no shader node uses {}",
+                artifact.file_path().as_str()
+            ))
+        })?;
+        let source = self.agent_asset_text(&artifact).await?.ok_or_else(|| {
+            UiError::UnsupportedAction("the shader source is not editable text".to_string())
+        })?;
+        let (led_points, fixture) = self.agent_fixture_context().await;
+        let bindings = target
+            .bindings
+            .into_iter()
+            .map(|binding| lpa_agent::BindingInfo {
+                name: binding.name,
+                ty: binding.ty,
+                value: binding.value.unwrap_or_else(|| "(bus-driven)".to_string()),
+            })
+            .collect();
+        let context = lpa_agent::ShaderContext {
+            project_name: self.project.agent_project_name(),
+            node_name: target.node_label,
+            fixture,
+            bindings,
+        };
+        let key = crate::AgentSessionKey::new(runtime, target.node_address);
+        self.agent
+            .start_run(
+                key,
+                artifact,
+                text,
+                provider,
+                crate::AgentRunContext {
+                    source,
+                    led_points,
+                    context,
+                },
+            )
+            .map_err(UiError::UnsupportedFeature)?;
+        Ok(UiNotices::new())
+    }
+
+    /// The overlay-aware text body of `artifact`, fetching and caching the
+    /// base body over the lens session when it is not resolved yet.
+    async fn agent_asset_text(
+        &mut self,
+        artifact: &lpc_model::ArtifactLocation,
+    ) -> Result<Option<String>, UiError> {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.asset_content(server, artifact).await?
+        };
+        self.record_logs(run.logs);
+        Ok(run.content.text().map(str::to_string))
+    }
+
+    /// Gather every fixture's mapping points (union, labeled by fixture
+    /// name — plan decision: v1 targets all fixtures) plus the compact
+    /// fixture summary for the system prompt. Unreadable or unparsable
+    /// fixture defs are skipped; SvgPath mappings contribute no points.
+    async fn agent_fixture_context(
+        &mut self,
+    ) -> (Vec<lps_probe::LedPoint>, Option<lpa_agent::FixtureSummary>) {
+        let mut led_points = Vec::new();
+        let mut summaries: Vec<lpa_agent::FixtureSummary> = Vec::new();
+        for (label, def_artifact) in self.project.agent_fixture_defs() {
+            let Ok(Some(body)) = self.agent_asset_text(&def_artifact).await else {
+                continue;
+            };
+            let Ok(def) = lpc_model::NodeDef::from_json_str(&body) else {
+                continue;
+            };
+            let Some(fixture) = def.as_fixture() else {
+                continue;
+            };
+            let mapping = fixture.mapping.value();
+            let points = lpc_model::nodes::fixture::generate_mapping_points(mapping, 1, 1);
+            summaries.push(lpa_agent::FixtureSummary {
+                name: label.clone(),
+                led_count: points.len() as u32,
+                mapping_kind: mapping_kind_label(mapping).to_string(),
+            });
+            led_points.extend(points.into_iter().map(|point| lps_probe::LedPoint {
+                label: label.clone(),
+                channel: point.channel,
+                at: point.center,
+            }));
+        }
+        let summary = fold_fixture_summaries(summaries);
+        (led_points, summary)
     }
 
     async fn execute_node_revert_op(&mut self, op: NodeRevertOp) -> UiResult {
@@ -3322,6 +3603,47 @@ enum AutoProjectConnect {
     NotFound,
 }
 
+/// Human-readable mapping kind for the system prompt's fixture line.
+fn mapping_kind_label(mapping: &lpc_model::nodes::fixture::MappingConfig) -> &'static str {
+    use lpc_model::nodes::fixture::MappingConfig;
+    match mapping {
+        MappingConfig::Unset => "unset",
+        MappingConfig::PathPoints { .. } => "path points",
+        MappingConfig::SvgPath { .. } => "svg path (no sample points yet)",
+    }
+}
+
+/// Collapse per-fixture summaries into the prompt's single fixture slot:
+/// one fixture passes through; several aggregate (joined names, summed LED
+/// count, joined kinds) — v1 targets all fixtures at once.
+fn fold_fixture_summaries(
+    mut summaries: Vec<lpa_agent::FixtureSummary>,
+) -> Option<lpa_agent::FixtureSummary> {
+    match summaries.len() {
+        0 => None,
+        1 => summaries.pop(),
+        _ => {
+            let name = summaries
+                .iter()
+                .map(|summary| summary.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let led_count = summaries.iter().map(|summary| summary.led_count).sum();
+            let mut kinds: Vec<&str> = summaries
+                .iter()
+                .map(|summary| summary.mapping_kind.as_str())
+                .collect();
+            kinds.dedup();
+            let mapping_kind = kinds.join(" + ");
+            Some(lpa_agent::FixtureSummary {
+                name,
+                led_count,
+                mapping_kind,
+            })
+        }
+    }
+}
+
 fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> UiNotice {
     if synced {
         UiNotice::info(success)
@@ -3526,6 +3848,60 @@ mod tests {
             studio.snapshot().flow,
             ConnectFlowState::SelectingProvider { .. }
         ));
+    }
+
+    #[test]
+    fn settings_commands_layer_persist_and_reach_the_view() {
+        use crate::{SettingsCommand, SettingsLayer, StudioSettings};
+
+        let mut studio = StudioController::new(|| 0.0);
+        let persisted: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        studio.set_on_user_settings({
+            let persisted = Rc::clone(&persisted);
+            move |json| persisted.borrow_mut().push(json.to_string())
+        });
+
+        // Boot: the stored user layer loads without firing the hook.
+        studio.load_user_settings_json(r#"{"agent":{"model":"user-model"}}"#);
+        assert!(persisted.borrow().is_empty());
+
+        // The host layer arrives; user override still wins for the model,
+        // the host supplies the key.
+        studio.apply_settings_command(SettingsCommand::HostLayerLoaded(
+            StudioSettings::from_json_str(
+                r#"{"agent":{"anthropic_api_key":"sk-ant-host-key","model":"host-model"}}"#,
+            )
+            .unwrap(),
+        ));
+        assert_eq!(studio.settings().agent_model(), Some("user-model"));
+        assert_eq!(
+            studio.settings().agent_anthropic_api_key(),
+            Some("sk-ant-host-key")
+        );
+        assert!(persisted.borrow().is_empty());
+
+        // A user mutation persists the user layer (only user fields).
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk-ant-user-key".to_string(),
+        )));
+        assert_eq!(persisted.borrow().len(), 1);
+        assert!(persisted.borrow()[0].contains("sk-ant-user-key"));
+        assert!(!persisted.borrow()[0].contains("host"));
+
+        // The view carries the settings slice: provenance + masked key.
+        let view = studio.view();
+        assert_eq!(view.settings.agent.api_key_layer, SettingsLayer::User);
+        assert_eq!(view.settings.agent.model_layer, SettingsLayer::User);
+        let masked = view.settings.agent.api_key_masked.clone().unwrap();
+        assert!(
+            !masked.contains("sk-ant-user"),
+            "unmasked key in view: {masked}"
+        );
+
+        // Clearing the override falls back to the host layer and persists.
+        studio.apply_settings_command(SettingsCommand::SetAgentModel(None));
+        assert_eq!(studio.settings().agent_model(), Some("host-model"));
+        assert_eq!(persisted.borrow().len(), 2);
     }
 
     #[test]

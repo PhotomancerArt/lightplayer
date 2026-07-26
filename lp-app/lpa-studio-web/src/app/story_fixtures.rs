@@ -48,6 +48,7 @@ pub(crate) fn shell_story(
             view,
             running,
             on_action: move |_| {},
+            on_settings: move |_| {},
         }
     }
 }
