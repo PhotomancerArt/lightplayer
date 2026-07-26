@@ -106,6 +106,23 @@ these apply only to local SCRATCH captures; canonical baselines come from the
   could masquerade as drift (fixed via .check-complete sentinel gating
   the CI artifact and story-pull), and pinned Chrome-for-Testing needs
   the AppArmor userns sysctl on ubuntu-24.04 runners.
+- 2026-07-26 — **CHURNER SET ROOT-CAUSED** (post-cutover run 6 failed on
+  the classic churners; diffed pixel-level): three mechanisms, all
+  bistable settling races the ready-wait didn't cover. (a) The font
+  gate `document.fonts.status === 'loaded'` is trivially true before
+  the first element requests a face — captures raced @font-face
+  decoding (select-text ghosting; whole-page layout shifts when
+  fallback metrics changed line wrap). Fix: ready-wait force-loads and
+  `document.fonts.check()`s every bundled face. (b) [autofocus] focus
+  lands a beat after first paint, scrolls the target into view
+  (shifting the capture clip), and ring-survival across re-renders is
+  itself racy — neither ring state is a stable terminal. Fix: wait for
+  autofocus to land, then blur + scrollTo(0,0) — baselines always show
+  the unfocused state. (c) Backstop: stable-pair capture (accept only
+  two consecutive byte-identical shots, 5 tries, warn-and-keep-last)
+  turns any residual settling race into determinism. Verified: 2×267
+  captures over the historical churner families (config-slot-row,
+  roster-card, slot-value-editor), byte-identical across passes.
 - 2026-07-26 — **PAYDOWN**: capture moved to CI
   (ADR `../adr/2026-07-26-ci-canonical-story-capture.md`). `validate-stories`
   job captures on a pinned x64 runner (Chrome for Testing 151.0.7922.47,
