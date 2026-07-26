@@ -619,9 +619,6 @@
   .tw\:\[grid-auto-rows\:minmax\(300px\,auto\)\] {
     grid-auto-rows: minmax(300px,auto);
   }
-  .tw\:\[grid-auto-rows\:minmax\(320px\,auto\)\] {
-    grid-auto-rows: minmax(320px,auto);
-  }
   .tw\:grid-cols-1 {
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
@@ -690,9 +687,6 @@
   }
   .tw\:grid-cols-\[repeat\(auto-fill\,minmax\(260px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fill,minmax(260px,1fr));
-  }
-  .tw\:grid-cols-\[repeat\(auto-fill\,minmax\(320px\,1fr\)\)\] {
-    grid-template-columns: repeat(auto-fill,minmax(320px,1fr));
   }
   .tw\:grid-cols-\[repeat\(auto-fit\,minmax\(130px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fit,minmax(130px,1fr));
