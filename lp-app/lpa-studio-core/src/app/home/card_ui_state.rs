@@ -67,23 +67,75 @@ pub enum CardVerb {
     Flash,
 }
 
-/// The in-place progress of a heavy op running on a card. The card
-/// renders a bar + this label + the session's console tail (the
-/// technical terminal); no separate wire — it mirrors the session's
-/// `operation_label`.
+/// The in-place progress of a heavy op running on a card — a CARD-OWNED
+/// flow, not a session attribute (state-flow model §2, ratified
+/// 2026-07-26). The controller sets it at op dispatch and clears it at
+/// landing; the live session only FEEDS progress. The session dying does
+/// NOT clear it (invariant I1) — heavy ops sever the very session that
+/// used to own their progress, which was the erase dead-end class.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CardOp {
     /// The human label, e.g. "Installing firmware…".
     pub label: String,
     /// Completion percent when the op reports one; `None` = indeterminate.
     pub percent: Option<u8>,
+    /// Where the flow is (model §2): running, riding out an EXPECTED
+    /// disconnect, or failed.
+    pub phase: CardOpPhase,
+}
+
+/// The op flow's phase (model §2).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum CardOpPhase {
+    /// The link op is executing; progress may tick.
+    #[default]
+    Running,
+    /// The op's EXPECTED disconnect happened (reboot / re-enumeration);
+    /// the reconnect ladder is armed and the overlay stays up (I2).
+    AwaitingDevice,
+    /// Terminal until the user takes the ONE exit to the nearest stable
+    /// state (I4) — e.g. "Back to set up" after a failed install.
+    Failed {
+        /// What went wrong, for the overlay's terminal region.
+        error: String,
+        /// The exit button's label (the nearest stable state's door).
+        exit_label: String,
+    },
 }
 
 impl CardOp {
+    /// A running op (the dispatch-time constructor).
     pub fn new(label: impl Into<String>, percent: Option<u8>) -> Self {
         Self {
             label: label.into(),
             percent,
+            phase: CardOpPhase::Running,
+        }
+    }
+
+    /// The expected-disconnect phase: same flow, new label (e.g.
+    /// "Restarting…" / "Waiting for the board…"), indeterminate.
+    pub fn awaiting(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            percent: None,
+            phase: CardOpPhase::AwaitingDevice,
+        }
+    }
+
+    /// The failed terminal: label + error + the single exit's label.
+    pub fn failed(
+        label: impl Into<String>,
+        error: impl Into<String>,
+        exit_label: impl Into<String>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            percent: None,
+            phase: CardOpPhase::Failed {
+                error: error.into(),
+                exit_label: exit_label.into(),
+            },
         }
     }
 }
@@ -100,6 +152,10 @@ pub enum CardUiOp {
     OpenSheet { card: String, sheet: CardSheet },
     /// Close the open sheet.
     CloseSheet { card: String },
+    /// Take a FAILED op's single exit (model §2 I4): clears the op flow so
+    /// the card re-derives its honest state ("Back to set up" lands the
+    /// blank board on the setup form).
+    ClearOp { card: String },
 }
 
 impl CardUiOp {
@@ -108,7 +164,8 @@ impl CardUiOp {
         match self {
             Self::SelectTab { card, .. }
             | Self::OpenSheet { card, .. }
-            | Self::CloseSheet { card } => card,
+            | Self::CloseSheet { card }
+            | Self::ClearOp { card } => card,
         }
     }
 }

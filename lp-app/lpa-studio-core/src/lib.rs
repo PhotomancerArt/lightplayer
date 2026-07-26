@@ -36,7 +36,7 @@ pub use app::device::{
     DeviceController, DeviceOp, DeviceOpenOutcome, EndpointChoice, ProviderChoice,
 };
 pub use app::home::{
-    CardOp, CardSheet, CardUiOp, CardUiState, CardVerb, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
+    CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
     HomePoolEvidence, HomeSimEvidence, UiCardConnection, UiDeviceCard, UiDeviceProjectChip,
     UiExampleCard, UiHomeView, UiPackageCard, ZipBytes,
 };

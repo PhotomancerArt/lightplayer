@@ -530,23 +530,61 @@ pub(crate) fn DeviceCard(
                 // body (the title bar above is spared) — a heavy op takes
                 // over the card here, never an app-level modal.
                 if let Some(op) = card.ui.op.as_ref() {
-                    {card_op_overlay(op, &card.console_tail)}
+                    {card_op_overlay(op, &card.console_tail, &card_key, on_action)}
                 }
             }
         }
     }
 }
 
-/// The in-place op overlay (device-lifecycle P2): the card's own progress
-/// while a heavy op runs on it — a label, a determinate-or-indeterminate
-/// bar, and the session's console tail as a collapsible technical terminal
-/// (open by default; Yona likes seeing it). It covers the tabs and blurs
-/// the body, so the card reads as busy without an elevated dialog.
-fn card_op_overlay(op: &lpa_studio_core::CardOp, tail: &[UiLogEntry]) -> Element {
-    let bar_class = if op.percent.is_some() {
-        "ux-card-op-bar"
-    } else {
+/// The in-place op overlay (device-lifecycle P2 + state-flow model §2):
+/// the card's own progress while a heavy op flow runs on it. Three
+/// phases: Running (label + bar + terminal), AwaitingDevice (the op's
+/// EXPECTED disconnect — indeterminate, overlay stays up), and Failed
+/// (error in the terminal + the ONE exit to the nearest stable state,
+/// I4 — dispatches `CardUi(ClearOp)` so the card re-derives). Covers the
+/// tabs and blurs the body; never an elevated dialog.
+fn card_op_overlay(
+    op: &lpa_studio_core::CardOp,
+    tail: &[UiLogEntry],
+    card_key: &str,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    use lpa_studio_core::CardOpPhase;
+    if let CardOpPhase::Failed { error, exit_label } = &op.phase {
+        let card_key = card_key.to_string();
+        let exit_label = exit_label.clone();
+        return rsx! {
+            div { class: "ux-card-op", role: "alert",
+                span { class: "ux-card-op-label ux-card-op-label-failed", "{op.label}" }
+                details { class: "ux-card-op-term", open: true,
+                    summary { "Technical details" }
+                    div { class: "ux-console-line-error", "{error}" }
+                    for entry in tail.iter() {
+                        div { class: console_line_class(entry.level), "{entry.message}" }
+                    }
+                }
+                div { class: "tw:flex tw:justify-end",
+                    button {
+                        class: "ux-card-op-exit",
+                        r#type: "button",
+                        onclick: move |_| {
+                            on_action.call(home_action(HomeOp::CardUi(CardUiOp::ClearOp {
+                                card: card_key.clone(),
+                            })));
+                        },
+                        "{exit_label}"
+                    }
+                }
+            }
+        };
+    }
+    let indeterminate =
+        op.percent.is_none() || matches!(op.phase, CardOpPhase::AwaitingDevice);
+    let bar_class = if indeterminate {
         "ux-card-op-bar is-indeterminate"
+    } else {
+        "ux-card-op-bar"
     };
     let fill_style = op
         .percent

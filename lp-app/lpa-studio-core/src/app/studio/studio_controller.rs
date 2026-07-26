@@ -93,6 +93,16 @@ pub struct StudioController {
     /// never re-reads. The in-place `op` is NOT stored here — it derives
     /// live from the session's `operation_label`.
     card_ui: std::collections::HashMap<String, crate::CardUiState>,
+    /// The hardware card's CARD-OWNED op flow (state-flow model §2): set
+    /// at management dispatch, fed by the manage event sink, and — the
+    /// point (I1) — NOT cleared when the session dies, because heavy ops
+    /// sever the very session that used to narrate them. `Failed` stays
+    /// until the user takes its one exit (`CardUiOp::ClearOp`). Keyed by
+    /// the managed device's stamped uid when it has one (`None` = an
+    /// identity-less blank board — the op then rides the live non-sim
+    /// card). One slot because the pool holds one hardware session; this
+    /// grows into a per-identity map with the pool.
+    device_card_op: Option<(Option<String>, Rc<RefCell<crate::CardOp>>)>,
     /// Injected randomness for identity minting (`dev_` uids). The web
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
@@ -156,6 +166,7 @@ impl StudioController {
             pending_open: None,
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
+            device_card_op: None,
             random: Rc::new(clock_fallback_random),
             settings: crate::app::settings::SettingsStore::default(),
             on_user_settings: None,
@@ -2001,11 +2012,21 @@ impl StudioController {
     /// and synchronous — no wire, no library.
     fn apply_card_ui_op(&mut self, op: crate::CardUiOp) {
         use crate::CardUiOp;
-        let entry = self.card_ui.entry(op.card().to_string()).or_default();
         match op {
-            CardUiOp::SelectTab { tab, .. } => entry.tab = tab,
-            CardUiOp::OpenSheet { sheet, .. } => entry.sheet = Some(sheet),
-            CardUiOp::CloseSheet { .. } => entry.sheet = None,
+            CardUiOp::SelectTab { card, tab } => {
+                self.card_ui.entry(card).or_default().tab = tab;
+            }
+            CardUiOp::OpenSheet { card, sheet } => {
+                self.card_ui.entry(card).or_default().sheet = Some(sheet);
+            }
+            CardUiOp::CloseSheet { card } => {
+                self.card_ui.entry(card).or_default().sheet = None;
+            }
+            // The failed op's ONE exit (model §2 I4): drop the flow; the
+            // card re-derives its honest state on the next view build.
+            CardUiOp::ClearOp { .. } => {
+                self.device_card_op = None;
+            }
         }
         self.mark_dirty();
     }
@@ -2019,6 +2040,23 @@ impl StudioController {
     fn overlay_card_ui(&self, mut card: crate::UiDeviceCard) -> crate::UiDeviceCard {
         if let Some(saved) = self.card_ui.get(card.identity_key()) {
             card.ui = saved.clone();
+        }
+        // The CARD-OWNED op flow first (model §2, I1): it survives the
+        // session the op severed, so it outranks session-derived
+        // narration. Targeting: the stamped uid when the managed device
+        // had one; an identity-less blank board's op rides the live
+        // (non-offline) hardware card.
+        if !card.sim
+            && let Some((target_uid, slot)) = self.device_card_op.as_ref()
+        {
+            let matches_target = match target_uid {
+                Some(uid) => card.uid.as_deref() == Some(uid.as_str()),
+                None => !matches!(card.state, crate::RosterCardState::Offline { .. }),
+            };
+            if matches_target {
+                card.ui.op = Some(slot.borrow().clone());
+                return card;
+            }
         }
         // the live op: the session whose card this is, mid-operation
         let op_label = if card.sim {
@@ -3276,6 +3314,7 @@ impl StudioController {
                 request: LinkManagementRequest::ResetRuntime,
                 progress_label: "Resetting device",
                 reconnect_detail: "Waiting for device boot",
+                failed_exit_label: "Close",
                 record_captured_logs_on_success: true,
                 done_notice: |_| UiNotice::info("Device reset"),
                 degrade_subject: "device reset",
@@ -3294,6 +3333,7 @@ impl StudioController {
                 request: LinkManagementRequest::FlashFirmware,
                 progress_label: "Flashing firmware",
                 reconnect_detail: "Waiting for firmware boot",
+                failed_exit_label: "Back to set up",
                 record_captured_logs_on_success: false,
                 done_notice: provision_notice,
                 degrade_subject: "firmware flashed",
@@ -3314,6 +3354,7 @@ impl StudioController {
                 request: LinkManagementRequest::EraseDeviceFlash,
                 progress_label: "Wiping device",
                 reconnect_detail: "Checking for LightPlayer firmware",
+                failed_exit_label: "Back to set up",
                 record_captured_logs_on_success: false,
                 done_notice: reset_notice,
                 degrade_subject: "device wiped",
@@ -3356,6 +3397,19 @@ impl StudioController {
         if severed_lens {
             self.project.reset();
         }
+        // The CARD-OWNED op flow starts here (model §2): the slot lives on
+        // the controller, keyed by the managed device's stamped uid, and
+        // survives whatever happens to the session below (I1). The event
+        // sink feeds it; the settle half flips it to Failed or clears it.
+        let managed_uid = self
+            .device_sync()
+            .and_then(|sync| sync.identity.as_ref())
+            .map(|identity| identity.uid.clone());
+        let card_op = Rc::new(RefCell::new(crate::CardOp::new(
+            format!("{}…", spec.progress_label),
+            None,
+        )));
+        self.device_card_op = Some((managed_uid, Rc::clone(&card_op)));
         if let Some(session) = self.pool.session_mut(device_id) {
             session.disconnect_server();
             // The pool refuses a same-kind replace while this runs (DQ-A
@@ -3380,6 +3434,8 @@ impl StudioController {
             target,
             Rc::clone(&activity),
             Rc::clone(&captured_logs),
+            Rc::clone(&card_op),
+            spec.reconnect_detail,
         );
         let manage_result = {
             let session = match self.hardware_session() {
@@ -3388,6 +3444,8 @@ impl StudioController {
                     if let Some(session) = self.pool.session_mut(device_id) {
                         session.set_operation(None);
                     }
+                    // The op never started — clean abort, no Failed render.
+                    self.device_card_op = None;
                     return Err(UiError::MissingSession(
                         "no hardware device session for management".to_string(),
                     ));
@@ -3404,6 +3462,14 @@ impl StudioController {
             Ok(management) => management,
             Err(error) => {
                 self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
+                // The card renders the failure with its ONE exit (I4);
+                // the flow stays until the user takes it (ClearOp).
+                *card_op.borrow_mut() = crate::CardOp::failed(
+                    format!("{} failed", spec.progress_label),
+                    error.to_string(),
+                    spec.failed_exit_label,
+                );
+                self.mark_dirty();
                 return Err(UiError::Link(error.to_string()));
             }
         };
@@ -3420,11 +3486,18 @@ impl StudioController {
             "Connecting",
             spec.reconnect_detail,
         );
+        // The reattach half is the op's AwaitingDevice phase (I2) — the
+        // overlay stays up, narrating the expected gap.
+        *card_op.borrow_mut() = crate::CardOp::awaiting(spec.reconnect_detail);
+        self.mark_dirty();
         // The link was already rebuilt inside `manage`; what remains is the
         // server reattach + post-attach sequence on the managed session.
         match self.attach_runtime(device_id, updates).await {
             Ok(mut attach_outcome) => {
                 outcome.notices.append(&mut attach_outcome.notices);
+                // Landed (I3): the flow ends; the card re-derives and its
+                // Status tab announces what's next.
+                self.device_card_op = None;
             }
             Err(error) => {
                 self.push_log(UiLogDraft::new(
@@ -3438,6 +3511,13 @@ impl StudioController {
                 if let Some(session) = self.pool.session_mut(device_id) {
                     session.fail(error.to_string());
                 }
+                // Failed reattach renders on the card too (I4) — with the
+                // same single exit, not a silent fall-through.
+                *card_op.borrow_mut() = crate::CardOp::failed(
+                    format!("{} — reconnect failed", spec.degrade_subject),
+                    error.to_string(),
+                    spec.failed_exit_label,
+                );
                 outcome = outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
             }
         }
@@ -3768,6 +3848,9 @@ struct ManagementFlowSpec {
     progress_label: &'static str,
     /// Activity detail while waiting for the post-operation reconnect.
     reconnect_detail: &'static str,
+    /// The Failed card-op's single exit label (model §2 I4) — the door to
+    /// the nearest stable state, e.g. "Back to set up".
+    failed_exit_label: &'static str,
     /// Reset records the live-captured logs on success (its result replay
     /// is empty); flash/erase rely on the result replay alone, so recording
     /// the capture too would double every line.
