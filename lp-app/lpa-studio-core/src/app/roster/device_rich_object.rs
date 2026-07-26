@@ -95,16 +95,31 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
     if let Some(sub_line) = input.state.sub_line() {
         lines.push(RichLine::new("note", sub_line));
     }
+    // The running family also offers the editor entry as a visible CTA
+    // on the card face (2026-07-26 walk: the grow ⤢ alone was too easy
+    // to miss — it stays, but the Status tab now says it out loud).
+    // Running-up-to-date's STATE affordance already is the open — only
+    // the drifted states need it added beside their Push/Review.
+    let state_affordance = input.state.affordance();
+    let open_editor = (matches!(
+        input.state,
+        RosterCardState::RunningUpToDate
+            | RosterCardState::RunningBehind { .. }
+            | RosterCardState::EditedOnDevice
+    ) && state_affordance != Some(RosterAffordance::OpenEditor))
+    .then_some(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
     RichSection {
         title: "Health".to_string(),
         tone: input.state.spec().tone,
         lines,
         chip: None,
-        affordances: input
-            .state
-            .affordance()
+        // The state-table affordance stays FIRST (it is the rollup's
+        // primary — Push/Review must not be demoted); the editor CTA
+        // rides second.
+        affordances: state_affordance
             .map(DeviceDetailAffordance::Roster)
             .into_iter()
+            .chain(open_editor)
             .collect(),
         weight: RichWeight::Actionable,
     }
@@ -257,10 +272,24 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
         RosterCardState::NotResponding => core::iter::once(DeviceDetailAffordance::FlashFirmware)
             .chain(forget())
             .collect(),
-        _ => vec![
-            DeviceDetailAffordance::FlashFirmware,
-            DeviceDetailAffordance::EraseDevice,
-        ],
+        _ => {
+            let mut rows = Vec::new();
+            // A live card holding a project can always wipe it back to
+            // blank from here (2026-07-26 walk: a problematic project
+            // must be removable without waiting for a sad state). The
+            // unreadable card already leads with wipe on Health — no
+            // double offer.
+            if input.project_name.is_some()
+                && !matches!(input.state, RosterCardState::HoldsUnreadableData { .. })
+            {
+                rows.push(DeviceDetailAffordance::Roster(
+                    RosterAffordance::WipeProject,
+                ));
+            }
+            rows.push(DeviceDetailAffordance::FlashFirmware);
+            rows.push(DeviceDetailAffordance::EraseDevice);
+            rows
+        }
     };
     if affordances.is_empty() {
         return None;
@@ -306,9 +335,11 @@ mod tests {
 
         let danger = view.sections.last().unwrap();
         assert_eq!(danger.weight, RichWeight::Danger);
+        // A held project can always be wiped from here (2026-07-26 walk).
         assert_eq!(
             danger.affordances,
             vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
             ]

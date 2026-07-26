@@ -177,6 +177,7 @@ mod tests {
         assert_eq!(
             tabs[4].sections[0].affordances,
             vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
             ]

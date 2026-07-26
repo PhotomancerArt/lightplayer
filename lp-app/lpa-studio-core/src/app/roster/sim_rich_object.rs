@@ -25,6 +25,9 @@ use super::roster_card_state::RosterCardState;
 /// the renderer's job (matching [`super::DeviceDetailAffordance`]).
 #[derive(Clone, Debug, PartialEq)]
 pub enum SimDetailAffordance {
+    /// Health, project loaded: the visible editor CTA (2026-07-26 walk —
+    /// the grow ⤢ stays; the card face says it out loud too).
+    OpenEditor,
     /// Danger zone: destroy the simulator session (worker + wire client).
     StopSimulator,
 }
@@ -51,8 +54,8 @@ pub fn sim_rich_object(input: &SimRichInput<'_>) -> RichObjectView<SimDetailAffo
 }
 
 /// Health: the card state itself, as a section — one derivation, consumed
-/// everywhere (the popover can never disagree with the circle). No
-/// affordance: the card body IS the open-editor click.
+/// everywhere (the popover can never disagree with the circle). With a
+/// project loaded it carries the visible editor CTA (the grow ⇲ stays).
 fn health_section(input: &SimRichInput<'_>) -> RichSection<SimDetailAffordance> {
     RichSection {
         title: "Health".to_string(),
@@ -62,7 +65,12 @@ fn health_section(input: &SimRichInput<'_>) -> RichSection<SimDetailAffordance> 
             input.state.status_line(input.now_secs),
         )],
         chip: None,
-        affordances: Vec::new(),
+        affordances: input
+            .project_name
+            .is_some()
+            .then_some(SimDetailAffordance::OpenEditor)
+            .into_iter()
+            .collect(),
         weight: RichWeight::Actionable,
     }
 }
@@ -113,7 +121,11 @@ mod tests {
 
         let rollup = view.rollup();
         assert_eq!(rollup.tone, UiStatusKind::Good);
-        assert_eq!(rollup.affordance, None, "the card click is the action");
+        assert_eq!(
+            rollup.affordance,
+            Some(&SimDetailAffordance::OpenEditor),
+            "the loaded sim's face carries the visible editor CTA"
+        );
 
         let danger = view.sections.last().unwrap();
         assert_eq!(danger.weight, RichWeight::Danger);
