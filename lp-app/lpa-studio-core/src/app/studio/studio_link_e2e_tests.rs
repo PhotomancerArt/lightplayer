@@ -680,9 +680,11 @@ fn reconnect_after_gone_rebuilds_the_link_to_ready() {
 
 /// Row 10 (erase lands BlankFlash as success): erasing a healthy device
 /// through the card's Danger tab succeeds — the rebuilt link classifies
-/// `BlankFlash`, the server degrades to no-firmware, and the card
-/// derives Ready-to-set-up (flash stays the next step), all without an
-/// error.
+/// `BlankFlash` and the card derives Ready-to-set-up (flash stays the next
+/// step), all without an error. Device-lifecycle P3: erasing the open
+/// device DETACHES the editor lens, so the top-level server releases to
+/// `Disconnected` (a clean return to the gallery) rather than leaving a
+/// no-firmware server bound to the wiped device.
 #[test]
 fn erase_lands_blank_flash_as_success_through_the_card() {
     let (_store, host) = library();
@@ -711,15 +713,15 @@ fn erase_lands_blank_flash_as_success_through_the_card() {
         studio.device_state_for_test()
     );
     assert!(
-        matches!(
-            studio.snapshot().server.state,
-            ServerState::Failed {
-                kind: ServerFailureKind::NoFirmware,
-                ..
-            }
-        ),
-        "the server degrades to no-firmware, got {:?}",
+        matches!(studio.snapshot().server.state, ServerState::Disconnected),
+        "erasing the open device detaches the lens — the server releases \
+         to the gallery, got {:?}",
         studio.snapshot().server.state
+    );
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        None,
+        "the editor lens is detached after the wipe"
     );
     let home = studio.view().home.expect("gallery shows");
     assert!(
@@ -1326,6 +1328,139 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
         studio.runtime_pool_for_test().lens(),
         Some(device_id),
         "the lens stays on the device across edits"
+    );
+}
+
+/// Device-lifecycle P3 (editor sever + post-reset nav): erasing a device
+/// whose project is OPEN in the editor severs the lens — the app returns
+/// to the gallery — and says why. A runtime reset (which keeps the
+/// project) leaves the editor open. This is the fix for the hardware-walk
+/// "factory reset weird state / can't reflash without refresh": the old
+/// path reset the project content but left the lens bound to the wiped
+/// device.
+#[test]
+fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
+    use super::studio_edit_e2e_tests::edit_e2e_files;
+    use crate::ProjectOp;
+
+    let (store, host) = library();
+    let sign = store
+        .install_package(
+            "Sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let sign_files = store.open(sign.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(sign_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new("dev_aaaaaaaaaaaaaaaa", "Bench board")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    // Open the device's project in the editor (lens on the device).
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::OpenDeviceProject { uid: None },
+    )))
+    .expect("the D29 op opens the device project");
+    let device_id = studio
+        .runtime_pool_for_test()
+        .device_session()
+        .expect("device session")
+        .id();
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        Some(device_id),
+        "the editor is a lens on the device"
+    );
+    assert!(studio.view().home.is_none(), "the editor is showing");
+
+    // Erase the device from under the open editor.
+    let outcome = drive(studio.dispatch(device_action(DeviceOp::ResetToBlank)))
+        .expect("erase succeeds even from the editor");
+
+    // The lens is severed → the app is back at the gallery.
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        None,
+        "erasing the open device detaches the lens"
+    );
+    assert!(
+        studio.view().home.is_some(),
+        "erasing the open project returns to the gallery"
+    );
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("no longer on this device")),
+        "the sever is explained: {:?}",
+        outcome.notices.iter().map(|n| &n.message).collect::<Vec<_>>()
+    );
+}
+
+/// Device-lifecycle P3 (contrast): the lens DETACH is specific to the
+/// destructive erase. A runtime reset keeps the project on the device, so
+/// it does not detach the lens (its live edit-state resets and reloads on
+/// reattach — that reload path is pre-existing and unchanged here). This
+/// pins that only a wipe sends you back to the gallery.
+#[test]
+fn runtime_reset_from_the_editor_keeps_the_lens_bound() {
+    use super::studio_edit_e2e_tests::edit_e2e_files;
+    use crate::ProjectOp;
+
+    let (store, host) = library();
+    let sign = store
+        .install_package(
+            "Sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let sign_files = store.open(sign.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(sign_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new("dev_bbbbbbbbbbbbbbbb", "Bench board")),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::OpenDeviceProject { uid: None },
+    )))
+    .expect("the D29 op opens the device project");
+    let device_id = studio
+        .runtime_pool_for_test()
+        .device_session()
+        .expect("device session")
+        .id();
+
+    drive(studio.dispatch(device_action(DeviceOp::ResetDevice))).expect("runtime reset succeeds");
+
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        Some(device_id),
+        "a runtime reset keeps the editor's lens on the device — only a \
+         destructive wipe detaches it"
     );
 }
 

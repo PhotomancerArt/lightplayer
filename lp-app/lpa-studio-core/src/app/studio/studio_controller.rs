@@ -2999,6 +2999,8 @@ impl StudioController {
                 done_notice: |_| UiNotice::info("Device reset"),
                 degrade_subject: "device reset",
                 server_reconnect_failed_notice: "Device reset; reconnect after it finishes booting",
+                // a runtime reset reboots the device; the project survives.
+                severs_lens: false,
             },
             updates,
         )
@@ -3016,6 +3018,9 @@ impl StudioController {
                 degrade_subject: "firmware flashed",
                 server_reconnect_failed_notice:
                     "Firmware flashed; reconnect the server after the device finishes booting",
+                // a flash reboots into new firmware; the stored project
+                // survives and reloads on reattach.
+                severs_lens: false,
             },
             updates,
         )
@@ -3033,6 +3038,9 @@ impl StudioController {
                 degrade_subject: "device wiped",
                 server_reconnect_failed_notice:
                     "Device wiped; reconnect after the device finishes booting",
+                // a wipe erases the flash — the project is gone; a lens on
+                // this device is severed and the app returns to the gallery.
+                severs_lens: true,
             },
             updates,
         )
@@ -3057,9 +3065,14 @@ impl StudioController {
             .ok_or_else(|| {
                 UiError::MissingSession("no hardware device session for management".to_string())
             })?;
-        // Quiesce the editor only when it is a lens on the device being
-        // managed (P2: a project open on the sim survives a flash/erase).
-        if self.pool.lens() == Some(device_id) {
+        // Quiesce the editor's live edit-state only when it is a lens on
+        // the device being managed (P2: a project open on the sim survives
+        // a flash/erase). A destructive wipe additionally DETACHES the lens
+        // once the op settles (below) — returning to the gallery — because
+        // the project is gone with the flash; a reset/flash keeps the
+        // project, so the editor stays put to reload after the reattach.
+        let severed_lens = self.pool.lens() == Some(device_id);
+        if severed_lens {
             self.project.reset();
         }
         if let Some(session) = self.pool.session_mut(device_id) {
@@ -3131,7 +3144,6 @@ impl StudioController {
         match self.attach_runtime(device_id, updates).await {
             Ok(mut attach_outcome) => {
                 outcome.notices.append(&mut attach_outcome.notices);
-                Ok(outcome)
             }
             Err(error) => {
                 self.push_log(UiLogDraft::new(
@@ -3145,9 +3157,21 @@ impl StudioController {
                 if let Some(session) = self.pool.session_mut(device_id) {
                     session.fail(error.to_string());
                 }
-                Ok(outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice)))
+                outcome = outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
             }
         }
+        // A destructive wipe severs the editor AFTER the reattach settles:
+        // the project went with the flash, so detach the lens (the app
+        // returns to the gallery) and say why. Detaching earlier would
+        // change the reattach outcome — the managed session must stay the
+        // lens through `attach_runtime` (device-lifecycle P3).
+        if severed_lens && spec.severs_lens {
+            self.quiesce_lens();
+            outcome = outcome.with_notice(UiNotice::info(
+                "This project is no longer on this device — back to your devices.",
+            ));
+        }
+        Ok(outcome)
     }
 
     fn project_is_loaded(&self) -> bool {
@@ -3432,6 +3456,13 @@ struct ManagementFlowSpec {
     /// reset" → "device reset but serial reopen failed: …".
     degrade_subject: &'static str,
     server_reconnect_failed_notice: &'static str,
+    /// The op takes the project WITH it (a destructive wipe): when the
+    /// editor lens sits on the managed device, fully quiesce it — detach
+    /// the lens so the app returns to the gallery — and say so, rather than
+    /// leaving a severed-but-still-open editor. A reset/flash keeps the
+    /// project on the device, so its lens only resets its live edit-state
+    /// and stays put to reload after the reattach (device-lifecycle P3).
+    severs_lens: bool,
 }
 
 fn provision_notice(result: &LinkManagementResult) -> UiNotice {
