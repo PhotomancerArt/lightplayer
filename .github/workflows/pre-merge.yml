@@ -339,12 +339,15 @@ jobs:
         id: story_check
         shell: bash
         env:
-          # Runners have 4 vCPUs and nothing else competing, so keep the
-          # default concurrency — but apply the debt entry's proven timeout
-          # lore: navigations of the release wasm bundle can legitimately
-          # stall well past 30s once many pages have cycled, and attempts are
-          # cheap because completed captures resume from disk.
-          STUDIO_STORY_PNGS_CONCURRENCY: 4
+          # Concurrency 2, not the default 4: the heavy app-shell stories
+          # (panes/workspaces/sheets, everything after the base/core
+          # primitives) wedge 4 parallel release-wasm instantiations on the
+          # 4-vCPU runner past even a 120s CDP ceiling — observed as
+          # Page.navigate response timeouts from a starved renderer, the CI
+          # incarnation of the debt entry's "heavy end-of-queue sheets" wedge.
+          # Timeout/attempt lore from the same entry; attempts are cheap
+          # because completed captures resume from disk.
+          STUDIO_STORY_PNGS_CONCURRENCY: 2
           STUDIO_STORY_CDP_TIMEOUT_MS: 120000
           STUDIO_STORY_CAPTURE_ATTEMPTS: 4
         run: cd lp2025 && just studio-story-check 2>&1 | tee "$RUNNER_TEMP/story-check.log"

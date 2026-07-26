@@ -508,6 +508,10 @@ async function launchCaptureBrowser(pageCount) {
     [
       "--headless=new",
       "--disable-gpu",
+      // Shared-memory transport can exhaust /dev/shm on Linux CI runners;
+      // falling back to /tmp is the standard headless-CI setting and is
+      // harmless elsewhere.
+      "--disable-dev-shm-usage",
       "--hide-scrollbars",
       "--no-first-run",
       "--no-default-browser-check",
