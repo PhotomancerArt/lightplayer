@@ -27,7 +27,7 @@ const publicDir = path.resolve(
   process.env.STUDIO_STORY_SITE_DIR ?? "target/dx/lpa-studio-web/debug/web/public",
 );
 const storyRoot = path.join(repoRoot, "lp-app/lpa-studio-web");
-const mode = parseMode(process.argv.slice(2));
+const { mode, storyFilters } = parseCliArgs(process.argv.slice(2));
 // Default to an OS-assigned free port so parallel runs (multiple agents, each in
 // its own git worktree — which isolates files but NOT ports) never fight over a
 // fixed port. Set STUDIO_STORY_PNGS_PORT to pin one (e.g. for debugging).
@@ -191,10 +191,11 @@ server.once("error", (error) => {
 
 try {
   await waitForServer(baseUrl);
-  const storyIds = await discoverStoryIds();
-  if (storyIds.length === 0) {
+  const discoveredStoryIds = await discoverStoryIds();
+  if (discoveredStoryIds.length === 0) {
     throw new Error("No story links were discovered from the storybook page.");
   }
+  const storyIds = filterStoryIds(discoveredStoryIds, storyFilters);
 
   const files = await captureStoriesWithRetry(storyIds, captureDir);
   await optimizePngs(files, { required: mode !== "pngs" });
@@ -218,13 +219,50 @@ try {
   await Promise.race([serverExited, delay(1_000)]);
 }
 
-function parseMode(args) {
-  const value = args[0] ?? "pngs";
-  if (["pngs", "baselines", "check"].includes(value)) {
-    return value;
+function parseCliArgs(args) {
+  const modes = ["pngs", "baselines", "check"];
+  let mode = "pngs";
+  let storyFilters = args;
+  if (args.length > 0 && modes.includes(args[0])) {
+    mode = args[0];
+    storyFilters = args.slice(1);
   }
-  console.error("Usage: studio-story-pngs.mjs [pngs|baselines|check]");
-  process.exit(2);
+  if (storyFilters.some((term) => term.startsWith("-"))) {
+    console.error("Usage: studio-story-pngs.mjs [pngs|baselines|check] [story-filter...]");
+    process.exit(2);
+  }
+  // Baselines are always the full story set: the committed set is replaced
+  // wholesale (replaceBaselineImages), and canonical captures come from CI —
+  // a partial local regeneration would silently delete every other baseline.
+  if (mode === "baselines" && storyFilters.length > 0) {
+    console.error(
+      "Story filters are not supported for baselines: the committed set is always " +
+        "regenerated in full (and canonically on CI). Use `pngs` or `check` with filters.",
+    );
+    process.exit(2);
+  }
+  return { mode, storyFilters };
+}
+
+// Case-insensitive substring OR-match over story ids. An empty filter list
+// keeps every story.
+function filterStoryIds(storyIds, filters) {
+  if (filters.length === 0) {
+    return storyIds;
+  }
+  const needles = filters.map((term) => term.toLowerCase());
+  const matched = storyIds.filter((storyId) => {
+    const haystack = storyId.toLowerCase();
+    return needles.some((needle) => haystack.includes(needle));
+  });
+  if (matched.length === 0) {
+    console.error(
+      `No stories match filter(s): ${filters.join(", ")} (${storyIds.length} stories discovered).`,
+    );
+    process.exit(2);
+  }
+  console.log(`Filter matched ${matched.length}/${storyIds.length} stories.`);
+  return matched;
 }
 
 // Ask the OS for a free TCP port by binding to 0, then release it and hand the
@@ -745,7 +783,9 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   const expectedFiles = new Set(
     targets.map((target) => storyFileName(target.storyId, target.viewport)),
   );
-  const baselineFiles = await listPngFiles(expectedDir);
+  // A filtered run only captures a partial target set, so baselines outside it
+  // can't be judged as removed stories — skip the removed-story scan entirely.
+  const baselineFiles = storyFilters.length > 0 ? [] : await listPngFiles(expectedDir);
   const unexpected = baselineFiles.filter((file) => !expectedFiles.has(file));
   const missing = [];
   const changed = [];

@@ -204,6 +204,165 @@ jobs:
       - name: Validate GFX
         run: cd lp2025 && just validate-gfx
 
+  # Story baselines are CI-canonical: this job captures every story with a
+  # pinned browser and compares against the committed PNGs (pixel tolerance,
+  # see studio-story-pngs.mjs). On drift it fails and uploads the fresh set as
+  # the `story-images-fresh` artifact — the branch owner runs
+  # `just studio-story-pull` to stage and commit it. CI never commits.
+  #
+  # The paths gate mirrors detect-gfx-changes: conservative directory list,
+  # always-run on main pushes. Cargo.lock is deliberately EXCLUDED — a dep bump
+  # can change rendering, but gating on it would run this ~20-30 min job on
+  # every dependency PR; a miss surfaces on the very next merge to main.
+  detect-studio-web-changes:
+    name: Detect Studio-web changes
+    runs-on: ubuntu-24.04
+    outputs:
+      studio: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.studio }}
+    steps:
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            studio:
+              - 'lp-app/lpa-studio-web/**'
+              - 'lp-app/lpa-studio-core/**'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+
+  validate-stories:
+    name: Validate story baselines
+    # x64: Chrome ships no linux-arm64 build, and the canonical capture
+    # environment is pinned to Chrome for Testing on x64 Linux.
+    runs-on: ubuntu-24.04
+    needs: detect-studio-web-changes
+    if: needs.detect-studio-web-changes.outputs.studio == 'true'
+    env:
+      # Bumping the pinned browser (or oxipng) is a DELIBERATE baseline-refresh
+      # PR: bump, let this job fail, `just studio-story-pull`, commit the
+      # regenerated PNGs. Do not bump casually.
+      CHROME_FOR_TESTING_VERSION: "151.0.7922.47"
+      OXIPNG_VERSION: "10.1.1"
+      WASM_BINDGEN_VERSION: "0.2.114"
+      DIOXUS_CLI_VERSION: "0.7.9"
+    steps:
+      - name: Install system deps (libudev for serialport build scripts)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      # The capture script drives Chrome over a raw CDP WebSocket; pin node so
+      # the global WebSocket client is guaranteed (and rendering-adjacent
+      # tooling stays deterministic).
+      - name: Install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Deploy-workflow-style cache (registry + git + bins + target) rather
+      # than rust-cache: the cargo-installed tools live in ~/.cargo/bin and
+      # must be cached with a key that includes their pinned versions.
+      - name: Cache cargo registry, tools, and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            lp2025/target/
+          key: ${{ runner.os }}-${{ runner.arch }}-stories-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-cargo-${{ hashFiles('lp2025/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-stories-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-cargo-
+
+      - name: Cache Chrome for Testing
+        uses: actions/cache@v4
+        with:
+          path: ~/chrome
+          key: chrome-for-testing-${{ env.CHROME_FOR_TESTING_VERSION }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install pinned tools (wasm-bindgen, dioxus-cli, oxipng)
+        shell: bash
+        run: |
+          wasm-bindgen --version 2>/dev/null | grep -qF "$WASM_BINDGEN_VERSION" \
+            || cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          dx --version 2>/dev/null | grep -qF "$DIOXUS_CLI_VERSION" \
+            || cargo install dioxus-cli --version "$DIOXUS_CLI_VERSION" --locked --force
+          oxipng --version 2>/dev/null | grep -qF "$OXIPNG_VERSION" \
+            || cargo install oxipng --version "$OXIPNG_VERSION" --locked --force
+
+      - name: Install Chrome for Testing (pinned)
+        shell: bash
+        run: |
+          npx -y @puppeteer/browsers install "chrome@$CHROME_FOR_TESTING_VERSION" --path "$HOME/chrome"
+          CHROME_BIN="$(find "$HOME/chrome" -type f -name chrome -path '*chrome-linux64*' | head -1)"
+          test -x "$CHROME_BIN"
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+          "$CHROME_BIN" --version
+
+      # `shell: bash` (not the default) so pipefail keeps tee from masking the
+      # check's exit code — piped-away failures have bitten this pipeline
+      # before (docs/debt/story-capture-pipeline.md).
+      - name: Story check
+        id: story_check
+        shell: bash
+        env:
+          # Runners have 4 vCPUs and nothing else competing; the local wedges
+          # documented in the debt entry were load-induced, not inherent.
+          STUDIO_STORY_PNGS_CONCURRENCY: 4
+        run: cd lp2025 && just studio-story-check 2>&1 | tee "$RUNNER_TEMP/story-check.log"
+
+      - name: Upload fresh captures (story-images-fresh)
+        if: failure() && steps.story_check.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-images-fresh
+          path: lp2025/lp-app/lpa-studio-web/story-images/.new/
+          retention-days: 7
+          if-no-files-found: error
+          # The capture dir itself is dot-prefixed; without this the v4
+          # default hidden-file exclusion uploads nothing.
+          include-hidden-files: true
+
+      - name: Story drift summary
+        if: failure() && steps.story_check.outcome == 'failure'
+        shell: bash
+        run: |
+          {
+            echo "## Story baselines differ"
+            echo
+            echo 'Fresh captures are uploaded as the `story-images-fresh` artifact.'
+            echo 'On this branch, run `just studio-story-pull` to stage them, review the diff, and commit.'
+            echo
+            echo '```'
+            tail -80 "$RUNNER_TEMP/story-check.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # build-esp32-arm:
   #   name: Build ESP32 (ARM)
   #   runs-on: ubuntu-24.04-arm

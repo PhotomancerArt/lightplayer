@@ -282,11 +282,18 @@ Run the dev server and open:
 http://127.0.0.1:2820/#/stories
 ```
 
-Generate or update visual baselines with:
+Visual baselines are **CI-canonical**: the `validate-stories` CI job captures
+them in a pinned environment (x64 Linux, Chrome for Testing, bundled fonts)
+and uploads drift as the `story-images-fresh` artifact. Stage it on your
+branch with:
 
 ```bash
-just studio-story-baselines-if-needed
+just studio-story-pull
 ```
+
+Do not commit locally-captured baselines — local rendering differs from the
+canonical environment. See `docs/adr/2026-07-26-ci-canonical-story-capture.md`
+and AGENTS.md "Studio UI visual baselines".
 
 Baselines are captured for `sm`, `md`, and `lg` viewports. Files are named as a
 story id plus viewport suffix, for example:
@@ -300,10 +307,16 @@ studio__editor-shell__lg.png
 Useful commands:
 
 ```bash
-just studio-story-pngs        # scratch captures under story-images/.scratch
-just studio-story-baselines   # update committed sm/md/lg baselines
-just studio-story-check       # compare fresh captures with committed baselines
+just studio-story-pngs [filter...]   # scratch captures under story-images/.scratch
+just studio-story-check [filter...]  # compare fresh captures with committed baselines
+just studio-story-pull               # stage CI-captured baselines for this branch
+just studio-story-baselines          # emergency full local regen (do not commit)
 ```
+
+Filters are case-insensitive story-id substrings (OR-matched), so
+`just studio-story-pngs slot-value-editor popover` captures just those story
+families. Local captures and checks are non-authoritative next to the CI
+environment — use them for quick interactive review.
 
 Baseline and check modes require `oxipng` so committed and fresh PNGs are
 losslessly normalized. Install it with `brew install oxipng` or
