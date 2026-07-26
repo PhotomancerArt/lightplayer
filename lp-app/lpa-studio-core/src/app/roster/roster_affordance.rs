@@ -19,6 +19,10 @@ pub enum RosterAffordance {
     Troubleshoot,
     /// Connected, empty: project picker popup.
     ChooseProject,
+    /// Holds-unreadable-data: wipe the device's project storage back to
+    /// blank (model rev 2026-07-26 — the way out is BLANK, never
+    /// push-over). Destructive: the web gates it with the confirm sheet.
+    WipeProject,
     /// Ready to set up / Other firmware: install (provisioning) popup.
     SetUp,
     /// Needs a firmware update: confirm popup.
@@ -36,11 +40,12 @@ impl RosterAffordance {
     pub fn label(&self) -> String {
         match self {
             Self::OpenEditor => "Open".to_string(),
-            Self::PushVersion { version: Some(n) } => format!("Push v{n}"),
-            Self::PushVersion { version: None } => "Push".to_string(),
+            // §3a: no version jargon — the Project facts carry distance.
+            Self::PushVersion { .. } => "Push the latest".to_string(),
             Self::ResolveDrift => "Review".to_string(),
             Self::Troubleshoot => "Troubleshoot".to_string(),
             Self::ChooseProject => "Choose a project".to_string(),
+            Self::WipeProject => "Wipe project…".to_string(),
             Self::SetUp => "Set up".to_string(),
             Self::UpdateFirmware => "Update".to_string(),
             Self::NameDevice => "Name it".to_string(),

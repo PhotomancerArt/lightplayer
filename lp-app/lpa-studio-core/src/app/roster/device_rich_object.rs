@@ -89,11 +89,10 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
         "status",
         input.state.status_line(input.now_secs),
     )];
-    // The sub-line rides along as a fact row — except the diverged banked
-    // note, which is the Backup section's whole story.
-    if !matches!(input.state, RosterCardState::EditedOnDevice)
-        && let Some(sub_line) = input.state.sub_line()
-    {
+    // The sub-line rides along as a fact row — including the diverged
+    // card's plain-words situation copy (§3a: the Status tab explains;
+    // the Backup section still carries the banked facts).
+    if let Some(sub_line) = input.state.sub_line() {
         lines.push(RichLine::new("note", sub_line));
     }
     RichSection {
@@ -127,23 +126,29 @@ fn project_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDeta
             head_version,
         } => {
             tone = UiStatusKind::Attention;
-            lines.push(RichLine::new(
-                "running",
-                match observed_version {
-                    Some(version) => format!("{name} · v{version}"),
-                    None => name.to_string(),
-                },
-            ));
-            if let Some(head) = head_version {
-                lines.push(RichLine::new("your copy", format!("v{head}")));
-            }
+            lines.push(RichLine::new("running", name.to_string()));
+            // §3a: the drift distance in plain words (saves, not vN).
+            // History records no wall-clock yet — edit-time copy lands
+            // with the timestamp plumbing (model backlog).
+            let distance = match (observed_version, head_version) {
+                (Some(observed), Some(head)) if *head > *observed => {
+                    let behind = head - observed;
+                    if behind == 1 {
+                        "1 save behind your latest".to_string()
+                    } else {
+                        format!("{behind} saves behind your latest")
+                    }
+                }
+                _ => "behind your latest".to_string(),
+            };
+            lines.push(RichLine::new("note", distance));
             affordances.push(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
         }
         RosterCardState::EditedOnDevice => {
             tone = UiStatusKind::Attention;
             lines.push(RichLine::new(
                 "running",
-                format!("{name} · edited on device"),
+                format!("{name} · changed on the device"),
             ));
             affordances.push(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
         }
@@ -226,23 +231,32 @@ fn backup_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
     })
 }
 
-/// Danger zone, pinned last. Live cards whose wire could take management
-/// operations carry flash + erase (the same gate the interim More-menu
-/// used — never mid-operation, mid-connect, or while another tab holds
-/// the port); offline registered cards carry forget. M8's provisioning
-/// entries get their permanent home here.
+/// Danger zone, pinned last — and present in EVERY state (state-flow
+/// model §3: the always-available short-circuit; its rows adapt). Live
+/// manageable cards carry flash + erase; a blank/foreign board carries
+/// erase (its MAIN action is the setup form's install, not danger); the
+/// not-responding card carries the recovery flash + forget; remembered,
+/// mid-connect, and port-held cards carry forget. The one exception is
+/// mid-operation — the in-place overlay covers the tabs (§2).
 fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetailAffordance>> {
+    let forget = || {
+        input
+            .uid
+            .is_some()
+            .then_some(DeviceDetailAffordance::ForgetDevice)
+    };
     let affordances = match input.state {
-        RosterCardState::Offline { .. } => {
-            if input.uid.is_some() {
-                vec![DeviceDetailAffordance::ForgetDevice]
-            } else {
-                Vec::new()
-            }
+        RosterCardState::Offline { .. }
+        | RosterCardState::ConnectingRetrying { .. }
+        | RosterCardState::InUseElsewhere => forget().into_iter().collect(),
+        RosterCardState::OperationInFlight { .. } => Vec::new(),
+        // The setup form owns the install; erase is the short-circuit.
+        RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware => {
+            vec![DeviceDetailAffordance::EraseDevice]
         }
-        RosterCardState::ConnectingRetrying { .. }
-        | RosterCardState::OperationInFlight { .. }
-        | RosterCardState::InUseElsewhere => Vec::new(),
+        RosterCardState::NotResponding => core::iter::once(DeviceDetailAffordance::FlashFirmware)
+            .chain(forget())
+            .collect(),
         _ => vec![
             DeviceDetailAffordance::FlashFirmware,
             DeviceDetailAffordance::EraseDevice,
@@ -333,9 +347,15 @@ mod tests {
             titles(&view),
             vec!["Health", "Project", "Technical", "Backup", "Danger zone"]
         );
-        // the banked note lives in Backup, not duplicated into Health
+        // §3a: Health explains the situation in plain words (the Backup
+        // section still carries the banked facts).
         let health = &view.sections[0];
-        assert_eq!(health.lines.len(), 1);
+        assert_eq!(health.lines.len(), 2);
+        assert!(
+            health.lines[1].value.contains("edits your project doesn't"),
+            "the note explains, not just labels: {}",
+            health.lines[1].value
+        );
     }
 
     #[test]

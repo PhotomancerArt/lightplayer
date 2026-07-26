@@ -65,6 +65,9 @@ pub enum CardVerb {
     /// Flash / reflash firmware onto a live board (the destructive,
     /// already-provisioned path — a blank board flashes with no confirm).
     Flash,
+    /// Wipe the device's project storage back to blank (the
+    /// Holds-unreadable-data card's way out — model rev 2026-07-26).
+    WipeProject,
 }
 
 /// The in-place progress of a heavy op running on a card — a CARD-OWNED

@@ -100,6 +100,11 @@ fn verb_to_action(verb: &CardVerb, card: &UiDeviceCard) -> UiAction {
             forget_device_action(card.uid.clone().unwrap_or_default(), card.name.clone())
         }
         CardVerb::StopSim => stop_simulator_action(),
+        // Base meta carries the confirm copy ("can't be backed up…").
+        CardVerb::WipeProject => UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::WipeProject,
+        ),
         CardVerb::Flash => flash_device_action_destructive(),
         CardVerb::PushDrop { key } => push_project_action(key.clone()).with_confirmation(
             lpa_studio_core::ActionConfirmation::new(
@@ -1454,10 +1459,11 @@ pub(super) fn device_affordance_action(
             .with_icon("upload")
         }
         // intercepted upstream: the D30 sheet / the troubleshoot sheet /
-        // the Project-tab picker (`wire_card_affordance`)
+        // the Project-tab picker / the wipe confirm (`wire_card_affordance`)
         RosterAffordance::ResolveDrift
         | RosterAffordance::Troubleshoot
-        | RosterAffordance::ChooseProject => return None,
+        | RosterAffordance::ChooseProject
+        | RosterAffordance::WipeProject => return None,
         // M8′ + device-lifecycle P2: provisioning IS the flash, worn per
         // context — and it is ONE CLICK (no confirm gate). A blank board
         // has nothing to lose; a firmware update warns via its summary
@@ -1559,6 +1565,18 @@ fn wire_card_affordance(
             .with_summary("Steps to try when the device is not responding.")
             .with_icon("zap");
             Some(CardRowAction::Sheet(CardSheetState::Troubleshoot, display))
+        }
+        // The unreadable card's wipe: destructive → the D41 confirm sheet
+        // gates it; the verb rides core state (model rev 2026-07-26).
+        DeviceDetailAffordance::Roster(RosterAffordance::WipeProject) => {
+            let action = UiAction::from_op(
+                ControllerId::new(DeviceController::NODE_ID),
+                DeviceOp::WipeProject,
+            );
+            Some(CardRowAction::Sheet(
+                CardSheetState::Confirm(CardVerb::WipeProject),
+                strip_confirmation(action),
+            ))
         }
         DeviceDetailAffordance::Roster(affordance) => {
             device_affordance_action(card, affordance).map(CardRowAction::from_action)

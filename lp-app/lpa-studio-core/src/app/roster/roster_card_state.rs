@@ -135,15 +135,10 @@ impl RosterCardState {
     pub fn status_line(&self, now_secs: f64) -> String {
         match self {
             Self::RunningUpToDate => "Running".to_string(),
-            Self::RunningBehind {
-                observed_version: Some(n),
-                ..
-            } => format!("Running v{n} — behind your copy"),
-            Self::RunningBehind {
-                observed_version: None,
-                ..
-            } => "Running — behind your copy".to_string(),
-            Self::EditedOnDevice => "Edited on device".to_string(),
+            // §3a copy rule: no version jargon in the headline — the
+            // Project facts carry the save-distance in plain words.
+            Self::RunningBehind { .. } => "Running an older version".to_string(),
+            Self::EditedOnDevice => "Changed on the device".to_string(),
             Self::Degraded {
                 reason: DegradedReason::CrashRecovery,
             } => "Recovered from a crash".to_string(),
@@ -184,7 +179,12 @@ impl RosterCardState {
     /// unreadable row's parse detail.
     pub fn sub_line(&self) -> Option<String> {
         match self {
-            Self::EditedOnDevice => Some("Device copy saved to history".to_string()),
+            // §3a: explain the situation, not just the label.
+            Self::EditedOnDevice => Some(
+                "This board's copy has edits your project doesn't — made after \
+                 your last push. A backup is already in your library."
+                    .to_string(),
+            ),
             Self::HoldsUnreadableData { detail } => Some(detail.clone()),
             _ => None,
         }
@@ -203,11 +203,10 @@ impl RosterCardState {
             Self::ConnectingRetrying { .. }
             | Self::OperationInFlight { .. }
             | Self::InUseElsewhere => None,
-            // choosing a project replaces the unreadable content; erase
-            // rides the card's actions popover
-            Self::ConnectedEmpty | Self::HoldsUnreadableData { .. } => {
-                Some(RosterAffordance::ChooseProject)
-            }
+            Self::ConnectedEmpty => Some(RosterAffordance::ChooseProject),
+            // The way out is BLANK, never push-over (model rev 2026-07-26):
+            // wipe the unreadable content, land on "nothing loaded".
+            Self::HoldsUnreadableData { .. } => Some(RosterAffordance::WipeProject),
             Self::ReadyToSetUp | Self::OtherFirmware => Some(RosterAffordance::SetUp),
             Self::NeedsFirmwareUpdate => Some(RosterAffordance::UpdateFirmware),
             Self::NeedsAName => Some(RosterAffordance::NameDevice),
@@ -296,7 +295,7 @@ mod tests {
                 head_version: Some(5),
             }
             .status_line(now),
-            "Running v3 — behind your copy"
+            "Running an older version"
         );
         assert_eq!(
             RosterCardState::OperationInFlight {
@@ -344,7 +343,7 @@ mod tests {
             .affordance()
             .unwrap()
             .label(),
-            "Push v5"
+            "Push the latest"
         );
         // the self-healing states offer nothing
         for quiet in [

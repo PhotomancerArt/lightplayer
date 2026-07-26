@@ -43,6 +43,11 @@ pub enum DeviceOp {
     /// happy path never detours through Needs-a-name. `None` = a plain
     /// flash / firmware update (already-stamped or recovery contexts).
     ProvisionFirmware { setup_name: Option<String> },
+    /// Wipe the device's project storage back to blank (the
+    /// Holds-unreadable-data card's way out — state-flow model rev
+    /// 2026-07-26: the way out is BLANK, never push-over). Firmware
+    /// stays; the board lands on Connected-empty.
+    WipeProject,
     ResetToBlank,
     DisconnectDevice,
     /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
@@ -113,6 +118,18 @@ impl ControllerOp for DeviceOp {
                 "This will write LightPlayer firmware to the selected ESP32. Continue?",
                 "Flash firmware",
             )),
+            Self::WipeProject => ActionMeta::new(
+                "Wipe project",
+                "Delete the device's project storage; firmware stays.",
+                ActionPriority::Tertiary,
+            )
+            .destructive()
+            .with_confirmation(ActionConfirmation::new(
+                "Wipe the project",
+                "Studio can't read this content, so it can't be backed up — \
+                 wiping deletes it for good and leaves the board empty.",
+                "Wipe",
+            )),
             Self::ResetToBlank => ActionMeta::new(
                 "Wipe device",
                 "Erase firmware and device data from this ESP32.",
@@ -165,6 +182,7 @@ impl ControllerOp for DeviceOp {
             | Self::DisconnectLightPlayer
             | Self::ResetDevice
             | Self::ProvisionFirmware { .. }
+            | Self::WipeProject
             | Self::ResetToBlank
             | Self::DisconnectDevice
             | Self::StopSimulator
