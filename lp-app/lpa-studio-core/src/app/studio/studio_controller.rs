@@ -2081,10 +2081,7 @@ impl StudioController {
                 .device_session()
                 .filter(|_| match (card.uid.as_deref(), live_uid) {
                     (Some(card_uid), Some(live_uid)) => card_uid == live_uid,
-                    _ => matches!(
-                        card.state,
-                        crate::RosterCardState::OperationInFlight { .. }
-                    ),
+                    _ => matches!(card.state, crate::RosterCardState::OperationInFlight { .. }),
                 })
                 .and_then(|session| session.operation_label().map(str::to_string))
         };
