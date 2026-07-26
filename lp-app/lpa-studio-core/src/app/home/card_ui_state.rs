@@ -44,8 +44,6 @@ pub enum CardSheet {
     /// The name-stamping sheet (an unstamped board — retired for the
     /// one-click provision flow, kept for explicit re-stamp paths).
     Name,
-    /// The D30 drift-resolution sheet (adopt / keep-both / stay).
-    Drift,
     /// The Not-responding card's troubleshooting sheet (M6).
     Troubleshoot,
 }

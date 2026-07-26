@@ -185,6 +185,12 @@ pub struct RuntimeSession {
     /// the roster's "Running vN"/"Push vN" evidence. `(None, None)`
     /// otherwise; only read while `device_sync` holds a `Known` content.
     device_versions: (Option<usize>, Option<usize>),
+    /// Drift wall-clock evidence (§3c-3), computed alongside
+    /// `device_versions`: when the LOCAL head was last saved
+    /// (`ProjectHistory::saved_at`) and when WE last pushed to this device
+    /// (its registry association's `at`). Feeds the Edited-on-device
+    /// card's plain-words time copy; `(None, None)` otherwise.
+    device_drift_times: (Option<f64>, Option<f64>),
     /// The project storage dir the attached device actually runs from
     /// (discovered from its loaded project at connect) — pull and push
     /// target it so one dir replaces in place.
@@ -232,6 +238,7 @@ impl RuntimeSession {
             requested_log_level: UiLogLevel::Info,
             device_sync: None,
             device_versions: (None, None),
+            device_drift_times: (None, None),
             device_storage_id: None,
             operation: None,
             backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
@@ -558,6 +565,15 @@ impl RuntimeSession {
 
     pub fn set_device_versions(&mut self, versions: (Option<usize>, Option<usize>)) {
         self.device_versions = versions;
+    }
+
+    /// (local head saved-at, last-push-to-this-device at) — §3c-3.
+    pub fn device_drift_times(&self) -> (Option<f64>, Option<f64>) {
+        self.device_drift_times
+    }
+
+    pub fn set_device_drift_times(&mut self, times: (Option<f64>, Option<f64>)) {
+        self.device_drift_times = times;
     }
 
     pub fn device_storage_id(&self) -> Option<&str> {

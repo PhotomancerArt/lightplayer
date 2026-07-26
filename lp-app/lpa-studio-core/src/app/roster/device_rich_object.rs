@@ -92,7 +92,7 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
     // The sub-line rides along as a fact row — including the diverged
     // card's plain-words situation copy (§3a: the Status tab explains;
     // the Backup section still carries the banked facts).
-    if let Some(sub_line) = input.state.sub_line() {
+    if let Some(sub_line) = input.state.sub_line(input.now_secs) {
         lines.push(RichLine::new("note", sub_line));
     }
     // The running family also offers the editor entry as a visible CTA
@@ -105,9 +105,13 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
         input.state,
         RosterCardState::RunningUpToDate
             | RosterCardState::RunningBehind { .. }
-            | RosterCardState::EditedOnDevice
+            | RosterCardState::EditedOnDevice { .. }
     ) && state_affordance != Some(RosterAffordance::OpenEditor))
     .then_some(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
+    // §3c-2: the diverged face carries BOTH verbs — Keep-both rides
+    // beside the state's Use-board-copy, then the editor CTA.
+    let keep_both = matches!(input.state, RosterCardState::EditedOnDevice { .. })
+        .then_some(DeviceDetailAffordance::Roster(RosterAffordance::KeepBoth));
     RichSection {
         title: "Health".to_string(),
         tone: input.state.spec().tone,
@@ -119,6 +123,7 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
         affordances: state_affordance
             .map(DeviceDetailAffordance::Roster)
             .into_iter()
+            .chain(keep_both)
             .chain(open_editor)
             .collect(),
         weight: RichWeight::Actionable,
@@ -159,7 +164,7 @@ fn project_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDeta
             lines.push(RichLine::new("note", distance));
             affordances.push(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
         }
-        RosterCardState::EditedOnDevice => {
+        RosterCardState::EditedOnDevice { .. } => {
             tone = UiStatusKind::Attention;
             lines.push(RichLine::new(
                 "running",
@@ -233,7 +238,7 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
 /// a diverged device copy; a download affordance lands with the flow that
 /// can serve it (no dead buttons).
 fn backup_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetailAffordance>> {
-    matches!(input.state, RosterCardState::EditedOnDevice).then(|| RichSection {
+    matches!(input.state, RosterCardState::EditedOnDevice { .. }).then(|| RichSection {
         title: "Backup".to_string(),
         tone: UiStatusKind::Neutral,
         lines: vec![
@@ -373,7 +378,10 @@ mod tests {
 
     #[test]
     fn diverged_device_carries_the_backup_section_in_schema_order() {
-        let view = device_rich_object(&input(&RosterCardState::EditedOnDevice));
+        let view = device_rich_object(&input(&RosterCardState::EditedOnDevice {
+            local_saved_at: None,
+            pushed_at: None,
+        }));
         assert_eq!(
             titles(&view),
             vec!["Health", "Project", "Technical", "Backup", "Danger zone"]

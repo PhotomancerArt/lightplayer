@@ -125,6 +125,22 @@ impl ProjectHistory {
         }
     }
 
+    /// When a line version was last saved (f64 epoch seconds): the newest
+    /// `Saved` event carrying it, falling back to the origin event when the
+    /// version is the origin's. `None` for versions not in the line.
+    pub fn saved_at(&self, version: ContentHash) -> Option<f64> {
+        self.events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.kind {
+                EventKind::Saved { version: saved } if *saved == version => Some(event.at),
+                kind if kind.is_origin() && kind.origin_version() == Some(version) => {
+                    Some(event.at)
+                }
+                _ => None,
+            })
+    }
+
     /// 1-based version number of the *first* occurrence in the line.
     ///
     /// The line is a save sequence: re-saving old content (a revert) appends
