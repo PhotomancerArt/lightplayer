@@ -665,6 +665,7 @@ async function createCapturePage(cdp) {
             " transition: none !important;" +
             " animation: none !important;" +
             " caret-color: transparent !important;" +
+            " scroll-behavior: auto !important;" +
             " }";
           document.head.appendChild(style);
         });
@@ -693,19 +694,46 @@ async function createCapturePage(cdp) {
       await cdp.send("Page.navigate", { url }, sessionId);
       await waitForCaptureBox(cdp, sessionId, storyId);
       await waitForStoryReady(cdp, sessionId, storyId);
+      await settleFocus(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
-      const { data } = await cdp.send(
-        "Page.captureScreenshot",
-        {
-          format: "png",
-          captureBeyondViewport: true,
-          fromSurface: true,
-          clip,
-        },
-        sessionId,
-      );
-      await writeFile(file, Buffer.from(data, "base64"));
+      const shoot = async () => {
+        const { data } = await cdp.send(
+          "Page.captureScreenshot",
+          {
+            format: "png",
+            captureBeyondViewport: true,
+            fromSurface: true,
+            clip,
+          },
+          sessionId,
+        );
+        return Buffer.from(data, "base64");
+      };
+      // Stable-pair capture: accept only two consecutive identical shots.
+      // The story-ready wait proves the page settled ENOUGH to paint, but
+      // bistable late settling still churned a known story set — a font-swap
+      // repaint landing after first paint (select text ghosting) and an
+      // autofocus ring appearing between shots. Both converge to a terminal
+      // state, so requiring shot N == shot N-1 captures that steady state
+      // deterministically. Genuinely non-settling stories exhaust the
+      // attempts; keep the last shot and warn so they surface as churn, not
+      // as a capture failure.
+      let shot = await shoot();
+      let stable = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const next = await shoot();
+        if (next.equals(shot)) {
+          stable = true;
+          break;
+        }
+        shot = next;
+      }
+      if (!stable) {
+        console.warn(`unstable render (kept last shot): ${storyId} (${viewport.name})`);
+      }
+      await writeFile(file, shot);
     },
 
     async close() {
@@ -781,6 +809,50 @@ async function waitForCaptureBox(cdp, sessionId, storyId) {
   throw new Error(`Timed out waiting for story capture target: ${storyId}`);
 }
 
+// Stories that mount an [autofocus] element (e.g. the device-card name sheet)
+// flickered run-to-run: focus lands a beat after first paint, autofocus
+// scrolls the element into view (shifting the capture box), and whether the
+// focus ring survives later re-renders is itself racy — so neither "ring" nor
+// "no ring" is a stable terminal state of the page. Make captures
+// deterministic at this layer: wait for the autofocus candidate to take focus
+// (so a late-landing focus can't race the blur), then blur it and reset
+// scroll. Baselines therefore always show the unfocused state. Bounded and
+// non-fatal: an autofocus element that can never take focus (hidden in a
+// closed sheet) costs this story the timeout, not the run.
+async function settleFocus(cdp, sessionId, storyId) {
+  const focusedExpression = `
+    (() => {
+      const af = document.querySelector('[autofocus]');
+      return !af || document.activeElement === af;
+    })()
+  `;
+  const started = Date.now();
+  let settled = false;
+  while (Date.now() - started < 3_000) {
+    if (await evaluate(cdp, sessionId, focusedExpression)) {
+      settled = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (!settled) {
+    console.warn(`autofocus never settled (capturing anyway): ${storyId}`);
+  }
+  await evaluate(
+    cdp,
+    sessionId,
+    `
+    (() => {
+      if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.blur();
+      }
+      window.scrollTo(0, 0);
+      return true;
+    })()
+  `,
+  );
+}
+
 async function waitForStoryReady(cdp, sessionId, storyId) {
   const expression = `
     (() => {
@@ -788,11 +860,29 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
       if (!el || el.getAttribute('data-story-id') !== ${JSON.stringify(storyId)}) {
         return false;
       }
-      // Webfont fallback metrics shift text by a few pixels; a capture that
-      // races font decoding diffs nondeterministically run-to-run (scattered
-      // ~Δ180 text pixels on whichever pages lost the race).
-      if (document.fonts && document.fonts.status !== 'loaded') {
-        return false;
+      // Webfont fallback metrics shift text; a capture that races font
+      // decoding diffs nondeterministically run-to-run — from scattered text
+      // pixels up to whole-page layout shifts when line wrapping changes.
+      // document.fonts.status alone is a trap: it reports 'loaded' whenever
+      // no loads are PENDING, which is trivially true before the first
+      // element requests a face. Demand every bundled face explicitly,
+      // kicking off its load so the check converges even for faces the
+      // current story hasn't touched yet.
+      if (document.fonts) {
+        const faces = [
+          '400 1em Inter', '500 1em Inter', '600 1em Inter',
+          '700 1em Inter', '800 1em Inter',
+          "400 1em 'JetBrains Mono'", "600 1em 'JetBrains Mono'",
+          "700 1em 'JetBrains Mono'",
+        ];
+        const missing = faces.filter((f) => !document.fonts.check(f));
+        if (missing.length > 0) {
+          missing.forEach((f) => document.fonts.load(f));
+          return false;
+        }
+        if (document.fonts.status !== 'loaded') {
+          return false;
+        }
       }
       return !document.querySelector('[data-story-wait="1"]');
     })()
