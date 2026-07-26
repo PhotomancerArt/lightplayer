@@ -34,8 +34,10 @@ Pinned in `package.json` / `package-lock.json`:
   `setDiagnostics` on the façade handle.
 - `@codemirror/autocomplete` — the completion popup behind the
   `completions` option / `setCompletions` handle method (entries carry
-  label, signature detail, optional snippet + info; empty list = the
-  extension is absent, so plain/XML editors never grow a popup).
+  label, signature detail, optional snippet + info + boost — boost biases
+  CodeMirror's ranking, used to lift user-defined symbols above builtins;
+  empty list = the extension is absent, so plain/XML editors never grow a
+  popup).
 - `@lezer/highlight` — tags for the studio-token highlight style.
 
 Intentionally excluded: search panel, folding, multiple themes — keep the
