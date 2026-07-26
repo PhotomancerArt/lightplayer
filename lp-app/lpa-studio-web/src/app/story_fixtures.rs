@@ -890,7 +890,7 @@ pub(crate) fn disconnect_lightplayer_action() -> UiAction {
 
 pub(crate) fn connected_esp32_recovery_actions() -> Vec<UiAction> {
     vec![
-        device_action(DeviceOp::ProvisionFirmware),
+        device_action(DeviceOp::ProvisionFirmware { setup_name: None }),
         device_action(DeviceOp::ResetDevice),
         device_action(DeviceOp::ResetToBlank),
         disconnect_device_action(),

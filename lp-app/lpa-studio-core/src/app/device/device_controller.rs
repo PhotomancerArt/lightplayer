@@ -795,7 +795,7 @@ impl DeviceController {
                 "Firmware operations are separate from project deploys.",
             ))
             .with_actions(vec![
-                UiAction::from_op(self.node_id(), DeviceOp::ProvisionFirmware)
+                UiAction::from_op(self.node_id(), DeviceOp::ProvisionFirmware { setup_name: None })
                     .with_label("Update firmware")
                     .with_summary("Flash the bundled LightPlayer firmware.")
                     .with_icon("zap"),

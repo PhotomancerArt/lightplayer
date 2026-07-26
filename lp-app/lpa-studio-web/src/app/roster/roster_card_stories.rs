@@ -164,7 +164,9 @@ fn holds_unreadable_data() -> Element {
     )])
 }
 
-#[story(description = "Amber filled edge: blank flash — provisioning turns it into a Device.")]
+#[story(
+    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name stamps at first post-flash contact."
+)]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])
 }
