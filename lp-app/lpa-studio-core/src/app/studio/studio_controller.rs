@@ -2067,11 +2067,24 @@ impl StudioController {
                 .sim_session()
                 .and_then(|session| session.operation_label().map(str::to_string))
         } else {
+            // Only the session's OWN card narrates the session op: the
+            // stamped identity must match the card's uid. A remembered
+            // (offline) card also carries a uid, so a bare is_some()
+            // check smeared one device's push across every device card.
+            // An identity-less live board has no uid on either side —
+            // its card is the one mid-operation.
+            let live_uid = self
+                .device_sync()
+                .and_then(|sync| sync.identity.as_ref())
+                .map(|identity| identity.uid.as_str());
             self.pool
                 .device_session()
-                .filter(|_| {
-                    card.uid.is_some()
-                        || matches!(card.state, crate::RosterCardState::OperationInFlight { .. })
+                .filter(|_| match (card.uid.as_deref(), live_uid) {
+                    (Some(card_uid), Some(live_uid)) => card_uid == live_uid,
+                    _ => matches!(
+                        card.state,
+                        crate::RosterCardState::OperationInFlight { .. }
+                    ),
                 })
                 .and_then(|session| session.operation_label().map(str::to_string))
         };

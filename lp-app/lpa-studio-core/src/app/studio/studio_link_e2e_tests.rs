@@ -2004,6 +2004,98 @@ fn push_from_card_narrates_operation_in_flight_and_settles() {
     );
 }
 
+/// Regression (2026-07-26 hardware walk): a push to the LIVE device
+/// smeared its "Pushing…" overlay onto a REMEMBERED (unplugged) device's
+/// card too — the overlay's session-op fallback matched any card with a
+/// uid, and an offline card carries one. The session op must narrate only
+/// on the session's own card (stamped identity == card uid).
+#[test]
+fn push_progress_stays_on_the_live_card() {
+    use crate::app::places::{DeviceRegistry, RegisteredDevice};
+    use crate::{UxUpdate, UxUpdateSink};
+
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let v1_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+    {
+        use lpc_model::AsLpPath;
+        let mut handle = store.open(summary.uid).unwrap();
+        handle
+            .apply_update("/shader.glsl".as_path(), Some(b"v2"))
+            .unwrap();
+        handle.record_save(2.0).unwrap().expect("head advanced");
+    }
+    // The FIRST board: connected earlier, unplugged, remembered — its
+    // offline card still carries the stamped uid.
+    let registry = DeviceRegistry::new(store.fs_handle());
+    registry
+        .upsert(RegisteredDevice {
+            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+            name: "First board".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 1.0,
+            association: None,
+        })
+        .unwrap();
+
+    // The SECOND board: live, holding v1 → classifies Behind → push.
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(v1_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    // Mid-push, record which cards wear the in-place op overlay.
+    let seen: Rc<RefCell<Vec<(Option<String>, bool)>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink_seen = Rc::clone(&seen);
+    let sink = UxUpdateSink::new(move |update| {
+        if let UxUpdate::View(view) = update
+            && let Some(home) = &view.home
+        {
+            for card in &home.devices {
+                sink_seen
+                    .borrow_mut()
+                    .push((card.uid.clone(), card.ui.op.is_some()));
+            }
+        }
+    });
+    drive(studio.dispatch_with_updates(
+        deploy_action(DeployOp::PushProject {
+            key: summary.uid.to_string(),
+        }),
+        sink,
+    ))
+    .expect("the push succeeds");
+
+    let seen = seen.borrow();
+    assert!(
+        seen.iter()
+            .any(|(uid, has_op)| uid.as_deref() == Some("dev_aaaaaaaaaaaaaaaa") && *has_op),
+        "the live card narrates its own push: {seen:?}"
+    );
+    assert!(
+        !seen
+            .iter()
+            .any(|(uid, has_op)| uid.as_deref() == Some("dev_bbbbbbbbbbbbbbbb") && *has_op),
+        "the remembered offline card must never wear the live push op: {seen:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
