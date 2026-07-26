@@ -374,6 +374,20 @@ generated uniform header declares them) and the `render` entry snippet.
 Accepting inserts a snippet with navigable placeholders; non-GLSL editors
 pass no completions and never grow a popup.
 
+The user's **own symbols complete live**: ~200 ms after typing stops the
+buffer is re-analyzed client-side by the LightPlayer GLSL compiler's front
+half (`lps_glsl::analyze_symbols` — parse + signature pass only, in the
+studio wasm; never the device, never the wire), so user-defined functions
+(with typed signature detail and call snippets), globals/consts, structs
+(with construction snippets), and text-declared uniforms join the popup,
+ranked above the builtins via a CodeMirror `boost`. Text-declared uniforms
+dedup against the slot-derived set by name (slot wins — its type is the
+applied truth), and the `render` template entry drops once the buffer
+defines `render`. A failed analysis (the normal mid-edit state, e.g. an
+unbalanced brace) keeps the last good symbol set, so the popup never
+blanks while typing — the same keep-last-good philosophy as the engine's
+shader handling.
+
 ## Boundary
 
 - `lpa-studio-core` owns Studio product state, `StudioView` panes, stack views,

@@ -209,6 +209,50 @@ impl LpsType {
     }
 }
 
+/// GLSL-style spelling of `ty` (`vec2`, `ivec3`, `float[4]`, struct name).
+///
+/// The canonical user-facing rendering of an [`LpsType`], used for editor
+/// completions and overload-disambiguated export names. `Texture2D` renders
+/// as `sampler2D`; anonymous structs render as `struct`.
+pub fn glsl_type_name(ty: &LpsType) -> String {
+    let mut out = String::new();
+    push_glsl_type_name(&mut out, ty);
+    out
+}
+
+fn push_glsl_type_name(out: &mut String, ty: &LpsType) {
+    let s = match ty {
+        LpsType::Void => "void",
+        LpsType::Float => "float",
+        LpsType::Int => "int",
+        LpsType::UInt => "uint",
+        LpsType::Bool => "bool",
+        LpsType::Vec2 => "vec2",
+        LpsType::Vec3 => "vec3",
+        LpsType::Vec4 => "vec4",
+        LpsType::IVec2 => "ivec2",
+        LpsType::IVec3 => "ivec3",
+        LpsType::IVec4 => "ivec4",
+        LpsType::UVec2 => "uvec2",
+        LpsType::UVec3 => "uvec3",
+        LpsType::UVec4 => "uvec4",
+        LpsType::BVec2 => "bvec2",
+        LpsType::BVec3 => "bvec3",
+        LpsType::BVec4 => "bvec4",
+        LpsType::Mat2 => "mat2",
+        LpsType::Mat3 => "mat3",
+        LpsType::Mat4 => "mat4",
+        LpsType::Texture2D => "sampler2D",
+        LpsType::Array { element, len } => {
+            push_glsl_type_name(out, element);
+            out.push_str(&alloc::format!("[{len}]"));
+            return;
+        }
+        LpsType::Struct { name, .. } => name.as_deref().unwrap_or("struct"),
+    };
+    out.push_str(s);
+}
+
 #[cfg(test)]
 mod serde_tests {
     use super::*;
@@ -264,5 +308,48 @@ mod serde_tests {
         let json = serde_json::to_string(&schema).unwrap();
         assert!(!json.is_empty());
         assert!(json.contains("LpsType"));
+    }
+}
+
+#[cfg(test)]
+mod glsl_name_tests {
+    use super::*;
+    use alloc::string::ToString;
+    use alloc::vec;
+
+    #[test]
+    fn scalars_vectors_matrices_and_sampler() {
+        assert_eq!(glsl_type_name(&LpsType::Float), "float");
+        assert_eq!(glsl_type_name(&LpsType::IVec3), "ivec3");
+        assert_eq!(glsl_type_name(&LpsType::Mat4), "mat4");
+        assert_eq!(glsl_type_name(&LpsType::Texture2D), "sampler2D");
+    }
+
+    #[test]
+    fn arrays_render_element_then_lengths() {
+        let inner = LpsType::Array {
+            element: Box::new(LpsType::Vec2),
+            len: 3,
+        };
+        assert_eq!(glsl_type_name(&inner), "vec2[3]");
+        let nested = LpsType::Array {
+            element: Box::new(inner),
+            len: 2,
+        };
+        assert_eq!(glsl_type_name(&nested), "vec2[3][2]");
+    }
+
+    #[test]
+    fn structs_render_name_or_placeholder() {
+        let named = LpsType::Struct {
+            name: Some("Light".to_string()),
+            members: vec![],
+        };
+        assert_eq!(glsl_type_name(&named), "Light");
+        let anon = LpsType::Struct {
+            name: None,
+            members: vec![],
+        };
+        assert_eq!(glsl_type_name(&anon), "struct");
     }
 }
