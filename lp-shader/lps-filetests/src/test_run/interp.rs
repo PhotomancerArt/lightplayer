@@ -124,7 +124,9 @@ impl InterpShader {
                 &mut handler,
                 &vmctx_image,
                 0,
-                lpir::DEFAULT_MAX_DEPTH,
+                // Oracle path: trusted filetest sources run without an op
+                // budget by design.
+                lpir::InterpLimits::unlimited(),
             )
             .map_err(|e| format!("interp: {SHADER_INIT_FN}: {e}"))?;
             vmctx_image = out.vmctx_bytes;
@@ -211,7 +213,9 @@ impl InterpInstance {
             &mut handler,
             &self.vmctx_image,
             sret_size,
-            lpir::DEFAULT_MAX_DEPTH,
+            // Oracle path: trusted filetest sources run without an op budget
+            // by design.
+            lpir::InterpLimits::unlimited(),
         )
         .map_err(|e| format!("interp: {name}: {e}"))?;
 
