@@ -315,6 +315,14 @@ jobs:
           oxipng --version 2>/dev/null | grep -qF "$OXIPNG_VERSION" \
             || cargo install oxipng --version "$OXIPNG_VERSION" --locked --force
 
+      # Ubuntu 23.10+ AppArmor blocks unprivileged user namespaces, which the
+      # pinned Chrome-for-Testing binary needs for its sandbox (the runner's
+      # preinstalled Chrome deb ships an AppArmor profile; a raw CfT download
+      # does not). Relax the restriction instead of running --no-sandbox so
+      # the capture browser stays as close to a real one as possible.
+      - name: Allow Chrome sandbox (unprivileged userns)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Install Chrome for Testing (pinned)
         shell: bash
         run: |
