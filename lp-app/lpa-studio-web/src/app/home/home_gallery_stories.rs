@@ -121,6 +121,33 @@ fn first_run() -> Element {
     }
 }
 
+#[story(
+    description = "The gallery AS the project chooser (state-flow model §1-A, settled 2026-07-26): a connected-EMPTY device grows an explicit \"Put on <name>\" button on every project card, beside Open-in-sim — the target is always named, never guessed. The card-resident Project-tab picker stays as the second door."
+)]
+fn gallery_chooser_buttons() -> Element {
+    let mut roster = devices();
+    roster[0].state = RosterCardState::ConnectedEmpty;
+    roster[0].project = None;
+    let home = UiHomeView {
+        devices: roster,
+        projects: packages(),
+        examples: examples(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            HomeGallery {
+                home,
+                now_secs: Some(STORY_NOW),
+                has_ever_granted: Some(true),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
 #[story]
 fn populated() -> Element {
     let home = UiHomeView {

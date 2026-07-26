@@ -31,6 +31,12 @@ pub(crate) fn PackageCard(
     /// Fixed clock for stories; `None` uses the platform clock.
     #[props(default)]
     now_secs: Option<f64>,
+    /// Names of connected-EMPTY devices (state-flow model §1-A, settled
+    /// 2026-07-26): each grows an explicit "⚡ Put on <name>" button on
+    /// this card — the gallery IS the chooser for a freshly set-up board,
+    /// and the target is always named, never guessed. Empty = no buttons.
+    #[props(default)]
+    empty_devices: Vec<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(platform_now_secs);
@@ -120,8 +126,11 @@ pub(crate) fn PackageCard(
             }
             // the crystallized open action (D36 prep): same navigation as
             // the bare card click, spelled out — projects always open on
-            // the sim, never a device takeover (D29)
-            div { class: "tw:flex tw:px-3 tw:pb-3",
+            // the sim, never a device takeover (D29). Beside it, one
+            // "Put on <name>" per connected-empty device (model §1-A):
+            // the explicit button IS the D11 consent, and pushing to a
+            // blank board destroys nothing — one click, no confirm.
+            div { class: "tw:flex tw:flex-wrap tw:gap-1 tw:px-3 tw:pb-3",
                 a {
                     class: "{quiet_action_class()} tw:relative tw:z-[2]",
                     href: "#/sim/{card.slug}",
@@ -135,6 +144,30 @@ pub(crate) fn PackageCard(
                         StudioIcon { name: StudioIconName::Play, size: 14 }
                     }
                     span { "Open in sim" }
+                }
+                for device_name in empty_devices.iter() {
+                    button {
+                        class: "{quiet_action_class()} tw:relative tw:z-[2] tw:text-accent",
+                        r#type: "button",
+                        title: "Put this project on \"{device_name}\" — it's empty and ready.",
+                        onclick: {
+                            let key = card.uid.clone();
+                            move |event: MouseEvent| {
+                                event.stop_propagation();
+                                if busy || opening {
+                                    return;
+                                }
+                                on_action.call(UiAction::from_op(
+                                    ControllerId::new(DEPLOY_NODE_ID),
+                                    DeployOp::PushProject { key: key.clone() },
+                                ));
+                            }
+                        },
+                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                            StudioIcon { name: StudioIconName::Apply, size: 14 }
+                        }
+                        span { "Put on \"{device_name}\"" }
+                    }
                 }
             }
         }
