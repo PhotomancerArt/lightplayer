@@ -19,7 +19,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../../..");
 const baselineDir = path.join(repoRoot, "lp-app/lpa-studio-web/story-images");
 const ARTIFACT_NAME = "story-images-fresh";
-const WORKFLOW_NAME = "CI";
+// The workflow FILE name, not its display name — the display name ("CI") is
+// ambiguous to `gh` because renamed/deleted workflows stay registered.
+const WORKFLOW_NAME = "pre-merge.yml";
 
 function run(command, args, { allowFailure = false } = {}) {
   const result = spawnSync(command, args, { cwd: repoRoot, encoding: "utf8" });
