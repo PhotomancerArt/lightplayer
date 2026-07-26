@@ -85,15 +85,24 @@ match a declared uniform are warnings, never errors.
 
 One place: `experiment.rs`.
 
-| Cap                   | Value  | On violation                        |
-|-----------------------|--------|-------------------------------------|
-| `MAX_PROBES`          | 8      | later probes `Skipped`              |
-| `MAX_EVALS_PER_PROBE` | 4096   | probe `Skipped` (\|domain\|×\|vary\|) |
-| `MAX_RAW_VALUES`      | 64     | probe `Skipped` (reduce `none` only) |
-| `MAX_TOTAL_EVALS`     | 16 384 | probe `Skipped` (probes + health)   |
+| Cap                   | Value     | On violation                        |
+|-----------------------|-----------|-------------------------------------|
+| `MAX_PROBES`          | 8         | later probes `Skipped`              |
+| `MAX_EVALS_PER_PROBE` | 4096      | probe `Skipped` (\|domain\|×\|vary\|) |
+| `MAX_RAW_VALUES`      | 64        | probe `Skipped` (reduce `none` only) |
+| `MAX_TOTAL_EVALS`     | 16 384    | probe `Skipped` (probes + health)   |
+| `MAX_OPS_PER_EVAL`    | 1 048 576 | interpreter errors mid-call         |
 
 Every `Skipped` reason states what to change (add a reduce, shrink the
 domain, remove probes).
+
+`MAX_OPS_PER_EVAL` is the interpreter op budget ("fuel") for a single
+evaluation — the guard that turns an infinite-loop shader into an
+actionable error instead of a hung Studio tab (the LPIR interpreter has no
+other termination bound; see `lpir::InterpLimits`). An exhausted evaluation
+skips its probe (with the "infinite or excessively long loop" reason), and
+health evaluation bails after a few consecutive failures, so a
+non-terminating shader costs a handful of bounded calls per experiment.
 
 ## Provenance
 

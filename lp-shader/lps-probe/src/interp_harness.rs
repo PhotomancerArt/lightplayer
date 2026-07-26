@@ -23,7 +23,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
-use lpir::{FloatMode, LpirModule, Value, interpret_entry};
+use lpir::{FloatMode, InterpLimits, LpirModule, Value, interpret_entry};
 use lps_frontend::std_math_handler::StdMathHandler;
 use lps_shared::layout::type_size;
 use lps_shared::{LayoutRules, LpsModuleSig, LpsType, LpsValueF32};
@@ -50,6 +50,7 @@ pub struct InterpInstance {
     ir: Arc<LpirModule>,
     sig: Arc<LpsModuleSig>,
     vmctx_image: Vec<u8>,
+    limits: InterpLimits,
 }
 
 impl CompiledShader {
@@ -97,7 +98,19 @@ impl CompiledShader {
     /// initializers), it runs once here — before any `set_uniform` writes,
     /// matching the compiled runtimes' instantiation order — and the
     /// initialized image is kept.
+    ///
+    /// Every interpreter run (including `__shader_init` here) is bounded by
+    /// the per-evaluation op budget [`crate::experiment::MAX_OPS_PER_EVAL`]:
+    /// probing runs untrusted agent GLSL on the Studio wasm main thread, so
+    /// an unbounded infinite loop would hang the tab. Callers that need
+    /// unbounded runs must opt out via [`Self::instantiate_with_limits`].
     pub fn instantiate(&self) -> Result<InterpInstance, String> {
+        self.instantiate_with_limits(InterpLimits::with_fuel(crate::experiment::MAX_OPS_PER_EVAL))
+    }
+
+    /// [`Self::instantiate`] with explicit interpreter limits (each `call`
+    /// gets a fresh fuel budget of `limits.fuel`).
+    pub fn instantiate_with_limits(&self, limits: InterpLimits) -> Result<InterpInstance, String> {
         let mut vmctx_image = vec![0u8; self.sig.vmctx_buffer_size()];
         if self.ir.functions.values().any(|f| f.name == SHADER_INIT_FN) {
             let mut handler = StdMathHandler::default();
@@ -108,7 +121,7 @@ impl CompiledShader {
                 &mut handler,
                 &vmctx_image,
                 0,
-                lpir::DEFAULT_MAX_DEPTH,
+                limits,
             )
             .map_err(|e| format!("interp: {SHADER_INIT_FN}: {e}"))?;
             vmctx_image = out.vmctx_bytes;
@@ -117,6 +130,7 @@ impl CompiledShader {
             ir: Arc::clone(&self.ir),
             sig: Arc::clone(&self.sig),
             vmctx_image,
+            limits,
         })
     }
 }
@@ -205,7 +219,7 @@ impl InterpInstance {
             &mut handler,
             &self.vmctx_image,
             sret_size,
-            lpir::DEFAULT_MAX_DEPTH,
+            self.limits,
         )
         .map_err(|e| format!("interp: {name}: {e}"))?;
 
@@ -553,6 +567,31 @@ mod tests {
         let b = inst.call("bump", &[LpsValueF32::F32(2.0)]).expect("call 2");
         assert!(matches!(a, LpsValueF32::F32(x) if x == 1.0));
         assert!(matches!(b, LpsValueF32::F32(x) if x == 3.0));
+    }
+
+    #[test]
+    fn infinite_loop_call_errors_instead_of_hanging() {
+        let shader = CompiledShader::compile(
+            "float spin(float x) { while (x >= 0.0) { x = x + 0.0; } return x; }",
+        )
+        .expect("compile");
+        let mut inst = shader.instantiate().expect("instantiate");
+        let err = inst
+            .call("spin", &[LpsValueF32::F32(1.0)])
+            .expect_err("must exhaust the op budget");
+        assert!(err.contains("op budget"), "{err}");
+    }
+
+    #[test]
+    fn instantiate_with_limits_overrides_the_fuel_default() {
+        let shader = CompiledShader::compile("float id(float x) { return x; }").expect("compile");
+        let mut inst = shader
+            .instantiate_with_limits(InterpLimits::with_fuel(1))
+            .expect("instantiate");
+        let err = inst
+            .call("id", &[LpsValueF32::F32(1.0)])
+            .expect_err("1 op of fuel cannot finish a call");
+        assert!(err.contains("op budget"), "{err}");
     }
 
     #[test]

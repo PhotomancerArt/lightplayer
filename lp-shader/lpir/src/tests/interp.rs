@@ -5,7 +5,10 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::interp::{ImportHandler, InterpError, Value, interpret, interpret_with_depth};
+use crate::interp::{
+    ImportHandler, InterpError, InterpLimits, Value, interpret, interpret_with_depth,
+    interpret_with_limits,
+};
 use crate::parse::parse_module;
 
 // --- Float arithmetic ---
@@ -1667,6 +1670,84 @@ fn interp_stack_overflow() {
     let m = parse_module(ir).unwrap();
     let err = interpret_with_depth(&m, "inf", &[Value::I32(0)], &mut NoImports, 4).unwrap_err();
     assert!(matches!(err, InterpError::StackOverflow));
+}
+
+// --- Fuel ---
+
+#[test]
+fn interp_fuel_bounds_infinite_loop() {
+    let ir = "func @spin() -> i32 {
+  v1:i32 = iconst.i32 0
+  v2:i32 = iconst.i32 1
+  loop {
+    v1 = iadd v1, v2
+  }
+  return v1
+}
+";
+    let m = parse_module(ir).unwrap();
+    let err = interpret_with_limits(
+        &m,
+        "spin",
+        &[],
+        &mut NoImports,
+        InterpLimits::with_fuel(10_000),
+    )
+    .unwrap_err();
+    assert!(matches!(err, InterpError::FuelExhausted { limit: 10_000 }));
+    assert!(err.to_string().contains("op budget"), "{err}");
+}
+
+#[test]
+fn interp_fuel_sufficient_budget_completes() {
+    let ir = "
+func @for_sum(v1:i32) -> i32 {
+  v2:i32 = iconst.i32 0
+  v3:i32 = iconst.i32 0
+  v4:i32 = iconst.i32 1
+  loop {
+    v5:i32 = ige_s v3, v1
+    if v5 {
+      break
+    }
+    v2 = iadd v2, v3
+    v3 = iadd v3, v4
+  }
+  return v2
+}
+";
+    let m = parse_module(ir).unwrap();
+    let out = interpret_with_limits(
+        &m,
+        "for_sum",
+        &[Value::I32(10)],
+        &mut NoImports,
+        InterpLimits::with_fuel(10_000),
+    )
+    .unwrap();
+    assert_eq!(out[0].as_i32().unwrap(), 45);
+}
+
+#[test]
+fn interp_fuel_is_shared_across_nested_calls() {
+    // Unbounded recursion would also hit StackOverflow eventually; a tiny
+    // fuel budget must trip first, proving callees draw from the caller's
+    // budget rather than getting fresh fuel.
+    let ir = "func @inf(v1:i32) -> i32 {
+  v2:i32 = call @inf(v1)
+  return v2
+}
+";
+    let m = parse_module(ir).unwrap();
+    let err = interpret_with_limits(
+        &m,
+        "inf",
+        &[Value::I32(0)],
+        &mut NoImports,
+        InterpLimits::with_fuel(64),
+    )
+    .unwrap_err();
+    assert!(matches!(err, InterpError::FuelExhausted { .. }));
 }
 
 // --- Error paths ---
