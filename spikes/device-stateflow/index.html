@@ -33,7 +33,7 @@
                margin: 0 0 6px 4px; letter-spacing: .03em; }
 
   /* ---- the card mock ---- */
-  .card { position: relative; width: 320px; min-height: 320px; display: flex; flex-direction: column;
+  .card { position: relative; width: 260px; min-height: 300px; display: flex; flex-direction: column;
           background: var(--card); border: 1px solid var(--border); border-radius: 10px;
           overflow: hidden; }
   .card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--tint); }
@@ -146,6 +146,19 @@ function op({label, pct, term, cancel}) {
 function arrow(who, text) {
   return `<div class="arrow"><span class="who ${who}">${who==="user"?"click":"auto"}</span><span class="line"></span>${text}</div>`;
 }
+// A gallery PROJECT/EXAMPLE card (not a device card): used where the
+// gallery itself becomes the project chooser for a blank device.
+function pkgCard(o) {
+  return `<div class="step"><p class="statename">${o.state}</p>
+    <div class="card" style="--tint:transparent; min-height:0">
+      <div style="height:84px; background:linear-gradient(115deg,#3b2d63,#1f6f5c 55%,#7c5cbf)"></div>
+      <div class="body" style="gap:6px">
+        <p class="status-line" style="color:var(--text)">${o.name}</p>
+        <p class="sub-line">${o.kind}</p>
+        ${o.action||""}
+      </div>
+    </div></div>`;
+}
 const statusLine = (txt) => `<p class="status-line">${txt}</p>`;
 const chip = (name) => `<span class="chip"><span class="sw"></span>${name}</span>`;
 
@@ -153,7 +166,7 @@ const chip = (name) => `<span class="chip"><span class="sw"></span>${name}</span
 const J = [];
 
 J.push({ id:"A", title:"A · BLANK BOARD → RUNNING PROJECT", budget:"2 clicks + optional name tweak",
-  desc:"The provisioning journey (model §1-A). The Status tab IS the setup form — date-default name, one Install button, no confirm, no separate naming dialog. The expected reboot is part of the op (§2 I2), and landing announces the next step (§2 I3).",
+  desc:"The provisioning journey (model §1-A). The Status tab IS the setup form — date-default name, one Install button, no confirm, no separate naming dialog. The expected reboot is part of the op (§2 I2). Landing hands off to the GALLERY as the chooser (rev 2026-07-26): with an empty device present, the project/example cards themselves grow the put-on-device affordance — the card-resident Project-tab picker stays as the second door.",
   steps:[
     card({state:"ConnectingRetrying", tint:"amber", pulsing:true, name:"New board", tabs:"lean",
       body: statusLine("Connecting…")+`<p class="sub-line">Checking what's on this board.</p>`}),
@@ -172,11 +185,14 @@ J.push({ id:"A", title:"A · BLANK BOARD → RUNNING PROJECT", budget:"2 clicks 
       op: op({label:"Restarting…", pct:null,
         term:`<span class="dim">port re-enumerating…</span><br><span class="dim">reconnect ladder armed</span>`})}),
     arrow("auto","reconnected · identity stamped"),
-    card({state:"ConnectedEmpty — landing announces next step (§2 I3)", tint:"green", name:"2026-07-26 14:30 Light…", tabs:"picker", activeTab:"Status",
+    card({state:"ConnectedEmpty — landing points at the gallery (§2 I3)", tint:"green", name:"2026-07-26 14:30 Light…", tabs:"picker", activeTab:"Status",
       body: statusLine("Set up complete")+
-        `<p class="sub-line">Nothing loaded yet — pick a project to put on it.</p>
-         <span class="btn primary">Choose a project…</span>`}),
-    arrow("user","pick a project (Project tab picker)"),
+        `<p class="sub-line">Nothing loaded yet — pick any project or example below to put on it.</p>`}),
+    arrow("auto","gallery cards grow the affordance while an empty device is present"),
+    pkgCard({state:"gallery project card AS the chooser (rev A-5)", name:"porch-sign", kind:"Project · v5, today 1:05 PM",
+      action:`<span class="btn primary">⚡ Put on "2026-07-26 14:30…"</span>
+        <p class="sub-line">No empty device? The same click starts a sim instead.</p>`}),
+    arrow("user","one click on the project card"),
     card({state:"OperationInFlight · Running", tint:"amber", pulsing:true, name:"2026-07-26 14:30 Light…", tabs:"lean",
       op: op({label:"Pushing porch-sign v1…", pct:34, cancel:true,
         term:`writing nodes/root.json<span class="dim"> · 3/12 files</span>`})}),
@@ -235,7 +251,7 @@ J.push({ id:"C", title:"C · FIRMWARE UPDATE", budget:"1 click",
   ]});
 
 J.push({ id:"D", title:"D · UNPLUG / REPLUG (+ THE SAD BRANCH)", budget:"0 clicks (happy) · troubleshoot sheet (sad)",
-  desc:"Physical disconnects self-heal through the M6 ladder. When the ladder gives up, NotResponding is an honest terminal with the troubleshoot sheet — never a silent dead card (§2 I4).",
+  desc:"Physical disconnects self-heal through the M6 ladder. When the ladder gives up, NotResponding is an honest terminal with the troubleshoot sheet — never a silent dead card (§2 I4). This family has many permutations (unplug mid-op, replug a different board, power-only cables…) — ratified as the SHAPE here; the permutation matrix iterates during reconciliation (model §5).",
   steps:[
     card({state:"RunningUpToDate", tint:"green", name:"Luna's porch sign", tabs:"full",
       body: statusLine("Running · up to date")+chip("porch-sign")}),
@@ -253,12 +269,16 @@ J.push({ id:"D", title:"D · UNPLUG / REPLUG (+ THE SAD BRANCH)", budget:"0 clic
   ]});
 
 J.push({ id:"E", title:"E · VOCABULARY — REMAINING STATES", budget:"single cards, no journey", vocab:true,
-  desc:"Every other state, one honest card each (model §3 has the full tab/affordance table). Danger is present on ALL of them — the always-available short-circuit.",
+  desc:"Every other state, one honest card each (model §3 has the full tab/affordance table). Danger is present on ALL of them — the always-available short-circuit. Copy rule (§3a): explain the situation in plain words, and date/time stamps — never vN — for versions. Backlog (§5): raw .bin backup/restore of a board, especially before wiping something unrecognized.",
   steps:[
-    card({state:"RunningBehind", tint:"amber", name:"Luna's porch sign", tabs:"full",
-      body: statusLine("Running · v3 (behind)")+chip("porch-sign")+`<span class="btn primary">↑ Push v5</span>`}),
-    card({state:"EditedOnDevice", tint:"amber", name:"Luna's porch sign", tabs:"full",
-      body: statusLine("Edited on device")+`<p class="sub-line">Device copy differs; banked at connect.</p><span class="btn">Review…</span>`}),
+    card({state:"RunningBehind — timestamps, not vN (copy rule §3a)", tint:"amber", name:"Luna's porch sign", tabs:"full",
+      body: statusLine("Running an older version")+chip("porch-sign")+
+        `<p class="sub-line">On the device: the version from <b>Jul 24, 2:10 PM</b>.<br>Your latest edit: <b>today, 1:05 PM</b>.</p>
+         <span class="btn primary">↑ Push the latest</span>`}),
+    card({state:"EditedOnDevice — explain the situation (copy rule §3a)", tint:"amber", name:"Luna's porch sign", tabs:"full",
+      body: statusLine("Changed on the device")+chip("porch-sign")+
+        `<p class="sub-line">This board's copy has edits your project doesn't — made after your last push. Studio already saved a backup of it to your library.</p>
+         <span class="btn">Review the changes…</span>`}),
     card({state:"NeedsAName (legacy boards only — journey A never lands here)", tint:"amber", name:"Unnamed device", tabs:"lean",
       body: statusLine("Needs a name")+
         `<div class="field"><label>Device name</label><input placeholder="2026-07-26 14:30 LightPlayer"></div><span class="btn primary">Name device</span>`}),
@@ -269,20 +289,26 @@ J.push({ id:"E", title:"E · VOCABULARY — REMAINING STATES", budget:"single ca
          <p class="sub-line">Recognized non-LightPlayer firmware; replacing is safe.</p>`}),
     card({state:"NeedsFirmwareUpdate", tint:"amber", name:"Luna's porch sign", tabs:"lean",
       body: statusLine("Needs a firmware update")+`<p class="sub-line">Speaks an older protocol — update to manage it.</p><span class="btn primary">⚡ Update firmware</span>`}),
-    card({state:"HoldsUnreadableData", tint:"amber", name:"Old prototype", tabs:"picker",
-      body: statusLine("Holds unreadable data")+`<p class="sub-line">project.json is not a current-format project.</p><span class="btn">Choose a project…</span>`}),
-    card({state:"InUseElsewhere", tint:"gray", name:"Luna's porch sign", tabs:"lean",
-      body: statusLine("In use elsewhere")+`<p class="sub-line">Another tab holds this port · retrying quietly</p>`}),
+    card({state:"HoldsUnreadableData — the way out is BLANK, not push (rev)", tint:"amber", name:"Old prototype", tabs:"lean",
+      body: statusLine("Holds unreadable data")+
+        `<p class="sub-line">project.json is not a current-format project. Get the board back to empty, then set it up fresh.</p>
+         <span class="btn destructive">Back up &amp; wipe project…</span>
+         <p class="sub-line">Saves a raw backup to your library first → lands on "nothing loaded".</p>`}),
+    card({state:"InUseElsewhere + take-over (stretch, rev)", tint:"gray", name:"Luna's porch sign", tabs:"lean",
+      body: statusLine("In use elsewhere")+
+        `<p class="sub-line">Another Studio tab holds this port.</p>
+         <span class="btn primary">Use here</span>
+         <p class="sub-line">Closes the connection in the other tab — you're the one holding the board.</p>`}),
     card({state:"Degraded (vocabulary slot)", tint:"amber", name:"Luna's porch sign", tabs:"picker",
       body: statusLine("Recovered from a crash")+`<span class="btn">Troubleshoot…</span>`}),
     card({state:"Offline · Danger → Forget", tint:"gray", hollow:true, faded:true, name:"Old prototype", tabs:"lean", activeTab:"Danger",
       body:`<div class="rows"><span class="btn destructive">Forget device…</span></div>`}),
     card({state:"Sim card (D36)", tint:"green", sim:true, tport:"SIM", name:"Simulator", tabs:"picker",
       body: statusLine("Running")+chip("porch-sign")}),
-    card({state:"OperationInFlight · Failed (§2 I4 — never a silent dead end)", tint:"red", name:"Luna's porch sign", tabs:"lean",
+    card({state:"OperationInFlight · Failed — ONE exit to the nearest stable state (§2 I4 rev)", tint:"red", name:"Luna's porch sign", tabs:"lean",
       op:`<div class="op"><span class="label" style="color:var(--red)">Install failed</span>
         <div class="term">esptool: timed out waiting for packet<br><span class="warn">device disconnected mid-write</span></div>
-        <div class="cancelrow"><span class="btn quiet">Dismiss</span><span class="btn primary" style="margin-left:8px">Retry</span></div></div>`}),
+        <div class="cancelrow"><span class="btn primary">Back to set up</span></div></div>`}),
   ]});
 
 // ---------- render ----------
