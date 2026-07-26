@@ -694,6 +694,28 @@ async function createCapturePage(cdp) {
       await cdp.send("Page.navigate", { url }, sessionId);
       await waitForCaptureBox(cdp, sessionId, storyId);
       await waitForStoryReady(cdp, sessionId, storyId);
+      // <select> widgets paint their label at first layout and do not reliably
+      // repaint when a webfont lands afterwards, so a select that painted
+      // before its font decoded keeps fallback-metric text for the life of the
+      // page — bistable run-to-run depending on who won the race (the last
+      // churner standing after the font gate above: subpixel-shifted select
+      // text, ~Δ100). Force each select through a display toggle after fonts
+      // are ready so its label re-renders with the real font.
+      await evaluate(
+        cdp,
+        sessionId,
+        `
+        (() => {
+          document.querySelectorAll('select').forEach((s) => {
+            const d = s.style.display;
+            s.style.display = 'none';
+            void s.offsetWidth;
+            s.style.display = d;
+          });
+          return true;
+        })()
+      `,
+      );
       await settleFocus(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
