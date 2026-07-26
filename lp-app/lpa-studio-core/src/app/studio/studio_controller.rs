@@ -3251,6 +3251,19 @@ impl StudioController {
             self.quiesce_lens();
             self.pool.set_lens(id);
         }
+        // Library sync must target the dir this runtime ACTUALLY serves:
+        // a device's storage dir is discovered at connect (CLI uploads /
+        // older pushes use dirs other than the sim's default slot) — the
+        // sim (no discovered dir) keeps the demo slot. Save-as-pull from
+        // the wrong dir silently skipped the library save (2026-07-26).
+        let storage_id = self
+            .pool
+            .session(id)
+            .and_then(|session| session.device_storage_id().map(str::to_string))
+            .unwrap_or_else(|| {
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+            });
+        self.project.set_runtime_storage_id(storage_id);
         self.connect_running_project(updates).await
     }
 
@@ -3776,6 +3789,13 @@ impl StudioController {
     /// The runtime pool, for e2e assertions about session coexistence.
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
         &self.pool
+    }
+
+    /// The storage dir library sync targets, for the save-as-pull
+    /// wiring regression (2026-07-26).
+    #[cfg(test)]
+    pub(crate) fn project_runtime_storage_id_for_test(&self) -> &str {
+        self.project.runtime_storage_id_for_test()
     }
 
     /// The connect-flow state, for ladder assertions (M6).

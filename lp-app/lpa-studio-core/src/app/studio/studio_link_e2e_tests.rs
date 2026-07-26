@@ -191,6 +191,52 @@ fn device_running_from_a_non_default_storage_dir_classifies_not_empty() {
     assert_eq!(slug, &summary.slug);
 }
 
+/// Save-as-pull regression (2026-07-26 walk): attaching the editor to a
+/// device running from a NON-default storage dir must point library sync
+/// at that dir. A fixed-"studio" pull returned empty and silently
+/// skipped the library half of every save — the device kept the edits,
+/// the library never saw them, and the next connect classified Diverged
+/// ("my edits didn't save locally").
+#[test]
+fn lens_attach_targets_the_devices_real_storage_dir() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let library_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_project_dir("bench")
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        crate::ProjectOp::OpenDeviceProject { uid: None },
+    )))
+    .expect("the D29 open attaches the device lens");
+
+    assert_eq!(
+        studio.project_runtime_storage_id_for_test(),
+        "bench",
+        "library sync must target the dir the device actually serves"
+    );
+}
+
 /// Row 1 (happy path, part 2): the card-native stamp→push on an empty
 /// device (M8′ — the dialog's wizard, re-homed onto the card): the name
 /// sheet's op stamps over the real serial framing, the Project-tab

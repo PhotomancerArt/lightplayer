@@ -48,6 +48,15 @@ pub struct ProjectController {
     state: ProjectState,
     running_project_status: RunningProjectStatus,
     active_editor_target: Option<ProjectEditorTarget>,
+    /// The storage dir (under `/projects/`) the LENS runtime actually
+    /// serves the project from. The sim always uses the demo slot, but a
+    /// DEVICE's dir is discovered at connect (CLI uploads and older
+    /// pushes use other dirs) — `StudioController::attach_lens` sets this
+    /// from the session so save-as-pull, the open path, and the
+    /// corruption tripwire all target the RIGHT dir. Pulling from the
+    /// wrong dir returned empty and silently skipped the library save
+    /// (2026-07-26 walk: device edits "lost", reconnect diverged).
+    runtime_storage_id: String,
     sync: Option<ProjectSync>,
     root_nodes: Vec<NodeController>,
     /// Un-acked local slot edits, keyed by address and held until the server
@@ -122,6 +131,8 @@ impl ProjectController {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
             active_editor_target: None,
+            runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
+                .to_string(),
             sync: None,
             root_nodes: Vec::new(),
             edit_buffer: BTreeMap::new(),
@@ -135,6 +146,17 @@ impl ProjectController {
             next_mutation_cmd_id: 1,
             library: None,
         }
+    }
+
+    /// Point library sync at the LENS runtime's actual project storage
+    /// dir (set at lens attach; a device's dir is discovered at connect).
+    pub fn set_runtime_storage_id(&mut self, storage_id: String) {
+        self.runtime_storage_id = storage_id;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn runtime_storage_id_for_test(&self) -> &str {
+        &self.runtime_storage_id
     }
 
     /// Attach the injected library host (browser shell, once the store
@@ -1409,11 +1431,7 @@ impl ProjectController {
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
 
         let loaded = server
-            .open_library_project(
-                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
-                &files,
-                &expected_hash,
-            )
+            .open_library_project(&self.runtime_storage_id, &files, &expected_hash)
             .await?;
         context.active = Some(ActiveLibraryProject {
             handle,
@@ -1446,10 +1464,7 @@ impl ProjectController {
         let now = (context.now_secs)();
 
         let pulled = server
-            .pull_changed_files(
-                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
-                active.last_synced,
-            )
+            .pull_changed_files(&self.runtime_storage_id, active.last_synced)
             .await?;
         if pulled.updates.is_empty() {
             active.last_synced = pulled.version;
@@ -1473,13 +1488,11 @@ impl ProjectController {
             .content_hash()
             .map_err(library_ui_error)?
             .to_string();
-        let (remote, _) = server
-            .hash_package(crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID)
-            .await?;
+        let (remote, _) = server.hash_package(&self.runtime_storage_id).await?;
         if local != remote {
             log::error!("library/runtime hash mismatch after save: {local} vs {remote}");
             return Ok(Some(UiNotice::warning(
-                "Saved, but the library copy differs from the simulator — please report this",
+                "Saved, but the library copy differs from the running project — please report this",
             )));
         }
         Ok(None)
@@ -2127,7 +2140,7 @@ impl ProjectController {
                 Err(e) => {
                     log::warn!("save-as-pull failed (will retry on next save): {e:?}");
                     notices = notices.with_notice(UiNotice::warning(
-                        "Saved to the simulator, but not yet to your library — will retry on the next save",
+                        "Saved to the running project, but not yet to your library — will retry on the next save",
                     ));
                 }
             }
