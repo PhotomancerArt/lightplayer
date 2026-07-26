@@ -52,6 +52,10 @@ pub struct UiAssetEditor {
     /// The owning shader's consumed uniforms (name + header-declared GLSL
     /// type), for editor completions. Empty for non-shader assets.
     pub uniforms: Vec<UiShaderUniform>,
+    /// The agent chat for this shader (Agent | Code tab strip), decorated
+    /// onto GLSL editors by the studio controller's view build. `None` for
+    /// non-GLSL assets and in project-controller unit contexts.
+    pub agent: Option<crate::UiAgentView>,
 }
 
 impl UiAssetEditor {
@@ -127,6 +131,7 @@ mod tests {
             failure: None,
             shader_error: None,
             uniforms: Vec::new(),
+            agent: None,
         }
     }
 

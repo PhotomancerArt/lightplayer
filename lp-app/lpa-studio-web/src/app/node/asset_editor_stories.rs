@@ -49,6 +49,9 @@ fn editor_fixture(content: Option<UiAssetContent>) -> UiAssetEditorData {
             name: "time".to_string(),
             glsl_type: "float".to_string(),
         }],
+        // The plain editor stories render without the Agent | Code strip;
+        // the decorated form has its own stories (agent_chat_stories).
+        agent: None,
     }
 }
 

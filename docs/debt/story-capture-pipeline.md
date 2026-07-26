@@ -44,6 +44,14 @@ each new agent session re-learns the incantations from memory notes.
   `code-editor` (chip task_16a65557 tracks the churn itself).
 
 **Incident log**
+- 2026-07-25 — shader-agent merge captures: three consecutive CDP
+  navigate timeouts (30s, then 90s) at concurrency 1, wedge story
+  varying per run. Root aggravation: **seven zombie headless Chromes**
+  accumulated from the failed passes themselves — each failure leaks
+  Chrome processes that starve the next attempt. Fix: `pkill -f
+  -- --headless` before retrying + the documented 120s timeout; passed
+  first try on a clean slate. Lesson: check for leaked Chromes FIRST
+  when captures wedge repeatedly.
 - 2026-07-08 — M4-gallery era: baseline regeneration flakes noted at
   first gallery visual gate (CDP timeout, retries needed).
 - 2026-07-16 — capture flake during M2 story-sheet work; retry passed.

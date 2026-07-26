@@ -1,3 +1,7 @@
+// Duplicated in lps-probe (src/interp_harness.rs), adapted there: string
+// diagnostics instead of anyhow, no texture specs, persistent VMContext
+// across calls. Not re-imported here because those signatures diverge.
+
 //! `interp.f32` filetest backend: GLSL → `lps-frontend` (naga) → LPIR →
 //! `lpir::interpret` in native f32, reusing the M2 conformance-oracle path.
 //!

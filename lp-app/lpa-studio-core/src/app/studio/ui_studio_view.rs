@@ -53,6 +53,9 @@ pub struct UiStudioView {
     /// as the gallery roster's live cards; `None` while no lens session
     /// exists (the shell falls back to the device pane surface).
     pub lens_card: Option<Box<crate::app::home::UiDeviceCard>>,
+    /// The layered-settings slice (effective values, provenance, override
+    /// state) for the shell's settings popover.
+    pub settings: crate::app::settings::UiSettingsView,
 }
 
 impl UiStudioView {
@@ -66,6 +69,7 @@ impl UiStudioView {
             open_project_slug: None,
             device_sync: None,
             lens_card: None,
+            settings: crate::app::settings::UiSettingsView::default(),
         }
     }
 
@@ -95,6 +99,11 @@ impl UiStudioView {
 
     pub fn with_lens_card(mut self, card: Option<crate::app::home::UiDeviceCard>) -> Self {
         self.lens_card = card.map(Box::new);
+        self
+    }
+
+    pub fn with_settings(mut self, settings: crate::app::settings::UiSettingsView) -> Self {
+        self.settings = settings;
         self
     }
 

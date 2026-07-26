@@ -88,6 +88,12 @@ follow-ups): [`docs/design/lp-shader-texture-access.md`](../docs/design/lp-shade
 - `lps-builtins-emu-app/` — RISC-V guest linking all builtins (emulator filetests)
 - `lpfn-impl-macro/` — Proc-macros for LPFX builtin definitions
 
+### Probing
+
+- `lps-probe/` — experiment/probe evaluation for shaders on the LPIR f32
+  interpreter (the shader agent's `iterate` core; `no_std` + `alloc`, sans-IO,
+  wasm-capable)
+
 ### Testing
 
 - `lps-filetests/` — GLSL filetests (JIT, RV32 native, RV32 Cranelift, WASM targets)
