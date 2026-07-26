@@ -31,7 +31,8 @@ pub mod probe_wrapper;
 
 pub use diff::{DiffReport, diff_experiments};
 pub use experiment::{
-    MAX_EVALS_PER_PROBE, MAX_PROBES, MAX_RAW_VALUES, MAX_TOTAL_EVALS, run_experiment,
+    MAX_EVALS_PER_PROBE, MAX_OPS_PER_EVAL, MAX_PROBES, MAX_RAW_VALUES, MAX_TOTAL_EVALS,
+    run_experiment,
 };
 pub use experiment_result::{
     ExperimentResult, ProbeHistogram, ProbeOutcome, ProbeStats, ProbeStepHistogram, ProbeStepStats,
