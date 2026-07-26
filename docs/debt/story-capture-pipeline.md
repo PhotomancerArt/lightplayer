@@ -44,6 +44,12 @@ each new agent session re-learns the incantations from memory notes.
   `code-editor` (chip task_16a65557 tracks the churn itself).
 
 **Incident log**
+- 2026-07-26 — device state-flow reconciliation capture: CDP navigate
+  timeout (120s, twice — both passes) on project-pane overview @ lg at
+  concurrency 1, while the `studio-dev` dx server ran on the same
+  machine. Retry with the dev server STOPPED + 180s timeout passed
+  first try. Confirms the "quiet machine" workaround is load-bearing:
+  the dev server alone is enough contention to wedge the heavy sheets.
 - 2026-07-25 — shader-agent merge captures: three consecutive CDP
   navigate timeouts (30s, then 90s) at concurrency 1, wedge story
   varying per run. Root aggravation: **seven zombie headless Chromes**
