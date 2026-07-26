@@ -1416,6 +1416,73 @@ fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
     );
 }
 
+/// Journey B (state-flow model §1-B, contrast): erasing a DIFFERENT
+/// device leaves the editor alone — the sever is specific to the lens's
+/// own device. A sim-lens editor stays open and bound through a hardware
+/// erase running in the background.
+#[test]
+fn erasing_the_device_leaves_a_sim_lens_editor_alone() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, StudioServerClient};
+    use std::collections::VecDeque;
+
+    let (store, host) = library();
+    let sign = store
+        .install_package(
+            "Sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
+            "dev_aaaaaaaaaaaaaaaa",
+            "Bench board",
+        )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    // The editor opens on the SIM…
+    let sim_io = InProcessServerIo {
+        server: Rc::new(RefCell::new(edit_e2e_server())),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let sim_id = studio.install_stub_sim_with_client_for_test(
+        StudioServerClient::from_io_for_test("in-process", Box::new(sim_io)),
+    );
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            key: sign.uid.to_string(),
+        },
+    )))
+    .expect("open on the sim succeeds");
+    assert_eq!(studio.runtime_pool_for_test().lens(), Some(sim_id));
+
+    // …the hardware connects alongside, and gets erased from its card.
+    connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
+    drive(studio.dispatch(device_action(DeviceOp::ResetToBlank)))
+        .expect("erase succeeds with a sim lens open");
+
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        Some(sim_id),
+        "erasing a different device never touches the editor (model §1-B)"
+    );
+    assert!(
+        studio.view().home.is_none(),
+        "the sim editor stays showing — no gallery bounce"
+    );
+}
+
 /// Device-lifecycle P3 (contrast): the lens DETACH is specific to the
 /// destructive erase. A runtime reset keeps the project on the device, so
 /// it does not detach the lens (its live edit-state resets and reloads on
