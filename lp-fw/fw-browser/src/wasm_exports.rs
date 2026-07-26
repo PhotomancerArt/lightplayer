@@ -77,9 +77,24 @@ pub fn destroy_runtime(runtime_id: u32) -> bool {
 }
 
 /// Number of live browser firmware runtimes.
+///
+/// Doubles as the worker script's poisoned-instance canary: it takes the
+/// runtime registry's `RefCell` borrow, so after an escaped panic leaked
+/// a `borrow_mut` this call aborts — a cheap, side-effect-free probe.
 #[wasm_bindgen]
 pub fn runtime_count() -> u32 {
     runtime_registry::runtime_count()
+}
+
+/// Deliberately panic inside the wasm instance.
+///
+/// Verification hook for the instance-fatal recovery path — the only way
+/// to trigger a real panic=abort trap on demand (worker message
+/// `debug_force_panic`). Never called by product code.
+#[wasm_bindgen]
+pub fn debug_force_panic() {
+    logger::install();
+    panic!("debug_force_panic: deliberate test panic");
 }
 
 /// Handle one input envelope encoded as JSON and return output envelopes JSON.

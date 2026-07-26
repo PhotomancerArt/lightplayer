@@ -1242,6 +1242,123 @@ fn open_sim_project_reattaches_the_lens_to_the_sim() {
     assert!(studio.view().home.is_none(), "the editor is back");
 }
 
+/// Poisoned-instance recovery, part 1 (worker crash): the link layer
+/// reports a sticky instance-fatal for the sim session; the tick-cadence
+/// recovery edge-detects it, surfaces the primary panic on the console,
+/// tears the dead session down, and attempts the auto-reboot with the
+/// last-known project. On this host harness the reboot's fresh install
+/// cannot complete (the browser-worker provider is wasm-only), so the
+/// attempt is asserted through its logged failure; the wasm-side reboot
+/// is covered by the live check.
+#[test]
+fn sim_crash_is_detected_torn_down_and_auto_reboot_attempted() {
+    let (mut studio, _device, _sim_id) = coexisting_sim_and_device();
+    arm_sim_fatal(&studio, "browser worker instance fatal: panicked at 'boom'");
+
+    drive(studio.run_due_sim_crash_recovery());
+
+    let logs = studio.logs();
+    assert!(
+        logs.iter().any(|entry| {
+            entry.message.contains("Simulator crashed:")
+                && entry.message.contains("panicked at 'boom'")
+        }),
+        "the primary panic reaches the console: {:?}",
+        logs.iter().map(|entry| &entry.message).collect::<Vec<_>>()
+    );
+    assert!(
+        logs.iter().any(|entry| entry.message.contains("restarted")),
+        "the auto-reboot announces itself"
+    );
+    assert!(
+        logs.iter()
+            .any(|entry| entry.message.contains("simulator restart failed")),
+        "the reboot was attempted (and failed on the host harness): {:?}",
+        logs.iter().map(|entry| &entry.message).collect::<Vec<_>>()
+    );
+    assert!(
+        studio.runtime_pool_for_test().sim_session().is_none(),
+        "the dead session was torn down"
+    );
+}
+
+/// Poisoned-instance recovery, part 2 (flap guard): a second crash within
+/// the guard window (the fixed test clock never advances) is marked
+/// `SimCrashed` but NOT auto-rebooted — the session stays Failed so the
+/// card offers manual restart.
+#[test]
+fn sim_crash_within_the_flap_guard_stays_failed_for_manual_restart() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_server};
+    use crate::StudioServerClient;
+    use std::collections::VecDeque;
+
+    let (mut studio, _device, _sim_id) = coexisting_sim_and_device();
+    arm_sim_fatal(&studio, "browser worker instance fatal: first crash");
+    drive(studio.run_due_sim_crash_recovery());
+    assert!(
+        studio.runtime_pool_for_test().sim_session().is_none(),
+        "the first crash consumed the auto-reboot"
+    );
+
+    // A fresh sim (as if the reboot had succeeded on wasm), crashing
+    // again inside the guard window.
+    let sim_io = InProcessServerIo {
+        server: Rc::new(RefCell::new(edit_e2e_server())),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    studio.install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+        "in-process",
+        Box::new(sim_io),
+    ));
+    arm_sim_fatal(&studio, "browser worker instance fatal: second crash");
+    drive(studio.run_due_sim_crash_recovery());
+
+    let pool = studio.runtime_pool_for_test();
+    let sim = pool
+        .sim_session()
+        .expect("the crashed session stays for manual restart");
+    assert!(
+        matches!(
+            sim.server_state(),
+            ServerState::Failed {
+                kind: ServerFailureKind::SimCrashed,
+                ..
+            }
+        ),
+        "the session is marked SimCrashed, got {:?}",
+        sim.server_state()
+    );
+    assert!(
+        studio
+            .logs()
+            .iter()
+            .any(|entry| entry.message.contains("keeps crashing")),
+        "the guard explains why no reboot ran"
+    );
+}
+
+/// Arm the scripted instance-fatal on the sim session's fake connector —
+/// the host stand-in for the browser worker's sticky fatal report.
+fn arm_sim_fatal(studio: &StudioController, message: &str) {
+    let pool = studio.runtime_pool_for_test();
+    let session = pool.sim_session().expect("a sim session");
+    let crate::RuntimePayload::Sim(sim) = session.payload() else {
+        panic!("sim session holds a sim payload");
+    };
+    #[allow(
+        unreachable_patterns,
+        reason = "providers beyond Fake are feature/target-gated, so the \
+                  wildcard arm is unreachable in some test configurations"
+    )]
+    match &*sim.connector {
+        lpa_link::LinkConnector::Fake(provider) => {
+            provider.set_session_fatal(Some(message.to_string()));
+        }
+        _ => panic!("stub sim uses the fake connector"),
+    }
+}
+
 /// Row P3-d (minimal D29): a device attached with its project LOADED and
 /// library-known → `ProjectOp::OpenDeviceProject` attaches the lens to
 /// the DEVICE session and opens its running project in the editor over

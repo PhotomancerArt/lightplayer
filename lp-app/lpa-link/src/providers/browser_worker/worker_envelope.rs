@@ -117,6 +117,12 @@ pub enum BrowserInputEnvelope {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BrowserOutputEnvelope {
+    /// Worker lifecycle report. `status` values include `"booting"`,
+    /// `"ready"`, `"error"` (one message failed; the worker keeps
+    /// serving), and `"fatal"` — the STICKY poisoned-instance report (an
+    /// escaped panic=abort trap condemned the wasm instance; the worker
+    /// answers every later message with it and must be respawned —
+    /// instance-fatal ADR). A fatal `message` carries the primary panic.
     Status {
         #[serde(default)]
         runtime_id: Option<u32>,

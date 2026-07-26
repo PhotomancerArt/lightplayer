@@ -88,6 +88,18 @@ impl BrowserWorkerProvider {
         state.handle()?.post(envelope)
     }
 
+    /// The sticky instance-fatal message a session's worker reported, or
+    /// `None` while its wasm instance is healthy (or the session is
+    /// unknown). Crash-recovery flows key off this to distinguish a dead
+    /// worker (reboot required) from ordinary transport trouble.
+    pub fn session_fatal(&self, session_id: &LinkSessionId) -> Option<String> {
+        self.sessions
+            .borrow()
+            .get(session_id)
+            .and_then(|state| state.handle.as_ref())
+            .and_then(BrowserWorkerHandle::fatal_message)
+    }
+
     pub fn take_outputs(
         &self,
         session_id: &LinkSessionId,
