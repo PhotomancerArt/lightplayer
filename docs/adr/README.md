@@ -80,8 +80,8 @@ holds the full context.
 | CI check that a `PROJECT_FORMAT_VERSION` bump lands with a `schemas/history/` snapshot | `2026-07-05-artifact-format-version-and-schema-snapshots` | The first real format bump |
 | CLI adoption of `DeviceSession` (lp-cli still hand-rolls provider/session bundles; `fwcheck`'s boot-line grep dies then) | `2026-07-15-device-session-model` | Device-link M5 (CLI) work begins |
 | Websocket / server-lightplayer connector classes on the capability model | `2026-07-15-device-session-model` | A remote (non-serial) device class becomes real |
-| Fuel heatmap / GLSL probe synergy (trap pixel = probe selection; vmctx `metadata` reserved for trace state) | `2026-07-20-lpvm-native-fuel` | Probes work begins |
-| Interpreter loop cap (interp target still has unbounded loops; trap filetests guard with `@unsupported(interp)`) | `2026-07-20-lpvm-native-fuel` | interp leaves opt-in oracle duty or hangs a runner |
+| Fuel heatmap / GLSL probe synergy (trap pixel = probe selection; vmctx `metadata` reserved for trace state) | `2026-07-20-lpvm-native-fuel` | Probes landed (`lps-probe`, 2026-07-25); revisit with probe/agent-activity visualization work |
+| Interpreter fuel/loop cap — **trigger has fired**: `lps-probe` runs the unbounded interp in product wasm (Studio main thread); an infinite-loop shader in a probe hangs the tab | `2026-07-20-lpvm-native-fuel`; `2026-07-25-shader-probe-experiment-api` | Bound it (interp fuel or worker offload + terminate-on-timeout) before hostile/accidental infinite loops meet real users |
 | Per-function shared trap stub (shrink back-edge fuel checks from 7 to ~5 words) | `2026-07-20-lpvm-native-fuel` | ESP32 16 KB JIT chunk budget gets tight |
 | Compute-tick / shader-init fuel blame route (traps abort bounded but bypass the panic/blame ledger) | `2026-07-20-lpvm-native-fuel` | Runaway compute shaders show up in practice |
 | Budgeted/async shader compile (spread the ~194 ms device compile across frames instead of one long frame per apply) | `2026-07-14-shader-auto-apply` | The per-apply frame stall matters in practice |
@@ -89,6 +89,14 @@ holds the full context.
 | Live sim-card frames: core-owned present service for pool sessions sharing PreviewHost's CPU blit seam + the gallery routing rule (sim frames instead of a preview lease) | `2026-07-24-runtime-pool` | The roadmap's live-thumbnails item is prioritized |
 | Real vmctx block on the browser path (guest shader shares the fw-browser module's linear memory with vmctx at address 0) | `2026-07-23-sim-wasm-fuel` | Browser memory-layout work or probe trace state lands |
 | Per-instance host recovery contexts (typed errors could feed a host blame ledger without panics) | `2026-07-23-per-target-panic-strategy`; `2026-07-04-crash-recovery-model` | Host-side blame for failing shaders becomes a product need |
+| Worker offload for probe evaluation (also the pragmatic bound on infinite-loop shaders until interp fuel) | `2026-07-25-shader-probe-experiment-api`; `2026-07-25-studio-shader-agent-architecture` | Live walks show probe-eval jank, or the interp fuel bound lands here first |
+| lps-glsl as a linter pass over the probe unit (better spans than the naga oracle) | `2026-07-25-shader-probe-experiment-api` | Span quality on probe/agent diagnostics becomes a complaint |
+| Frontend dialect gap: engine frontends accept bare uniforms, the probe oracle (naga) requires `layout(binding=N)` — a shader can render on-engine yet fail health | `2026-07-25-shader-probe-experiment-api` | A live gate or demo shader hits it; align or lint in the agent path |
+| Probe/agent-activity visualization (render probe domains/results on the preview) | `2026-07-25-studio-shader-agent-architecture` | M6 capture lands or the node-UX pass begins; likely its own plan |
+| Full shader-node UX pass toward preview + chat (this slice added only the tab strip + dirty dot) | `2026-07-25-studio-shader-agent-architecture` | The separately-running design spike concludes |
+| Live-sim binding push (agent binding overrides reach only the probe oracle today; transient push needs visible indication + auto-clear) | `2026-07-25-studio-shader-agent-architecture` | Outward-from-GLSL capability work begins |
+| In-web local model provider (the reason `ModelProvider` exists) | `2026-07-25-studio-shader-agent-architecture` | A credible in-browser model is worth serving |
+| Unreserve the `iterate` tool's `capture` field | `2026-07-25-studio-shader-agent-architecture` | The M6 preview snapshot seam lands |
 
 ## Relationship To Shared Planning
 

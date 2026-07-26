@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod bus;
 pub mod device;
 pub mod home;
@@ -10,4 +11,5 @@ pub mod rich_object;
 pub mod roster;
 pub mod runtime_pool;
 pub mod server;
+pub mod settings;
 pub mod studio;

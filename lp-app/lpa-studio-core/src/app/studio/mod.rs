@@ -1,6 +1,10 @@
 pub mod console_command;
 pub mod refresh_cadence;
 pub mod studio_actor;
+/// End-to-end agent-flow tests: scripted fake model over the real agent →
+/// iterate → overlay-edit path (host-only, like the edit e2e tests).
+#[cfg(test)]
+mod studio_agent_e2e_tests;
 pub mod studio_command;
 pub mod studio_controller;
 /// End-to-end edit-flow tests against an in-process `lpa-server` (host-only

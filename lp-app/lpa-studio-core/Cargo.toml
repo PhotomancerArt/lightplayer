@@ -9,6 +9,7 @@ publish = false
 description = "Headless LightPlayer Studio application core"
 
 [dependencies]
+lpa-agent = { path = "../lpa-agent" }
 lpa-client = { path = "../lpa-client", default-features = false }
 # device-session everywhere (RuntimeAttachment::Device drives it); the host
 # transport wire arrives via feature unification when a host provider
@@ -19,6 +20,7 @@ lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
+lps-probe = { path = "../../lp-shader/lps-probe" }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -52,6 +54,8 @@ lpa-server = { path = "../lpa-server" }
 # scripted fake device); the feature is dev-only.
 lpa-link = { path = "../lpa-link", features = ["fake-device"] }
 async-trait = { version = "0.1" }
+# Scripted model-provider streams in the agent e2e tests.
+futures-util = "0.3"
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 
