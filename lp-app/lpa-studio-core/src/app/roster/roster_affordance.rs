@@ -39,7 +39,7 @@ impl RosterAffordance {
     /// accessibility even when no button renders.
     pub fn label(&self) -> String {
         match self {
-            Self::OpenEditor => "Open".to_string(),
+            Self::OpenEditor => "Open in editor".to_string(),
             // §3a: no version jargon — the Project facts carry distance.
             Self::PushVersion { .. } => "Push the latest".to_string(),
             Self::ResolveDrift => "Review".to_string(),

@@ -1440,7 +1440,11 @@ pub(super) fn device_affordance_action(
 ) -> Option<UiAction> {
     let action = match affordance {
         // the grow control (⤢) is the editor entry — no row
-        RosterAffordance::OpenEditor => return None,
+        // The visible editor CTA on the running card's face (2026-07-26
+        // walk) — same op as the grow ⤢, said out loud.
+        RosterAffordance::OpenEditor => open_device_project_action()
+            .with_summary("Open this device's project in the editor.")
+            .with_icon("grow"),
         // The in-card push (M5): the button IS the D11 consent — the push
         // dispatches directly and its progress folds into the card's
         // Operation-in-flight state. A missing chip means no honest push
@@ -1571,7 +1575,10 @@ fn wire_card_affordance(
             let action = UiAction::from_op(
                 ControllerId::new(DeviceController::NODE_ID),
                 DeviceOp::WipeProject,
-            );
+            )
+            .with_label(RosterAffordance::WipeProject.label())
+            .with_summary("Remove the project from this device — back to blank.")
+            .with_icon("revert");
             Some(CardRowAction::Sheet(
                 CardSheetState::Confirm(CardVerb::WipeProject),
                 strip_confirmation(action),
@@ -1612,6 +1619,12 @@ fn wire_sim_card_section(section: RichSection<SimDetailAffordance>) -> RichSecti
             .affordances
             .iter()
             .map(|affordance| match affordance {
+                SimDetailAffordance::OpenEditor => CardRowAction::Dispatch(
+                    open_sim_project_action()
+                        .with_label("Open in editor")
+                        .with_summary("Open the loaded project in the editor.")
+                        .with_icon("grow"),
+                ),
                 SimDetailAffordance::StopSimulator => CardRowAction::Sheet(
                     CardSheetState::Confirm(CardVerb::StopSim),
                     strip_confirmation(stop_simulator_action()),

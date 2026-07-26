@@ -131,8 +131,12 @@ pub(crate) fn PackageCard(
             // the explicit button IS the D11 consent, and pushing to a
             // blank board destroys nothing — one click, no confirm.
             div { class: "tw:flex tw:flex-wrap tw:gap-1 tw:px-3 tw:pb-3",
+                // Both chooser buttons wear the SAME quiet-chip treatment
+                // (2026-07-26 walk: the anchor's UA underline read as a
+                // link, the push button's accent tint didn't match — a
+                // matched pair now; the <a> stays an <a> for D37 nav).
                 a {
-                    class: "{quiet_action_class()} tw:relative tw:z-[2]",
+                    class: "{quiet_action_class()} tw:relative tw:z-[2] tw:no-underline",
                     href: "#/sim/{card.slug}",
                     title: "Open this project in the simulator.",
                     onclick: move |event| {
@@ -147,7 +151,7 @@ pub(crate) fn PackageCard(
                 }
                 for device_name in empty_devices.iter() {
                     button {
-                        class: "{quiet_action_class()} tw:relative tw:z-[2] tw:text-accent",
+                        class: "{quiet_action_class()} tw:relative tw:z-[2]",
                         r#type: "button",
                         title: "Put this project on \"{device_name}\" — it's empty and ready.",
                         onclick: {
