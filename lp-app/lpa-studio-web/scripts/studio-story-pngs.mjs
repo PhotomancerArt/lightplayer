@@ -14,6 +14,8 @@ import {
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
+import { createReadStream } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -42,6 +44,12 @@ const cdpCallTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CDP_TIMEOUT_MS", 
 // resumes from the already-captured files and has always completed in practice,
 // so retry the pass in-process instead of taxing callers with a manual re-run.
 const captureAttempts = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_ATTEMPTS", 2);
+// Fresh browser every N captures: a long-lived capture browser degrades into
+// permanent navigation stalls after a few hundred same-process navigations of
+// the release wasm bundle (CI runners wedge around ~200; a CPU-limited local
+// container around ~580). Restarts cost ~1-2s and resume from disk, so a low
+// ceiling is cheap insurance everywhere, including local runs.
+const browserRestartEvery = parsePositiveIntegerEnv("STUDIO_STORY_BROWSER_RESTART_EVERY", 120);
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
@@ -180,13 +188,17 @@ if (resuming) {
   }
 }
 
-const server = spawn("python3", ["-m", "http.server", port, "--bind", "127.0.0.1"], {
-  cwd: publicDir,
-  stdio: ["ignore", "pipe", "pipe"],
-});
-const serverExited = once(server, "exit").catch(() => {});
-server.once("error", (error) => {
-  console.error(`Failed to start static server from ${publicDir}: ${error.message}`);
+// In-process static server. This replaced `python3 -m http.server`, which
+// WEDGES under capture load: when a CDP timeout kills a Chrome page
+// mid-download, the serving thread blocks forever in a kernel socket send
+// (observed in sock_alloc_send_pskb) and the whole server stops answering —
+// turning one transiently slow story into a permanent all-pages navigation
+// wedge (the debt entry's long-mysterious "heavy end-of-queue sheets" class).
+// Node destroys dead sockets instead of blocking on them.
+const server = createStaticServer(publicDir);
+await new Promise((resolve, reject) => {
+  server.once("error", reject);
+  server.listen(Number(port), "127.0.0.1", resolve);
 });
 
 try {
@@ -225,10 +237,58 @@ try {
     console.log(`Story PNGs: ${path.relative(repoRoot, outputDir)}`);
   }
 } finally {
-  if (server.exitCode === null) {
-    server.kill("SIGTERM");
-  }
-  await Promise.race([serverExited, delay(1_000)]);
+  server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+}
+
+// Minimal static file server over publicDir. MIME types cover what the story
+// build actually serves; `application/wasm` is load-bearing (streaming
+// compile refuses other types).
+function createStaticServer(rootDir) {
+  const mimeTypes = {
+    ".css": "text/css",
+    ".html": "text/html; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".js": "text/javascript",
+    ".json": "application/json",
+    ".mjs": "text/javascript",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".wasm": "application/wasm",
+    ".woff2": "font/woff2",
+  };
+  return createHttpServer((request, response) => {
+    const fatal = (status) => {
+      response.writeHead(status);
+      response.end();
+    };
+    let pathname;
+    try {
+      pathname = decodeURIComponent(new URL(request.url, "http://localhost/").pathname);
+    } catch {
+      return fatal(400);
+    }
+    if (pathname.endsWith("/")) {
+      pathname += "index.html";
+    }
+    const filePath = path.join(rootDir, pathname);
+    // path.join normalizes ".." segments; anything escaping rootDir is refused.
+    if (!filePath.startsWith(rootDir + path.sep)) {
+      return fatal(403);
+    }
+    const stream = createReadStream(filePath);
+    stream.once("error", () => fatal(404));
+    stream.once("open", () => {
+      response.writeHead(200, {
+        "content-type": mimeTypes[path.extname(filePath)] ?? "application/octet-stream",
+        "cache-control": "no-store",
+      });
+      stream.pipe(response);
+    });
+    // A page killed mid-download (CDP timeout recycling) must tear down the
+    // stream, never block the server.
+    response.once("close", () => stream.destroy());
+  });
 }
 
 function parseCliArgs(args) {
@@ -432,54 +492,77 @@ async function captureStoriesWithRetry(storyIds, directory) {
 
 async function captureStories(storyIds, directory) {
   const targets = storyTargets(storyIds);
-  const concurrency = Math.min(requestedCaptureConcurrency, targets.length);
   const files = new Array(targets.length);
-  const browser = await launchCaptureBrowser(concurrency);
-  let nextTargetIndex = 0;
 
+  // Resume: viewports already captured for this build are kept as-is (the
+  // capture dir is wiped at startup whenever the build changed). Filtering
+  // them out here keeps the browser-restart budget below proportional to
+  // real capture work, so resumed runs don't pay restarts for skipped files.
+  const pending = [];
+  for (let targetIndex = 0; targetIndex < targets.length; targetIndex += 1) {
+    const target = targets[targetIndex];
+    const file = path.join(directory, storyFileName(target.storyId, target.viewport));
+    if (await isNonEmptyFile(file)) {
+      files[targetIndex] = file;
+    } else {
+      pending.push({ target, targetIndex });
+    }
+  }
+  if (pending.length === 0) {
+    return files;
+  }
+
+  const concurrency = Math.min(requestedCaptureConcurrency, pending.length);
   console.log(
-    `Capturing ${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
+    `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
   );
 
-  try {
-    await Promise.all(
-      Array.from({ length: concurrency }, (_, pageIndex) =>
-        captureStoryWorker({
-          browser,
-          directory,
-          files,
-          nextTargetIndex: () => nextTargetIndex++,
-          pageIndex,
-          targets,
-        }),
-      ),
-    );
-  } finally {
-    await browser.close();
+  // Defense in depth: capture in chunks with a fresh browser per chunk
+  // (~1-2s each, resume from disk). The historical navigation wedges were
+  // ultimately the static server's fault (see createStaticServer), but a
+  // bounded browser lifetime keeps any future renderer-side degradation
+  // from ever wedging a whole run. See docs/debt/story-capture-pipeline.md.
+  for (let start = 0; start < pending.length; start += browserRestartEvery) {
+    const chunk = pending.slice(start, start + browserRestartEvery);
+    const chunkConcurrency = Math.min(concurrency, chunk.length);
+    if (start > 0) {
+      console.log(
+        `Restarting capture browser (${start}/${pending.length} captured this pass)...`,
+      );
+    }
+    const browser = await launchCaptureBrowser(chunkConcurrency);
+    let nextChunkIndex = 0;
+    try {
+      await Promise.all(
+        Array.from({ length: chunkConcurrency }, (_, pageIndex) =>
+          captureStoryWorker({
+            browser,
+            directory,
+            files,
+            nextPending: () => chunk[nextChunkIndex++],
+            pageIndex,
+          }),
+        ),
+      );
+    } finally {
+      await browser.close();
+    }
   }
   return files;
 }
 
-async function captureStoryWorker({
-  browser,
-  directory,
-  files,
-  nextTargetIndex,
-  pageIndex,
-  targets,
-}) {
+async function captureStoryWorker({ browser, directory, files, nextPending, pageIndex }) {
   while (true) {
-    const targetIndex = nextTargetIndex();
-    if (targetIndex >= targets.length) {
+    const entry = nextPending();
+    if (entry === undefined) {
       return;
     }
 
-    const target = targets[targetIndex];
+    const { target, targetIndex } = entry;
     const file = path.join(directory, storyFileName(target.storyId, target.viewport));
-    // A viewport already captured for this build is kept as-is. Any non-empty
-    // file here is from the current build: the capture dir is wiped at startup
-    // whenever the build changed, so this covers both cross-run resume and the
-    // in-process retry pass after a failed capture attempt.
+    // Already-captured check stays as a safety even though captureStories
+    // pre-filters: the in-process retry pass re-enters with fresh pending
+    // lists built from the same on-disk state.
     if (await isNonEmptyFile(file)) {
       files[targetIndex] = file;
       continue;
