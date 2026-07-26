@@ -150,6 +150,99 @@ fn close_sheet_action(card_key: &str) -> UiAction {
     }))
 }
 
+/// The setup form's date-default device name (state-flow model §1-A):
+/// `YYYY-MM-DD HH:MM LightPlayer`. A fixed story clock derives a
+/// deterministic UTC name (baselines never drift); live rendering uses
+/// the platform's local clock.
+fn default_setup_name(now_secs: Option<f64>) -> String {
+    #[cfg(target_arch = "wasm32")]
+    if now_secs.is_none() {
+        let now = js_sys::Date::new_0();
+        return format!(
+            "{:04}-{:02}-{:02} {:02}:{:02} LightPlayer",
+            now.get_full_year(),
+            now.get_month() + 1,
+            now.get_date(),
+            now.get_hours(),
+            now.get_minutes(),
+        );
+    }
+    let secs = now_secs.unwrap_or(0.0) as i64;
+    let (year, month, day) = civil_from_days(secs.div_euclid(86_400));
+    let rem = secs.rem_euclid(86_400);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} LightPlayer",
+        rem / 3600,
+        (rem % 3600) / 60,
+    )
+}
+
+/// Days-since-epoch → civil (y, m, d), Howard Hinnant's algorithm.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (year, month, day)
+}
+
+/// The blank board's SETUP FORM (state-flow model §1-A): the Status tab
+/// IS the form — a prefilled date-default name plus ONE Install button,
+/// no confirm, no separate naming dialog. The name rides the provision
+/// op and stamps at first post-flash contact, so the happy path never
+/// lands on Needs-a-name.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SetupForm(
+    default_name: String,
+    /// OtherFirmware wears replacing copy; a blank board installing copy.
+    replaces: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut name = use_signal(|| default_name.clone());
+    let label = if replaces {
+        "Replace with LightPlayer"
+    } else {
+        "Install firmware"
+    };
+    rsx! {
+        div { class: "tw:mt-1 tw:grid tw:gap-2",
+            div {
+                label { class: "tw:mb-1 tw:block tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                    "Device name"
+                }
+                input {
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    value: "{name}",
+                    oninput: move |event| name.set(event.value()),
+                }
+            }
+            div {
+                CardSheetButton {
+                    label: "⚡ {label}",
+                    tone: SheetButtonTone::Primary,
+                    onclick: move |_| {
+                        let setup_name = Some(name.read().trim().to_string())
+                            .filter(|value| !value.is_empty());
+                        on_action.call(UiAction::from_op(
+                            ControllerId::new(DeviceController::NODE_ID),
+                            DeviceOp::ProvisionFirmware { setup_name },
+                        ));
+                    },
+                }
+            }
+            p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
+                "About a minute. Progress shows here — you can walk away."
+            }
+        }
+    }
+}
+
 /// One roster card: the device (or live sim session) as a tabbed control
 /// panel. The grow control is the editor entry; the tabs carry status,
 /// project, settings, console (P2), and the danger zone; body clicks are
@@ -472,6 +565,9 @@ pub(crate) fn DeviceCard(
                     // title + three instruction bullets + three stacked
                     // buttons — the tallest sheet
                     (false, Some(DeviceCardSheet::Troubleshoot), _) => "tw:relative tw:min-h-[370px]",
+                    // title + message + input + button row (the 210px
+                    // floor clipped it — walkthrough §4.10)
+                    (false, Some(DeviceCardSheet::Name), _) => "tw:relative tw:min-h-[260px]",
                     (false, Some(_), _) => "tw:relative tw:min-h-[210px]",
                     (false, None, _) => "tw:relative",
                 },
@@ -487,7 +583,7 @@ pub(crate) fn DeviceCard(
                 div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
                     match active_tab {
                         DeviceCardTab::Status => rsx! {
-                            {status_tab_body(&card, &tabs, chip_muted, on_action, &card_key)}
+                            {status_tab_body(&card, &tabs, chip_muted, on_action, &card_key, now_secs)}
                         },
                         DeviceCardTab::Console => rsx! {
                             {console_tab_body(&card.console_tail)}
@@ -713,12 +809,20 @@ fn status_tab_body(
     chip_muted: bool,
     on_action: EventHandler<UiAction>,
     card_key: &str,
+    now_secs: Option<f64>,
 ) -> Element {
     let health = tabs
         .iter()
         .find(|tab| tab.tab == DeviceCardTab::Status)
         .map(|tab| tab.sections.as_slice())
         .unwrap_or_default();
+    // The blank board's Status tab IS the setup form (model §1-A): the
+    // form replaces the affordance rows (SetUp came through them).
+    let setup_form = !card.sim
+        && matches!(
+            card.state,
+            RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware
+        );
     rsx! {
         for section in health {
             for line in section.lines.iter() {
@@ -753,10 +857,18 @@ fn status_tab_body(
                 span { class: chip_name_class(chip_muted), "{chip.name}" }
             }
         }
-        for section in health {
-            for row in section.affordances.iter() {
-                div { class: "tw:mt-1",
-                    {row_button(row, ActionButtonVariant::Quiet, on_action, card_key)}
+        if setup_form {
+            SetupForm {
+                default_name: default_setup_name(now_secs),
+                replaces: matches!(card.state, RosterCardState::OtherFirmware),
+                on_action,
+            }
+        } else {
+            for section in health {
+                for row in section.affordances.iter() {
+                    div { class: "tw:mt-1",
+                        {row_button(row, ActionButtonVariant::Quiet, on_action, card_key)}
+                    }
                 }
             }
         }
@@ -1214,7 +1326,7 @@ pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware,
+            DeviceOp::ProvisionFirmware { setup_name: None },
         )
     } else {
         UiAction::from_op(
@@ -1354,7 +1466,7 @@ pub(super) fn device_affordance_action(
         // without a dialog. Destructive re-flash/erase keep their confirm.
         RosterAffordance::SetUp => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware,
+            DeviceOp::ProvisionFirmware { setup_name: None },
         )
         .with_summary(
             "Install LightPlayer firmware on this board — about a minute; \
@@ -1363,7 +1475,7 @@ pub(super) fn device_affordance_action(
         .with_icon("zap"),
         RosterAffordance::UpdateFirmware => UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware,
+            DeviceOp::ProvisionFirmware { setup_name: None },
         )
         .with_summary(
             "Install this build's firmware over the device's older build — \
@@ -1441,7 +1553,7 @@ fn wire_card_affordance(
         DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot) => {
             let display = UiAction::from_op(
                 ControllerId::new(DeviceController::NODE_ID),
-                DeviceOp::ProvisionFirmware,
+                DeviceOp::ProvisionFirmware { setup_name: None },
             )
             .with_label(RosterAffordance::Troubleshoot.label())
             .with_summary("Steps to try when the device is not responding.")
@@ -1587,5 +1699,18 @@ fn grow_button_class(push_right: bool) -> &'static str {
         "tw:ml-auto tw:inline-flex tw:h-6 tw:w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded tw:border-0 tw:bg-transparent tw:text-dim-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:opacity-40"
     } else {
         "tw:inline-flex tw:h-6 tw:w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded tw:border-0 tw:bg-transparent tw:text-dim-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:opacity-40"
+    }
+}
+
+#[cfg(test)]
+mod setup_name_tests {
+    use super::default_setup_name;
+
+    #[test]
+    fn a_fixed_story_clock_derives_a_deterministic_utc_name() {
+        assert_eq!(
+            default_setup_name(Some(1_800_000_000.0)),
+            "2027-01-15 08:00 LightPlayer"
+        );
     }
 }

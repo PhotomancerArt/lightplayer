@@ -37,7 +37,12 @@ pub enum DeviceOp {
     ConnectLightPlayer,
     DisconnectLightPlayer,
     ResetDevice,
-    ProvisionFirmware,
+    /// Flash the packaged firmware. `setup_name` rides along from the
+    /// blank board's SETUP FORM (state-flow model §1-A): after the flash
+    /// lands and the wire is up, the controller stamps this name so the
+    /// happy path never detours through Needs-a-name. `None` = a plain
+    /// flash / firmware update (already-stamped or recovery contexts).
+    ProvisionFirmware { setup_name: Option<String> },
     ResetToBlank,
     DisconnectDevice,
     /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
@@ -98,7 +103,7 @@ impl ControllerOp for DeviceOp {
                 "Reboot the connected device without erasing firmware or data.",
                 ActionPriority::Tertiary,
             ),
-            Self::ProvisionFirmware => ActionMeta::new(
+            Self::ProvisionFirmware { .. } => ActionMeta::new(
                 "Flash firmware",
                 "Flash the packaged LightPlayer firmware onto this ESP32.",
                 ActionPriority::Primary,
@@ -159,7 +164,7 @@ impl ControllerOp for DeviceOp {
             | Self::ConnectLightPlayer
             | Self::DisconnectLightPlayer
             | Self::ResetDevice
-            | Self::ProvisionFirmware
+            | Self::ProvisionFirmware { .. }
             | Self::ResetToBlank
             | Self::DisconnectDevice
             | Self::StopSimulator
@@ -212,7 +217,7 @@ mod tests {
             DeviceOp::ConnectLightPlayer,
             DeviceOp::DisconnectLightPlayer,
             DeviceOp::ResetDevice,
-            DeviceOp::ProvisionFirmware,
+            DeviceOp::ProvisionFirmware { setup_name: None },
             DeviceOp::ResetToBlank,
             DeviceOp::DisconnectDevice,
             DeviceOp::StopSimulator,

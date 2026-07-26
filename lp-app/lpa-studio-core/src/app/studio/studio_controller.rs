@@ -1709,7 +1709,9 @@ impl StudioController {
                     })?;
                 self.connect_server_from_link(id, updates).await
             }
-            DeviceOp::ProvisionFirmware => self.provision_firmware(updates).await,
+            DeviceOp::ProvisionFirmware { setup_name } => {
+                self.provision_firmware(updates, setup_name).await
+            }
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
             DeviceOp::RefreshConnections => {
                 // Drop the session (no provider close) + catalog refresh.
@@ -3327,25 +3329,58 @@ impl StudioController {
         .await
     }
 
-    async fn provision_firmware(&mut self, updates: UxUpdateSink) -> UiResult {
-        self.run_device_management(
-            ManagementFlowSpec {
-                request: LinkManagementRequest::FlashFirmware,
-                progress_label: "Flashing firmware",
-                reconnect_detail: "Waiting for firmware boot",
-                failed_exit_label: "Back to set up",
-                record_captured_logs_on_success: false,
-                done_notice: provision_notice,
-                degrade_subject: "firmware flashed",
-                server_reconnect_failed_notice:
-                    "Firmware flashed; reconnect the server after the device finishes booting",
-                // a flash reboots into new firmware; the stored project
-                // survives and reloads on reattach.
-                severs_lens: false,
-            },
-            updates,
-        )
-        .await
+    async fn provision_firmware(
+        &mut self,
+        updates: UxUpdateSink,
+        setup_name: Option<String>,
+    ) -> UiResult {
+        let mut outcome = self
+            .run_device_management(
+                ManagementFlowSpec {
+                    request: LinkManagementRequest::FlashFirmware,
+                    progress_label: "Flashing firmware",
+                    reconnect_detail: "Waiting for firmware boot",
+                    failed_exit_label: "Back to set up",
+                    record_captured_logs_on_success: false,
+                    done_notice: provision_notice,
+                    degrade_subject: "firmware flashed",
+                    server_reconnect_failed_notice:
+                        "Firmware flashed; reconnect the server after the device finishes booting",
+                    // a flash reboots into new firmware; the stored project
+                    // survives and reloads on reattach.
+                    severs_lens: false,
+                },
+                updates,
+            )
+            .await?;
+        // The setup form's name stamps at first post-flash contact
+        // (model §1-A): the happy path never detours through
+        // Needs-a-name. Only an identity-less board takes the stamp —
+        // an update on a stamped device keeps its name. Naming failure
+        // degrades honestly: the flash stands, the card offers naming.
+        let setup_name = setup_name
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
+        if let Some(name) = setup_name
+            && self
+                .device_sync()
+                .is_some_and(|sync| sync.identity.is_none())
+        {
+            match self.run_identity_stamp(name).await {
+                Ok(identity) => {
+                    outcome = outcome.with_notice(UiNotice::info(format!(
+                        "This device is now \"{}\"",
+                        identity.name
+                    )));
+                }
+                Err(error) => {
+                    outcome = outcome.with_notice(UiNotice::info(format!(
+                        "Firmware installed, but naming failed: {error} — name it from its card."
+                    )));
+                }
+            }
+        }
+        Ok(outcome)
     }
 
     async fn reset_to_blank(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -4109,7 +4144,7 @@ mod tests {
         let actions = view_actions(&view);
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
+            Some(DeviceOp::ProvisionFirmware { setup_name: None })
         )));
         // The device section explains the incompatibility as an issue.
         let UiViewContent::Stack(stack) = &device_pane.body else {
@@ -4367,7 +4402,7 @@ mod tests {
         let actions = view_actions(&view);
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
+            Some(DeviceOp::ProvisionFirmware { setup_name: None })
         )));
     }
 
@@ -4408,7 +4443,7 @@ mod tests {
         // firmware ops live in their own section (D15), away from deploy
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
+            Some(DeviceOp::ProvisionFirmware { setup_name: None })
         )));
         assert!(
             actions
@@ -4430,7 +4465,7 @@ mod tests {
         // recovery stays reachable from the editor's firmware section
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
+            Some(DeviceOp::ProvisionFirmware { setup_name: None })
         )));
         assert!(
             actions
