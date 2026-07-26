@@ -29,8 +29,8 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    ConsoleCommand, DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp,
-    STUDIO_LOG_SINK, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
+    DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp, STUDIO_LOG_SINK,
+    SettingsCommand, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
     UiLogLevel, UiStudioView,
 };
 
@@ -108,6 +108,38 @@ pub fn App() -> Element {
         // builds keep the core's clock-derived fallback.
         #[cfg(target_arch = "wasm32")]
         controller.set_random(crate::library_host_opfs::random_bytes);
+        // Layered settings (P4): the persisted user layer loads
+        // synchronously before the actor spawns (settings are effective
+        // before panes render), and user mutations write back through the
+        // hook. The host layer (dev-settings.json) is fetched below.
+        if let Some(json) = crate::settings_io::load_user_settings_json() {
+            controller.load_user_settings_json(&json);
+        }
+        controller.set_on_user_settings(crate::settings_io::store_user_settings_json);
+        // Shader agent (P5/P8): run futures ride the browser's
+        // single-threaded executor; the provider streams SSE over the
+        // browser fetch transport — Anthropic or OpenAI-compatible per the
+        // resolved settings. Both are wasm-only — host builds of this
+        // crate only run unit tests and never spawn the actor.
+        #[cfg(target_arch = "wasm32")]
+        {
+            use lpa_studio_core::AgentProviderConfig;
+            controller.set_agent_spawner(wasm_bindgen_futures::spawn_local);
+            controller.set_agent_provider_factory(|config| match config {
+                AgentProviderConfig::Anthropic(config) => {
+                    Box::new(lpa_agent::AnthropicProvider::new(
+                        config.clone(),
+                        lpa_agent::provider::WebFetchTransport,
+                    ))
+                }
+                AgentProviderConfig::OpenAiCompat(config) => {
+                    Box::new(lpa_agent::OpenAiCompatProvider::new(
+                        config.clone(),
+                        lpa_agent::provider::WebFetchTransport,
+                    ))
+                }
+            });
+        }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
         spawn(async move {
@@ -179,6 +211,16 @@ pub fn App() -> Element {
             }
         });
         spawn(actor.run());
+        // The host settings layer: a same-origin dev-settings.json fetch
+        // (absent everywhere but the dev server / a future Electron host).
+        let settings_tx = handle.tx.clone();
+        spawn(async move {
+            if let Some(host) = crate::settings_io::fetch_dev_settings().await {
+                settings_tx.send(StudioCommand::Settings(SettingsCommand::HostLayerLoaded(
+                    host,
+                )));
+            }
+        });
         StudioBridge {
             tx: handle.tx,
             delay: handle.delay,
@@ -326,6 +368,22 @@ pub fn App() -> Element {
                 }
                 StudioRoute::Home | StudioRoute::Stories { .. } => {}
             }
+            // D32 auto-connect (M6): the load-time attach sweep — queued
+            // AFTER the route dispatch, so a `#/device/<uid>` reload's own
+            // connect runs first and the sweep no-ops on the live session
+            // (the core guard makes it idempotent). Attach + pull + show,
+            // nothing else; failures land softly on card evidence.
+            startup_bridge
+                .tx
+                .send(StudioCommand::Action(UiAction::from_op(
+                    lpa_studio_core::DeviceController::NODE_ID,
+                    lpa_studio_core::DeviceOp::AutoConnect,
+                )));
+            // Hotplug (M6): a granted port (re)appearing re-runs the
+            // sweep; a departing port hastens the Gone classification
+            // with a tick. Listener lifetime = page lifetime (forget).
+            #[cfg(target_arch = "wasm32")]
+            install_serial_hotplug(&startup_bridge.tx);
         });
     });
 
@@ -346,19 +404,11 @@ pub fn App() -> Element {
         action_bridge.tx.send(StudioCommand::Action(action));
     };
 
-    // Console toolbar gestures ride the same ordered command queue as
-    // actions; the actor applies them synchronously and never coalesces them.
-    let console_bridge = bridge.clone();
-    let on_console = move |command: ConsoleCommand| {
-        // The display threshold doubles as the *capture* floor: raise or lower
-        // the global `log::` max level to match, so `debug!`/`trace!` producers
-        // short-circuit inside the macro when hidden instead of formatting and
-        // queuing output the console would only drop. Reveal below the current
-        // floor is therefore forward-only, by design.
-        if let ConsoleCommand::SetMinLevel(level) = command {
-            log::set_max_level(capture_level_for(level));
-        }
-        console_bridge.tx.send(StudioCommand::Console(command));
+    // Settings popover gestures ride the same ordered command queue; the
+    // actor applies them synchronously, like console commands.
+    let settings_bridge = bridge.clone();
+    let on_settings = move |command: SettingsCommand| {
+        settings_bridge.tx.send(StudioCommand::Settings(command));
     };
 
     // The URL's intent picks the frame: a SIM route whose project the
@@ -381,7 +431,7 @@ pub fn App() -> Element {
             running: false,
             opening_frame,
             on_action,
-            on_console,
+            on_settings,
         }
     }
 }
@@ -397,6 +447,36 @@ fn make_pull_timer(delay: Duration) -> TimeoutFuture {
 /// the session's injected factory (the `make_pull_timer` pattern).
 fn make_device_timers() -> DeviceTimers {
     DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
+}
+
+/// M6 (D32): the `navigator.serial` hotplug listeners. A `connect`
+/// event (a granted port re-appearing) re-runs the auto-connect sweep;
+/// a `disconnect` sends a tick so the Gone classification lands without
+/// waiting for the next cadence beat.
+#[cfg(target_arch = "wasm32")]
+fn install_serial_hotplug(tx: &CommandSender) {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
+
+    let connect_tx = tx.clone();
+    let on_connect = Closure::wrap(Box::new(move || {
+        connect_tx.send(StudioCommand::Action(UiAction::from_op(
+            lpa_studio_core::DeviceController::NODE_ID,
+            lpa_studio_core::DeviceOp::AutoConnect,
+        )));
+    }) as Box<dyn FnMut()>);
+    let tick_tx = tx.clone();
+    let on_disconnect = Closure::wrap(Box::new(move || {
+        tick_tx.send(StudioCommand::RefreshTick);
+    }) as Box<dyn FnMut()>);
+    let installed = lpa_link::providers::browser_serial_esp32::install_serial_events(
+        on_connect.as_ref().unchecked_ref(),
+        on_disconnect.as_ref().unchecked_ref(),
+    );
+    if installed {
+        on_connect.forget();
+        on_disconnect.forget();
+    }
 }
 
 /// Wire the cross-tab library refresh triggers (M4b): a BroadcastChannel
@@ -474,11 +554,12 @@ fn now_secs() -> f64 {
 /// spawns, so `log::` macros anywhere on the wasm side are captured and later
 /// drained into the console ring by the actor.
 ///
-/// The initial max level matches the console filter's default threshold
-/// (`Info`): the display threshold is also the *capture* floor, so producers
-/// below it never format or queue output. `on_console` keeps the two in sync
-/// as the user moves the filter. An already-installed logger is tolerated with
-/// a JS-console warning, never a panic.
+/// The max level is the *capture* floor (`Info` — mirroring core's
+/// `LogFilter` default), so producers below it never format or queue
+/// output. The global console UI that used to move this floor retired
+/// with M7′ P2; the floor is fixed until a per-device level control
+/// lands. An already-installed logger is tolerated with a JS-console
+/// warning, never a panic.
 fn install_log_sink() {
     match log::set_logger(&STUDIO_LOG_SINK) {
         // `Info` mirrors `LogFilter::default().min_level` in core.

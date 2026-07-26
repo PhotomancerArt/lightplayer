@@ -27,6 +27,13 @@ pub enum DeviceOp {
     ReconnectDevice {
         uid: Option<String>,
     },
+    /// D32 auto-connect (M6): the load-time / hotplug attach sweep.
+    /// Connect a granted port when one exists — attach + pull + show,
+    /// nothing else (invariant 4: no push, no load, no editor touch).
+    /// Never prompts a chooser, never toasts; failures land on card
+    /// evidence (the ladder / In-use-elsewhere). Idempotent: a live
+    /// device session or a busy connect flow makes it a no-op.
+    AutoConnect,
     ConnectLightPlayer,
     DisconnectLightPlayer,
     ResetDevice,
@@ -70,6 +77,11 @@ impl ControllerOp for DeviceOp {
                 "Reconnect",
                 "Reconnect to a previously connected device.",
                 ActionPriority::Primary,
+            ),
+            Self::AutoConnect => ActionMeta::new(
+                "Auto-connect",
+                "Connect a granted device automatically (attach only).",
+                ActionPriority::Secondary,
             ),
             Self::ConnectLightPlayer => ActionMeta::new(
                 "Connect LightPlayer",
@@ -143,6 +155,7 @@ impl ControllerOp for DeviceOp {
             | Self::OpenProviderForRecovery { .. }
             | Self::ConnectEndpoint { .. }
             | Self::ReconnectDevice { .. }
+            | Self::AutoConnect
             | Self::ConnectLightPlayer
             | Self::DisconnectLightPlayer
             | Self::ResetDevice

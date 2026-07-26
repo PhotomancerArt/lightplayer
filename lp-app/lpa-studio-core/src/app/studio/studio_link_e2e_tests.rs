@@ -14,7 +14,7 @@
 //! 6–10 cover the M4 DeviceSession states end to end: Incompatible (hello
 //! suppressed / proto mismatch) with the reflash affordance, Unresponsive
 //! with reconnect recovery, reconnect-after-Gone, and erase landing
-//! BlankFlash as success through the deploy dialog.
+//! BlankFlash as success through the card's Danger tab.
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -35,7 +35,7 @@ use lpa_link::{
 };
 use lpfs::LpFsMemory;
 
-use crate::app::device::{DEPLOY_NODE_ID, DeployOp, DeployState};
+use crate::app::device::{DEPLOY_NODE_ID, DeployOp};
 use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
 use crate::app::places::DeviceContent;
 use crate::{
@@ -191,11 +191,13 @@ fn device_running_from_a_non_default_storage_dir_classifies_not_empty() {
     assert_eq!(slug, &summary.slug);
 }
 
-/// Row 1 (happy path, part 2): the stamp→push flow on an empty device —
-/// the deploy dialog's whole wizard, but with every wire operation running
-/// through the real serial framing.
+/// Row 1 (happy path, part 2): the card-native stamp→push on an empty
+/// device (M8′ — the dialog's wizard, re-homed onto the card): the name
+/// sheet's op stamps over the real serial framing, the Project-tab
+/// picker's push replaces the device copy, and connect-as-pull
+/// re-classifies to at-head.
 #[test]
-fn deploy_dialog_stamps_and_pushes_through_the_link() {
+fn card_native_stamp_and_push_through_the_link() {
     let (store, host) = library();
     let summary = store
         .install_package(
@@ -214,43 +216,43 @@ fn deploy_dialog_stamps_and_pushes_through_the_link() {
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
     let sync = studio.device_sync().expect("pull landed");
     assert_eq!(sync.content, DeviceContent::Empty, "fresh device is empty");
-
-    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    // the gallery narrates the unstamped board as Needs-a-name
+    let home = studio.view().home.expect("no project open — gallery shows");
     assert!(
-        matches!(deploy_state(&studio), DeployState::NeedsIdentity { .. }),
-        "empty unstamped device asks for a name, got {:?}",
-        deploy_state(&studio)
+        home.devices
+            .iter()
+            .any(|card| card.state == crate::RosterCardState::NeedsAName),
+        "unstamped empty device asks for a name on its card: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
     );
 
-    // Stamp: writes `/.lp/device.json` at the REAL server's fs root over
-    // the wire.
-    drive(studio.dispatch(deploy_action(DeployOp::StampIdentity {
-        name: "Luna's porch sign".to_string(),
-    })))
+    // Stamp (the name sheet's op): writes `/.lp/device.json` at the REAL
+    // server's fs root over the wire.
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::app::home::HOME_NODE_ID),
+        crate::HomeOp::NameDevice {
+            name: "Luna's porch sign".to_string(),
+        },
+    )))
     .unwrap();
-    assert!(matches!(
-        deploy_state(&studio),
-        DeployState::ChoosingPackage { .. }
-    ));
+    let sync = studio.device_sync().expect("re-pulled after stamp");
+    assert_eq!(
+        sync.identity
+            .as_ref()
+            .map(|identity| identity.name.as_str()),
+        Some("Luna's porch sign")
+    );
 
-    drive(studio.dispatch(deploy_action(DeployOp::ChoosePackage {
+    // Push (the Project-tab picker's op): hash-verified replace-and-load
+    // + re-pull (no re-stamp — the root identity is outside the replaced
+    // storage dir).
+    drive(studio.dispatch(deploy_action(DeployOp::PushProject {
         key: summary.uid.to_string(),
     })))
     .unwrap();
-    assert!(matches!(
-        deploy_state(&studio),
-        DeployState::Reviewing { .. }
-    ));
-
-    // Push: hash-verified replace-and-load + re-pull (no re-stamp — the
-    // root identity is outside the replaced storage dir).
-    drive(studio.dispatch(deploy_action(DeployOp::ConfirmPush))).unwrap();
-    let DeployState::Done { device, pushed } = deploy_state(&studio) else {
-        panic!("push completes, got {:?}", deploy_state(&studio));
-    };
-    assert_eq!(device.name, "Luna's porch sign");
-    assert_eq!(pushed.slug, summary.slug);
-
     let sync = studio.device_sync().expect("re-pulled after push");
     assert_eq!(
         sync.identity
@@ -320,11 +322,12 @@ fn fresh_device_pulls_as_empty_not_unreadable() {
 }
 
 /// Row 4 (blank flash): boot output classifies as no-firmware
-/// (BlankOrErasedFlash) → the deploy dialog derives `Blank`; a scripted
-/// flash through the real `manage()` path reboots the device as LightPlayer
-/// and the wizard proceeds to NeedsIdentity.
+/// (BlankOrErasedFlash) → the CARD derives Ready-to-set-up (M8′ — the
+/// dialog is gone); the card's Set-up (`ProvisionFirmware`) flashes
+/// through the real `manage()` path, and the flashed, unstamped device
+/// lands on the Needs-a-name card (the name sheet is next).
 #[test]
-fn blank_flash_classifies_flashes_and_reaches_needs_identity() {
+fn blank_flash_classifies_flashes_and_reaches_needs_a_name() {
     let (_store, host) = library();
     let script = FakeDeviceScript::new(FakeBootState::BlankFlash);
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
@@ -346,26 +349,32 @@ fn blank_flash_classifies_flashes_and_reaches_needs_identity() {
         studio.snapshot().server.state
     );
 
-    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    let home = studio.view().home.expect("no project open — gallery shows");
     assert!(
-        matches!(
-            deploy_state(&studio),
-            DeployState::Blank {
-                flashed_once: false
-            }
-        ),
-        "deploy environment derives Blank, got {:?}",
-        deploy_state(&studio)
+        home.devices
+            .iter()
+            .any(|card| card.state == crate::RosterCardState::ReadyToSetUp),
+        "blank flash derives the Ready-to-set-up card: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
     );
 
-    // Scripted flash via the real manage() path: the device reboots as
-    // LightPlayer, the controller reconnects, and the wizard lands on
-    // NeedsIdentity (empty, unstamped device).
-    drive(studio.dispatch(deploy_action(DeployOp::FlashFirmware))).unwrap();
+    // Scripted flash via the real manage() path (the card's Set-up
+    // affordance): the device reboots as LightPlayer, the controller
+    // reconnects, and the empty unstamped device lands on Needs-a-name.
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware))).unwrap();
+    let home = studio.view().home.expect("gallery still shows");
     assert!(
-        matches!(deploy_state(&studio), DeployState::NeedsIdentity { .. }),
-        "flashed empty device asks for a name, got {:?}",
-        deploy_state(&studio)
+        home.devices
+            .iter()
+            .any(|card| card.state == crate::RosterCardState::NeedsAName),
+        "flashed empty device asks for a name on its card: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
     );
     assert!(matches!(
         studio.snapshot().server.state,
@@ -465,10 +474,10 @@ fn stall_during_connect_times_out_with_no_serial_output() {
 
 /// Row 6 (Incompatible: hello suppressed): an `M!`-speaking device whose
 /// firmware predates the wire hello classifies `Incompatible` through the
-/// real path; the deploy dialog surfaces reflash as the affordance; a flash
+/// real path; the card surfaces reflash as the affordance; a flash
 /// reboots the device to a compatible build and the session lands `Ready`.
 #[test]
-fn incompatible_no_hello_reflashes_through_the_deploy_dialog() {
+fn incompatible_no_hello_reflashes_through_the_card() {
     let (_store, host) = library();
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new().with_suppressed_hello(),
@@ -499,21 +508,22 @@ fn incompatible_no_hello_reflashes_through_the_deploy_dialog() {
         studio.device_state_for_test()
     );
 
-    // Reflash is the ONE affordance: the dialog derives the flash state.
-    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
+    // Reflash is the ONE affordance: the card derives Needs-firmware-
+    // update, whose Update runs the same ProvisionFirmware (M8′).
+    let home = studio.view().home.expect("gallery shows");
     assert!(
-        matches!(
-            deploy_state(&studio),
-            DeployState::Blank {
-                flashed_once: false
-            }
-        ),
-        "incompatible firmware derives the reflash affordance, got {:?}",
-        deploy_state(&studio)
+        home.devices
+            .iter()
+            .any(|card| card.state == crate::RosterCardState::NeedsFirmwareUpdate),
+        "incompatible firmware derives the update card: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
     );
 
     // Flash → reboot → Ready (the flashed build speaks the current proto).
-    drive(studio.dispatch(deploy_action(DeployOp::FlashFirmware))).unwrap();
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware))).unwrap();
     assert!(
         matches!(
             studio.device_state_for_test(),
@@ -526,10 +536,16 @@ fn incompatible_no_hello_reflashes_through_the_deploy_dialog() {
         studio.snapshot().server.state,
         ServerState::Connected { .. }
     ));
+    let home = studio.view().home.expect("gallery still shows");
     assert!(
-        matches!(deploy_state(&studio), DeployState::NeedsIdentity { .. }),
-        "the wizard proceeds after the reflash, got {:?}",
-        deploy_state(&studio)
+        home.devices
+            .iter()
+            .any(|card| card.state == crate::RosterCardState::NeedsAName),
+        "the flow proceeds to the name sheet after the reflash: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -537,7 +553,7 @@ fn incompatible_no_hello_reflashes_through_the_deploy_dialog() {
 /// proto classifies `Incompatible` immediately (no deadline burn); same
 /// reflash affordance and recovery as the no-hello row.
 #[test]
-fn incompatible_proto_mismatch_reflashes_through_the_deploy_dialog() {
+fn incompatible_proto_mismatch_reflashes_through_the_card() {
     let (_store, host) = library();
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new().with_proto_override(lpc_wire::WIRE_PROTO_VERSION + 1),
@@ -558,15 +574,14 @@ fn incompatible_proto_mismatch_reflashes_through_the_deploy_dialog() {
         studio.device_state_for_test()
     );
 
-    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
-    assert!(matches!(
-        deploy_state(&studio),
-        DeployState::Blank {
-            flashed_once: false
-        }
-    ));
+    let home = studio.view().home.expect("gallery shows");
+    assert!(
+        home.devices
+            .iter()
+            .any(|card| card.state == crate::RosterCardState::NeedsFirmwareUpdate)
+    );
 
-    drive(studio.dispatch(deploy_action(DeployOp::FlashFirmware))).unwrap();
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware))).unwrap();
     assert!(matches!(
         studio.device_state_for_test(),
         Some(DeviceState::Ready { .. })
@@ -664,21 +679,21 @@ fn reconnect_after_gone_rebuilds_the_link_to_ready() {
 }
 
 /// Row 10 (erase lands BlankFlash as success): erasing a healthy device
-/// through the deploy dialog succeeds — the rebuilt link classifies
-/// `BlankFlash`, the server degrades to no-firmware, and the dialog derives
-/// the `Blank` state (flash stays the next step), all without an error.
+/// through the card's Danger tab succeeds — the rebuilt link classifies
+/// `BlankFlash`, the server degrades to no-firmware, and the card
+/// derives Ready-to-set-up (flash stays the next step), all without an
+/// error.
 #[test]
-fn erase_lands_blank_flash_as_success_through_the_deploy_dialog() {
+fn erase_lands_blank_flash_as_success_through_the_card() {
     let (_store, host) = library();
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
     studio.attach_library(host);
 
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
-    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
 
     let outcome = drive(studio.dispatch(deploy_action(DeployOp::EraseDevice)))
-        .expect("erase through the dialog is a success");
+        .expect("erase from the card is a success");
     assert!(
         outcome
             .notices
@@ -706,15 +721,16 @@ fn erase_lands_blank_flash_as_success_through_the_deploy_dialog() {
         "the server degrades to no-firmware, got {:?}",
         studio.snapshot().server.state
     );
+    let home = studio.view().home.expect("gallery shows");
     assert!(
-        matches!(
-            deploy_state(&studio),
-            DeployState::Blank {
-                flashed_once: false
-            }
-        ),
-        "the dialog derives Blank after the erase, got {:?}",
-        deploy_state(&studio)
+        home.devices
+            .iter()
+            .any(|card| card.state == crate::RosterCardState::ReadyToSetUp),
+        "the card derives Ready-to-set-up after the erase: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -911,19 +927,46 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     let view = studio.view();
     assert_eq!(slot_value_display(find_slot(&view, "controls.rate")), "2");
 
-    // The device heartbeat drains a buffered console line into the ring…
+    // The device heartbeat drains a buffered console line into the
+    // SESSION's console tail (D42: the per-device console — session
+    // streams no longer land in the global ring). Trace/debug
+    // diagnostics stay OFF the tail (the retired console's Info+
+    // display floor; the sim worker's per-tick spam must not drown
+    // the 40-line ring)…
+    studio.push_device_console_log_for_test(UiLogDraft::new(
+        UiLogLevel::Trace,
+        UiLogOrigin::Device,
+        "tick delta=32ms incoming=1 responses=1",
+    ));
     studio.push_device_console_log_for_test(UiLogDraft::new(
         UiLogLevel::Info,
         UiLogOrigin::Device,
         "standalone frame tick",
     ));
     studio.run_due_heartbeats();
-    assert!(
+    let device_tail_has = |studio: &StudioController, message: &str| {
         studio
+            .runtime_pool_for_test()
+            .device_session()
+            .expect("a device session is attached")
+            .console_tail()
+            .iter()
+            .any(|entry| entry.message == message)
+    };
+    assert!(
+        device_tail_has(&studio, "standalone frame tick"),
+        "the first heartbeat drains the device session's console buffer into its tail"
+    );
+    assert!(
+        !device_tail_has(&studio, "tick delta=32ms incoming=1 responses=1"),
+        "trace diagnostics stay below the tail's Info+ floor"
+    );
+    assert!(
+        !studio
             .logs()
             .iter()
             .any(|entry| entry.message == "standalone frame tick"),
-        "the first heartbeat drains the device session's console buffer"
+        "session console streams stay off the global ring (D42)"
     );
     // …and stays SLOW: a line buffered right after is not drained until
     // the heartbeat interval elapses (the fixed test clock never advances).
@@ -934,21 +977,18 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
     ));
     studio.run_due_heartbeats();
     assert!(
-        !studio
-            .logs()
-            .iter()
-            .any(|entry| entry.message == "buffered until the next heartbeat"),
+        !device_tail_has(&studio, "buffered until the next heartbeat"),
         "a heartbeat inside the interval drains nothing"
     );
 }
 
-/// Row 13 (papercut, defect 2026-07-23): the deploy dialog opened from a
-/// device card with NO explicit target, while the device runs a project
-/// the library KNOWS, pre-targets that project — landing on Reviewing
-/// instead of ChoosingPackage. Choosing a DIFFERENT project stays
-/// reachable from Reviewing.
+/// Row 13 (re-homed from the dialog's pre-target row, M8′): a device
+/// already running a known project can still be pushed a DIFFERENT
+/// project — the project card's "Push to <device>" / picker lane
+/// (`PushProject` with another key) replaces the running copy; nothing
+/// about the direct-push lane locks the device to its current project.
 #[test]
-fn deploy_dialog_pre_targets_the_running_project() {
+fn push_replaces_the_running_project_with_a_different_one() {
     let (store, host) = library();
     let porch = store
         .install_package(
@@ -979,33 +1019,27 @@ fn deploy_dialog_pre_targets_the_running_project() {
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
     studio.attach_library(host);
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
-
-    drive(studio.dispatch(deploy_action(DeployOp::OpenDialog { target_key: None }))).unwrap();
-    let DeployState::Reviewing {
-        target, on_device, ..
-    } = deploy_state(&studio)
-    else {
-        panic!(
-            "a device running a known project opens on Reviewing, got {:?}",
-            deploy_state(&studio)
-        );
-    };
-    assert_eq!(target.slug, porch.slug, "the running project is the target");
     assert!(
-        matches!(on_device, DeviceContent::Known { .. }),
-        "the review shows what the device holds"
+        matches!(
+            studio.device_sync().map(|sync| &sync.content),
+            Some(DeviceContent::Known { slug, .. }) if slug == &porch.slug
+        ),
+        "the device runs the known project"
     );
 
-    // The default never removes the choice: a different project remains
-    // one ChoosePackage away.
-    drive(studio.dispatch(deploy_action(DeployOp::ChoosePackage {
+    drive(studio.dispatch(deploy_action(DeployOp::PushProject {
         key: other.uid.to_string(),
     })))
-    .unwrap();
-    let DeployState::Reviewing { target, .. } = deploy_state(&studio) else {
-        panic!("choosing re-reviews, got {:?}", deploy_state(&studio));
-    };
-    assert_eq!(target.slug, other.slug);
+    .expect("pushing a different project succeeds");
+    assert!(
+        matches!(
+            studio.device_sync().map(|sync| &sync.content),
+            Some(DeviceContent::Known { slug, relation: lpc_history::SyncRelation::AtHead, .. })
+                if slug == &other.slug
+        ),
+        "the device now runs the other project at its head, got {:?}",
+        studio.device_sync().map(|sync| sync.content.clone())
+    );
 }
 
 /// Row P3-a + Q3 (gallery return keeps sessions): a project open on the
@@ -1808,16 +1842,6 @@ fn device_action(op: DeviceOp) -> UiAction {
 
 fn deploy_action(op: DeployOp) -> UiAction {
     UiAction::from_op(ControllerId::new(DEPLOY_NODE_ID), op)
-}
-
-fn deploy_state(studio: &StudioController) -> DeployState {
-    studio
-        .view()
-        .deploy
-        .as_ref()
-        .expect("deploy dialog open")
-        .state
-        .clone()
 }
 
 fn library() -> (LibraryStore, Rc<MemoryLibraryHost>) {

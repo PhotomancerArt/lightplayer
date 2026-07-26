@@ -34,6 +34,12 @@ extern "C" {
     #[wasm_bindgen(js_name = isSupported)]
     fn js_is_supported() -> bool;
 
+    #[wasm_bindgen(js_name = installSerialEvents)]
+    fn js_install_serial_events(
+        on_connect: &js_sys::Function,
+        on_disconnect: &js_sys::Function,
+    ) -> bool;
+
     #[wasm_bindgen(js_name = requestPort)]
     fn js_request_port() -> Promise;
 
@@ -64,6 +70,18 @@ extern "C" {
 
 pub fn is_supported() -> bool {
     js_is_supported()
+}
+
+/// M6 (D32): install the `navigator.serial` hotplug listeners —
+/// `connect` fires when a granted port (re)appears (the auto-connect
+/// sweep's trigger), `disconnect` when one leaves (Gone handling
+/// hastens). At most once per page; returns whether listeners are live
+/// (`false` when Web Serial is unsupported).
+pub fn install_serial_events(
+    on_connect: &js_sys::Function,
+    on_disconnect: &js_sys::Function,
+) -> bool {
+    js_install_serial_events(on_connect, on_disconnect)
 }
 
 /// Serial ports the user has ALREADY granted this origin

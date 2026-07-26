@@ -1,10 +1,22 @@
 # ADR: Device card state vocabulary as a first-class concept
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-07-24 — see the M7′ note below)
 - **Date:** 2026-07-16
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** None (the vocabulary stands; only the circle
+  presentation is superseded — see the M7′ note)
+
+> **M7′ amendment (2026-07-24).** The state VOCABULARY is intact and
+> normative. The status-circle PRESENTATION is retired: the card's
+> tinted LEFT EDGE carries the same grammar (solid→filled 3px edge,
+> hollow→double-line faded "remembered", pulsing→edge-color pulse
+> "working"), per the card-as-control-panel replan (D39;
+> `Planning/lp2025/2026-07-24-m7m8-replan/agenda.md`). The core spec
+> renamed to match its generality: `RosterCircle`/`RosterCircleShape` →
+> **`RosterStateSpec`/`RosterTreatment`** (`roster/roster_state_spec.rs`,
+> `RosterCardState::spec()`) — still renderer-independent, still the
+> derivation an on-device LED would consume.
 
 ## Context
 

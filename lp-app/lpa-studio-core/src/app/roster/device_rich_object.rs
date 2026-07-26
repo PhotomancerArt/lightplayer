@@ -98,7 +98,7 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
     }
     RichSection {
         title: "Health".to_string(),
-        tone: input.state.circle().tone,
+        tone: input.state.spec().tone,
         lines,
         chip: None,
         affordances: input

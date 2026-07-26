@@ -6,6 +6,22 @@ export function isSupported() {
   return Boolean(globalThis.navigator?.serial);
 }
 
+// M6 (D32): hotplug plumbing. `navigator.serial` fires `connect` when a
+// granted port (re)appears and `disconnect` when one leaves; Studio's
+// auto-connect sweep and Gone handling ride these. Installed at most
+// once; returns whether listeners are live.
+let serialEventsInstalled = false;
+export function installSerialEvents(onConnect, onDisconnect) {
+  const serial = globalThis.navigator?.serial;
+  if (!serial?.addEventListener || serialEventsInstalled) {
+    return serialEventsInstalled;
+  }
+  serialEventsInstalled = true;
+  serial.addEventListener("connect", () => onConnect());
+  serial.addEventListener("disconnect", () => onDisconnect());
+  return true;
+}
+
 // Enumerate the ports this origin was ALREADY granted (no permission
 // prompt), registering each one as a session so the returned {id, label}
 // descriptors are openable without a chooser. Repeat calls return the same

@@ -21,6 +21,9 @@ ALLOWLIST=(
     "lp-fw/fw-browser/src/envelope.rs"           # browser (wasm) build only
     "lp-fw/fw-browser/src/tests.rs"              # browser (wasm) tests only
     "lp-fw/fw-checks/src/checks/shader_compile/records.rs" # host check tool only
+    "lp-app/lpa-agent/src/provider/anthropic/anthropic_wire.rs" # Anthropic API wire format — internally tagged by the external API contract; Studio wasm/host only, not in fw graph
+    "lp-app/lpa-agent/src/provider/model_provider.rs" # provider-neutral chat content blocks serialized to external provider wire; Studio wasm/host only, not in fw graph
+    "lp-shader/lps-probe/src/experiment_spec.rs" # agent tool JSON: untagged BindingValue (number|bool|array) per the iterate tool schema; Studio wasm + host evals only, not in fw graph
 )
 
 hits=$(grep -rnE '^\s*#\[serde\((tag|untagged|flatten)' \
