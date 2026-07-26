@@ -1,5 +1,5 @@
 ---
-status: carried
+status: paying-down
 since: 2026-07-08      # first recorded capture pain (M4-gallery era)
 logged: 2026-07-23
 area: studio-web/story-capture
@@ -7,7 +7,7 @@ related:
   [
     "../defects/README.md",
     "chip task_16a65557 (deterministic slot-story drift)",
-    "docs/adr/… (none yet — the local-vs-CI capture decision is the likely paydown ADR)",
+    "../adr/2026-07-26-ci-canonical-story-capture.md (the paydown ADR)",
   ]
 ---
 # Story-capture pipeline: slow, flaky, and load-sensitive
@@ -31,7 +31,9 @@ queue behind it; byte-noise churn in a known set of stories
 (slot-row/editor family) must be manually reverted on every capture;
 each new agent session re-learns the incantations from memory notes.
 
-**Workarounds** (current lore, keep updated):
+**Workarounds** (current lore, keep updated — since the 2026-07-26 paydown
+these apply only to local SCRATCH captures; canonical baselines come from the
+`validate-stories` CI job via `just studio-story-pull`):
 - `STUDIO_STORY_PNGS_CONCURRENCY=1` (2 on a quiet machine) and
   `STUDIO_STORY_CDP_TIMEOUT_MS=120000`.
 - Run on a quiet machine — not while the dev server + live debugging
@@ -81,6 +83,14 @@ each new agent session re-learns the incantations from memory notes.
   same heavy-sheet family. Run 2 resumed from disk and completed
   clean. Two-run capture is now the working norm.
 
+- 2026-07-26 — **PAYDOWN**: capture moved to CI
+  (ADR `../adr/2026-07-26-ci-canonical-story-capture.md`). `validate-stories`
+  job captures on a pinned x64 runner (Chrome for Testing 151.0.7922.47,
+  oxipng 10.1.1, bundled Inter/JetBrains Mono), fails loudly on drift, and
+  delivers fresh sets as the `story-images-fresh` artifact;
+  `just studio-story-pull` stages them; `-if-needed` deleted. Full baseline
+  set regenerated in the canonical environment at cutover.
+
 **Exit criteria** — All of: (1) captures complete deterministically at
 default concurrency on a loaded machine, or run somewhere isolated
 (the "is local PNG generation worth it" decision — likely a paydown
@@ -88,3 +98,12 @@ ADR weighing CI-side capture vs local determinism hardening);
 (2) resume-instead-of-restart on failure; (3) the gate detects
 committed-as-well-as-working-tree UI changes; (4) failures are loud
 (non-zero all the way out); (5) the churner story set is empty.
+
+**Exit-criteria status after the 2026-07-26 paydown** — (1) isolated
+pinned CI runner ✓; (2) clean ephemeral runners make restart cheap and
+the in-script retry/resume is retained ✓; (3) CI check always compares
+the committed tree against a fresh build — the `-if-needed` blind spot
+is structurally gone (helper deleted) ✓; (4) blocking CI job, pipefail
+guarded ✓; (5) churner set: pending the cutover green-run evidence —
+flip this entry to `retired` when the post-cutover re-run shows the
+historical churners byte-identical/tolerated.
