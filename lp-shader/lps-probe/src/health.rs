@@ -40,8 +40,16 @@ pub(crate) fn health_sites(spec: &ExperimentSpec) -> Vec<[f32; 2]> {
     sites
 }
 
+/// Consecutive evaluation failures after which health evaluation stops.
+/// Failures are rarely site-specific (an exhausted op budget or a broken
+/// import fails everywhere), and each op-budget exhaustion burns the full
+/// per-evaluation fuel — bailing keeps a hostile shader's health pass cheap.
+const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
 /// Evaluate the health report on an already-bound instance. Evaluation
-/// failures are reported as warnings and excluded from `sites_evaluated`.
+/// failures are reported as warnings and excluded from `sites_evaluated`;
+/// after [`MAX_CONSECUTIVE_FAILURES`] failures in a row the remaining sites
+/// are abandoned (with a warning).
 pub(crate) fn evaluate_health(
     instance: &mut InterpInstance,
     spec: &ExperimentSpec,
@@ -54,6 +62,7 @@ pub(crate) fn evaluate_health(
     let mut lum_sites = 0u32;
     let mut clipped = 0u32;
     let mut evaluated = 0u32;
+    let mut consecutive_failures = 0u32;
 
     for site in health_sites(spec) {
         let pos = [site[0] * spec.size[0] as f32, site[1] * spec.size[1] as f32];
@@ -68,9 +77,18 @@ pub(crate) fn evaluate_health(
                     "health: render failed at ({:.4}, {:.4}): {e}",
                     site[0], site[1]
                 ));
+                consecutive_failures += 1;
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                    warnings.push(format!(
+                        "health: abandoned after {consecutive_failures} consecutive \
+                         evaluation failures"
+                    ));
+                    break;
+                }
                 continue;
             }
         };
+        consecutive_failures = 0;
         evaluated += 1;
         for c in rgba {
             if c.is_nan() {
