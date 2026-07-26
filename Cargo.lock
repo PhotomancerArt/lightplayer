@@ -3744,6 +3744,7 @@ name = "fw-browser"
 version = "40.0.0"
 dependencies = [
  "fw-core",
+ "js-sys",
  "log",
  "lp-gfx-lpvm",
  "lp-gfx-wgpu",

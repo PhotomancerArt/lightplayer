@@ -41,6 +41,10 @@ pub struct FakeProvider {
     /// only the post-management rebuild's `connect` fail).
     connect_error: RefCell<Option<String>>,
     connection_error: Option<String>,
+    /// Scripted analogue of the browser-worker provider's `session_fatal`
+    /// (the sticky instance-fatal message a crashed sim worker reports).
+    /// Interior-mutable so crash-recovery tests can arm it mid-session.
+    session_fatal: RefCell<Option<String>>,
     #[cfg(feature = "fake-device")]
     devices: BTreeMap<LinkEndpointId, crate::providers::fake_device::FakeEsp32Device>,
 }
@@ -54,6 +58,7 @@ impl FakeProvider {
             discover_error: None,
             connect_error: RefCell::new(None),
             connection_error: None,
+            session_fatal: RefCell::new(None),
             #[cfg(feature = "fake-device")]
             devices: BTreeMap::new(),
         }
@@ -85,6 +90,19 @@ impl FakeProvider {
     pub fn with_connection_error(mut self, message: impl Into<String>) -> Self {
         self.connection_error = Some(message.into());
         self
+    }
+
+    /// Arm (or clear) the scripted instance-fatal message returned by
+    /// [`Self::session_fatal`].
+    pub fn set_session_fatal(&self, message: Option<String>) {
+        *self.session_fatal.borrow_mut() = message;
+    }
+
+    /// Scripted mirror of the browser-worker provider's `session_fatal`:
+    /// the sticky instance-fatal message of a crashed sim worker. Ignores
+    /// the session id — the fake hosts one sim conversation per test.
+    pub fn session_fatal(&self, _session_id: &LinkSessionId) -> Option<String> {
+        self.session_fatal.borrow().clone()
     }
 
     /// Register a scripted fake device endpoint (full capability set —
