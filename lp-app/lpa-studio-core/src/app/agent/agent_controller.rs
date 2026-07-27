@@ -230,6 +230,7 @@ impl AgentController {
                     self.decorate_sections(sections, runtime, ctx);
                 }
             }
+            self.decorate_face(node.face.as_mut(), runtime, ctx);
             self.decorate_children(&mut node.children, runtime, ctx);
         }
     }
@@ -242,8 +243,32 @@ impl AgentController {
     ) {
         for child in children {
             self.decorate_sections(&mut child.sections, runtime, ctx);
+            self.decorate_face(child.face.as_mut(), runtime, ctx);
             self.decorate_children(&mut child.children, runtime, ctx);
         }
+    }
+
+    /// Attach the agent chat DTO to a shader card's face (node-card P3):
+    /// the face's `agent` section hosts the SAME chat the inline editor's
+    /// Agent tab carries, keyed by the code drawer's artifact. The code
+    /// drawer itself stays undecorated — inside the face, the chat lives in
+    /// its own section, not on a tab strip.
+    fn decorate_face(
+        &self,
+        face: Option<&mut crate::UiNodeFace>,
+        runtime: Option<RuntimeId>,
+        ctx: &AgentViewContext,
+    ) {
+        let Some(crate::UiNodeFace::Shader(shader)) = face else {
+            return;
+        };
+        let Some(editor) = &shader.code_drawer else {
+            return;
+        };
+        if editor.kind != UiAssetEditorKind::Glsl {
+            return;
+        }
+        shader.agent = Some(self.view_for(runtime, &editor.artifact, ctx));
     }
 
     fn decorate_sections(

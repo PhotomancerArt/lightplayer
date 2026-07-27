@@ -6,6 +6,7 @@
 //! need to talk back to the server.
 
 pub mod node_controller;
+pub(in crate::app::project) mod node_face_builder;
 pub mod node_revert_op;
 pub mod project_node_address;
 pub mod project_node_target;

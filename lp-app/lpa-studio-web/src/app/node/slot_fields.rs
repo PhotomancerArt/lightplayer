@@ -397,7 +397,7 @@ pub fn XySlotField(
                     let Some((address, handler)) = down_wiring.clone() else {
                         return;
                     };
-                    capture_pad_pointer(&event);
+                    capture_field_pointer(&event);
                     dragging.set(true);
                     let point = event.data().element_coordinates();
                     handler.call(slot_set_value_action(address, xy_pad_value(point.x, point.y)));
@@ -485,10 +485,11 @@ pub(crate) fn xy_pad_value(x: f64, y: f64) -> LpValue {
     LpValue::Vec2([fx, fy])
 }
 
-/// Route subsequent pointer events to the pad for the duration of the drag
-/// (pointer capture), so a drag can leave the small pad and keep updating
-/// with edge-clamped values. No-op outside a real browser event.
-fn capture_pad_pointer(event: &Event<PointerData>) {
+/// Route subsequent pointer events to the gesture surface for the duration
+/// of the drag (pointer capture), so a drag can leave the small surface and
+/// keep updating with edge-clamped values. Shared by the XY pad and the
+/// panel knob field. No-op outside a real browser event.
+pub(crate) fn capture_field_pointer(event: &Event<PointerData>) {
     use dioxus::web::WebEventExt;
 
     if let Some(web_event) = event.data().try_as_web_event()

@@ -422,7 +422,7 @@ impl FixtureBuilder {
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),
             brightness: self.brightness.map_or_else(OptionSlot::none, |brightness| {
-                OptionSlot::some(ValueSlot::new(u32::from(brightness)))
+                OptionSlot::some(ValueSlot::new(lpc_model::Brightness(u32::from(brightness))))
             }),
             gamma_correction: self
                 .gamma_correction

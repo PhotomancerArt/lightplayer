@@ -448,9 +448,19 @@
             "some": {
               "value": {
                 "shape": {
-                  "editor": "plain",
-                  "id": 3065358156,
-                  "meta": {},
+                  "editor": {
+                    "slider": {
+                      "max": 255.0,
+                      "min": 0.0,
+                      "step": 1.0
+                    }
+                  },
+                  "id": 1575082113,
+                  "meta": {
+                    "description": "Fixture output brightness (0-255).",
+                    "label": "Brightness",
+                    "panel": true
+                  },
                   "ty": "u32"
                 }
               }
