@@ -266,6 +266,12 @@
         "min": {
           "type": "number"
         },
+        "panel": {
+          "type": "boolean"
+        },
+        "unit": {
+          "type": "string"
+        },
         "value": {
           "type": "string"
         }
@@ -822,8 +828,10 @@
           "type": "object"
         },
         "brightness": {
+          "description": "Fixture output brightness (0-255).",
           "maximum": 4294967295,
           "minimum": 0,
+          "title": "Brightness",
           "type": "integer"
         },
         "color_order": {

@@ -1,7 +1,9 @@
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::fixture::{FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig};
+use crate::nodes::fixture::{
+    Brightness, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig,
+};
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
     OptionSlot, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted,
@@ -32,8 +34,9 @@ pub struct FixtureDef {
     pub color_order: ValueSlot<ColorOrder>,
     /// Texture-space 2D affine transform.
     pub transform: Affine2dSlot,
-    /// Brightness level (0-255).
-    pub brightness: OptionSlot<ValueSlot<u32>>,
+    /// Brightness level (0-255) — the fixture card's front-panel fader
+    /// ([`Brightness`] carries the panel meta + slider hint).
+    pub brightness: OptionSlot<ValueSlot<Brightness>>,
     /// Enable gamma correction.
     pub gamma_correction: OptionSlot<ValueSlot<bool>>,
 }
@@ -74,8 +77,8 @@ impl FixtureDef {
         self.brightness
             .data
             .as_ref()
-            .and_then(|value| u8::try_from(*value.value()).ok())
-            .unwrap_or(64)
+            .map(|value| value.value().as_u8())
+            .unwrap_or(Brightness::DEFAULT.as_u8())
     }
 
     pub fn gamma_correction(&self) -> bool {
@@ -100,8 +103,8 @@ impl FixtureDef {
     }
 }
 
-fn default_brightness() -> OptionSlot<ValueSlot<u32>> {
-    OptionSlot::some(ValueSlot::new(64_u32))
+fn default_brightness() -> OptionSlot<ValueSlot<Brightness>> {
+    OptionSlot::some(ValueSlot::new(Brightness::DEFAULT))
 }
 
 fn default_render_size() -> Dim2uSlot {

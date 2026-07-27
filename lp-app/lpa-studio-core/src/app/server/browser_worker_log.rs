@@ -24,9 +24,19 @@ pub fn worker_log_draft(level: &str, target: String, message: String) -> UiLogDr
 /// Map a worker `Status` envelope to an Info draft labeled
 /// [`WORKER_STATUS_DETAIL`]. The optional human message wins over the raw
 /// status token.
+///
+/// The `"fatal"` status — the worker's sticky poisoned-instance report,
+/// whose message carries the primary panic — maps to an Error draft: it is
+/// the one console line that explains a sim crash, so it must not drown at
+/// the Info floor.
 pub fn worker_status_draft(status: String, message: Option<String>) -> UiLogDraft {
+    let level = if status == "fatal" {
+        UiLogLevel::Error
+    } else {
+        UiLogLevel::Info
+    };
     UiLogDraft::new(
-        UiLogLevel::Info,
+        level,
         UiLogSource::with_detail(UiLogOrigin::Device, WORKER_STATUS_DETAIL),
         message.unwrap_or(status),
     )
@@ -61,6 +71,23 @@ mod tests {
     fn unknown_worker_level_reads_as_info() {
         assert_eq!(parse_worker_log_level("verbose"), UiLogLevel::Info);
         assert_eq!(parse_worker_log_level(""), UiLogLevel::Info);
+    }
+
+    #[test]
+    fn fatal_status_maps_to_an_error_draft_with_the_primary_panic() {
+        let draft = worker_status_draft(
+            "fatal".to_string(),
+            Some("browser worker instance fatal: panicked at 'boom'".to_string()),
+        );
+        assert_eq!(draft.level, UiLogLevel::Error);
+        assert!(draft.message.contains("panicked at 'boom'"));
+    }
+
+    #[test]
+    fn ordinary_status_stays_an_info_draft() {
+        let draft = worker_status_draft("ready".to_string(), None);
+        assert_eq!(draft.level, UiLogLevel::Info);
+        assert_eq!(draft.message, "ready");
     }
 
     #[test]

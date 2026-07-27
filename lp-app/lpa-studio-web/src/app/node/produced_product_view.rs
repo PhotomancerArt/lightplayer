@@ -62,9 +62,13 @@ pub fn ProducedProductView(
     }
 }
 
+/// The bare preview media (pixel grid / lamp layout / skeleton / message)
+/// inside the product's aspect frame. `pub(crate)` so node-face heroes and
+/// playlist strip thumbnails reuse the exact preview path instead of
+/// mocking a lookalike.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProductPreview(
+pub(crate) fn ProductPreview(
     kind: UiProductKind,
     preview: UiProductPreview,
     tracking: UiProductTrackingState,
