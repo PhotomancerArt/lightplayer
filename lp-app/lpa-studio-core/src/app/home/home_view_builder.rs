@@ -22,6 +22,7 @@ use crate::app::roster::{
     ConnectEvidence, RosterCardState, RosterEvidence, derive_roster_card_state,
 };
 
+use super::card_ui_state::CardUiState;
 use super::embedded_example::embedded_examples;
 use super::ui_device_card::{UiDeviceCard, UiDeviceProjectChip};
 use super::ui_example_card::UiExampleCard;
@@ -89,6 +90,10 @@ pub struct HomeDeviceEvidence {
     pub observed_version: Option<usize>,
     /// The local head's version number, for the "Push vN" affordance.
     pub head_version: Option<usize>,
+    /// When the local head was last saved (§3c-3 drift copy).
+    pub local_saved_at: Option<f64>,
+    /// When we last pushed to this device (its registry association).
+    pub pushed_at: Option<f64>,
     /// The remembered device a one-click reconnect targets: while the
     /// connect window is open and no identity has landed, the live
     /// evidence renders ON that card (uid + name adopted from the
@@ -328,6 +333,7 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
         fw: None,
         sim: true,
         console_tail: sim.console_tail.clone(),
+        ui: CardUiState::default(),
     }
 }
 
@@ -344,6 +350,8 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         content: live.sync.as_ref().map(|sync| &sync.content),
         observed_version: live.observed_version,
         head_version: live.head_version,
+        local_saved_at: live.local_saved_at,
+        pushed_at: live.pushed_at,
         unstamped: live
             .sync
             .as_ref()
@@ -384,6 +392,7 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         fw,
         sim: false,
         console_tail: live.console_tail.clone(),
+        ui: CardUiState::default(),
     })
 }
 
@@ -486,6 +495,8 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         content: None,
         observed_version: None,
         head_version: None,
+        local_saved_at: None,
+        pushed_at: None,
         unstamped: false,
         registry: Some(device),
         connect: ConnectEvidence::Idle,
@@ -502,6 +513,7 @@ fn device_card(device: &RegisteredDevice, projects: &[UiPackageCard]) -> UiDevic
         sim: false,
         // no session, no console (D42: the console is the session's)
         console_tail: Vec::new(),
+        ui: CardUiState::default(),
     }
 }
 
@@ -710,6 +722,7 @@ mod tests {
                 fw: None,
                 sim: false,
                 console_tail: Vec::new(),
+                ui: CardUiState::default(),
             },
             UiDeviceCard {
                 uid: Some("dev_a".to_string()),
@@ -720,6 +733,7 @@ mod tests {
                 fw: None,
                 sim: false,
                 console_tail: Vec::new(),
+                ui: CardUiState::default(),
             },
         ];
         let deduped = dedupe_by_key(cards, |card| card.render_key().to_string(), "device");

@@ -102,6 +102,23 @@ pub struct StudioController {
     /// When the next quiet PortHeld retry is due (D32; `None` while no
     /// port is held). Epoch seconds on the injected clock.
     port_held_retry_at: Option<f64>,
+    /// Per-card UI view-state (selected tab, open sheet), keyed by the
+    /// card's `identity_key()`. Core-owned so it survives the card ⇄ pane
+    /// growth and session replaces, and is e2e-drivable (2026-07-25
+    /// re-home). Pruned lazily: absent keys default; a stale key just
+    /// never re-reads. The in-place `op` is NOT stored here — it derives
+    /// live from the session's `operation_label`.
+    card_ui: std::collections::HashMap<String, crate::CardUiState>,
+    /// The hardware card's CARD-OWNED op flow (state-flow model §2): set
+    /// at management dispatch, fed by the manage event sink, and — the
+    /// point (I1) — NOT cleared when the session dies, because heavy ops
+    /// sever the very session that used to narrate them. `Failed` stays
+    /// until the user takes its one exit (`CardUiOp::ClearOp`). Keyed by
+    /// the managed device's stamped uid when it has one (`None` = an
+    /// identity-less blank board — the op then rides the live non-sim
+    /// card). One slot because the pool holds one hardware session; this
+    /// grows into a per-identity map with the pool.
+    device_card_op: Option<(Option<String>, Rc<RefCell<crate::CardOp>>)>,
     /// When the last sim crash auto-reboot ran (`None` = never). Epoch
     /// seconds on the injected clock; the flap guard: a second crash
     /// within [`SIM_CRASH_REBOOT_GUARD_SECS`] stays Failed for manual
@@ -169,6 +186,8 @@ impl StudioController {
             library_refresh_pending: false,
             pending_open: None,
             port_held_retry_at: None,
+            card_ui: std::collections::HashMap::new(),
+            device_card_op: None,
             sim_crash_reboot_at: None,
             random: Rc::new(clock_fallback_random),
             settings: crate::app::settings::SettingsStore::default(),
@@ -580,7 +599,7 @@ impl StudioController {
     fn lens_device_card(&self) -> Option<crate::UiDeviceCard> {
         let session = self.pool.lens_session()?;
         let evidence = self.home_pool_evidence();
-        if session.is_sim() {
+        let card = if session.is_sim() {
             evidence
                 .sim
                 .as_ref()
@@ -590,7 +609,8 @@ impl StudioController {
                 .devices
                 .first()
                 .and_then(crate::app::home::home_view_builder::live_device_card)
-        }
+        };
+        card.map(|card| self.overlay_card_ui(card))
     }
 
     /// The lens's runtime binding for the view (SDI: the URL is the
@@ -634,12 +654,20 @@ impl StudioController {
             ConnectFlowState::Failed { issue } => Some(issue.clone()),
             _ => None,
         };
-        Some(home_view_builder::build_home_view(
+        let mut view = home_view_builder::build_home_view(
             self.home_inputs.as_ref(),
             opening.map(|pending| pending.card_key().to_string()),
             issue,
             &self.home_pool_evidence(),
-        ))
+        );
+        // Overlay each card's persisted UI view-state + live op (the
+        // builder leaves `ui` default; identity keys the overlay).
+        view.devices = view
+            .devices
+            .into_iter()
+            .map(|card| self.overlay_card_ui(card))
+            .collect();
+        Some(view)
     }
 
     /// The runtime pool's roster evidence (P4): one evidence bundle per
@@ -654,6 +682,11 @@ impl StudioController {
             .pool
             .device_session()
             .map(crate::RuntimeSession::device_versions)
+            .unwrap_or((None, None));
+        let (local_saved_at, pushed_at) = self
+            .pool
+            .device_session()
+            .map(crate::RuntimeSession::device_drift_times)
             .unwrap_or((None, None));
         // A long-running operation on the device session (flash / erase /
         // push — the same flag that blocks pool replaces) owns the card's
@@ -676,6 +709,8 @@ impl StudioController {
             transport: self.transport_label().map(str::to_string),
             observed_version,
             head_version,
+            local_saved_at,
+            pushed_at,
             pending_uid: self.device.pending_reconnect_uid().map(str::to_string),
             console_tail: self
                 .pool
@@ -1060,6 +1095,18 @@ impl StudioController {
             (Some(uid), Ok(host)) => match host.catalog_snapshot().await {
                 Ok(fs) => {
                     let store = crate::app::library::LibraryStore::read_only(fs);
+                    // The device's last-push marker (§3c-1): what WE last
+                    // pushed to this board, per its registry association —
+                    // the auto-fast-forward base, read off the same
+                    // snapshot.
+                    let association = identity.as_ref().and_then(|id| {
+                        crate::app::places::DeviceRegistry::new(store.fs_handle())
+                            .list()
+                            .ok()?
+                            .into_iter()
+                            .find(|entry| entry.uid == id.uid)?
+                            .association
+                    });
                     match store.list() {
                         Ok(summaries) => summaries
                             .into_iter()
@@ -1068,22 +1115,35 @@ impl StudioController {
                                 // relation + line version numbers (the
                                 // roster's "Running vN"/"Push vN" evidence)
                                 // in one handle open
-                                let (relation, versions) = store
+                                let (relation, versions, head, head_saved_at) = store
                                     .open(summary.uid)
                                     .map(|handle| {
                                         let history = &handle.history;
+                                        let head = history.head();
                                         (
                                             history.classify(pulled.observed),
                                             (
                                                 history.version_number(pulled.observed),
-                                                history
-                                                    .head()
-                                                    .and_then(|head| history.version_number(head)),
+                                                head.and_then(|head| history.version_number(head)),
                                             ),
+                                            head,
+                                            head.and_then(|head| history.saved_at(head)),
                                         )
                                     })
-                                    .unwrap_or((lpc_history::SyncRelation::Diverged, (None, None)));
-                                (summary, relation, versions)
+                                    .unwrap_or((
+                                        lpc_history::SyncRelation::Diverged,
+                                        (None, None),
+                                        None,
+                                        None,
+                                    ));
+                                (
+                                    summary,
+                                    relation,
+                                    versions,
+                                    head,
+                                    head_saved_at,
+                                    association,
+                                )
                             }),
                         Err(_) => None,
                     }
@@ -1093,19 +1153,27 @@ impl StudioController {
             _ => None,
         };
 
-        if let Some((summary, relation, versions)) = local {
+        if let Some((summary, relation, versions, head, head_saved_at, association)) = local {
+            // §3c-3 drift wall-clock: the local head's save time + when we
+            // last pushed to THIS board (its association) — the
+            // Edited-on-device card's plain-words comparison.
+            let pushed_at = association
+                .as_ref()
+                .filter(|assoc| assoc.project == summary.uid)
+                .map(|assoc| assoc.at);
             if let Ok(session) = self.pool.device_session_mut() {
                 session.set_device_versions(versions);
+                session.set_device_drift_times((head_saved_at, pushed_at));
             }
-            let content = DeviceContent::Known {
-                project_uid: summary.uid.to_string(),
-                slug: summary.slug.clone(),
-                observed: pulled.observed,
-                relation,
-            };
             let Some(identity_value) = identity.clone() else {
                 // anonymous hardware: classification only (the wizard
                 // stamps an identity, then this re-runs)
+                let content = DeviceContent::Known {
+                    project_uid: summary.uid.to_string(),
+                    slug: summary.slug.clone(),
+                    observed: pulled.observed,
+                    relation,
+                };
                 return Ok(DeviceSyncState { identity, content });
             };
             let device_uid: lpc_history::PrefixedUid = identity_value.uid.parse().map_err(|e| {
@@ -1118,7 +1186,9 @@ impl StudioController {
                 &pulled.files,
                 now,
             )?;
-            if !handled {
+            let banked = if handled {
+                true
+            } else {
                 let host = self.library_host()?;
                 let op = CatalogOp::RecordDeviceObservation {
                     project_uid: summary.uid.to_string(),
@@ -1130,19 +1200,80 @@ impl StudioController {
                     observed: pulled.observed,
                     files: pulled.files.clone(),
                 };
-                if let Err(error) = host.catalog(op).await {
-                    // open in another tab (or busy): that tab owns the
-                    // history — classify only, don't bank from here
-                    self.push_log(UiLogDraft::new(
-                        UiLogLevel::Info,
-                        UiLogOrigin::Studio,
-                        format!(
-                            "device observation for {} not banked: {error}",
-                            summary.slug
-                        ),
-                    ));
+                match host.catalog(op).await {
+                    Ok(_) => true,
+                    Err(error) => {
+                        // open in another tab (or busy): that tab owns the
+                        // history — classify only, don't bank from here
+                        self.push_log(UiLogDraft::new(
+                            UiLogLevel::Info,
+                            UiLogOrigin::Studio,
+                            format!(
+                                "device observation for {} not banked: {error}",
+                                summary.slug
+                            ),
+                        ));
+                        false
+                    }
+                }
+            };
+
+            // AUTO FAST-FORWARD (§3c-1): the board's copy diverges, but
+            // what we last pushed to THIS board is still our head — local
+            // never moved, so the banked copy is a pure extension of it.
+            // Adopt it without asking (the old head stays in history);
+            // Edited-on-device is reserved for genuine forks. Skipped
+            // when banking didn't happen (another tab owns the history) —
+            // the card then asks, which is always safe.
+            let mut relation = relation;
+            if relation == lpc_history::SyncRelation::Diverged
+                && banked
+                && head.is_some()
+                && association.as_ref().is_some_and(|assoc| {
+                    assoc.project == summary.uid && Some(assoc.version) == head
+                })
+            {
+                let host = self.library_host()?;
+                match host
+                    .catalog(CatalogOp::AdoptObservedVersion {
+                        project_uid: summary.uid.to_string(),
+                        observed: pulled.observed,
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        relation = lpc_history::SyncRelation::AtHead;
+                        // adopt appended the observed copy as the new head
+                        let new_head = versions.1.map(|n| n + 1);
+                        if let Ok(session) = self.pool.device_session_mut() {
+                            session.set_device_versions((new_head, new_head));
+                        }
+                        self.push_log(UiLogDraft::new(
+                            UiLogLevel::Info,
+                            UiLogOrigin::Studio,
+                            format!(
+                                "Pulled your edits from {} — {} is up to date",
+                                identity_value.name, summary.slug
+                            ),
+                        ));
+                    }
+                    Err(error) => {
+                        // stays Diverged: the card asks, nothing is lost
+                        self.push_log(UiLogDraft::new(
+                            UiLogLevel::Warn,
+                            UiLogOrigin::Studio,
+                            format!("auto fast-forward for {} failed: {error}", summary.slug),
+                        ));
+                    }
                 }
             }
+
+            let content = DeviceContent::Known {
+                project_uid: summary.uid.to_string(),
+                slug: summary.slug.clone(),
+                observed: pulled.observed,
+                relation,
+            };
             self.request_library_refresh();
             return Ok(DeviceSyncState { identity, content });
         }
@@ -1707,7 +1838,10 @@ impl StudioController {
                     })?;
                 self.connect_server_from_link(id, updates).await
             }
-            DeviceOp::ProvisionFirmware => self.provision_firmware(updates).await,
+            DeviceOp::ProvisionFirmware { setup_name } => {
+                self.provision_firmware(updates, setup_name).await
+            }
+            DeviceOp::WipeProject => self.wipe_project().await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
             DeviceOp::RefreshConnections => {
                 // Drop the session (no provider close) + catalog refresh.
@@ -2112,7 +2246,96 @@ impl StudioController {
                     identity.name
                 ))))
             }
+            HomeOp::CardUi(op) => {
+                self.apply_card_ui_op(op);
+                Ok(UiNotices::new())
+            }
         }
+    }
+
+    /// Apply a card UI view-state mutation (2026-07-25 re-home): flip the
+    /// entry keyed by the card's identity and mark the view dirty. Pure
+    /// and synchronous — no wire, no library.
+    fn apply_card_ui_op(&mut self, op: crate::CardUiOp) {
+        use crate::CardUiOp;
+        match op {
+            CardUiOp::SelectTab { card, tab } => {
+                self.card_ui.entry(card).or_default().tab = tab;
+            }
+            CardUiOp::OpenSheet { card, sheet } => {
+                self.card_ui.entry(card).or_default().sheet = Some(sheet);
+            }
+            CardUiOp::CloseSheet { card } => {
+                self.card_ui.entry(card).or_default().sheet = None;
+            }
+            // The failed op's ONE exit (model §2 I4): drop the flow; the
+            // card re-derives its honest state on the next view build.
+            CardUiOp::ClearOp { .. } => {
+                self.device_card_op = None;
+            }
+        }
+        self.mark_dirty();
+    }
+
+    /// Overlay each card's persisted UI view-state (tab + sheet) and its
+    /// live in-place op onto a freshly-built roster card. The builder
+    /// leaves `ui` default; identity keys the lookup. The `op` derives
+    /// from the attached session's `operation_label` (the same flag the
+    /// Operation-in-flight card state reads) so the in-place progress and
+    /// the edge treatment never disagree.
+    fn overlay_card_ui(&self, mut card: crate::UiDeviceCard) -> crate::UiDeviceCard {
+        if let Some(saved) = self.card_ui.get(card.identity_key()) {
+            card.ui = saved.clone();
+        }
+        // The CARD-OWNED op flow first (model §2, I1): it survives the
+        // session the op severed, so it outranks session-derived
+        // narration. Targeting: the stamped uid when the managed device
+        // had one; an identity-less blank board's op rides the live
+        // (non-offline) hardware card.
+        if !card.sim
+            && let Some((target_uid, slot)) = self.device_card_op.as_ref()
+        {
+            let matches_target = match target_uid {
+                Some(uid) => card.uid.as_deref() == Some(uid.as_str()),
+                None => !matches!(card.state, crate::RosterCardState::Offline { .. }),
+            };
+            if matches_target {
+                card.ui.op = Some(slot.borrow().clone());
+                return card;
+            }
+        }
+        // the live op: the session whose card this is, mid-operation
+        let op_label = if card.sim {
+            self.pool
+                .sim_session()
+                .and_then(|session| session.operation_label().map(str::to_string))
+        } else {
+            // Only the session's OWN card narrates the session op: the
+            // stamped identity must match the card's uid. A remembered
+            // (offline) card also carries a uid, so a bare is_some()
+            // check smeared one device's push across every device card.
+            // An identity-less live board has no uid on either side —
+            // its card is the one mid-operation.
+            let live_uid = self
+                .device_sync()
+                .and_then(|sync| sync.identity.as_ref())
+                .map(|identity| identity.uid.as_str());
+            self.pool
+                .device_session()
+                .filter(|_| match (card.uid.as_deref(), live_uid) {
+                    (Some(card_uid), Some(live_uid)) => card_uid == live_uid,
+                    _ => matches!(card.state, crate::RosterCardState::OperationInFlight { .. }),
+                })
+                .and_then(|session| session.operation_label().map(str::to_string))
+        };
+        if let Some(label) = op_label {
+            let percent = match &card.state {
+                crate::RosterCardState::OperationInFlight { percent, .. } => *percent,
+                _ => None,
+            };
+            card.ui.op = Some(crate::CardOp::new(label, percent));
+        }
+        card
     }
 
     /// The live half of a device rename (D34): when the renamed device is
@@ -3190,6 +3413,19 @@ impl StudioController {
             self.quiesce_lens();
             self.pool.set_lens(id);
         }
+        // Library sync must target the dir this runtime ACTUALLY serves:
+        // a device's storage dir is discovered at connect (CLI uploads /
+        // older pushes use dirs other than the sim's default slot) — the
+        // sim (no discovered dir) keeps the demo slot. Save-as-pull from
+        // the wrong dir silently skipped the library save (2026-07-26).
+        let storage_id = self
+            .pool
+            .session(id)
+            .and_then(|session| session.device_storage_id().map(str::to_string))
+            .unwrap_or_else(|| {
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+            });
+        self.project.set_runtime_storage_id(storage_id);
         self.connect_running_project(updates).await
     }
 
@@ -3369,31 +3605,103 @@ impl StudioController {
                 request: LinkManagementRequest::ResetRuntime,
                 progress_label: "Resetting device",
                 reconnect_detail: "Waiting for device boot",
+                failed_exit_label: "Close",
                 record_captured_logs_on_success: true,
                 done_notice: |_| UiNotice::info("Device reset"),
                 degrade_subject: "device reset",
                 server_reconnect_failed_notice: "Device reset; reconnect after it finishes booting",
+                // a runtime reset reboots the device; the project survives.
+                severs_lens: false,
             },
             updates,
         )
         .await
     }
 
-    async fn provision_firmware(&mut self, updates: UxUpdateSink) -> UiResult {
-        self.run_device_management(
-            ManagementFlowSpec {
-                request: LinkManagementRequest::FlashFirmware,
-                progress_label: "Flashing firmware",
-                reconnect_detail: "Waiting for firmware boot",
-                record_captured_logs_on_success: false,
-                done_notice: provision_notice,
-                degrade_subject: "firmware flashed",
-                server_reconnect_failed_notice:
-                    "Firmware flashed; reconnect the server after the device finishes booting",
-            },
-            updates,
-        )
-        .await
+    async fn provision_firmware(
+        &mut self,
+        updates: UxUpdateSink,
+        setup_name: Option<String>,
+    ) -> UiResult {
+        let mut outcome = self
+            .run_device_management(
+                ManagementFlowSpec {
+                    request: LinkManagementRequest::FlashFirmware,
+                    progress_label: "Flashing firmware",
+                    reconnect_detail: "Waiting for firmware boot",
+                    failed_exit_label: "Back to set up",
+                    record_captured_logs_on_success: false,
+                    done_notice: provision_notice,
+                    degrade_subject: "firmware flashed",
+                    server_reconnect_failed_notice:
+                        "Firmware flashed; reconnect the server after the device finishes booting",
+                    // a flash reboots into new firmware; the stored project
+                    // survives and reloads on reattach.
+                    severs_lens: false,
+                },
+                updates,
+            )
+            .await?;
+        // The setup form's name stamps at first post-flash contact
+        // (model §1-A): the happy path never detours through
+        // Needs-a-name. Only an identity-less board takes the stamp —
+        // an update on a stamped device keeps its name. Naming failure
+        // degrades honestly: the flash stands, the card offers naming.
+        let setup_name = setup_name
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
+        if let Some(name) = setup_name
+            && self
+                .device_sync()
+                .is_some_and(|sync| sync.identity.is_none())
+        {
+            match self.run_identity_stamp(name).await {
+                Ok(identity) => {
+                    outcome = outcome.with_notice(UiNotice::info(format!(
+                        "This device is now \"{}\"",
+                        identity.name
+                    )));
+                }
+                Err(error) => {
+                    outcome = outcome.with_notice(UiNotice::info(format!(
+                        "Firmware installed, but naming failed: {error} — name it from its card."
+                    )));
+                }
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// Wipe the device's PROJECT storage back to blank over the live wire
+    /// (the Holds-unreadable-data card's way out — model rev 2026-07-26:
+    /// the way out is BLANK, never push-over). Firmware stays; the
+    /// re-pull reclassifies the board as Connected-empty (landing I3).
+    /// The unreadable content cannot be banked (that's what unreadable
+    /// means) — the confirm sheet's copy says so plainly; raw-image
+    /// backup is the model-§5 backlog item.
+    async fn wipe_project(&mut self) -> UiResult {
+        let storage_id = self
+            .pool
+            .device_session()
+            .and_then(|session| session.device_storage_id().map(str::to_string))
+            .ok_or_else(|| {
+                UiError::MissingSession("no device project storage to wipe".to_string())
+            })?;
+        let logs = self
+            .pool
+            .device_session_mut()?
+            .client_mut()?
+            .replace_project_files(
+                &storage_id,
+                Vec::<lpa_client::project_deploy::ProjectDeployFile>::new(),
+            )
+            .await?;
+        self.record_logs(logs);
+        self.refresh_device_sync().await;
+        self.mark_dirty();
+        Ok(UiNotices::new().with_notice(UiNotice::info(
+            "Wiped — this board is empty now. Pick a project to put on it.",
+        )))
     }
 
     async fn reset_to_blank(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -3402,11 +3710,15 @@ impl StudioController {
                 request: LinkManagementRequest::EraseDeviceFlash,
                 progress_label: "Wiping device",
                 reconnect_detail: "Checking for LightPlayer firmware",
+                failed_exit_label: "Back to set up",
                 record_captured_logs_on_success: false,
                 done_notice: reset_notice,
                 degrade_subject: "device wiped",
                 server_reconnect_failed_notice:
                     "Device wiped; reconnect after the device finishes booting",
+                // a wipe erases the flash — the project is gone; a lens on
+                // this device is severed and the app returns to the gallery.
+                severs_lens: true,
             },
             updates,
         )
@@ -3431,11 +3743,29 @@ impl StudioController {
             .ok_or_else(|| {
                 UiError::MissingSession("no hardware device session for management".to_string())
             })?;
-        // Quiesce the editor only when it is a lens on the device being
-        // managed (P2: a project open on the sim survives a flash/erase).
-        if self.pool.lens() == Some(device_id) {
+        // Quiesce the editor's live edit-state only when it is a lens on
+        // the device being managed (P2: a project open on the sim survives
+        // a flash/erase). A destructive wipe additionally DETACHES the lens
+        // once the op settles (below) — returning to the gallery — because
+        // the project is gone with the flash; a reset/flash keeps the
+        // project, so the editor stays put to reload after the reattach.
+        let severed_lens = self.pool.lens() == Some(device_id);
+        if severed_lens {
             self.project.reset();
         }
+        // The CARD-OWNED op flow starts here (model §2): the slot lives on
+        // the controller, keyed by the managed device's stamped uid, and
+        // survives whatever happens to the session below (I1). The event
+        // sink feeds it; the settle half flips it to Failed or clears it.
+        let managed_uid = self
+            .device_sync()
+            .and_then(|sync| sync.identity.as_ref())
+            .map(|identity| identity.uid.clone());
+        let card_op = Rc::new(RefCell::new(crate::CardOp::new(
+            format!("{}…", spec.progress_label),
+            None,
+        )));
+        self.device_card_op = Some((managed_uid, Rc::clone(&card_op)));
         if let Some(session) = self.pool.session_mut(device_id) {
             session.disconnect_server();
             // The pool refuses a same-kind replace while this runs (DQ-A
@@ -3460,6 +3790,8 @@ impl StudioController {
             target,
             Rc::clone(&activity),
             Rc::clone(&captured_logs),
+            Rc::clone(&card_op),
+            spec.reconnect_detail,
         );
         let manage_result = {
             let session = match self.hardware_session() {
@@ -3468,6 +3800,8 @@ impl StudioController {
                     if let Some(session) = self.pool.session_mut(device_id) {
                         session.set_operation(None);
                     }
+                    // The op never started — clean abort, no Failed render.
+                    self.device_card_op = None;
                     return Err(UiError::MissingSession(
                         "no hardware device session for management".to_string(),
                     ));
@@ -3484,6 +3818,14 @@ impl StudioController {
             Ok(management) => management,
             Err(error) => {
                 self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
+                // The card renders the failure with its ONE exit (I4);
+                // the flow stays until the user takes it (ClearOp).
+                *card_op.borrow_mut() = crate::CardOp::failed(
+                    format!("{} failed", spec.progress_label),
+                    error.to_string(),
+                    spec.failed_exit_label,
+                );
+                self.mark_dirty();
                 return Err(UiError::Link(error.to_string()));
             }
         };
@@ -3500,12 +3842,18 @@ impl StudioController {
             "Connecting",
             spec.reconnect_detail,
         );
+        // The reattach half is the op's AwaitingDevice phase (I2) — the
+        // overlay stays up, narrating the expected gap.
+        *card_op.borrow_mut() = crate::CardOp::awaiting(spec.reconnect_detail);
+        self.mark_dirty();
         // The link was already rebuilt inside `manage`; what remains is the
         // server reattach + post-attach sequence on the managed session.
         match self.attach_runtime(device_id, updates).await {
             Ok(mut attach_outcome) => {
                 outcome.notices.append(&mut attach_outcome.notices);
-                Ok(outcome)
+                // Landed (I3): the flow ends; the card re-derives and its
+                // Status tab announces what's next.
+                self.device_card_op = None;
             }
             Err(error) => {
                 self.push_log(UiLogDraft::new(
@@ -3519,9 +3867,28 @@ impl StudioController {
                 if let Some(session) = self.pool.session_mut(device_id) {
                     session.fail(error.to_string());
                 }
-                Ok(outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice)))
+                // Failed reattach renders on the card too (I4) — with the
+                // same single exit, not a silent fall-through.
+                *card_op.borrow_mut() = crate::CardOp::failed(
+                    format!("{} — reconnect failed", spec.degrade_subject),
+                    error.to_string(),
+                    spec.failed_exit_label,
+                );
+                outcome = outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
             }
         }
+        // A destructive wipe severs the editor AFTER the reattach settles:
+        // the project went with the flash, so detach the lens (the app
+        // returns to the gallery) and say why. Detaching earlier would
+        // change the reattach outcome — the managed session must stay the
+        // lens through `attach_runtime` (device-lifecycle P3).
+        if severed_lens && spec.severs_lens {
+            self.quiesce_lens();
+            outcome = outcome.with_notice(UiNotice::info(
+                "This project is no longer on this device — back to your devices.",
+            ));
+        }
+        Ok(outcome)
     }
 
     fn project_is_loaded(&self) -> bool {
@@ -3584,6 +3951,13 @@ impl StudioController {
     /// The runtime pool, for e2e assertions about session coexistence.
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
         &self.pool
+    }
+
+    /// The storage dir library sync targets, for the save-as-pull
+    /// wiring regression (2026-07-26).
+    #[cfg(test)]
+    pub(crate) fn project_runtime_storage_id_for_test(&self) -> &str {
+        self.project.runtime_storage_id_for_test()
     }
 
     /// The connect-flow state, for ladder assertions (M6).
@@ -3837,6 +4211,9 @@ struct ManagementFlowSpec {
     progress_label: &'static str,
     /// Activity detail while waiting for the post-operation reconnect.
     reconnect_detail: &'static str,
+    /// The Failed card-op's single exit label (model §2 I4) — the door to
+    /// the nearest stable state, e.g. "Back to set up".
+    failed_exit_label: &'static str,
     /// Reset records the live-captured logs on success (its result replay
     /// is empty); flash/erase rely on the result replay alone, so recording
     /// the capture too would double every line.
@@ -3847,6 +4224,13 @@ struct ManagementFlowSpec {
     /// reset" → "device reset but serial reopen failed: …".
     degrade_subject: &'static str,
     server_reconnect_failed_notice: &'static str,
+    /// The op takes the project WITH it (a destructive wipe): when the
+    /// editor lens sits on the managed device, fully quiesce it — detach
+    /// the lens so the app returns to the gallery — and say so, rather than
+    /// leaving a severed-but-still-open editor. A reset/flash keeps the
+    /// project on the device, so its lens only resets its live edit-state
+    /// and stays put to reload after the reattach (device-lifecycle P3).
+    severs_lens: bool,
 }
 
 fn provision_notice(result: &LinkManagementResult) -> UiNotice {
@@ -4099,7 +4483,7 @@ mod tests {
         let actions = view_actions(&view);
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
+            Some(DeviceOp::ProvisionFirmware { setup_name: None })
         )));
         // The device section explains the incompatibility as an issue.
         let UiViewContent::Stack(stack) = &device_pane.body else {
@@ -4357,7 +4741,7 @@ mod tests {
         let actions = view_actions(&view);
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
+            Some(DeviceOp::ProvisionFirmware { setup_name: None })
         )));
     }
 
@@ -4398,7 +4782,7 @@ mod tests {
         // firmware ops live in their own section (D15), away from deploy
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
+            Some(DeviceOp::ProvisionFirmware { setup_name: None })
         )));
         assert!(
             actions
@@ -4420,7 +4804,7 @@ mod tests {
         // recovery stays reachable from the editor's firmware section
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ProvisionFirmware)
+            Some(DeviceOp::ProvisionFirmware { setup_name: None })
         )));
         assert!(
             actions

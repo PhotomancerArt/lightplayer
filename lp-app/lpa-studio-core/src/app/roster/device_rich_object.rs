@@ -89,23 +89,42 @@ fn health_section(input: &DeviceRichInput<'_>) -> RichSection<DeviceDetailAfford
         "status",
         input.state.status_line(input.now_secs),
     )];
-    // The sub-line rides along as a fact row — except the diverged banked
-    // note, which is the Backup section's whole story.
-    if !matches!(input.state, RosterCardState::EditedOnDevice)
-        && let Some(sub_line) = input.state.sub_line()
-    {
+    // The sub-line rides along as a fact row — including the diverged
+    // card's plain-words situation copy (§3a: the Status tab explains;
+    // the Backup section still carries the banked facts).
+    if let Some(sub_line) = input.state.sub_line(input.now_secs) {
         lines.push(RichLine::new("note", sub_line));
     }
+    // The running family also offers the editor entry as a visible CTA
+    // on the card face (2026-07-26 walk: the grow ⤢ alone was too easy
+    // to miss — it stays, but the Status tab now says it out loud).
+    // Running-up-to-date's STATE affordance already is the open — only
+    // the drifted states need it added beside their Push/Review.
+    let state_affordance = input.state.affordance();
+    let open_editor = (matches!(
+        input.state,
+        RosterCardState::RunningUpToDate
+            | RosterCardState::RunningBehind { .. }
+            | RosterCardState::EditedOnDevice { .. }
+    ) && state_affordance != Some(RosterAffordance::OpenEditor))
+    .then_some(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
+    // §3c-2: the diverged face carries BOTH verbs — Keep-both rides
+    // beside the state's Use-board-copy, then the editor CTA.
+    let keep_both = matches!(input.state, RosterCardState::EditedOnDevice { .. })
+        .then_some(DeviceDetailAffordance::Roster(RosterAffordance::KeepBoth));
     RichSection {
         title: "Health".to_string(),
         tone: input.state.spec().tone,
         lines,
         chip: None,
-        affordances: input
-            .state
-            .affordance()
+        // The state-table affordance stays FIRST (it is the rollup's
+        // primary — Push/Review must not be demoted); the editor CTA
+        // rides second.
+        affordances: state_affordance
             .map(DeviceDetailAffordance::Roster)
             .into_iter()
+            .chain(keep_both)
+            .chain(open_editor)
             .collect(),
         weight: RichWeight::Actionable,
     }
@@ -127,23 +146,29 @@ fn project_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDeta
             head_version,
         } => {
             tone = UiStatusKind::Attention;
-            lines.push(RichLine::new(
-                "running",
-                match observed_version {
-                    Some(version) => format!("{name} · v{version}"),
-                    None => name.to_string(),
-                },
-            ));
-            if let Some(head) = head_version {
-                lines.push(RichLine::new("your copy", format!("v{head}")));
-            }
+            lines.push(RichLine::new("running", name.to_string()));
+            // §3a: the drift distance in plain words (saves, not vN).
+            // History records no wall-clock yet — edit-time copy lands
+            // with the timestamp plumbing (model backlog).
+            let distance = match (observed_version, head_version) {
+                (Some(observed), Some(head)) if *head > *observed => {
+                    let behind = head - observed;
+                    if behind == 1 {
+                        "1 save behind your latest".to_string()
+                    } else {
+                        format!("{behind} saves behind your latest")
+                    }
+                }
+                _ => "behind your latest".to_string(),
+            };
+            lines.push(RichLine::new("note", distance));
             affordances.push(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
         }
-        RosterCardState::EditedOnDevice => {
+        RosterCardState::EditedOnDevice { .. } => {
             tone = UiStatusKind::Attention;
             lines.push(RichLine::new(
                 "running",
-                format!("{name} · edited on device"),
+                format!("{name} · changed on the device"),
             ));
             affordances.push(DeviceDetailAffordance::Roster(RosterAffordance::OpenEditor));
         }
@@ -213,7 +238,7 @@ fn technical_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDe
 /// a diverged device copy; a download affordance lands with the flow that
 /// can serve it (no dead buttons).
 fn backup_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetailAffordance>> {
-    matches!(input.state, RosterCardState::EditedOnDevice).then(|| RichSection {
+    matches!(input.state, RosterCardState::EditedOnDevice { .. }).then(|| RichSection {
         title: "Backup".to_string(),
         tone: UiStatusKind::Neutral,
         lines: vec![
@@ -226,27 +251,50 @@ fn backup_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
     })
 }
 
-/// Danger zone, pinned last. Live cards whose wire could take management
-/// operations carry flash + erase (the same gate the interim More-menu
-/// used — never mid-operation, mid-connect, or while another tab holds
-/// the port); offline registered cards carry forget. M8's provisioning
-/// entries get their permanent home here.
+/// Danger zone, pinned last — and present in EVERY state (state-flow
+/// model §3: the always-available short-circuit; its rows adapt). Live
+/// manageable cards carry flash + erase; a blank/foreign board carries
+/// erase (its MAIN action is the setup form's install, not danger); the
+/// not-responding card carries the recovery flash + forget; remembered,
+/// mid-connect, and port-held cards carry forget. The one exception is
+/// mid-operation — the in-place overlay covers the tabs (§2).
 fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetailAffordance>> {
+    let forget = || {
+        input
+            .uid
+            .is_some()
+            .then_some(DeviceDetailAffordance::ForgetDevice)
+    };
     let affordances = match input.state {
-        RosterCardState::Offline { .. } => {
-            if input.uid.is_some() {
-                vec![DeviceDetailAffordance::ForgetDevice]
-            } else {
-                Vec::new()
-            }
+        RosterCardState::Offline { .. }
+        | RosterCardState::ConnectingRetrying { .. }
+        | RosterCardState::InUseElsewhere => forget().into_iter().collect(),
+        RosterCardState::OperationInFlight { .. } => Vec::new(),
+        // The setup form owns the install; erase is the short-circuit.
+        RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware => {
+            vec![DeviceDetailAffordance::EraseDevice]
         }
-        RosterCardState::ConnectingRetrying { .. }
-        | RosterCardState::OperationInFlight { .. }
-        | RosterCardState::InUseElsewhere => Vec::new(),
-        _ => vec![
-            DeviceDetailAffordance::FlashFirmware,
-            DeviceDetailAffordance::EraseDevice,
-        ],
+        RosterCardState::NotResponding => core::iter::once(DeviceDetailAffordance::FlashFirmware)
+            .chain(forget())
+            .collect(),
+        _ => {
+            let mut rows = Vec::new();
+            // A live card holding a project can always wipe it back to
+            // blank from here (2026-07-26 walk: a problematic project
+            // must be removable without waiting for a sad state). The
+            // unreadable card already leads with wipe on Health — no
+            // double offer.
+            if input.project_name.is_some()
+                && !matches!(input.state, RosterCardState::HoldsUnreadableData { .. })
+            {
+                rows.push(DeviceDetailAffordance::Roster(
+                    RosterAffordance::WipeProject,
+                ));
+            }
+            rows.push(DeviceDetailAffordance::FlashFirmware);
+            rows.push(DeviceDetailAffordance::EraseDevice);
+            rows
+        }
     };
     if affordances.is_empty() {
         return None;
@@ -292,9 +340,11 @@ mod tests {
 
         let danger = view.sections.last().unwrap();
         assert_eq!(danger.weight, RichWeight::Danger);
+        // A held project can always be wiped from here (2026-07-26 walk).
         assert_eq!(
             danger.affordances,
             vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
             ]
@@ -328,14 +378,23 @@ mod tests {
 
     #[test]
     fn diverged_device_carries_the_backup_section_in_schema_order() {
-        let view = device_rich_object(&input(&RosterCardState::EditedOnDevice));
+        let view = device_rich_object(&input(&RosterCardState::EditedOnDevice {
+            local_saved_at: None,
+            pushed_at: None,
+        }));
         assert_eq!(
             titles(&view),
             vec!["Health", "Project", "Technical", "Backup", "Danger zone"]
         );
-        // the banked note lives in Backup, not duplicated into Health
+        // §3a: Health explains the situation in plain words (the Backup
+        // section still carries the banked facts).
         let health = &view.sections[0];
-        assert_eq!(health.lines.len(), 1);
+        assert_eq!(health.lines.len(), 2);
+        assert!(
+            health.lines[1].value.contains("edits your project doesn't"),
+            "the note explains, not just labels: {}",
+            health.lines[1].value
+        );
     }
 
     #[test]

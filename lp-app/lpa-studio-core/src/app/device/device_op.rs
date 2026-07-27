@@ -37,7 +37,19 @@ pub enum DeviceOp {
     ConnectLightPlayer,
     DisconnectLightPlayer,
     ResetDevice,
-    ProvisionFirmware,
+    /// Flash the packaged firmware. `setup_name` rides along from the
+    /// blank board's SETUP FORM (state-flow model §1-A): after the flash
+    /// lands and the wire is up, the controller stamps this name so the
+    /// happy path never detours through Needs-a-name. `None` = a plain
+    /// flash / firmware update (already-stamped or recovery contexts).
+    ProvisionFirmware {
+        setup_name: Option<String>,
+    },
+    /// Wipe the device's project storage back to blank (the
+    /// Holds-unreadable-data card's way out — state-flow model rev
+    /// 2026-07-26: the way out is BLANK, never push-over). Firmware
+    /// stays; the board lands on Connected-empty.
+    WipeProject,
     ResetToBlank,
     DisconnectDevice,
     /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
@@ -98,7 +110,7 @@ impl ControllerOp for DeviceOp {
                 "Reboot the connected device without erasing firmware or data.",
                 ActionPriority::Tertiary,
             ),
-            Self::ProvisionFirmware => ActionMeta::new(
+            Self::ProvisionFirmware { .. } => ActionMeta::new(
                 "Flash firmware",
                 "Flash the packaged LightPlayer firmware onto this ESP32.",
                 ActionPriority::Primary,
@@ -107,6 +119,18 @@ impl ControllerOp for DeviceOp {
                 "Flash firmware",
                 "This will write LightPlayer firmware to the selected ESP32. Continue?",
                 "Flash firmware",
+            )),
+            Self::WipeProject => ActionMeta::new(
+                "Wipe project",
+                "Delete the device's project storage; firmware stays.",
+                ActionPriority::Tertiary,
+            )
+            .destructive()
+            .with_confirmation(ActionConfirmation::new(
+                "Wipe the project",
+                "Studio can't read this content, so it can't be backed up — \
+                 wiping deletes it for good and leaves the board empty.",
+                "Wipe",
             )),
             Self::ResetToBlank => ActionMeta::new(
                 "Wipe device",
@@ -159,7 +183,8 @@ impl ControllerOp for DeviceOp {
             | Self::ConnectLightPlayer
             | Self::DisconnectLightPlayer
             | Self::ResetDevice
-            | Self::ProvisionFirmware
+            | Self::ProvisionFirmware { .. }
+            | Self::WipeProject
             | Self::ResetToBlank
             | Self::DisconnectDevice
             | Self::StopSimulator
@@ -212,7 +237,7 @@ mod tests {
             DeviceOp::ConnectLightPlayer,
             DeviceOp::DisconnectLightPlayer,
             DeviceOp::ResetDevice,
-            DeviceOp::ProvisionFirmware,
+            DeviceOp::ProvisionFirmware { setup_name: None },
             DeviceOp::ResetToBlank,
             DeviceOp::DisconnectDevice,
             DeviceOp::StopSimulator,

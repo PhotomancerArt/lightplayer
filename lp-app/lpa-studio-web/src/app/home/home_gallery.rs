@@ -62,6 +62,15 @@ pub fn HomeGallery(
     // override exists for the label-candidate stories only
     let roster_title = roster_label.unwrap_or_else(|| "Devices".to_string());
     let busy = home.opening.is_some();
+    // Connected-EMPTY devices grow "Put on <name>" buttons on every
+    // project card (state-flow model §1-A: the gallery IS the chooser
+    // for a freshly set-up board; the target is always named).
+    let empty_devices: Vec<String> = home
+        .devices
+        .iter()
+        .filter(|card| !card.sim && matches!(card.state, RosterCardState::ConnectedEmpty))
+        .map(|card| card.name.clone())
+        .collect();
     let import_dropped = import_handler(on_action);
     let import_picked = import_dropped.clone();
 
@@ -192,6 +201,7 @@ pub fn HomeGallery(
                                     busy,
                                     card,
                                     now_secs,
+                                    empty_devices: empty_devices.clone(),
                                     on_action,
                                 }
                             }
@@ -300,13 +310,13 @@ fn card_grid_class() -> &'static str {
     "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] tw:gap-3.5"
 }
 
-/// The DEVICE roster grid (Yona hardware-walk feedback): wider columns
-/// and a stretched row floor so a card is phone-screen-sized by default
-/// (~320px each way) and the common operations — tab switches, opening a
+/// The DEVICE roster grid (Yona hardware-walk feedback, width revised
+/// down with the 2026-07-26 state-flow review): wide-enough columns and a
+/// stretched row floor so the common operations — tab switches, opening a
 /// sheet — resize the card WITHIN its footprint instead of reflowing the
 /// page. Cards stretch to the row (grid default `align-items: stretch`),
 /// so the min-height lives on the row, not the card component. Projects/
 /// Examples keep the compact grid.
 fn device_grid_class() -> &'static str {
-    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(320px,1fr))] tw:gap-3.5 tw:[grid-auto-rows:minmax(320px,auto)]"
+    "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]"
 }

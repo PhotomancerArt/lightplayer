@@ -26,8 +26,10 @@ use crate::UiStatusKind;
 use crate::app::rich_object::{RichObjectView, RichSection, RichWeight};
 
 /// The card's icon tabs, in their fixed order.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DeviceCardTab {
+    /// The card's front door — the stable default a fresh card opens on.
+    #[default]
     Status,
     Project,
     Settings,
@@ -175,6 +177,7 @@ mod tests {
         assert_eq!(
             tabs[4].sections[0].affordances,
             vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
             ]
@@ -183,7 +186,12 @@ mod tests {
 
     #[test]
     fn backup_rides_the_project_tab_on_the_diverged_card() {
-        let tabs = device_card_tabs(device_rich_object(&input(&RosterCardState::EditedOnDevice)));
+        let tabs = device_card_tabs(device_rich_object(&input(
+            &RosterCardState::EditedOnDevice {
+                local_saved_at: None,
+                pushed_at: None,
+            },
+        )));
         let project = tab(&tabs, DeviceCardTab::Project);
         let titles: Vec<&str> = project
             .sections

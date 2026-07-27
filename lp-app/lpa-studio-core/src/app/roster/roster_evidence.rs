@@ -59,6 +59,11 @@ pub struct RosterEvidence<'a> {
     pub observed_version: Option<usize>,
     /// The local head's version number, for the "Push vN" affordance.
     pub head_version: Option<usize>,
+    /// When the local head was last saved — the Edited-on-device card's
+    /// plain-words time comparison (§3c-3).
+    pub local_saved_at: Option<f64>,
+    /// When we last pushed to this device (its registry association).
+    pub pushed_at: Option<f64>,
     /// The connect-as-pull landed WITHOUT a stamped identity (M8′): an
     /// EMPTY unstamped board must ask for its name before anything can
     /// be pushed to it (the provisioning order: flash → name → choose).
@@ -132,7 +137,10 @@ fn running_state(evidence: &RosterEvidence<'_>) -> RosterCardState {
                 observed_version: evidence.observed_version,
                 head_version: evidence.head_version,
             },
-            SyncRelation::Diverged => RosterCardState::EditedOnDevice,
+            SyncRelation::Diverged => RosterCardState::EditedOnDevice {
+                local_saved_at: evidence.local_saved_at,
+                pushed_at: evidence.pushed_at,
+            },
         },
         Some(DeviceContent::Adopted { .. }) => RosterCardState::RunningUpToDate,
         // An empty UNSTAMPED board names itself before anything else
@@ -252,7 +260,10 @@ mod tests {
         let content = known(SyncRelation::Diverged);
         assert_eq!(
             derive(&evidence().with_link(&ready).with_content(&content)),
-            RosterCardState::EditedOnDevice
+            RosterCardState::EditedOnDevice {
+                local_saved_at: None,
+                pushed_at: None,
+            }
         );
     }
 
@@ -408,6 +419,8 @@ mod tests {
             content: None,
             observed_version: None,
             head_version: None,
+            local_saved_at: None,
+            pushed_at: None,
             unstamped: false,
             registry: None,
             connect: ConnectEvidence::Idle,

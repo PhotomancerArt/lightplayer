@@ -48,7 +48,7 @@ fn firmware_section() -> UiStepView {
     .with_actions(vec![
         UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware,
+            DeviceOp::ProvisionFirmware { setup_name: None },
         )
         .with_label("Update firmware"),
         UiAction::from_op(
@@ -134,7 +134,7 @@ pub(crate) fn ready_to_flash() -> Element {
             ))
             .with_actions(vec![UiAction::from_op(
                 ControllerId::new(DeviceController::NODE_ID),
-                DeviceOp::ProvisionFirmware,
+                DeviceOp::ProvisionFirmware { setup_name: None },
             )]),
             firmware_section(),
         ],
@@ -191,7 +191,7 @@ fn connected_actions() -> Vec<UiAction> {
     vec![
         UiAction::from_op(
             ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::ProvisionFirmware,
+            DeviceOp::ProvisionFirmware { setup_name: None },
         )
         .with_label("Push to device…"),
         UiAction::from_op(
