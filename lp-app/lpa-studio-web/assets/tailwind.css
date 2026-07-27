@@ -815,6 +815,9 @@
   .tw\:justify-items-center {
     justify-items: center;
   }
+  .tw\:justify-items-start {
+    justify-items: start;
+  }
   .tw\:justify-items-stretch {
     justify-items: stretch;
   }

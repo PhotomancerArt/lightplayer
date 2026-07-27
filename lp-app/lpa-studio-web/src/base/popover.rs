@@ -23,6 +23,22 @@ const TRIGGER_INFLATE_PX: f64 = 3.0;
 /// Panel content starts fading in after this fraction of the open timeline.
 const CONTENT_FADE_DELAY: f64 = 0.10;
 
+/// Context handle letting popover CONTENT close its enclosing popover —
+/// menu-style consumers (the add-node picker) close on selection. Provided
+/// by [`PopoverButton`] to its panel subtree; content that may render
+/// outside a popover consumes it with `try_consume_context`.
+#[derive(Clone, Copy)]
+pub struct PopoverCloseHandle {
+    open: Signal<bool>,
+}
+
+impl PopoverCloseHandle {
+    /// Close the enclosing popover (the normal close animation runs).
+    pub fn close(&mut self) {
+        self.open.set(false);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PopoverPlacement {
     TopStart,
@@ -89,6 +105,7 @@ pub fn PopoverButton(
     children: Element,
 ) -> Element {
     let mut open = use_signal(|| initially_open);
+    use_context_provider(|| PopoverCloseHandle { open });
     let trigger_id = use_hook(|| {
         let id = NEXT_POPOVER_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-popover-trigger-{id}")

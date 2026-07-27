@@ -21,13 +21,13 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, NodeCreateOp, ProjectEditorView, ProjectSyncPhase, UiAction, UiAffordance,
-    UiConfigSlot, UiMetric, UiPendingEdit, UiSlotRecord, UiStatus,
+    DirtySummary, ProjectEditorView, ProjectSyncPhase, UiAction, UiAffordance, UiConfigSlot,
+    UiMetric, UiPendingEdit, UiSlotRecord, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
 use crate::app::layout::{PaneChrome, StudioPane};
-use crate::app::node::{PaneAddNodePicker, SlotRecordEditor, node_status_label_class};
+use crate::app::node::{SlotRecordEditor, node_status_label_class};
 use crate::app::project::ProjectNodeTree;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
@@ -65,18 +65,10 @@ pub fn ProjectPane(
     let roots = view.tree.roots.clone();
     let syncing = !matches!(view.sync.phase, ProjectSyncPhase::Ready);
     let tree_add_menu = view.add_node_menu.clone();
-    // The always-present "add" header action (authoring P4) dispatches a
-    // default create; this renderer intercepts it and opens the kind picker
-    // from `add_node_menu` instead. The remaining actions (Save / Revert)
-    // keep the generic `PaneActionButton` path. Without picker data (older
-    // fixtures) the action stays a plain dispatch button.
-    let mut header_actions = view.header_actions.clone();
-    let add_picker = view.add_node_menu.clone().and_then(|menu| {
-        let index = header_actions
-            .iter()
-            .position(|action| action.action.op_as::<NodeCreateOp>().is_some())?;
-        Some((menu, header_actions.remove(index)))
-    });
+    // Adding does not ride the header: the tree's "Add node…" row (below)
+    // and the workspace button carry the picker. Header actions are the
+    // contextual Save / Revert pair on the generic `PaneActionButton` path.
+    let header_actions = view.header_actions.clone();
     let project_name = view.project_name.clone();
     let pending_edits = view.pending_edits.clone();
     let root_slots = view.root_slots.clone();
@@ -88,16 +80,6 @@ pub fn ProjectPane(
             chrome,
             actions: header_actions,
             on_action,
-            trailing: rsx! {
-                if let Some((menu, add)) = add_picker {
-                    PaneAddNodePicker {
-                        menu,
-                        label: add.label().to_string(),
-                        initially_open: add_picker_initially_open,
-                        on_action,
-                    }
-                }
-            },
             detail: rsx! {
                 ProjectDetailPopover {
                     affordance,
@@ -128,6 +110,7 @@ pub fn ProjectPane(
                         running,
                         add_node_menu: tree_add_menu,
                         syncing,
+                        add_picker_initially_open,
                         on_action,
                     }
                 }

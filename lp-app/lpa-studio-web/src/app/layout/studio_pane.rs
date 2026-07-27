@@ -351,7 +351,7 @@ fn pane_chip_class(tone: PaneTone) -> &'static str {
 /// The header action-slot icon-button classes, exported so a trigger that is
 /// not a plain dispatch button (the add-node picker's popover trigger) can
 /// sit in the header and read identically to its `PaneActionButton` siblings.
-pub(crate) fn pane_action_button_class(primary: bool, enabled: bool) -> &'static str {
+fn pane_action_button_class(primary: bool, enabled: bool) -> &'static str {
     match (primary, enabled) {
         (_, false) => {
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-dim-foreground tw:opacity-50 tw:cursor-not-allowed"

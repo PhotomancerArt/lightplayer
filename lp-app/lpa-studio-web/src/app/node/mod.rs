@@ -74,7 +74,7 @@ mod slot_vector_fields;
 pub(crate) mod toggle_field_stories;
 pub(crate) mod value_display;
 
-pub use add_node_picker::{AddNodePicker, PaneAddNodePicker};
+pub use add_node_picker::{AddNodePicker, WorkspaceAddNodeButton};
 pub use agent_chat::AgentChatPane;
 pub use asset_editor::AssetEditor;
 pub(crate) use binding_authoring_section::BindingAuthoringSection;

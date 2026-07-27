@@ -32,6 +32,9 @@ pub fn ProjectNodeTree(
     /// where an empty list means "unknown" rather than "no nodes yet".
     #[props(default = false)]
     syncing: bool,
+    /// Open the add row's kind picker immediately (stories only).
+    #[props(default = false)]
+    add_picker_initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let empty = roots.is_empty();
@@ -70,6 +73,7 @@ pub fn ProjectNodeTree(
                 trigger_open_class: tree_add_row_class(true),
                 label: "Add a node to this project".to_string(),
                 placement: PopoverPlacement::BottomStart,
+                initially_open: add_picker_initially_open,
                 on_action,
             }
         }
@@ -78,9 +82,10 @@ pub fn ProjectNodeTree(
 
 /// The add row's trigger class: the tree row grid and hover treatment in the
 /// subtle foreground, with a dashed border so it reads as an invitation, not
-/// a node.
+/// a node. The explicit `bg-transparent` matters: without it the user-agent
+/// button face paints a gray pill under the dashed border.
 fn tree_add_row_class(open: bool) -> String {
-    const BASE: &str = "tw:grid tw:w-full tw:grid-cols-[18px_minmax(0,1fr)] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-subtle tw:px-2 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
+    const BASE: &str = "tw:grid tw:w-full tw:cursor-pointer tw:appearance-none tw:grid-cols-[18px_minmax(0,1fr)] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
     if open {
         format!("{BASE} tw:bg-card-muted tw:text-soft-foreground")
     } else {
