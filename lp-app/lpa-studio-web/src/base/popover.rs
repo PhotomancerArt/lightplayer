@@ -189,6 +189,15 @@ pub fn PopoverButton(
                 position,
                 placement,
             );
+            remeasure_after_fonts_ready(
+                measured_id_for_effect.clone(),
+                panel_id_for_effect.clone(),
+                panel_size,
+                trigger_rect,
+                position,
+                placement,
+                stabilized,
+            );
         } else {
             auto_update_for_effect.borrow_mut().take();
         }
@@ -402,6 +411,59 @@ pub fn IconPopoverButton(
             anchor_visual,
             {children}
         }
+    }
+}
+
+/// Re-run the measurement pass once `document.fonts` finishes loading. A
+/// popover that mounts before @font-face decoding freezes its position and
+/// panel size on fallback text metrics: the later font reflow shifts the
+/// anchor without resizing it, so the resize-based auto-update never fires.
+/// `document.fonts.ready` resolves immediately when fonts are already loaded,
+/// so steady-state opens re-measure at most one microtask late. (The
+/// select-churner class from b85dce748, surfaced as run-to-run bistable
+/// story captures of the anchored control popovers.)
+#[allow(
+    unused_variables,
+    reason = "host builds have no font loading; the wasm body consumes the args"
+)]
+fn remeasure_after_fonts_ready(
+    trigger_id: String,
+    panel_id: String,
+    panel_size: Signal<Option<SizeSnapshot>>,
+    trigger_rect: Signal<Option<RectSnapshot>>,
+    position: Signal<PopoverPosition>,
+    placement: PopoverPlacement,
+    stabilized: Signal<bool>,
+) {
+    #[cfg(not(target_arch = "wasm32"))]
+    return;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Ok(fonts) = js_sys::Reflect::get(document.as_ref(), &"fonts".into()) else {
+            return;
+        };
+        let Ok(ready) = js_sys::Reflect::get(&fonts, &"ready".into()) else {
+            return;
+        };
+        let Ok(promise) = ready.dyn_into::<js_sys::Promise>() else {
+            return;
+        };
+        wasm_bindgen_futures::spawn_local(async move {
+            if wasm_bindgen_futures::JsFuture::from(promise).await.is_ok() {
+                measure_trigger_with_stabilization(
+                    trigger_id,
+                    panel_id,
+                    panel_size,
+                    trigger_rect,
+                    position,
+                    placement,
+                    stabilized,
+                );
+            }
+        });
     }
 }
 
