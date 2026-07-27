@@ -167,6 +167,23 @@ committed-as-well-as-working-tree UI changes; (4) failures are loud
   the concurrency group). The designed steady state is **green one commit
   back**: the run that found drift passes after committing, and the bot
   head ships with unapproved checks.
+- 2026-07-27 — **shader-face flip diagnosed: NOT canvas paint** (chip
+  task_c8301674 investigated). Pixel-diffing the two CI variants of
+  `studio__node__shader-face__advanced-open__sm` (51359 vs 51448 bytes)
+  shows the preview canvas region is byte-identical in both runs — and
+  byte-identical to the pre-canvas span-grid baseline
+  (`image-rendering: pixelated` reproduces the grid exactly). The flip is
+  62 pixels, max channel delta 2, confined to the advanced drawer's slot
+  rows (value-box / ⓘ-button / binding-chip borders): sub-AA raster noise,
+  the same compositor-level class as `version-badge__loaded__sm` (85 px,
+  Δ≤6) and NOT an app settling race — no app-level ready gate can remove
+  it, only the stable-pair keeps each run self-consistent. The
+  paint-timing hypothesis was still closed structurally: an unpainted
+  canvas IS a theoretically stable pair terminal (paint runs from an async
+  task after mount), so `paint_preview_canvas` now stamps
+  `data-preview-painted` after its first blit and the capture ready-wait
+  refuses readiness while any `ux-produced-product-pixel-canvas` in the
+  story lacks it — same pattern as the font and `data-story-wait` gates.
 
 **Exit-criteria status after the 2026-07-26 paydown** — (1) isolated
 pinned CI runner ✓; (2) clean ephemeral runners make restart cheap and

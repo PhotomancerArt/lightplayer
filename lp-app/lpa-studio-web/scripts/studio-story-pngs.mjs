@@ -906,6 +906,18 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
           return false;
         }
       }
+      // Preview canvases paint via putImageData from an async task after
+      // mount, so "mounted but not yet painted" is a real page state. Both
+      // painted and unpainted survive a stable pair, so without this gate a
+      // baseline could freeze either one — bistable run-to-run. The app
+      // stamps data-preview-painted on each canvas after its first blit;
+      // demand it on every preview canvas in the story.
+      const unpainted = el.querySelectorAll(
+        'canvas.ux-produced-product-pixel-canvas:not([data-preview-painted])',
+      );
+      if (unpainted.length > 0) {
+        return false;
+      }
       return !document.querySelector('[data-story-wait="1"]');
     })()
   `;
