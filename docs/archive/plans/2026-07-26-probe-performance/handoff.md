@@ -47,10 +47,10 @@ view snapshot. Replaced with `ProductPreviewCanvas`: one `<canvas>` painted
 via `putImageData`, following the existing blit pattern in
 `preview_host_impl.rs`.
 
-- [produced_product_view.rs](../../../lp-app/lpa-studio-web/src/app/node/produced_product_view.rs) —
+- [produced_product_view.rs](../../../../lp-app/lpa-studio-web/src/app/node/produced_product_view.rs) —
   new component + `paint_preview_canvas`; `ProductPixelGrid` and
   `rgb_pixel_styles` deleted.
-- [style.css](../../../lp-app/lpa-studio-web/src/style.css) —
+- [style.css](../../../../lp-app/lpa-studio-web/src/style.css) —
   `.ux-produced-product-pixel-grid` → `.ux-produced-product-pixel-canvas`
   with `image-rendering: pixelated` to keep the crisp-pixel look.
 - Repaints are keyed on `(revision, buffer identity)` so unrelated
@@ -65,11 +65,11 @@ became a `UiLogDraft`, and marked the whole view dirty → full
 `UiStudioView` rebuild (including cloning up to 1000 console ring entries)
 at 30 Hz.
 
-- [runtime.rs](../../../lp-fw/fw-browser/src/runtime.rs) — `log()` now gates
+- [runtime.rs](../../../../lp-fw/fw-browser/src/runtime.rs) — `log()` now gates
   on the process-global `log::max_level()` via `envelope_level_enabled()`,
   the same single gate the console mirror uses. Re-enable by raising the
   level through the existing wire `SetLogLevel`; nothing new was invented.
-- [studio_controller.rs](../../../lp-app/lpa-studio-core/src/app/studio/studio_controller.rs) —
+- [studio_controller.rs](../../../../lp-app/lpa-studio-core/src/app/studio/studio_controller.rs) —
   split `logs_dirty` out of `dirty`. Streamed log batches
   (`record_logs`, `record_session_logs`) set `logs_dirty` and publish on a
   throttle (`LOG_ONLY_PUBLISH_MIN_GAP_SECS = 0.25`); structural changes and
@@ -86,17 +86,17 @@ Two coupled changes; this is the largest phase.
 per received frame, and the code itself flagged event-driven receive as
 "future work (M7)". Now it drains, then parks on a wake signal:
 
-- [worker_handle.rs](../../../lp-app/lpa-link/src/providers/browser_worker/worker_handle.rs) —
+- [worker_handle.rs](../../../../lp-app/lpa-link/src/providers/browser_worker/worker_handle.rs) —
   `output_wakers` + `wake_output_waiters()` called from the `onmessage` /
   `onerror` / `onmessageerror` closures; new `OutputWait` future
   (level-triggered on the shared output buffer, so drain-then-wait cannot
   miss a push). Wakers are moved out before waking so no `RefCell` borrow
   is held across a wake.
-- [provider.rs](../../../lp-app/lpa-link/src/providers/browser_worker/provider.rs) —
+- [provider.rs](../../../../lp-app/lpa-link/src/providers/browser_worker/provider.rs) —
   `wait_for_output()`, returning an already-ready wait when
   provider-buffered outputs exist; the session borrow is released before
   the caller awaits.
-- [browser_worker_client_io.rs](../../../lp-app/lpa-studio-core/src/app/server/browser_worker_client_io.rs) —
+- [browser_worker_client_io.rs](../../../../lp-app/lpa-studio-core/src/app/server/browser_worker_client_io.rs) —
   drain → park → re-arm loop, with a shared `RECEIVE_TIMEOUT_MS = 1000`
   deadline (matching the old ~960 ms budget) so log-only wakeups cannot
   extend the overall budget.
@@ -106,21 +106,21 @@ for the previous pull, so a slow pull meant back-to-back pulls with zero
 idle. Cadence values are now a **minimum gap between pull completion and
 next pull start**:
 
-- [runtime_session.rs](../../../lp-app/lpa-studio-core/src/app/runtime_pool/runtime_session.rs) —
+- [runtime_session.rs](../../../../lp-app/lpa-studio-core/src/app/runtime_pool/runtime_session.rs) —
   `last_refresh_completed_at`, `mark_refresh_complete`, `refresh_due_in`,
   `refresh_due`.
-- [studio_controller.rs](../../../lp-app/lpa-studio-core/src/app/studio/studio_controller.rs) —
+- [studio_controller.rs](../../../../lp-app/lpa-studio-core/src/app/studio/studio_controller.rs) —
   `lens_refresh_gap()` (kind cadence ⊓ verdict-chase ⊕ backoff),
   `passive_refresh_due()`, `note_passive_refresh_completed()`;
   `next_refresh_interval()` counts down from the completion stamp.
-- [project_controller.rs](../../../lp-app/lpa-studio-core/src/app/project/project_controller.rs) —
+- [project_controller.rs](../../../../lp-app/lpa-studio-core/src/app/project/project_controller.rs) —
   new `ProjectRefreshOutcome::NotDue`; the gate bounces early ticks before
   any wire op.
-- [studio_actor.rs](../../../lp-app/lpa-studio-core/src/app/studio/studio_actor.rs) —
+- [studio_actor.rs](../../../../lp-app/lpa-studio-core/src/app/studio/studio_actor.rs) —
   stamps completion for any attempt that actually ran. **`NotDue` and
   `Cancelled` deliberately do not stamp** — stamping `NotDue` would starve
   the pull, and a preempted pull should redo promptly.
-- [refresh_cadence.rs](../../../lp-app/lpa-studio-core/src/app/studio/refresh_cadence.rs) —
+- [refresh_cadence.rs](../../../../lp-app/lpa-studio-core/src/app/studio/refresh_cadence.rs) —
   module docs rewritten to describe the completion+gap model (they are the
   de-facto spec the P6 ADR should cite); `REFRESH_DUE_SLACK = 2 ms`
   absorbs the UI timer's millisecond truncation.
@@ -141,7 +141,7 @@ next pull start**:
 - **sRGB LUT:** `linear_unorm16_to_srgb8` was 3072 `libm::powf` calls per
   32×32 probe frame *on the ESP32*. Replaced with a generated 4096-entry
   table — new file
-  [srgb8_lut.rs](../../../lp-core/lpc-engine/src/engine/srgb8_lut.rs)
+  [srgb8_lut.rs](../../../../lp-core/lpc-engine/src/engine/srgb8_lut.rs)
   (4 KiB, `no_std`, indexed by the top 12 bits). Test
   `srgb8_lut_matches_float_reference_within_one_lsb` checks **all 65536**
   inputs against the retained float reference; max error ≤ 1 LSB. The
@@ -186,7 +186,7 @@ The code comment at the policy site says this.
     `adr: expected`. The ADR should record why "raise the baud rate" is not
     an alternative (the CDC finding).
   - Doc updates: a sizing/cadence note in
-    [docs/lp-core/probes.md](../../lp-core/probes.md); check the
+    [docs/lp-core/probes.md](../../../lp-core/probes.md); check the
     `lpa-studio-core` / `lpa-studio-web` READMEs.
   - Cleanup sweep over the branch diff (TODO/debug/commented-out grep,
     no new `#[allow]` without justification, no scope creep).

@@ -79,3 +79,22 @@ check, batched with PR review.
 Sim sessions probe all non-collapsed nodes' products; device behavior
 byte-identical to before; intent overrides respected; tests cover the
 matrix; checks green.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-07-27
+Commit: e287c3d5d
+
+- Changed: `node_subscribes_products` `Default` arm is runtime-kind-aware
+  (sim → `!collapsed`, device/unknown → focused); lens kind reaches
+  `ProjectController` via `set_lens_runtime_kind` at the P4 chokepoints;
+  tracking badge takes the real subscription decision via a `subscribes`
+  closure through the DTO build chain.
+- Validated: test
+  `sim_lens_subscribes_unfocused_nodes_device_stays_focused_only`;
+  `just check` + `just test` green.
+- Deviations: none, but note `collapsed` is never true in production (web
+  collapse is view-local), so sim probes ALL nodes until the ui-state-audit
+  re-homes collapse state — commented at the policy site and recorded in the
+  ADR. Details in [handoff.md](handoff.md).

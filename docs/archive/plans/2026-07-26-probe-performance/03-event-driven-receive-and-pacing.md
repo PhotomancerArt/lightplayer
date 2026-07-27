@@ -116,3 +116,24 @@ Review gate: none here (Yona's sim feel check batched at PR review).
 No fixed-interval sleep-poll in sim receive; refresh due-times stamped at
 pull completion; verdict-chase/backoff preserved; tests cover both; checks
 green.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-07-27
+Commit: e287c3d5d
+
+- Changed: `worker_handle.rs` `output_wakers` + level-triggered `OutputWait`
+  woken from `onmessage`/`onerror`/`onmessageerror`; `provider.rs`
+  `wait_for_output()`; `browser_worker_client_io.rs` drain → park → re-arm
+  with `RECEIVE_TIMEOUT_MS = 1000`. Pacing: completion stamps on
+  `RuntimeSession`, `lens_refresh_gap()` /
+  `passive_refresh_due()` in the controller,
+  `ProjectRefreshOutcome::NotDue` gate; `NotDue`/`Cancelled` deliberately do
+  not stamp. `refresh_cadence.rs` docs rewritten as the pacing spec.
+- Validated: test
+  `early_tick_bounces_off_the_completion_gate_without_a_wire_op`; wasm-target
+  `cargo check -p lpa-studio-web --target wasm32-unknown-unknown` (the
+  browser_worker cfg-gate hides this code from host checks); `just check` +
+  `just test` green.
+- Deviations: none. Details in [handoff.md](handoff.md).
