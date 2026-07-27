@@ -62,15 +62,16 @@ impl<T: HttpSseTransport> AnthropicProvider<T> {
     }
 
     fn build_request(&self, req: &TurnRequest) -> HttpRequest {
-        let body = serde_json::to_string(&MessagesRequest {
+        let body = MessagesRequest {
             model: &self.config.model,
             max_tokens: req.max_tokens,
             stream: true,
             system: &req.system,
             messages: &req.messages,
             tools: &req.tools,
-        })
-        .expect("request serialization is infallible");
+        }
+        .body()
+        .to_string();
         HttpRequest {
             url: format!("{}/v1/messages", self.config.base_url.trim_end_matches('/')),
             headers: vec![
@@ -242,6 +243,8 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
             SsePayload::MessageStart { message } => {
                 if let Some(u) = message.usage {
                     self.usage.input_tokens = u.input_tokens;
+                    self.usage.cache_write_tokens = u.cache_creation_input_tokens;
+                    self.usage.cache_read_tokens = u.cache_read_input_tokens;
                 }
             }
             SsePayload::ContentBlockStart {
@@ -279,8 +282,19 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
                     self.stop_reason = Some(map_stop_reason(&s));
                 }
                 if let Some(u) = usage {
-                    // Cumulative output tokens for the turn.
+                    // Cumulative output tokens for the turn; input-side
+                    // fields override `message_start` values when the
+                    // final delta repeats them.
                     self.usage.output_tokens = u.output_tokens;
+                    if let Some(input) = u.input_tokens {
+                        self.usage.input_tokens = input;
+                    }
+                    if let Some(write) = u.cache_creation_input_tokens {
+                        self.usage.cache_write_tokens = write;
+                    }
+                    if let Some(read) = u.cache_read_input_tokens {
+                        self.usage.cache_read_tokens = read;
+                    }
                 }
             }
             SsePayload::MessageStop => {
@@ -346,7 +360,8 @@ mod tests {
                     stop_reason: StopReason::EndTurn,
                     usage: TokenUsage {
                         input_tokens: 25,
-                        output_tokens: 12
+                        output_tokens: 12,
+                        ..TokenUsage::default()
                     }
                 }
             ]
@@ -391,10 +406,93 @@ mod tests {
                     stop_reason: StopReason::ToolUse,
                     usage: TokenUsage {
                         input_tokens: 40,
-                        output_tokens: 30
+                        output_tokens: 30,
+                        ..TokenUsage::default()
                     }
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn cache_usage_from_message_start_lands_in_turn_usage() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{",
+            "\"input_tokens\":21,\"cache_creation_input_tokens\":2100,",
+            "\"cache_read_input_tokens\":18000,\"output_tokens\":1}}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":9}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        );
+        let transport = FakeTransport::respond_once(200, vec![sse.as_bytes().to_vec()]);
+        let events = run(&transport);
+        assert_eq!(
+            events,
+            vec![TurnEvent::TurnDone {
+                stop_reason: StopReason::EndTurn,
+                usage: TokenUsage {
+                    input_tokens: 21,
+                    output_tokens: 9,
+                    cache_write_tokens: 2100,
+                    cache_read_tokens: 18000,
+                }
+            }]
+        );
+    }
+
+    #[test]
+    fn message_delta_usage_overrides_input_side_fields_when_present() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},",
+            "\"usage\":{\"output_tokens\":9,\"input_tokens\":21,",
+            "\"cache_creation_input_tokens\":2100,\"cache_read_input_tokens\":18000}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        );
+        let transport = FakeTransport::respond_once(200, vec![sse.as_bytes().to_vec()]);
+        let events = run(&transport);
+        assert_eq!(
+            events,
+            vec![TurnEvent::TurnDone {
+                stop_reason: StopReason::EndTurn,
+                usage: TokenUsage {
+                    input_tokens: 21,
+                    output_tokens: 9,
+                    cache_write_tokens: 2100,
+                    cache_read_tokens: 18000,
+                }
+            }]
+        );
+    }
+
+    #[test]
+    fn request_body_carries_cache_breakpoints() {
+        let transport = FakeTransport::respond_once(200, vec![TEXT_TURN.as_bytes().to_vec()]);
+        let _ = run(&transport);
+        let reqs = transport.requests.borrow();
+        let body: serde_json::Value = serde_json::from_str(&reqs[0].body).expect("json body");
+        // System prompt is the block form with a cache marker...
+        assert_eq!(
+            body["system"],
+            serde_json::json!([{
+                "type": "text", "text": "sys",
+                "cache_control": {"type": "ephemeral"},
+            }])
+        );
+        // ...and the last content block of the last message carries the
+        // rolling marker.
+        let last_block = body["messages"]
+            .as_array()
+            .and_then(|m| m.last())
+            .and_then(|m| m["content"].as_array())
+            .and_then(|c| c.last())
+            .expect("last block");
+        assert_eq!(
+            last_block["cache_control"],
+            serde_json::json!({"type": "ephemeral"})
         );
     }
 

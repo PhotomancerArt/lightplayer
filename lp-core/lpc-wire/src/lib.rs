@@ -45,7 +45,9 @@ pub use project::{
     WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
     WireRuntimeBufferPayload, WireTextureFormat,
 };
-pub use project_command::{WireProjectCommand, WireProjectCommandResponse};
+pub use project_command::{
+    WireNodeCommand, WireNodeCommandResponse, WireProjectCommand, WireProjectCommandResponse,
+};
 pub use project_inventory::{WireProjectInventoryReadRequest, WireProjectInventoryReadResponse};
 pub use project_overlay::{
     WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,

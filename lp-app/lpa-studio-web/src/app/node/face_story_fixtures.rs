@@ -270,6 +270,7 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
         usage: UiAgentUsage {
             input_tokens: 2841,
             output_tokens: 512,
+            ..UiAgentUsage::default()
         },
         estimated_cost: Some("~$0.0162".to_string()),
     }

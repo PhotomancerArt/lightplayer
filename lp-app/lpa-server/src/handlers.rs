@@ -130,6 +130,11 @@ fn handle_project_command(
                 response: project.read_inventory(),
             })
         }
+        WireProjectCommand::NodeCommand { node, command } => {
+            Ok(WireProjectCommandResponse::NodeCommand {
+                response: project.node_command(node, &command),
+            })
+        }
     }
 }
 

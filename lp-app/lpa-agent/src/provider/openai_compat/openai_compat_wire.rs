@@ -214,13 +214,35 @@ pub struct WireFunctionDelta {
 }
 
 /// The final chunk's usage block (absent on servers that ignore
-/// `stream_options.include_usage`).
+/// `stream_options.include_usage`). Note `prompt_tokens` INCLUDES any
+/// cached tokens on this dialect — the provider subtracts
+/// [`PromptTokensDetails::cached_tokens`] to keep the neutral usage
+/// buckets disjoint.
 #[derive(Debug, Deserialize)]
 pub struct WireUsage {
     #[serde(default)]
     pub prompt_tokens: u32,
     #[serde(default)]
     pub completion_tokens: u32,
+    /// OpenAI's cached-prompt breakdown (absent on most local servers).
+    #[serde(default)]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+impl WireUsage {
+    /// Cached prompt tokens, when the server reports them.
+    pub fn cached_tokens(&self) -> u32 {
+        self.prompt_tokens_details
+            .as_ref()
+            .map_or(0, |details| details.cached_tokens)
+    }
+}
+
+/// `usage.prompt_tokens_details`: the cached share of `prompt_tokens`.
+#[derive(Debug, Deserialize)]
+pub struct PromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: u32,
 }
 
 /// Non-2xx response body: `{ "error": { "message", "type", ... } }`.
@@ -378,6 +400,26 @@ mod tests {
         .expect("parse");
         let usage = chunk.usage.expect("usage");
         assert_eq!((usage.prompt_tokens, usage.completion_tokens), (25, 12));
+        // No details block → zero cached tokens.
+        assert_eq!(usage.cached_tokens(), 0);
+    }
+
+    #[test]
+    fn cached_prompt_tokens_deserialize() {
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":12,
+                "prompt_tokens_details":{"cached_tokens":768}}}"#,
+        )
+        .expect("parse");
+        assert_eq!(chunk.usage.expect("usage").cached_tokens(), 768);
+
+        // An empty details object defaults its fields.
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":1,
+                "prompt_tokens_details":{}}}"#,
+        )
+        .expect("parse");
+        assert_eq!(chunk.usage.expect("usage").cached_tokens(), 0);
     }
 
     #[test]

@@ -257,9 +257,16 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
             }
         };
         if let Some(usage) = chunk.usage {
+            // This dialect's `prompt_tokens` INCLUDES cached tokens;
+            // subtract them so the neutral buckets stay disjoint (input =
+            // uncached remainder, matching Anthropic semantics). Caching is
+            // automatic server-side here, so there is never a write bucket.
+            let cached = usage.cached_tokens();
             self.usage = TokenUsage {
-                input_tokens: usage.prompt_tokens,
+                input_tokens: usage.prompt_tokens.saturating_sub(cached),
                 output_tokens: usage.completion_tokens,
+                cache_write_tokens: 0,
+                cache_read_tokens: cached,
             };
         }
         let Some(choice) = chunk.choices.into_iter().next() else {
@@ -357,7 +364,8 @@ mod tests {
                     stop_reason: StopReason::EndTurn,
                     usage: TokenUsage {
                         input_tokens: 25,
-                        output_tokens: 12
+                        output_tokens: 12,
+                        ..TokenUsage::default()
                     }
                 }
             ]
@@ -450,10 +458,37 @@ mod tests {
                     stop_reason: StopReason::ToolUse,
                     usage: TokenUsage {
                         input_tokens: 40,
-                        output_tokens: 30
+                        output_tokens: 30,
+                        ..TokenUsage::default()
                     }
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn cached_prompt_tokens_map_to_cache_read_and_are_subtracted_from_input() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":12,",
+            "\"prompt_tokens_details\":{\"cached_tokens\":768}}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let transport = FakeTransport::respond_once(200, vec![sse.as_bytes().to_vec()]);
+        let events = run_with_key(&transport, Some("sk-test"));
+        assert_eq!(
+            events.last(),
+            Some(&TurnEvent::TurnDone {
+                stop_reason: StopReason::EndTurn,
+                usage: TokenUsage {
+                    // 1000 reported prompt tokens minus the 768 cached ones.
+                    input_tokens: 232,
+                    output_tokens: 12,
+                    cache_write_tokens: 0,
+                    cache_read_tokens: 768,
+                }
+            })
         );
     }
 

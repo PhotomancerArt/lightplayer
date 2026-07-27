@@ -8,7 +8,11 @@
 //! footnote with its optional ~$ estimate. The chat DRAFT is view-local
 //! (editing-model ADR D9, like editor text); everything else lives in
 //! core — including the per-provider setup guidance the needs-setup empty
-//! state renders.
+//! state renders. Hosts that unmount this pane while text may be pending
+//! (the shader face's collapsible agent section) pass their OWN
+//! `draft` signal, owned above the unmount boundary, so collapse never
+//! destroys a half-typed draft; without one the pane keeps a local
+//! signal (the editor tab, which never unmounts mid-draft).
 //!
 //! Status colors follow the standard palette: working (yellow) while
 //! streaming or running a tool, error (red) for provider failures, good
@@ -39,6 +43,10 @@ pub fn AgentChatPane(
     /// Open tool rows expanded on first render (stories).
     #[props(default = false)]
     tool_rows_expanded: bool,
+    /// Parent-owned composer draft signal (see the module doc). `None`
+    /// keeps a pane-local draft.
+    #[props(default = None)]
+    draft: Option<Signal<String>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     /// The OpenRouter Connect CTA (the funnel-critical path): present ⇒ the
     /// needs-setup empty state leads with the one-click connect button.
@@ -58,7 +66,8 @@ pub fn AgentChatPane(
         };
     }
 
-    let mut draft = use_signal(String::new);
+    let local_draft = use_signal(String::new);
+    let mut draft = draft.unwrap_or(local_draft);
     let mut transcript_element = use_signal(|| None::<Rc<MountedData>>);
     let mut stick_to_bottom = use_signal(|| true);
     let busy = view.busy();

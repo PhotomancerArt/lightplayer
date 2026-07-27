@@ -192,10 +192,29 @@ impl UiAgentToolRow {
 }
 
 /// Cumulative token usage (mirrors `lpa_agent::TokenUsage`, kept `Eq`).
+/// The buckets are disjoint: `input_tokens` is the *uncached* prompt
+/// remainder; the cache buckets are prompt tokens written to / served
+/// from the provider prompt cache (a breakdown the footnote tooltip can
+/// surface).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct UiAgentUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    pub cache_write_tokens: u32,
+    pub cache_read_tokens: u32,
+}
+
+impl UiAgentUsage {
+    /// Total prompt tokens processed (fresh + cache writes + cache reads)
+    /// — the "in" number a user expects, since the buckets are disjoint.
+    pub fn total_input_tokens(&self) -> u32 {
+        self.input_tokens + self.cache_write_tokens + self.cache_read_tokens
+    }
+
+    /// True when no tokens have been counted at all.
+    pub fn is_zero(&self) -> bool {
+        self.total_input_tokens() == 0 && self.output_tokens == 0
+    }
 }
 
 #[cfg(test)]

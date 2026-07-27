@@ -20,7 +20,14 @@ use serde::{Deserialize, Serialize};
 /// old peer misread a new frame or vice versa. There is no negotiation and
 /// no compatibility shim (see AGENTS.md wire-compat policy): differing
 /// versions mean "assume nothing works; upgrade the firmware".
-pub const WIRE_PROTO_VERSION: u32 = 1;
+///
+/// # History
+///
+/// - 2: `WireProjectCommand::NodeCommand` runtime command channel
+///   (playlist activate-entry;
+///   `docs/adr/2026-07-27-runtime-node-command-channel.md`).
+/// - 1: hello handshake introduced.
+pub const WIRE_PROTO_VERSION: u32 = 2;
 
 /// Unsolicited/boot-time server identity and version report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +78,7 @@ mod tests {
             device_uid: Some("dev_0000000000000001".to_string()),
         };
         let json = crate::json::to_string(&hello).unwrap();
-        assert!(json.contains("\"proto\":1"));
+        assert!(json.contains("\"proto\":2"));
         assert!(json.contains("\"deviceUid\""));
         let back: ServerHello = crate::json::from_str(&json).unwrap();
         assert_eq!(back, hello);

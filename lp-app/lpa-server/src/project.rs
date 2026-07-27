@@ -14,8 +14,9 @@ use lpc_shared::backtrace;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
-    WireOverlayMutationResponse, WireOverlayReadResponse, WireProjectInventoryReadResponse,
+    WireNodeCommand, WireNodeCommandResponse, WireOverlayCommitRequest, WireOverlayCommitResponse,
+    WireOverlayMutationRequest, WireOverlayMutationResponse, WireOverlayReadResponse,
+    WireProjectInventoryReadResponse,
 };
 use lpfs::{FsEvent, FsVersion, LpFs};
 
@@ -213,6 +214,25 @@ impl Project {
             self.registry.inventory(),
             |use_location| index.node_id(use_location),
         )
+    }
+
+    /// Dispatch a runtime node command to the engine.
+    ///
+    /// Rejections (unknown node, dead runtime, unsupported command,
+    /// out-of-range payload) are NORMAL responses, never a request-envelope
+    /// error: a stale click must not poison the connection or any node's
+    /// runtime status.
+    pub fn node_command(
+        &mut self,
+        node: lpc_model::NodeId,
+        command: &WireNodeCommand,
+    ) -> WireNodeCommandResponse {
+        match self.engine_mut().handle_node_command(node, command) {
+            Ok(()) => WireNodeCommandResponse::Accepted,
+            Err(error) => WireNodeCommandResponse::Rejected {
+                reason: format!("{error}"),
+            },
+        }
     }
 
     pub fn mutate_overlay(

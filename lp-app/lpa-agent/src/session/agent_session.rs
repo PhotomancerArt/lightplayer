@@ -420,7 +420,8 @@ mod tests {
             session.transcript().usage_total,
             TokenUsage {
                 input_tokens: 60,
-                output_tokens: 40
+                output_tokens: 40,
+                ..TokenUsage::default()
             }
         );
         // The second turn's system prompt reflects the staged source.
@@ -546,6 +547,7 @@ mod tests {
             usage: TokenUsage {
                 input_tokens: input,
                 output_tokens: output,
+                ..TokenUsage::default()
             },
         }
     }

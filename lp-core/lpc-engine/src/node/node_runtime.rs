@@ -5,6 +5,7 @@ use lpc_model::{
     AssetLocation, NodeRuntimeStatus, SlotAccess, SlotPath, SlotShapeRegistry,
     SlotShapeRegistryError,
 };
+use lpc_wire::WireNodeCommand;
 
 use super::contexts::{
     AssetRefreshContext, DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext,
@@ -59,6 +60,28 @@ pub trait NodeRuntime {
     /// produce values can keep the no-op default.
     fn consume(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         Ok(())
+    }
+
+    /// Handle a runtime command addressed to this node (the wire runtime
+    /// command channel, `WireProjectCommand::NodeCommand`).
+    ///
+    /// Commands are immediate runtime pokes — nothing is staged in the
+    /// overlay and nothing persists. `time_s` is the engine's
+    /// project-relative frame time in seconds; nodes whose behavior is
+    /// clocked by a CONSUMED time slot (playlist) should not stamp state
+    /// with it directly — defer the effect to the next `produce`, where the
+    /// node's own time domain is resolvable, so command effects land
+    /// exactly like organic ones (trigger switches).
+    ///
+    /// Returning an error REJECTS the command: the server answers a normal
+    /// `Rejected { reason }` response and the node's runtime status is
+    /// untouched. Default: nodes accept no commands.
+    fn handle_command(
+        &mut self,
+        _command: &WireNodeCommand,
+        _time_s: f32,
+    ) -> Result<(), NodeError> {
+        Err(NodeError::msg("node accepts no runtime commands"))
     }
 
     /// Refresh a referenced asset after the project registry reports an effective asset change.

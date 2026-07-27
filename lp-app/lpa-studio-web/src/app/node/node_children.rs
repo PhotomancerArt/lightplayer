@@ -50,6 +50,7 @@ fn child_node_view(child: UiNodeChild) -> UiNodeView {
         .with_header_actions(child.header_actions)
         .with_children(child.children);
     view.face = child.face;
+    view.card_ui = child.card_ui;
     view.focused = child.focused || child.active;
     view.action = child.action;
     view

@@ -75,11 +75,21 @@ pub enum StopReason {
     Other(String),
 }
 
-/// Token usage for one turn (or a running total).
+/// Token usage for one turn (or a running total). The four buckets are
+/// disjoint: `input_tokens` is the *uncached* prompt remainder (Anthropic
+/// semantics — the full prompt size is the sum of the three input-side
+/// buckets), `cache_write_tokens` were written to the provider prompt
+/// cache this turn, and `cache_read_tokens` were served from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Prompt tokens written to the provider cache (billed at a premium).
+    #[serde(default)]
+    pub cache_write_tokens: u32,
+    /// Prompt tokens read from the provider cache (billed at a discount).
+    #[serde(default)]
+    pub cache_read_tokens: u32,
 }
 
 impl TokenUsage {
@@ -87,6 +97,8 @@ impl TokenUsage {
     pub fn add(&mut self, other: TokenUsage) {
         self.input_tokens += other.input_tokens;
         self.output_tokens += other.output_tokens;
+        self.cache_write_tokens += other.cache_write_tokens;
+        self.cache_read_tokens += other.cache_read_tokens;
     }
 }
 
@@ -187,16 +199,22 @@ mod tests {
         total.add(TokenUsage {
             input_tokens: 10,
             output_tokens: 5,
+            cache_write_tokens: 100,
+            cache_read_tokens: 0,
         });
         total.add(TokenUsage {
             input_tokens: 3,
             output_tokens: 7,
+            cache_write_tokens: 20,
+            cache_read_tokens: 90,
         });
         assert_eq!(
             total,
             TokenUsage {
                 input_tokens: 13,
-                output_tokens: 12
+                output_tokens: 12,
+                cache_write_tokens: 120,
+                cache_read_tokens: 90,
             }
         );
     }

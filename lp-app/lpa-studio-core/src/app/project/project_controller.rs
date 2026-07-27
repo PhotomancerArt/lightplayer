@@ -14,16 +14,16 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, ProgressState,
-    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
-    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
-    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
-    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
-    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
-    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
-    UiStatus, UiViewContent, UxUpdateSink,
+    NodeCardUiState, NodeUiOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
+    PlaylistActivateOp, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
+    ProjectSyncSummary, SlotEditOp, StudioOverlayMutation, StudioProjectReadOutcome,
+    StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError,
+    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction,
+    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
+    UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -34,6 +34,7 @@ use lpc_model::{
     resolve_artifact_specifier, resolve_slot_policy,
 };
 use lpc_view::ProjectView;
+use lpc_wire::{WireNodeCommand, WireNodeCommandResponse};
 
 use super::{
     NodeController, ProjectProductSubscriptionIntent, SlotController, SlotKind, node::root_slot_key,
@@ -93,6 +94,12 @@ pub struct ProjectController {
     slot_shapes: SlotShapeRegistry,
     /// `node.{id}.{root}` → root shape id from the last applied view.
     root_shape_ids: BTreeMap<String, SlotShapeId>,
+    /// Node-card UI view-state (drawer disclosure, agent collapse,
+    /// mirrored composer draft), keyed by node address path — the node arm
+    /// of the CardUiState re-home (2026-07-27). Mutated synchronously via
+    /// `ProjectEditorOp::NodeUi`, overlaid onto the editor DTOs at view
+    /// build, pruned with the loaded project.
+    node_card_ui: BTreeMap<String, NodeCardUiState>,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
     /// The local library, when the platform mounted a store (browser).
@@ -143,6 +150,7 @@ impl ProjectController {
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
+            node_card_ui: BTreeMap::new(),
             next_mutation_cmd_id: 1,
             library: None,
         }
@@ -1204,7 +1212,7 @@ impl ProjectController {
             |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
-        let nodes = self
+        let mut nodes = self
             .root_nodes
             .iter()
             .flat_map(NodeController::children)
@@ -1218,6 +1226,12 @@ impl ProjectController {
                 )
             })
             .collect::<Vec<_>>();
+        // Card UI view-state rides the DTOs (drawer disclosure, agent
+        // collapse, mirrored composer draft), overlaid from the
+        // address-keyed store so it survives re-renders and remounts.
+        for node in &mut nodes {
+            self.overlay_node_card_ui(node);
+        }
         // Node dirty covers slot + node-mapped asset edits across the subtree;
         // asset edits whose artifact maps to no node (a shader's `.glsl`) are
         // added on top so they still count toward Save (see `dirty_summary`).
@@ -1677,6 +1691,43 @@ impl ProjectController {
                 self.active_editor_target = Some(target);
                 Ok(UiNotices::new())
             }
+            // Node-card UI view-state mutations are local and synchronous:
+            // the op carries its own node key, so the action's editor target
+            // is irrelevant here.
+            ProjectEditorOp::NodeUi(op) => {
+                self.apply_node_ui_op(op);
+                Ok(UiNotices::new())
+            }
+        }
+    }
+
+    /// Apply one node-card UI mutation to the address-keyed store (the
+    /// node arm of the CardUiState re-home; see
+    /// [`NodeCardUiState`]'s module doc for the draft-mirroring contract).
+    fn apply_node_ui_op(&mut self, op: NodeUiOp) {
+        self.node_card_ui
+            .entry(op.node().to_string())
+            .or_default()
+            .apply(&op);
+    }
+
+    /// Overlay the saved card UI view-state onto a built node DTO and its
+    /// nested children (keyed by address: `header.path` for panes,
+    /// `detail` for children) — the same pattern as the device roster's
+    /// `overlay_card_ui`.
+    fn overlay_node_card_ui(&self, node: &mut UiNodeView) {
+        if let Some(saved) = self.node_card_ui.get(&node.header.path) {
+            node.card_ui = saved.clone();
+        }
+        self.overlay_child_card_ui(&mut node.children);
+    }
+
+    fn overlay_child_card_ui(&self, children: &mut [crate::UiNodeChild]) {
+        for child in children {
+            if let Some(saved) = self.node_card_ui.get(&child.detail) {
+                child.card_ui = saved.clone();
+            }
+            self.overlay_child_card_ui(&mut child.children);
         }
     }
 
@@ -1952,6 +2003,10 @@ impl ProjectController {
     fn clear_loaded_project_state(&mut self) {
         self.sync = None;
         self.root_nodes.clear();
+        // Card UI view-state follows the loaded project: a closed or
+        // failed project must not leak drawer/collapse state (or a
+        // mirrored composer draft) into the next one.
+        self.node_card_ui.clear();
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
@@ -2097,6 +2152,51 @@ impl ProjectController {
             }
             SlotEditOp::Revert { address } => self.apply_revert(server, handle_id, address).await,
         }
+    }
+
+    /// Execute a [`PlaylistActivateOp`]: dispatch the activate-entry runtime
+    /// command to the playlist's live runtime (the non-overlay command
+    /// channel — nothing staged, nothing in the Save panel).
+    ///
+    /// The op carries the stable authored address; the CURRENT runtime
+    /// `NodeId` is resolved here, at dispatch time, so a queued click never
+    /// addresses a stale runtime id across a reload. Acceptance is quiet —
+    /// the strip's ACTIVE placard following on the next refresh is the
+    /// outcome — but borrows the verdict-chase tightened ticks so the
+    /// switch is visible in UI-time, not device-cadence-time. Rejection
+    /// (stale entry key, dead runtime) surfaces as a warning notice.
+    pub async fn activate_playlist_entry(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PlaylistActivateOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let node_id = self
+            .node(&op.node)
+            .map(|node| node.target().node_id)
+            .ok_or_else(|| {
+                UiError::Project(format!("no node at {} to activate an entry on", op.node))
+            })?;
+        let run = server
+            .node_command(
+                handle_id,
+                node_id,
+                WireNodeCommand::PlaylistActivateEntry { entry: op.entry },
+            )
+            .await?;
+        let notices = match run.response {
+            WireNodeCommandResponse::Accepted => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            WireNodeCommandResponse::Rejected { reason } => UiNotices::new().with_notice(
+                UiNotice::warning(format!("Couldn't activate entry {}: {reason}", op.entry)),
+            ),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
     }
 
     /// Commit the pending-edit overlay (persisted edits are written back to
@@ -3861,6 +3961,160 @@ mod tests {
         let view = project.editor_view("studio-demo", 7, &inventory);
 
         assert_eq!(view.project_name, "studio-demo");
+    }
+
+    /// Dispatch a `NodeUi` mutation exactly as the web does: through the
+    /// action seam, targeted at the node-tree editor surface (the op
+    /// carries its own node key).
+    fn dispatch_node_ui(project: &mut ProjectController, op: NodeUiOp) {
+        let action = UiAction::from_op(
+            ProjectEditorTarget::node_tree().node_id(),
+            ProjectEditorOp::NodeUi(op),
+        );
+        block_on_ready(project.dispatch_editor_action(action, UxUpdateSink::noop()))
+            .expect("node-ui op applies");
+    }
+
+    #[test]
+    fn node_ui_ops_ride_the_action_seam_into_the_editor_view() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        let orbit = "/demo.project/orbit.shader".to_string();
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDrawer {
+                node: orbit.clone(),
+                drawer: crate::NodeCardDrawer::Code,
+                open: true,
+            },
+        );
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit.clone(),
+                collapsed: true,
+            },
+        );
+
+        let view = project.editor_view("studio-demo", 7, &inventory);
+        assert_eq!(
+            view.nodes[1].card_ui,
+            NodeCardUiState {
+                code_open: true,
+                agent_collapsed: true,
+                ..NodeCardUiState::default()
+            },
+            "the Orbit pane wears its saved card UI state"
+        );
+        assert_eq!(
+            view.nodes[0].card_ui,
+            NodeCardUiState::default(),
+            "state is keyed per node — the Clock pane stays fresh"
+        );
+    }
+
+    #[test]
+    fn agent_collapse_round_trip_preserves_the_mirrored_draft() {
+        // The web's collapse choreography: mirror the draft, collapse,
+        // expand. The mirrored draft must come back out of the DTO so a
+        // remounting composer can seed from it — the draft-survival
+        // contract.
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        let orbit = "/demo.project/orbit.shader".to_string();
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDraft {
+                node: orbit.clone(),
+                draft: "make it pulse slowly".to_string(),
+            },
+        );
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit.clone(),
+                collapsed: true,
+            },
+        );
+        let collapsed = project.editor_view("studio-demo", 7, &inventory);
+        assert!(collapsed.nodes[1].card_ui.agent_collapsed);
+        assert_eq!(
+            collapsed.nodes[1].card_ui.composer_draft,
+            "make it pulse slowly"
+        );
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit,
+                collapsed: false,
+            },
+        );
+        let expanded = project.editor_view("studio-demo", 7, &inventory);
+        assert!(!expanded.nodes[1].card_ui.agent_collapsed);
+        assert_eq!(
+            expanded.nodes[1].card_ui.composer_draft, "make it pulse slowly",
+            "expanding never clears the mirrored draft"
+        );
+    }
+
+    #[test]
+    fn node_card_ui_is_pruned_when_the_loaded_project_closes() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDraft {
+                node: "/demo.project/orbit.shader".to_string(),
+                draft: "stale draft".to_string(),
+            },
+        );
+
+        project.disconnect();
+        project.mark_ready("studio-demo", 8, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+
+        let view = project.editor_view("studio-demo", 8, &inventory);
+        assert_eq!(
+            view.nodes[1].card_ui,
+            NodeCardUiState::default(),
+            "card UI state follows the loaded project"
+        );
+    }
+
+    #[test]
+    fn nested_child_cards_wear_their_own_card_ui_overlay() {
+        let mut project = ProjectController::new();
+        project.apply_node_ui_op(NodeUiOp::SetDrawer {
+            node: "/demo.project/list.playlist/glow.shader".to_string(),
+            drawer: crate::NodeCardDrawer::Advanced,
+            open: true,
+        });
+
+        // A nested child DTO (keyed by `detail` = its address), one level
+        // down — the overlay walk must reach it.
+        let mut children = vec![crate::UiNodeChild::new(
+            "List",
+            "Playlist",
+            "/demo.project/list.playlist",
+        )];
+        children[0].children = vec![crate::UiNodeChild::new(
+            "Glow",
+            "Shader",
+            "/demo.project/list.playlist/glow.shader",
+        )];
+
+        project.overlay_child_card_ui(&mut children);
+        assert!(!children[0].card_ui.advanced_open);
+        assert!(children[0].children[0].card_ui.advanced_open);
     }
 
     #[test]

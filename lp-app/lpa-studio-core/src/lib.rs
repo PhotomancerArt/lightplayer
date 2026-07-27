@@ -61,16 +61,17 @@ pub use app::preview_host::{
 };
 pub use app::project::{
     AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeController, NodeControllerState, NodeRevertOp, PendingAssetEdit, PendingEdit,
-    PendingEditOp, PendingEditPhase, ProjectAssetContentRun, ProjectConnectResult,
-    ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
-    ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
-    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
-    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
-    SlotEditOp, SlotKind, UiAffordance, UiAssetContent, UiAssetContentBody, UiPendingEdit,
-    UiPendingEditKind, UiPendingEditPhase, UiShaderError,
+    NodeCardDrawer, NodeCardUiState, NodeController, NodeControllerState, NodeRevertOp, NodeUiOp,
+    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
+    ProjectAssetContentRun, ProjectConnectResult, ProjectController, ProjectEditRun,
+    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
+    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
+    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent,
+    ProjectRefreshOutcome, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
+    ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAffordance,
+    UiAssetContent, UiAssetContentBody, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    UiShaderError,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,

@@ -362,11 +362,8 @@ impl AgentController {
 /// without rates (unknown model, no overrides) or before any usage.
 fn estimated_cost(usage: UiAgentUsage, rates: Option<AgentCostRates>) -> Option<String> {
     let rates = rates?;
-    if usage.input_tokens == 0 && usage.output_tokens == 0 {
+    if usage.is_zero() {
         return None;
     }
-    Some(format!(
-        "~{}",
-        format_cost_usd(rates.estimate_usd(usage.input_tokens, usage.output_tokens))
-    ))
+    Some(format!("~{}", format_cost_usd(rates.estimate_usd(usage))))
 }

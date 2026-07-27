@@ -23,12 +23,12 @@ use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeRevertOp, ProjectConnectResult, ProjectController,
-    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
-    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
-    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
-    UiNotice, UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent,
-    UxActivityTarget, UxUpdate, UxUpdateSink,
+    DeviceController, DeviceOp, NodeRevertOp, PlaylistActivateOp, ProjectConnectResult,
+    ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState,
+    ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot, ServerState,
+    SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress, UiResult, UiStatus,
+    UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -1796,6 +1796,10 @@ impl StudioController {
                 let op = action.into_op::<NodeRevertOp>()?;
                 return self.execute_node_revert_op(op).await;
             }
+            if action.op_as::<PlaylistActivateOp>().is_some() {
+                let op = action.into_op::<PlaylistActivateOp>()?;
+                return self.execute_playlist_activate_op(op).await;
+            }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
         }
@@ -2787,6 +2791,18 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.revert_node_edits(server, &op.node).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Playlist entry-strip click: dispatch the activate-entry runtime
+    /// command (the non-overlay command channel). Quiet on acceptance —
+    /// the ACTIVE placard follows via the tightened refresh ticks; a
+    /// rejection comes back as a warning notice.
+    async fn execute_playlist_activate_op(&mut self, op: PlaylistActivateOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.activate_playlist_entry(server, op).await
         };
         self.record_project_edit_run(run)
     }
