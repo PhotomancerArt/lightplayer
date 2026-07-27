@@ -7,7 +7,7 @@ use lpa_studio_core::app::project::node::add_node_menu;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiAddNodeMenu, UiAttachTarget, UiPaneAction, UiPendingEdit, UiPendingEditKind,
+    UiAttachTarget, UiPaneAction, UiPendingEdit, UiPendingEditKind,
     UiPendingEditPhase, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
@@ -16,7 +16,7 @@ use crate::app::project::ProjectPane;
 use crate::app::story_fixtures::project_editor_fixture;
 
 #[story(
-    description = "Clean project: the project name as title, 'Project' kind label, no chips, only the always-present add-node '+' in the header (authoring P4/P5), quiet 'i' detail trigger (the status word lives in the popup); the node tree is the whole pane body — no 'Node tree' heading and no Refresh/Disconnect strip (P6 sidebar tidy)."
+    description = "Clean project: the project name as title, 'Project' kind label, no chips, no header actions (adding lives in the node list's dashed 'Add node…' row), quiet 'i' detail trigger (the status word lives in the popup); the node tree is the whole pane body — no 'Node tree' heading and no Refresh/Disconnect strip (P6 sidebar tidy)."
 )]
 pub(crate) fn unchanged() -> Element {
     rsx! {
@@ -46,7 +46,7 @@ pub(crate) fn uncommitted() -> Element {
 }
 
 #[story(
-    description = "Only live (transient) edits: blue header wash; no persisted edits, so no Save/Revert icons (the '+' stays) and a quiet 'i' trigger."
+    description = "Only live (transient) edits: blue header wash; no persisted edits, so no Save/Revert icons and a quiet 'i' trigger."
 )]
 pub(crate) fn live_only() -> Element {
     rsx! {
@@ -210,7 +210,7 @@ pub(crate) fn change_list_overflow() -> Element {
 }
 
 #[story(
-    description = "The add-node kind picker pinned open on the project header's '+': one flat popover (no submenu — the future source dimension grows here), one row per instantiable kind with its glyph; a row click dispatches the ready-made create at the project root. No name field — nodes auto-name."
+    description = "The add-node kind picker pinned open on the node tree's 'Add node…' row: one flat popover (no submenu — the future source dimension grows here), one row per instantiable kind with its glyph; a row click dispatches the ready-made create at the project root and closes the picker. No name field — nodes auto-name."
 )]
 pub(crate) fn add_node_picker() -> Element {
     rsx! {
@@ -226,15 +226,14 @@ pub(crate) fn add_node_picker() -> Element {
 }
 
 #[story(
-    description = "A freshly created (or emptied) project's pane: the synced-empty state is not a waiting message but the dashed 'Add node…' row — the add affordance lives in the node list, where nodes live. The header '+' opens the same picker."
+    description = "A freshly created (or emptied) project's pane: the synced-empty state is not a waiting message but the dashed 'Add node…' row — the add affordance lives in the node list, where nodes live (no title-bar '+')."
 )]
 pub(crate) fn empty_project() -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
     view.tree.roots = Vec::new();
     view.nodes = Vec::new();
-    let menu = add_node_menu(&UiAttachTarget::ProjectRoot);
-    view.header_actions = vec![add_header_action(&menu)];
-    view.add_node_menu = Some(menu);
+    view.header_actions = Vec::new();
+    view.add_node_menu = Some(add_node_menu(&UiAttachTarget::ProjectRoot));
 
     rsx! {
         div { class: "tw:max-w-[320px]",
@@ -297,11 +296,9 @@ fn StoryPane(
     } else {
         Vec::new()
     };
-    // Mirror the controller (authoring P4): the "+" is ALWAYS present, after
-    // the contextual Save/Revert pair; the picker data rides the view.
-    let menu = add_node_menu(&UiAttachTarget::ProjectRoot);
-    view.header_actions.push(add_header_action(&menu));
-    view.add_node_menu = Some(menu);
+    // Mirror the controller (review round): no header add action — the
+    // picker data rides the view and renders as the tree's add row.
+    view.add_node_menu = Some(add_node_menu(&UiAttachTarget::ProjectRoot));
 
     rsx! {
         div { class: "tw:max-w-[320px]",
@@ -326,13 +323,6 @@ fn header_actions() -> Vec<UiPaneAction> {
             project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
         ),
     ]
-}
-
-/// The controller's always-present add action: the wrapped default create
-/// (Shader at the project root — the menu's first entry) wearing the generic
-/// "Add node" label the header trigger shows.
-fn add_header_action(menu: &UiAddNodeMenu) -> UiPaneAction {
-    UiPaneAction::new("add", menu.entries[0].action.clone().with_label("Add node"))
 }
 
 fn project_action(op: ProjectOp) -> UiAction {

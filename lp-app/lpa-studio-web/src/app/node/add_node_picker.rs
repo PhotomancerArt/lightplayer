@@ -3,17 +3,18 @@
 //! Renders controller-produced [`UiAddNodeMenu`] data (authoring P4): each
 //! entry carries a ready-to-dispatch create action, so a row click is a
 //! plain dispatch — the renderer never assembles ops. One shared component
-//! serves both attach surfaces: the project header's "+" (attach = project
-//! root, [`PaneAddNodePicker`]) and the playlist strip's add chip (attach =
-//! that playlist). Deliberately one flat popover, no submenu: the future
-//! source dimension (blank/copy/import/examples) grows inside this panel.
+//! serves every add surface: the node tree's "Add node…" row, the
+//! workspace's add button ([`WorkspaceAddNodeButton`]) — both attach at the
+//! project root — and the playlist strip's add chip (attach = that
+//! playlist). Deliberately one flat popover, no submenu: the future source
+//! dimension (blank/copy/import/examples) grows inside this panel.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiAddNodeMenu, UiAddNodeMenuEntry};
 
-use crate::app::layout::pane_action_button_class;
 use crate::base::{
-    DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName, node_kind_icon,
+    DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
+    node_kind_icon,
 };
 use crate::core::menu_item_action_class;
 
@@ -58,35 +59,32 @@ pub fn AddNodePicker(
     }
 }
 
-/// The project-header variant: the picker behind a trigger styled exactly
-/// like the header's generic `PaneActionButton`s, so the "+" reads as one of
-/// the pane's action icons while its press opens the picker instead of
-/// dispatching the wrapped default create.
+/// The workspace variant: a dashed card-family "Add node" button at the end
+/// of the node-card column (and the empty project's call to action), opening
+/// the same picker. The affordance lives where people look for it — beside
+/// the node cards — mirroring the node tree's "Add node…" row.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn PaneAddNodePicker(
+pub fn WorkspaceAddNodeButton(
     menu: UiAddNodeMenu,
-    /// Accessible label/tooltip (the intercepted add action's label).
-    #[props(default = "Add node".to_string())]
-    label: String,
     /// Open the picker immediately (stories only).
     #[props(default = false)]
     initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let rest_class = pane_action_button_class(false, true).to_string();
-    let open_class = format!("{rest_class} tw:bg-card-subtle/60 tw:text-strong-foreground");
+    const REST: &str = "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:justify-self-start tw:rounded-md tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-3 tw:py-2 tw:text-sm tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
 
     rsx! {
         AddNodePicker {
             menu,
             trigger: rsx! {
                 StudioIcon { name: StudioIconName::Add, size: 15 }
+                span { "Add node" }
             },
-            trigger_class: rest_class,
-            trigger_open_class: open_class,
-            label,
-            placement: PopoverPlacement::BottomEnd,
+            trigger_class: REST.to_string(),
+            trigger_open_class: format!("{REST} tw:bg-card-muted tw:text-soft-foreground"),
+            label: "Add a node to this project".to_string(),
+            placement: PopoverPlacement::BottomStart,
             initially_open,
             on_action,
         }
@@ -94,9 +92,10 @@ pub fn PaneAddNodePicker(
 }
 
 /// One picker row: kind glyph + label, dispatching the entry's create
-/// action. A bespoke row (not `ActionButton { variant: MenuItem }`) only
-/// because the glyph is the KIND's, which is outside the `ActionMeta` icon
-/// vocabulary — the classes and dispatch shape are the shared menu-row ones
+/// action and closing the popover (a selection is a completed gesture). A
+/// bespoke row (not `ActionButton { variant: MenuItem }`) only because the
+/// glyph is the KIND's, which is outside the `ActionMeta` icon vocabulary —
+/// the classes and dispatch shape are the shared menu-row ones
 /// (`package_card`'s export-zip precedent).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -104,6 +103,7 @@ fn AddNodeMenuRow(entry: UiAddNodeMenuEntry, on_action: EventHandler<UiAction>) 
     let icon = node_kind_icon(&entry.icon);
     let title = entry.action.meta().summary.clone();
     let action = entry.action.clone();
+    let close = try_consume_context::<PopoverCloseHandle>();
 
     rsx! {
         button {
@@ -113,6 +113,9 @@ fn AddNodeMenuRow(entry: UiAddNodeMenuEntry, on_action: EventHandler<UiAction>) 
             onclick: move |event| {
                 event.stop_propagation();
                 on_action.call(action.clone());
+                if let Some(mut close) = close {
+                    close.close();
+                }
             },
             span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center tw:text-subtle-foreground", aria_hidden: "true",
                 StudioIcon { name: icon, size: 14 }

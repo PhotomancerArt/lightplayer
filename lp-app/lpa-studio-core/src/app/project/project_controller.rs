@@ -3831,11 +3831,10 @@ fn slot_path_display(address: &ProjectSlotAddress) -> String {
 
 /// Contextual project-header actions (D4/D5): Save and Revert-to-saved as
 /// controller-produced [`UiPaneAction`] data while persisted edits are
-/// pending, plus the ALWAYS-present add-node action (authoring P4 — the
-/// dirty gate moved inside so a clean project still offers "add"). The add
-/// action dispatches the default create (shader at the project root); P5's
-/// renderer opens the per-kind picker from
-/// [`ProjectEditorView::add_node_menu`] instead.
+/// pending. Adding nodes does NOT ride the header: the add affordance is the
+/// node tree's "Add node…" row and the workspace's add button, both fed by
+/// [`ProjectEditorView::add_node_menu`] (review round, 2026-07-27 — put
+/// buttons where people look for them; the title-bar "+" was dropped).
 fn project_header_actions(dirty: &DirtySummary) -> Vec<UiPaneAction> {
     let mut actions = Vec::new();
     if dirty.persisted > 0 {
@@ -3848,16 +3847,6 @@ fn project_header_actions(dirty: &DirtySummary) -> Vec<UiPaneAction> {
             project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
         ));
     }
-    actions.push(UiPaneAction::new(
-        "add",
-        UiAction::from_op(
-            ControllerId::new(ProjectController::NODE_ID),
-            crate::NodeCreateOp {
-                kind: NodeKind::Shader,
-                attach: UiAttachTarget::ProjectRoot,
-            },
-        ),
-    ));
     actions
 }
 
@@ -7332,9 +7321,9 @@ mod tests {
         let (project, _client, _sent) = authoring_project_with_scripted_client(Vec::new());
 
         let view = project.editor_view("demo", 7, &ProjectInventorySummary::default());
-        // Clean project: the add action is present without save/revert.
-        assert_eq!(view.header_actions.len(), 1);
-        assert_eq!(view.header_actions[0].icon, "add");
+        // Clean project: no header actions — adding rides the tree row and
+        // the workspace button, both fed by the picker data on the view.
+        assert!(view.header_actions.is_empty());
         let menu = view.add_node_menu.expect("picker data rides the editor");
         assert_eq!(menu.entries.len(), 10);
 
@@ -8966,8 +8955,8 @@ mod tests {
         assert_eq!(editor.dirty, expected);
         assert_eq!(
             editor.header_actions.len(),
-            3,
-            "a pending asset body enables Save/Revert beside the standing add"
+            2,
+            "a pending asset body enables Save/Revert"
         );
         assert_eq!(pending_edits_by_phase(&editor.pending_edits), editor.dirty);
     }
@@ -9543,8 +9532,8 @@ mod tests {
                 .iter()
                 .map(|action| action.icon.as_str())
                 .collect::<Vec<_>>(),
-            vec!["add"],
-            "failed edits alone do not surface Save/Revert (add always stands)"
+            Vec::<&str>::new(),
+            "failed edits alone do not surface Save/Revert"
         );
     }
 
@@ -9567,15 +9556,8 @@ mod tests {
         );
         // Flat-root: a childless root contributes no tree rows.
         assert!(editor.tree.roots.is_empty());
-        // A clean project still offers the standing add-node action.
-        assert_eq!(
-            editor
-                .header_actions
-                .iter()
-                .map(|action| action.icon.as_str())
-                .collect::<Vec<_>>(),
-            vec!["add"]
-        );
+        // No header actions on a clean project (adding rides the node list).
+        assert!(editor.header_actions.is_empty());
     }
 
     #[test]
@@ -9588,11 +9570,7 @@ mod tests {
 
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
 
-        assert_eq!(
-            editor.header_actions.len(),
-            3,
-            "save + revert + standing add"
-        );
+        assert_eq!(editor.header_actions.len(), 2, "save + revert");
         let save = &editor.header_actions[0];
         assert_eq!(save.icon, "save");
         assert_eq!(save.label(), "Save");
@@ -9612,11 +9590,10 @@ mod tests {
             Some(&ProjectOp::RevertAllEdits)
         );
         assert!(revert.action.is_for_node(ProjectController::NODE_ID));
-        let add = &editor.header_actions[2];
-        assert_eq!(add.icon, "add");
-        assert!(
-            add.action.op_as::<crate::NodeCreateOp>().is_some(),
-            "the standing add dispatches NodeCreateOp"
+        assert_eq!(
+            editor.header_actions.len(),
+            2,
+            "no standing add action rides the header (adding lives in the tree/workspace)"
         );
     }
 
@@ -9642,8 +9619,8 @@ mod tests {
                 .iter()
                 .map(|action| action.icon.as_str())
                 .collect::<Vec<_>>(),
-            vec!["add"],
-            "live-only edits do not surface Save/Revert (add always stands)"
+            Vec::<&str>::new(),
+            "live-only edits do not surface Save/Revert"
         );
     }
 
