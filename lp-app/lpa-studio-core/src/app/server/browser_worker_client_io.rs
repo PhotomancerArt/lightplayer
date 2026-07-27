@@ -1,5 +1,8 @@
 use std::cell::RefCell;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::Poll;
 
 use async_trait::async_trait;
 use lpa_client::ClientIo;
@@ -7,7 +10,7 @@ use lpa_link::LinkConnector;
 use lpa_link::LinkProvider;
 use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_worker::{
-    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerProvider,
+    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerProvider, OutputWait,
 };
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::JsValue;
@@ -17,7 +20,10 @@ use super::browser_worker_log::{worker_log_draft, worker_status_draft};
 use super::pending_server_messages::{BatchItem, PendingServerMessages};
 use crate::UiLogDraft;
 
-const RESPONSE_POLL_LIMIT: usize = 240;
+/// Overall budget for one `receive()` before it reports a wedged worker —
+/// the same ~1 s the old 240 × 4 ms poll loop allowed, now spent parked on
+/// the worker's output signal instead of a fixed-interval poll.
+const RECEIVE_TIMEOUT_MS: i32 = 1000;
 
 pub struct BrowserWorkerClientIo {
     state: Rc<RefCell<BrowserWorkerClientState>>,
@@ -39,6 +45,43 @@ impl BrowserWorkerClientIo {
             pending: PendingServerMessages::new(),
         }
     }
+
+    /// Take everything the worker has posted so far: protocol frames into
+    /// the pending queue, non-protocol envelopes into the log sink.
+    fn drain_worker_outputs(&mut self) -> Result<(), TransportError> {
+        let outputs = self.state.borrow().take_outputs()?;
+        let state = &self.state;
+        self.pending.ingest(outputs, |output| match output {
+            BrowserOutputEnvelope::ProtocolOut { frame, .. } => json::from_str(&frame)
+                .map(BatchItem::Protocol)
+                .map_err(|error| TransportError::Deserialization(error.to_string())),
+            output => {
+                state.borrow().record_output(output);
+                Ok(BatchItem::Other)
+            }
+        })
+    }
+}
+
+/// Race the output signal against the shared receive deadline: `Ok(true)`
+/// when outputs are (or become) available, `Ok(false)` when the deadline
+/// elapsed first. The deadline future is shared across re-arms of the wait
+/// so log-only wakeups cannot extend the overall budget.
+async fn output_or_deadline(
+    mut wait: OutputWait,
+    mut deadline: Pin<&mut (impl Future<Output = Result<(), TransportError>> + ?Sized)>,
+) -> Result<bool, TransportError> {
+    core::future::poll_fn(move |cx| {
+        if Pin::new(&mut wait).poll(cx).is_ready() {
+            return Poll::Ready(Ok(true));
+        }
+        match deadline.as_mut().poll(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(false)),
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Pending => Poll::Pending,
+        }
+    })
+    .await
 }
 
 #[async_trait(?Send)]
@@ -57,31 +100,26 @@ impl ClientIo for BrowserWorkerClientIo {
             return Ok(message);
         }
 
-        // The worker owns its own clock (self-ticking with real deltas), so this
-        // loop is a pure consumer: it polls for worker outputs and never advances
-        // simulation time. Event-driven receive is future work (M7).
-        for _ in 0..RESPONSE_POLL_LIMIT {
-            sleep_ms(4).await?;
-
-            let outputs = self.state.borrow().take_outputs()?;
-            let state = &self.state;
-            self.pending.ingest(outputs, |output| match output {
-                BrowserOutputEnvelope::ProtocolOut { frame, .. } => json::from_str(&frame)
-                    .map(BatchItem::Protocol)
-                    .map_err(|error| TransportError::Deserialization(error.to_string())),
-                output => {
-                    state.borrow().record_output(output);
-                    Ok(BatchItem::Other)
-                }
-            })?;
-
+        // The worker owns its own clock (self-ticking with real deltas), so
+        // this is a pure consumer: drain whatever the worker already posted,
+        // then park on its output signal (woken by `onmessage`) until a
+        // protocol frame arrives. Non-protocol envelopes (logs, status) wake
+        // the wait too; they are recorded and the loop re-arms. The deadline
+        // bounds a wedged worker.
+        let mut deadline = Box::pin(sleep_ms(RECEIVE_TIMEOUT_MS));
+        loop {
+            self.drain_worker_outputs()?;
             if let Some(message) = self.pending.pop() {
                 return Ok(message);
             }
+
+            let wait = self.state.borrow().wait_for_output()?;
+            if !output_or_deadline(wait, deadline.as_mut()).await? {
+                return Err(TransportError::Other(
+                    "timed out waiting for browser worker protocol output".to_string(),
+                ));
+            }
         }
-        Err(TransportError::Other(
-            "timed out waiting for browser worker protocol output".to_string(),
-        ))
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
@@ -115,6 +153,12 @@ impl BrowserWorkerClientState {
     fn take_outputs(&self) -> Result<Vec<BrowserOutputEnvelope>, TransportError> {
         browser_worker_provider(&self.connector)?
             .take_outputs(&self.session_id)
+            .map_err(|error| TransportError::Other(error.to_string()))
+    }
+
+    fn wait_for_output(&self) -> Result<OutputWait, TransportError> {
+        browser_worker_provider(&self.connector)?
+            .wait_for_output(&self.session_id)
             .map_err(|error| TransportError::Other(error.to_string()))
     }
 

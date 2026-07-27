@@ -50,6 +50,13 @@ use super::{
 pub struct ProjectController {
     state: ProjectState,
     running_project_status: RunningProjectStatus,
+    /// The lens session's runtime kind, pushed down by the studio
+    /// controller (dispatch + passive tick chokepoints). Drives the
+    /// runtime-tiered probe policy: visual probe resolution
+    /// ([`Self::visual_preview_frame`]) and the product-subscription node
+    /// scope. `None` (no lens / tests) behaves like a device lens for
+    /// subscription scope and uses the default probe resolution.
+    lens_runtime_kind: Option<crate::RuntimeKind>,
     active_editor_target: Option<ProjectEditorTarget>,
     /// The storage dir (under `/projects/`) the LENS runtime actually
     /// serves the project from. The sim always uses the demo slot, but a
@@ -139,6 +146,7 @@ impl ProjectController {
         Self {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
+            lens_runtime_kind: None,
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
                 .to_string(),
@@ -451,6 +459,7 @@ impl ProjectController {
             |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
+        let subscribes = |node: &NodeController| self.node_subscribes_products(node);
         self.root_nodes
             .iter()
             .map(|node| {
@@ -460,6 +469,7 @@ impl ProjectController {
                     &extra_config,
                     &asset_editor,
                     primary_visual.as_ref(),
+                    &subscribes,
                 )
             })
             .collect()
@@ -1433,6 +1443,7 @@ impl ProjectController {
             |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
+        let subscribes = |node: &NodeController| self.node_subscribes_products(node);
         let mut nodes = self
             .root_nodes
             .iter()
@@ -1444,6 +1455,7 @@ impl ProjectController {
                     &extra_config,
                     &asset_editor,
                     primary_visual.as_ref(),
+                    &subscribes,
                 )
             })
             .collect::<Vec<_>>();
@@ -1826,7 +1838,9 @@ impl ProjectController {
             .get_or_insert_with(ProjectSync::new)
             .begin_refresh();
         let products = self.subscribed_products();
-        let request = self.sync_mut()?.refresh_project_read_request(products);
+        let request = self
+            .sync_for_request()?
+            .refresh_project_read_request(products);
         let outcome = server
             .project_read_gated(handle_id, request, deadline, cancel)
             .await;
@@ -2054,7 +2068,19 @@ impl ProjectController {
 
     fn node_subscribes_products(&self, node: &NodeController) -> bool {
         match node.state().product_subscription_intent {
-            ProjectProductSubscriptionIntent::Default => self.is_focused_node(node),
+            ProjectProductSubscriptionIntent::Default => match self.lens_runtime_kind {
+                // Sim probes ride an in-memory postMessage wire and (post
+                // probe-performance plan) render onto canvases, so every
+                // expanded node keeps live previews. `collapsed` is the
+                // controller-side signal; today the web pane's collapse
+                // toggle is view-local (always false here — effectively
+                // "all nodes") and this gate becomes real when the UI
+                // state audit moves live collapse state into core.
+                Some(crate::RuntimeKind::Sim) => !node.state().collapsed,
+                // Device serial bandwidth is precious: focused node only
+                // (the primary visual is unioned in regardless).
+                Some(crate::RuntimeKind::Device) | None => self.is_focused_node(node),
+            },
             ProjectProductSubscriptionIntent::Subscribed => true,
             ProjectProductSubscriptionIntent::Unsubscribed => false,
         }
@@ -2149,7 +2175,9 @@ impl ProjectController {
         handle_id: u32,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let products = self.subscribed_products();
-        let request = self.sync_mut()?.initial_project_read_request(products);
+        let request = self
+            .sync_for_request()?
+            .initial_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
         let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
@@ -2164,7 +2192,9 @@ impl ProjectController {
         handle_id: u32,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let products = self.subscribed_products();
-        let request = self.sync_mut()?.refresh_project_read_request(products);
+        let request = self
+            .sync_for_request()?
+            .refresh_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
         self.apply_refresh_read(server, handle_id, read).await
     }
@@ -2197,7 +2227,9 @@ impl ProjectController {
                 ));
                 self.sync_mut()?.reset_view();
                 let products = self.subscribed_products();
-                let request = self.sync_mut()?.initial_project_read_request(products);
+                let request = self
+                    .sync_for_request()?
+                    .initial_project_read_request(products);
                 let resync = server.project_read(handle_id, request).await?;
                 logs.extend(resync.logs);
                 self.sync_mut()?.apply_project_read_events(resync.events)?;
@@ -2236,6 +2268,32 @@ impl ProjectController {
         self.sync
             .as_mut()
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))
+    }
+
+    /// Record the lens session's runtime kind (probe-policy input). Pushed
+    /// by the studio controller at its dispatch and passive-tick
+    /// chokepoints, so the policy tracks lens moves without lifecycle
+    /// wiring.
+    pub fn set_lens_runtime_kind(&mut self, kind: Option<crate::RuntimeKind>) {
+        self.lens_runtime_kind = kind;
+    }
+
+    /// The runtime-tiered visual probe resolution for the current lens.
+    fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
+        match self.lens_runtime_kind {
+            Some(crate::RuntimeKind::Device) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
+            Some(crate::RuntimeKind::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
+        }
+    }
+
+    /// The sync handle for building a read request, with the lens-tier
+    /// visual probe frame pushed down first — the kind can change with the
+    /// lens, and requests must always reflect the current one.
+    fn sync_for_request(&mut self) -> Result<&mut ProjectSync, UiError> {
+        let frame = self.visual_preview_frame();
+        let sync = self.sync_mut()?;
+        sync.set_visual_preview_frame(frame);
+        Ok(sync)
     }
 
     fn clear_loaded_project_state(&mut self) {
@@ -3215,6 +3273,10 @@ pub enum ProjectRefreshOutcome {
     Cancelled,
     /// The progress deadline fired on a stalled stream; nothing was applied.
     TimedOut,
+    /// The completion-based pacing gate bounced an early tick: the last pull
+    /// completed less than one cadence gap ago, so no wire op ran. Not a
+    /// completion — the due stamp is untouched.
+    NotDue,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -4962,6 +5024,49 @@ mod tests {
                 output: 0
             }]
         );
+    }
+
+    #[test]
+    fn sim_lens_subscribes_unfocused_nodes_device_stays_focused_only() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+
+        // Device lens (and unknown): an unfocused node contributes nothing.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        assert_eq!(project.subscribed_products(), Vec::new());
+        project.set_lens_runtime_kind(None);
+        assert_eq!(project.subscribed_products(), Vec::new());
+
+        // Sim lens: the unfocused (expanded) node's products stream too.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        assert_eq!(
+            project.subscribed_products(),
+            vec![
+                UiProductRef::Visual {
+                    node_id: 1,
+                    output: 0
+                },
+                UiProductRef::Control {
+                    node_id: 1,
+                    output: 1,
+                    rows: 2,
+                    samples_per_row: 16
+                }
+            ]
+        );
+
+        // An explicit opt-out still wins over the sim policy.
+        let address = node_address("/demo.project/orbit.shader");
+        project
+            .node_mut(&address)
+            .unwrap()
+            .state_mut()
+            .product_subscription_intent = ProjectProductSubscriptionIntent::Unsubscribed;
+        assert_eq!(project.subscribed_products(), Vec::new());
     }
 
     #[test]
