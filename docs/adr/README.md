@@ -61,8 +61,7 @@ holds the full context.
 | Device-pane adoption of the pane grammar (`StudioPane`/`DetailPopover`/`UiPaneAction`) | `2026-07-05-studio-pane-grammar` (a) | Next device-pane UX work |
 | Save visibility while scrolling (project header scrolls with the sidebar; the strip was always visible) | `2026-07-05-studio-pane-grammar` (b) | The M2a UX gate or later use flags losing always-visible Save |
 | Tint-variant loser's story removal (D7 pick pending at the M2a gate) | `2026-07-05-studio-pane-grammar` (c) | The tint pick is recorded in the M2a plan notes |
-| Event-driven (postMessage/waker) receive so the poll-sleep loop retires (~50–100 line bridge across `browser_worker_client_io.rs`, `worker_handle.rs`, JS worker) | `2026-07-04-client-pull-loop-and-actor` (a); `2026-07-03-simulator-clock-ownership` | Poll latency shows up in traces, or battery/CPU cost matters |
-| Probe payload optimization (binary/compressed preview encoding, downscaled extents, delta frames) | `2026-07-04-client-pull-loop-and-actor` (b) | Steady-state tick cost is dominated by raw probe bytes; own design pass with measurements |
+| Probe payload optimization (binary/compressed preview encoding, delta frames, transferable sim frames on PreviewHost's zero-copy precedent) | `2026-07-04-client-pull-loop-and-actor` (b); `2026-07-27-completion-based-refresh-pacing` | Steady-state tick cost is dominated by raw probe bytes; own design pass with measurements |
 | Native/tokio actor parity: `tokio::spawn`/`LocalSet` spawn helper + native timer factory | `2026-07-04-client-pull-loop-and-actor` (c) | A native Studio shell exists |
 | Layout-header semantic chunking (per-lamp-range events) | `2026-07-04-envelope-streaming` | Display-layout fixtures grow ~4×+ past the 16 KiB frame budget |
 | Sub-root slot progressive patching | `2026-07-04-envelope-streaming`; `2026-06-27-project-read-event-frames` | `SlotMirrorView` can apply partial root snapshots safely |
@@ -105,6 +104,9 @@ holds the full context.
 | Fixture mapping editor drawer (face's planned custom drawer; fixture has only advanced today) | `2026-07-26-node-card-faces` | Fixture mapping UX work begins |
 | Drawer open-state re-home into CardUiState (view-local signals today) | `2026-07-26-node-card-faces` | The ui-state-audit plan lands |
 | Node-card refinement round (bound-knob live bus value, friendly panel-ⓘ titles, entry-thumb warming, story-fixture selection look, knob keyboard support, hardware placard walk) | `2026-07-26-node-card-faces` | The post-landing refinement round is scheduled |
+| Display-driven per-surface probe sizing, capped by the runtime tier | `2026-07-27-completion-based-refresh-pacing` | Multi-node probing has soaked and card-size feedback plumbing is worth the plumbing |
+| Probe revision-gating on the wire (skip unchanged probe bytes; display-layout's `IfChanged` read is the precedent) | `2026-07-27-completion-based-refresh-pacing` | Steady-state probe bytes dominate tick cost on a real link |
+| Sim "non-collapsed" probe scope becomes real (collapse is view-local today, so sim probes ALL nodes) | `2026-07-27-completion-based-refresh-pacing` | The ui-state-audit plan moves live collapse state into core |
 
 ## Relationship To Shared Planning
 

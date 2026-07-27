@@ -112,6 +112,25 @@ impl BrowserWorkerProvider {
         outputs.extend(state.handle_mut()?.take_outputs());
         Ok(outputs)
     }
+
+    /// A future resolving once [`Self::take_outputs`] would return something
+    /// — immediately when provider-buffered outputs are pending, otherwise
+    /// when the worker's `onmessage` next pushes an envelope. The session
+    /// borrow is released before the caller awaits (the future holds only
+    /// the handle's shared buffers).
+    pub fn wait_for_output(
+        &self,
+        session_id: &LinkSessionId,
+    ) -> Result<super::worker_handle::OutputWait, LinkError> {
+        let sessions = self.sessions.borrow();
+        let state = sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        if !state.pending_outputs.is_empty() {
+            return Ok(super::worker_handle::OutputWait::ready());
+        }
+        Ok(state.handle()?.wait_for_output())
+    }
 }
 
 impl LinkProvider for BrowserWorkerProvider {

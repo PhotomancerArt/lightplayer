@@ -37,6 +37,22 @@ pub const DEFAULT_REQUEST_IDLE_DEADLINE: Duration = Duration::from_secs(10);
 /// poll interval).
 pub const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+/// Gap between polls while a request is IN FLIGHT and its response frames
+/// are streaming in. Deliberately tighter than
+/// [`READINESS_POLL_INTERVAL`]: a multi-frame project read used to pay up
+/// to 10 ms of poll latency per frame. Browsers clamp nested `setTimeout`
+/// to ~4 ms, so the effective in-stream poll is ~4 ms — still less than
+/// half the old per-frame tax, and only while a response is pending
+/// (idle sessions never run this loop).
+#[cfg_attr(
+    not(all(feature = "browser-serial-esp32", target_arch = "wasm32")),
+    allow(
+        dead_code,
+        reason = "consumed only by the wasm browser-wire receive loop"
+    )
+)]
+pub const WIRE_FRAME_POLL_INTERVAL: Duration = Duration::from_millis(2);
+
 /// Per-operation deadlines for one device session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DeviceDeadlines {
