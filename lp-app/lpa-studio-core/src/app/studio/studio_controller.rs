@@ -241,6 +241,10 @@ impl StudioController {
                 self.settings.set_agent_custom_api_key(key);
                 self.persist_user_settings();
             }
+            SettingsCommand::SetAgentOpenRouterApiKey(key) => {
+                self.settings.set_agent_openrouter_api_key(key);
+                self.persist_user_settings();
+            }
             SettingsCommand::SetAgentModel(model) => {
                 self.settings.set_agent_model(model);
                 self.persist_user_settings();

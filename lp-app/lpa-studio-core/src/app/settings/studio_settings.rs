@@ -16,6 +16,14 @@ use crate::app::settings::agent_provider::AgentProvider;
 /// name, never guessed here).
 pub const DEFAULT_AGENT_MODEL: &str = "claude-sonnet-5";
 
+/// OpenRouter's API origin (browser-CORS-open, OpenAI-compatible).
+pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
+
+/// The effective model for OpenRouter when no layer overrides it, so the
+/// Connect flow alone makes the agent ready. Slug verified live against
+/// `GET https://openrouter.ai/api/v1/models` on 2026-07-26.
+pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-5";
+
 /// One settings overlay: every field optional, absent fields defer to the
 /// layer below.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -46,6 +54,10 @@ pub struct AgentSettings {
     /// need none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_api_key: Option<String>,
+    /// OpenRouter key, normally written by the OAuth PKCE Connect flow
+    /// (it lives in the user's OpenRouter account and is revocable there).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openrouter_api_key: Option<String>,
     /// Model id. Effective default is [`DEFAULT_AGENT_MODEL`] for
     /// Anthropic; REQUIRED (no default) for OpenAI/Custom.
     #[serde(skip_serializing_if = "Option::is_none")]
