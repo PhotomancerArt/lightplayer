@@ -175,15 +175,23 @@ it enqueues commands and renders change-gated snapshots. The pieces:
   applies `BackoffPolicy`. Progressive `UxUpdate` activity/log deltas during a
   long action are applied to the live view (`UiStudioView::apply_activity`) and
   republished through the same channel.
-- **Cadence is data (`RefreshCadence`).** The refresh interval the UI timer waits
-  is derived in core from the connection's `ConnectFlowState` (`RefreshCadence::for_flow_state`)
-  and surfaced through `StudioHandle::next_refresh_delay` (interval + backoff), so
-  no `LinkProviderKind` transport-sniffing lives in the view layer. The simulator
-  keeps a faster interval only because it self-ticks and the UI re-reads previews
-  at that rate.
-- **Request scoping** stays core-owned: the focus-scoped probe set
-  (`node_subscribes_products`) is picked up by the next pull; `Focus` completes
-  synchronously with no bolt-on network refresh.
+- **Cadence is data (`RefreshCadence`), and a cadence is a GAP.** The value is
+  derived in core from the lens session's `RuntimeKind`
+  (`RefreshCadence::for_kind`) and surfaced through
+  `StudioHandle::next_refresh_delay` (gap + backoff), so no `LinkProviderKind`
+  transport-sniffing lives in the view layer. Since the probe-performance plan
+  the value is the minimum gap between one passive pull *completing* and the
+  next one starting, not a fixed period: the lens session stamps completion,
+  the published delay counts down from the stamp, and an early tick bounces
+  off the due gate as `ProjectRefreshOutcome::NotDue` without a wire op. See
+  `refresh_cadence.rs` module docs and
+  `docs/adr/2026-07-27-completion-based-refresh-pacing.md`.
+- **Request scoping** stays core-owned and is runtime-tiered: the probe set
+  (`node_subscribes_products`) subscribes every non-collapsed node's products
+  on the simulator and only the focused node (plus the primary visual) on a
+  device, and probe resolution tiers the same way (32×32 sim / 16×16 device).
+  The set is picked up by the next pull; `Focus` completes synchronously with
+  no bolt-on network refresh.
 
 The client's single timeout/cancel/retry owner and the actor model are recorded
 in `docs/adr/2026-07-04-client-pull-loop-and-actor.md`.

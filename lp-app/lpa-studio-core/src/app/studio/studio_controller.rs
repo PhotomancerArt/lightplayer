@@ -36,6 +36,13 @@ use crate::{
 /// holder, fast enough that closing the other tab feels responsive).
 const PORT_HELD_RETRY_SECS: f64 = 5.0;
 
+/// Minimum gap between view publishes that carry *only* streamed log lines
+/// (session console tails, drained producer batches). Anything structural —
+/// a revision advance or a local mutation — publishes immediately and takes
+/// pending lines along; this throttle only bounds how often a bare log
+/// stream can force a full-view rebuild.
+const LOG_ONLY_PUBLISH_MIN_GAP_SECS: f64 = 0.25;
+
 /// Flap guard for the sim crash auto-reboot: one reboot per window. A
 /// crash landing within this many seconds of the previous auto-reboot
 /// means the loaded project crashes the worker itself — rebooting again
@@ -70,6 +77,11 @@ pub struct StudioController {
     /// The injected wall clock that stamps [`UiLogDraft`]s at push time.
     /// Producers never stamp — see the `core::log` module docs.
     now_secs: LogClock,
+    /// The mutable cell behind `now_secs` when built via the test
+    /// constructors, so pacing tests can advance time past a completion
+    /// gap (`advance_clock_for_test`).
+    #[cfg(test)]
+    test_clock: Option<std::rc::Rc<std::cell::Cell<f64>>>,
     /// Optional per-entry mirror hook, invoked for **every** stamped entry as
     /// it enters the ring — independent of the display filter (which only
     /// shapes the emitted console view). The web shell installs its JS-console
@@ -81,9 +93,17 @@ pub struct StudioController {
     /// mutation set [`Self::dirty`].
     applied_revision: Option<i64>,
     /// Set when local (non-network) state changed since the last emitted view —
-    /// a dispatched action, focus change, or log — so the next gate emits even
-    /// though the project revision did not move.
+    /// a dispatched action, focus change, or an action-outcome log — so the
+    /// next gate emits even though the project revision did not move.
     dirty: bool,
+    /// Set when only *streamed* log lines arrived (session console tails,
+    /// drained producer batches) since the last emitted view. Kept separate
+    /// from [`Self::dirty`] and published on a throttle
+    /// ([`LOG_ONLY_PUBLISH_MIN_GAP_SECS`]) so a per-line stream cannot force
+    /// full-view rebuilds at stream rate.
+    logs_dirty: bool,
+    /// `now_secs` at the last log-only publish (throttle anchor).
+    last_log_only_publish: f64,
     /// The injected library host (M4b): catalog transactions, project
     /// open/close, and gallery snapshots all go through this seam. Also
     /// held by the project flows.
@@ -177,10 +197,14 @@ impl StudioController {
             logs: LogRing::new(),
             log_filter: LogFilter::default(),
             now_secs: Rc::new(now_secs),
+            #[cfg(test)]
+            test_clock: None,
             on_entry: None,
             applied_revision: None,
             // The first view is always new to the UI, so start dirty.
             dirty: true,
+            logs_dirty: false,
+            last_log_only_publish: f64::NEG_INFINITY,
             library_host: None,
             home_inputs: None,
             library_refresh_pending: false,
@@ -454,18 +478,56 @@ impl StudioController {
         let mut delay: Option<Duration> = None;
         for session in self.pool.sessions() {
             let candidate = if Some(session.id()) == lens {
-                let cadence = session.cadence_interval();
-                let cadence = match self.project.verdict_chase_interval() {
-                    Some(chase) => cadence.min(chase),
-                    None => cadence,
-                };
-                cadence.saturating_add(session.backoff_delay())
+                // Completion-based pacing: count the lens gap down from the
+                // last pull's COMPLETION stamp, so a slow pull pushes the
+                // next tick out instead of stacking behind it.
+                session.refresh_due_in(now, self.lens_refresh_gap(session))
             } else {
                 session.heartbeat_due_in(now)
             };
             delay = Some(delay.map_or(candidate, |current| current.min(candidate)));
         }
         delay.unwrap_or_else(|| RefreshCadence::default().interval())
+    }
+
+    /// The effective minimum gap between passive pulls on the lens session:
+    /// the kind cadence, tightened by a post-apply verdict chase, stretched
+    /// by that session's failure backoff.
+    fn lens_refresh_gap(&self, session: &crate::RuntimeSession) -> Duration {
+        let gap = session.cadence_interval();
+        let gap = match self.project.verdict_chase_interval() {
+            Some(chase) => gap.min(chase),
+            None => gap,
+        };
+        gap.saturating_add(session.backoff_delay())
+    }
+
+    /// Whether the lens session's next passive pull is due. Early ticks (the
+    /// UI timer racing a slow pull) bounce off this without a wire op.
+    fn passive_refresh_due(&self) -> bool {
+        let now = (self.now_secs)();
+        match self.pool.lens_session() {
+            Some(session) => session.refresh_due(now, self.lens_refresh_gap(session)),
+            None => true,
+        }
+    }
+
+    /// Push the lens session's runtime kind into the project controller so
+    /// probe policy (visual probe resolution, product-subscription node
+    /// scope) tracks the lens.
+    fn sync_lens_probe_policy(&mut self) {
+        let kind = self.pool.lens_session().map(crate::RuntimeSession::kind);
+        self.project.set_lens_runtime_kind(kind);
+    }
+
+    /// Stamp the lens session's pull-completion time: the next passive pull
+    /// becomes due one cadence gap after this moment, not one gap after the
+    /// pull started.
+    pub fn note_passive_refresh_completed(&mut self) {
+        let now = (self.now_secs)();
+        if let Ok(session) = self.pool.lens_session_mut() {
+            session.mark_refresh_complete(now);
+        }
     }
 
     /// Record a passive project-refresh outcome on the LENS session's
@@ -830,10 +892,22 @@ impl StudioController {
         let revision = self.current_revision();
         let advanced = revision != self.applied_revision;
         if !self.dirty && !advanced {
-            return None;
+            if !self.logs_dirty {
+                return None;
+            }
+            // Log-only churn: publish on a throttle so a per-line stream
+            // (device console, verbose sessions) cannot force full-view
+            // rebuilds at stream rate. Pending lines are never lost — they
+            // sit in the tails/ring and ride the next emitted view.
+            let now = (self.now_secs)();
+            if now - self.last_log_only_publish < LOG_ONLY_PUBLISH_MIN_GAP_SECS {
+                return None;
+            }
+            self.last_log_only_publish = now;
         }
         self.applied_revision = revision;
         self.dirty = false;
+        self.logs_dirty = false;
         Some(self.view())
     }
 
@@ -841,6 +915,12 @@ impl StudioController {
     /// [`Self::view_if_changed`] emits.
     fn mark_dirty(&mut self) {
         self.dirty = true;
+    }
+
+    /// Mark streamed log lines as pending so the next
+    /// [`Self::view_if_changed`] emits — throttled, unlike [`Self::mark_dirty`].
+    fn mark_logs_dirty(&mut self) {
+        self.logs_dirty = true;
     }
 
     /// Stamp one draft with the injected clock, append it to the bounded log
@@ -881,13 +961,14 @@ impl StudioController {
         if let Some(session) = self.pool.session_mut(id) {
             session.push_console_tail(stamped);
         }
-        self.mark_dirty();
+        self.mark_logs_dirty();
     }
 
     /// Stamp a batch of producer drafts (all with one clock read — they
-    /// arrived together) into the ring and mark the view dirty. No-op for an
-    /// empty batch so a quiet passive refresh stays change-gated out. The
-    /// mirror hook fires once per stamped entry.
+    /// arrived together) into the ring and mark streamed logs pending
+    /// (throttled publish). No-op for an empty batch so a quiet passive
+    /// refresh stays change-gated out. The mirror hook fires once per
+    /// stamped entry.
     fn record_logs(&mut self, drafts: Vec<UiLogDraft>) {
         if drafts.is_empty() {
             return;
@@ -898,7 +979,7 @@ impl StudioController {
             self.notify_entry(&entry);
             self.logs.push(entry);
         }
-        self.mark_dirty();
+        self.mark_logs_dirty();
     }
 
     /// Apply a console command (from [`StudioCommand::Console`]): mutate the
@@ -1732,6 +1813,10 @@ impl StudioController {
         if !self.project_is_loaded() || !self.has_lightplayer_state() {
             return Ok(None);
         }
+        if !self.passive_refresh_due() {
+            return Ok(Some(ProjectRefreshOutcome::NotDue));
+        }
+        self.sync_lens_probe_policy();
         let outcome = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
@@ -1756,6 +1841,9 @@ impl StudioController {
     }
 
     async fn dispatch_inner(&mut self, action: UiAction, updates: UxUpdateSink) -> UiResult {
+        // Actions can move the lens (connect/open flows) or trigger reads;
+        // keep the project controller's probe policy tracking the lens.
+        self.sync_lens_probe_policy();
         let node_id = action.node_id().clone();
         let device_node_id = self.device.node_id();
         let project_node_id = self.project.node_id();
@@ -4052,13 +4140,27 @@ impl StudioController {
     pub(crate) fn connected_with_client_for_test(client: crate::StudioServerClient) -> Self {
         use crate::ProjectInventorySummary;
 
-        let mut studio = Self::new(|| 0.0);
+        let clock = std::rc::Rc::new(std::cell::Cell::new(0.0_f64));
+        let mut studio = Self::new({
+            let clock = std::rc::Rc::clone(&clock);
+            move || clock.get()
+        });
+        studio.test_clock = Some(clock);
         studio.set_stub_sim_for_test();
         studio.set_server_client_for_test(client);
         studio
             .project
             .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         studio
+    }
+
+    /// Advance the injected test clock (no-op for controllers built with a
+    /// real clock). Lets pacing/heartbeat tests move time past a
+    /// completion gap.
+    pub(crate) fn advance_clock_for_test(&mut self, secs: f64) {
+        if let Some(clock) = &self.test_clock {
+            clock.set(clock.get() + secs);
+        }
     }
 
     /// Apply a project view into the owned tree (drives probe scoping).
@@ -4329,6 +4431,44 @@ mod tests {
     };
 
     #[test]
+    fn streamed_logs_publish_on_a_throttle_not_per_batch() {
+        use std::cell::Cell;
+
+        fn draft(message: &str) -> UiLogDraft {
+            UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Studio, message)
+        }
+
+        let clock = Rc::new(Cell::new(0.0_f64));
+        let mut studio = {
+            let clock = Rc::clone(&clock);
+            StudioController::new(move || clock.get())
+        };
+
+        // Prime: the first gate always emits (starts dirty).
+        assert!(studio.view_if_changed().is_some());
+        assert!(studio.view_if_changed().is_none());
+
+        // The first streamed batch publishes at once.
+        studio.record_logs(vec![draft("one")]);
+        assert!(studio.view_if_changed().is_some());
+
+        // A stream arriving faster than the throttle gates out — the lines
+        // wait in the ring instead of forcing a rebuild per batch.
+        studio.record_logs(vec![draft("two")]);
+        assert!(studio.view_if_changed().is_none());
+
+        // Once the gap elapses the pending lines publish.
+        clock.set(LOG_ONLY_PUBLISH_MIN_GAP_SECS + 0.01);
+        assert!(studio.view_if_changed().is_some());
+
+        // A local mutation (action-outcome log) publishes immediately and
+        // carries any throttled stream lines with it.
+        studio.record_logs(vec![draft("three")]);
+        studio.push_log(draft("outcome"));
+        assert!(studio.view_if_changed().is_some());
+    }
+
+    #[test]
     fn sim_crash_reboot_guard_allows_first_and_expired_never_within_window() {
         // Never rebooted: always allowed.
         assert!(sim_crash_reboot_allowed(None, 100.0, 30.0));
@@ -4564,7 +4704,11 @@ mod tests {
         let mut studio = StudioController::new(|| 100.0);
         studio.set_stub_sim_for_test();
 
-        // Lens on the sim: the fast sim cadence drives the tick.
+        // Lens on the sim: a never-pulled lens is immediately due
+        // (completion-based pacing); once a pull completes, the fast sim
+        // gap counts down from the completion stamp.
+        assert_eq!(studio.next_refresh_interval(), Duration::ZERO);
+        studio.note_passive_refresh_completed();
         assert_eq!(studio.next_refresh_interval(), SIMULATOR_REFRESH_INTERVAL);
 
         // Detached (P3): the sim leaves the lens lane and joins the slow

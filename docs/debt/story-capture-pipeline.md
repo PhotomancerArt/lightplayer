@@ -1,5 +1,5 @@
 ---
-status: retired      # 2026-07-26: all five exit criteria met; see status section
+status: retired      # 2026-07-26: all five exit criteria met — but see the 2026-07-27 incident: criterion (5) "churner set empty" has since been disproven; Yona to decide whether to re-activate
 since: 2026-07-08      # first recorded capture pain (M4-gallery era)
 logged: 2026-07-23
 area: studio-web/story-capture
@@ -151,6 +151,22 @@ ADR weighing CI-side capture vs local determinism hardening);
 (2) resume-instead-of-restart on failure; (3) the gate detects
 committed-as-well-as-working-tree UI changes; (4) failures are loud
 (non-zero all the way out); (5) the churner story set is empty.
+
+- 2026-07-27 — **CHURNER SET NOT EMPTY: cross-run bistability recurred**
+  (PR #149). Two consecutive CI captures produced different bytes for 3
+  stories: `base__code-editor__overview__sm`,
+  `studio__layout__version-badge__loaded__sm` (both flipped BACK to their
+  pre-first-capture bytes — same class as the churner chip filed during
+  PR #148), and `studio__node__shader-face__advanced-open__sm` (possibly
+  NEW: the branch's canvas previews paint from an effect, so
+  painted/unpainted may both be stable-pair terminals — chip
+  task_c8301674). Operational lesson learned the hard way: after the
+  auto-commit lands, do NOT approve the bot-triggered `action_required`
+  run — approval starts a fresh capture that can flip bistable stories
+  and auto-commit AGAIN (ping-pong; it also cancels the in-flight run via
+  the concurrency group). The designed steady state is **green one commit
+  back**: the run that found drift passes after committing, and the bot
+  head ships with unapproved checks.
 
 **Exit-criteria status after the 2026-07-26 paydown** — (1) isolated
 pinned CI runner ✓; (2) clean ephemeral runners make restart cheap and

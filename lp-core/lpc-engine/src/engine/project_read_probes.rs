@@ -218,14 +218,13 @@ fn rgba16_linear_to_srgb8(bytes: &[u8]) -> alloc::vec::Vec<u8> {
     out
 }
 
+/// Encode one linear unorm16 sample as sRGB8 via the generated lookup
+/// table — an index instead of a per-sample `libm::powf`, which dominated
+/// on-device probe cost (thousands of calls per frame). Within 1 u8 LSB of
+/// the exact float transfer (see [`srgb8_lut`](super::srgb8_lut) and the
+/// exhaustive test below).
 fn linear_unorm16_to_srgb8(value: u16) -> u8 {
-    let linear = value as f32 / u16::MAX as f32;
-    let srgb = if linear <= 0.003_130_8 {
-        linear * 12.92
-    } else {
-        1.055 * libm::powf(linear, 1.0 / 2.4) - 0.055
-    };
-    (srgb.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+    super::srgb8_lut::LINEAR16_TO_SRGB8[(value >> 4) as usize]
 }
 
 /// Project one runtime binding entry onto the wire.
@@ -306,6 +305,31 @@ mod tests {
 
     use super::*;
     use crate::engine::test_support::{EngineTestBuilder, bus, output, produced_slot};
+
+    /// The exact float transfer the LUT replaces (the pre-LUT
+    /// implementation, kept as the test reference).
+    fn linear_unorm16_to_srgb8_reference(value: u16) -> u8 {
+        let linear = value as f32 / u16::MAX as f32;
+        let srgb = if linear <= 0.003_130_8 {
+            linear * 12.92
+        } else {
+            1.055 * libm::powf(linear, 1.0 / 2.4) - 0.055
+        };
+        (srgb.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+    }
+
+    #[test]
+    fn srgb8_lut_matches_float_reference_within_one_lsb() {
+        for value in 0..=u16::MAX {
+            let lut = linear_unorm16_to_srgb8(value);
+            let reference = linear_unorm16_to_srgb8_reference(value);
+            let error = (i16::from(lut) - i16::from(reference)).abs();
+            assert!(
+                error <= 1,
+                "lut diverges at {value}: lut={lut} reference={reference}"
+            );
+        }
+    }
 
     #[test]
     fn binding_graph_probe_reports_bindings_channels_and_values() {

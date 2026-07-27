@@ -27,7 +27,7 @@ use lpa_link::{DeviceSession, DeviceState, LinkConnection, LinkConnector, LinkSe
 use crate::app::places::DeviceSyncState;
 use crate::app::studio::refresh_cadence::{
     DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX,
-    RefreshCadence,
+    REFRESH_DUE_SLACK, RefreshCadence,
 };
 use crate::{
     RuntimeId, ServerFailureKind, ServerState, StudioServerClient, UiError, UiIssue, UiLogDraft,
@@ -211,6 +211,12 @@ pub struct RuntimeSession {
     /// `None` = never: the first heartbeat is immediately due, so a fresh
     /// session baselines its observed device state right away.
     last_heartbeat_at: Option<f64>,
+    /// When the last passive project pull COMPLETED (injected-clock epoch
+    /// seconds). `None` = never: the first pull is immediately due.
+    /// Completion-based pacing — the next pull is due one cadence gap after
+    /// this stamp, so a pull slower than the gap pushes the next one out
+    /// instead of running back-to-back.
+    last_refresh_completed_at: Option<f64>,
     /// The device state the last heartbeat observed, for surfacing state
     /// changes through the change gate (view builds read the live state;
     /// the heartbeat's job is marking the view dirty when it moved).
@@ -243,6 +249,7 @@ impl RuntimeSession {
             operation: None,
             backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
             last_heartbeat_at: None,
+            last_refresh_completed_at: None,
             heartbeat_device_state: None,
             sim_loaded_project: None,
             console_tail: VecDeque::new(),
@@ -459,10 +466,35 @@ impl RuntimeSession {
         self.operation = operation;
     }
 
-    /// The passive project-refresh interval while the lens is on this
+    /// The passive project-refresh completion-gap while the lens is on this
     /// session (kind policy: sim fast, device calm).
     pub fn cadence_interval(&self) -> Duration {
         RefreshCadence::for_kind(self.kind()).interval()
+    }
+
+    /// Stamp a passive pull's completion (injected-clock epoch seconds);
+    /// the next pull becomes due `gap` after this moment.
+    pub(crate) fn mark_refresh_complete(&mut self, now: f64) {
+        self.last_refresh_completed_at = Some(now);
+    }
+
+    /// Time until the next passive pull is due under `gap`, for the actor's
+    /// min-over-sessions delay. A session that never pulled is due at once.
+    pub(crate) fn refresh_due_in(&self, now: f64, gap: Duration) -> Duration {
+        match self.last_refresh_completed_at {
+            None => Duration::ZERO,
+            Some(last) => {
+                let elapsed = (now - last).max(0.0);
+                gap.saturating_sub(Duration::from_secs_f64(elapsed))
+            }
+        }
+    }
+
+    /// Whether a passive pull is due under `gap`. The slack absorbs the UI
+    /// timer's millisecond truncation so an on-time tick is not bounced as
+    /// early (see [`REFRESH_DUE_SLACK`]).
+    pub(crate) fn refresh_due(&self, now: f64, gap: Duration) -> bool {
+        self.refresh_due_in(now, gap) <= REFRESH_DUE_SLACK
     }
 
     /// This session's current passive-refresh backoff delay.
