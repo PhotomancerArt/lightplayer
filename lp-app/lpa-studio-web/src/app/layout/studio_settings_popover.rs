@@ -20,6 +20,9 @@ pub fn StudioSettingsPopover(
     settings: UiSettingsView,
     on_settings: EventHandler<SettingsCommand>,
 ) -> Element {
+    // The OpenRouter connect wiring (App-provided context; absent under
+    // stories, which render the section directly with fixture props).
+    let openrouter_error = try_consume_context::<Signal<Option<String>>>();
     rsx! {
         IconPopoverButton {
             class: TRIGGER_CLASS.to_string(),
@@ -31,7 +34,12 @@ pub fn StudioSettingsPopover(
             popup_class: POPUP_CLASS.to_string(),
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomEnd,
-            AgentSettingsSection { agent: settings.agent, on_settings }
+            AgentSettingsSection {
+                agent: settings.agent,
+                on_settings,
+                on_connect: move |_| crate::openrouter_oauth::begin_connect(openrouter_error),
+                connect_error: openrouter_error.and_then(|error| error()),
+            }
         }
     }
 }
@@ -43,6 +51,13 @@ pub fn StudioSettingsPopover(
 pub fn AgentSettingsSection(
     agent: UiAgentSettingsView,
     on_settings: EventHandler<SettingsCommand>,
+    /// Starts the OpenRouter PKCE redirect (absent under stories ⇒ the
+    /// Connect button renders inert).
+    #[props(default)]
+    on_connect: Option<EventHandler<()>>,
+    /// Transient connect-flow failure to surface under the button.
+    #[props(default)]
+    connect_error: Option<String>,
 ) -> Element {
     let key_hint = key_provenance_hint(&agent);
     let model_hint = model_provenance_hint(&agent);
@@ -141,43 +156,89 @@ pub fn AgentSettingsSection(
                 }
             }
 
-            // API key for the selected provider.
-            div { class: "tw:grid tw:min-w-0 tw:gap-1",
-                label { class: LABEL_CLASS, r#for: "studio-settings-api-key",
-                    if agent.api_key_optional { "API key (optional)" } else { "API key" }
-                }
-                if let Some(masked) = agent.api_key_masked.as_deref() {
-                    div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2",
-                        code { class: "tw:font-mono tw:text-xs tw:text-muted-foreground", "{masked}" }
-                        if let Some(hint) = key_hint {
-                            span { class: HINT_CLASS, "{hint}" }
-                        }
-                        if agent.api_key_overridden {
+            // Account access: OpenRouter connects via OAuth (no pasted
+            // key); every other provider takes a pasted API key.
+            if provider == AgentProvider::OpenRouter {
+                div { class: "tw:grid tw:min-w-0 tw:gap-1",
+                    span { class: LABEL_CLASS, "Account" }
+                    if let Some(masked) = agent.api_key_masked.as_deref() {
+                        div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2",
+                            code { class: "tw:font-mono tw:text-xs tw:text-muted-foreground", "{masked}" }
+                            if let Some(hint) = key_hint {
+                                span { class: HINT_CLASS, "{hint}" }
+                            }
                             button {
                                 class: CLEAR_BUTTON_CLASS,
                                 r#type: "button",
-                                title: "Remove the key saved in this browser",
-                                onclick: move |_| on_settings.call(set_key_command(key_field_provider, None)),
-                                "Clear saved key"
+                                title: "Forget this key (also revocable at openrouter.ai)",
+                                onclick: move |_| {
+                                    on_settings
+                                        .call(SettingsCommand::SetAgentOpenRouterApiKey(None));
+                                },
+                                "Disconnect"
+                            }
+                        }
+                    } else {
+                        button {
+                            class: CONNECT_BUTTON_CLASS,
+                            r#type: "button",
+                            title: "Sign in on openrouter.ai and come right back — no key to paste",
+                            onclick: move |_| {
+                                if let Some(on_connect) = on_connect {
+                                    on_connect.call(());
+                                }
+                            },
+                            "Connect OpenRouter"
+                        }
+                    }
+                    if let Some(error) = connect_error.as_deref() {
+                        span { class: "tw:text-[0.68rem] tw:font-bold tw:text-status-warning-foreground",
+                            "{error}"
+                        }
+                    }
+                    p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
+                        "Saved in this browser only, unencrypted."
+                    }
+                }
+            } else {
+                // API key for the selected provider.
+                div { class: "tw:grid tw:min-w-0 tw:gap-1",
+                    label { class: LABEL_CLASS, r#for: "studio-settings-api-key",
+                        if agent.api_key_optional { "API key (optional)" } else { "API key" }
+                    }
+                    if let Some(masked) = agent.api_key_masked.as_deref() {
+                        div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2",
+                            code { class: "tw:font-mono tw:text-xs tw:text-muted-foreground", "{masked}" }
+                            if let Some(hint) = key_hint {
+                                span { class: HINT_CLASS, "{hint}" }
+                            }
+                            if agent.api_key_overridden {
+                                button {
+                                    class: CLEAR_BUTTON_CLASS,
+                                    r#type: "button",
+                                    title: "Remove the key saved in this browser",
+                                    onclick: move |_| on_settings.call(set_key_command(key_field_provider, None)),
+                                    "Clear saved key"
+                                }
                             }
                         }
                     }
-                }
-                input {
-                    id: "studio-settings-api-key",
-                    class: INPUT_CLASS,
-                    r#type: "password",
-                    placeholder: api_key_placeholder(&agent),
-                    autocomplete: "off",
-                    // paste-and-save: the value commits on change (blur /
-                    // Enter) and the field resets to its masked summary on
-                    // the next snapshot
-                    onchange: move |event| {
-                        on_settings.call(set_key_command(key_field_provider, Some(event.value())));
-                    },
-                }
-                p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
-                    "Saved in this browser only, unencrypted."
+                    input {
+                        id: "studio-settings-api-key",
+                        class: INPUT_CLASS,
+                        r#type: "password",
+                        placeholder: api_key_placeholder(&agent),
+                        autocomplete: "off",
+                        // paste-and-save: the value commits on change (blur /
+                        // Enter) and the field resets to its masked summary on
+                        // the next snapshot
+                        onchange: move |event| {
+                            on_settings.call(set_key_command(key_field_provider, Some(event.value())));
+                        },
+                    }
+                    p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
+                        "Saved in this browser only, unencrypted."
+                    }
                 }
             }
 
@@ -259,6 +320,7 @@ const TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center t
 const POPUP_CLASS: &str = "tw:grid tw:w-[min(340px,calc(100vw-24px))] tw:overflow-hidden tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_74%)] tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 const INPUT_CLASS: &str = "tw:h-7 tw:w-full tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:font-mono tw:text-xs tw:text-muted-foreground";
 const CLEAR_BUTTON_CLASS: &str = "tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:text-[11px] tw:text-muted-foreground tw:hover:text-soft-foreground";
+const CONNECT_BUTTON_CLASS: &str = "tw:justify-self-start tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-accent tw:transition tw:duration-300 tw:hover:bg-accent-wash";
 const LABEL_CLASS: &str = "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground";
 const HINT_CLASS: &str = "tw:text-[0.68rem] tw:text-subtle-foreground";
 
