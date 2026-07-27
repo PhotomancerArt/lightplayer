@@ -5,6 +5,7 @@ pub mod exploration;
 #[cfg(target_arch = "wasm32")]
 mod library_host_opfs;
 mod local_store;
+mod openrouter_oauth;
 mod router;
 mod settings_io;
 #[cfg(feature = "stories")]

@@ -67,6 +67,22 @@ pub fn App() -> Element {
     }
 
     let mut view = use_signal(UiStudioView::empty);
+    // The OpenRouter connect return leg (`?code=…`): consumed synchronously
+    // BEFORE the router reads the URL — it scrubs the query and restores the
+    // pre-redirect hash. The exchange itself runs async once the actor is up.
+    #[cfg(target_arch = "wasm32")]
+    let openrouter_callback = use_hook(|| {
+        Rc::new(RefCell::new(
+            crate::openrouter_oauth::take_pending_callback(),
+        ))
+    });
+    // Transient connect-flow error, rendered by the settings section and the
+    // agent empty state (a failed exchange must not die silently).
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        allow(unused_variables, reason = "only the wasm exchange task writes it")
+    )]
+    let openrouter_error = use_context_provider(|| Signal::new(None::<String>));
     // The route: parsed from the URL at boot, canonicalized once, then
     // kept in sync bidirectionally — the view loop below mirrors the LENS
     // into the URL (SDI: the URL is the focused document), and the
@@ -221,6 +237,28 @@ pub fn App() -> Element {
                 )));
             }
         });
+        // The OpenRouter code→key exchange (return leg captured above).
+        // Success writes the key and switches the provider — Connect alone
+        // makes the agent ready; failure lands in the transient signal.
+        #[cfg(target_arch = "wasm32")]
+        if let Some(callback) = openrouter_callback.borrow_mut().take() {
+            use lpa_studio_core::app::settings::AgentProvider;
+            let exchange_tx = handle.tx.clone();
+            let mut error = openrouter_error;
+            spawn(async move {
+                match crate::openrouter_oauth::exchange(callback).await {
+                    Ok(key) => {
+                        exchange_tx.send(StudioCommand::Settings(
+                            SettingsCommand::SetAgentOpenRouterApiKey(Some(key)),
+                        ));
+                        exchange_tx.send(StudioCommand::Settings(
+                            SettingsCommand::SetAgentProvider(Some(AgentProvider::OpenRouter)),
+                        ));
+                    }
+                    Err(message) => error.set(Some(message)),
+                }
+            });
+        }
         StudioBridge {
             tx: handle.tx,
             delay: handle.delay,
