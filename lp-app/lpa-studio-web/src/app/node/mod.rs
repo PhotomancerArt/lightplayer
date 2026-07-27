@@ -13,6 +13,15 @@ mod binding_chip;
 mod config_slot_row;
 #[cfg(feature = "stories")]
 pub(crate) mod config_slot_row_stories;
+mod face;
+#[cfg(feature = "stories")]
+pub(crate) mod face_story_fixtures;
+#[cfg(feature = "stories")]
+pub(crate) mod fixture_face_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod h_fader_field_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod knob_field_stories;
 mod node_children;
 mod node_detail_popover;
 mod node_pane;
@@ -20,6 +29,9 @@ mod node_pane;
 pub(crate) mod node_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod node_story_fixtures;
+mod panel;
+#[cfg(feature = "stories")]
+pub(crate) mod playlist_face_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod produced_product_stories;
 mod produced_product_view;
@@ -29,6 +41,8 @@ pub(crate) mod produced_value_stories;
 mod produced_value_view;
 mod produced_values;
 mod shader_editor_tabs;
+#[cfg(feature = "stories")]
+pub(crate) mod shader_face_stories;
 mod slot_affine2d_field;
 mod slot_detail_button;
 mod slot_dimensions_field;
@@ -55,6 +69,8 @@ mod slot_value_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_value_editor_stories;
 mod slot_vector_fields;
+#[cfg(feature = "stories")]
+pub(crate) mod toggle_field_stories;
 pub(crate) mod value_display;
 
 pub use agent_chat::AgentChatPane;
@@ -62,9 +78,13 @@ pub use asset_editor::AssetEditor;
 pub(crate) use binding_authoring_section::BindingAuthoringSection;
 pub(crate) use binding_chip::{BindingChip, BindingChipDirection};
 pub use config_slot_row::ConfigSlotRow;
+pub use face::{
+    FixtureFace, NodeCardDrawers, NodeCardSection, NodeFaceBody, PlaylistFace, ShaderFace,
+};
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
+pub use panel::{HFaderField, KnobField, PanelControl, ToggleField};
 pub use produced_product_view::ProducedProductView;
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;

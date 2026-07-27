@@ -259,6 +259,8 @@ void tick() {{
                 mapping: lpc_model::OptionSlot::none(),
                 label: ValueSlot::default(),
                 description: ValueSlot::default(),
+                panel: lpc_model::OptionSlot::none(),
+                unit: lpc_model::OptionSlot::none(),
             },
         );
 

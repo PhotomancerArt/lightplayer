@@ -29,6 +29,9 @@ pub fn NodeChildren(
     }
 }
 
+/// Promote an extracted child summary to a full pane view (nested cards are
+/// the same card grammar) — the playlist's active child renders below its
+/// playlist card through this same path (P2c item 2).
 fn child_node_view(child: UiNodeChild) -> UiNodeView {
     let header = UiNodeHeader::new(
         child.label.clone(),
@@ -46,6 +49,7 @@ fn child_node_view(child: UiNodeChild) -> UiNodeView {
         .with_node_id(format!("child:{}", child.label))
         .with_header_actions(child.header_actions)
         .with_children(child.children);
+    view.face = child.face;
     view.focused = child.focused || child.active;
     view.action = child.action;
     view

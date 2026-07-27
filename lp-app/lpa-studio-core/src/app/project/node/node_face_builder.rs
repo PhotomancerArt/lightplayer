@@ -1,0 +1,854 @@
+//! Kind-specific node-card face derivation (node-card P3).
+//!
+//! Faces are built FROM the already-projected section DTOs — the same rows,
+//! previews, edit states, and inline editors the generic sections view
+//! renders — so a panel control and its backing slot row can never disagree
+//! (one derivation, two presentations). The builder never re-reads slot
+//! controllers or project state.
+//!
+//! - **Shader**: preview = the produced visual product; controls = consumed
+//!   uniform slots whose authored `panel` flag is on (`ShaderSlotDef.panel`),
+//!   as knobs over the authored `min`/`max` editing
+//!   `consumed.<name>.default.some`; the code drawer reuses the inline GLSL
+//!   asset editor. The agent handle is decorated later by the studio
+//!   controller (`AgentController::decorate_editor_view`), exactly like the
+//!   sections path.
+//! - **Fixture**: preview = the produced control product (lamp map);
+//!   brightness = the first panel-flagged value row (`SlotMeta::panel`,
+//!   seeded by [`lpc_model::Brightness`]) as the dominant fader editing
+//!   `brightness.some`.
+//! - **Playlist**: face = the ENTRIES strip only ({entries, active} — P2c
+//!   item 2); entries from the def's `entries` map rows (authored name,
+//!   `duration` seconds → ms chip, `trigger_ids` non-empty → cue tag),
+//!   `active` from the produced `PlaylistState.active_entry` row. Entry
+//!   thumbs/click actions reuse the already-built child DTOs (visual
+//!   preview snapshot, node-select action). Deriving the face ALSO
+//!   enforces the sibling invariant: the children list keeps ONLY the
+//!   active entry's child (see [`kind_face`]).
+//! - Every other kind returns `None` — the card keeps today's generic
+//!   sections.
+
+use lpc_model::{FixtureDef, PlaylistDef, ShaderDef};
+
+use crate::{
+    ProjectSlotAddress, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody,
+    UiFixtureFace, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
+    UiShaderFace, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint, UiSlotValue, UiSlotValueKind,
+};
+
+/// Build the kind-specific face for a node's card from its projected
+/// sections and already-built child DTOs. `ty` is the raw tree discriminant
+/// (`ShaderDef::KIND`, …).
+///
+/// **The playlist arm filters `children` in place** — this is the "one live
+/// surface" rule (P4): while the strip face is up, the strip represents
+/// every entry, so only the ACTIVE entry's child renders as a sibling card
+/// below the playlist card. The filter rides the same derivation as the
+/// face so the two can never disagree; when the face does not derive
+/// (missing entries row, no `active_entry` status yet, active entry's
+/// child not mounted), `children` is left untouched and the card falls
+/// back to today's full rendering.
+pub(in crate::app::project) fn kind_face(
+    ty: &str,
+    sections: &[UiNodeSection],
+    children: &mut Vec<UiNodeChild>,
+) -> Option<UiNodeFace> {
+    match ty {
+        ShaderDef::KIND => shader_face(sections).map(UiNodeFace::Shader),
+        FixtureDef::KIND => fixture_face(sections).map(UiNodeFace::Fixture),
+        PlaylistDef::KIND => {
+            let (face, active_child) = playlist_face(sections, children)?;
+            let active = children.swap_remove(active_child);
+            children.clear();
+            children.push(active);
+            // NOTE: the surviving child does NOT set `UiNodeChild::active`
+            // — the web maps that flag onto the pane's *selection* look
+            // (`focused || active`, a story-fixture affordance), and the
+            // active entry is not thereby the Studio selection. The strip's
+            // ACTIVE placard is the active-ness presentation.
+            Some(UiNodeFace::Playlist(face))
+        }
+        // Unknown kinds stay on the generic fallback permanently.
+        _ => None,
+    }
+}
+
+/// The shader card's face: visual hero, panel knobs, code drawer. `None`
+/// when the node produces no visual output row (nothing to be a face of).
+fn shader_face(sections: &[UiNodeSection]) -> Option<UiShaderFace> {
+    let preview = product_of_kind(sections, UiProductKind::Visual)?;
+    Some(UiShaderFace {
+        preview,
+        controls: shader_panel_controls(sections),
+        // Decorated by the studio controller's view build (the project
+        // walk stays agent-free, same rule as the sections path).
+        agent: None,
+        code_drawer: glsl_inline_editor(sections),
+    })
+}
+
+/// The fixture card's face: lamp preview + dominant brightness fader. Both
+/// pieces are required — a fixture without a panel-flagged fader row keeps
+/// the generic sections.
+fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
+    let preview = product_of_kind(sections, UiProductKind::Control)?;
+    let brightness = config_rows(sections)
+        .into_iter()
+        .find_map(|slot| panel_control_from_row(slot, panel_widget(slot)?))?;
+    Some(UiFixtureFace {
+        preview,
+        brightness,
+    })
+}
+
+/// First produced product row of the wanted kind; an `Empty`-kind row (the
+/// output exists but nothing resolved yet) is the stable-face fallback.
+fn product_of_kind(sections: &[UiNodeSection], kind: UiProductKind) -> Option<UiProducedProduct> {
+    let products = sections.iter().find_map(|section| match section {
+        UiNodeSection::ProducedProducts(products) => Some(products),
+        _ => None,
+    })?;
+    products
+        .iter()
+        .find(|product| product.kind == kind)
+        .or_else(|| {
+            products
+                .iter()
+                .find(|product| product.kind == UiProductKind::Empty)
+        })
+        .cloned()
+}
+
+/// Flattened top-level config rows (composite rows are NOT descended here;
+/// panel scans that need record fields descend explicitly).
+fn config_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
+    sections
+        .iter()
+        .filter_map(|section| match section {
+            UiNodeSection::ConfigSlots(slots) => Some(slots),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// The first inline GLSL editor among the node's asset rows — the code
+/// drawer reuses it verbatim (it is the SAME editor the sections view
+/// renders, minus the studio-level agent decoration).
+fn glsl_inline_editor(sections: &[UiNodeSection]) -> Option<UiAssetEditor> {
+    fn in_slots(slots: &[UiConfigSlot]) -> Option<UiAssetEditor> {
+        slots.iter().find_map(|slot| match &slot.body {
+            UiConfigSlotBody::Asset(asset) if asset.editor == UiAssetEditorKind::Glsl => {
+                asset.inline_editor.clone()
+            }
+            UiConfigSlotBody::Record(record) => in_slots(&record.fields),
+            _ => None,
+        })
+    }
+    sections.iter().find_map(|section| match section {
+        UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => in_slots(slots),
+        _ => None,
+    })
+}
+
+// -- shader panel controls ---------------------------------------------------
+
+/// Knob controls from the shader's `consumed` map: one per uniform whose
+/// authored `panel` flag is on and whose `default` value is present (the
+/// knob edits `consumed.<name>.default.some` through the standard slot
+/// path). A uniform wired by a binding additionally wears that binding's
+/// aspect, so the knob rolls up violet exactly like the binding row.
+fn shader_panel_controls(sections: &[UiNodeSection]) -> Vec<UiPanelControl> {
+    let rows = config_rows(sections);
+    let Some(UiConfigSlotBody::Record(consumed)) = rows
+        .iter()
+        .find(|row| row.key == "consumed")
+        .map(|row| &row.body)
+    else {
+        return Vec::new();
+    };
+    consumed
+        .fields
+        .iter()
+        .filter_map(|entry| shader_uniform_control(entry, &rows))
+        .collect()
+}
+
+/// One uniform entry (a `ShaderSlotDef` record row) → its knob control.
+fn shader_uniform_control(
+    entry: &UiConfigSlot,
+    top_rows: &[&UiConfigSlot],
+) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    let fields = &record.fields;
+    if !option_bool_field(fields, "panel") {
+        return None;
+    }
+
+    let default_row = uniform_field(fields, "default")?;
+    let control = panel_control_from_row(
+        default_row,
+        UiPanelWidget::Knob {
+            min: option_f32_field(fields, "min").unwrap_or(0.0),
+            max: option_f32_field(fields, "max").unwrap_or(1.0),
+            step: None,
+        },
+    )?;
+
+    let name = map_entry_name(entry);
+    let label = string_field(fields, "label")
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| entry.label.clone());
+    let unit = string_field(fields, "unit")
+        .filter(|unit| !unit.is_empty())
+        .map(|unit| crate::app::project::slot::slot_controller::ui_slot_unit(&unit));
+
+    let mut control = UiPanelControl { label, ..control };
+    if unit.is_some() {
+        control.unit = unit;
+    }
+    if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
+        replace_binding_aspect(&mut control.aspects, binding);
+    }
+    Some(control)
+}
+
+/// A map-entry row's key segment (the trailing bracket key of the row's
+/// key, e.g. `consumed[speed]` → `speed`, `entries[2]` → `2`).
+fn map_entry_name(entry: &UiConfigSlot) -> String {
+    let key = entry.key.as_str();
+    if let Some(stripped) = key.strip_suffix(']')
+        && let Some(open) = stripped.rfind('[')
+    {
+        return stripped[open + 1..].trim_matches('"').to_string();
+    }
+    key.rsplit('.').next().unwrap_or(key).to_string()
+}
+
+/// A bound uniform's Binding aspect, taken from the binding-derived row the
+/// project walk appends for wired runtime slots (`extra_config`): the row
+/// keyed by the bare uniform name whose aspects announce `Bound`.
+fn uniform_binding_aspect(top_rows: &[&UiConfigSlot], name: &str) -> Option<UiSlotAspect> {
+    let row = top_rows.iter().find(|row| row.key == name)?;
+    row.visible_aspects()
+        .into_iter()
+        .find(|aspect| aspect.kind == UiSlotAspectKind::Binding && aspect.affordance.is_some())
+}
+
+/// Swap the control's Binding aspect for the wired one (append when the
+/// default row carried none).
+fn replace_binding_aspect(aspects: &mut Vec<UiSlotAspect>, binding: UiSlotAspect) {
+    match aspects
+        .iter_mut()
+        .find(|aspect| aspect.kind == UiSlotAspectKind::Binding)
+    {
+        Some(slot) => *slot = binding,
+        None => aspects.push(binding),
+    }
+}
+
+fn uniform_field<'a>(fields: &'a [UiConfigSlot], name: &str) -> Option<&'a UiConfigSlot> {
+    let suffix = format!(".{name}");
+    fields.iter().find(|field| field.key.ends_with(&suffix))
+}
+
+/// A present `OptionSlot<ValueSlot<bool>>` field carrying `true`.
+fn option_bool_field(fields: &[UiConfigSlot], name: &str) -> bool {
+    uniform_field(fields, name).is_some_and(|field| {
+        field.optionality.is_some_and(|opt| opt.included)
+            && matches!(
+                &field.body,
+                UiConfigSlotBody::Value(UiSlotValue {
+                    kind: UiSlotValueKind::Bool(true),
+                    ..
+                })
+            )
+    })
+}
+
+/// A present `OptionSlot<ValueSlot<f32>>` field's value.
+fn option_f32_field(fields: &[UiConfigSlot], name: &str) -> Option<f32> {
+    let field = uniform_field(fields, name)?;
+    if !field.optionality.is_some_and(|opt| opt.included) {
+        return None;
+    }
+    match &field.body {
+        UiConfigSlotBody::Value(UiSlotValue {
+            kind: UiSlotValueKind::F32(value),
+            ..
+        }) => Some(*value),
+        _ => None,
+    }
+}
+
+/// A plain string field's value.
+fn string_field(fields: &[UiConfigSlot], name: &str) -> Option<String> {
+    match &uniform_field(fields, name)?.body {
+        UiConfigSlotBody::Value(UiSlotValue {
+            kind: UiSlotValueKind::String(value),
+            ..
+        }) => Some(value.clone()),
+        UiConfigSlotBody::Value(UiSlotValue {
+            kind: UiSlotValueKind::Unset,
+            ..
+        })
+        | UiConfigSlotBody::Empty => None,
+        _ => None,
+    }
+}
+
+// -- playlist face -------------------------------------------------------------
+
+/// The playlist card's face: the entries strip plus the index of the ACTIVE
+/// entry's child in `children`. `None` — full-rendering fallback — when the
+/// def has no entries row, the produced `active_entry` status has not
+/// arrived, the active key names no strip entry, or the active entry's
+/// child is not among the built child DTOs.
+fn playlist_face(
+    sections: &[UiNodeSection],
+    children: &[UiNodeChild],
+) -> Option<(UiPlaylistFace, usize)> {
+    let rows = config_rows(sections);
+    let UiConfigSlotBody::Record(entries_map) = rows
+        .iter()
+        .find(|row| row.key == "entries")
+        .map(|row| &row.body)?
+    else {
+        return None;
+    };
+    // The status seam: `PlaylistState.active_entry` (produced u32 =
+    // entries-map key), projected as a ProducedValues row. Its display is
+    // `u32::to_string`, so the parse is the exact inverse.
+    let active_key = produced_u32(sections, "active_entry")?;
+
+    let entries: Vec<(UiPlaylistEntry, Option<usize>)> = entries_map
+        .fields
+        .iter()
+        .filter_map(|row| playlist_entry(row, children))
+        .collect();
+    let active_child = entries
+        .iter()
+        .find(|(entry, _)| entry.key == active_key)
+        .and_then(|(_, child)| *child)?;
+
+    let face = UiPlaylistFace {
+        entries: entries.into_iter().map(|(entry, _)| entry).collect(),
+        active: Some(active_key),
+    };
+    Some((face, active_child))
+}
+
+/// One `entries[<key>]` record row → its strip entry plus the index of its
+/// mounted child DTO (matched by the loader's naming rule: the authored
+/// entry `name`, else `entry_<key>`). Dangling entries (no mounted child)
+/// still chip into the strip, name-only and inert.
+fn playlist_entry(
+    row: &UiConfigSlot,
+    children: &[UiNodeChild],
+) -> Option<(UiPlaylistEntry, Option<usize>)> {
+    let UiConfigSlotBody::Record(record) = &row.body else {
+        return None;
+    };
+    let key: u32 = map_entry_name(row).parse().ok()?;
+    let fields = &record.fields;
+
+    let authored_name = string_field(fields, "name").filter(|name| !name.is_empty());
+    let child_name = authored_name
+        .clone()
+        .unwrap_or_else(|| format!("entry_{key}"));
+    let child = children
+        .iter()
+        .position(|child| child_tree_name(child) == Some(child_name.as_str()));
+
+    let name = authored_name
+        .or_else(|| child.map(|index| children[index].label.clone()))
+        .unwrap_or_else(|| format!("Entry {key}"));
+    let entry = UiPlaylistEntry {
+        key,
+        name,
+        // Authored seconds (`PositiveF32`) → the strip's m:ss chip unit.
+        duration_ms: option_f32_field(fields, "duration")
+            .map(|seconds| (f64::from(seconds) * 1000.0).round() as u64),
+        cue: option_list_field_is_non_empty(fields, "trigger_ids"),
+        thumb: child.and_then(|index| child_visual_snapshot(&children[index])),
+        action: child.and_then(|index| children[index].action.clone()),
+    };
+    Some((entry, child))
+}
+
+/// A produced-value row's u32 reading, keyed by the produced slot's path.
+fn produced_u32(sections: &[UiNodeSection], key: &str) -> Option<u32> {
+    sections
+        .iter()
+        .find_map(|section| match section {
+            UiNodeSection::ProducedValues(values) => Some(values),
+            _ => None,
+        })?
+        .iter()
+        .find(|value| value.key == key)?
+        .value
+        .parse()
+        .ok()
+}
+
+/// The child's tree segment name, parsed from its address detail
+/// (`/main.show/playlist.playlist/idle.shader` → `idle`).
+fn child_tree_name(child: &UiNodeChild) -> Option<&str> {
+    let segment = child.detail.rsplit('/').next()?;
+    Some(segment.split_once('.').map_or(segment, |(name, _)| name))
+}
+
+/// The child's visual-output preview snapshot, when one has already landed
+/// (previews are reused, never re-plumbed — a child with no cached probe
+/// renders a name-only chip).
+fn child_visual_snapshot(child: &UiNodeChild) -> Option<UiProductPreview> {
+    child.sections.iter().find_map(|section| match section {
+        UiNodeSection::ProducedProducts(products) => products
+            .iter()
+            .find(|product| {
+                product.kind == UiProductKind::Visual
+                    && matches!(product.preview, UiProductPreview::VisualSrgb8 { .. })
+            })
+            .map(|product| product.preview.clone()),
+        _ => None,
+    })
+}
+
+/// A present option list field carrying at least one element.
+fn option_list_field_is_non_empty(fields: &[UiConfigSlot], name: &str) -> bool {
+    uniform_field(fields, name).is_some_and(|field| {
+        field.optionality.is_some_and(|opt| opt.included)
+            && matches!(
+                &field.body,
+                UiConfigSlotBody::Value(UiSlotValue {
+                    kind: UiSlotValueKind::Array(values),
+                    ..
+                }) if !values.is_empty()
+            )
+    })
+}
+
+// -- generic panel controls --------------------------------------------------
+
+/// Project one config row into a panel control wearing `widget`: value,
+/// state, and popover aspects are the row's own; the edit address follows
+/// the slot-row rule (a present option row's value edits target the
+/// interior `.some` slot).
+fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Value(value) = &slot.body else {
+        return None;
+    };
+    Some(UiPanelControl {
+        label: slot.label.clone(),
+        address: row_edit_address(slot),
+        widget,
+        value: value.clone(),
+        unit: value.unit.clone(),
+        state: slot.state.clone(),
+        aspects: slot.visible_aspects(),
+    })
+}
+
+/// The widget a panel-flagged value row renders as, from its editor hint
+/// (Knob → knob, Slider → fader, bool → toggle). `None` (no mappable
+/// widget) keeps the row off the panel.
+fn panel_widget(slot: &UiConfigSlot) -> Option<UiPanelWidget> {
+    let UiConfigSlotBody::Value(value) = &slot.body else {
+        return None;
+    };
+    if !value.panel {
+        return None;
+    }
+    match &value.editor {
+        UiSlotEditorHint::Knob { min, max, step } => Some(UiPanelWidget::Knob {
+            min: *min,
+            max: *max,
+            step: *step,
+        }),
+        UiSlotEditorHint::Slider { min, max, step } => Some(UiPanelWidget::Fader {
+            min: *min,
+            max: *max,
+            step: *step,
+        }),
+        _ => matches!(value.kind, UiSlotValueKind::Bool(_)).then_some(UiPanelWidget::Toggle),
+    }
+}
+
+/// Value-edit target for a row: a present option row's edits go to the
+/// interior `some` slot (the same rule `config_slot_row` applies).
+fn row_edit_address(slot: &UiConfigSlot) -> Option<ProjectSlotAddress> {
+    match &slot.optionality {
+        Some(optionality) if optionality.included => slot
+            .address
+            .as_ref()
+            .and_then(|address| address.child_field("some")),
+        Some(_) => None,
+        None => slot.address.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ControllerId, ProjectEditorOp, ProjectNodeAddress, ProjectSlotRoot, UiAction,
+        UiBindingEndpoint, UiProducedValue, UiSlotFieldState, UiSlotOptionality, UiSlotSourceState,
+    };
+    use lpc_model::SlotPath;
+
+    #[test]
+    fn shader_face_builds_knobs_from_panel_flagged_uniforms() {
+        let sections = shader_sections();
+
+        let face = kind_face("shader", &sections, &mut Vec::new()).expect("shader face");
+        let UiNodeFace::Shader(face) = face else {
+            panic!("expected a shader face");
+        };
+
+        assert_eq!(face.preview.kind, UiProductKind::Visual);
+        assert_eq!(face.controls.len(), 1, "only the panel-flagged uniform");
+        let control = &face.controls[0];
+        assert_eq!(control.label, "Speed");
+        assert_eq!(
+            control.widget,
+            UiPanelWidget::Knob {
+                min: 0.0,
+                max: 4.0,
+                step: None
+            }
+        );
+        assert_eq!(control.value.kind, UiSlotValueKind::F32(2.0));
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("knob edits are addressed")
+                .path
+                .to_string(),
+            "consumed[speed].default.some",
+            "knob edits the uniform default's interior slot"
+        );
+        assert!(face.agent.is_none(), "agent decoration is studio-level");
+    }
+
+    #[test]
+    fn bound_uniform_wears_the_binding_rows_violet_aspect() {
+        let mut sections = shader_sections();
+        // The binding-derived row the project walk appends for a wired
+        // uniform (key = bare uniform name, source = Bound).
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1] {
+            rows.push(
+                UiConfigSlot::empty("speed", "Speed")
+                    .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:time"))),
+            );
+        }
+
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &sections, &mut Vec::new()) else {
+            panic!("expected a shader face");
+        };
+        assert!(
+            face.controls[0].bound(),
+            "the knob rolls up the binding row's Bound affordance"
+        );
+    }
+
+    #[test]
+    fn fixture_face_projects_the_panel_fader_at_the_interior_address() {
+        let sections = fixture_sections();
+
+        let Some(UiNodeFace::Fixture(face)) = kind_face("fixture", &sections, &mut Vec::new())
+        else {
+            panic!("expected a fixture face");
+        };
+
+        assert_eq!(face.preview.kind, UiProductKind::Control);
+        assert_eq!(
+            face.brightness.widget,
+            UiPanelWidget::Fader {
+                min: 0.0,
+                max: 255.0,
+                step: Some(1.0)
+            }
+        );
+        assert_eq!(
+            face.brightness
+                .address
+                .as_ref()
+                .expect("fader edits are addressed")
+                .path
+                .to_string(),
+            "brightness.some"
+        );
+        assert!(
+            face.brightness
+                .aspects
+                .iter()
+                .any(|aspect| aspect.kind == UiSlotAspectKind::Optionality),
+            "the fader's popover keeps the option row's aspects"
+        );
+    }
+
+    #[test]
+    fn other_kinds_and_faceless_sections_stay_generic() {
+        assert_eq!(
+            kind_face("clock", &shader_sections(), &mut Vec::new()),
+            None
+        );
+        assert_eq!(
+            kind_face("playlist", &shader_sections(), &mut Vec::new()),
+            None
+        );
+        // A shader with no produced visual row keeps the sections view.
+        let no_products = vec![UiNodeSection::ConfigSlots(Vec::new())];
+        assert_eq!(kind_face("shader", &no_products, &mut Vec::new()), None);
+        // A fixture whose rows carry no panel flag keeps the sections view.
+        let unflagged = vec![
+            UiNodeSection::ProducedProducts(vec![UiProducedProduct::control("Output")]),
+            UiNodeSection::ConfigSlots(vec![UiConfigSlot::value(
+                "brightness",
+                "Brightness",
+                UiSlotValue::u32(64),
+            )]),
+        ];
+        assert_eq!(kind_face("fixture", &unflagged, &mut Vec::new()), None);
+    }
+
+    #[test]
+    fn playlist_face_derives_the_strip_and_keeps_only_the_active_child() {
+        let sections = playlist_sections(Some(1));
+        let mut children = playlist_children();
+
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        else {
+            panic!("expected a playlist face");
+        };
+
+        assert_eq!(face.active, Some(1), "ACTIVE follows the produced status");
+        assert_eq!(face.entries.len(), 2);
+        let idle = &face.entries[0];
+        assert_eq!((idle.key, idle.name.as_str()), (1, "idle"));
+        assert_eq!(idle.duration_ms, None);
+        assert!(!idle.cue);
+        let cued = &face.entries[1];
+        assert_eq!((cued.key, cued.name.as_str()), (2, "active"));
+        assert_eq!(cued.duration_ms, Some(4000), "authored seconds → ms");
+        assert!(cued.cue, "non-empty trigger_ids reads as a cue entry");
+        assert!(
+            cued.thumb.is_some(),
+            "the non-active entry reuses its child's cached snapshot"
+        );
+        assert!(
+            cued.action.is_some(),
+            "strip click reuses the child's node-select action"
+        );
+
+        // The one-live-surface rule: only the ACTIVE entry's child remains.
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].label, "Idle");
+        assert!(
+            !children[0].active,
+            "the child card must NOT wear the selection look (the web maps \
+             `active` onto pane focus); the strip placard presents active-ness"
+        );
+    }
+
+    #[test]
+    fn playlist_without_active_status_keeps_all_children_and_no_face() {
+        let sections = playlist_sections(None);
+        let mut children = playlist_children();
+
+        assert_eq!(kind_face("playlist", &sections, &mut children), None);
+        assert_eq!(children.len(), 2, "fallback renders every child as today");
+    }
+
+    #[test]
+    fn playlist_whose_active_entry_has_no_mounted_child_falls_back() {
+        // Status names entry 7: not in the strip, no mounted child.
+        let sections = playlist_sections(Some(7));
+        let mut children = playlist_children();
+
+        assert_eq!(kind_face("playlist", &sections, &mut children), None);
+        assert_eq!(children.len(), 2);
+    }
+
+    #[test]
+    fn unnamed_playlist_entries_fall_back_to_the_loader_naming_rule() {
+        // Entry 3 has no authored name; its child mounts as `entry_3`.
+        let mut sections = playlist_sections(Some(1));
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[2]
+            && let UiConfigSlotBody::Record(entries) = &mut rows[0].body
+        {
+            entries.fields.push(UiConfigSlot::record(
+                "entries[3]",
+                "3",
+                vec![UiConfigSlot::value(
+                    "entries[3].fade_after",
+                    "Fade after",
+                    UiSlotValue::f32(0.5),
+                )],
+            ));
+        }
+        let mut children = playlist_children();
+        children.push(child("entry_3", "Entry 3"));
+
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        else {
+            panic!("expected a playlist face");
+        };
+        let entry = face.entries.iter().find(|entry| entry.key == 3).unwrap();
+        assert_eq!(entry.name, "Entry 3", "falls back to the child's label");
+        assert!(entry.action.is_some(), "matched via the entry_<key> rule");
+    }
+
+    // -- fixtures ------------------------------------------------------------
+
+    fn address(path: &str) -> ProjectSlotAddress {
+        ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.project/node.shader").expect("valid address"),
+            ProjectSlotRoot::Def,
+            SlotPath::parse(path).expect("valid path"),
+        )
+    }
+
+    fn option_f32(key: &str, label: &str, value: f32) -> UiConfigSlot {
+        UiConfigSlot::value(key, label, UiSlotValue::f32(value))
+            .with_address(address(key))
+            .with_optionality(UiSlotOptionality::included(true))
+    }
+
+    fn shader_sections() -> Vec<UiNodeSection> {
+        let uniform = |name: &str, panel: bool| {
+            let prefix = format!("consumed[{name}]");
+            let mut fields = vec![
+                UiConfigSlot::value(
+                    format!("{prefix}.kind"),
+                    "Kind",
+                    UiSlotValue::string("value"),
+                ),
+                option_f32(&format!("{prefix}.default"), "Default", 2.0),
+                option_f32(&format!("{prefix}.min"), "Min", 0.0)
+                    .with_state(UiSlotFieldState::editable()),
+                option_f32(&format!("{prefix}.max"), "Max", 4.0),
+                UiConfigSlot::value(
+                    format!("{prefix}.label"),
+                    "Label",
+                    UiSlotValue::string("Speed"),
+                ),
+            ];
+            if panel {
+                fields.push(
+                    UiConfigSlot::value(
+                        format!("{prefix}.panel"),
+                        "Panel",
+                        UiSlotValue::bool(true),
+                    )
+                    .with_optionality(UiSlotOptionality::included(true)),
+                );
+            }
+            UiConfigSlot::record(prefix.clone(), name, fields).with_address(address(&prefix))
+        };
+
+        vec![
+            UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
+            UiNodeSection::ConfigSlots(vec![UiConfigSlot::record(
+                "consumed",
+                "Consumed",
+                vec![uniform("speed", true), uniform("time", false)],
+            )]),
+        ]
+    }
+
+    /// Playlist sections: produced visual output, the `active_entry` status
+    /// row (when `active` is given), and the `entries` map (1 = "idle",
+    /// name-only; 2 = "active", 4 s duration + one trigger id).
+    fn playlist_sections(active: Option<u32>) -> Vec<UiNodeSection> {
+        let entry_1 = UiConfigSlot::record(
+            "entries[1]",
+            "1",
+            vec![UiConfigSlot::value(
+                "entries[1].name",
+                "Name",
+                UiSlotValue::string("idle"),
+            )],
+        );
+        let entry_2 = UiConfigSlot::record(
+            "entries[2]",
+            "2",
+            vec![
+                UiConfigSlot::value("entries[2].name", "Name", UiSlotValue::string("active")),
+                option_f32("entries[2].duration", "Duration", 4.0),
+                UiConfigSlot::value(
+                    "entries[2].trigger_ids",
+                    "Trigger ids",
+                    UiSlotValue::array(vec![UiSlotValue::u32(1)]),
+                )
+                .with_optionality(UiSlotOptionality::included(true)),
+            ],
+        );
+
+        let mut sections = vec![UiNodeSection::ProducedProducts(vec![
+            UiProducedProduct::visual("Output"),
+        ])];
+        if let Some(active) = active {
+            sections.push(UiNodeSection::ProducedValues(vec![
+                UiProducedValue::new("Active entry", active.to_string()).with_key("active_entry"),
+            ]));
+        }
+        sections.push(UiNodeSection::ConfigSlots(vec![UiConfigSlot::record(
+            "entries",
+            "Entries",
+            vec![entry_1, entry_2],
+        )]));
+        sections
+    }
+
+    /// Children as the loader mounts them: `idle` (no cached preview) and
+    /// `active` (with a cached visual snapshot), both with select actions.
+    fn playlist_children() -> Vec<UiNodeChild> {
+        let mut active = child("active", "Active");
+        active.sections = vec![UiNodeSection::ProducedProducts(vec![
+            UiProducedProduct::visual("Output").with_preview(UiProductPreview::VisualSrgb8 {
+                width: 2,
+                height: 2,
+                revision: 1,
+                bytes: vec![0u8; 12].into(),
+            }),
+        ])];
+        vec![child("idle", "Idle"), active]
+    }
+
+    fn child(name: &str, label: &str) -> UiNodeChild {
+        let mut child = UiNodeChild::new(
+            label,
+            "Shader",
+            format!("/main.project/playlist.playlist/{name}.shader"),
+        );
+        child.action = Some(
+            UiAction::from_op(ControllerId::new("test.project"), ProjectEditorOp::Focus)
+                .with_label(format!("Focus {label}")),
+        );
+        child
+    }
+
+    fn fixture_sections() -> Vec<UiNodeSection> {
+        let brightness_value =
+            UiSlotValue::u32(64)
+                .with_panel(true)
+                .with_editor(UiSlotEditorHint::Slider {
+                    min: 0.0,
+                    max: 255.0,
+                    step: Some(1.0),
+                });
+        vec![
+            UiNodeSection::ProducedProducts(vec![UiProducedProduct::control("Output")]),
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value("brightness", "Brightness", brightness_value)
+                    .with_address(address("brightness"))
+                    .with_optionality(UiSlotOptionality::included(true)),
+            ]),
+        ]
+    }
+}

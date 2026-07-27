@@ -245,6 +245,8 @@ mod tests {
                 mapping: crate::OptionSlot::none(),
                 label: crate::ValueSlot::default(),
                 description: crate::ValueSlot::default(),
+                panel: crate::OptionSlot::none(),
+                unit: crate::OptionSlot::none(),
             },
         );
 

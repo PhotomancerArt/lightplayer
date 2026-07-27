@@ -105,7 +105,7 @@ pub use node::{
     RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ArtifactPathResolutionError, ButtonDef, ButtonDefView, ButtonState,
+    AddSubMode, ArtifactPathResolutionError, Brightness, ButtonDef, ButtonDefView, ButtonState,
     ButtonStateView, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder,
     ComputeShaderDef, ComputeShaderDefView, ControlRadioDef, ControlRadioDefView,
     ControlRadioState, ControlRadioStateView, DivMode, FixtureDef, FixtureDefView,

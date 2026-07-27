@@ -1,6 +1,8 @@
 //! Complete node pane data.
 
-use crate::{UiAction, UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeTabBody, UiPaneAction};
+use crate::{
+    UiAction, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeTab, UiNodeTabBody, UiPaneAction,
+};
 
 /// The full data model for a Studio node pane.
 #[derive(Clone, Debug, PartialEq)]
@@ -13,6 +15,9 @@ pub struct UiNodeView {
     /// controller-produced, currently the node-subtree batch revert while
     /// the header's dirty summary announces pending edits.
     pub header_actions: Vec<UiPaneAction>,
+    /// Kind-specific permanent face for this node's card. `None` (any kind
+    /// without a hand-built face) renders the generic tab/section fallback.
+    pub face: Option<UiNodeFace>,
     /// Tabs rendered inside the node pane.
     pub tabs: Vec<UiNodeTab>,
     /// Child nodes extracted from the config slot tree.
@@ -35,6 +40,7 @@ impl UiNodeView {
             node_id,
             header,
             header_actions: Vec::new(),
+            face: None,
             tabs,
             children: Vec::new(),
             focused: false,

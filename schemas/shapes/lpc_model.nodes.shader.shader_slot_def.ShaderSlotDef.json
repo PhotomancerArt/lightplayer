@@ -155,6 +155,42 @@
             }
           }
         }
+      },
+      {
+        "name": "panel",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1196386242,
+                  "meta": {},
+                  "ty": "bool"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "unit",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2612013983,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
       }
     ],
     "meta": {}
