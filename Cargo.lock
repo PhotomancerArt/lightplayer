@@ -5533,6 +5533,7 @@ name = "lpa-studio-web"
 version = "40.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "dioxus",
  "dioxus-icons",
  "futures-util",
@@ -5553,6 +5554,7 @@ dependencies = [
  "pulldown-cmark",
  "serde",
  "serde_json",
+ "sha2",
  "syn 2.0.117",
  "wasm-bindgen",
  "wasm-bindgen-futures",
