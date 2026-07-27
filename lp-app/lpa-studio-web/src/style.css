@@ -1122,12 +1122,16 @@ label:has(> input:not(:disabled)) {
     margin-inline: auto;
 }
 
-.ux-produced-product-pixel-grid {
-    display: grid;
+.ux-produced-product-pixel-canvas {
+    display: block;
     position: absolute;
     inset: 0;
-    min-width: 0;
+    width: 100%;
+    height: 100%;
     background: var(--studio-color-terminal);
+    /* Probe frames are low-resolution by design; keep the crisp pixel look
+       the old per-pixel grid had instead of bilinear smearing. */
+    image-rendering: pixelated;
 }
 
 .ux-produced-product-control-layout {

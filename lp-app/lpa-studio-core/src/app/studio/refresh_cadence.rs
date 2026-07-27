@@ -12,8 +12,18 @@
 //! published delay is the minimum over sessions
 //! (`StudioController::next_refresh_interval`).
 //!
+//! **Completion-based pacing (probe-performance plan):** a cadence value is
+//! the minimum GAP between one passive pull *completing* and the next one
+//! starting — not a fixed period. The lens session stamps each pull's
+//! completion time; the published delay counts down from that stamp, and an
+//! early tick (the UI timer racing a slow pull) bounces off the due gate in
+//! `refresh_loaded_project_tick_gated` as `ProjectRefreshOutcome::NotDue`
+//! without touching the wire. A pull that takes longer than the gap
+//! therefore pushes the next pull out instead of running back-to-back with
+//! zero idle.
+//!
 //! Per M7 Q3 the default is a single uniform cadence; the browser simulator
-//! keeps a faster interval only because it self-ticks and the UI re-reads
+//! keeps a faster gap only because it self-ticks and the UI re-reads
 //! previews at that rate (see the simulator-clock ADR), while a real device
 //! polls calmly.
 
@@ -21,14 +31,25 @@ use core::time::Duration;
 
 use crate::RuntimeKind;
 
-/// Fast interval for the self-ticking browser simulator: the UI re-reads preview
-/// state at ~30 Hz so self-ticked previews stay visibly fresh. Retired web
-/// constant `SIMULATOR_PROJECT_REFRESH_INTERVAL_MS`.
+/// Fast completion-gap for the self-ticking browser simulator: the UI re-reads
+/// preview state at up to ~30 Hz so self-ticked previews stay visibly fresh.
+/// Retired web constant `SIMULATOR_PROJECT_REFRESH_INTERVAL_MS`.
 pub const SIMULATOR_REFRESH_INTERVAL: Duration = Duration::from_millis(33);
 
-/// Calm interval for a real connected device (and the default when no device is
-/// connected). Retired web constant `DEVICE_PROJECT_REFRESH_INTERVAL_MS`.
-pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(750);
+/// Completion-gap for a real connected device (and the default when no
+/// device is connected). Under completion-based pacing this is idle time
+/// BETWEEN pulls, not a period — a slow serial pull can no longer stack
+/// behind the timer — so it is far tighter than the retired 750 ms fixed
+/// interval. Tune at the hardware feel-walk if 150 ms proves too chatty
+/// for a busy device. Retired web constant
+/// `DEVICE_PROJECT_REFRESH_INTERVAL_MS`.
+pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(150);
+
+/// Slack applied when deciding whether a passive pull is due: the UI timer
+/// truncates the published delay to whole milliseconds, so a tick can fire
+/// a hair "early". Anything within this window counts as due instead of
+/// bouncing off the gate and re-arming a sub-millisecond timer.
+pub const REFRESH_DUE_SLACK: Duration = Duration::from_millis(2);
 
 /// Slow status-heartbeat interval for DEVICE sessions the editor lens is not
 /// on (runtime-pool P2): each heartbeat drains the session's buffered wire
