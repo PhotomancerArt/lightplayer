@@ -21,8 +21,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, NodeCreateOp, ProjectEditorView, UiAction, UiAffordance, UiConfigSlot, UiMetric,
-    UiPendingEdit, UiSlotRecord, UiStatus,
+    DirtySummary, NodeCreateOp, ProjectEditorView, ProjectSyncPhase, UiAction, UiAffordance,
+    UiConfigSlot, UiMetric, UiPendingEdit, UiSlotRecord, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
@@ -63,6 +63,8 @@ pub fn ProjectPane(
     let sync_issue = view.sync.issue.clone();
     let stats = view.stats.clone();
     let roots = view.tree.roots.clone();
+    let syncing = !matches!(view.sync.phase, ProjectSyncPhase::Ready);
+    let tree_add_menu = view.add_node_menu.clone();
     // The always-present "add" header action (authoring P4) dispatches a
     // default create; this renderer intercepts it and opens the kind picker
     // from `add_node_menu` instead. The remaining actions (Save / Revert)
@@ -121,7 +123,13 @@ pub fn ProjectPane(
                             }
                         }
                     }
-                    ProjectNodeTree { roots, running, on_action }
+                    ProjectNodeTree {
+                        roots,
+                        running,
+                        add_node_menu: tree_add_menu,
+                        syncing,
+                        on_action,
+                    }
                 }
             },
         }

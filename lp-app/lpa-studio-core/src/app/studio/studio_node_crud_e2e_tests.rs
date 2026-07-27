@@ -225,6 +225,52 @@ fn create_into_playlist_adds_entry_and_child() {
         "the entry's def stages as a deleted file row: {:?}",
         editor.pending_edits
     );
+
+    // Adding again BEFORE saving must work: the base file still holds the
+    // staged-removed `entries[1]`, so the next create skips to `entries[2]`
+    // (a create at 1 would reject as TargetOccupied — review-found bug).
+    let playlist_card = project_editor(&snapshot)
+        .nodes
+        .iter()
+        .find(|node| node.node_id == playlist_id)
+        .expect("playlist card still present");
+    let entry = playlist_card
+        .add_node_menu
+        .as_ref()
+        .expect("playlist still offers the picker")
+        .entries
+        .iter()
+        .find(|entry| entry.kind == NodeKind::Clock)
+        .expect("clock entry offered");
+    handle.tx.send(StudioCommand::Action(entry.action.clone()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("re-add emits a snapshot");
+    let playlist_def = read_file(&server, "playlist.json");
+    assert!(
+        playlist_def.contains("\"2\"") && playlist_def.contains("clock_2.json"),
+        "the re-added entry landed in the base def at key 2: {playlist_def}"
+    );
+    assert!(
+        project_editor(&snapshot)
+            .nodes
+            .iter()
+            .flat_map(|node| node.children.iter())
+            .any(|child| child.detail.contains("entry_2")),
+        "the re-added entry mounted as entry_2 (staged entries[1] skipped): {:?}",
+        project_editor(&snapshot)
+            .nodes
+            .iter()
+            .flat_map(|node| node.children.iter())
+            .map(|child| child.detail.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        project_editor(&snapshot)
+            .pending_edits
+            .iter()
+            .any(|edit| edit.kind == UiPendingEditKind::NodeRemoved),
+        "the staged removal of entries[1] survives the re-add"
+    );
 }
 
 #[test]

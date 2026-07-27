@@ -695,6 +695,9 @@
   .tw\:grid-cols-4 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+  .tw\:grid-cols-\[18px_minmax\(0\,1fr\)\] {
+    grid-template-columns: 18px minmax(0,1fr);
+  }
   .tw\:grid-cols-\[18px_minmax\(0\,1fr\)_auto\] {
     grid-template-columns: 18px minmax(0,1fr) auto;
   }

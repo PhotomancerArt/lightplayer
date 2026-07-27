@@ -1018,6 +1018,31 @@ impl ProjectController {
             .unwrap_or(SlotPolicy::default().persistence)
     }
 
+    /// Entry keys of `artifact`'s `entries` map that carry pending overlay
+    /// slot edits (typically a staged entry removal). The base file still
+    /// holds these entries until Save, so the create path must treat them as
+    /// occupied even though they left the effective tree.
+    fn overlay_entry_keys(&self, artifact: &ArtifactLocation) -> BTreeSet<u32> {
+        let Some(sync) = &self.sync else {
+            return BTreeSet::new();
+        };
+        sync.overlay_slot_edits()
+            .filter(|(edit_artifact, _, _)| *edit_artifact == artifact)
+            .filter_map(|(_, path, _)| match path.segments() {
+                [SlotPathSegment::Field(field), SlotPathSegment::Key(key), ..]
+                    if field.as_str() == "entries" =>
+                {
+                    match key {
+                        SlotMapKey::U32(key) => Some(*key),
+                        SlotMapKey::I32(key) => u32::try_from(*key).ok(),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Reverse index from def artifact to the node addresses currently using
     /// it, built from the synced controller tree plus the connect-time
     /// def-artifact map.
@@ -2446,8 +2471,12 @@ impl ProjectController {
                     ))));
                 };
                 // Next free entries key by the map's suggested-key rule
-                // (first free index, gap-filling).
-                let key = playlist_next_entry_key(playlist);
+                // (first free index, gap-filling). Keys with staged overlay
+                // edits (a pending entry removal) count as used: the base
+                // file still holds them until Save, so the server rejects a
+                // create there as TargetOccupied.
+                let staged = self.overlay_entry_keys(artifact);
+                let key = playlist_next_entry_key(playlist, &staged);
                 let path = SlotPath::parse(&format!("entries[{key}].node"))
                     .expect("entries[<u32>].node is a valid slot path");
                 (
@@ -3638,13 +3667,16 @@ fn collect_subtree_nodes<'a>(node: &'a NodeController, out: &mut Vec<&'a NodeCon
 }
 
 /// The next free key of a playlist's `entries` map: the first free index
-/// counting up from **1** over the effective entry keys. Playlist entries
-/// are 1-based by convention (`PlaylistDef.idle_entry` defaults to 1, and
-/// the shipped examples key from 1), so the first added entry lands on the
-/// bare default's idle key and starts playing immediately instead of
-/// dangling beside it.
-fn playlist_next_entry_key(playlist: &NodeController) -> u32 {
-    let used: BTreeSet<u32> = playlist_entry_keys(playlist).collect();
+/// counting up from **1** over the effective entry keys plus `staged`
+/// (keys the base file still holds behind pending overlay edits — see
+/// `overlay_entry_keys`). Playlist entries are 1-based by convention
+/// (`PlaylistDef.idle_entry` defaults to 1, and the shipped examples key
+/// from 1), so the first added entry lands on the bare default's idle key
+/// and starts playing immediately instead of dangling beside it.
+fn playlist_next_entry_key(playlist: &NodeController, staged: &BTreeSet<u32>) -> u32 {
+    let used: BTreeSet<u32> = playlist_entry_keys(playlist)
+        .chain(staged.iter().copied())
+        .collect();
     (1..)
         .find(|candidate| !used.contains(candidate))
         .expect("a finite key set always leaves a free index")
