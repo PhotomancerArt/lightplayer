@@ -8,11 +8,14 @@
 //! rides the tabbed stories (`ShaderEditorTabs` over the same fixtures),
 //! including the dirty dot on the Code tab.
 
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    AgentProvider, ArtifactLocation, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor as UiAssetEditorData,
-    UiAssetEditorKind, UiShaderUniform, provider_guidance,
+    AgentProvider, ArtifactLocation, UiAgentAvailability, UiAgentHistoryEntry, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent,
+    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiProductPreview, UiShaderUniform,
+    provider_guidance,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -33,6 +36,8 @@ fn agent_fixture(status: UiAgentStatus, turns: Vec<UiAgentTurn>) -> UiAgentView 
         },
         // 2841 in × $3 + 512 out × $15 per MTok (claude-sonnet-5 rates).
         estimated_cost: Some("~$0.0162".to_string()),
+        history: Vec::new(),
+        history_dropped: 0,
     }
 }
 
@@ -203,6 +208,96 @@ fn tool_running_awaiting_engine() -> Element {
     ];
     rsx! {
         ChatStoryCard { view: agent_fixture(UiAgentStatus::RunningTool, turns) }
+    }
+}
+
+/// A deterministic 32×32 thumb: diagonal color bands, hue seeded per edit
+/// so the filmstrip's chips read as distinct looks.
+fn history_thumb(seed: u8) -> UiProductPreview {
+    let (width, height) = (32u32, 32u32);
+    let mut bytes = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let band = ((x + y) / 8) as u8;
+            bytes.push(
+                40u8.wrapping_add(seed.wrapping_mul(70))
+                    .wrapping_add(band * 18),
+            );
+            bytes.push(
+                180u8
+                    .wrapping_sub(seed.wrapping_mul(50))
+                    .wrapping_sub(band * 12),
+            );
+            bytes.push(90u8.wrapping_add(band * 24));
+        }
+    }
+    UiProductPreview::VisualSrgb8 {
+        width,
+        height,
+        revision: i64::from(seed),
+        bytes: Rc::from(bytes.as_slice()),
+    }
+}
+
+/// Three staged edits: two verified ok with thumbs, the middle one an
+/// engine error (no thumb, error dot).
+fn history_entries() -> Vec<UiAgentHistoryEntry> {
+    vec![
+        UiAgentHistoryEntry {
+            turn: 1,
+            note: Some("slow the rings down".to_string()),
+            thumb: Some(history_thumb(0)),
+            engine_ok: Some(true),
+        },
+        UiAgentHistoryEntry {
+            turn: 2,
+            note: Some("add a speed uniform".to_string()),
+            thumb: None,
+            engine_ok: Some(false),
+        },
+        UiAgentHistoryEntry {
+            turn: 3,
+            note: Some("warm the palette".to_string()),
+            thumb: Some(history_thumb(2)),
+            engine_ok: Some(true),
+        },
+    ]
+}
+
+#[story(
+    description = "Edit history filmstrip above the composer: thumb chips for verified edits (good dot), a numbered placeholder chip for the engine-errored edit (error dot), and the dropped-count label; each chip is a one-click revert."
+)]
+fn history_with_thumbs() -> Element {
+    let mut view = agent_fixture(UiAgentStatus::Idle, idle_transcript());
+    view.history = history_entries();
+    view.history_dropped = 2;
+    rsx! {
+        ChatStoryCard { view }
+    }
+}
+
+#[story(
+    description = "After a revert: the transcript carries the 'Reverted to turn 1' notice while the filmstrip keeps every record for further hops."
+)]
+fn history_reverted() -> Element {
+    let mut turns = idle_transcript();
+    turns.push(UiAgentTurn::Notice {
+        text: "Reverted to turn 1 — that edit's source is staged again (Save keeps it)."
+            .to_string(),
+    });
+    let mut view = agent_fixture(UiAgentStatus::Idle, turns);
+    view.history = history_entries();
+    rsx! {
+        ChatStoryCard { view }
+    }
+}
+
+#[story(
+    description = "No staged edits yet: the history strip stays absent entirely — the composer sits directly under the transcript."
+)]
+fn history_empty() -> Element {
+    rsx! {
+        ChatStoryCard { view: agent_fixture(UiAgentStatus::Idle, idle_transcript()) }
     }
 }
 

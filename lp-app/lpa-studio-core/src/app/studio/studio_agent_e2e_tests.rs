@@ -154,6 +154,130 @@ fn agent_turn_stages_an_overlay_edit_end_to_end() {
     );
 }
 
+/// A second staged edit for the history/revert flow.
+const BLUE_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.0, 0.0, 1.0, 1.0);\n}\n";
+
+/// P4: two staged edits build the session history; reverting to the first
+/// restages its source through the real overlay path — editor content and
+/// dirty state show v1 again, the transcript says so, and the history
+/// records themselves stay intact.
+#[test]
+fn history_revert_restages_an_earlier_edit_end_to_end() {
+    let stage = |id: &str, source: &str, note: &str| {
+        vec![
+            TurnEvent::ToolUseStart {
+                id: id.into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: id.into(),
+                json_fragment: json!({ "source": source, "note": note }).to_string(),
+            },
+            turn_done(StopReason::ToolUse, 10, 10),
+        ]
+    };
+    let scripts = vec![
+        vec![
+            stage("tu_1", GREEN_SHADER, "go green"),
+            stage("tu_2", BLUE_SHADER, "try blue"),
+            vec![
+                TurnEvent::TextDelta("Blue it is.".into()),
+                turn_done(StopReason::EndTurn, 10, 10),
+            ],
+        ],
+        // Run 2, after the revert: a text-only turn whose system prompt
+        // must carry the reverted source.
+        vec![vec![
+            TurnEvent::TextDelta("Yes — green.".into()),
+            turn_done(StopReason::EndTurn, 10, 10),
+        ]],
+    ];
+    let harness = AgentHarness::new(scripts);
+    let (mut actor, handle) = StudioActor::new(harness.controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let agent = agent_view(&snapshot);
+
+    handle
+        .tx
+        .send(StudioCommand::Action(agent.send_action("green then blue")));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+    let run = harness.tasks.borrow_mut().remove(0);
+    drive(run);
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("agent batch emits a snapshot");
+
+    // Both staged calls became history entries, in order; the editor holds
+    // the LAST staged source.
+    let agent = agent_view(&snapshot);
+    assert_eq!(agent.history.len(), 2, "history: {:?}", agent.history);
+    assert_eq!(agent.history[0].turn, 1);
+    assert_eq!(agent.history[0].note.as_deref(), Some("go green"));
+    assert_eq!(agent.history[1].turn, 2);
+    assert_eq!(agent.history[1].note.as_deref(), Some("try blue"));
+    assert_eq!(agent.history_dropped, 0);
+    let editor = find_asset_editor(&snapshot);
+    assert_eq!(
+        editor.content.as_ref().expect("content").text(),
+        Some(BLUE_SHADER)
+    );
+
+    // Revert to turn 1 through the DTO's action builder (the filmstrip's
+    // click): the recorded v1 source restages through ApplyBody.
+    handle
+        .tx
+        .send(StudioCommand::Action(agent.revert_action(1)));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("revert emits a snapshot");
+
+    let editor = find_asset_editor(&snapshot);
+    let content = editor.content.as_ref().expect("resolved content");
+    assert!(content.dirty, "revert stages, never saves");
+    assert_eq!(content.text(), Some(GREEN_SHADER));
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+
+    // The transcript tells the user (and the next run's context reflects
+    // the overlay anyway); history keeps both records for further hops.
+    let agent = agent_view(&snapshot);
+    assert!(
+        matches!(
+            agent.turns.last(),
+            Some(UiAgentTurn::Notice { text }) if text.contains("Reverted to turn 1")
+        ),
+        "turns: {:?}",
+        agent.turns
+    );
+    assert_eq!(agent.history.len(), 2);
+
+    // The NEXT run's current_source reflects the revert (the run-start
+    // refresh reads the overlay): its system prompt carries v1, not v2.
+    handle
+        .tx
+        .send(StudioCommand::Action(agent.send_action("still green?")));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+    let run = harness.tasks.borrow_mut().remove(0);
+    drive(run);
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+    let requests = harness.requests.borrow();
+    assert_eq!(requests.len(), 4);
+    assert!(
+        requests[3].system.contains(GREEN_SHADER),
+        "the follow-up run sees the reverted source"
+    );
+    assert!(
+        !requests[3].system.contains(BLUE_SHADER),
+        "v2 is no longer the working source"
+    );
+}
+
 /// Stages a shader that compiles fine in the probe world but declares a
 /// uniform (`speed`) the node def has no record for — the engine then fails
 /// at RENDER time ("missing uniform field"), the exact class the probe

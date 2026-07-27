@@ -23,10 +23,11 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus::{html::geometry::PixelsVector2D, prelude::dioxus_core::use_after_render};
 use lpa_studio_core::{
-    AgentProviderGuidance, UiAction, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentView,
+    AgentProviderGuidance, UiAction, UiAgentAvailability, UiAgentHistoryEntry, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentView, UiProductPreview,
 };
 
+use crate::app::node::ProductPixelGrid;
 use crate::base::MarkdownText;
 
 /// Scroll slack under which the transcript stays glued to its bottom.
@@ -179,6 +180,13 @@ pub fn AgentChatPane(
                     }
                 }
             }
+            // Edit-history filmstrip (P4): one thumb chip per staged edit,
+            // right above the composer. Clicking restages that edit —
+            // confirm-less, it only stages (Save-gated like any agent
+            // edit); disabled mid-run (a revert would race the agent).
+            if !view.history.is_empty() {
+                HistoryStrip { view: view.clone(), busy, on_action }
+            }
             // Composer.
             div { class: "tw:flex tw:items-end tw:gap-2 tw:border-t tw:border-border-muted tw:bg-card-subtle tw:px-3 tw:py-2",
                 textarea {
@@ -226,6 +234,96 @@ pub fn AgentChatPane(
                         span { title: "estimate based on configured rates", " · {cost}" }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// The staged-edit history filmstrip: horizontally scrollable thumb chips
+/// (oldest first, newest at the end — reading order matches the
+/// transcript), each a one-click revert. A dropped-count label owns the
+/// strip's honesty when the retention cap has trimmed old edits.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn HistoryStrip(
+    view: UiAgentView,
+    busy: bool,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    rsx! {
+        div { class: "tw:flex tw:items-end tw:gap-1.5 tw:overflow-x-auto tw:border-t tw:border-border-muted tw:bg-card-subtle tw:px-3 tw:py-1.5",
+            span { class: "tw:flex-none tw:self-center tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-dim-foreground",
+                "Edits"
+            }
+            if view.history_dropped > 0 {
+                span {
+                    class: "tw:flex-none tw:self-center tw:text-[10px] tw:text-dim-foreground",
+                    title: "Older edits fell off the session's history cap",
+                    "+{view.history_dropped} older"
+                }
+            }
+            for entry in view.history.iter() {
+                HistoryChip {
+                    key: "{entry.turn}",
+                    entry: entry.clone(),
+                    action: view.revert_action(entry.turn),
+                    busy,
+                    on_action,
+                }
+            }
+        }
+    }
+}
+
+/// One history chip: the 32-px preview thumb (or a numbered placeholder
+/// while none landed), the turn number, and the engine-verdict dot.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn HistoryChip(
+    entry: UiAgentHistoryEntry,
+    action: UiAction,
+    busy: bool,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let intent = entry.note.as_deref().unwrap_or("this edit");
+    let title = if busy {
+        format!("Turn {}: {intent} — stop the run to revert", entry.turn)
+    } else {
+        format!(
+            "Revert to turn {}: {intent} (stages the source; Save keeps it)",
+            entry.turn
+        )
+    };
+    rsx! {
+        button {
+            class: history_chip_class(busy),
+            r#type: "button",
+            disabled: busy,
+            title: "{title}",
+            onclick: move |_| {
+                if let Some(handler) = on_action {
+                    handler.call(action.clone());
+                }
+            },
+            div { class: "tw:relative tw:h-8 tw:w-8 tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card",
+                match &entry.thumb {
+                    Some(UiProductPreview::VisualSrgb8 { width, height, bytes, .. }) => rsx! {
+                        ProductPixelGrid {
+                            width: *width,
+                            height: *height,
+                            bytes: bytes.clone(),
+                        }
+                    },
+                    _ => rsx! {
+                        span { class: "tw:absolute tw:inset-0 tw:flex tw:items-center tw:justify-center tw:font-mono tw:text-[11px] tw:text-dim-foreground",
+                            "{entry.turn}"
+                        }
+                    },
+                }
+            }
+            span { class: "tw:flex tw:items-center tw:gap-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
+                span { class: history_dot_class(entry.engine_ok) }
+                "{entry.turn}"
             }
         }
     }
@@ -344,6 +442,29 @@ fn NeedsKeyState(
     }
 }
 
+/// History chip chrome: clickable revert normally, inert while a run is in
+/// flight — constant geometry either way.
+fn history_chip_class(busy: bool) -> String {
+    let state = if busy {
+        "tw:cursor-default tw:opacity-50"
+    } else {
+        "tw:cursor-pointer tw:hover:border-accent-border tw:hover:bg-accent-wash"
+    };
+    format!(
+        "tw:flex tw:flex-none tw:flex-col tw:items-center tw:gap-0.5 tw:rounded-xs tw:border tw:border-transparent tw:bg-transparent tw:p-1 tw:transition tw:duration-300 {state}"
+    )
+}
+
+/// The chip's engine-verdict dot: good/error once resolved, dim while the
+/// verdict is still unknown.
+fn history_dot_class(engine_ok: Option<bool>) -> &'static str {
+    match engine_ok {
+        Some(true) => "tw:h-1 tw:w-1 tw:flex-none tw:rounded-full tw:bg-status-good-foreground",
+        Some(false) => "tw:h-1 tw:w-1 tw:flex-none tw:rounded-full tw:bg-status-error-foreground",
+        None => "tw:h-1 tw:w-1 tw:flex-none tw:rounded-full tw:bg-dim-foreground",
+    }
+}
+
 /// The tool row's status dot: working while running, good (valid compile)
 /// or error once done.
 fn tool_dot_class(row: &UiAgentToolRow) -> &'static str {
@@ -414,5 +535,23 @@ mod tests {
     fn near_bottom_threshold_is_forgiving() {
         assert!(is_near_bottom(952.0, 1400, 400));
         assert!(!is_near_bottom(0.0, 1400, 400));
+    }
+
+    #[test]
+    fn history_dot_tracks_the_engine_verdict() {
+        assert!(history_dot_class(Some(true)).contains("status-good"));
+        assert!(history_dot_class(Some(false)).contains("status-error"));
+        assert!(!history_dot_class(None).contains("status-"));
+    }
+
+    #[test]
+    fn history_chip_keeps_geometry_while_busy() {
+        for busy in [true, false] {
+            let class = history_chip_class(busy);
+            assert!(class.contains("tw:p-1"));
+            assert!(class.contains("tw:flex-col"));
+        }
+        assert!(history_chip_class(true).contains("tw:cursor-default"));
+        assert!(history_chip_class(false).contains("tw:cursor-pointer"));
     }
 }

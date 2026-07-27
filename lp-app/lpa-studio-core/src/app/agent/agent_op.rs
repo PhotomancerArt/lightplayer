@@ -26,6 +26,16 @@ pub enum AgentOp {
     },
     /// Flip the running session's abort flag (the Stop button).
     Stop { artifact: ArtifactLocation },
+    /// Restage the source of one session edit record (the history strip's
+    /// revert): pull the recorded source, dispatch it through the SAME
+    /// `AssetEditOp::ApplyBody` overlay path a staged agent edit rides, and
+    /// mirror it into the session's bridge state so the next run's
+    /// `current_source` agrees. Refused while a run is in flight.
+    RevertToTurn {
+        artifact: ArtifactLocation,
+        /// The edit record's session-scoped ordinal.
+        turn: u32,
+    },
     /// The agent's `upsert_param` write (dispatched by the host bridge, not
     /// the web layer): send ONE `PutSlotEdit` batch on the target node's
     /// def artifact and record the outcome into the session's bridge cell
@@ -49,6 +59,11 @@ impl ControllerOp for AgentOp {
             Self::Stop { .. } => ActionMeta::new(
                 "Stop",
                 "Stop the running agent turn.",
+                ActionPriority::Secondary,
+            ),
+            Self::RevertToTurn { turn, .. } => ActionMeta::new(
+                "Revert",
+                format!("Restage the agent's edit {turn} as the shader source."),
                 ActionPriority::Secondary,
             ),
             Self::UpsertParam { .. } => ActionMeta::new(

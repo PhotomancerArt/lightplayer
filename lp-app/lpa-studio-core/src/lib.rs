@@ -26,10 +26,11 @@ pub use lpc_history::{ContentHash, SyncRelation};
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
 pub use app::agent::{
-    AgentController, AgentCostRates, AgentFeedback, AgentModelsFetchFuture, AgentOp,
-    AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture, AgentTimerFactory,
-    AgentTimerFuture, AgentViewContext, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, instant_agent_timer,
+    AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
+    AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
+    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
+    UiAgentHistoryEntry, UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
+    instant_agent_timer,
 };
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
