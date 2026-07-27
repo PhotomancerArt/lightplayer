@@ -1,6 +1,7 @@
 # Probe performance investigation — notes
 
-Created 2026-07-26. Status: discovery in progress.
+Created 2026-07-26. Status: complete — discovery done 2026-07-26, P1–P6
+implemented 2026-07-27 (see [handoff.md](handoff.md) and `_DONE.md`).
 
 ## Initial understanding (from Yona)
 
@@ -238,4 +239,23 @@ strategy (discussion); multi-node scope on sim; measurement-first vs fix-first.
 
 ## Future work
 
-(none yet)
+Deliberately deferred — no wire/protocol changes were made anywhere on this
+plan. Indexed (where durable) in `docs/adr/README.md`'s open-follow-ups table
+under `2026-07-27-completion-based-refresh-pacing`:
+
+- **Probe revision-gating**: skip unchanged probe bytes on the wire; the
+  display-layout `IfChanged` read is the precedent.
+- **Binary/transferable protocol frames on the sim path**: PreviewHost already
+  has a zero-copy transferable path the probe path does not use.
+- **Firmware transport**: stop-and-wait server sends, the 64-byte inbound read
+  buffer per 1 ms tick, the ~16.7 KiB stack JSON buffer per send (incl. tiny
+  acks).
+- **Display-driven per-surface probe sizing**, capped by the runtime tier
+  (Yona's Q7 answer: tier now, display-driven later once multi-node probing
+  has soaked).
+- **Wiring `ProjectProductSubscriptionIntent` to a user-facing toggle**: the
+  per-node override enum has existed unwired since M2a and remains the durable
+  seam.
+- **Sim "non-collapsed" scope becoming real**: collapse state is view-local
+  today so sim probes all nodes; the ui-state-audit plan moving live collapse
+  state into core makes the refinement effective.

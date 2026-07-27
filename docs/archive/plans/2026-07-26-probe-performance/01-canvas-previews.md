@@ -82,3 +82,18 @@ ADR: none. Review gate: none (sim feel check batched at PR review).
 
 `ProductPixelGrid`/`rgb_pixel_styles` gone; previews render via canvas with
 paints keyed on preview revision; checks green.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-07-27
+Commit: e287c3d5d
+
+- Changed: `ProductPreviewCanvas` + `paint_preview_canvas` in
+  `produced_product_view.rs` (grid + `rgb_pixel_styles` deleted); CSS class
+  renamed to `.ux-produced-product-pixel-canvas` with
+  `image-rendering: pixelated`. Repaints keyed on `(revision, buffer
+  identity)`; `onmounted` paint covers the first frame.
+- Validated: `just check` + `just test` green; story baselines left to CI
+  auto-commit (expected drift).
+- Deviations: none. Details in [handoff.md](handoff.md).

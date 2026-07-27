@@ -2,18 +2,20 @@
 kind: plan
 size: md
 depth: implementation
-status: active
+status: done
 repo: lp2025
 created: 2026-07-26
-adr: expected
+completed: 2026-07-27
+commit: e287c3d5d
+adr: docs/adr/2026-07-27-completion-based-refresh-pacing.md
 ---
 
 # Probe & Studio UI performance
 
-> **Status 2026-07-27:** P1–P5 implemented and committed on
-> `claude/studio-ui-performance-312c9c`; `just check` + `just test` green.
-> P6 (ADR, docs, cleanup sweep, `build-ci`) not started; no PR yet; both
-> Yona feel gates still open. See [handoff.md](handoff.md).
+> **Status 2026-07-27:** P1–P6 complete. P1–P5 in `e287c3d5d`; P6 (ADR,
+> docs, sweep, full `just check build-ci test` green) in the close-out
+> commit on `claude/studio-ui-performance-probe-d6da80`. Both Yona feel
+> gates batched at PR review. See [handoff.md](handoff.md) and `_DONE.md`.
 
 ## Size
 

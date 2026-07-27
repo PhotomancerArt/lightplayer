@@ -104,3 +104,22 @@ and UI feel; compare 16×16 legibility).
 Device gap 150 ms completion-based; device probes 16×16; LUT test proves
 ≤1 LSB error vs powf; multi-frame device reads no longer pay 10 ms/frame;
 checks green.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-07-27
+Commit: e287c3d5d
+
+- Changed: `DEVICE_REFRESH_INTERVAL` 750 ms → 150 ms (gap semantics);
+  `UiProductPreviewFrame::VISUAL_DEVICE` (16×16) pushed through
+  `ProjectSync::set_visual_preview_frame` — no protocol change (request
+  already carries width/height); `srgb8_lut.rs` 4096-entry LUT replaces
+  3072 `libm::powf`/frame; in-stream device receive polls at
+  `WIRE_FRAME_POLL_INTERVAL = 2 ms` only while a response is pending.
+  Firmware untouched.
+- Validated: `srgb8_lut_matches_float_reference_within_one_lsb` (all 65536
+  inputs, ≤1 LSB); ESP32 clippy in `just check` proves `no_std` fit;
+  `just test` green.
+- Deviations: none. Hardware retune of the 150 ms floor is the batched PR
+  gate. Details in [handoff.md](handoff.md).

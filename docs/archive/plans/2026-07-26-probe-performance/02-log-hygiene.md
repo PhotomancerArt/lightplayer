@@ -83,3 +83,18 @@ ADR: none. Review gate: none.
 Idle sim session no longer rebuilds/publishes the full view at tick rate;
 per-tick trace/debug envelopes off by default but re-enableable; console pane
 still shows logs; checks green.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-07-27
+Commit: e287c3d5d
+
+- Changed: `runtime.rs` `log()` gates on `log::max_level()` via
+  `envelope_level_enabled()` (re-enable through the existing wire
+  `SetLogLevel` — no new mechanism); `studio_controller.rs` splits
+  `logs_dirty` from `dirty`, streamed log batches publish on a 0.25 s
+  throttle, structural/action publishes carry pending lines. No line dropped.
+- Validated: test `streamed_logs_publish_on_a_throttle_not_per_batch`;
+  `just check` + `just test` green.
+- Deviations: none. Details in [handoff.md](handoff.md).

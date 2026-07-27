@@ -60,3 +60,27 @@ steps in the PR body).
 
 ADR written; docs updated; sweep clean; `just check build-ci test` green;
 `_DONE.md` + frontmatter flip done by the implement workflow.
+
+## Implementation Result
+
+Status: done
+Completed: 2026-07-27
+Commit: pending (close-out commit on `claude/studio-ui-performance-probe-d6da80`)
+
+- Changed: ADR `docs/adr/2026-07-27-completion-based-refresh-pacing.md`
+  (+ open-follow-ups rows in `docs/adr/README.md`; the long-deferred
+  "event-driven receive" row struck — this plan landed it); sizing & cadence
+  note in `docs/lp-core/probes.md`; `lp-app/lpa-studio-core/README.md`
+  refresh section rewritten for gap semantics + tiered scoping (it still
+  cited the retired `for_flow_state`); `refresh_cadence.rs` docs verified
+  (already the pacing spec); notes.md future-work section filled;
+  Implementation Result sections on P1–P6.
+- Validated: cleanup sweep clean over the full branch diff (no
+  TODO/FIXME/dbg!/println!/console.log/#[allow]/#[ignore]/commented-out
+  code; every file traceable to a phase); `just check build-ci test` green
+  in this worktree (exit 0, no failures; the handoff's first-run
+  `rv32n_imm_range` flake did not recur).
+- Deviations: work continued on branch
+  `claude/studio-ui-performance-probe-d6da80` (fast-forwarded from
+  `claude/studio-ui-performance-312c9c`, which had no PR); story baselines
+  left to CI auto-commit per plan.
