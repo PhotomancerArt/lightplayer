@@ -51,6 +51,7 @@ the lowering was fixed. Ternary conditions and arms also evaluate lazily
 | `brk_*`       | break at depth 1 (then/else guard) and depth 2 (inner loop only, nested guard) per loop kind |
 | `cont_*`      | continue, same enumeration; while/do-while variants exercise the continue-to-condition edge |
 | `brkcont_*`   | break and continue mixed across nesting levels / in one body      |
+| `brknest_*`   | nested loop pairs, all outer-kind x inner-kind combinations: inner body with both continue and break, outer break / outer continue placed after the inner loop, plus depth-3 chains (`brknest_triple`) |
 | `ret_*`       | early returns from nested ifs, from each loop kind, from inner loops of nested pairs, from loops inside branches |
 | `sc_*`        | short-circuit `&&`/`||` whose right operand calls a global-mutating function: bare ops, precedence chains, nested groups, and as if/while/ternary conditions |
 | `terncond_*`  | ternaries nested in branch conditions: if conditions, loop bounds, nested ternaries, side-effecting arms |
