@@ -6,6 +6,7 @@
 use serde_json::Value;
 
 use crate::provider::model_provider::{StopReason, TokenUsage};
+use crate::tool::tool_phase::ToolPhase;
 
 /// One UI-facing session event.
 #[derive(Clone, Debug, PartialEq)]
@@ -16,6 +17,12 @@ pub enum AgentEvent {
     ToolUseStart { id: String, name: String },
     /// A fragment of the tool call's input JSON (for live UI display).
     ToolInputDelta { id: String, json_fragment: String },
+    /// The tool call's input JSON finished accumulating (pre-execution);
+    /// `note` is the model's one-line intent, when it sent one. The full
+    /// input stays in the transcript — the UI row only needs the note.
+    ToolInputReady { id: String, note: Option<String> },
+    /// The executing tool entered a new phase (live tool-row activity).
+    ToolProgress { id: String, phase: ToolPhase },
     /// A tool call finished executing; `summary_json` is the compact result
     /// summary for the tool row.
     ToolExecuted {

@@ -522,6 +522,15 @@ impl ProjectController {
                 authored: (binding.origin == lpc_wire::WireBindingOrigin::Authored)
                     .then(|| endpoint.clone()),
             };
+            // The live bus reading rides the (display-only) endpoint AFTER
+            // the authoring surface is built, so Retarget/Unbind state never
+            // carries the churning value (P6 item 1).
+            if binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint
+                && let Some(live) = live_channel_value(graph, channel, binding.kind)
+            {
+                endpoint = endpoint.with_live_value(live);
+            }
             let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
                 .with_description("Runtime slot wired by binding; it has no authored value here.")
                 .with_state(crate::UiSlotFieldState::readonly())
@@ -652,6 +661,43 @@ impl ProjectController {
             }
         }
         None
+    }
+
+    /// The engine's latest status for the shader node behind `artifact`:
+    /// the retained status Revision plus the verdict classification
+    /// ([`crate::AgentEngineStatus`]). `None` when no shader node uses the
+    /// artifact. Written into the agent bridge cell on every pull so a
+    /// running agent's engine-verdict wait can observe status advances.
+    pub(crate) fn agent_engine_status(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<crate::AgentEngineStatus> {
+        fn find<'a>(
+            controller: &'a ProjectController,
+            nodes: &'a [NodeController],
+            artifact: &ArtifactLocation,
+        ) -> Option<&'a NodeController> {
+            for node in nodes {
+                if node.kind().eq_ignore_ascii_case("shader")
+                    && let Some(source) = shader_source_path(node)
+                    && controller
+                        .resolve_node_asset_artifact(node, &source)
+                        .as_ref()
+                        == Some(artifact)
+                {
+                    return Some(node);
+                }
+                if let Some(found) = find(controller, node.children(), artifact) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        let node = find(self, &self.root_nodes, artifact)?;
+        Some(crate::AgentEngineStatus {
+            revision: node.status_frame(),
+            verdict: crate::app::project::agent_support::engine_verdict(node.status()),
+        })
     }
 
     /// Every fixture node with a known def artifact, as `(label, def
@@ -1049,6 +1095,49 @@ impl ProjectController {
             node.refresh_binding_facts(&overrides);
         }
         self.apply_default_binding_overlay();
+        self.apply_bound_live_values();
+    }
+
+    /// Decorate every bound slot's endpoint with the consumed channel's
+    /// current reading (P6 item 1) — the display-only `live_value` a bound
+    /// panel control renders in the violet family. Values come off the
+    /// binding-graph snapshot that already rides every pull; quantization
+    /// and the monotonic/time-kind exclusion live in
+    /// [`live_channel_value`], so this pass only dirties DTOs when a
+    /// displayed reading actually moves. Runs after the binding overlays,
+    /// which (re)build the endpoints it decorates.
+    fn apply_bound_live_values(&mut self) {
+        let Some(graph) = self.binding_graph() else {
+            return;
+        };
+        let mut updates: Vec<(NodeId, String, String)> = Vec::new();
+        for binding in &graph.bindings {
+            if binding.direction != lpc_wire::WireBindingDirection::Consumes {
+                continue;
+            }
+            let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint else {
+                continue;
+            };
+            let Some(slot) = binding.slot.as_ref() else {
+                continue;
+            };
+            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+                continue;
+            };
+            let Some(live) = live_channel_value(graph, channel, binding.kind) else {
+                continue;
+            };
+            updates.push((binding.node, name.as_str().to_string(), live));
+        }
+        for (node_id, slot, live) in updates {
+            if let Some(node) = self
+                .root_nodes
+                .iter_mut()
+                .find_map(|node| node.node_by_runtime_id_mut(node_id))
+            {
+                node.apply_bound_live_value(&slot, &live);
+            }
+        }
     }
 
     /// The pending `bindings[…]` edits fact derivation must read through:
@@ -1860,6 +1949,23 @@ impl ProjectController {
             let mut node_products = Vec::new();
             node.collect_produced_product_refs(&mut node_products);
             products.extend(node_products);
+        }
+        // Entry-thumb warming (P6 item 6): the playlist card's strip face is
+        // a permanent surface whose chips reuse each child's CACHED visual
+        // preview, so the children's visual products stay tracked while the
+        // project is open — otherwise non-active entries render name-only
+        // until first focused. These are the 32×32 `RenderProduct` probe
+        // previews riding the regular pull, never GPU gallery lease slots.
+        if node.is_playlist_kind() {
+            for child in node.children() {
+                let mut child_products = Vec::new();
+                child.collect_produced_product_refs(&mut child_products);
+                products.extend(
+                    child_products
+                        .into_iter()
+                        .filter(|product| matches!(product, UiProductRef::Visual { .. })),
+                );
+            }
         }
         for child in node.children() {
             self.collect_subscribed_products(child, products);
@@ -3021,6 +3127,33 @@ fn root_node_ids(view: &ProjectView) -> Vec<NodeId> {
 
 fn count_nodes(node: &NodeController) -> usize {
     1 + node.children().iter().map(count_nodes).sum::<usize>()
+}
+
+/// The live reading for a consumed bus channel, prepared for display on a
+/// bound panel control (P6 item 1). `None` — no live display — for:
+///
+/// - **monotonic/time-kind channels** (`Kind::Instant`: `time`, `trigger`),
+///   excluded BY KIND so the per-tick clock advance never dirties node DTOs
+///   (the whole-DTO change gate would fire on every pull otherwise);
+/// - channels without a resolved scalar value ([`format_live_scalar`], which
+///   also quantizes floats to ≤2 decimals before DTO entry).
+fn live_channel_value(
+    graph: &lpc_wire::WireBindingGraph,
+    channel_name: &str,
+    binding_kind: lpc_model::Kind,
+) -> Option<String> {
+    if binding_kind == lpc_model::Kind::Instant {
+        return None;
+    }
+    let channel = graph
+        .channels
+        .iter()
+        .find(|channel| channel.name == channel_name)?;
+    if channel.kind == Some(lpc_model::Kind::Instant) {
+        return None;
+    }
+    let value = channel.value.as_ref()?.value.as_ref()?;
+    crate::app::project::format_live_scalar(value)
 }
 
 /// Humanize a slot field name for display (`entry_time` → `Entry time`).
@@ -4901,6 +5034,152 @@ mod tests {
             panic!("expected wired row to be bound, got {:?}", wired.source);
         };
         assert_eq!(endpoint.label, "bus:visual.out");
+    }
+
+    #[test]
+    fn bound_rows_carry_quantized_live_values_and_skip_time_kind() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let binding = |slot: &str,
+                       channel: &str,
+                       kind: lpc_model::Kind,
+                       origin: lpc_wire::WireBindingOrigin|
+         -> lpc_wire::WireEffectiveBinding {
+            lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse(slot).unwrap()),
+                direction: lpc_wire::WireBindingDirection::Consumes,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: channel.to_string(),
+                },
+                origin,
+                priority: 0,
+                kind,
+            }
+        };
+        let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
+            lpc_wire::WireBusChannel {
+                name: name.to_string(),
+                kind: Some(kind),
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::F32(value)),
+                    error: None,
+                }),
+            }
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: vec![
+                    // Implicit runtime slots → binding-derived rows.
+                    binding(
+                        "wired_in",
+                        "wobble",
+                        lpc_model::Kind::Amplitude,
+                        lpc_wire::WireBindingOrigin::Authored,
+                    ),
+                    binding(
+                        "wired_time",
+                        "time",
+                        lpc_model::Kind::Instant,
+                        lpc_wire::WireBindingOrigin::Authored,
+                    ),
+                    // Backing def row → decorated by the live-value pass
+                    // after the default overlay wires it.
+                    binding(
+                        "brightness",
+                        "wobble",
+                        lpc_model::Kind::Amplitude,
+                        lpc_wire::WireBindingOrigin::Default,
+                    ),
+                ],
+                channels: vec![
+                    channel("wobble", lpc_model::Kind::Amplitude, 0.123_456),
+                    channel("time", lpc_model::Kind::Instant, 12_345.678),
+                ],
+            });
+        project.apply_default_binding_overlay();
+        project.apply_bound_live_values();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let bound_endpoint = |label: &str| -> &crate::UiBindingEndpoint {
+            let row = config.iter().find(|slot| slot.label == label).unwrap();
+            let UiSlotSourceState::Bound(endpoint) = &row.source else {
+                panic!("expected {label} to be bound, got {:?}", row.source);
+            };
+            endpoint
+        };
+
+        // Binding-derived row: quantized (≤2 decimals) live reading.
+        assert_eq!(
+            bound_endpoint("Wired in").live_value.as_deref(),
+            Some("0.12")
+        );
+        // Time-kind channels are excluded so the per-tick clock advance
+        // never dirties the DTO change gate.
+        assert_eq!(bound_endpoint("Wired time").live_value, None);
+        // Def-root slot wired by the overlay: the live pass decorates it.
+        assert_eq!(
+            bound_endpoint("Brightness").live_value.as_deref(),
+            Some("0.12")
+        );
+    }
+
+    #[test]
+    fn playlist_children_visual_products_stay_tracked_for_entry_thumbs() {
+        let mut view = ProjectView::new();
+        let mut playlist = node_entry(
+            1,
+            "/demo.project/list.playlist",
+            None,
+            NodeRuntimeStatus::Ok,
+        );
+        playlist.children = vec![NodeId::new(2)];
+        view.tree.insert(playlist);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.project/list.playlist/glow.shader",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        install_ui_projection_slots(&mut view, 2, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+
+        // The child picks up default focus (only shader in the tree) which
+        // would subscribe ALL its products; pin it unsubscribed so the
+        // assertion isolates the warming path.
+        let child = crate::ProjectNodeAddress::parse("/demo.project/list.playlist/glow.shader")
+            .expect("valid address");
+        project
+            .node_mut(&child)
+            .expect("child controller")
+            .state_mut()
+            .product_subscription_intent = ProjectProductSubscriptionIntent::Unsubscribed;
+
+        // An unsubscribed (unfocused) child would normally be untracked;
+        // the playlist strip face keeps its VISUAL product warm for the
+        // entry thumb (probe previews only — the control product stays
+        // out, and GPU gallery leases are a separate web-side concern).
+        assert_eq!(
+            project.subscribed_products(),
+            vec![UiProductRef::Visual {
+                node_id: 2,
+                output: 0
+            }]
+        );
     }
 
     #[test]

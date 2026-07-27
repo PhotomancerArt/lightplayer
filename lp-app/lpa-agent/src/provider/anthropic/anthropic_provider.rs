@@ -25,6 +25,8 @@ use crate::provider::sse_parser::{SseEvent, SseParser};
 pub const DEFAULT_MODEL: &str = "claude-sonnet-5";
 /// Default API origin (overridable for tests).
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
+/// The `anthropic-version` header value (shared with model discovery).
+pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// Backoff before the single retry.
 const RETRY_BACKOFF_MS: u32 = 500;
 /// Cap on how much of a non-2xx response body is read for the error message.
@@ -76,7 +78,7 @@ impl<T: HttpSseTransport> AnthropicProvider<T> {
             url: format!("{}/v1/messages", self.config.base_url.trim_end_matches('/')),
             headers: vec![
                 ("x-api-key".into(), self.config.api_key.clone()),
-                ("anthropic-version".into(), "2023-06-01".into()),
+                ("anthropic-version".into(), ANTHROPIC_VERSION.into()),
                 ("content-type".into(), "application/json".into()),
                 // Required for CORS from the browser; harmless on host.
                 (

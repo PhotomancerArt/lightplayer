@@ -40,6 +40,7 @@ fn done_tool_row() -> UiAgentToolRow {
     UiAgentToolRow {
         id: "tu_1".to_string(),
         note: Some("slow the rings down".to_string()),
+        phase: None,
         done: true,
         staged: true,
         shader_ok: Some(true),
@@ -163,6 +164,45 @@ fn streaming() -> Element {
     ];
     rsx! {
         ChatStoryCard { view: agent_fixture(UiAgentStatus::Streaming, turns) }
+    }
+}
+
+#[story(
+    description = "Mid-tool live progress: the running row carries the model's note plus the current phase (probe 2/5) from ToolProgress events, with the working dot pulsing."
+)]
+fn tool_running_with_phase() -> Element {
+    let mut running = UiAgentToolRow::started("tu_2");
+    running.note = Some("sweep the ring speed".to_string());
+    running.phase = Some("probe 2/5".to_string());
+    let turns = vec![
+        UiAgentTurn::User {
+            text: "Try a few ring speeds and keep the calmest".to_string(),
+        },
+        UiAgentTurn::Assistant {
+            text: "Sweeping speed over four values.".to_string(),
+        },
+        UiAgentTurn::Tool(running),
+    ];
+    rsx! {
+        ChatStoryCard { view: agent_fixture(UiAgentStatus::RunningTool, turns) }
+    }
+}
+
+#[story(
+    description = "Mid-tool live progress while the engine verdict is awaited: the running row reads 'waiting for engine' after the staged edit reached the live project."
+)]
+fn tool_running_awaiting_engine() -> Element {
+    let mut running = UiAgentToolRow::started("tu_3");
+    running.note = Some("stage the warmer palette".to_string());
+    running.phase = Some("waiting for engine".to_string());
+    let turns = vec![
+        UiAgentTurn::User {
+            text: "Warm the palette up".to_string(),
+        },
+        UiAgentTurn::Tool(running),
+    ];
+    rsx! {
+        ChatStoryCard { view: agent_fixture(UiAgentStatus::RunningTool, turns) }
     }
 }
 

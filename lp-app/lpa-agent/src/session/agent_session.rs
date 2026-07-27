@@ -222,8 +222,27 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                 self.transcript.push_tool_results(results);
                 return Ok(TurnStep::Aborted);
             }
+            // The input JSON is fully accumulated here (parsed at end of
+            // turn): surface the model's one-line note so the running row
+            // reads "{note} — running" instead of a generic label.
+            on_event(AgentEvent::ToolInputReady {
+                id: id.clone(),
+                note: input["note"].as_str().map(str::to_string),
+            });
             let outcome = if name == ITERATE_TOOL_NAME {
-                run_iterate(&input, &mut self.host, &mut self.prev_compiled)
+                let progress_id = id.clone();
+                run_iterate(
+                    &input,
+                    &mut self.host,
+                    &mut self.prev_compiled,
+                    &mut |phase| {
+                        on_event(AgentEvent::ToolProgress {
+                            id: progress_id.clone(),
+                            phase,
+                        });
+                    },
+                )
+                .await
             } else {
                 IterateOutcome {
                     content: json!({ "error": format!("unknown tool {name:?}") }).to_string(),
@@ -311,7 +330,8 @@ mod tests {
 
     use super::*;
     use crate::provider::model_provider::{BoxStream, ChatRole, TokenUsage};
-    use crate::tool::iterate_host::{HostError, ShaderContext};
+    use crate::tool::iterate_host::{HostError, HostFuture, ShaderContext};
+    use crate::tool::tool_phase::ToolPhase;
 
     const RED: &str = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
     const GREEN: &str = "vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
@@ -380,6 +400,32 @@ mod tests {
 
         // The host saw the staged edit.
         assert_eq!(session.host.staged.borrow().as_slice(), [GREEN.to_string()]);
+        // The accumulated input surfaced its note (pre-execution), then the
+        // live phases, then the executed summary — in that order.
+        let ready_at = events
+            .iter()
+            .position(|e| {
+                matches!(e, AgentEvent::ToolInputReady { id, note }
+                    if id == "tu_1" && note.as_deref() == Some("go green"))
+            })
+            .expect("ToolInputReady");
+        let first_progress = events
+            .iter()
+            .position(|e| {
+                matches!(
+                    e,
+                    AgentEvent::ToolProgress {
+                        phase: ToolPhase::Staging,
+                        ..
+                    }
+                )
+            })
+            .expect("ToolProgress(Staging)");
+        let executed_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::ToolExecuted { .. }))
+            .expect("ToolExecuted");
+        assert!(ready_at < first_progress && first_progress < executed_at);
         // ToolExecuted carried the compact summary.
         let executed = events
             .iter()
@@ -597,10 +643,15 @@ mod tests {
             Ok(self.source.borrow().clone())
         }
 
-        fn stage_source(&mut self, source: &str) -> Result<(), HostError> {
-            self.staged.borrow_mut().push(source.to_string());
-            *self.source.borrow_mut() = source.to_string();
-            Ok(())
+        fn stage_source<'a>(
+            &'a mut self,
+            source: &'a str,
+        ) -> HostFuture<'a, Result<(), HostError>> {
+            Box::pin(async move {
+                self.staged.borrow_mut().push(source.to_string());
+                *self.source.borrow_mut() = source.to_string();
+                Ok(())
+            })
         }
 
         fn led_points(&self) -> Vec<LedPoint> {

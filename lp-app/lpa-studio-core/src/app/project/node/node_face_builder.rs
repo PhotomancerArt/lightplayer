@@ -35,7 +35,7 @@ use crate::{
     UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
     UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget, UiPlaylistEntry,
     UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect,
-    UiSlotAspectKind, UiSlotEditorHint, UiSlotValue, UiSlotValueKind,
+    UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -215,7 +215,26 @@ fn shader_uniform_control(
     if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
         replace_binding_aspect(&mut control.aspects, binding);
     }
+    // A wired uniform's live bus reading rides the binding-derived row
+    // (keyed by the bare uniform name), not the authored default row the
+    // knob edits — mirror it onto the control for display (P6 item 1).
+    if control.live_value.is_none() {
+        control.live_value = top_rows
+            .iter()
+            .find(|row| row.key == name)
+            .and_then(|row| bound_live_value(row));
+    }
     Some(control)
+}
+
+/// A row's live bus reading (display-only), from the bound source endpoint
+/// the project walk decorates with the consumed channel's current value
+/// (P6 item 1).
+fn bound_live_value(slot: &UiConfigSlot) -> Option<String> {
+    match &slot.source {
+        UiSlotSourceState::Bound(endpoint) => endpoint.live_value.clone(),
+        _ => None,
+    }
 }
 
 /// A map-entry row's key segment (the trailing bracket key of the row's
@@ -472,6 +491,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         address: row_edit_address(slot),
         widget,
         value: value.clone(),
+        live_value: bound_live_value(slot),
         unit: value.unit.clone(),
         state: slot.state.clone(),
         aspects: slot.visible_aspects(),
@@ -587,6 +607,36 @@ mod tests {
         assert!(
             face.controls[0].bound(),
             "the knob rolls up the binding row's Bound affordance"
+        );
+    }
+
+    #[test]
+    fn bound_uniform_mirrors_the_wired_rows_live_reading() {
+        let mut sections = shader_sections();
+        // The binding-derived row, decorated with the channel's quantized
+        // live reading by the project walk (P6 item 1).
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1] {
+            rows.push(
+                UiConfigSlot::empty("speed", "Speed").with_source(UiSlotSourceState::Bound(
+                    UiBindingEndpoint::new("bus:master-tempo").with_live_value("2.72"),
+                )),
+            );
+        }
+
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        assert_eq!(
+            face.controls[0].live_value.as_deref(),
+            Some("2.72"),
+            "the display-only live reading rides the control"
+        );
+        assert_eq!(
+            face.controls[0].value.kind,
+            UiSlotValueKind::F32(2.0),
+            "the authored default stays the edit target"
         );
     }
 

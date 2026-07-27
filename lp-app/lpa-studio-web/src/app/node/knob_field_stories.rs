@@ -87,6 +87,26 @@ fn bound() -> Element {
     }
 }
 
+#[story(
+    description = "Bound knob with a live bus reading: the violet arc and pointer follow the LIVE value while the readout leads with it (violet) and keeps the authored default secondary — the default stays the edit target."
+)]
+fn bound_live() -> Element {
+    let mut control = knob_control(
+        "speed",
+        1.6,
+        0.0,
+        4.0,
+        UiSlotFieldState::editable(),
+        bound_source(),
+    );
+    control.live_value = Some("3.4".to_string());
+    rsx! {
+        KnobStoryCard {
+            PanelControl { control, on_action: move |_| {} }
+        }
+    }
+}
+
 #[story(description = "Unsaved edit: the warning-colored label; Save will persist the new value.")]
 fn dirty() -> Element {
     rsx! {

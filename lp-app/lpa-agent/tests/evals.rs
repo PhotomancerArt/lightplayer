@@ -91,6 +91,7 @@ impl ProviderCfg {
                 base_url,
                 api_key: std::env::var("LPA_EVAL_API_KEY").ok(),
                 model,
+                extra_headers: Vec::new(),
             }));
         }
         let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
@@ -590,9 +591,14 @@ impl AgentHost for EvalHost {
         Ok(self.source.borrow().clone())
     }
 
-    fn stage_source(&mut self, source: &str) -> Result<(), HostError> {
-        *self.source.borrow_mut() = source.to_string();
-        Ok(())
+    fn stage_source<'a>(
+        &'a mut self,
+        source: &'a str,
+    ) -> lpa_agent::HostFuture<'a, Result<(), HostError>> {
+        Box::pin(async move {
+            *self.source.borrow_mut() = source.to_string();
+            Ok(())
+        })
     }
 
     fn led_points(&self) -> Vec<LedPoint> {

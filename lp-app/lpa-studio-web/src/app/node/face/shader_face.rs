@@ -55,6 +55,11 @@ pub fn ShaderFace(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let preview = face.preview.clone();
+    // The OpenRouter connect wiring, #142 parity with `ShaderEditorTabs`:
+    // App-provided context (absent under stories, which render the
+    // needs-setup CTA inert) so the agent section's empty state leads with
+    // the one-click Connect button (P6 item 5).
+    let openrouter_error = try_consume_context::<Signal<Option<String>>>();
     // The composer draft, owned ABOVE the collapse boundary so the
     // collapsed branch's unmount of `AgentChatPane` cannot destroy it.
     let draft = use_signal(move || composer_draft);
@@ -104,7 +109,13 @@ pub fn ShaderFace(
                 summary: Some(agent_section_summary(&agent)),
                 open: Some(!agent_collapsed),
                 on_toggle: on_toggle_agent,
-                AgentChatPane { view: agent, draft: Some(draft), on_action }
+                AgentChatPane {
+                    view: agent,
+                    draft: Some(draft),
+                    on_action,
+                    on_connect: move |_| crate::openrouter_oauth::begin_connect(openrouter_error),
+                    connect_error: openrouter_error.and_then(|error| error()),
+                }
             }
         }
     }

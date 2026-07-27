@@ -77,6 +77,19 @@ impl AgentChatSession {
             // The raw input JSON stays in core/debug; the row renders the
             // executed summary instead.
             AgentEvent::ToolInputDelta { .. } => {}
+            // The accumulated input's note lands pre-execution so the
+            // running row reads "{note} — running" while the tool works.
+            AgentEvent::ToolInputReady { id, note } => {
+                if let Some(row) = self.tool_row_mut(&id) {
+                    row.note = note;
+                }
+            }
+            // Live phase for the running row ("compiling", "probe 2/5", …).
+            AgentEvent::ToolProgress { id, phase } => {
+                if let Some(row) = self.tool_row_mut(&id) {
+                    row.phase = Some(phase.to_string());
+                }
+            }
             AgentEvent::ToolExecuted {
                 id, summary_json, ..
             } => {
@@ -87,6 +100,7 @@ impl AgentChatSession {
                 });
                 if let Some(row) = row {
                     row.done = true;
+                    row.phase = None;
                     row.note = summary_json["note"].as_str().map(str::to_string);
                     row.staged = summary_json["staged"].as_bool().unwrap_or(false);
                     row.shader_ok = summary_json["shader_ok"].as_bool();
@@ -149,6 +163,14 @@ impl AgentChatSession {
     /// Append a session-level notice to the transcript.
     pub fn push_notice(&mut self, text: impl Into<String>) {
         self.turns.push(UiAgentTurn::Notice { text: text.into() });
+    }
+
+    /// The most recent tool row with `id` (updates target the newest call).
+    fn tool_row_mut(&mut self, id: &str) -> Option<&mut UiAgentToolRow> {
+        self.turns.iter_mut().rev().find_map(|turn| match turn {
+            UiAgentTurn::Tool(row) if row.id == id => Some(row),
+            _ => None,
+        })
     }
 
     /// Snapshot the mirror as DTO fields (turns + usage).
@@ -217,6 +239,41 @@ mod tests {
         assert_eq!((row.probes, row.warnings), (2, 1));
         assert!(row.detail.contains("go green"));
         assert_eq!(session.status, UiAgentStatus::Streaming);
+    }
+
+    #[test]
+    fn input_ready_and_progress_shape_the_running_row() {
+        let mut session = session();
+        session.apply_event(AgentEvent::ToolUseStart {
+            id: "tu_1".into(),
+            name: "iterate".into(),
+        });
+        session.apply_event(AgentEvent::ToolInputReady {
+            id: "tu_1".into(),
+            note: Some("go green".into()),
+        });
+        session.apply_event(AgentEvent::ToolProgress {
+            id: "tu_1".into(),
+            phase: lpa_agent::ToolPhase::Probing { i: 2, of: 5 },
+        });
+        let UiAgentTurn::Tool(row) = &session.turns[0] else {
+            panic!("expected tool row");
+        };
+        assert!(!row.done);
+        assert_eq!(row.summary_line(), "go green — probe 2/5");
+
+        // Execution completes: the phase clears, the outcome takes over.
+        session.apply_event(AgentEvent::ToolExecuted {
+            id: "tu_1".into(),
+            name: "iterate".into(),
+            summary_json: json!({ "note": "go green", "staged": true, "shader_ok": true }),
+        });
+        let UiAgentTurn::Tool(row) = &session.turns[0] else {
+            panic!("expected tool row");
+        };
+        assert!(row.done);
+        assert_eq!(row.phase, None);
+        assert!(row.summary_line().contains("compile ok"));
     }
 
     #[test]

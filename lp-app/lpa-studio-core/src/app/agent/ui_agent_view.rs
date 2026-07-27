@@ -126,6 +126,9 @@ pub struct UiAgentToolRow {
     pub id: String,
     /// The model's one-line intent for this call.
     pub note: Option<String>,
+    /// Live activity label while executing ("compiling", "probe 2/5", …);
+    /// cleared when the call finishes.
+    pub phase: Option<String>,
     /// False while the call is still executing.
     pub done: bool,
     /// Whether the call staged new source (an overlay edit landed).
@@ -148,6 +151,7 @@ impl UiAgentToolRow {
         Self {
             id: id.into(),
             note: None,
+            phase: None,
             done: false,
             staged: false,
             shader_ok: None,
@@ -161,8 +165,12 @@ impl UiAgentToolRow {
     /// The compact one-line summary the collapsed row shows.
     pub fn summary_line(&self) -> String {
         if !self.done {
+            // Live activity: prefer the current phase ("compiling",
+            // "probe 2/5", …) over the generic "running".
+            let activity = self.phase.as_deref().unwrap_or("running");
             return match &self.note {
-                Some(note) => format!("{note} — running"),
+                Some(note) => format!("{note} — {activity}"),
+                None if self.phase.is_some() => format!("Experiment — {activity}"),
                 None => "Running experiment".to_string(),
             };
         }
@@ -262,6 +270,16 @@ mod tests {
             retryable: true,
         };
         assert!(!view.busy());
+    }
+
+    #[test]
+    fn running_row_prefers_the_live_phase() {
+        let mut row = UiAgentToolRow::started("tu_1");
+        assert_eq!(row.summary_line(), "Running experiment");
+        row.phase = Some("probe 2/5".into());
+        assert_eq!(row.summary_line(), "Experiment — probe 2/5");
+        row.note = Some("go green".into());
+        assert_eq!(row.summary_line(), "go green — probe 2/5");
     }
 
     #[test]

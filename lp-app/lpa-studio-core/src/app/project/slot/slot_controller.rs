@@ -296,6 +296,20 @@ impl SlotController {
         }
     }
 
+    /// Attach a consumed channel's live reading to the named top-level
+    /// field's bound endpoint (display-only; P6 item 1). No-op when the
+    /// field is not bound — live readings only decorate existing wiring.
+    pub(in crate::app::project) fn apply_bound_live_value(&mut self, slot_name: &str, live: &str) {
+        for child in &mut self.children {
+            if child.root_field_name() != Some(slot_name) {
+                continue;
+            }
+            if let UiSlotSourceState::Bound(endpoint) = &mut child.source {
+                endpoint.live_value = Some(live.to_string());
+            }
+        }
+    }
+
     /// True when this root has a top-level field child named `name`.
     pub(in crate::app::project) fn has_root_field(&self, name: &str) -> bool {
         self.children
