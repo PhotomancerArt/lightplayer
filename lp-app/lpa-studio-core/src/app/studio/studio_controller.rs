@@ -2859,6 +2859,14 @@ impl StudioController {
             crate::AgentOp::RevertToTurn { artifact, turn } => {
                 self.agent_revert_to_turn(artifact, turn).await
             }
+            crate::AgentOp::ExportDebug { artifact } => {
+                let config = self.settings.agent_provider_config();
+                self.agent
+                    .export_debug(self.pool.lens(), &artifact, config.as_ref())
+                    .map_err(UiError::UnsupportedAction)?;
+                self.mark_dirty();
+                Ok(UiNotices::new())
+            }
             crate::AgentOp::UpsertParam {
                 artifact,
                 seq,

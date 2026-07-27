@@ -14,8 +14,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     AgentProvider, ArtifactLocation, UiAgentAvailability, UiAgentHistoryEntry, UiAgentModelView,
     UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent,
-    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiModelOption, UiProductPreview,
-    UiShaderUniform, provider_guidance,
+    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiModelOption, UiNoticeLevel,
+    UiProductPreview, UiShaderUniform, provider_guidance,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -45,6 +45,7 @@ fn agent_fixture(status: UiAgentStatus, turns: Vec<UiAgentTurn>) -> UiAgentView 
             options: Vec::new(),
             loading: false,
         },
+        debug: None,
     }
 }
 
@@ -152,6 +153,36 @@ fn needs_setup_view(provider: AgentProvider) -> UiAgentView {
     );
     view.setup = Some(provider_guidance(provider));
     view
+}
+
+#[story(
+    description = "A run cut off by the output-token limit: the dangling tool row resolved as interrupted (error dot) and the warning-toned truncation notice — the state that used to end silently."
+)]
+fn run_truncated() -> Element {
+    let turns = vec![
+        UiAgentTurn::User {
+            text: "Replace the shader with a bouncing ball simulation".to_string(),
+        },
+        UiAgentTurn::Tool(UiAgentToolRow {
+            note: Some("write the bouncing-ball shader".to_string()),
+            done: true,
+            staged: false,
+            shader_ok: None,
+            probes: 0,
+            error: Some("cut off by the output-token limit".to_string()),
+            detail: String::new(),
+            ..done_tool_row()
+        }),
+        UiAgentTurn::Notice {
+            text: "Run stopped: the response hit the output-token limit while writing the \
+                   edit — try again or ask for something smaller."
+                .to_string(),
+            level: UiNoticeLevel::Warning,
+        },
+    ];
+    rsx! {
+        ChatStoryCard { view: agent_fixture(UiAgentStatus::Idle, turns) }
+    }
 }
 
 #[story(
@@ -339,6 +370,7 @@ fn history_reverted() -> Element {
     turns.push(UiAgentTurn::Notice {
         text: "Reverted to turn 1 — that edit's source is staged again (Save keeps it)."
             .to_string(),
+        level: UiNoticeLevel::Info,
     });
     let mut view = agent_fixture(UiAgentStatus::Idle, turns);
     view.history = history_entries();
@@ -452,6 +484,7 @@ fn provider_error() -> Element {
         },
         UiAgentTurn::Notice {
             text: "Provider error: HTTP 401: authentication_error: invalid x-api-key".to_string(),
+            level: UiNoticeLevel::Info,
         },
     ];
     rsx! {

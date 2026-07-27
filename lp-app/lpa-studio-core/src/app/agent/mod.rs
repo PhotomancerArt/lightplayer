@@ -9,6 +9,7 @@
 
 pub mod agent_chat_session;
 pub mod agent_controller;
+pub mod agent_debug_export;
 pub mod agent_feedback;
 pub mod agent_host_bridge;
 pub mod agent_op;
@@ -29,6 +30,6 @@ pub use agent_pricing::{AgentCostRates, format_cost_usd};
 pub use agent_provider_config::AgentProviderConfig;
 pub use agent_session_key::AgentSessionKey;
 pub use ui_agent_view::{
-    UiAgentAvailability, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView,
+    UiAgentAvailability, UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
 };

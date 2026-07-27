@@ -29,8 +29,8 @@ pub use app::agent::{
     AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
     AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
     AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
-    UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow, UiAgentTurn,
-    UiAgentUsage, UiAgentView, instant_agent_timer,
+    UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
+    UiAgentTurn, UiAgentUsage, UiAgentView, instant_agent_timer,
 };
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{

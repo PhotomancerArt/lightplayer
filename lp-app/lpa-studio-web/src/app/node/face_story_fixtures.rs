@@ -290,6 +290,7 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
             options: Vec::new(),
             loading: false,
         },
+        debug: None,
     }
 }
 

@@ -248,7 +248,7 @@ fn history_revert_restages_an_earlier_edit_end_to_end() {
     assert!(
         matches!(
             agent.turns.last(),
-            Some(UiAgentTurn::Notice { text }) if text.contains("Reverted to turn 1")
+            Some(UiAgentTurn::Notice { text, .. }) if text.contains("Reverted to turn 1")
         ),
         "turns: {:?}",
         agent.turns
@@ -657,7 +657,7 @@ fn provider_error_surfaces_sanely_and_a_retry_recovers() {
     assert!(!agent.busy(), "retry must be possible");
     assert!(matches!(
         agent.turns.last(),
-        Some(UiAgentTurn::Notice { text }) if text.contains("401")
+        Some(UiAgentTurn::Notice { text, .. }) if text.contains("401")
     ));
 
     // Retry with the next scripted provider: the run completes and the
