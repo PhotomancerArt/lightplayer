@@ -5549,6 +5549,7 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "lps-builtin-completions",
+ "lps-glsl",
  "pulldown-cmark",
  "serde",
  "serde_json",

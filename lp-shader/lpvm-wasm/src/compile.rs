@@ -3,7 +3,7 @@
 use alloc::{format, string::String, vec::Vec};
 
 use lpir::LpirModule;
-use lps_shared::{LpsModuleSig, LpsType};
+use lps_shared::LpsModuleSig;
 
 use crate::emit;
 use crate::emit::func::wasm_function_signature;
@@ -146,7 +146,7 @@ fn export_fn_names(meta: &LpsModuleSig) -> Vec<String> {
             if k > 0 {
                 name.push(',');
             }
-            push_type_suffix(&mut name, &p.ty);
+            name.push_str(&lps_shared::glsl_type_name(&p.ty));
         }
         name.push(')');
         names.push(name);
@@ -165,7 +165,7 @@ fn export_fn_names(meta: &LpsModuleSig) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lps_shared::{FnParam, LpsFnSig, ParamQualifier};
+    use lps_shared::{FnParam, LpsFnSig, LpsType, ParamQualifier};
 
     fn sig(name: &str, params: &[LpsType]) -> LpsFnSig {
         LpsFnSig {
@@ -237,38 +237,4 @@ mod tests {
         let names = names_for(alloc::vec![sig("f", &[anon()]), sig("f", &[anon()])]);
         assert_eq!(names, ["f(struct)", "f(struct)#1"]);
     }
-}
-
-/// GLSL-style spelling of `ty` for overload-disambiguated export names.
-fn push_type_suffix(out: &mut String, ty: &LpsType) {
-    let s = match ty {
-        LpsType::Void => "void",
-        LpsType::Float => "float",
-        LpsType::Int => "int",
-        LpsType::UInt => "uint",
-        LpsType::Bool => "bool",
-        LpsType::Vec2 => "vec2",
-        LpsType::Vec3 => "vec3",
-        LpsType::Vec4 => "vec4",
-        LpsType::IVec2 => "ivec2",
-        LpsType::IVec3 => "ivec3",
-        LpsType::IVec4 => "ivec4",
-        LpsType::UVec2 => "uvec2",
-        LpsType::UVec3 => "uvec3",
-        LpsType::UVec4 => "uvec4",
-        LpsType::BVec2 => "bvec2",
-        LpsType::BVec3 => "bvec3",
-        LpsType::BVec4 => "bvec4",
-        LpsType::Mat2 => "mat2",
-        LpsType::Mat3 => "mat3",
-        LpsType::Mat4 => "mat4",
-        LpsType::Texture2D => "sampler2D",
-        LpsType::Array { element, len } => {
-            push_type_suffix(out, element);
-            out.push_str(&format!("[{len}]"));
-            return;
-        }
-        LpsType::Struct { name, .. } => name.as_deref().unwrap_or("struct"),
-    };
-    out.push_str(s);
 }

@@ -287,43 +287,35 @@ studio-web-story-build: install-wasm32-target
     just studio-web-copy-sidecars debug target/dx/lpa-studio-web/release/web/public false
     echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (story build)"
 
-studio-story-pngs: studio-web-story-build
+studio-story-pngs *filters: studio-web-story-build
     #!/usr/bin/env bash
     set -euo pipefail
     STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
-        node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs
+        node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs pngs {{ filters }}
 
+# CI-canonical: story baselines are captured by the `validate-stories` CI job
+# and staged locally via `just studio-story-pull` — do NOT commit
+# locally-captured baselines (macOS rendering differs from the pinned CI
+# environment). This recipe remains as the emergency full-regen escape hatch.
+# See docs/adr/2026-07-26-ci-canonical-story-capture.md.
 studio-story-baselines: studio-web-story-build
     #!/usr/bin/env bash
     set -euo pipefail
     STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
         node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs baselines
 
-studio-story-check: studio-web-story-build
+studio-story-check *filters: studio-web-story-build
     #!/usr/bin/env bash
     set -euo pipefail
     STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
-        node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs check
+        node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs check {{ filters }}
 
-studio-story-baselines-if-needed:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tracked="$(git diff --name-only HEAD -- \
-        lp-app/lpa-studio-web \
-        ':!lp-app/lpa-studio-web/public/**' \
-        ':!lp-app/lpa-studio-web/story-images/**')"
-    untracked="$(git ls-files --others --exclude-standard -- lp-app/lpa-studio-web \
-        | grep -v '^lp-app/lpa-studio-web/public/' \
-        | grep -v '^lp-app/lpa-studio-web/story-images/' \
-        || true)"
-    changed="$(printf '%s\n%s\n' "$tracked" "$untracked" | sed '/^$/d' | sort -u)"
-    if [[ -z "$changed" ]]; then
-        echo "No Studio UI source changes; skipping story baseline generation."
-        exit 0
-    fi
-    echo "Studio UI source changed; updating story baselines:"
-    printf '%s\n' "$changed" | sed 's/^/  /'
-    just studio-story-baselines
+# Pull CI-captured story baselines for the current branch and stage them.
+# Story baselines are CI-canonical (validate-stories job); do not commit
+# locally-captured baselines — macOS rendering differs from the pinned CI
+# environment. See docs/adr/2026-07-26-ci-canonical-story-capture.md.
+studio-story-pull:
+    node lp-app/lpa-studio-web/scripts/story-pull.mjs
 
 studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash

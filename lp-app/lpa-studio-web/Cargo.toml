@@ -30,6 +30,7 @@ lpc-wire = { path = "../../lp-core/lpc-wire" }
 # through Dioxus nodes — never raw HTML).
 pulldown-cmark = { version = "0.13", default-features = false }
 lps-builtin-completions = { path = "../../lp-shader/lps-builtin-completions" }
+lps-glsl = { path = "../../lp-shader/lps-glsl" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2"

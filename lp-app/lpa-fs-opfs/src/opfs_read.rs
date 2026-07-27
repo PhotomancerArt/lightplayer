@@ -62,8 +62,13 @@ pub async fn load_tree_filtered(
                 }
                 FileSystemHandleKind::File => {
                     let file_handle: FileSystemFileHandle = handle.unchecked_into();
-                    let bytes = read_file_bytes(&file_handle, &child_path).await?;
-                    out.push((LpPathBuf::from(child_path.as_str()), bytes));
+                    match read_file_bytes(&file_handle, &child_path).await? {
+                        Some(bytes) => out.push((LpPathBuf::from(child_path.as_str()), bytes)),
+                        None => log::warn!(
+                            "opfs: skipping implausibly large file at {child_path} \
+                             (> {MAX_FILE_BYTES} bytes; corrupt-store recovery)"
+                        ),
+                    }
                 }
                 _ => {
                     log::warn!("opfs: unknown handle kind at {child_path}, skipping");
@@ -105,15 +110,30 @@ pub async fn list_child_dirs(dir: &FileSystemDirectoryHandle) -> Result<Vec<Stri
     Ok(out)
 }
 
-async fn read_file_bytes(handle: &FileSystemFileHandle, path: &str) -> Result<Vec<u8>, OpfsError> {
+/// Refuse to load files no legitimate package member can reach. Library
+/// content is device-bound (JSON, GLSL, SVG — kilobytes); the only known
+/// way to exceed this is store corruption (pre-fix WebKit wrote the whole
+/// wasm heap into every file — see `opfs_write::write_file`). Reading such
+/// a file into the memory-primary tree would OOM the tab all over again,
+/// so the mount skips it instead.
+const MAX_FILE_BYTES: f64 = 16.0 * 1024.0 * 1024.0;
+
+/// `Ok(None)` when the file exceeds [`MAX_FILE_BYTES`].
+async fn read_file_bytes(
+    handle: &FileSystemFileHandle,
+    path: &str,
+) -> Result<Option<Vec<u8>>, OpfsError> {
     let file = JsFuture::from(handle.get_file())
         .await
         .map_err(|e| OpfsError::new("get_file", path.to_string(), e))?;
     let file: File = file
         .dyn_into()
         .map_err(|e| OpfsError::new("get_file", path.to_string(), e))?;
+    if file.size() > MAX_FILE_BYTES {
+        return Ok(None);
+    }
     let buffer = JsFuture::from(file.array_buffer())
         .await
         .map_err(|e| OpfsError::new("array_buffer", path.to_string(), e))?;
-    Ok(Uint8Array::new(&buffer).to_vec())
+    Ok(Some(Uint8Array::new(&buffer).to_vec()))
 }

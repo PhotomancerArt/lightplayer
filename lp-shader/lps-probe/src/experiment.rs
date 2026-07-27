@@ -31,6 +31,16 @@ pub const MAX_EVALS_PER_PROBE: usize = 4096;
 pub const MAX_RAW_VALUES: usize = 64;
 /// Hard cap on total experiment evaluations (probes + health).
 pub const MAX_TOTAL_EVALS: usize = 16_384;
+/// Interpreter op budget for a single evaluation (one probe/health/diff call
+/// or `__shader_init`) — the bound that keeps an infinite-loop shader from
+/// hanging the Studio wasm main thread (the interpreter has no other
+/// termination guarantee). 64 ops per unit of the eval budget
+/// ([`MAX_TOTAL_EVALS`]) ≈ 1M ops: a realistic ~100-line shader evaluates in
+/// ~10³–10⁴ ops (see the perf test), so this is ~100× headroom, while one
+/// exhausted call costs well under a second. Exhaustion aborts the enclosing
+/// probe (and health bails after repeated failures), so a hostile shader
+/// triggers only a handful of exhausted calls per experiment.
+pub const MAX_OPS_PER_EVAL: u64 = MAX_TOTAL_EVALS as u64 * 64;
 
 /// Compile `source` plus per-probe wrappers, evaluate everything on the f32
 /// LPIR interpreter, and report diagnostics, health, and probe outcomes.
@@ -837,6 +847,51 @@ mod tests {
             panic!("expected probe-count skip");
         };
         assert!(reason.contains("at most 8 probes"), "{reason}");
+    }
+
+    #[test]
+    fn infinite_loop_shader_is_bounded_and_actionable() {
+        // `x` never grows past the bound because the increment is 0.0, so
+        // `render` loops forever; the per-evaluation op budget must turn that
+        // into bounded, actionable failures instead of a hang.
+        let src = "vec4 render(vec2 pos) {\n\
+                       float x = 0.0;\n\
+                       while (x < 1.0) { x = x + 0.0; }\n\
+                       return vec4(x, 0.0, 0.0, 1.0);\n\
+                   }";
+        let spec = spec_with(vec![probe(
+            "p",
+            ProbeType::Float,
+            "render(pos).x",
+            ProbeDomain::Point { at: [0.5, 0.5] },
+        )]);
+        let result = run_experiment(src, &spec);
+        assert_eq!(result.shader, ShaderCompileOutcome::Ok);
+
+        // Health warns per failed site, then bails instead of burning the
+        // op budget on every remaining site.
+        let health = result.health.expect("health");
+        assert_eq!(health.sites_evaluated, 0);
+        assert!(
+            result.warnings.iter().any(|w| w.contains("op budget")),
+            "{:?}",
+            result.warnings
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("abandoned after")),
+            "{:?}",
+            result.warnings
+        );
+
+        let ProbeOutcome::Skipped { reason } = result.probes.get(&"p".to_owned()).expect("p")
+        else {
+            panic!("expected skip");
+        };
+        assert!(reason.contains("op budget"), "{reason}");
+        assert!(reason.contains("loop"), "{reason}");
     }
 
     #[test]

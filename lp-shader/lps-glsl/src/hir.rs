@@ -21,6 +21,7 @@ mod function;
 mod place;
 mod scalar;
 mod shape;
+mod symbols;
 mod typeck;
 mod types;
 mod typing;
@@ -35,6 +36,9 @@ pub(crate) use builtin::{builtin_has_out_args, builtin_kind, check_builtin_arity
 use function::{FunctionSig, GlobalConst, ImportRegistry};
 pub(crate) use place::{HirPlace, PlaceRoot, PlaceSegment};
 pub(crate) use shape::TypeShape;
+pub use symbols::{
+    FnParamSymbol, FnSymbol, StructSymbol, SymbolAnalysis, VarSymbol, analyze_symbols,
+};
 use typeck::TypeCtx;
 use types::StructTypes;
 pub use types::{
