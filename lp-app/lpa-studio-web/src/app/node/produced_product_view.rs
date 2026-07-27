@@ -1,6 +1,8 @@
 //! Leaf presentation for a produced product.
 
+use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -8,6 +10,7 @@ use lpa_studio_core::{
     UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame,
     UiProductTrackingState,
 };
+use wasm_bindgen::{Clamped, JsCast};
 
 use crate::app::node::{BindingChip, BindingChipDirection, SlotPane, SlotPaneTreatment};
 
@@ -86,10 +89,10 @@ pub(crate) fn ProductPreview(
                 UiProductPreview::VisualSrgb8 {
                     width,
                     height,
+                    revision,
                     bytes,
-                    ..
                 } => rsx! {
-                    ProductPixelGrid { width, height, bytes }
+                    ProductPreviewCanvas { width, height, revision, bytes }
                 },
                 UiProductPreview::ControlNative(preview) => rsx! {
                     ControlProductPreview { preview }
@@ -200,28 +203,103 @@ fn ControlProductPreview(preview: UiControlProductPreview) -> Element {
     }
 }
 
+/// Monotonic preview-canvas element ids (one per mounted canvas).
+static NEXT_PREVIEW_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
+
+/// One visual preview = one `<canvas>` painted with `putImageData`. Replaces
+/// the per-pixel `<span>` grid, whose 1024 keyed DOM nodes were re-diffed on
+/// every view snapshot (the dominant UI-thread cost with live sim previews).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProductPixelGrid(width: u32, height: u32, bytes: Rc<[u8]>) -> Element {
-    let columns = width.max(1);
-    let rows = height.max(1);
-    let grid_style = format!(
-        "grid-template-columns: repeat({columns}, minmax(0, 1fr)); grid-template-rows: repeat({rows}, minmax(0, 1fr));"
-    );
-    let pixels = rgb_pixel_styles(&bytes);
-    rsx! {
-        div {
-    class: "ux-produced-product-pixel-grid",
-            style: "{grid_style}",
-            for (index, style) in pixels.into_iter().enumerate() {
-                span {
-                    key: "{index}",
-            class: "tw:block",
-                    style: "{style}",
-                }
+fn ProductPreviewCanvas(width: u32, height: u32, revision: i64, bytes: Rc<[u8]>) -> Element {
+    let canvas_id = use_hook(|| {
+        let id = NEXT_PREVIEW_CANVAS_ID.fetch_add(1, Ordering::Relaxed);
+        format!("product-preview-canvas-{id}")
+    });
+    // What the canvas currently shows: probe revision + buffer identity
+    // (two products can share an engine revision, so the revision alone is
+    // not a safe skip key). Parent re-renders without new probe bytes skip
+    // the repaint entirely.
+    let painted = use_hook(|| Rc::new(Cell::new(None::<(i64, usize)>)));
+
+    let paint_key = (revision, Rc::as_ptr(&bytes) as *const u8 as usize);
+    if painted.get() != Some(paint_key) {
+        // Paint from a task, not the render pass. The canvas element is
+        // stable across diffs, so painting never fights the vdom; a failed
+        // paint (element not mounted yet) retries on the next snapshot and
+        // the `onmounted` paint below covers the first frame.
+        let canvas_id = canvas_id.clone();
+        let bytes = bytes.clone();
+        let painted = painted.clone();
+        spawn(async move {
+            match paint_preview_canvas(&canvas_id, width, height, &bytes) {
+                Ok(()) => painted.set(Some(paint_key)),
+                Err(error) => log::debug!("preview canvas paint skipped: {error}"),
             }
+        });
+    }
+
+    let mount_canvas_id = canvas_id.clone();
+    let mount_painted = painted.clone();
+    rsx! {
+        canvas {
+            id: "{canvas_id}",
+            class: "ux-produced-product-pixel-canvas",
+            width: "{width}",
+            height: "{height}",
+            onmounted: move |_| {
+                let canvas_id = mount_canvas_id.clone();
+                let bytes = bytes.clone();
+                let painted = mount_painted.clone();
+                spawn(async move {
+                    match paint_preview_canvas(&canvas_id, width, height, &bytes) {
+                        Ok(()) => painted.set(Some(paint_key)),
+                        Err(error) => log::warn!("preview canvas mount paint failed: {error}"),
+                    }
+                });
+            },
         }
     }
+}
+
+/// Expand tightly-packed RGB8 preview bytes to RGBA and blit them onto the
+/// canvas identified by `canvas_id` (the `preview_host_impl.rs` blit
+/// pattern, minus the transferable-buffer source).
+fn paint_preview_canvas(
+    canvas_id: &str,
+    width: u32,
+    height: u32,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let width = width.max(1);
+    let height = height.max(1);
+    let canvas = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(canvas_id))
+        .ok_or_else(|| format!("canvas #{canvas_id} not mounted"))?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .map_err(|_| format!("element #{canvas_id} is not a canvas"))?;
+    if canvas.width() != width || canvas.height() != height {
+        canvas.set_width(width);
+        canvas.set_height(height);
+    }
+    let context = canvas
+        .get_context("2d")
+        .map_err(|error| format!("get 2d context: {error:?}"))?
+        .ok_or_else(|| "canvas has no 2d context".to_string())?
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .map_err(|_| "2d context has an unexpected type".to_string())?;
+
+    let mut rgba = vec![255_u8; width as usize * height as usize * 4];
+    for (dst, src) in rgba.chunks_exact_mut(4).zip(bytes.chunks_exact(3)) {
+        dst[..3].copy_from_slice(src);
+    }
+    let image = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&rgba), width, height)
+        .map_err(|error| format!("build ImageData: {error:?}"))?;
+    context
+        .put_image_data(&image, 0.0, 0.0)
+        .map_err(|error| format!("putImageData: {error:?}"))?;
+    Ok(())
 }
 
 #[component]
@@ -359,18 +437,6 @@ fn preview_frame_style(preview: &UiProductPreview, frame: UiProductPreviewFrame)
         );
     }
     format!("aspect-ratio: {} / {};", frame.width, frame.height)
-}
-
-fn rgb_pixel_styles(bytes: &[u8]) -> Vec<String> {
-    bytes
-        .chunks_exact(3)
-        .map(|chunk| {
-            format!(
-                "background-color: rgb({} {} {});",
-                chunk[0], chunk[1], chunk[2]
-            )
-        })
-        .collect()
 }
 
 fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -> bool {

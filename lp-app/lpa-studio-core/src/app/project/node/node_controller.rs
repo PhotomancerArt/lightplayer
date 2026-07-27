@@ -167,6 +167,8 @@ impl NodeController {
             &|_| Vec::new(),
             &|_, _| None,
             None,
+            // No project context: focus is the whole Default-intent policy.
+            &|node| node.state().focused,
         )
     }
 
@@ -189,6 +191,7 @@ impl NodeController {
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
         always_live: Option<&UiProductRef>,
+        subscribes: &impl Fn(&NodeController) -> bool,
     ) -> UiNodeView {
         let mut children = self.ui_children_with_product_previews(
             product_preview,
@@ -196,6 +199,7 @@ impl NodeController {
             extra_config,
             asset_editor,
             always_live,
+            subscribes,
         );
         // Dirty aggregates over the FULL child list, before any face-driven
         // suppression: a playlist face hides non-active child cards, but
@@ -224,6 +228,7 @@ impl NodeController {
             edits,
             extra_config,
             always_live,
+            subscribes,
         );
         self.embed_asset_editors(&mut sections, asset_editor);
         // The face derives FROM the finished sections (previews, edit
@@ -453,6 +458,7 @@ impl NodeController {
         edits: &SlotEditJoin<'_>,
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         always_live: Option<&UiProductRef>,
+        subscribes: &impl Fn(&NodeController) -> bool,
     ) -> Vec<UiNodeSection> {
         let mut products = Vec::new();
         let mut produced_values = Vec::new();
@@ -475,7 +481,7 @@ impl NodeController {
 
         let mut sections = Vec::new();
         if !products.is_empty() {
-            let base_tracking = self.product_tracking_state();
+            let base_tracking = self.product_tracking_state(subscribes(self));
             for product in &mut products {
                 let mut has_cached_preview = false;
                 if let Some(product_ref) = product.product
@@ -540,6 +546,7 @@ impl NodeController {
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
         always_live: Option<&UiProductRef>,
+        subscribes: &impl Fn(&NodeController) -> bool,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -558,6 +565,7 @@ impl NodeController {
                     edits,
                     extra_config,
                     always_live,
+                    subscribes,
                 );
                 child.embed_asset_editors(&mut view.sections, asset_editor);
                 view.children = child.ui_children_with_product_previews(
@@ -566,6 +574,7 @@ impl NodeController {
                     extra_config,
                     asset_editor,
                     always_live,
+                    subscribes,
                 );
                 // Dirty rolls up the FULL nested-child list before the face
                 // derivation may suppress non-active playlist children —
@@ -611,9 +620,14 @@ impl NodeController {
         UiStatus::new(self.status.label.clone(), self.status.tone.ui_status_kind())
     }
 
-    fn product_tracking_state(&self) -> UiProductTrackingState {
+    /// The badge must mirror the probe policy, not re-derive it: the caller
+    /// passes whether this node's products are actually subscribed under
+    /// the current lens (`ProjectController::node_subscribes_products`), so
+    /// a sim lens that streams every node never labels a live preview
+    /// "not tracked".
+    fn product_tracking_state(&self, subscribed: bool) -> UiProductTrackingState {
         match self.state.product_subscription_intent {
-            ProjectProductSubscriptionIntent::Default if self.state.focused => {
+            ProjectProductSubscriptionIntent::Default if subscribed => {
                 UiProductTrackingState::Tracking
             }
             ProjectProductSubscriptionIntent::Default => UiProductTrackingState::Untracked,

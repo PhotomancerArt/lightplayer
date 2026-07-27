@@ -437,6 +437,15 @@ impl BrowserFirmwareRuntime {
     }
 
     fn log(&mut self, level: &str, message: &str) {
+        // Same single gate as the console mirror (`logger.rs`): the
+        // process-global `log::max_level()`, seeded to `Info` and mutable at
+        // runtime via the wire `SetLogLevel`. At the default level the
+        // per-tick trace and per-frame debug diagnostics never cross the
+        // postMessage boundary — each suppressed envelope would otherwise
+        // cost a main-thread task, a deserialize, and a dirty view.
+        if !envelope_level_enabled(level) {
+            return;
+        }
         self.outbox.push(BrowserOutputEnvelope::Log {
             runtime_id: self.id,
             level: level.to_string(),
@@ -444,4 +453,18 @@ impl BrowserFirmwareRuntime {
             message: format!("{}: {message}", self.label),
         });
     }
+}
+
+/// Whether a runtime log envelope at `level` passes the process-global
+/// `log::max_level()` gate. Unknown level strings are treated as `Error`
+/// (never suppressed).
+fn envelope_level_enabled(level: &str) -> bool {
+    let level = match level {
+        "trace" => log::Level::Trace,
+        "debug" => log::Level::Debug,
+        "info" => log::Level::Info,
+        "warn" => log::Level::Warn,
+        _ => log::Level::Error,
+    };
+    level <= log::max_level()
 }
