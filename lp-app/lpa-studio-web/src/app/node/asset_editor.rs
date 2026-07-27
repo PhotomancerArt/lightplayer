@@ -39,6 +39,15 @@
 //! Revert stays one click away even while the applied body fails to
 //! compile. See `../../../Planning/lp2025/2026-07-14-shader-auto-apply/`.
 //!
+//! **Live user-symbol completions.** For GLSL sources the buffer is
+//! re-analyzed [`SYMBOL_ANALYSIS_DEBOUNCE_MS`] after the last keystroke by
+//! the compiler's front half running client-side
+//! ([`lps_glsl::analyze_symbols`] — never the device, never the wire), so
+//! the user's own functions (typed signatures), globals, structs, and
+//! text-declared uniforms complete alongside the builtins, boosted above
+//! them. A failed analysis keeps the previous symbol set
+//! ([`symbols_after_edit`]): mid-edit parse failures never blank the popup.
+//!
 //! **Keyboard.** ⌘↵/Ctrl+Enter applies now and ⌘S/Ctrl+S saves while the
 //! editor is focused (both captured in the CodeMirror keymap; ⌘S never
 //! reaches the browser). Hints via [`crate::base::keyboard`].
@@ -56,6 +65,7 @@ use lpa_studio_core::{
     ControllerId, ProjectController, ProjectOp, UiAction, UiAssetContentBody,
     UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiShaderError, UiShaderUniform,
 };
+use lps_glsl::{ParamQualifier, SymbolAnalysis};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -70,6 +80,18 @@ use crate::base::{
 /// ~200 ms device compile.
 const AUTO_APPLY_DEBOUNCE_MS: u32 = 500;
 
+/// Quiet period after the last keystroke before the buffer is re-analyzed
+/// for user-symbol completions. Deliberately shorter than
+/// [`AUTO_APPLY_DEBOUNCE_MS`]: the analysis is client-side, front-half-only
+/// (`lps_glsl::analyze_symbols`), and ms-scale — completions should feel a
+/// beat ahead of the apply loop, not behind it.
+const SYMBOL_ANALYSIS_DEBOUNCE_MS: u32 = 200;
+
+/// CodeMirror ranking boost for symbols the user declared in the buffer —
+/// their own names outrank the builtin manifest (default boost 0) while
+/// staying far from the ±99 rails.
+const USER_SYMBOL_BOOST: i32 = 1;
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn AssetEditor(
@@ -83,6 +105,16 @@ pub fn AssetEditor(
     // Editor-local state (see module docs).
     let mut modified = use_signal(|| false);
     let mut text = use_signal(String::new);
+    // The user's own symbols from the buffer (functions, globals, structs,
+    // uniforms), as of the last *successful* analysis — a mid-edit parse
+    // failure keeps the previous set (keep-last-good) instead of blanking
+    // the completion popup. Seeded from the resolved doc below; refreshed by
+    // its own debounce in `on_change`.
+    let mut user_symbols = use_signal(SymbolAnalysis::default);
+    let analysis_epoch = use_hook(|| Rc::new(RefCell::new(0_u64)));
+    // Doc text whose symbols are already seeded, so resolves/resyncs analyze
+    // exactly once (typing goes through the debounce path, not this).
+    let analyzed_doc = use_hook(|| Rc::new(RefCell::new(None::<String>)));
     // Auto-apply plumbing: the keystroke epoch (only the newest keystroke's
     // debounce timer fires) and a non-reactive mirror of the controller
     // projections the timer must read *at fire time* (values captured at
@@ -126,6 +158,23 @@ pub fn AssetEditor(
     let doc = last_doc.borrow().clone();
     let language = editor_language(editor.kind);
 
+    // Seed (and re-seed on external resyncs) the user-symbol set from the
+    // resolved doc, so completions are live before the first keystroke.
+    // Deferred via `spawn` — signal writes during render are a hazard.
+    if editor.kind == UiAssetEditorKind::Glsl
+        && let Some(doc_text) = &doc
+    {
+        let mut analyzed = analyzed_doc.borrow_mut();
+        if analyzed.as_deref() != Some(doc_text.as_str()) {
+            *analyzed = Some(doc_text.clone());
+            let seed_text = doc_text.clone();
+            spawn(async move {
+                let previous = user_symbols.peek().clone();
+                user_symbols.set(symbols_after_edit(previous, &seed_text));
+            });
+        }
+    }
+
     // Compile-error presentation. Suppressed while an apply is in flight —
     // the old error refers to the body being replaced. Positions refer to
     // the last *applied* text and are never remapped while the user types
@@ -139,10 +188,10 @@ pub fn AssetEditor(
         .as_ref()
         .map(|error| shader_error_diagnostics(error))
         .unwrap_or_default();
-    // Builtin + uniform completions for GLSL sources; other editor kinds
-    // pass an empty list and never grow a popup.
+    // Builtin + uniform + live user-symbol completions for GLSL sources;
+    // other editor kinds pass an empty list and never grow a popup.
     let completions = match editor.kind {
-        UiAssetEditorKind::Glsl => glsl_completions(&editor.uniforms),
+        UiAssetEditorKind::Glsl => glsl_completions(&editor.uniforms, &user_symbols.read()),
         _ => Vec::new(),
     };
     // `None` between reveals so clicking the same line twice still scrolls
@@ -219,8 +268,32 @@ pub fn AssetEditor(
     let auto_editor = editor.clone();
     let auto_gate = auto_apply_gate.clone();
     let epoch_cell = edit_epoch.clone();
+    let analysis_epoch_cell = analysis_epoch.clone();
+    let analyze_kind = editor.kind;
     let on_change = move |value: String| {
         text.set(value);
+        // Debounced user-symbol analysis, epoch-guarded like the auto-apply
+        // below (same RefCell-not-Signal reasoning) but on its own shorter
+        // clock: only the newest keystroke's timer analyzes, reading the
+        // freshest text at fire time. Fires for typing and external resyncs
+        // alike — both mean the buffer's symbols may have changed.
+        if analyze_kind == UiAssetEditorKind::Glsl {
+            let epoch = {
+                let mut cell = analysis_epoch_cell.borrow_mut();
+                *cell = cell.wrapping_add(1);
+                *cell
+            };
+            let epoch_watch = analysis_epoch_cell.clone();
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(SYMBOL_ANALYSIS_DEBOUNCE_MS).await;
+                if *epoch_watch.borrow() != epoch {
+                    return;
+                }
+                let current = text.peek().clone();
+                let previous = user_symbols.peek().clone();
+                user_symbols.set(symbols_after_edit(previous, &current));
+            });
+        }
         let epoch = {
             let mut cell = epoch_cell.borrow_mut();
             *cell = cell.wrapping_add(1);
@@ -440,14 +513,30 @@ fn AssetEditorNote(note: String) -> Element {
     }
 }
 
-/// The GLSL editor's completion list: this shader's consumed uniforms
-/// first (typed as the generated uniform header declares them), then the
-/// `render` entry snippet, then the vector/matrix constructors, then every
-/// builtin from the generated manifest (`lps-builtin-completions` — LPFN
-/// with full typed signatures and descriptions, standard GLSL with
-/// name+arity snippets; never hand-authored, see that crate's drift
-/// tests).
-fn glsl_completions(uniforms: &[UiShaderUniform]) -> Vec<CodeEditorCompletion> {
+/// The next stored symbol set after the buffer changed to `source`: a
+/// successful analysis replaces the set, a failed one keeps the previous —
+/// client-side keep-last-good, mirroring the engine's keep-last-good shader.
+/// Mid-edit states fail analysis constantly (an unbalanced brace while
+/// typing a new function is the common case) and must not blank the popup.
+fn symbols_after_edit(current: SymbolAnalysis, source: &str) -> SymbolAnalysis {
+    lps_glsl::analyze_symbols(source).unwrap_or(current)
+}
+
+/// The GLSL editor's completion list: this shader's uniforms first (the
+/// slot-derived set, unioned with `layout(...) uniform`s declared in the
+/// buffer text — slot wins on a name collision, its type is the applied
+/// truth), then the user's own functions/globals/structs from the live
+/// buffer (typed via `analyze_symbols`, boosted above the builtins), then
+/// the `render` entry snippet (dropped once the user has written `render` —
+/// their real signature is in the list by then), then the vector/matrix
+/// constructors, then every builtin from the generated manifest
+/// (`lps-builtin-completions` — LPFN with full typed signatures and
+/// descriptions, standard GLSL with name+arity snippets; never
+/// hand-authored, see that crate's drift tests).
+fn glsl_completions(
+    uniforms: &[UiShaderUniform],
+    symbols: &SymbolAnalysis,
+) -> Vec<CodeEditorCompletion> {
     let mut completions: Vec<CodeEditorCompletion> = uniforms
         .iter()
         .map(|uniform| CodeEditorCompletion {
@@ -456,18 +545,71 @@ fn glsl_completions(uniforms: &[UiShaderUniform]) -> Vec<CodeEditorCompletion> {
             kind: CodeEditorCompletionKind::Variable,
             snippet: None,
             info: None,
+            boost: Some(USER_SYMBOL_BOOST),
         })
         .collect();
-    completions.push(CodeEditorCompletion {
-        label: "render".to_string(),
-        detail: "vec4 render(vec2 pos)".to_string(),
-        kind: CodeEditorCompletionKind::Keyword,
-        snippet: Some("vec4 render(vec2 ${pos}) {\n\t${}\n}".to_string()),
-        info: Some(
-            "The shader entry point: called per pixel with continuous pixel coordinates."
-                .to_string(),
-        ),
-    });
+    // Text-declared uniforms the slot-derived set doesn't already carry
+    // (`outputSize` and friends): same rendering, deduped by name.
+    completions.extend(
+        symbols
+            .uniforms
+            .iter()
+            .filter(|uniform| uniforms.iter().all(|slot| slot.name != uniform.name))
+            .map(|uniform| CodeEditorCompletion {
+                label: uniform.name.clone(),
+                detail: format!("uniform {}", uniform.type_name),
+                kind: CodeEditorCompletionKind::Variable,
+                snippet: None,
+                info: None,
+                boost: Some(USER_SYMBOL_BOOST),
+            }),
+    );
+    completions.extend(
+        symbols
+            .functions
+            .iter()
+            .map(|function| CodeEditorCompletion {
+                label: function.name.clone(),
+                detail: fn_signature(function),
+                kind: CodeEditorCompletionKind::Function,
+                snippet: Some(fn_call_snippet(function)),
+                info: None,
+                boost: Some(USER_SYMBOL_BOOST),
+            }),
+    );
+    completions.extend(symbols.globals.iter().map(|global| CodeEditorCompletion {
+        label: global.name.clone(),
+        detail: global.type_name.clone(),
+        kind: CodeEditorCompletionKind::Variable,
+        snippet: None,
+        info: None,
+        boost: Some(USER_SYMBOL_BOOST),
+    }));
+    completions.extend(symbols.structs.iter().map(|strukt| CodeEditorCompletion {
+        label: strukt.name.clone(),
+        detail: format!("struct {}", strukt.name),
+        kind: CodeEditorCompletionKind::Type,
+        snippet: Some(struct_construct_snippet(strukt)),
+        info: None,
+        boost: Some(USER_SYMBOL_BOOST),
+    }));
+    let user_defines_render = symbols
+        .functions
+        .iter()
+        .any(|function| function.name == "render");
+    if !user_defines_render {
+        completions.push(CodeEditorCompletion {
+            label: "render".to_string(),
+            detail: "vec4 render(vec2 pos)".to_string(),
+            kind: CodeEditorCompletionKind::Keyword,
+            snippet: Some("vec4 render(vec2 ${pos}) {\n\t${}\n}".to_string()),
+            info: Some(
+                "The shader entry point: called per pixel with continuous pixel coordinates."
+                    .to_string(),
+            ),
+            boost: None,
+        });
+    }
     // Vector/matrix constructors: language-level (GLSL-spec, no drift risk
     // — unlike builtins these are grammar, not a generated set), offered
     // with their most common construction shape.
@@ -488,6 +630,7 @@ fn glsl_completions(uniforms: &[UiShaderUniform]) -> Vec<CodeEditorCompletion> {
                 kind: CodeEditorCompletionKind::Type,
                 snippet: Some((*snippet).to_string()),
                 info: None,
+                boost: None,
             }),
     );
     completions.extend(lps_builtin_completions::COMPLETIONS.iter().map(|entry| {
@@ -497,9 +640,59 @@ fn glsl_completions(uniforms: &[UiShaderUniform]) -> Vec<CodeEditorCompletion> {
             kind: CodeEditorCompletionKind::Function,
             snippet: Some(entry.snippet.to_string()),
             info: (!entry.description.is_empty()).then(|| entry.description.to_string()),
+            boost: None,
         }
     }));
     completions
+}
+
+/// GLSL-style rendered signature for a user function's completion detail:
+/// `vec3 tonemap(vec3 color, float exposure)`, with `out`/`inout`
+/// qualifiers spelled and unnamed parameters shown by type alone.
+fn fn_signature(function: &lps_glsl::FnSymbol) -> String {
+    let params: Vec<String> = function
+        .params
+        .iter()
+        .map(|param| {
+            let qualifier = match param.qualifier {
+                ParamQualifier::In => "",
+                ParamQualifier::Out => "out ",
+                ParamQualifier::InOut => "inout ",
+            };
+            match &param.name {
+                Some(name) => format!("{qualifier}{} {name}", param.type_name),
+                None => format!("{qualifier}{}", param.type_name),
+            }
+        })
+        .collect();
+    format!(
+        "{} {}({})",
+        function.return_type,
+        function.name,
+        params.join(", ")
+    )
+}
+
+/// Call snippet for a user function: `tonemap(${color}, ${exposure})`,
+/// falling back to the parameter type for unnamed parameters.
+fn fn_call_snippet(function: &lps_glsl::FnSymbol) -> String {
+    let args: Vec<String> = function
+        .params
+        .iter()
+        .map(|param| format!("${{{}}}", param.name.as_deref().unwrap_or(&param.type_name)))
+        .collect();
+    format!("{}({})", function.name, args.join(", "))
+}
+
+/// Construction snippet for a user struct: `Light(${color}, ${intensity})`
+/// — GLSL struct constructors take every field in declaration order.
+fn struct_construct_snippet(strukt: &lps_glsl::StructSymbol) -> String {
+    let args: Vec<String> = strukt
+        .fields
+        .iter()
+        .map(|field| format!("${{{}}}", field.name))
+        .collect();
+    format!("{}({})", strukt.name, args.join(", "))
 }
 
 /// The strip's location as editor lint chrome (one diagnostic today — the
@@ -621,7 +814,7 @@ mod tests {
             name: "time".to_string(),
             glsl_type: "float".to_string(),
         }];
-        let completions = glsl_completions(&uniforms);
+        let completions = glsl_completions(&uniforms, &SymbolAnalysis::default());
 
         assert_eq!(completions[0].label, "time");
         assert_eq!(completions[0].detail, "uniform float");
@@ -659,6 +852,123 @@ mod tests {
             2 + 6 + lps_builtin_completions::COMPLETIONS.len(),
             "uniform + render + 6 constructors + the manifest"
         );
+    }
+
+    /// A buffer exercising every user-symbol kind, as the debounced
+    /// analysis would produce it.
+    fn analyzed() -> SymbolAnalysis {
+        lps_glsl::analyze_symbols(
+            "\
+struct Light { vec3 color; float intensity; };
+const int COUNT = 4;
+layout(binding = 0) uniform vec2 outputSize;
+layout(binding = 1) uniform float time;
+float phase = 0.25;
+vec3 tonemap(vec3 color, float exposure) { return color * exposure; }
+",
+        )
+        .expect("fixture shader analyzes")
+    }
+
+    #[test]
+    fn user_symbols_complete_typed_and_boosted_above_builtins() {
+        let completions = glsl_completions(&[], &analyzed());
+
+        let tonemap = completions
+            .iter()
+            .find(|c| c.label == "tonemap")
+            .expect("user function present");
+        assert_eq!(tonemap.detail, "vec3 tonemap(vec3 color, float exposure)");
+        assert_eq!(
+            tonemap.snippet.as_deref(),
+            Some("tonemap(${color}, ${exposure})")
+        );
+        assert_eq!(tonemap.kind, CodeEditorCompletionKind::Function);
+        assert_eq!(tonemap.boost, Some(USER_SYMBOL_BOOST));
+
+        for label in ["COUNT", "phase"] {
+            let global = completions
+                .iter()
+                .find(|c| c.label == label)
+                .expect("user global present");
+            assert_eq!(global.kind, CodeEditorCompletionKind::Variable);
+            assert_eq!(global.boost, Some(USER_SYMBOL_BOOST));
+        }
+
+        let light = completions
+            .iter()
+            .find(|c| c.label == "Light")
+            .expect("user struct present");
+        assert_eq!(light.detail, "struct Light");
+        assert_eq!(
+            light.snippet.as_deref(),
+            Some("Light(${color}, ${intensity})")
+        );
+        assert_eq!(light.boost, Some(USER_SYMBOL_BOOST));
+
+        // Builtins stay unboosted so the user's names rank first.
+        let mix = completions.iter().find(|c| c.label == "mix").unwrap();
+        assert_eq!(mix.boost, None);
+    }
+
+    #[test]
+    fn text_uniforms_union_with_slot_uniforms_and_slot_wins() {
+        let slot = vec![UiShaderUniform {
+            name: "time".to_string(),
+            glsl_type: "float".to_string(),
+        }];
+        let completions = glsl_completions(&slot, &analyzed());
+
+        // `time` collides: exactly one entry, the slot-derived one.
+        let times: Vec<_> = completions.iter().filter(|c| c.label == "time").collect();
+        assert_eq!(times.len(), 1);
+        assert_eq!(times[0].detail, "uniform float");
+        // `outputSize` is text-declared only and rides along typed.
+        let output_size = completions
+            .iter()
+            .find(|c| c.label == "outputSize")
+            .expect("text-declared uniform present");
+        assert_eq!(output_size.detail, "uniform vec2");
+        assert_eq!(output_size.boost, Some(USER_SYMBOL_BOOST));
+    }
+
+    #[test]
+    fn render_template_drops_once_user_defines_render() {
+        let with_render =
+            lps_glsl::analyze_symbols("vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }")
+                .expect("render shader analyzes");
+        let completions = glsl_completions(&[], &with_render);
+
+        // Exactly one `render` entry: the user's own typed function, not
+        // the template.
+        let renders: Vec<_> = completions.iter().filter(|c| c.label == "render").collect();
+        assert_eq!(renders.len(), 1);
+        assert_eq!(renders[0].kind, CodeEditorCompletionKind::Function);
+        assert_eq!(renders[0].detail, "vec4 render(vec2 pos)");
+        assert_eq!(renders[0].boost, Some(USER_SYMBOL_BOOST));
+    }
+
+    #[test]
+    fn out_params_render_in_signature_and_snippet() {
+        let symbols =
+            lps_glsl::analyze_symbols("void split(vec2 v, out float x) { x = v.x; }").unwrap();
+        let completions = glsl_completions(&[], &symbols);
+        let split = completions.iter().find(|c| c.label == "split").unwrap();
+        assert_eq!(split.detail, "void split(vec2 v, out float x)");
+        assert_eq!(split.snippet.as_deref(), Some("split(${v}, ${x})"));
+    }
+
+    #[test]
+    fn failed_analysis_keeps_the_previous_symbol_set() {
+        let good = analyzed();
+        // The dominant mid-edit state: an unbalanced brace aborts analysis;
+        // the stored set must survive so the popup never blanks.
+        let after_bad_edit = symbols_after_edit(good.clone(), "vec3 f() {");
+        assert_eq!(after_bad_edit, good);
+        // A successful re-analysis replaces it.
+        let after_good_edit = symbols_after_edit(good, "float ramp(float t) { return t * t; }");
+        assert_eq!(after_good_edit.functions.len(), 1);
+        assert_eq!(after_good_edit.functions[0].name, "ramp");
     }
 
     #[test]

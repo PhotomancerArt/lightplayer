@@ -189,8 +189,12 @@ The trap flows to the engine as **data, never substring matching**:
   own emission. Both wasm hosts share the rv32 unit, header contract,
   and message. See
   [2026-07-23-sim-wasm-fuel.md](2026-07-23-sim-wasm-fuel.md).
-- **interp** has no loop bound at all (opt-in oracle target; recorded
-  follow-up).
+- ~~**interp** has no loop bound at all (opt-in oracle target; recorded
+  follow-up).~~ *Resolved 2026-07-25:* `lpir::InterpLimits` adds a
+  caller-supplied op budget ("fuel", one unit per executed op, shared
+  across call frames) to `interpret`/`interpret_entry`; `lps-probe`
+  defaults every evaluation to `MAX_OPS_PER_EVAL` (~1M ops) while the
+  filetest oracle path stays explicitly unlimited.
 - Compute-tick and `__shader_init` traps surface as plain typed-message
   errors (bounded abort, no coordinates, no panic/blame route) — only the
   per-invocation render/sample paths get the panic conversion today.
@@ -256,8 +260,11 @@ The trap flows to the engine as **data, never substring matching**:
   the natural entry point to the GLSL probe workflow — the trapping pixel
   IS the probe selection; per-pixel fuel-consumed also gives a cost
   heatmap. `metadata` (vmctx+12) stays reserved for probe trace state.
-- **interp loop cap**: the interpreter still has unbounded loops (opt-in
-  target only; guarded by `@unsupported(interp)` on trap filetests).
+- ~~**interp loop cap**~~ — *done 2026-07-25*: `lpir::InterpLimits`
+  fuel (opt-in per call; `lps-probe` sets `MAX_OPS_PER_EVAL` by default,
+  filetests remain unlimited). Trap filetests stay
+  `@unsupported(interp)` — interp fuel is a host bound, not the rv32
+  fuel-header contract.
 - **Per-function trap stub**: share one trap-write-and-jump stub per
   function to shrink back-edge sites from 7 to ~5 words if the JIT chunk
   budget gets tight.

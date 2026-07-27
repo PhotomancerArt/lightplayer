@@ -96,7 +96,9 @@ impl CodeEditorCompletionKind {
 /// ${a})`) makes accepting insert the template with navigable
 /// placeholders instead. `detail` renders dimmed beside the label
 /// (signatures go here); `info` is the longer description shown in the
-/// side panel while the item is selected.
+/// side panel while the item is selected. `boost` biases CodeMirror's
+/// ranking (−99..99, default 0) — deterministic ordering control that
+/// survives fuzzy matching, unlike list order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CodeEditorCompletion {
     pub label: String,
@@ -104,6 +106,7 @@ pub struct CodeEditorCompletion {
     pub kind: CodeEditorCompletionKind,
     pub snippet: Option<String>,
     pub info: Option<String>,
+    pub boost: Option<i32>,
 }
 
 /// CodeMirror-backed editor. See the module docs for the ownership and
@@ -649,6 +652,9 @@ impl CmHandle {
             }
             if let Some(info) = &completion.info {
                 set("info", &JsValue::from_str(info));
+            }
+            if let Some(boost) = completion.boost {
+                set("boost", &JsValue::from_f64(f64::from(boost)));
             }
             list.push(&entry);
         }

@@ -1,5 +1,5 @@
 ---
-status: carried
+status: retired      # 2026-07-26: all five exit criteria met; see status section
 since: 2026-07-08      # first recorded capture pain (M4-gallery era)
 logged: 2026-07-23
 area: studio-web/story-capture
@@ -7,7 +7,7 @@ related:
   [
     "../defects/README.md",
     "chip task_16a65557 (deterministic slot-story drift)",
-    "docs/adr/… (none yet — the local-vs-CI capture decision is the likely paydown ADR)",
+    "../adr/2026-07-26-ci-canonical-story-capture.md (the paydown ADR)",
   ]
 ---
 # Story-capture pipeline: slow, flaky, and load-sensitive
@@ -31,7 +31,9 @@ queue behind it; byte-noise churn in a known set of stories
 (slot-row/editor family) must be manually reverted on every capture;
 each new agent session re-learns the incantations from memory notes.
 
-**Workarounds** (current lore, keep updated):
+**Workarounds** (current lore, keep updated — since the 2026-07-26 paydown
+these apply only to local SCRATCH captures; canonical baselines come from the
+`validate-stories` CI job via `just studio-story-pull`):
 - `STUDIO_STORY_PNGS_CONCURRENCY=1` (2 on a quiet machine) and
   `STUDIO_STORY_CDP_TIMEOUT_MS=120000`.
 - Run on a quiet machine — not while the dev server + live debugging
@@ -88,6 +90,54 @@ each new agent session re-learns the incantations from memory notes.
   same heavy-sheet family. Run 2 resumed from disk and completed
   clean. Two-run capture is now the working norm.
 
+- 2026-07-26 — **THE WEDGE ROOT-CAUSED: `python3 -m http.server` hangs
+  under capture load.** The class that plagued this pipeline since
+  2026-07-08 ("heavy end-of-queue sheets", story-specific wedges,
+  load-correlation) finally reproduced deterministically in a 4-cpu
+  Linux container and was caught alive: when a CDP timeout kills a
+  Chrome page mid-download, the python worker thread serving it blocks
+  FOREVER in a kernel socket send (`sock_alloc_send_pskb`) and the
+  server stops answering entirely (curl → empty reply). One transiently
+  slow story → timeout → page recycled mid-response → server wedges →
+  every later navigation on every page/browser times out. This explains
+  the red herrings: wedges followed the capture frontier (not stories),
+  fresh pages AND fresh browsers inherited the wedge (shared server),
+  thresholds varied with load, and the renderer main thread sat in
+  pthread_cond_timedwait waiting on fetches that never finished. Fix:
+  the capture script now serves the site itself (in-process node static
+  server, `response.close → stream.destroy`); python3 is no longer a
+  dependency. A defense-in-depth browser restart every
+  STUDIO_STORY_BROWSER_RESTART_EVERY captures (default 120, ~1-2s,
+  resume from disk) also landed while browser aging was the leading
+  theory. Also from the same debugging arc: a crashed partial capture
+  could masquerade as drift (fixed via .check-complete sentinel gating
+  the CI artifact and story-pull), and pinned Chrome-for-Testing needs
+  the AppArmor userns sysctl on ubuntu-24.04 runners.
+- 2026-07-26 — **CHURNER SET ROOT-CAUSED** (post-cutover run 6 failed on
+  the classic churners; diffed pixel-level): three mechanisms, all
+  bistable settling races the ready-wait didn't cover. (a) The font
+  gate `document.fonts.status === 'loaded'` is trivially true before
+  the first element requests a face — captures raced @font-face
+  decoding (select-text ghosting; whole-page layout shifts when
+  fallback metrics changed line wrap). Fix: ready-wait force-loads and
+  `document.fonts.check()`s every bundled face. (b) [autofocus] focus
+  lands a beat after first paint, scrolls the target into view
+  (shifting the capture clip), and ring-survival across re-renders is
+  itself racy — neither ring state is a stable terminal. Fix: wait for
+  autofocus to land, then blur + scrollTo(0,0) — baselines always show
+  the unfocused state. (c) Backstop: stable-pair capture (accept only
+  two consecutive byte-identical shots, 5 tries, warn-and-keep-last)
+  turns any residual settling race into determinism. Verified: 2×267
+  captures over the historical churner families (config-slot-row,
+  roster-card, slot-value-editor), byte-identical across passes.
+- 2026-07-26 — **PAYDOWN**: capture moved to CI
+  (ADR `../adr/2026-07-26-ci-canonical-story-capture.md`). `validate-stories`
+  job captures on a pinned x64 runner (Chrome for Testing 151.0.7922.47,
+  oxipng 10.1.1, bundled Inter/JetBrains Mono), fails loudly on drift, and
+  delivers fresh sets as the `story-images-fresh` artifact;
+  `just studio-story-pull` stages them; `-if-needed` deleted. Full baseline
+  set regenerated in the canonical environment at cutover.
+
 **Exit criteria** — All of: (1) captures complete deterministically at
 default concurrency on a loaded machine, or run somewhere isolated
 (the "is local PNG generation worth it" decision — likely a paydown
@@ -95,3 +145,15 @@ ADR weighing CI-side capture vs local determinism hardening);
 (2) resume-instead-of-restart on failure; (3) the gate detects
 committed-as-well-as-working-tree UI changes; (4) failures are loud
 (non-zero all the way out); (5) the churner story set is empty.
+
+**Exit-criteria status after the 2026-07-26 paydown** — (1) isolated
+pinned CI runner ✓; (2) clean ephemeral runners make restart cheap and
+the in-script retry/resume is retained ✓; (3) CI check always compares
+the committed tree against a fresh build — the `-if-needed` blind spot
+is structurally gone (helper deleted) ✓; (4) blocking CI job, pipefail
+guarded ✓; (5) churner set EMPTY ✓ — after the settling-race fixes
+(font gate, focus blur, select reflow, stable-pair), PR #139 run 10
+(2026-07-26) reproduced all 894 committed baselines byte-identically
+on a fresh runner. All criteria met; entry retired. Chip
+task_16a65557 (deterministic slot-story drift) is resolved by the same
+fixes.

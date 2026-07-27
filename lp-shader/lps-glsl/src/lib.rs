@@ -27,11 +27,14 @@ mod token;
 pub use compile::{CompileOptions, CompileOutput, compile, index_source};
 pub use diagnostic::{Diagnostic, DiagnosticSeverity};
 pub use hir::HirModule;
+pub use hir::{FnParamSymbol, FnSymbol, StructSymbol, SymbolAnalysis, VarSymbol, analyze_symbols};
+// Part of the `FnParamSymbol` public shape.
 pub use index::{
     ConstDecl, FunctionDecl, FunctionParam, GlobalDecl, TopLevelIndex, TypeRef, UniformDecl,
 };
 pub use job::{CompileBudget, CompileJob, CompileStage, CompileStepResult};
 pub use lexer::lex;
+pub use lps_shared::ParamQualifier;
 pub use lvalue::{LvalueBase, LvaluePath, LvalueProjection, SwizzleComponent};
 pub use source::{SourceMap, Span};
 pub use token::{Keyword, Token, TokenKind};
