@@ -89,21 +89,31 @@ pub async fn run_upsert_param(
     // or a not-yet-declared uniform, reported in-band with both sets.
     progress(ToolPhase::Compiling);
     yield_to_ui().await;
-    let declared: Vec<String> = match host.current_source() {
-        Ok(source) => CompiledShader::compile(&source)
-            .map(|compiled| top_level_uniform_names(compiled.signatures()))
-            .unwrap_or_default(),
+    let (declared, source_compiles): (Vec<String>, bool) = match host.current_source() {
+        Ok(source) => match CompiledShader::compile(&source) {
+            Ok(compiled) => (top_level_uniform_names(compiled.signatures()), true),
+            // The staged source often does NOT compile yet at upsert time
+            // (declare uniform → upsert record → fix the code is a normal
+            // repair order): fall back to a textual declaration scan so a
+            // broken compile never blocks creating the record.
+            Err(_) => (textual_uniform_names(&source), false),
+        },
         Err(e) => return host_error(format!("reading current source failed: {}", e.message)),
     };
     let defs = host.shader_params().await.unwrap_or_default();
     let known_def = defs.iter().any(|def| def.name == name);
     if !declared.contains(&name) && !known_def {
         let def_names: Vec<&str> = defs.iter().map(|def| def.name.as_str()).collect();
+        let compile_note = if source_compiles {
+            ""
+        } else {
+            " (note: the current source does not compile; declared names were scanned textually)"
+        };
         return data_outcome(
             json!({ "error": format!(
                 "`{name}` is neither a declared uniform nor an existing param record — \
-                 declare the uniform first (or fix the name). declared: {declared:?}, \
-                 def records: {def_names:?}"
+                 declare the uniform first (or fix the name){compile_note}. \
+                 declared: {declared:?}, def records: {def_names:?}"
             ) }),
             json!({ "note": format!("param `{name}`"), "error": "unknown param name" }),
         );
@@ -145,6 +155,71 @@ pub async fn run_upsert_param(
         is_error: false,
         summary,
     }
+}
+
+/// Lightweight declaration scan for source that does not compile: every
+/// identifier following `uniform <type>` (precision qualifiers skipped).
+/// Good enough for the pre-check; the compiled signature stays the truth
+/// whenever the source compiles.
+fn textual_uniform_names(source: &str) -> Vec<String> {
+    let source = strip_comments(source);
+    let mut names = Vec::new();
+    let mut tokens = source
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|token| !token.is_empty());
+    while let Some(token) = tokens.next() {
+        if token != "uniform" {
+            continue;
+        }
+        // <precision?> <type> <name>
+        let mut next = tokens.next();
+        if matches!(next, Some("highp" | "mediump" | "lowp")) {
+            next = tokens.next();
+        }
+        if next.is_none() {
+            break;
+        }
+        if let Some(name) = tokens.next() {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Drop `//` line and `/* */` block comments (the word `uniform` in prose
+/// must not fool the declaration scan).
+fn strip_comments(source: &str) -> String {
+    let mut cleaned = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '/' {
+            cleaned.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('/') => {
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        cleaned.push('\n');
+                        break;
+                    }
+                }
+            }
+            Some('*') => {
+                chars.next();
+                let mut prev = ' ';
+                for next in chars.by_ref() {
+                    if prev == '*' && next == '/' {
+                        break;
+                    }
+                    prev = next;
+                }
+                cleaned.push(' ');
+            }
+            _ => cleaned.push(c),
+        }
+    }
+    cleaned
 }
 
 /// Echo the written fields (rounded), so the transcript records what landed.
@@ -348,6 +423,38 @@ mod tests {
         let content: Value = serde_json::from_str(&outcome.content).expect("json");
         assert_eq!(content["applied"], true, "{content}");
         assert_eq!(host.upserts.borrow().len(), 1);
+    }
+
+    #[test]
+    fn broken_compile_falls_back_to_the_textual_declaration_scan() {
+        // The live-reported blocker: staged source declares new uniforms
+        // but does NOT compile (naga limitation mid-repair) — the upsert
+        // must still accept the declared names.
+        let mut host = FakeHost::new(
+            "layout(binding = 4) uniform float gravity;\n\
+             layout(binding = 5) uniform highp float ballCount;\n\
+             vec4 render(vec2 pos) { this does not compile }",
+        );
+        let outcome = run(&json!({ "name": "gravity", "default": 1.0 }), &mut host);
+        let content: Value = serde_json::from_str(&outcome.content).expect("json");
+        assert_eq!(content["applied"], true, "{content}");
+        assert_eq!(host.upserts.borrow().len(), 1);
+
+        let refused = run(&json!({ "name": "sizeVariance" }), &mut host);
+        let content: Value = serde_json::from_str(&refused.content).expect("json");
+        let error = content["error"].as_str().expect("error");
+        assert!(error.contains("does not compile"), "{error}");
+        assert!(error.contains("ballCount"), "scanned set listed: {error}");
+    }
+
+    #[test]
+    fn textual_scan_reads_declarations_only() {
+        let names = textual_uniform_names(
+            "layout(binding = 0) uniform float speed;\n\
+             uniform highp vec2 wind; // uniform in a comment\n\
+             float not_a_uniform;",
+        );
+        assert_eq!(names, vec!["speed".to_string(), "wind".to_string()]);
     }
 
     #[test]
