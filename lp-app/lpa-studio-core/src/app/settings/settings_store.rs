@@ -228,7 +228,9 @@ impl SettingsStore {
 
     /// Cost rates for the usage estimate: per-field settings overrides win
     /// over the built-in table; both rates must resolve or there is no
-    /// estimate (unknown model, no overrides ⇒ tokens only).
+    /// estimate (unknown model, no overrides ⇒ tokens only). Overrides
+    /// stay two fields (input/output) — the cache-write/read rates always
+    /// derive from the resolved input rate by the standard multipliers.
     pub fn agent_cost_rates(&self) -> Option<AgentCostRates> {
         let table = self.agent_model().and_then(AgentCostRates::for_model);
         let input = self
@@ -237,10 +239,7 @@ impl SettingsStore {
         let output = self
             .price_override(|agent| agent.price_output_per_mtok)
             .or(table.map(|rates| rates.output_per_mtok))?;
-        Some(AgentCostRates {
-            input_per_mtok: input,
-            output_per_mtok: output,
-        })
+        Some(AgentCostRates::from_io(input, output))
     }
 
     fn price_override(

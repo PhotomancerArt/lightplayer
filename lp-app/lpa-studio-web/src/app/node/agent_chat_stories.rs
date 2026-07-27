@@ -29,6 +29,7 @@ fn agent_fixture(status: UiAgentStatus, turns: Vec<UiAgentTurn>) -> UiAgentView 
         usage: UiAgentUsage {
             input_tokens: 2841,
             output_tokens: 512,
+            ..UiAgentUsage::default()
         },
         // 2841 in × $3 + 512 out × $15 per MTok (claude-sonnet-5 rates).
         estimated_cost: Some("~$0.0162".to_string()),

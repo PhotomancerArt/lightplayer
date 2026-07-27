@@ -8,11 +8,13 @@
 pub mod node_controller;
 pub(in crate::app::project) mod node_face_builder;
 pub mod node_revert_op;
+pub mod playlist_activate_op;
 pub mod project_node_address;
 pub mod project_node_target;
 
 pub(in crate::app::project) use node_controller::root_slot_key;
 pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
 pub use node_revert_op::NodeRevertOp;
+pub use playlist_activate_op::PlaylistActivateOp;
 pub use project_node_address::ProjectNodeAddress;
 pub use project_node_target::ProjectNodeTarget;

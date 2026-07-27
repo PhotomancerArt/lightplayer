@@ -264,7 +264,7 @@ impl NodeController {
         sections: &[UiNodeSection],
         children: &mut Vec<UiNodeChild>,
     ) -> Option<UiNodeFace> {
-        super::node_face_builder::kind_face(self.node_ty()?, sections, children)
+        super::node_face_builder::kind_face(self.node_ty()?, self.address(), sections, children)
     }
 
     /// True when any of this node's slot roots carries a top-level field

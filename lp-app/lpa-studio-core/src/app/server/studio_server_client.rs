@@ -14,8 +14,8 @@ use lpc_model::{
     ProjectOverlay, Revision, SlotPath,
 };
 use lpc_wire::{
-    ProjectReadEvent, ProjectReadRequest, WireOverlayMutationRequest, WireProjectHandle,
-    WireProjectInventoryReadResponse,
+    ProjectReadEvent, ProjectReadRequest, WireNodeCommand, WireNodeCommandResponse,
+    WireOverlayMutationRequest, WireProjectHandle, WireProjectInventoryReadResponse,
 };
 
 use crate::app::project::demo_project::{
@@ -353,6 +353,12 @@ pub struct StudioOverlayMutation {
     pub logs: Vec<UiLogDraft>,
 }
 
+/// Outcome of a runtime node command dispatch.
+pub struct StudioNodeCommand {
+    pub response: WireNodeCommandResponse,
+    pub logs: Vec<UiLogDraft>,
+}
+
 /// Result of an overlay commit, with the post-commit overlay revision.
 pub struct StudioOverlayCommit {
     pub result: CommitResult,
@@ -480,6 +486,28 @@ impl StudioServerClient {
         Ok(StudioOverlayMutation {
             result: response.value.result,
             overlay_revision: response.value.overlay_revision,
+            logs,
+        })
+    }
+
+    /// Dispatch a runtime node command (the non-overlay command channel;
+    /// first consumer: playlist activate-entry). The server's rejection is
+    /// data in the response, not a transport error.
+    pub async fn node_command(
+        &mut self,
+        handle_id: u32,
+        node: NodeId,
+        command: WireNodeCommand,
+    ) -> Result<StudioNodeCommand, UiError> {
+        let response = self
+            .client
+            .project_node_command(WireProjectHandle::new(handle_id), node, command)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(response.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioNodeCommand {
+            response: response.value,
             logs,
         })
     }

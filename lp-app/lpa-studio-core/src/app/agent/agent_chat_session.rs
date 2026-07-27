@@ -156,6 +156,8 @@ impl AgentChatSession {
         UiAgentUsage {
             input_tokens: self.usage.input_tokens,
             output_tokens: self.usage.output_tokens,
+            cache_write_tokens: self.usage.cache_write_tokens,
+            cache_read_tokens: self.usage.cache_read_tokens,
         }
     }
 }
@@ -225,6 +227,8 @@ mod tests {
             usage: TokenUsage {
                 input_tokens: 10,
                 output_tokens: 5,
+                cache_write_tokens: 100,
+                cache_read_tokens: 0,
             },
         });
         assert_eq!(session.usage.input_tokens, 10);
@@ -232,13 +236,17 @@ mod tests {
             usage_total: TokenUsage {
                 input_tokens: 60,
                 output_tokens: 40,
+                cache_write_tokens: 120,
+                cache_read_tokens: 90,
             },
         });
         assert_eq!(
             session.ui_usage(),
             UiAgentUsage {
                 input_tokens: 60,
-                output_tokens: 40
+                output_tokens: 40,
+                cache_write_tokens: 120,
+                cache_read_tokens: 90,
             }
         );
     }

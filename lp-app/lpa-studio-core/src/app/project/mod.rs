@@ -27,6 +27,7 @@ pub mod demo_project;
 pub mod dirty_summary;
 pub mod loaded_project_choice;
 pub mod node;
+pub mod node_card_ui_state;
 pub mod project_connect_result;
 pub mod project_controller;
 pub mod project_editor_op;
@@ -55,9 +56,10 @@ pub use asset::{
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeController, NodeControllerState, NodeRevertOp, ProjectNodeAddress, ProjectNodeTarget,
-    ProjectProductSubscriptionIntent,
+    NodeController, NodeControllerState, NodeRevertOp, PlaylistActivateOp, ProjectNodeAddress,
+    ProjectNodeTarget, ProjectProductSubscriptionIntent,
 };
+pub use node_card_ui_state::{NodeCardDrawer, NodeCardUiState, NodeUiOp};
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{
     ProjectAssetContentRun, ProjectController, ProjectEditRun, ProjectRefreshOutcome,

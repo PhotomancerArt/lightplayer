@@ -300,6 +300,7 @@ fn turn_done(stop_reason: StopReason, input: u32, output: u32) -> TurnEvent {
         usage: TokenUsage {
             input_tokens: input,
             output_tokens: output,
+            ..TokenUsage::default()
         },
     }
 }
