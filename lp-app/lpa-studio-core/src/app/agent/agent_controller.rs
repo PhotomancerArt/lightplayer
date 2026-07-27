@@ -307,6 +307,7 @@ impl AgentController {
                 config,
                 agent.transcript(),
                 &session.turn_stats,
+                &session.edits,
             )
         };
         session.set_debug_dump(json);

@@ -10,7 +10,7 @@
 use lpa_agent::{AgentTranscript, StopReason};
 use serde_json::json;
 
-use crate::app::agent::agent_chat_session::AgentTurnStat;
+use crate::app::agent::agent_chat_session::{AgentEditRecord, AgentTurnStat};
 use crate::app::agent::agent_provider_config::AgentProviderConfig;
 
 /// Dump format version, bumped when the shape changes.
@@ -22,6 +22,7 @@ pub(crate) fn debug_dump_json(
     config: Option<&AgentProviderConfig>,
     transcript: &AgentTranscript,
     turn_stats: &[AgentTurnStat],
+    edits: &[AgentEditRecord],
 ) -> String {
     let (provider, model) = match config {
         Some(AgentProviderConfig::Anthropic(c)) => ("anthropic", c.model.clone()),
@@ -40,6 +41,19 @@ pub(crate) fn debug_dump_json(
                 json!({
                     "stop_reason": stop_reason_str(&stat.stop_reason),
                     "usage": stat.usage,
+                })
+            })
+            .collect::<Vec<_>>(),
+        // Every staged source in full, first-class — the GLSL is also
+        // buried in the messages' tool inputs, but debugging starts here.
+        "edits": edits
+            .iter()
+            .map(|record| {
+                json!({
+                    "turn": record.turn,
+                    "note": record.note,
+                    "engine_ok": record.engine_ok,
+                    "source": record.source.as_ref(),
                 })
             })
             .collect::<Vec<_>>(),
@@ -65,6 +79,7 @@ fn stop_reason_str(reason: &StopReason) -> String {
 #[cfg(test)]
 mod tests {
     use lpa_agent::{ChatMessage, TokenUsage};
+    use lpc_model::Revision;
 
     use super::*;
 
@@ -86,13 +101,23 @@ mod tests {
             stop_reason: StopReason::MaxTokens,
             usage: TokenUsage::default(),
         }];
-        let json = debug_dump_json("nodes/a.glsl", None, &transcript(), &stats);
+        let edits = vec![AgentEditRecord {
+            turn: 1,
+            note: Some("slow it down".into()),
+            source: std::rc::Rc::from("uniform float speed;"),
+            thumb: None,
+            engine_ok: Some(true),
+            at: Revision::default(),
+        }];
+        let json = debug_dump_json("nodes/a.glsl", None, &transcript(), &stats, &edits);
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
         assert_eq!(value["format"], 1);
         assert_eq!(value["artifact"], "nodes/a.glsl");
         assert_eq!(value["provider"], "unconfigured");
         assert_eq!(value["turns"][0]["stop_reason"], "max_tokens");
         assert_eq!(value["usage_total"]["output_tokens"], 20);
+        assert_eq!(value["edits"][0]["turn"], 1);
+        assert_eq!(value["edits"][0]["source"], "uniform float speed;");
         // Messages round-trip through the provider-neutral serde shape.
         let messages: Vec<ChatMessage> =
             serde_json::from_value(value["messages"].clone()).expect("messages deserialize");
@@ -106,7 +131,7 @@ mod tests {
             model: "claude-sonnet-5".to_string(),
             base_url: "https://api.anthropic.com".to_string(),
         });
-        let json = debug_dump_json("nodes/a.glsl", Some(&config), &transcript(), &[]);
+        let json = debug_dump_json("nodes/a.glsl", Some(&config), &transcript(), &[], &[]);
         assert!(json.contains("claude-sonnet-5"));
         assert!(!json.contains("sk-secret"));
     }

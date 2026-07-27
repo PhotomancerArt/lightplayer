@@ -33,6 +33,13 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          - The dialect is GLSL compiled by naga's `glsl-in` frontend (the \
          LightPlayer dialect): no textures unless declared, no derivatives, \
          no `discard`.\n\
+         - Dialect landmines (each costs a wasted turn if hit): do NOT \
+         assign through a swizzle of an indexed array element — \
+         `arr[i].x = v;` and `arr[i].x += v;` fail to lower; rebuild the \
+         vector instead (`arr[i] = vec2(v, arr[i].y);`). Avoid `break`/\
+         `continue` inside NESTED loops — the runtime backend rejects that \
+         control flow even when the GLSL compiles; use `if` guards or loop \
+         conditions instead.\n\
          - If a compile fails, the running device keeps the last good shader \
          (keep-last-good); nothing breaks, but your edit is not live until it \
          compiles.\n\n",
