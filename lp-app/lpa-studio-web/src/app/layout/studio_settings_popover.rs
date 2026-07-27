@@ -277,6 +277,7 @@ fn set_key_command(provider: AgentProvider, value: Option<String>) -> SettingsCo
         AgentProvider::Anthropic => SettingsCommand::SetAgentAnthropicApiKey(value),
         AgentProvider::OpenAi => SettingsCommand::SetAgentOpenAiApiKey(value),
         AgentProvider::Custom => SettingsCommand::SetAgentCustomApiKey(value),
+        AgentProvider::OpenRouter => SettingsCommand::SetAgentOpenRouterApiKey(value),
     }
 }
 
@@ -311,6 +312,7 @@ fn api_key_placeholder(agent: &UiAgentSettingsView) -> &'static str {
         AgentProvider::Anthropic => "sk-ant-…",
         AgentProvider::OpenAi => "sk-…",
         AgentProvider::Custom => "usually not needed",
+        AgentProvider::OpenRouter => "use Connect below",
     }
 }
 

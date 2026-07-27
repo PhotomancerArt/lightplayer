@@ -22,11 +22,19 @@ pub enum AgentProvider {
     /// Any OpenAI-compatible server (Ollama, LM Studio, llama.cpp, vLLM)
     /// at a user-supplied base URL; API key optional.
     Custom,
+    /// OpenRouter's OpenAI-compatible API; the key arrives via the OAuth
+    /// PKCE Connect flow (charged to the user's own OpenRouter credits)
+    /// rather than being pasted.
+    #[serde(rename = "openrouter")]
+    OpenRouter,
 }
 
 impl AgentProvider {
-    /// Every provider, in selector order.
-    pub const ALL: [AgentProvider; 3] = [
+    /// Every provider, in selector order. OpenRouter leads: it's the
+    /// recommended no-key-juggling path (the enum default stays Anthropic so
+    /// existing installs keep their provider).
+    pub const ALL: [AgentProvider; 4] = [
+        AgentProvider::OpenRouter,
         AgentProvider::Anthropic,
         AgentProvider::OpenAi,
         AgentProvider::Custom,
@@ -35,6 +43,7 @@ impl AgentProvider {
     /// Short display label (the segmented selector's button text).
     pub fn label(self) -> &'static str {
         match self {
+            AgentProvider::OpenRouter => "OpenRouter",
             AgentProvider::Anthropic => "Anthropic",
             AgentProvider::OpenAi => "OpenAI",
             AgentProvider::Custom => "Custom",
@@ -60,6 +69,21 @@ pub struct AgentProviderGuidance {
 /// The guidance for one provider.
 pub fn provider_guidance(provider: AgentProvider) -> AgentProviderGuidance {
     match provider {
+        AgentProvider::OpenRouter => AgentProviderGuidance {
+            provider,
+            label: provider.label(),
+            setup: "Connect your OpenRouter account — one click, no key to \
+                    paste. Usage is pay-as-you-go from your own OpenRouter \
+                    credits, and every major model is available.",
+            links: &[
+                ("openrouter.ai/credits", "https://openrouter.ai/credits"),
+                ("manage keys", "https://openrouter.ai/settings/keys"),
+            ],
+            note: Some(
+                "Connect creates a key inside your OpenRouter account; you \
+                 can revoke it there at any time.",
+            ),
+        },
         AgentProvider::Anthropic => AgentProviderGuidance {
             provider,
             label: provider.label(),
@@ -107,6 +131,7 @@ mod tests {
             (AgentProvider::Anthropic, "\"anthropic\""),
             (AgentProvider::OpenAi, "\"openai\""),
             (AgentProvider::Custom, "\"custom\""),
+            (AgentProvider::OpenRouter, "\"openrouter\""),
         ] {
             assert_eq!(serde_json::to_string(&provider).unwrap(), name);
             assert_eq!(

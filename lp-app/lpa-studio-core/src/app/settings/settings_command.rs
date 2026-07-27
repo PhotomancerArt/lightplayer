@@ -29,6 +29,9 @@ pub enum SettingsCommand {
     SetAgentCustomBaseUrl(Option<String>),
     /// Set or clear the user's custom-server API-key override.
     SetAgentCustomApiKey(Option<String>),
+    /// Set or clear the OpenRouter key (written by the Connect flow's
+    /// exchange; `None` = Disconnect).
+    SetAgentOpenRouterApiKey(Option<String>),
     /// Set or clear the user's model override.
     SetAgentModel(Option<String>),
     /// Set or clear the $/MTok input-rate override from its text-field
