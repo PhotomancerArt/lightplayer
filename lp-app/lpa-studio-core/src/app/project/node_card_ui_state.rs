@@ -98,6 +98,27 @@ impl NodeUiOp {
             | Self::SetDraft { node, .. } => node,
         }
     }
+
+    /// The agent section's toggle choreography — THE op sequence the web's
+    /// collapse control dispatches (shared so the face e2e drives exactly
+    /// what the component does). Collapsing mirrors the live draft FIRST
+    /// (the collapsed branch unmounts the composer, and a full card
+    /// remount while collapsed reseeds from the mirror), then flips;
+    /// expanding is the flip alone — it must never touch the mirror.
+    pub fn toggle_agent_section(node: &str, collapsed: bool, live_draft: &str) -> Vec<NodeUiOp> {
+        let mut ops = Vec::with_capacity(2);
+        if !collapsed {
+            ops.push(NodeUiOp::SetDraft {
+                node: node.to_string(),
+                draft: live_draft.to_string(),
+            });
+        }
+        ops.push(NodeUiOp::SetAgentCollapsed {
+            node: node.to_string(),
+            collapsed: !collapsed,
+        });
+        ops
+    }
 }
 
 #[cfg(test)]
@@ -175,5 +196,41 @@ mod tests {
         for op in &ops {
             assert_eq!(op.node(), "/a.project/b.shader");
         }
+    }
+
+    #[test]
+    fn collapsing_mirrors_the_live_draft_before_the_flip() {
+        // Order is the contract: the mirror must land before the collapse
+        // flips, so the state a collapsed remount seeds from already
+        // carries the half-typed text.
+        let ops = NodeUiOp::toggle_agent_section("/a.project/b.shader", false, "half a thought");
+        assert_eq!(
+            ops,
+            vec![
+                NodeUiOp::SetDraft {
+                    node: "/a.project/b.shader".into(),
+                    draft: "half a thought".into(),
+                },
+                NodeUiOp::SetAgentCollapsed {
+                    node: "/a.project/b.shader".into(),
+                    collapsed: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn expanding_only_flips_the_collapse_bit() {
+        // Expanding must never write the draft: the composer is unmounted
+        // while collapsed, so its live value is whatever the caller has on
+        // hand — the mirror is the truth and stays untouched.
+        let ops = NodeUiOp::toggle_agent_section("/a.project/b.shader", true, "");
+        assert_eq!(
+            ops,
+            vec![NodeUiOp::SetAgentCollapsed {
+                node: "/a.project/b.shader".into(),
+                collapsed: false,
+            }]
+        );
     }
 }

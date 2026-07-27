@@ -63,18 +63,12 @@ pub fn ShaderFace(
         let Some(handler) = on_action else {
             return;
         };
-        if !agent_collapsed {
-            // Collapsing: mirror the draft into core FIRST, so it also
-            // survives a full card remount while collapsed.
-            handler.call(node_ui_action(NodeUiOp::SetDraft {
-                node: toggle_node.clone(),
-                draft: draft.peek().clone(),
-            }));
+        // The shared choreography (mirror-then-flip on collapse, flip
+        // alone on expand) lives in core so the face e2e drives the exact
+        // same op sequence — see `NodeUiOp::toggle_agent_section`.
+        for op in NodeUiOp::toggle_agent_section(&toggle_node, agent_collapsed, &draft.peek()) {
+            handler.call(node_ui_action(op));
         }
-        handler.call(node_ui_action(NodeUiOp::SetAgentCollapsed {
-            node: toggle_node.clone(),
-            collapsed: !agent_collapsed,
-        }));
     };
 
     rsx! {
