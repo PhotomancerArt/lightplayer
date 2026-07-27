@@ -50,6 +50,12 @@ flag), and ONE SVG path draws the fill, border, and shadow for the whole shape.
   contracts are gone; alignment cases need no special-casing.
 - Popover chrome is JS-measured: rendering depends on `getBoundingClientRect`
   and re-measurement on scroll/resize (this was already true of positioning).
+  *Amended 2026-07-26 — content-resize handling:* scroll/resize alone missed
+  panel CONTENT growth while open, leaving outline/clip/position stale
+  (`docs/defects/2026-07-26-popover-outline-stale-on-content-resize.md`); a
+  `ResizeObserver` on the panel now feeds the same rAF-coalesced re-measure,
+  with an epsilon gate on `panel_size` writes so observe→measure→set can't
+  loop.
 - The panel and trigger paint no background/border of their own while open;
   consumer `popup_class` chrome is neutralized via `ux-svg-popover-panel`.
 - Geometry is unit-testable on the host; visual regressions are covered by the

@@ -58,6 +58,52 @@ fn open_popover() -> Element {
     }
 }
 
+#[story(
+    description = "An open popover whose panel content grows after mount; the merged outline and clip must fit the grown content."
+)]
+fn content_growth() -> Element {
+    rsx! {
+        section { class: "tw:min-h-96 tw:pt-16",
+            div { class: "tw:flex tw:justify-end tw:pr-24", GrowingPopoverStory {} }
+        }
+    }
+}
+
+/// An `initially_open` popover that grows its panel one effect tick after
+/// mount — deterministically, no timers — so the capture exercises the
+/// content-resize re-measure path (panel ResizeObserver). The panel's
+/// `data-story-wait` stays up until the post-growth stabilization measure
+/// lands, so the PNG always shows the settled, grown outline.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn GrowingPopoverStory() -> Element {
+    let mut grown = use_signal(|| false);
+    use_effect(move || grown.set(true));
+    rsx! {
+        IconPopoverButton {
+            class: "ux-node-ui-popup-trigger".to_string(),
+            open_class: "ux-node-ui-popup-trigger ux-node-ui-popup-trigger-open".to_string(),
+            icon: StudioIconName::BoundValue,
+            icon_size: 13,
+            label: "Growing details".to_string(),
+            title: "Growing details".to_string(),
+            popup_class: "ux-node-ui-popup ux-popover-story-panel".to_string(),
+            chrome_class: "ux-popover-chrome-accent".to_string(),
+            placement: PopoverPlacement::BottomEnd,
+            initially_open: true,
+            div { class: "ux-node-ui-popup-kicker", "popover" }
+            strong { "Growing panel" }
+            p { "This panel grew after it was first measured." }
+            if grown() {
+                div { class: "ux-node-ui-binding-section ux-node-ui-bus-binding-section",
+                    div { class: "ux-node-ui-binding-heading", "grown block" }
+                    p { "Added one effect tick after mount; the outline and clip-path must contain it." }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PopoverStoryButton(
