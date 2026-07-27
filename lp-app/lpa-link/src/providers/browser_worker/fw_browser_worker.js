@@ -16,7 +16,22 @@ let tickMode = "self_ticking";
 let selfTickTimer = null;
 let lastTickAtMs = null;
 
+// Instance-fatal state. fw-browser builds with panic=abort: a Rust panic
+// inside a wasm export escapes as a WebAssembly.RuntimeError WITHOUT
+// running Rust drops, leaving instance state (the runtime registry's
+// RefCell borrow flag) permanently leaked. Once that happens the instance
+// is condemned — calling any further export just aborts again
+// (panic_already_borrowed), burying the primary panic under a cascade.
+// Non-null = poisoned; holds the composed fatal message.
+let fatal = null;
+
 self.onmessage = async (event) => {
+  if (fatal != null) {
+    // Condemned instance: answer every message with the fatal status so
+    // host polls fail fast instead of timing out. Never touch wasm again.
+    postFatalStatus();
+    return;
+  }
   try {
     const message = event.data || {};
     switch (message.kind) {
@@ -72,6 +87,12 @@ self.onmessage = async (event) => {
         requireBooted();
         postMany(fwBrowser.drain_output_json(targetRuntime(message)));
         break;
+      case "debug_force_panic":
+        // Verification hook for the instance-fatal recovery path: panics
+        // inside the wasm instance, condemning it for real. Test-only.
+        requireBooted();
+        fwBrowser.debug_force_panic();
+        break;
       case "start":
       case "stop":
         requireBooted();
@@ -83,6 +104,9 @@ self.onmessage = async (event) => {
         throw new Error(`unknown worker message kind: ${message.kind}`);
     }
   } catch (error) {
+    if (handleIfInstanceFatal(error)) {
+      return;
+    }
     console.error("[fw-browser-worker]", error);
     self.postMessage({
       kind: "status",
@@ -155,6 +179,9 @@ function previewFrame(message) {
       [pixels.buffer],
     );
   } catch (error) {
+    if (handleIfInstanceFatal(error)) {
+      return;
+    }
     self.postMessage({
       kind: "preview_error",
       runtime_id: runtimeId,
@@ -177,6 +204,9 @@ function destroyRuntime(message) {
     fwBrowser.destroy_runtime(runtimeId);
     self.postMessage({ kind: "runtime_destroyed", runtime_id: runtimeId });
   } catch (error) {
+    if (handleIfInstanceFatal(error)) {
+      return;
+    }
     self.postMessage({
       kind: "preview_error",
       runtime_id: runtimeId,
@@ -195,6 +225,9 @@ function attachSurface(message) {
     postMany(fwBrowser.drain_output_json(runtimeId));
     self.postMessage({ kind: "surface_attached", runtime_id: runtimeId });
   } catch (error) {
+    if (handleIfInstanceFatal(error)) {
+      return;
+    }
     self.postMessage({
       kind: "preview_error",
       runtime_id: runtimeId,
@@ -228,6 +261,9 @@ function presentFrame(message) {
       wasm_memory_bytes: wasmExports?.memory?.buffer?.byteLength || 0,
     });
   } catch (error) {
+    if (handleIfInstanceFatal(error)) {
+      return;
+    }
     self.postMessage({
       kind: "preview_error",
       runtime_id: runtimeId,
@@ -256,6 +292,9 @@ function startSelfTick() {
     try {
       postMany(fwBrowser.tick_runtime(bootRuntimeId, deltaMs));
     } catch (error) {
+      if (handleIfInstanceFatal(error)) {
+        return;
+      }
       console.error("[fw-browser-worker] self-tick failed", error);
       self.postMessage({
         kind: "status",
@@ -264,6 +303,73 @@ function startSelfTick() {
       });
     }
   }, SELF_TICK_INTERVAL_MS);
+}
+
+// Classify an exception that escaped a wasm export call. A string throw
+// is a wasm-bindgen `Result::Err` — the export returned normally, the
+// instance is intact. A WebAssembly.RuntimeError is a panic=abort trap:
+// Rust drops were skipped and the instance is condemned. Anything else
+// (e.g. a foreign JS exception that crossed wasm frames, also skipping
+// drops) is ambiguous, so probe the instance: runtime_count() takes the
+// exact RefCell borrow a leaked borrow_mut poisons, so it aborts iff the
+// instance is dead.
+function isInstanceFatal(error) {
+  if (typeof error === "string") {
+    return false;
+  }
+  if (error instanceof WebAssembly.RuntimeError) {
+    return true;
+  }
+  if (!booted || fwBrowser == null) {
+    // Pre-boot failures (module load, missing paths) keep the ordinary
+    // error path — there is no instance to condemn yet.
+    return false;
+  }
+  try {
+    fwBrowser.runtime_count();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+// Route an exception that escaped a wasm export: condemn the instance
+// when it is instance-fatal. Returns true when the error was absorbed
+// into the fatal state (callers stop; the fatal status speaks for them).
+function handleIfInstanceFatal(error) {
+  if (fatal != null) {
+    return true;
+  }
+  if (!isInstanceFatal(error)) {
+    return false;
+  }
+  markFatal(error);
+  return true;
+}
+
+// Condemn the wasm instance: stop the clock, compose the fatal message
+// (preferring the primary panic the fw-browser panic hook stashed on the
+// worker global over the escaped error's generic trap text), and post the
+// fatal status. The Worker itself stays alive — the host owns its
+// lifecycle and recovers by spawning a fresh Worker.
+function markFatal(error) {
+  const primary = self.__lp_last_panic;
+  delete self.__lp_last_panic;
+  if (selfTickTimer != null) {
+    clearInterval(selfTickTimer);
+    selfTickTimer = null;
+  }
+  const escaped = String(error?.stack || error);
+  fatal =
+    primary != null
+      ? `browser worker instance fatal: ${primary} (escaped: ${escaped})`
+      : `browser worker instance fatal: ${escaped}`;
+  console.error("[fw-browser-worker]", fatal);
+  postFatalStatus();
+}
+
+function postFatalStatus() {
+  self.postMessage({ kind: "status", status: "fatal", message: fatal });
 }
 
 function requireBooted() {

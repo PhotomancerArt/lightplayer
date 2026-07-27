@@ -24,16 +24,32 @@ use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
     DeviceController, DeviceOp, NodeRevertOp, ProjectConnectResult, ProjectController,
-    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePool,
-    ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView,
-    UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress,
-    UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
+    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
+    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiNotice, UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent,
+    UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
 /// (D32: "quiet periodic retry" — calm enough to never fight the other
 /// holder, fast enough that closing the other tab feels responsive).
 const PORT_HELD_RETRY_SECS: f64 = 5.0;
+
+/// Flap guard for the sim crash auto-reboot: one reboot per window. A
+/// crash landing within this many seconds of the previous auto-reboot
+/// means the loaded project crashes the worker itself — rebooting again
+/// would loop, so the session stays Failed for manual restart.
+const SIM_CRASH_REBOOT_GUARD_SECS: f64 = 30.0;
+
+/// Whether a fresh sim crash at `now` may auto-reboot, given when the
+/// previous auto-reboot ran (`None` = never; epoch seconds).
+fn sim_crash_reboot_allowed(last_reboot_at: Option<f64>, now: f64, guard_secs: f64) -> bool {
+    match last_reboot_at {
+        None => true,
+        Some(last) => now - last >= guard_secs,
+    }
+}
 
 pub struct StudioController {
     device: DeviceController,
@@ -103,6 +119,11 @@ pub struct StudioController {
     /// card). One slot because the pool holds one hardware session; this
     /// grows into a per-identity map with the pool.
     device_card_op: Option<(Option<String>, Rc<RefCell<crate::CardOp>>)>,
+    /// When the last sim crash auto-reboot ran (`None` = never). Epoch
+    /// seconds on the injected clock; the flap guard: a second crash
+    /// within [`SIM_CRASH_REBOOT_GUARD_SECS`] stays Failed for manual
+    /// restart instead of reboot-looping a crashing project.
+    sim_crash_reboot_at: Option<f64>,
     /// Injected randomness for identity minting (`dev_` uids). The web
     /// shell installs crypto randomness at startup; the default is a
     /// clock-derived fallback good enough for tests.
@@ -167,6 +188,7 @@ impl StudioController {
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
             device_card_op: None,
+            sim_crash_reboot_at: None,
             random: Rc::new(clock_fallback_random),
             settings: crate::app::settings::SettingsStore::default(),
             on_user_settings: None,
@@ -1933,6 +1955,120 @@ impl StudioController {
         }
     }
 
+    /// Sim crash detection + guarded auto-reboot, riding the tick cadence
+    /// like [`Self::run_due_connect_retry`] (poisoned-instance defect: a
+    /// panic escaping the worker's panic=abort wasm instance condemns it;
+    /// the link layer reports it as a sticky per-session fatal message).
+    ///
+    /// Detection is edge-triggered — a sim session not yet marked
+    /// [`ServerFailureKind::SimCrashed`] whose connector reports a fatal —
+    /// so the recovery decision runs once per crash. When the flap guard
+    /// allows, the dead session is torn down (the Worker terminates) and
+    /// the recorded [`SimLoadedProject`](crate::SimLoadedProject) is
+    /// reopened through the normal open flow; otherwise the session stays
+    /// Failed and the card offers manual restart (the open flow tears a
+    /// crashed session down itself, see `open_from_home_inner`).
+    pub async fn run_due_sim_crash_recovery(&mut self) {
+        let Some(sim_id) = self.detect_sim_crash() else {
+            return;
+        };
+        let now = (self.now_secs)();
+        if !sim_crash_reboot_allowed(self.sim_crash_reboot_at, now, SIM_CRASH_REBOOT_GUARD_SECS) {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Error,
+                UiLogOrigin::Studio,
+                "Simulator keeps crashing; not restarting automatically. \
+                 Reopen the project to try again.",
+            ));
+            self.mark_dirty();
+            return;
+        }
+        self.sim_crash_reboot_at = Some(now);
+        let loaded = self
+            .pool
+            .session(sim_id)
+            .and_then(|session| session.sim_loaded_project().cloned());
+        self.teardown_crashed_sim(sim_id).await;
+        // The crashed session's project still holds its host-side tab lock
+        // (quiesce parks it for the settle points, which run at batch end —
+        // too late for this same-batch reopen). Release it now so the
+        // reopen can lock the project again.
+        self.project.release_closed_library_projects().await;
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Warn,
+            UiLogOrigin::Studio,
+            "Simulator crashed and was restarted; unsaved changes may be lost.",
+        ));
+        if let Some(project) = loaded {
+            // Reboot with the last-known project: the library head — the
+            // crashed instance held the applied-but-unsaved overlay, which
+            // died with it either way.
+            if let Err(error) = self
+                .open_from_home(PendingOpen::Package(project.uid), UxUpdateSink::noop())
+                .await
+            {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Error,
+                    UiLogOrigin::Studio,
+                    format!("simulator restart failed: {error}"),
+                ));
+            }
+        }
+        self.mark_dirty();
+    }
+
+    /// Edge-detect a crashed sim worker: the sim session's connector
+    /// reports a sticky instance-fatal message and the session is not yet
+    /// marked crashed. Marks it Failed with
+    /// [`ServerFailureKind::SimCrashed`], surfaces the primary panic on
+    /// the console, and returns the session id.
+    fn detect_sim_crash(&mut self) -> Option<crate::RuntimeId> {
+        let session = self.pool.sim_session()?;
+        if matches!(
+            session.server_state(),
+            ServerState::Failed {
+                kind: ServerFailureKind::SimCrashed,
+                ..
+            }
+        ) {
+            return None;
+        }
+        let RuntimePayload::Sim(sim) = session.payload() else {
+            return None;
+        };
+        let message = sim.connector.session_fatal(&sim.session.id)?;
+        let sim_id = session.id();
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Error,
+            UiLogOrigin::Studio,
+            format!("Simulator crashed: {message}"),
+        ));
+        if let Some(session) = self.pool.session_mut(sim_id) {
+            session.fail_with_kind(message, ServerFailureKind::SimCrashed);
+        }
+        self.mark_dirty();
+        Some(sim_id)
+    }
+
+    /// Tear down a crashed sim session: quiesce the editor lens when it
+    /// sits on it, take the session out of the pool, and close its payload
+    /// (terminating the dead Worker). Close errors are logged, not fatal —
+    /// the worker is already dead.
+    async fn teardown_crashed_sim(&mut self, sim_id: crate::RuntimeId) {
+        if self.pool.lens() == Some(sim_id) {
+            self.quiesce_lens();
+        }
+        if let Some(session) = self.pool.remove_kind(crate::RuntimeKind::Sim) {
+            if let Err(error) = self.device.disconnect(Some(session.into_payload())).await {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("crashed simulator teardown: {error}"),
+                ));
+            }
+        }
+    }
+
     /// Land a connect flow's outcome in the pool. P2 capacity semantics:
     /// only the KIND being connected is touched — `Opened`, `Cancelled`,
     /// and failures clear that kind's slot (matching the retired
@@ -2309,6 +2445,28 @@ impl StudioController {
             .is_some_and(|session| !session.is_sim())
         {
             self.quiesce_lens();
+        }
+        // A crashed sim (SimCrashed: its worker's wasm instance is
+        // poisoned) cannot be reconnected — the worker never answers
+        // again. Tear it down here so the open falls through to a fresh
+        // install below; this is also the MANUAL restart path when the
+        // auto-reboot flap guard left the session Failed.
+        if self.pool.sim_session().is_some_and(|sim| {
+            matches!(
+                sim.server_state(),
+                ServerState::Failed {
+                    kind: ServerFailureKind::SimCrashed,
+                    ..
+                }
+            )
+        }) {
+            let sim_id = self.pool.sim_session().map(crate::RuntimeSession::id);
+            if let Some(sim_id) = sim_id {
+                self.teardown_crashed_sim(sim_id).await;
+                // Free the dead session's project tab lock now — the settle
+                // points run after this open, which needs the lock itself.
+                self.project.release_closed_library_projects().await;
+            }
         }
         // The open targets THE sim session: reuse it when it exists — the
         // lens moves onto it (the editor mirror opens on the sim) — and
@@ -4123,6 +4281,17 @@ mod tests {
         ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTarget, ProjectState,
         ProjectSyncPhase, ServerFailureKind, ServerState, StudioServerClient, UiIssue,
     };
+
+    #[test]
+    fn sim_crash_reboot_guard_allows_first_and_expired_never_within_window() {
+        // Never rebooted: always allowed.
+        assert!(sim_crash_reboot_allowed(None, 100.0, 30.0));
+        // Inside the window (including the same instant): suppressed.
+        assert!(!sim_crash_reboot_allowed(Some(100.0), 100.0, 30.0));
+        assert!(!sim_crash_reboot_allowed(Some(100.0), 129.9, 30.0));
+        // Window elapsed: allowed again.
+        assert!(sim_crash_reboot_allowed(Some(100.0), 130.0, 30.0));
+    }
 
     #[test]
     fn initial_snapshot_selects_provider() {

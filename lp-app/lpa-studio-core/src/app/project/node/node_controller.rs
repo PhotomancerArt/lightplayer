@@ -9,9 +9,9 @@ use crate::{
     ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
     ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
     ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction,
-    UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeHeader, UiNodeSection,
-    UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview, UiProductRef, UiProductTrackingState,
-    UiSlotAsset, UiStatus,
+    UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeFace, UiNodeHeader,
+    UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview, UiProductRef,
+    UiProductTrackingState, UiSlotAsset, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -190,13 +190,16 @@ impl NodeController {
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
         always_live: Option<&UiProductRef>,
     ) -> UiNodeView {
-        let children = self.ui_children_with_product_previews(
+        let mut children = self.ui_children_with_product_previews(
             product_preview,
             edits,
             extra_config,
             asset_editor,
             always_live,
         );
+        // Dirty aggregates over the FULL child list, before any face-driven
+        // suppression: a playlist face hides non-active child cards, but
+        // their pending edits still count toward this node's summary.
         let dirty = self.own_slots_dirty_summary(edits)
             + children
                 .iter()
@@ -223,6 +226,12 @@ impl NodeController {
             always_live,
         );
         self.embed_asset_editors(&mut sections, asset_editor);
+        // The face derives FROM the finished sections (previews, edit
+        // states, and inline editors included) and the built child DTOs,
+        // so it is built last. The playlist arm filters `children` down to
+        // the active entry's child (the "one live surface" rule — see
+        // `node_face_builder::kind_face`).
+        let face = self.kind_face(&sections, &mut children);
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
             .with_header_actions(node_header_actions(&self.address, &dirty))
@@ -231,7 +240,31 @@ impl NodeController {
         view.action = Some(node_focus_action(self));
         view.collapsed = self.state.collapsed;
         view.issues = self.issues.clone();
+        view.face = face;
         view
+    }
+
+    /// Raw tree `ty` discriminant for this node (matches `ShaderDef::KIND`,
+    /// `FixtureDef::KIND`, `PlaylistDef::KIND`, …).
+    fn node_ty(&self) -> Option<&str> {
+        self.address
+            .path()
+            .0
+            .last()
+            .map(|segment| segment.ty.as_str())
+    }
+
+    /// Kind-specific permanent face for this node's card, keyed on the tree
+    /// `ty` ([`Self::node_ty`]) and derived from the already-projected
+    /// sections and child DTOs (node-card P3: shader + fixture; P4:
+    /// playlist, whose arm also filters `children` to the active entry's
+    /// child). Unknown kinds stay on the generic fallback permanently.
+    fn kind_face(
+        &self,
+        sections: &[UiNodeSection],
+        children: &mut Vec<UiNodeChild>,
+    ) -> Option<UiNodeFace> {
+        super::node_face_builder::kind_face(self.node_ty()?, sections, children)
     }
 
     /// True when any of this node's slot roots carries a top-level field
@@ -534,12 +567,16 @@ impl NodeController {
                     asset_editor,
                     always_live,
                 );
+                // Dirty rolls up the FULL nested-child list before the face
+                // derivation may suppress non-active playlist children —
+                // hidden cards keep counting their pending edits.
                 view.dirty = child.own_slots_dirty_summary(edits)
                     + view
                         .children
                         .iter()
                         .map(|nested| nested.dirty)
                         .sum::<DirtySummary>();
+                view.face = child.kind_face(&view.sections, &mut view.children);
                 view.header_actions = node_header_actions(&child.address, &view.dirty);
                 view
             })

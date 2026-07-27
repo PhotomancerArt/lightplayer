@@ -35,6 +35,13 @@ pub struct BrowserWorkerHandle {
     worker: Worker,
     outputs: Rc<RefCell<Vec<BrowserOutputEnvelope>>>,
     preview_frames: Rc<RefCell<Vec<PreviewPixelFrame>>>,
+    /// Sticky instance-fatal message. Set (first message wins — it carries
+    /// the primary panic) when the worker posts `status: "fatal"`: its wasm
+    /// instance is condemned (escaped panic=abort trap) and will never
+    /// answer again, so [`Self::post`] fails fast instead of feeding it.
+    /// The envelope still drains through [`Self::take_outputs`] so
+    /// consumers can log it.
+    fatal: Rc<RefCell<Option<String>>>,
 }
 
 impl BrowserWorkerHandle {
@@ -45,8 +52,10 @@ impl BrowserWorkerHandle {
             .map_err(|error| LinkError::other(format!("{error:?}")))?;
         let outputs = Rc::new(RefCell::new(Vec::new()));
         let preview_frames = Rc::new(RefCell::new(Vec::new()));
+        let fatal = Rc::new(RefCell::new(None));
         let output_ref = Rc::clone(&outputs);
         let preview_ref = Rc::clone(&preview_frames);
+        let fatal_ref = Rc::clone(&fatal);
         let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             let data = event.data();
             // The binary preview path is intercepted before serde: its pixel
@@ -64,7 +73,25 @@ impl BrowserWorkerHandle {
                 return;
             }
             match serde_wasm_bindgen::from_value::<BrowserOutputEnvelope>(data) {
-                Ok(envelope) => output_ref.borrow_mut().push(envelope),
+                Ok(envelope) => {
+                    // Record instance-fatality before the envelope joins the
+                    // stream; the first fatal wins (it carries the primary
+                    // panic — later ones are the sticky re-post).
+                    if let BrowserOutputEnvelope::Status {
+                        status, message, ..
+                    } = &envelope
+                    {
+                        if status == "fatal" {
+                            let mut fatal = fatal_ref.borrow_mut();
+                            if fatal.is_none() {
+                                *fatal = Some(message.clone().unwrap_or_else(|| {
+                                    "browser worker instance fatal".to_string()
+                                }));
+                            }
+                        }
+                    }
+                    output_ref.borrow_mut().push(envelope);
+                }
                 Err(error) => output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
                     runtime_id: 0,
                     level: "error".to_string(),
@@ -108,6 +135,7 @@ impl BrowserWorkerHandle {
             worker,
             outputs,
             preview_frames,
+            fatal,
         })
     }
 
@@ -151,6 +179,12 @@ impl BrowserWorkerHandle {
     }
 
     pub fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), LinkError> {
+        // A condemned instance never answers again — fail the send fast
+        // (with the primary panic) instead of feeding the dead worker and
+        // letting consumers discover it via poll timeouts.
+        if let Some(message) = self.fatal.borrow().as_ref() {
+            return Err(LinkError::other(message.clone()));
+        }
         let value = serde_wasm_bindgen::to_value(envelope)
             .map_err(|error| LinkError::other(error.to_string()))?;
         self.worker
@@ -205,6 +239,13 @@ impl BrowserWorkerHandle {
     /// Take binary preview frames received since the last call.
     pub fn take_preview_frames(&mut self) -> Vec<PreviewPixelFrame> {
         core::mem::take(&mut *self.preview_frames.borrow_mut())
+    }
+
+    /// The worker's sticky instance-fatal message, once it has reported
+    /// one (`None` while the instance is healthy). Set permanently by the
+    /// first `status: "fatal"` envelope; carries the primary panic.
+    pub fn fatal_message(&self) -> Option<String> {
+        self.fatal.borrow().clone()
     }
 
     pub fn terminate(&self) {
@@ -278,7 +319,7 @@ fn boot_error_message(output: &BrowserOutputEnvelope) -> Option<String> {
     match output {
         BrowserOutputEnvelope::Status {
             status, message, ..
-        } if status == "error" => Some(
+        } if status == "error" || status == "fatal" => Some(
             message
                 .clone()
                 .unwrap_or_else(|| "worker reported error status".to_string()),
