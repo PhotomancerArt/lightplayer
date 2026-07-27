@@ -107,24 +107,48 @@ live-sim push enters — controls added no new ops and no second door.
 
 All face sections (output, controls, agent, entries, code, advanced) use
 one `NodeCardSection` grammar: full-bleed content separated by 1px
-muted dividers — no box-in-box — with a slim vertical label rail on the
-**left** edge (bottom-to-top label, reads like a book spine) when
+hairline dividers — no box-in-box — with a slim vertical label rail on
+the **left** edge (bottom-to-top label, reads like a book spine) when
 expanded and a slim horizontal row (chevron + label + summary) when
-collapsed. The agent section labels its role explicitly ("edits this
-shader with you").
+collapsed. The pre-merge live review hardened the grammar's legibility:
+the divider is `border-strong` (the original `border-muted` hairline
+rendered but sat below the perceptual threshold against the card surface
+on real displays), and the rail and the collapsed row are styled as **two
+states of one control** — identical label typography (uppercase
+small-caps in both writing modes) and one shared chevron glyph, pointing
+right on the collapsed row and down at the top of a toggleable rail
+(dimmed at rest), each rotating toward the other state on hover
+(`prefers-reduced-motion` disables the transition). Non-toggleable
+sections (the permanent face) keep the rail as a pure label: no chevron,
+no hover tint, dimmer text. The agent section labels its role explicitly
+("edits this shader with you").
 
-### Control popover: the control IS the trigger
+### Control popover: the label is the trigger, the control is the visual
 
-Opening a panel control's detail ⓘ merges the **whole live control** with
-its aspects panel via the contiguous-outline popover — "diving into the
-control", not a duplicate rendering. `base/popover.rs` gained an anchored
-mode (`anchor_id`/`anchor_visual`): the merged outline measures an
-external anchor element instead of the trigger button's rect, the
-top-layer visual paints the anchor's live copy, and clicks inside it do
-not dismiss (it hosts working controls). `outline.rs` untouched. The
-popover content is the SAME aspect list as the backing slot row
-(`SlotDetailButton`/`DetailPopover` reused, not forked), so binding
-info, unbind, and edit state appear identically in both places.
+A panel control's **label is the detail trigger**: a real button carrying
+the control name plus a small info glyph, so keyboard focus and
+Enter/Space work. (The first landing used a hover-revealed corner ⓘ; the
+live review killed it — it appeared on top of the knob it described.)
+Opening still merges the **whole live control** with its aspects panel
+via the contiguous-outline popover — "diving into the control", not a
+duplicate rendering. `base/popover.rs`'s anchored mode
+(`anchor_id`/`anchor_visual`) is unchanged: the merged outline measures
+the control element instead of the trigger button's rect, the top-layer
+visual paints the control's live copy, and clicks inside it do not
+dismiss (it hosts working controls). `outline.rs` untouched. The popover
+content is the SAME aspect list as the backing slot row
+(`SlotDetailButton`/`DetailPopover` reused, not forked — `DetailPopover`
+gained a custom-trigger mode beside its icon trigger), so binding info,
+unbind, and edit state appear identically in both places.
+
+The label also carries the slot's **state color**, reusing the slot-row
+affordance ladder (`primary_affordance`): red failed/invalid, warning
+unsaved (live-blue when the edit is transient), working while saving,
+violet bound, quiet otherwise — green stays valid-only. This retired the
+separate edit-state dot: the label now says what the dot said, and the
+overlap case (edited while bound) loses nothing because the widget
+itself keeps the violet bound family while the label wears the edit
+color.
 
 ### Playlist: one live surface
 
@@ -171,15 +195,18 @@ suites plus face e2e tests against a real server.
   baseline churn.
 - Firmware graph: SlotMeta/StaticSlotMeta grew additive optional fields
   only; riscv release-esp32 check stays mandatory when lpc-model moves.
-- Harvested refinement list (post-landing round, not this slice): bound
-  knob shows the inert authored default rather than the live bus value;
-  panel ⓘ popover titles use raw address paths (want friendly labels);
-  playlist entry thumbs are name-only until a preview snapshot lands;
-  story fixtures fake the selection look on the mock active child;
-  the knob advertises `role="slider"` but is pointer-only (no keyboard
-  handler/tabindex yet — the fader's native range input is fine);
-  ACTIVE-placard-follow under a live trigger still needs a hardware walk
-  (browser sim has no virtual button).
+- Harvested refinement list (post-landing round, not this slice; the
+  live-review round already landed section-divider legibility, the
+  rail/row collapse affordance, and the label trigger replacing the
+  corner ⓘ and the edit-state dot): bound knob shows the inert authored
+  default rather than the live bus value; panel detail popover titles
+  use raw address paths (want friendly labels); playlist entry thumbs
+  are name-only until a preview snapshot lands; story fixtures fake the
+  selection look on the mock active child; the knob advertises
+  `role="slider"` but is pointer-only (no keyboard handler/tabindex yet
+  — the label trigger and the fader's native range input are keyboard
+  targets); ACTIVE-placard-follow under a live trigger still needs a
+  hardware walk (browser sim has no virtual button).
 
 ## Alternatives Considered
 
@@ -198,6 +225,11 @@ suites plus face e2e tests against a real server.
   of the control inside the popup): rejected for the anchored mode —
   "the button IS the whole actual control"; duplication risked drift
   between the two renderings.
+- **Hover-revealed corner ⓘ as the popover trigger**: the P2c landing
+  shape; rejected at the live review — the ⓘ materialized on top of the
+  knob it described, and hover-only affordances hid the door. The label
+  button (name + info glyph, state-colored) replaced it; the anchored
+  "dive into the control" visual survived unchanged.
 - **Fully data-driven faces** (face layout from metadata): rejected —
   faces are product surfaces, hand-built per kind; metadata only says
   which slots sit on the panel and how a value edits.

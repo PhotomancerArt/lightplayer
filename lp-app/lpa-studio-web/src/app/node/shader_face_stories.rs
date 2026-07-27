@@ -22,7 +22,7 @@ fn ShaderCardCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "Idle shader card: preview hero, knob row (live-edited scale dot, mirror toggle), condensed agent chat, collapsed code/advanced drawers."
+    description = "Idle shader card: preview hero, knob row (blue live-edited scale label, mirror toggle), condensed agent chat, collapsed code/advanced drawers."
 )]
 fn idle() -> Element {
     rsx! {

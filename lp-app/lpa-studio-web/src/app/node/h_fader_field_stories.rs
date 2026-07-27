@@ -2,10 +2,10 @@
 //! brightness control; build A — ticks above, block grip — settled at the
 //! P2c re-gate).
 //!
-//! Coverage: default, the violet bound state, unsaved (warning dot),
-//! live-transient (blue dot), and the detail popover pinned open — the
-//! control is the trigger, its outline merged with the aspect card (P2c
-//! item 3).
+//! Coverage: default, the violet bound state, unsaved (warning label),
+//! live-transient (blue label), and the detail popover pinned open — the
+//! LABEL is the trigger, and the control's outline merges with the aspect
+//! card (P2c item 3).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiNodeDirtyState, UiSlotFieldState, UiSlotSourceState};
@@ -57,7 +57,7 @@ fn bound() -> Element {
     }
 }
 
-#[story(description = "Unsaved edit: the warning dot beside the readout.")]
+#[story(description = "Unsaved edit: the warning-colored label.")]
 fn dirty() -> Element {
     rsx! {
         FaderStoryCard {
@@ -74,7 +74,7 @@ fn dirty() -> Element {
 }
 
 #[story(
-    description = "Live transient edit: the blue dot — brightness rides the running project, not Save."
+    description = "Live transient edit: the blue label — brightness rides the running project, not Save."
 )]
 fn live() -> Element {
     rsx! {
@@ -94,7 +94,7 @@ fn live() -> Element {
 }
 
 #[story(
-    description = "Detail pinned open on a bound fader: the control IS the trigger — its outline merges with the identical slot-row aspect card below into one contiguous shape (P2c item 3)."
+    description = "Detail pinned open via the LABEL trigger on a bound fader: the control's outline merges with the identical slot-row aspect card below into one contiguous shape (P2c item 3)."
 )]
 fn detail_open() -> Element {
     rsx! {

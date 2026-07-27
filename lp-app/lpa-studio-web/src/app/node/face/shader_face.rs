@@ -24,7 +24,8 @@ pub(crate) const AGENT_SUBLINE: &str = "edits this shader with you";
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ShaderFace(
     face: UiShaderFaceData,
-    /// Open this control's corner ⓘ popover on first render (stories).
+    /// Open this control's label-trigger detail popover on first render
+    /// (stories).
     #[props(default = None)]
     detail_open_control: Option<String>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,

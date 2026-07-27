@@ -2,18 +2,24 @@
 
 use dioxus::prelude::*;
 
-use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIconName};
+use crate::base::{IconMenuButton, IconMenuTone, PopoverButton, PopoverPlacement, StudioIconName};
 
-/// Icon-triggered popover presenting the standard Studio "detail card": a
-/// 320px-capped, sectioned surface. One base sits under every detail popup
-/// (slot detail, project pending-edit popup, …) so the card chrome is never
-/// copied per surface.
+use super::icon_menu::icon_menu_chrome_class;
+
+/// Popover presenting the standard Studio "detail card": a 320px-capped,
+/// sectioned surface. One base sits under every detail popup (slot detail,
+/// project pending-edit popup, …) so the card chrome is never copied per
+/// surface.
 ///
-/// The base owns the trigger (via [`IconMenuButton`]), placement, and card
-/// chrome; content is arbitrary, but section rows should use
-/// [`DetailSection`] (or [`detail_popover_section_class`] for bespoke
-/// section markup) so dividers, titles, and status tints stay consistent
-/// across consumers.
+/// The base owns the trigger, placement, and card chrome; content is
+/// arbitrary, but section rows should use [`DetailSection`] (or
+/// [`detail_popover_section_class`] for bespoke section markup) so dividers,
+/// titles, and status tints stay consistent across consumers.
+///
+/// The trigger is the toned `icon` (via [`IconMenuButton`]) by default; a
+/// custom `trigger` element (panel-control labels) replaces it while keeping
+/// the identical toned card chrome, so both trigger shapes open the same
+/// popup.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn DetailPopover(
@@ -24,6 +30,17 @@ pub fn DetailPopover(
     #[props(default = PopoverPlacement::BottomEnd)] placement: PopoverPlacement,
     #[props(default = false)] active: bool,
     #[props(default = false)] initially_open: bool,
+    /// Custom trigger content replacing the icon trigger (the panel
+    /// control's label-as-trigger). Presentational only — the popover base
+    /// still owns the button.
+    #[props(default = None)]
+    trigger: Option<Element>,
+    /// Button class for the custom trigger at rest.
+    #[props(default = String::new())]
+    trigger_class: String,
+    /// Button class for the custom trigger while open.
+    #[props(default = String::new())]
+    trigger_open_class: String,
     /// Anchored mode pass-through (see `PopoverButton`): the detail card
     /// merges its outline with an external anchor element — "diving into
     /// the control" (node-card P2c item 3).
@@ -34,6 +51,25 @@ pub fn DetailPopover(
     anchor_visual: Option<Element>,
     children: Element,
 ) -> Element {
+    if let Some(trigger) = trigger {
+        return rsx! {
+            PopoverButton {
+                class: trigger_class,
+                open_class: trigger_open_class,
+                trigger,
+                label,
+                title,
+                popup_class: detail_popover_card_class().to_string(),
+                chrome_class: icon_menu_chrome_class(tone).to_string(),
+                placement,
+                initially_open,
+                anchor_id,
+                anchor_visual,
+                {children}
+            }
+        };
+    }
+
     rsx! {
         IconMenuButton {
             icon,

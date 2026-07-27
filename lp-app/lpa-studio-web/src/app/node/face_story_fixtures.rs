@@ -3,8 +3,8 @@
 //! Everything here is hand-built mock DTO data mirroring what the real
 //! face derivation (`node_face_builder`) produces, so the stories stay a
 //! faithful design record. Panel-control aspects are derived through a real
-//! `UiConfigSlot` (`visible_aspects()`), so the corner ⓘ popover content is
-//! byte-identical to what the backing slot row would show.
+//! `UiConfigSlot` (`visible_aspects()`), so the label-trigger popover
+//! content is byte-identical to what the backing slot row would show.
 
 use lpa_studio_core::{
     ArtifactLocation, ControllerId, ProjectEditorOp, ProjectNodeAddress, ProjectSlotAddress,
@@ -30,8 +30,8 @@ pub(crate) fn story_slot_address(path: &str) -> ProjectSlotAddress {
     )
 }
 
-/// One knob control. Aspects (the ⓘ popover) ride the equivalent config
-/// slot, so panel and row present identical detail.
+/// One knob control. Aspects (the label-trigger popover) ride the
+/// equivalent config slot, so panel and row present identical detail.
 pub(crate) fn knob_control(
     label: &str,
     value: f32,

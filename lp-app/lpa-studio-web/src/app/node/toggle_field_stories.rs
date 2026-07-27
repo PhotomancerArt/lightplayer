@@ -2,8 +2,8 @@
 //!
 //! Good-green is worn ONLY by the on state (green = good/valid — never
 //! selection, never binding); bound toggles ring violet in both states.
-//! Coverage: on (default), off, bound, unsaved, live, and the corner ⓘ
-//! pinned open.
+//! Coverage: on (default), off, bound, unsaved (warning label), live (blue
+//! label), and the detail popover pinned open via the label trigger.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiNodeDirtyState, UiSlotFieldState, UiSlotSourceState};
@@ -77,7 +77,7 @@ fn bound() -> Element {
     }
 }
 
-#[story(description = "Unsaved edit: the warning dot beside the readout.")]
+#[story(description = "Unsaved edit: the warning-colored label.")]
 fn dirty() -> Element {
     rsx! {
         ToggleStoryCard {
@@ -94,7 +94,7 @@ fn dirty() -> Element {
     }
 }
 
-#[story(description = "Live transient edit: the blue dot beside the readout.")]
+#[story(description = "Live transient edit: the blue label.")]
 fn live() -> Element {
     rsx! {
         ToggleStoryCard {
@@ -114,7 +114,7 @@ fn live() -> Element {
 }
 
 #[story(
-    description = "Corner ⓘ pinned open on a bound toggle: the identical slot-row detail popover."
+    description = "Detail pinned open via the LABEL trigger on a bound toggle: the identical slot-row detail popover."
 )]
 fn detail_open() -> Element {
     rsx! {

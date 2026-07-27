@@ -49,7 +49,10 @@ fn default_icon_menu_popup_class() -> &'static str {
     "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-3 tw:text-sm tw:text-muted-foreground tw:shadow-lg"
 }
 
-fn icon_menu_chrome_class(tone: IconMenuTone) -> &'static str {
+/// Popover chrome class for a tone: sets the merged-outline gradient
+/// variables on the top layer. Shared with [`crate::base::DetailPopover`]'s
+/// custom-trigger mode so a text trigger keeps the identical toned chrome.
+pub(crate) fn icon_menu_chrome_class(tone: IconMenuTone) -> &'static str {
     match tone {
         IconMenuTone::Quiet => "ux-popover-chrome-quiet",
         IconMenuTone::Neutral => "ux-popover-chrome-neutral",

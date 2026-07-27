@@ -40,7 +40,7 @@ pub fn NodePane(
     /// Open the face's advanced drawer on first render (stories).
     #[props(default = false)]
     face_advanced_drawer_open: bool,
-    /// Pin this face control's corner ⓘ popover open on first render
+    /// Pin this face control's label-trigger detail popover open on first render
     /// (stories).
     #[props(default = None)]
     face_detail_open_control: Option<String>,

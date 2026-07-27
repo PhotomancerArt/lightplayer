@@ -5,9 +5,9 @@
 //! Fields follow the stateless slot-field pattern (`value, state, address,
 //! on_action`) and dispatch through the standard slot write path
 //! (`SlotEditOp::SetValue`), so drags coalesce exactly like slot editor
-//! floods. [`PanelControl`] is the shared chrome: label, value + unit
-//! readout, edit-state dot, and the hover-revealed corner ⓘ opening the
-//! SAME detail popover as the backing slot row.
+//! floods. [`PanelControl`] is the shared chrome: the state-colored label
+//! button (name + info glyph — the detail trigger, opening the SAME
+//! popover as the backing slot row) and the value + unit readout.
 
 mod h_fader_field;
 mod knob_field;
