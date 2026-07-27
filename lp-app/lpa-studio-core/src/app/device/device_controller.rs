@@ -944,6 +944,11 @@ mod tests {
         let registry = LinkProviderRegistry::from_env(LinkEnv::default());
         let shared = registry.create_connector(LinkProviderKind::Fake).unwrap();
         let mut device = DeviceController::with_registry(registry);
+        #[allow(
+            unreachable_patterns,
+            reason = "providers beyond Fake are feature/target-gated, so the \
+                      wildcard arm is unreachable in some test configurations"
+        )]
         match &*shared {
             LinkConnector::Fake(provider) => {
                 provider.set_connect_error(Some("armed on the shared instance".to_string()));
