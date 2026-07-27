@@ -123,6 +123,14 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          - Your edits land as unsaved changes in the user's editor — staged \
          source and `upsert_param` records alike; the user can Save or \
          revert them. Say what you changed.\n\
+         - When the ENGINE rejects source that probes compile (a backend \
+         codegen bug, not your bug): spend at most 2–3 diagnostic calls \
+         narrowing it, then apply a workaround and tell the user the exact \
+         trigger so the developers can fix it. Do not spend the session \
+         hand-bisecting a compiler.\n\
+         - If you stage diagnostic or stripped-down sources, restage your \
+         best WORKING version before the run ends — never leave a \
+         diagnostic fragment as the user's staged shader.\n\
          - Your write surface is THIS shader's source plus its float param \
          records (`upsert_param`). For anything else (non-float params, \
          wiring buses, fixtures, other nodes), advise the user on what to do \
