@@ -20,11 +20,14 @@ use crate::{
     UiControlSampleFormat, UiError, UiIssue, UiProductPreview, UiProductPreviewFrame, UiProductRef,
 };
 
-const VISUAL_PRODUCT_PREVIEW_FRAME: UiProductPreviewFrame = UiProductPreviewFrame::VISUAL_DEFAULT;
-
 pub struct ProjectSync {
     view: ProjectView,
     phase: ProjectSyncPhase,
+    /// The resolution visual-product probes request. Runtime-tiered policy
+    /// pushed down by the project controller before each request build
+    /// (sim 32×32, device 16×16 — probe-performance plan); the engine
+    /// renders natively at whatever is asked.
+    visual_preview_frame: UiProductPreviewFrame,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
     /// Latest binding-graph snapshot, kept while a consumer subscribes.
     binding_graph: Option<WireBindingGraph>,
@@ -51,6 +54,7 @@ impl ProjectSync {
         Self {
             view: ProjectView::new(),
             phase: ProjectSyncPhase::Empty,
+            visual_preview_frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             product_previews: BTreeMap::new(),
             binding_graph: None,
             binding_graph_subscribed: false,
@@ -369,6 +373,13 @@ impl ProjectSync {
         self.binding_graph = Some(graph);
     }
 
+    /// Set the resolution visual-product probes request (runtime-tiered:
+    /// the project controller pushes the lens tier down before each
+    /// request build).
+    pub fn set_visual_preview_frame(&mut self, frame: UiProductPreviewFrame) {
+        self.visual_preview_frame = frame;
+    }
+
     /// Toggle the binding-graph probe on project reads. Unsubscribing drops
     /// the cached snapshot so stale topology never renders.
     pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
@@ -402,8 +413,8 @@ impl ProjectSync {
                         probes.push(ProjectProbeRequest::RenderProduct(
                             RenderProductProbeRequest {
                                 product: visual,
-                                width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
-                                height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
+                                width: self.visual_preview_frame.width,
+                                height: self.visual_preview_frame.height,
                                 format: WireTextureFormat::Srgb8,
                             },
                         ));
@@ -948,14 +959,34 @@ mod tests {
             request.probes[0],
             ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
                 product,
-                width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
-                height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
+                width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
+                height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                 format: WireTextureFormat::Srgb8,
             })
         );
         assert_eq!(
             sync.product_preview(&UiProductRef::from_visual_product(product)),
             Some(&UiProductPreview::Pending)
+        );
+    }
+
+    #[test]
+    fn device_tier_frame_flows_into_visual_probe_requests() {
+        let mut sync = ProjectSync::new();
+        let product = VisualProduct::new(NodeId::new(7), 2);
+
+        sync.set_visual_preview_frame(UiProductPreviewFrame::VISUAL_DEVICE);
+        let request =
+            sync.refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
+
+        assert_eq!(
+            request.probes[0],
+            ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
+                product,
+                width: UiProductPreviewFrame::VISUAL_DEVICE.width,
+                height: UiProductPreviewFrame::VISUAL_DEVICE.height,
+                format: WireTextureFormat::Srgb8,
+            })
         );
     }
 

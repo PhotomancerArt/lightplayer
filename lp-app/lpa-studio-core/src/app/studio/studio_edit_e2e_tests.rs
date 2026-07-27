@@ -1693,6 +1693,16 @@ fn accepted_apply_tightens_the_next_refresh_delay() {
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
+    // Completion-based pacing: a never-pulled lens is immediately due, so
+    // prime one passive pull; its completion stamp arms the device gap.
+    assert_eq!(
+        handle.delay.get(),
+        core::time::Duration::ZERO,
+        "a never-pulled lens session is immediately due"
+    );
+    handle.tx.send(StudioCommand::RefreshTick);
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
     assert_eq!(
         handle.delay.get(),
         DEVICE_REFRESH_INTERVAL,
@@ -1705,8 +1715,12 @@ fn accepted_apply_tightens_the_next_refresh_delay() {
     let snapshot = view.try_recv().expect("fetch emits a snapshot");
     let tab = find_asset_editor(&snapshot);
 
-    // An accepted apply opens the verdict-chase window: the published delay
-    // tightens so the compile verdict is pulled promptly.
+    // An accepted apply opens the verdict-chase window. The published delay
+    // is the tighter of the device gap and the chase interval — with the
+    // completion-paced 150 ms device gap the chase no longer tightens
+    // anything (it guards a future retune of the gap above the chase), so
+    // the delay stays at the device gap throughout.
+    let chase_gap = DEVICE_REFRESH_INTERVAL.min(VERDICT_CHASE_INTERVAL);
     handle
         .tx
         .send(StudioCommand::Action(tab.apply_action(ASSET_SHADER_V2)));
@@ -1714,13 +1728,13 @@ fn accepted_apply_tightens_the_next_refresh_delay() {
     let _ = view.try_recv().expect("apply emits a snapshot");
     assert_eq!(
         handle.delay.get(),
-        VERDICT_CHASE_INTERVAL,
-        "an accepted apply tightens the next tick to the chase interval"
+        chase_gap,
+        "an accepted apply never loosens the tick below the chase interval"
     );
 
     // Each full pull consumes one chase tick; the cadence then relaxes.
     for _ in 0..VERDICT_CHASE_TICKS {
-        assert_eq!(handle.delay.get(), VERDICT_CHASE_INTERVAL);
+        assert_eq!(handle.delay.get(), chase_gap);
         handle.tx.send(project_action(ProjectOp::RefreshProject));
         drive(actor.run_one_batch_for_test());
         let _ = view.try_recv();
