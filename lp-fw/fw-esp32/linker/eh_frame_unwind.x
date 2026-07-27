@@ -7,3 +7,8 @@
  * to validate that a PC falls within the binary's code range). */
 PROVIDE(__executable_start = ORIGIN(ROTEXT));
 PROVIDE(__etext = ORIGIN(ROTEXT) + LENGTH(ROTEXT));
+
+/* If the link fails with `undefined symbol: __eh_frame`, esp-hal's build
+ * script regenerated its linker scripts after build.rs patched them (the
+ * two scripts have no ordering edge). build.rs watches the patched files,
+ * so simply rebuilding re-applies the patch. */
