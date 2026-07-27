@@ -1,6 +1,7 @@
 //! Studio node UI components and colocated node UI stories.
 
 mod agent_chat;
+pub(crate) mod agent_chat_export;
 #[cfg(feature = "stories")]
 pub(crate) mod agent_chat_stories;
 mod asset_editor;

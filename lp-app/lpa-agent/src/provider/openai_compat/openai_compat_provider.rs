@@ -26,6 +26,12 @@ use crate::provider::sse_parser::{SseEvent, SseParser};
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 /// The stream's terminator payload.
 const DONE_PAYLOAD: &str = "[DONE]";
+/// Per-turn output ceiling (`max_completion_tokens`). Deliberately
+/// conservative — this dialect serves arbitrary compat servers and local
+/// models, many of which reject or misbehave on large values — so compat
+/// keeps the historic 8k budget instead of following the Anthropic
+/// provider's 32k raise (`ANTHROPIC_MAX_OUTPUT_TOKENS`).
+pub const COMPAT_MAX_COMPLETION_TOKENS: u32 = 8_192;
 /// Backoff before the single retry.
 const RETRY_BACKOFF_MS: u32 = 500;
 /// Cap on how much of a non-2xx response body is read for the error message.
@@ -67,7 +73,7 @@ impl<T: HttpSseTransport> OpenAiCompatProvider<T> {
             stream_options: StreamOptions {
                 include_usage: true,
             },
-            max_completion_tokens: req.max_tokens,
+            max_completion_tokens: COMPAT_MAX_COMPLETION_TOKENS,
             messages: wire_messages(&req.system, &req.messages),
             tools: req.tools.iter().map(WireTool::from_def).collect(),
         })
@@ -389,7 +395,7 @@ mod tests {
         );
         assert!(reqs[0].body.contains("\"stream\":true"));
         assert!(reqs[0].body.contains("\"include_usage\":true"));
-        assert!(reqs[0].body.contains("\"max_completion_tokens\":1024"));
+        assert!(reqs[0].body.contains("\"max_completion_tokens\":8192"));
     }
 
     #[test]
@@ -408,7 +414,6 @@ mod tests {
             system: "sys".into(),
             messages: vec![ChatMessage::user_text("hi")],
             tools: vec![],
-            max_tokens: 1024,
         };
         futures_executor::block_on(StreamExt::collect::<Vec<_>>(provider.run_turn(req)));
         let reqs = transport.requests.borrow();
@@ -673,7 +678,6 @@ mod tests {
             system: "sys".into(),
             messages: vec![ChatMessage::user_text("hi")],
             tools: vec![],
-            max_tokens: 1024,
         };
         futures_executor::block_on(StreamExt::collect::<Vec<_>>(provider.run_turn(req)))
     }

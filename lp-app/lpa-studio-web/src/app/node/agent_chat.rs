@@ -168,8 +168,8 @@ pub fn AgentChatPane(
                         UiAgentTurn::Thinking { text, done } => rsx! {
                             ThinkingTurn { key: "{index}-thinking", text: text.clone(), done: *done }
                         },
-                        UiAgentTurn::Notice { text } => rsx! {
-                            p { key: "{index}", class: "tw:m-0 tw:text-xs tw:italic tw:text-dim-foreground", "{text}" }
+                        UiAgentTurn::Notice { text, level } => rsx! {
+                            p { key: "{index}", class: notice_class(*level), "{text}" }
                         },
                     }
                 }
@@ -247,6 +247,7 @@ pub fn AgentChatPane(
             // only the uncached remainder and would read absurdly low.
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:border-t tw:border-border-subtle tw:bg-card-subtle tw:px-3 tw:py-1",
                 ModelChip { model: view.model.clone(), busy }
+                ExportButtons { view: view.clone(), busy, on_action }
                 span { class: "tw:min-w-0 tw:flex-1" }
                 if !view.usage.is_zero() {
                     p { class: "tw:m-0 tw:flex-none tw:text-right tw:text-[10px] tw:text-dim-foreground",
@@ -662,6 +663,86 @@ fn NeedsKeyState(
                 "Keys are stored in this browser and sent only to the provider you configure."
             }
         }
+    }
+}
+
+/// The footer's export affordances: copy the chat as markdown (anytime the
+/// transcript is non-empty), and the debug-JSON download. The JSON is
+/// core-built from the PARKED session runtime, so the button dispatches
+/// [`UiAgentView::export_debug_action`] and the actual download fires when
+/// the DTO comes back with a fresh [`lpa_studio_core::UiAgentDebugDump`]
+/// `seq` — a re-rendered stale DTO never re-downloads (paint-key pattern,
+/// like the preview canvas).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ExportButtons(
+    view: UiAgentView,
+    busy: bool,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let downloaded_seq = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(0_u64)));
+    if let Some(dump) = &view.debug {
+        if downloaded_seq.get() < dump.seq {
+            downloaded_seq.set(dump.seq);
+            crate::app::node::agent_chat_export::download_json(
+                &crate::app::node::agent_chat_export::debug_dump_file_name(&view),
+                &dump.json,
+            );
+        }
+    }
+    let have_log = !view.turns.is_empty();
+    let copy_view = view.clone();
+    let dump_view = view.clone();
+    // The raw transcript is parked only between runs — idle-only.
+    let can_dump = have_log && !busy;
+    rsx! {
+        button {
+            class: export_button_class(have_log),
+            r#type: "button",
+            disabled: !have_log,
+            title: "Copy the chat as a markdown log",
+            onclick: move |_| {
+                crate::app::node::agent_chat_export::copy_to_clipboard(
+                    crate::app::node::agent_chat_export::chat_markdown(&copy_view),
+                );
+            },
+            "Copy log"
+        }
+        button {
+            class: export_button_class(can_dump),
+            r#type: "button",
+            disabled: !can_dump,
+            title: if busy { "Debug export is available when the run finishes" } else { "Download the raw model transcript (JSON) for debugging" },
+            onclick: move |_| {
+                if let Some(handler) = on_action {
+                    handler.call(dump_view.export_debug_action());
+                }
+            },
+            "Debug JSON"
+        }
+    }
+}
+
+/// Export button chrome: quiet text buttons, enabled/disabled in place.
+fn export_button_class(enabled: bool) -> String {
+    let state = if enabled {
+        "tw:cursor-pointer tw:text-dim-foreground tw:hover:bg-accent-wash tw:hover:text-muted-foreground"
+    } else {
+        "tw:cursor-default tw:text-subtle-foreground tw:opacity-40"
+    };
+    format!(
+        "tw:flex-none tw:rounded-xs tw:border tw:border-transparent tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[10px] tw:transition tw:duration-300 {state}"
+    )
+}
+
+/// Notice presentation by level: dim italics normally, warning-toned when
+/// the run ended incomplete (the reader must not scroll past it).
+fn notice_class(level: lpa_studio_core::UiNoticeLevel) -> &'static str {
+    match level {
+        lpa_studio_core::UiNoticeLevel::Warning => {
+            "tw:m-0 tw:text-xs tw:italic tw:text-status-warning-foreground"
+        }
+        _ => "tw:m-0 tw:text-xs tw:italic tw:text-dim-foreground",
     }
 }
 

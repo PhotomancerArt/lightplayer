@@ -281,6 +281,38 @@ impl AgentController {
             .ok_or_else(|| format!("no edit record for turn {turn} (it may have been dropped)"))
     }
 
+    /// Build the debug export for one session and embed it in the mirror
+    /// (see [`crate::UiAgentDebugDump`]). Idle-only: the raw model-facing
+    /// transcript lives in the parked runtime, which is moved into the run
+    /// future while a run is in flight.
+    pub(crate) fn export_debug(
+        &mut self,
+        runtime: Option<RuntimeId>,
+        artifact: &ArtifactLocation,
+        config: Option<&crate::AgentProviderConfig>,
+    ) -> Result<(), String> {
+        let session = self
+            .session_for_mut(runtime, artifact)
+            .ok_or_else(|| "no agent chat for this shader yet".to_string())?;
+        if session.running {
+            return Err("export waits for the run to finish".to_string());
+        }
+        let json = {
+            let parked = session.runtime.borrow();
+            let agent = parked
+                .as_ref()
+                .ok_or_else(|| "nothing to export yet — send a message first".to_string())?;
+            crate::app::agent::agent_debug_export::debug_dump_json(
+                artifact.file_path().as_str(),
+                config,
+                agent.transcript(),
+                &session.turn_stats,
+            )
+        };
+        session.set_debug_dump(json);
+        Ok(())
+    }
+
     /// Settle a successfully dispatched revert: mirror the restaged source
     /// into the session's bridge state (so the next run's `current_source`
     /// agrees before the async apply round-trips) and append the visible
@@ -365,6 +397,10 @@ impl AgentController {
         };
         entry.abort = session.abort_handle();
         entry.running = true;
+        // A new run invalidates any embedded export (the raw transcript it
+        // came from is about to grow); the web shell only downloads on a
+        // fresh `seq`, so dropping it here just trims the DTO.
+        entry.debug_dump = None;
         entry.status = crate::UiAgentStatus::Streaming;
         entry
             .turns
@@ -502,7 +538,7 @@ impl AgentController {
                 .values()
                 .find(|session| session.key.runtime == runtime && &session.artifact == artifact)
         });
-        let (status, turns, usage, history, history_dropped) = match session {
+        let (status, turns, usage, history, history_dropped, debug) = match session {
             Some(session) => (
                 session.status.clone(),
                 session.turns.clone(),
@@ -518,6 +554,7 @@ impl AgentController {
                     })
                     .collect(),
                 session.dropped_edits,
+                session.debug_dump.clone(),
             ),
             None => (
                 crate::UiAgentStatus::Idle,
@@ -525,6 +562,7 @@ impl AgentController {
                 UiAgentUsage::default(),
                 Vec::new(),
                 0,
+                None,
             ),
         };
         UiAgentView {
@@ -538,6 +576,7 @@ impl AgentController {
             history,
             history_dropped,
             model: ctx.model.clone(),
+            debug,
         }
     }
 

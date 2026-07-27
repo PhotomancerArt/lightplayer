@@ -8,5 +8,6 @@ pub mod anthropic_provider;
 pub mod anthropic_wire;
 
 pub use anthropic_provider::{
-    ANTHROPIC_VERSION, AnthropicConfig, AnthropicProvider, DEFAULT_BASE_URL, DEFAULT_MODEL,
+    ANTHROPIC_MAX_OUTPUT_TOKENS, ANTHROPIC_VERSION, AnthropicConfig, AnthropicProvider,
+    DEFAULT_BASE_URL, DEFAULT_MODEL,
 };

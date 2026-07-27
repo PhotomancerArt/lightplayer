@@ -43,6 +43,16 @@ pub enum AgentEvent {
     },
     /// The per-run turn limit was hit; the run stopped cleanly.
     MaxTurnsReached { turns: u32 },
+    /// The model's reply was cut off before it finished (`MaxTokens`, or an
+    /// unrecognized `Other` stop reason). `dropped_tool_call` is true when
+    /// the cut landed on a pending tool call, which was dropped from the
+    /// transcript (its input JSON was truncated and it will never execute).
+    /// The run stops cleanly after this event — the UI must surface it, or
+    /// the run appears to end with nothing.
+    Truncated {
+        stop_reason: StopReason,
+        dropped_tool_call: bool,
+    },
     /// The run was aborted via the abort handle.
     Aborted,
     /// The provider failed; the run stops after this event.

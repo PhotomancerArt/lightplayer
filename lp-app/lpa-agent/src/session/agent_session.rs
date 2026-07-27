@@ -27,8 +27,6 @@ use crate::tool::upsert_param_tool::{
 
 /// Model turns (API calls) allowed per user message.
 pub const MAX_TURNS_PER_RUN: u32 = 16;
-/// Default per-turn output token budget.
-pub const DEFAULT_MAX_TOKENS: u32 = 8192;
 
 /// A session run failed (the transcript keeps everything up to the failure).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,8 +40,6 @@ pub struct AgentSession<P: ModelProvider, H: AgentHost> {
     provider: P,
     host: H,
     transcript: AgentTranscript,
-    /// Per-turn output token budget.
-    pub max_tokens: u32,
     /// Model turns allowed per `run` call.
     pub max_turns: u32,
     abort: Arc<AtomicBool>,
@@ -57,7 +53,6 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
             provider,
             host,
             transcript: AgentTranscript::default(),
-            max_tokens: DEFAULT_MAX_TOKENS,
             max_turns: MAX_TURNS_PER_RUN,
             abort: Arc::new(AtomicBool::new(false)),
             prev_compiled: None,
@@ -138,7 +133,6 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
             system,
             messages: self.transcript.messages.clone(),
             tools: vec![iterate_tool_def(), upsert_param_tool_def()],
-            max_tokens: self.max_tokens,
         };
 
         let mut blocks: Vec<Acc> = Vec::new();
@@ -250,7 +244,29 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
 
         // Record the assistant message (parse accumulated tool input JSON
         // now, at end of turn).
-        let content: Vec<ContentBlock> = blocks.iter().map(Acc::to_content_block).collect();
+        let mut content: Vec<ContentBlock> = blocks.iter().map(Acc::to_content_block).collect();
+
+        if stop_reason != StopReason::ToolUse {
+            // Any accumulated tool call will never execute — most often a
+            // `MaxTokens` cut mid-input-JSON. Drop such blocks from the
+            // recorded message instead of replaying them: the Anthropic
+            // protocol requires every `tool_use` to be answered by a
+            // `tool_result`, and a truncated input is garbage anyway. The
+            // `Truncated` event tells the UI the run ended incomplete.
+            let dropped_tool_call = content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolUse { .. }));
+            content.retain(|b| !matches!(b, ContentBlock::ToolUse { .. }));
+            self.transcript.push_assistant(content);
+            if matches!(stop_reason, StopReason::MaxTokens | StopReason::Other(_)) {
+                on_event(AgentEvent::Truncated {
+                    stop_reason,
+                    dropped_tool_call,
+                });
+            }
+            return Ok(TurnStep::Done);
+        }
+
         let tool_calls: Vec<(String, String, serde_json::Value)> = content
             .iter()
             .filter_map(|b| match b {
@@ -261,14 +277,20 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
             })
             .collect();
         self.transcript.push_assistant(content);
-
-        if stop_reason != StopReason::ToolUse || tool_calls.is_empty() {
+        if tool_calls.is_empty() {
             return Ok(TurnStep::Done);
         }
 
         let mut results = Vec::new();
-        for (id, name, input) in tool_calls {
+        let mut calls = tool_calls.into_iter();
+        while let Some((id, name, input)) = calls.next() {
             if self.abort.load(Ordering::Relaxed) {
+                // The recorded assistant message already carries every
+                // tool_use block; the protocol still requires each to be
+                // answered before the next model turn, so the unexecuted
+                // remainder gets synthesized cancellation results.
+                results.push(cancelled_tool_result(id));
+                results.extend(calls.map(|(id, _, _)| cancelled_tool_result(id)));
                 self.transcript.push_tool_results(results);
                 return Ok(TurnStep::Aborted);
             }
@@ -330,6 +352,18 @@ enum TurnStep {
     Continue,
     Done,
     Aborted,
+}
+
+/// The synthesized result for a recorded tool call the run never executed
+/// (Stop mid-turn): keeps the transcript protocol-valid — every `tool_use`
+/// answered — and tells the model plainly what happened.
+fn cancelled_tool_result(id: String) -> ContentBlock {
+    ContentBlock::ToolResult {
+        tool_use_id: id,
+        content: json!({ "cancelled": "the user stopped the run before this call executed" })
+            .to_string(),
+        is_error: Some(true),
+    }
 }
 
 /// Accumulator for one streamed content block.
@@ -756,6 +790,137 @@ mod tests {
                 content, is_error, ..
             } => {
                 assert!(content.contains("unknown tool"), "{content}");
+                assert_eq!(*is_error, Some(true));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn max_tokens_cut_drops_the_dangling_tool_call_and_reports_truncation() {
+        // The output budget ran out mid-tool-input-JSON — the live failure:
+        // stream ends with `max_tokens`, the tool call's input is torn.
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::TextDelta("Rewriting the shader.".into()),
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: "{\"source\": \"vec4 render(".into(),
+            },
+            turn_done(StopReason::MaxTokens, 10, 8192),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("bounce a ball".into(), |e| events.push(e))).expect("run");
+
+        // The run ends CLEANLY but loudly: Truncated then SessionDone.
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::Truncated {
+                stop_reason: StopReason::MaxTokens,
+                dropped_tool_call: true,
+            }
+        )));
+        assert!(matches!(
+            events.last(),
+            Some(AgentEvent::SessionDone { .. })
+        ));
+        // The dangling tool_use never reaches the transcript (a replayed
+        // tool_use without a tool_result is a protocol violation), while
+        // the text that did stream is kept.
+        let assistant = &session.transcript().messages[1];
+        assert_eq!(
+            assistant.content,
+            vec![ContentBlock::Text {
+                text: "Rewriting the shader.".into()
+            }]
+        );
+        // A follow-up run replays a valid transcript and completes.
+        provider.turns.borrow_mut().push_back(vec![
+            TurnEvent::TextDelta("Shorter this time.".into()),
+            turn_done(StopReason::EndTurn, 1, 1),
+        ]);
+        block_on(session.run("try smaller".into(), |e| events.push(e))).expect("second run");
+        assert!(matches!(
+            events.last(),
+            Some(AgentEvent::SessionDone { .. })
+        ));
+    }
+
+    #[test]
+    fn other_stop_reason_reports_truncation_without_a_tool_drop() {
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::TextDelta("Half a thought".into()),
+            turn_done(StopReason::Other("pause_turn".into()), 1, 1),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("go".into(), |e| events.push(e))).expect("run");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::Truncated {
+                stop_reason: StopReason::Other(reason),
+                dropped_tool_call: false,
+            } if reason == "pause_turn"
+        )));
+    }
+
+    #[test]
+    fn abort_mid_tool_loop_synthesizes_cancelled_results() {
+        // One turn, two tool calls; the Stop flag flips while the first
+        // executes, so the second must never run — but its recorded
+        // tool_use still needs an answer for the transcript to replay.
+        let input = format!("{{\"source\": {}, \"note\": \"go green\"}}", json!(GREEN));
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: input.clone(),
+            },
+            TurnEvent::ToolUseStart {
+                id: "tu_2".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_2".into(),
+                json_fragment: input,
+            },
+            turn_done(StopReason::ToolUse, 1, 1),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let abort = session.abort_handle();
+        let mut events = Vec::new();
+        block_on(session.run("go".into(), |e| {
+            if matches!(&e, AgentEvent::ToolExecuted { id, .. } if id == "tu_1") {
+                abort.store(true, Ordering::Relaxed);
+            }
+            events.push(e);
+        }))
+        .expect("run");
+
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::Aborted)));
+        // The results message answers BOTH calls: the executed first one
+        // and a cancelled second one.
+        let results = &session.transcript().messages[2];
+        assert_eq!(results.content.len(), 2, "{:?}", results.content);
+        assert!(matches!(
+            &results.content[0],
+            ContentBlock::ToolResult { tool_use_id, is_error: None, .. } if tool_use_id == "tu_1"
+        ));
+        match &results.content[1] {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "tu_2");
+                assert!(content.contains("cancelled"), "{content}");
                 assert_eq!(*is_error, Some(true));
             }
             other => panic!("unexpected: {other:?}"),

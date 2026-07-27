@@ -10,13 +10,17 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use lpa_agent::{AgentEvent, AgentSession, EngineStatusKind, ModelProvider, TokenUsage};
+use lpa_agent::{
+    AgentEvent, AgentSession, EngineStatusKind, ModelProvider, StopReason, TokenUsage,
+};
 use lpc_model::{ArtifactLocation, Revision};
 
-use crate::UiProductPreview;
 use crate::app::agent::agent_host_bridge::{AgentBridgeState, AgentHostBridge};
 use crate::app::agent::agent_session_key::AgentSessionKey;
-use crate::app::agent::ui_agent_view::{UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage};
+use crate::app::agent::ui_agent_view::{
+    UiAgentDebugDump, UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage,
+};
+use crate::{UiNoticeLevel, UiProductPreview};
 
 /// The concrete `lpa-agent` session type Studio drives: a runtime-chosen
 /// provider behind a box, over the command-queue host bridge.
@@ -56,6 +60,15 @@ pub struct AgentEditRecord {
     pub at: Revision,
 }
 
+/// One model turn's outcome, mirrored for the debug export: how the turn
+/// stopped and what it cost. The model-facing transcript records neither,
+/// so the mirror keeps them (session-scoped, like the rest of the mirror).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentTurnStat {
+    pub stop_reason: StopReason,
+    pub usage: TokenUsage,
+}
+
 /// One shader node's conversation: view mirror + parked session runtime.
 pub struct AgentChatSession {
     pub key: AgentSessionKey,
@@ -75,6 +88,13 @@ pub struct AgentChatSession {
     pub status: UiAgentStatus,
     /// Cumulative usage (authoritatively reset by `SessionDone` totals).
     pub usage: TokenUsage,
+    /// Per-turn stop reason + usage, in turn order (debug-export data).
+    pub turn_stats: Vec<AgentTurnStat>,
+    /// The latest requested debug dump, embedded in the DTO until the next
+    /// run starts (the web shell downloads it when `seq` advances).
+    pub debug_dump: Option<UiAgentDebugDump>,
+    /// The next dump's `seq` (1-based, never reused).
+    next_debug_seq: u64,
     /// True from run start until `RunEnded` arrives.
     pub running: bool,
     /// The shared snapshot the host bridge serves (refreshed at run start).
@@ -97,6 +117,9 @@ impl AgentChatSession {
             next_edit_turn: 1,
             status: UiAgentStatus::Idle,
             usage: TokenUsage::default(),
+            turn_stats: Vec::new(),
+            debug_dump: None,
+            next_debug_seq: 1,
             running: false,
             bridge: Rc::new(RefCell::new(AgentBridgeState::default())),
             runtime: Rc::new(RefCell::new(None)),
@@ -196,13 +219,23 @@ impl AgentChatSession {
                     }
                 }
             }
-            AgentEvent::TurnDone { usage, .. } => {
+            AgentEvent::TurnDone { stop_reason, usage } => {
                 self.usage.add(usage);
+                self.turn_stats.push(AgentTurnStat { stop_reason, usage });
             }
             AgentEvent::MaxTurnsReached { turns } => {
                 self.push_notice(format!(
                     "Turn limit reached ({turns} model turns) — the agent stopped to wait for you."
                 ));
+            }
+            AgentEvent::Truncated {
+                stop_reason,
+                dropped_tool_call,
+            } => {
+                // The cut usually lands mid-tool-call: that row will never
+                // execute, so it must not keep pulsing "running".
+                self.resolve_unfinished_tool_rows("cut off by the output-token limit");
+                self.push_warning_notice(truncation_notice(&stop_reason, dropped_tool_call));
             }
             AgentEvent::Aborted => {
                 self.push_notice("Stopped.");
@@ -227,6 +260,9 @@ impl AgentChatSession {
         if let Some(UiAgentTurn::Thinking { done, .. }) = self.turns.last_mut() {
             *done = true;
         }
+        // General invariant: however the run ended (abort, provider error,
+        // truncation), no tool row may stay pulsing "running" forever.
+        self.resolve_unfinished_tool_rows("interrupted — the run ended before this call finished");
         match error {
             // `ProviderError` events usually set the error status already;
             // this covers failure paths that end the run without one.
@@ -244,7 +280,42 @@ impl AgentChatSession {
 
     /// Append a session-level notice to the transcript.
     pub fn push_notice(&mut self, text: impl Into<String>) {
-        self.turns.push(UiAgentTurn::Notice { text: text.into() });
+        self.turns.push(UiAgentTurn::Notice {
+            text: text.into(),
+            level: UiNoticeLevel::Info,
+        });
+    }
+
+    /// Append a warning-toned notice (the run ended incomplete).
+    pub fn push_warning_notice(&mut self, text: impl Into<String>) {
+        self.turns.push(UiAgentTurn::Notice {
+            text: text.into(),
+            level: UiNoticeLevel::Warning,
+        });
+    }
+
+    /// Settle every not-yet-done tool row as failed with `reason`, so a
+    /// run that ends for any reason leaves no dangling "running" row.
+    fn resolve_unfinished_tool_rows(&mut self, reason: &str) {
+        for turn in &mut self.turns {
+            if let UiAgentTurn::Tool(row) = turn
+                && !row.done
+            {
+                row.done = true;
+                row.phase = None;
+                row.error = Some(reason.to_string());
+            }
+        }
+    }
+
+    /// Record a freshly built debug dump; the DTO's `seq` advance is what
+    /// tells the web shell this is a NEW export to download.
+    pub fn set_debug_dump(&mut self, json: String) {
+        self.debug_dump = Some(UiAgentDebugDump {
+            seq: self.next_debug_seq,
+            json: Rc::from(json.as_str()),
+        });
+        self.next_debug_seq += 1;
     }
 
     /// Record one staged edit at `ToolExecuted` time. The source comes off
@@ -344,6 +415,29 @@ impl AgentChatSession {
             cache_write_tokens: self.usage.cache_write_tokens,
             cache_read_tokens: self.usage.cache_read_tokens,
         }
+    }
+}
+
+/// The user-facing copy for a truncated run. `MaxTokens` gets the
+/// actionable phrasing (retry, or ask for something smaller); an unknown
+/// `Other` stop reason is surfaced verbatim.
+fn truncation_notice(stop_reason: &StopReason, dropped_tool_call: bool) -> String {
+    match (stop_reason, dropped_tool_call) {
+        (StopReason::MaxTokens, true) => "Run stopped: the response hit the output-token limit \
+             while writing the edit — try again or ask for something smaller."
+            .to_string(),
+        (StopReason::MaxTokens, false) => "Run stopped: the response hit the output-token limit \
+             — try again or ask for something smaller."
+            .to_string(),
+        (StopReason::Other(reason), true) => format!(
+            "Run stopped early (provider reported {reason:?}) — the unfinished edit was discarded."
+        ),
+        (StopReason::Other(reason), false) => {
+            format!("Run stopped early (provider reported {reason:?}).")
+        }
+        // Unreachable today (the session only emits Truncated for the two
+        // arms above); a safe fallback beats a panic.
+        _ => "Run stopped early.".to_string(),
     }
 }
 
@@ -774,7 +868,7 @@ mod tests {
         );
         assert!(matches!(
             session.turns.last(),
-            Some(UiAgentTurn::Notice { text }) if text.contains("401")
+            Some(UiAgentTurn::Notice { text, .. }) if text.contains("401")
         ));
     }
 

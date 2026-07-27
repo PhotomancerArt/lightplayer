@@ -27,6 +27,13 @@ pub const DEFAULT_MODEL: &str = "claude-sonnet-5";
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 /// The `anthropic-version` header value (shared with model discovery).
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
+/// Per-turn output-token ceiling (`max_tokens`). Current Claude models
+/// support ≥64k output tokens; 32k gives a long shader landing inside an
+/// `iterate` input JSON — plus adaptive thinking, which spends from the
+/// same output budget — generous headroom while still bounding a runaway
+/// turn. The old 8k budget truncated tool calls mid-JSON on big shaders,
+/// ending runs silently with `stop_reason: max_tokens`.
+pub const ANTHROPIC_MAX_OUTPUT_TOKENS: u32 = 32_000;
 /// Backoff before the single retry.
 const RETRY_BACKOFF_MS: u32 = 500;
 /// Cap on how much of a non-2xx response body is read for the error message.
@@ -66,7 +73,7 @@ impl<T: HttpSseTransport> AnthropicProvider<T> {
     fn build_request(&self, req: &TurnRequest) -> HttpRequest {
         let body = MessagesRequest {
             model: &self.config.model,
-            max_tokens: req.max_tokens,
+            max_tokens: ANTHROPIC_MAX_OUTPUT_TOKENS,
             stream: true,
             system: &req.system,
             messages: &req.messages,
@@ -719,7 +726,6 @@ mod tests {
             system: "sys".into(),
             messages: vec![ChatMessage::user_text("hi")],
             tools: vec![],
-            max_tokens: 1024,
         };
         futures_executor::block_on(StreamExt::collect::<Vec<_>>(provider.run_turn(req)))
     }

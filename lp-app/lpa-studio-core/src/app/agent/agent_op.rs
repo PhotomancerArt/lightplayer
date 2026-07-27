@@ -36,6 +36,12 @@ pub enum AgentOp {
         /// The edit record's session-scoped ordinal.
         turn: u32,
     },
+    /// Build the debug export for one session: the raw model-facing
+    /// transcript dump lands on the session's DTO
+    /// ([`crate::UiAgentView::debug`]) with a fresh `seq`, and the web
+    /// shell downloads it. Refused while a run is in flight — the raw
+    /// transcript is parked in the controller only between runs.
+    ExportDebug { artifact: ArtifactLocation },
     /// The agent's `upsert_param` write (dispatched by the host bridge, not
     /// the web layer): send ONE `PutSlotEdit` batch on the target node's
     /// def artifact and record the outcome into the session's bridge cell
@@ -64,6 +70,11 @@ impl ControllerOp for AgentOp {
             Self::RevertToTurn { turn, .. } => ActionMeta::new(
                 "Revert",
                 format!("Restage the agent's edit {turn} as the shader source."),
+                ActionPriority::Secondary,
+            ),
+            Self::ExportDebug { .. } => ActionMeta::new(
+                "Export debug JSON",
+                "Dump the model-facing transcript of this chat for debugging.",
                 ActionPriority::Secondary,
             ),
             Self::UpsertParam { .. } => ActionMeta::new(

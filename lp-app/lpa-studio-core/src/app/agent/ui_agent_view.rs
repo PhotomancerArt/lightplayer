@@ -5,13 +5,15 @@
 //! [`crate::UiAssetEditor`], the DTO prebuilds its actions so the view never
 //! constructs domain ops.
 
+use std::rc::Rc;
+
 use lpc_model::ArtifactLocation;
 
 use crate::app::agent::agent_controller::AgentController;
 use crate::app::agent::agent_op::AgentOp;
 use crate::app::settings::agent_provider::AgentProviderGuidance;
 use crate::app::settings::ui_settings_view::UiModelOption;
-use crate::{ControllerId, UiAction, UiProductPreview};
+use crate::{ControllerId, UiAction, UiNoticeLevel, UiProductPreview};
 
 /// The agent chat state for one shader node's editor region.
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +45,9 @@ pub struct UiAgentView {
     pub history_dropped: u32,
     /// The session's model context for the footer chip (settings-derived).
     pub model: UiAgentModelView,
+    /// The latest requested debug export (see [`UiAgentDebugDump`]);
+    /// `None` until an export is requested.
+    pub debug: Option<UiAgentDebugDump>,
 }
 
 impl UiAgentView {
@@ -59,6 +64,7 @@ impl UiAgentView {
             history: Vec::new(),
             history_dropped: 0,
             model: UiAgentModelView::default(),
+            debug: None,
         }
     }
 
@@ -103,6 +109,30 @@ impl UiAgentView {
             },
         )
     }
+
+    /// The debug-export action: ask core to dump the model-facing
+    /// transcript; the result lands on [`Self::debug`] with a fresh `seq`
+    /// and the web shell downloads it. Idle-only (the raw transcript is
+    /// parked in the controller only between runs).
+    pub fn export_debug_action(&self) -> UiAction {
+        UiAction::from_op(
+            ControllerId::new(AgentController::NODE_ID),
+            AgentOp::ExportDebug {
+                artifact: self.artifact.clone(),
+            },
+        )
+    }
+}
+
+/// One requested debug export: the raw model-facing transcript dump (wire
+/// shapes, per-turn stop reasons and usage, provider + model — never the
+/// API key), pretty-printed JSON. `seq` is session-monotonic; the web
+/// shell downloads the dump exactly when it observes `seq` advance, so a
+/// re-rendered stale DTO never re-downloads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiAgentDebugDump {
+    pub seq: u64,
+    pub json: Rc<str>,
 }
 
 /// One staged edit in the session's history filmstrip: a compact projection
@@ -178,8 +208,10 @@ pub enum UiAgentTurn {
     Thinking { text: String, done: bool },
     /// A tool call row (compact one-liner, expandable detail).
     Tool(UiAgentToolRow),
-    /// A session-level notice (stopped, turn limit, provider error).
-    Notice { text: String },
+    /// A session-level notice (stopped, turn limit, provider error,
+    /// truncated run). `level` picks the presentation: `Info` renders dim,
+    /// `Warning` warning-toned (a run that ended incomplete).
+    Notice { text: String, level: UiNoticeLevel },
 }
 
 /// Compact projection of one `iterate` call for the tool row. Derived from

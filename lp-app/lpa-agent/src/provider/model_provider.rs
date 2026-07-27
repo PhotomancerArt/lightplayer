@@ -32,13 +32,15 @@ impl ModelProvider for Box<dyn ModelProvider> {
     }
 }
 
-/// Everything a provider needs for one turn.
+/// Everything a provider needs for one turn. The per-turn output-token
+/// ceiling is provider-owned (each provider knows what its API and servers
+/// accept — see `ANTHROPIC_MAX_OUTPUT_TOKENS` and
+/// `COMPAT_MAX_COMPLETION_TOKENS`), so no budget rides the request.
 #[derive(Clone, Debug)]
 pub struct TurnRequest {
     pub system: String,
     pub messages: Vec<ChatMessage>,
     pub tools: Vec<ToolDef>,
-    pub max_tokens: u32,
 }
 
 /// Streamed turn progress.
