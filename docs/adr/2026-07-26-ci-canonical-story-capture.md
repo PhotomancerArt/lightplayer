@@ -2,10 +2,17 @@
 
 ## Status
 
-Accepted. Supersedes the local-canonical capture premise of
+Accepted; superseded in part by
+[ADR 2026-07-26: CI Auto-Commits Story Baseline Refreshes](2026-07-26-ci-story-auto-commit.md) —
+the "CI never commits / branch owner pulls and commits" delivery loop
+(Decision points 3–4 below) is replaced by a direct auto-commit to same-repo PR
+branches; the capture environment, pinning, path gate, and local-capture
+demotion stand.
+
+Supersedes the local-canonical capture premise of
 [ADR 2026-06-18](2026-06-18-studio-story-png-baselines.md); that ADR's core
-premises — curated baseline PNGs committed to the repo, visible in PRs, never
-committed by CI — stand unchanged.
+premise — curated baseline PNGs committed to the repo, visible in PRs — stands
+unchanged.
 
 ## Context
 
