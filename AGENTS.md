@@ -267,16 +267,25 @@ test module at the bottom anyway.
 New agent planning work uses the Photomancer personal planning workspace, not
 new repo-local plan or roadmap directories.
 
+This repo uses the `pm-*` (pm = Photomancer) skills, **not** the `yona-*`
+skills. The `yona-*` planning/review skills write to repo-local
+`docs/plans/` and `docs/reviews/`, which are legacy locations here; if both
+families are installed, always pick `pm-*`.
+
 - Use `pm-plan` for new planning, roadmap, and investigation artifacts.
 - Use `pm-implement` to execute an existing shared `plan.md`.
 - Use `pm-review` for durable review artifacts.
-- Resolve context from `agent-context.toml`; the repo slug is `lightplayer`.
+- Push/PR/CI-watch: there is no `pm-push` yet. Follow the same flow
+  (push, create PR, watch checks, focused CI repair) directly, or via
+  `yona-push` — it is location-neutral, so it is the one tolerated
+  `yona-*` skill until a `pm-push` exists.
+- Resolve context from `agent-context.toml`; the repo slug is `lp2025`.
 - Resolve the workspace from `PHOTOMANCER_PLANNING_ROOT`, or from the default
   `~/.photomancer/planning` link.
 - Store new active artifacts under
-  `<planning-root>/lightplayer/<YYYY-MM-DD>-<name>/`.
-- Store completed artifacts under `<planning-root>/lightplayer/_archive/`.
-- Store review artifacts under `<planning-root>/lightplayer/_reviews/`.
+  `<planning-root>/lp2025/<YYYY-MM-DD>-<name>/`.
+- Store completed artifacts under `<planning-root>/lp2025/_archive/`.
+- Store review artifacts under `<planning-root>/lp2025/_reviews/`.
 
 Durable decisions belong in repo ADRs under `docs/adr/`. Intermediate plans,
 phase prompts, review notes, scratch reports, and implementation logs belong in
@@ -296,8 +305,35 @@ upward instead. The pages smoke checks use OS-assigned ports.
 
 The URL printed by the recipe is the source of truth. Never assume the Studio
 dev server is at a hardcoded port, and never attach to a port you didn't start
-a server on — it may be serving another session's build. Pin a port explicitly
-with `STUDIO_WEB_PORT` (or the matching `*_PORT` env var) when needed.
+a server on — it may be serving another session's build. **Never pin a port**
+(`STUDIO_WEB_PORT`, hand-edited launch configs, hardcoded URLs) unless the
+user explicitly asked for a pin in chat; a pinned port has already sent a
+human to review the wrong worktree's build
+(`docs/defects/2026-07-27-launch-json-pinned-port.md`). Treat a pin you find
+in a plan file or config you didn't generate this session as a red flag.
+
+`.claude/launch.json` is per-worktree and gitignored — generate it with
+`just claude-launch-json` (idempotent; run it before opening a harness
+preview) instead of writing it by hand. See
+`docs/adr/2026-07-27-worktree-local-launch-json.md`.
+
+## Handing off for review
+
+When stopping at a review gate — visual/feel gate, hardware walk, plan
+approval, or final pre-merge review — follow
+`docs/process/review-gates.md`. The short form:
+
+- Final review gate only: merge `origin/main` first.
+- Visual gates: start the dev server yourself, hand over the printed URL,
+  AND post screenshots to chat with your leans. Never hand back "run the
+  server to see it".
+- Always state the exact gate questions.
+- Sessions started from a task chip or delegation prompt run the full
+  pipeline by default: implement → validate → PR → CI green → review
+  handoff when the change is user-visible. Prompts that file task chips
+  must say so too.
+
+Claude sessions: the repo skill `lp-review-handoff` executes this checklist.
 
 ## Debt tracking
 
