@@ -226,6 +226,28 @@ pub(crate) fn add_node_picker() -> Element {
 }
 
 #[story(
+    description = "A freshly created (or emptied) project's pane: the synced-empty state is not a waiting message but the dashed 'Add node…' row — the add affordance lives in the node list, where nodes live. The header '+' opens the same picker."
+)]
+pub(crate) fn empty_project() -> Element {
+    let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
+    view.tree.roots = Vec::new();
+    view.nodes = Vec::new();
+    let menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+    view.header_actions = vec![add_header_action(&menu)];
+    view.add_node_menu = Some(menu);
+
+    rsx! {
+        div { class: "tw:max-w-[320px]",
+            ProjectPane {
+                view,
+                status: UiStatus::good("Ready"),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
     description = "A staged node removal in the save panel: the NodeRemoved row (removed node's name, its attachment site, 'Restore' revert) plus the staged file deletions as 'file deleted on save' rows with their own reverts — all in the unsaved bucket until save."
 )]
 pub(crate) fn staged_node_removal() -> Element {
