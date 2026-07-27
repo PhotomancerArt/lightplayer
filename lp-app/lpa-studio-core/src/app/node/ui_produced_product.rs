@@ -46,8 +46,14 @@ pub struct UiProductPreviewFrame {
 }
 
 impl UiProductPreviewFrame {
-    /// Default visual-product probe frame.
+    /// Default visual-product probe frame (simulator tier).
     pub const VISUAL_DEFAULT: Self = Self::new(32, 32);
+
+    /// Visual-product probe frame for real-device lenses: 4× fewer bytes
+    /// over the serial wire and 4× fewer per-pixel sRGB encodes on the
+    /// ESP32, at a resolution the small preview cards still read fine
+    /// (probe-performance plan, runtime-tiered sizing).
+    pub const VISUAL_DEVICE: Self = Self::new(16, 16);
 
     /// Create a preview frame with a nonzero fallback.
     #[must_use]

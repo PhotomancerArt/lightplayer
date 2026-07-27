@@ -378,6 +378,40 @@ fn view_gate_suppresses_redundant_snapshot() {
     assert!(controller.view_if_changed().is_none());
 }
 
+#[test]
+fn early_tick_bounces_off_the_completion_gate_without_a_wire_op() {
+    let (controller, handle) = connected_controller();
+    let (mut actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, mut view, .. } = studio_handle;
+
+    // First tick: never pulled, immediately due — the pull runs and its
+    // completion stamps the pacing gate.
+    tx.send(StudioCommand::RefreshTick);
+    drive(actor.run_one_batch_for_test());
+    let after_first = handle.read_count();
+    assert!(after_first >= 1, "the first tick must pull");
+
+    // An immediate second tick (the UI timer racing a slow pull) bounces
+    // off the completion gate: no wire op, no back-to-back pull.
+    tx.send(StudioCommand::RefreshTick);
+    drive(actor.run_one_batch_for_test());
+    assert_eq!(
+        handle.read_count(),
+        after_first,
+        "an early tick must not reach the wire"
+    );
+
+    // Once the gap elapses, the next tick pulls again.
+    actor.controller.advance_clock_for_test(1.0);
+    tx.send(StudioCommand::RefreshTick);
+    drive(actor.run_one_batch_for_test());
+    assert!(
+        handle.read_count() > after_first,
+        "a due tick pulls again"
+    );
+    let _ = view.try_recv();
+}
+
 // ---------------------------------------------------------------------------
 // Scenario 5: a failed passive pull applies backoff; success clears it.
 // ---------------------------------------------------------------------------
@@ -397,8 +431,11 @@ fn failed_passive_pull_applies_backoff_then_success_clears_it() {
         "a failed passive pull must arm backoff"
     );
 
-    // Now let reads succeed and tick again: backoff clears.
+    // Now let reads succeed, move time past the (backoff-stretched) gap so
+    // the completion-paced gate lets the next pull run, and tick again:
+    // backoff clears.
     handle.set_fail(false);
+    actor.controller.advance_clock_for_test(60.0);
     tx.send(StudioCommand::RefreshTick);
     drive(actor.run_one_batch_for_test());
     assert_eq!(

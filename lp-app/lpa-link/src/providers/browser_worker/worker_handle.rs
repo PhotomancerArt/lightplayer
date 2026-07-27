@@ -1,5 +1,8 @@
 use std::cell::RefCell;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll, Waker};
 
 use js_sys::Promise;
 use wasm_bindgen::JsCast;
@@ -42,6 +45,10 @@ pub struct BrowserWorkerHandle {
     /// The envelope still drains through [`Self::take_outputs`] so
     /// consumers can log it.
     fatal: Rc<RefCell<Option<String>>>,
+    /// Tasks parked in [`Self::wait_for_output`], woken whenever the
+    /// `onmessage`/`onerror` closures push an output envelope. Event-driven
+    /// receive: consumers wait here instead of polling on a timer.
+    output_wakers: Rc<RefCell<Vec<Waker>>>,
 }
 
 impl BrowserWorkerHandle {
@@ -53,22 +60,31 @@ impl BrowserWorkerHandle {
         let outputs = Rc::new(RefCell::new(Vec::new()));
         let preview_frames = Rc::new(RefCell::new(Vec::new()));
         let fatal = Rc::new(RefCell::new(None));
+        let output_wakers: Rc<RefCell<Vec<Waker>>> = Rc::new(RefCell::new(Vec::new()));
         let output_ref = Rc::clone(&outputs);
         let preview_ref = Rc::clone(&preview_frames);
         let fatal_ref = Rc::clone(&fatal);
+        let wakers_ref = Rc::clone(&output_wakers);
         let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             let data = event.data();
             // The binary preview path is intercepted before serde: its pixel
             // ArrayBuffer must stay a JS object, not become JSON-shaped data.
             if message_kind(&data).as_deref() == Some("preview_pixels") {
                 match parse_preview_pixels(&data) {
-                    Ok(frame) => preview_ref.borrow_mut().push(frame),
-                    Err(error) => output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
-                        runtime_id: 0,
-                        level: "error".to_string(),
-                        target: "lpa-link".to_string(),
-                        message: format!("failed to parse preview pixel frame: {error}"),
-                    }),
+                    Ok(frame) => {
+                        // No output-waker wake: preview frames have their
+                        // own consumer (the PreviewHost pump).
+                        preview_ref.borrow_mut().push(frame);
+                    }
+                    Err(error) => {
+                        output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
+                            runtime_id: 0,
+                            level: "error".to_string(),
+                            target: "lpa-link".to_string(),
+                            message: format!("failed to parse preview pixel frame: {error}"),
+                        });
+                        wake_output_waiters(&wakers_ref);
+                    }
                 }
                 return;
             }
@@ -91,19 +107,24 @@ impl BrowserWorkerHandle {
                         }
                     }
                     output_ref.borrow_mut().push(envelope);
+                    wake_output_waiters(&wakers_ref);
                 }
-                Err(error) => output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
-                    runtime_id: 0,
-                    level: "error".to_string(),
-                    target: "lpa-link".to_string(),
-                    message: format!("failed to parse worker message: {error}"),
-                }),
+                Err(error) => {
+                    output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
+                        runtime_id: 0,
+                        level: "error".to_string(),
+                        target: "lpa-link".to_string(),
+                        message: format!("failed to parse worker message: {error}"),
+                    });
+                    wake_output_waiters(&wakers_ref);
+                }
             }
         });
         worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
         on_message.forget();
 
         let output_ref = Rc::clone(&outputs);
+        let wakers_ref = Rc::clone(&output_wakers);
         let on_error = Closure::<dyn FnMut(ErrorEvent)>::new(move |event: ErrorEvent| {
             output_ref.borrow_mut().push(BrowserOutputEnvelope::Status {
                 runtime_id: None,
@@ -116,11 +137,13 @@ impl BrowserWorkerHandle {
                     event.colno()
                 )),
             });
+            wake_output_waiters(&wakers_ref);
         });
         worker.set_onerror(Some(on_error.as_ref().unchecked_ref()));
         on_error.forget();
 
         let output_ref = Rc::clone(&outputs);
+        let wakers_ref = Rc::clone(&output_wakers);
         let on_message_error =
             Closure::<dyn FnMut(MessageEvent)>::new(move |_event: MessageEvent| {
                 output_ref.borrow_mut().push(BrowserOutputEnvelope::Status {
@@ -128,6 +151,7 @@ impl BrowserWorkerHandle {
                     status: "error".to_string(),
                     message: Some("worker message could not be deserialized".to_string()),
                 });
+                wake_output_waiters(&wakers_ref);
             });
         worker.set_onmessageerror(Some(on_message_error.as_ref().unchecked_ref()));
         on_message_error.forget();
@@ -136,6 +160,7 @@ impl BrowserWorkerHandle {
             outputs,
             preview_frames,
             fatal,
+            output_wakers,
         })
     }
 
@@ -236,6 +261,15 @@ impl BrowserWorkerHandle {
         core::mem::take(&mut *self.outputs.borrow_mut())
     }
 
+    /// A future resolving as soon as [`Self::take_outputs`] has something to
+    /// take (immediately if outputs are already queued). Level-triggered on
+    /// the shared output buffer, so drain-then-wait never misses a push.
+    pub fn wait_for_output(&self) -> OutputWait {
+        OutputWait {
+            shared: Some((Rc::clone(&self.outputs), Rc::clone(&self.output_wakers))),
+        }
+    }
+
     /// Take binary preview frames received since the last call.
     pub fn take_preview_frames(&mut self) -> Vec<PreviewPixelFrame> {
         core::mem::take(&mut *self.preview_frames.borrow_mut())
@@ -250,6 +284,51 @@ impl BrowserWorkerHandle {
 
     pub fn terminate(&self) {
         self.worker.terminate();
+    }
+}
+
+/// Wake every parked [`OutputWait`]. Wakers are moved out before waking so
+/// no `RefCell` borrow is held if a wake ever polls (and re-registers)
+/// synchronously.
+fn wake_output_waiters(wakers: &Rc<RefCell<Vec<Waker>>>) {
+    let pending = core::mem::take(&mut *wakers.borrow_mut());
+    for waker in pending {
+        waker.wake();
+    }
+}
+
+/// Future from [`BrowserWorkerHandle::wait_for_output`] (or an
+/// already-ready one from the provider when buffered outputs exist).
+pub struct OutputWait {
+    /// `None` = resolve immediately (provider-buffered outputs pending).
+    shared: Option<(
+        Rc<RefCell<Vec<BrowserOutputEnvelope>>>,
+        Rc<RefCell<Vec<Waker>>>,
+    )>,
+}
+
+impl OutputWait {
+    /// An immediately-ready wait, for callers that already hold outputs.
+    pub(crate) fn ready() -> Self {
+        Self { shared: None }
+    }
+}
+
+impl Future for OutputWait {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let Some((outputs, wakers)) = &self.shared else {
+            return Poll::Ready(());
+        };
+        if !outputs.borrow().is_empty() {
+            return Poll::Ready(());
+        }
+        let mut wakers = wakers.borrow_mut();
+        if !wakers.iter().any(|waker| waker.will_wake(cx.waker())) {
+            wakers.push(cx.waker().clone());
+        }
+        Poll::Pending
     }
 }
 

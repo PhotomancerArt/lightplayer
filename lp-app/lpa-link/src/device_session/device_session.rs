@@ -33,6 +33,8 @@ use super::device_mode::{ChannelUseGuard, DeviceMode, DeviceModeGuard};
 use super::device_readiness::{BootLineClassifier, HelloGate, gate_first_frame};
 use super::device_snapshot::DeviceSnapshot;
 use super::device_state::{DeviceState, IncompatibleReason};
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+use super::device_timers::WIRE_FRAME_POLL_INTERVAL;
 use super::device_timers::{DeviceTimers, READINESS_POLL_INTERVAL};
 use super::device_wire::DeviceWire;
 
@@ -504,7 +506,9 @@ impl DeviceShared {
                     // pump_console_lines surfaced a serial error → Gone
                     return Err(TransportError::Other(message));
                 }
-                self.timers.sleep(READINESS_POLL_INTERVAL).await;
+                // In-stream poll: a response is pending, so poll tighter
+                // than the readiness cadence (see WIRE_FRAME_POLL_INTERVAL).
+                self.timers.sleep(WIRE_FRAME_POLL_INTERVAL).await;
             }
         }
         Err(TransportError::Other(
