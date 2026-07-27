@@ -121,7 +121,7 @@ pub fn AgentChatPane(
         div { class: "tw:grid tw:min-w-0",
             // Transcript.
             div {
-                class: "tw:grid tw:max-h-80 tw:min-h-40 tw:content-start tw:gap-2 tw:overflow-auto tw:bg-card tw:px-3 tw:py-3",
+                class: transcript_class(!view.turns.is_empty()),
                 onmounted: move |event| {
                     transcript_element.set(Some(event.data()));
                 },
@@ -145,7 +145,7 @@ pub fn AgentChatPane(
                 for (index, turn) in view.turns.iter().enumerate() {
                     match turn {
                         UiAgentTurn::User { text } => rsx! {
-                            div { key: "{index}", class: "tw:justify-self-end tw:max-w-[85%] tw:whitespace-pre-wrap tw:break-words tw:rounded-md tw:bg-card-subtle tw:px-3 tw:py-2 tw:text-sm tw:text-strong-foreground",
+                            div { key: "{index}", class: "tw:justify-self-end tw:max-w-[85%] tw:whitespace-pre-wrap tw:break-words tw:rounded-md tw:bg-card tw:px-3 tw:py-2 tw:text-sm tw:text-strong-foreground",
                                 "{text}"
                             }
                         },
@@ -205,9 +205,9 @@ pub fn AgentChatPane(
             // draft up to the cap (`field-sizing: content`; browsers
             // without it keep the fixed min-height plus the manual resize
             // handle) — the gate-feedback "cramped box" fix.
-            div { class: "tw:flex tw:items-end tw:gap-2 tw:border-t tw:border-border-muted tw:bg-card-subtle tw:px-3 tw:py-2",
+            div { class: "tw:flex tw:items-end tw:gap-2 tw:border-t tw:border-border-muted tw:bg-card tw:px-3 tw:py-2",
                 textarea {
-                    class: "tw:field-sizing-content tw:min-h-20 tw:max-h-40 tw:flex-1 tw:resize-y tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card tw:px-2.5 tw:py-2 tw:font-sans tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent-border",
+                    class: "tw:field-sizing-content tw:min-h-20 tw:max-h-40 tw:flex-1 tw:resize-y tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-subtle tw:px-2.5 tw:py-2 tw:font-sans tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent-border",
                     rows: 3,
                     placeholder: if source_resolved { "Ask for a change… (Enter sends, Shift+Enter for a new line)" } else { "Loading shader source…" },
                     value: "{draft}",
@@ -245,7 +245,7 @@ pub fn AgentChatPane(
             // "in" figure is TOTAL prompt tokens (fresh + cache writes +
             // cache reads) — post-caching, the raw `input_tokens` bucket is
             // only the uncached remainder and would read absurdly low.
-            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:border-t tw:border-border-subtle tw:bg-card-subtle tw:px-3 tw:py-1",
+            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:border-t tw:border-border-subtle tw:bg-card tw:px-3 tw:py-1",
                 ModelChip { model: view.model.clone(), busy }
                 ExportButtons { view: view.clone(), busy, on_action }
                 span { class: "tw:min-w-0 tw:flex-1" }
@@ -274,7 +274,7 @@ fn HistoryStrip(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     rsx! {
-        div { class: "tw:flex tw:items-end tw:gap-1.5 tw:overflow-x-auto tw:border-t tw:border-border-muted tw:bg-card-subtle tw:px-3 tw:py-1.5",
+        div { class: "tw:flex tw:items-end tw:gap-1.5 tw:overflow-x-auto tw:border-t tw:border-border-muted tw:bg-card tw:px-3 tw:py-1.5",
             span { class: "tw:flex-none tw:self-center tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-dim-foreground",
                 "Edits"
             }
@@ -362,14 +362,27 @@ fn HistoryChip(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ThinkingTurn(text: String, done: bool) -> Element {
     let mut open = use_signal(|| false);
+    let has_text = !text.is_empty();
     if !done {
+        // Streaming: collapsed by default — a quiet pulsing one-liner the
+        // user can expand to watch the thinking live (gate feedback: the
+        // full stream was too loud always-on).
         return rsx! {
             div { class: "tw:min-w-0 tw:max-w-[95%]",
-                div { class: "tw:flex tw:items-center tw:gap-2 tw:text-xs tw:text-status-working-foreground",
+                button {
+                    class: "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-xs tw:text-status-working-foreground",
+                    r#type: "button",
+                    title: if has_text { "Show the thinking as it streams" } else { "Waiting for the model" },
+                    onclick: move |_| open.set(!open()),
                     span { class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:animate-pulse tw:rounded-full tw:bg-status-working-foreground" }
                     "Thinking…"
+                    if has_text {
+                        span { class: "tw:flex-none",
+                            if open() { "▾" } else { "▸" }
+                        }
+                    }
                 }
-                if !text.is_empty() {
+                if open() && has_text {
                     p { class: "tw:m-0 tw:mt-1 tw:whitespace-pre-wrap tw:break-words tw:text-xs tw:italic tw:leading-snug tw:text-dim-foreground",
                         "{text}"
                     }
@@ -377,7 +390,6 @@ fn ThinkingTurn(text: String, done: bool) -> Element {
             }
         };
     }
-    let has_text = !text.is_empty();
     rsx! {
         div { class: "tw:min-w-0 tw:max-w-[95%]",
             button {
@@ -726,12 +738,24 @@ fn ExportButtons(
 /// Export button chrome: quiet text buttons, enabled/disabled in place.
 fn export_button_class(enabled: bool) -> String {
     let state = if enabled {
-        "tw:cursor-pointer tw:text-dim-foreground tw:hover:bg-accent-wash tw:hover:text-muted-foreground"
+        "tw:cursor-pointer tw:border-border-subtle tw:text-muted-foreground tw:hover:border-accent-border tw:hover:bg-accent-wash tw:hover:text-accent"
     } else {
-        "tw:cursor-default tw:text-subtle-foreground tw:opacity-40"
+        "tw:cursor-default tw:border-border-subtle tw:text-subtle-foreground tw:opacity-40"
     };
     format!(
-        "tw:flex-none tw:rounded-xs tw:border tw:border-transparent tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[10px] tw:transition tw:duration-300 {state}"
+        "tw:flex-none tw:rounded-xs tw:border tw:bg-transparent tw:px-2 tw:py-0.5 tw:text-[10px] tw:font-bold tw:transition tw:duration-300 {state}"
+    )
+}
+
+/// Transcript chrome: the chat scrollback owns the DISTINCT (subtle)
+/// background — the strips around it share the node card's — and locks to
+/// a fixed height once a conversation exists, so streaming text scrolls
+/// inside instead of reflowing the card line by line. The empty state
+/// stays short.
+fn transcript_class(has_turns: bool) -> String {
+    let height = if has_turns { "tw:h-80" } else { "tw:min-h-40" };
+    format!(
+        "tw:grid {height} tw:content-start tw:gap-2 tw:overflow-auto tw:bg-card-subtle tw:px-3 tw:py-3"
     )
 }
 

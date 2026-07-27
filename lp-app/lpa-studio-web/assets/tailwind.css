@@ -315,6 +315,9 @@
   .tw\:h-72 {
     height: calc(var(--tw-spacing) * 72);
   }
+  .tw\:h-80 {
+    height: calc(var(--tw-spacing) * 80);
+  }
   .tw\:h-\[7px\] {
     height: 7px;
   }

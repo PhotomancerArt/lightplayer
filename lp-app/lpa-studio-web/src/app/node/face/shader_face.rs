@@ -31,7 +31,7 @@ use super::node_ui_action;
 
 /// The agent section's plain-language role subline (item 2): active voice,
 /// no jargon.
-pub(crate) const AGENT_SUBLINE: &str = "edits this shader with you";
+pub(crate) const AGENT_SUBLINE: &str = "describe a change in plain language";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
