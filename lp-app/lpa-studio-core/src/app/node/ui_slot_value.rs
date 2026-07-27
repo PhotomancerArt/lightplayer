@@ -149,6 +149,10 @@ pub struct UiSlotValue {
     pub unit: Option<UiSlotUnit>,
     /// Preferred editor treatment for this value.
     pub editor: UiSlotEditorHint,
+    /// Whether the slot's shape marks it for the owning node card's front
+    /// panel (`SlotMeta::panel`) — the face derivation picks panel controls
+    /// by this flag (node-card P3).
+    pub panel: bool,
 }
 
 impl UiSlotValue {
@@ -354,7 +358,14 @@ impl UiSlotValue {
             detail: None,
             unit: None,
             editor: UiSlotEditorHint::Auto,
+            panel: false,
         }
+    }
+
+    /// Mark this value's slot for the node card's front panel.
+    pub fn with_panel(mut self, panel: bool) -> Self {
+        self.panel = panel;
+        self
     }
 
     /// Add secondary detail.

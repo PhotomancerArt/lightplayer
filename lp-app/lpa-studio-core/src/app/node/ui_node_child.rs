@@ -1,6 +1,8 @@
 //! Child nodes extracted from config slots.
 
-use crate::{DirtySummary, UiAction, UiAffordance, UiNodeSection, UiPaneAction, UiStatus};
+use crate::{
+    DirtySummary, UiAction, UiAffordance, UiNodeFace, UiNodeSection, UiPaneAction, UiStatus,
+};
 
 /// A child node rendered outside its parent node pane.
 #[derive(Clone, Debug, PartialEq)]
@@ -21,6 +23,10 @@ pub struct UiNodeChild {
     pub focused: bool,
     /// Action that focuses this child node as the current Studio selection.
     pub action: Option<UiAction>,
+    /// Kind-specific permanent face when this child renders as a nested
+    /// card (the symmetric seed of [`crate::UiNodeView::face`]). `None`
+    /// (any kind without a hand-built face) renders the generic sections.
+    pub face: Option<UiNodeFace>,
     /// Compact body sections for expanded child display (asset slots carry
     /// their own inline editor data on [`crate::UiSlotAsset::inline_editor`]).
     pub sections: Vec<UiNodeSection>,
@@ -51,6 +57,7 @@ impl UiNodeChild {
             active: false,
             focused: false,
             action: None,
+            face: None,
             sections: Vec::new(),
             children: Vec::new(),
             dirty: DirtySummary::clean(),

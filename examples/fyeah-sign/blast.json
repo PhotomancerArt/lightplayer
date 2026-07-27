@@ -20,8 +20,11 @@
       "kind": "value",
       "value": "f32",
       "default": 0,
-      "label": "",
-      "description": ""
+      "min": 0,
+      "max": 1,
+      "label": "Progress",
+      "description": "Blast envelope progress (bound to the playlist entry)",
+      "panel": true
     },
     "time": {
       "kind": "value",

@@ -106,6 +106,21 @@ pub fn SlotValueEditor(
             on_action,
             NumberBounds { min, max, step },
         ),
+        // Knob widgets live on the node face's front panel (`KnobField`);
+        // in a generic slot row a knob hint renders as the same constrained
+        // number field a `Number` hint gets.
+        UiSlotEditorHint::Knob { min, max, step } => auto_value(
+            value,
+            state,
+            unit,
+            address,
+            on_action,
+            NumberBounds {
+                min: Some(min),
+                max: Some(max),
+                step,
+            },
+        ),
         UiSlotEditorHint::Text | UiSlotEditorHint::Auto => auto_value(
             value,
             state,
