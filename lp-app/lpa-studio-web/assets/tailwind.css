@@ -365,6 +365,9 @@
   .tw\:min-h-80 {
     min-height: calc(var(--tw-spacing) * 80);
   }
+  .tw\:min-h-96 {
+    min-height: calc(var(--tw-spacing) * 96);
+  }
   .tw\:min-h-\[46px\] {
     min-height: 46px;
   }

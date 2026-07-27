@@ -78,6 +78,8 @@ genuinely fits none of these, and define it here in one line.
 - **`stand-in-divergence`** — a stand-in (placeholder, mock, fallback)
   meant to be equivalent to what it replaces diverges in a dimension the
   substitution didn't model.
+- **`stale-measurement`** — a cached measurement outlives its validity
+  because the events that invalidate it aren't all observed.
 
 ## Index
 
@@ -101,6 +103,7 @@ bookkeeping fact.
 | partial-knowledge-loss | 2026-07-23 | [reconnect-transient-twin-card](2026-07-23-reconnect-transient-twin-card.md) | fixed | lpa-studio-core/home + device |
 | policy-leak | 2026-07-17 | [hardware-attach-opened-editor](2026-07-17-hardware-attach-opened-editor.md) | fixed | lpa-studio-core/studio |
 | stand-in-divergence | 2026-07-23 | [popover-open-resizes-card](2026-07-23-popover-open-resizes-card.md) | fixed | lpa-studio-web/base/popover |
+| stale-measurement | 2026-07-26 | [popover-outline-stale-on-content-resize](2026-07-26-popover-outline-stale-on-content-resize.md) | fixed | lpa-studio-web/base/popover |
 
 ## Predecessor: `docs/bugs/`
 
