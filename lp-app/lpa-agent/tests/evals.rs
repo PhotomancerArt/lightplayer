@@ -7,12 +7,21 @@
 //!
 //! Opt-in and never CI-blocking:
 //! - the test is `#[ignore]`d, so plain `cargo test` never touches it;
-//! - without `ANTHROPIC_API_KEY` it prints a notice and skips cleanly.
+//! - without provider configuration it prints a notice and skips cleanly.
 //!
-//! Run with:
+//! Run against Anthropic (the default provider):
 //!
 //! ```sh
 //! ANTHROPIC_API_KEY=... cargo test -p lpa-agent --features host-transport -- --ignored evals
+//! ```
+//!
+//! Or against any OpenAI-compatible server (Ollama, LM Studio, llama.cpp,
+//! vLLM) — `LPA_EVAL_MODEL` is required here since compat servers have no
+//! default model id, and `LPA_EVAL_API_KEY` is optional:
+//!
+//! ```sh
+//! LPA_EVAL_BASE_URL=http://localhost:11434/v1 LPA_EVAL_MODEL=qwen3.5:9b \
+//!     cargo test -p lpa-agent --features host-transport -- --ignored evals
 //! ```
 //!
 //! Optional: `LPA_EVAL_MODEL` overrides the model id (default
@@ -32,7 +41,7 @@ use std::time::Instant;
 use lpa_agent::provider::ReqwestTransport;
 use lpa_agent::{
     AgentEvent, AgentHost, AgentSession, AnthropicConfig, AnthropicProvider, FixtureSummary,
-    HostError, ShaderContext, TokenUsage,
+    HostError, ModelProvider, OpenAiCompatConfig, OpenAiCompatProvider, ShaderContext, TokenUsage,
 };
 use lps_probe::{
     ExperimentResult, ExperimentSpec, HealthReport, LedPoint, ProbeDomain, ProbeOutcome,
@@ -61,14 +70,72 @@ vec4 render(vec2 pos) {
 }
 ";
 
+/// Provider selection for one eval run, resolved from the environment:
+/// `LPA_EVAL_BASE_URL` picks any OpenAI-compatible server, otherwise
+/// `ANTHROPIC_API_KEY` picks Anthropic; neither set means skip.
+enum ProviderCfg {
+    Anthropic {
+        api_key: String,
+        model: Option<String>,
+    },
+    OpenAiCompat(OpenAiCompatConfig),
+}
+
+impl ProviderCfg {
+    fn from_env() -> Option<Self> {
+        let model = std::env::var("LPA_EVAL_MODEL").ok();
+        if let Ok(base_url) = std::env::var("LPA_EVAL_BASE_URL") {
+            let model = model
+                .expect("LPA_EVAL_BASE_URL requires LPA_EVAL_MODEL (compat servers have no default model id)");
+            return Some(Self::OpenAiCompat(OpenAiCompatConfig {
+                base_url,
+                api_key: std::env::var("LPA_EVAL_API_KEY").ok(),
+                model,
+            }));
+        }
+        let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
+        Some(Self::Anthropic { api_key, model })
+    }
+
+    /// Human-readable `provider model` label for the report header.
+    fn label(&self) -> String {
+        match self {
+            Self::Anthropic { model, .. } => format!(
+                "anthropic {}",
+                model.clone().unwrap_or_else(|| "(default model)".into())
+            ),
+            Self::OpenAiCompat(c) => format!("openai-compat {} @ {}", c.model, c.base_url),
+        }
+    }
+
+    fn build(&self) -> Box<dyn ModelProvider> {
+        match self {
+            Self::Anthropic { api_key, model } => {
+                let mut config = AnthropicConfig::new(api_key);
+                if let Some(model) = model {
+                    config.model = model.clone();
+                }
+                Box::new(AnthropicProvider::new(config, ReqwestTransport::new()))
+            }
+            Self::OpenAiCompat(config) => Box::new(OpenAiCompatProvider::new(
+                config.clone(),
+                ReqwestTransport::new(),
+            )),
+        }
+    }
+}
+
 #[test]
-#[ignore = "live eval: needs ANTHROPIC_API_KEY and network; run with -- --ignored evals"]
+#[ignore = "live eval: needs a provider (see module docs) and network; run with -- --ignored evals"]
 fn evals() {
-    let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") else {
-        eprintln!("evals: ANTHROPIC_API_KEY is not set; skipping the live eval corpus");
+    let Some(provider_cfg) = ProviderCfg::from_env() else {
+        eprintln!(
+            "evals: set ANTHROPIC_API_KEY, or LPA_EVAL_BASE_URL + LPA_EVAL_MODEL for a local \
+             OpenAI-compatible server; skipping the live eval corpus"
+        );
         return;
     };
-    let model_override = std::env::var("LPA_EVAL_MODEL").ok();
+    eprintln!("evals: provider = {}", provider_cfg.label());
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -78,7 +145,7 @@ fn evals() {
     let mut outcomes = Vec::new();
     for task in tasks() {
         eprintln!("evals: running task {}...", task.name);
-        let outcome = run_task(&rt, &api_key, model_override.as_deref(), &task);
+        let outcome = run_task(&rt, &provider_cfg, &task);
         eprintln!(
             "evals: task {} -> {} ({} turns, {:.1}s)",
             task.name,
@@ -89,7 +156,7 @@ fn evals() {
         outcomes.push((task, outcome));
     }
 
-    let report = render_report(&outcomes);
+    let report = render_report(&outcomes, &provider_cfg);
     eprintln!("\n{report}");
     write_report(&report);
 
@@ -445,15 +512,10 @@ impl TaskOutcome {
 
 fn run_task(
     rt: &tokio::runtime::Runtime,
-    api_key: &str,
-    model_override: Option<&str>,
+    provider_cfg: &ProviderCfg,
     task: &EvalTask,
 ) -> TaskOutcome {
-    let mut config = AnthropicConfig::new(api_key);
-    if let Some(model) = model_override {
-        config.model = model.to_string();
-    }
-    let provider = AnthropicProvider::new(config, ReqwestTransport::new());
+    let provider = provider_cfg.build();
 
     let leds = ring_points();
     let source = Rc::new(RefCell::new(task.starting_source.to_string()));
@@ -553,9 +615,9 @@ impl AgentHost for EvalHost {
 
 // -- reporting -------------------------------------------------------------
 
-fn render_report(outcomes: &[(EvalTask, TaskOutcome)]) -> String {
+fn render_report(outcomes: &[(EvalTask, TaskOutcome)], provider_cfg: &ProviderCfg) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "shader agent eval report");
+    let _ = writeln!(out, "shader agent eval report — {}", provider_cfg.label());
     let _ = writeln!(
         out,
         "{:<17} {:<6} {:>7} {:>6} {:>9} {:>9} {:>8}",
@@ -577,15 +639,26 @@ fn render_report(outcomes: &[(EvalTask, TaskOutcome)]) -> String {
         );
         total.add(o.usage);
     }
-    let input_m = f64::from(total.input_tokens) / 1e6;
-    let output_m = f64::from(total.output_tokens) / 1e6;
-    let cost = input_m * USD_PER_M_INPUT + output_m * USD_PER_M_OUTPUT;
-    let _ = writeln!(
-        out,
-        "total: {} input + {} output tokens; est. ${cost:.2} at claude-sonnet-5 \
-         standard rates (${USD_PER_M_INPUT}/M in, ${USD_PER_M_OUTPUT}/M out)",
-        total.input_tokens, total.output_tokens
-    );
+    match provider_cfg {
+        ProviderCfg::Anthropic { .. } => {
+            let input_m = f64::from(total.input_tokens) / 1e6;
+            let output_m = f64::from(total.output_tokens) / 1e6;
+            let cost = input_m * USD_PER_M_INPUT + output_m * USD_PER_M_OUTPUT;
+            let _ = writeln!(
+                out,
+                "total: {} input + {} output tokens; est. ${cost:.2} at claude-sonnet-5 \
+                 standard rates (${USD_PER_M_INPUT}/M in, ${USD_PER_M_OUTPUT}/M out)",
+                total.input_tokens, total.output_tokens
+            );
+        }
+        ProviderCfg::OpenAiCompat(_) => {
+            let _ = writeln!(
+                out,
+                "total: {} input + {} output tokens (local/compat server; no cost estimate)",
+                total.input_tokens, total.output_tokens
+            );
+        }
+    }
 
     // Per-check detail (always listed; transcripts only for failures).
     for (task, o) in outcomes {
