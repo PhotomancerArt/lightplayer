@@ -4,8 +4,11 @@
 //! Header: the project *name* as the title (never the literal word
 //! "project" — that is the kind label), a dirty/status tone wash, contextual
 //! Save / Revert-to-saved icon actions supplied by the controller
-//! (`ProjectEditorView.header_actions`), and a `DetailPopover` at the right
-//! edge whose trigger renders the pane's one core-computed `UiAffordance`
+//! (`ProjectEditorView.header_actions`), the always-present "+" whose press
+//! opens the add-node kind picker (`ProjectEditorView.add_node_menu`, P5 —
+//! intercepting the P4 add action's default create), and a `DetailPopover`
+//! at the right edge whose trigger renders the pane's one core-computed
+//! `UiAffordance`
 //! (P6 affordance model). No status chip and no count chips in the header:
 //! the status word ("Ready", "Syncing", …), the per-bucket dirty counts, and
 //! the project stats all live in the detail popup.
@@ -18,13 +21,13 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, ProjectEditorView, UiAction, UiAffordance, UiConfigSlot, UiMetric, UiPendingEdit,
-    UiSlotRecord, UiStatus,
+    DirtySummary, NodeCreateOp, ProjectEditorView, UiAction, UiAffordance, UiConfigSlot, UiMetric,
+    UiPendingEdit, UiSlotRecord, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
 use crate::app::layout::{PaneChrome, StudioPane};
-use crate::app::node::{SlotRecordEditor, node_status_label_class};
+use crate::app::node::{PaneAddNodePicker, SlotRecordEditor, node_status_label_class};
 use crate::app::project::ProjectNodeTree;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
@@ -44,6 +47,9 @@ pub fn ProjectPane(
     /// Open the detail popup immediately (stories only).
     #[props(default = false)]
     initially_open: bool,
+    /// Open the add-node kind picker immediately (stories only).
+    #[props(default = false)]
+    add_picker_initially_open: bool,
 ) -> Element {
     let dirty = view.dirty;
     let edits_in_flight = view.edits_in_flight;
@@ -57,7 +63,18 @@ pub fn ProjectPane(
     let sync_issue = view.sync.issue.clone();
     let stats = view.stats.clone();
     let roots = view.tree.roots.clone();
-    let header_actions = view.header_actions.clone();
+    // The always-present "add" header action (authoring P4) dispatches a
+    // default create; this renderer intercepts it and opens the kind picker
+    // from `add_node_menu` instead. The remaining actions (Save / Revert)
+    // keep the generic `PaneActionButton` path. Without picker data (older
+    // fixtures) the action stays a plain dispatch button.
+    let mut header_actions = view.header_actions.clone();
+    let add_picker = view.add_node_menu.clone().and_then(|menu| {
+        let index = header_actions
+            .iter()
+            .position(|action| action.action.op_as::<NodeCreateOp>().is_some())?;
+        Some((menu, header_actions.remove(index)))
+    });
     let project_name = view.project_name.clone();
     let pending_edits = view.pending_edits.clone();
     let root_slots = view.root_slots.clone();
@@ -69,6 +86,16 @@ pub fn ProjectPane(
             chrome,
             actions: header_actions,
             on_action,
+            trailing: rsx! {
+                if let Some((menu, add)) = add_picker {
+                    PaneAddNodePicker {
+                        menu,
+                        label: add.label().to_string(),
+                        initially_open: add_picker_initially_open,
+                        on_action,
+                    }
+                }
+            },
             detail: rsx! {
                 ProjectDetailPopover {
                     affordance,

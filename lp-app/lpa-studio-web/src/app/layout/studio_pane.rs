@@ -32,6 +32,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiPaneAction};
 
 use crate::base::{StudioIcon, StudioIconName, action_icon_name};
+use crate::core::confirmation_confirmed;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -237,6 +238,7 @@ fn PaneActionButton(
         action.summary().to_string()
     };
     let class = pane_action_button_class(action.is_primary(), enabled);
+    let confirmation = action.action.meta().confirmation.clone();
     let dispatch = action.action.clone();
 
     rsx! {
@@ -248,7 +250,12 @@ fn PaneActionButton(
             title: "{title}",
             onclick: move |event| {
                 event.stop_propagation();
-                if let Some(handler) = on_action {
+                // The shared confirm path (`ActionButton`'s): an action whose
+                // meta carries a confirmation (e.g. delete node with its
+                // composed pre-flight warning) asks before dispatch.
+                if confirmation_confirmed(confirmation.as_ref())
+                    && let Some(handler) = on_action
+                {
                     handler.call(dispatch.clone());
                 }
             },
@@ -341,7 +348,10 @@ fn pane_chip_class(tone: PaneTone) -> &'static str {
     }
 }
 
-fn pane_action_button_class(primary: bool, enabled: bool) -> &'static str {
+/// The header action-slot icon-button classes, exported so a trigger that is
+/// not a plain dispatch button (the add-node picker's popover trigger) can
+/// sit in the header and read identically to its `PaneActionButton` siblings.
+pub(crate) fn pane_action_button_class(primary: bool, enabled: bool) -> &'static str {
     match (primary, enabled) {
         (_, false) => {
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-dim-foreground tw:opacity-50 tw:cursor-not-allowed"

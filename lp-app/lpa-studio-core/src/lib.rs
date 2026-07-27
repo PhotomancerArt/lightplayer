@@ -61,16 +61,17 @@ pub use app::preview_host::{
 };
 pub use app::project::{
     AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeController, NodeControllerState, NodeRevertOp, PendingAssetEdit, PendingEdit,
-    PendingEditOp, PendingEditPhase, ProjectAssetContentRun, ProjectConnectResult,
-    ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    NodeController, NodeControllerState, NodeCreateOp, NodeRemoveOp, NodeRevertOp,
+    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, ProjectAssetContentRun,
+    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
     ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
-    SlotEditOp, SlotKind, UiAffordance, UiAssetContent, UiAssetContentBody, UiPendingEdit,
-    UiPendingEditKind, UiPendingEditPhase, UiShaderError,
+    SlotEditOp, SlotKind, UiAddNodeMenu, UiAddNodeMenuEntry, UiAffordance, UiAssetContent,
+    UiAssetContentBody, UiAttachTarget, UiNodeRemovePreflight, UiPendingEdit, UiPendingEditKind,
+    UiPendingEditPhase, UiShaderError,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
@@ -87,8 +88,9 @@ pub use app::runtime_pool::{
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
-    ServerState, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation, StudioOverlayRead,
-    StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+    ServerState, StudioCreateNode, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation,
+    StudioOverlayRead, StudioProjectRead, StudioProjectReadOutcome, StudioRemoveNode,
+    StudioServerClient,
 };
 pub use app::settings::{
     AgentProvider, AgentProviderGuidance, AgentSettings, DEFAULT_AGENT_MODEL, SettingsCommand,
