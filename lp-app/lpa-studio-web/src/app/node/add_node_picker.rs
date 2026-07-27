@@ -48,6 +48,10 @@ pub fn AddNodePicker(
             trigger: Some(trigger),
             trigger_class,
             trigger_open_class,
+            // Every add trigger is a glyph PLUS a label, so its top-layer
+            // copy must keep the trigger's own box (the default centred-glyph
+            // treatment would re-flow the two children on open).
+            layer_keeps_layout: true,
             DetailSection { title: "Add node",
                 div { class: "tw:grid tw:gap-0.5",
                     for entry in menu.entries.clone() {

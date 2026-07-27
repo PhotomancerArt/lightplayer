@@ -102,6 +102,12 @@ pub fn PopoverButton(
     /// open — a live copy of the anchored element's content.
     #[props(default = None)]
     anchor_visual: Option<Element>,
+    /// The trigger's content has real internal layout (icon **plus** label,
+    /// not a lone glyph): the top-layer copy then keeps the trigger's own
+    /// box — padding, display, and track sizes — instead of the default
+    /// centered-glyph treatment, so nothing shifts when the popover opens.
+    #[props(default = false)]
+    layer_keeps_layout: bool,
     children: Element,
 ) -> Element {
     let mut open = use_signal(|| initially_open);
@@ -158,6 +164,11 @@ pub fn PopoverButton(
     let content_style = panel_content_style(t);
     let (grad_stop_near, grad_stop_far) = gradient_stops(current_position.side);
     let trigger_visual_style = open_trigger_style(trigger_rect());
+    let layer_layout_class = if layer_keeps_layout {
+        "ux-popover-open-trigger-boxed"
+    } else {
+        ""
+    };
     // The visual re-parented into the top layer while open: the anchored
     // element's live copy in anchored mode, the trigger's clone otherwise.
     let trigger_for_layer = anchor_visual.unwrap_or_else(|| trigger.clone());
@@ -401,7 +412,7 @@ pub fn PopoverButton(
                         }
                     } else if attached {
                         div {
-                            class: "ux-popover-open-trigger {open_class}",
+                            class: "ux-popover-open-trigger {layer_layout_class} {open_class}",
                             style: "{trigger_visual_style}",
                             aria_hidden: "true",
                             onclick: move |event| {

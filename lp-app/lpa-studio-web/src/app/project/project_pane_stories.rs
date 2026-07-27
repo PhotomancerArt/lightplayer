@@ -7,8 +7,7 @@ use lpa_studio_core::app::project::node::add_node_menu;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiAttachTarget, UiPaneAction, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiStatus,
+    UiAttachTarget, UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
