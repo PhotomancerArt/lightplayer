@@ -708,6 +708,24 @@ impl ProjectController {
         find(self, &self.root_nodes, artifact)
     }
 
+    /// The cached visual-output preview of the shader node behind
+    /// `artifact` (output 0 — the render product every shader produces),
+    /// for the agent history's thumbnails. `None` when no shader node uses
+    /// the artifact or no probe preview has landed yet (previews are
+    /// reused, never re-plumbed — same doctrine as the playlist strip's
+    /// `child_visual_snapshot`).
+    pub(crate) fn agent_visual_preview(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<crate::UiProductPreview> {
+        let node = self.agent_shader_node(artifact)?;
+        let product = crate::UiProductRef::Visual {
+            node_id: node.target().node_id.0,
+            output: 0,
+        };
+        self.sync.as_ref()?.product_preview(&product).cloned()
+    }
+
     /// The def-side param records of the shader node behind `artifact`
     /// (its `consumed` map), for the agent's params diff. `None` when no
     /// shader node uses the artifact. Written into the agent bridge cell

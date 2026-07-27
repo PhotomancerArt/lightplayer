@@ -54,6 +54,13 @@ pub struct AgentBridgeState {
     /// The overlay-aware shader source as of the last refresh or staged
     /// edit.
     pub source: String,
+    /// Per-call staged sources awaiting their `ToolExecuted` mirror (FIFO:
+    /// `stage_source` pushes, the chat session's edit-record push pops —
+    /// events and stages share one order, so the front entry is always the
+    /// executing call's). Cleared at run start; `source` alone is not
+    /// enough because a batch can apply several `ToolExecuted` events
+    /// after multiple stages already overwrote the mirror.
+    pub staged_sources: std::collections::VecDeque<Rc<str>>,
     /// Union of all fixtures' mapping points, labeled by fixture node name.
     pub led_points: Vec<LedPoint>,
     /// System-prompt context (bindings, fixture summary, names).
@@ -165,7 +172,9 @@ impl AgentHost for AgentHostBridge {
                 )
                 .with_summary("Apply the agent's staged shader edit."),
             ));
-            self.state.borrow_mut().source = source.to_string();
+            let mut state = self.state.borrow_mut();
+            state.source = source.to_string();
+            state.staged_sources.push_back(Rc::from(source));
             Ok(())
         })
     }

@@ -282,6 +282,8 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
             ..UiAgentUsage::default()
         },
         estimated_cost: Some("~$0.0162".to_string()),
+        history: Vec::new(),
+        history_dropped: 0,
     }
 }
 

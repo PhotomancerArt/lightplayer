@@ -250,10 +250,16 @@ impl StudioController {
     /// and its params diff sees acked def edits.
     fn refresh_agent_engine_status(&mut self) {
         let project = &self.project;
-        self.agent.refresh_engine_status(
+        let history_changed = self.agent.refresh_engine_status(
             |artifact| project.agent_engine_status(artifact),
             |artifact| project.agent_param_defs(artifact),
+            |artifact| project.agent_visual_preview(artifact),
         );
+        if history_changed {
+            // Thumbnail attaches and late verdict resolutions change the
+            // DTO without necessarily advancing the sync revision.
+            self.mark_dirty();
+        }
     }
 
     /// Fold one spawned-run feedback message into the agent state and mark
@@ -2753,12 +2759,50 @@ impl StudioController {
                 Ok(UiNotices::new())
             }
             crate::AgentOp::Send { artifact, text } => self.agent_send(artifact, text).await,
+            crate::AgentOp::RevertToTurn { artifact, turn } => {
+                self.agent_revert_to_turn(artifact, turn).await
+            }
             crate::AgentOp::UpsertParam {
                 artifact,
                 seq,
                 upsert,
             } => self.agent_upsert_param(artifact, seq, upsert).await,
         }
+    }
+
+    /// Execute one history revert: pull the recorded source, restage it
+    /// through the SAME `ApplyBody` overlay path a staged agent edit rides
+    /// (so dirty state, acks, verdict chasing, and the live sim follow),
+    /// then settle the session — bridge `source` mirror + the visible
+    /// "reverted to turn N" transcript notice. The next run's
+    /// `current_source` reflects the revert through the overlay anyway;
+    /// the mirror update keeps the intra-run snapshot coherent too.
+    async fn agent_revert_to_turn(
+        &mut self,
+        artifact: lpc_model::ArtifactLocation,
+        turn: u32,
+    ) -> UiResult {
+        let runtime = self.pool.lens();
+        let source = self
+            .agent
+            .revert_source(runtime, &artifact, turn)
+            .map_err(UiError::UnsupportedAction)?;
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .apply_asset_edit(
+                    server,
+                    crate::AssetEditOp::ApplyBody {
+                        artifact: artifact.clone(),
+                        bytes: source.as_bytes().to_vec(),
+                    },
+                )
+                .await
+        };
+        let notices = self.record_project_edit_run(run)?;
+        self.agent.record_revert(runtime, &artifact, turn, &source);
+        self.mark_dirty();
+        Ok(notices)
     }
 
     /// Execute one agent `upsert_param` dispatch: ONE `PutSlotEdit` batch

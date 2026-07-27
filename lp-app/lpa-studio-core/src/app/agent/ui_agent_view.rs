@@ -10,10 +10,10 @@ use lpc_model::ArtifactLocation;
 use crate::app::agent::agent_controller::AgentController;
 use crate::app::agent::agent_op::AgentOp;
 use crate::app::settings::agent_provider::AgentProviderGuidance;
-use crate::{ControllerId, UiAction};
+use crate::{ControllerId, UiAction, UiProductPreview};
 
 /// The agent chat state for one shader node's editor region.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiAgentView {
     /// The shader source artifact this chat operates on (the send/stop
     /// target identity).
@@ -34,6 +34,12 @@ pub struct UiAgentView {
     /// Display-ready cost estimate for [`Self::usage`] (e.g. `~$0.0042`),
     /// when rates are known (pricing table or settings overrides).
     pub estimated_cost: Option<String>,
+    /// The session's staged-edit history (oldest first): one entry per
+    /// `iterate` call that staged source, with its preview thumbnail once
+    /// the engine verdict resolved ok. The filmstrip above the composer.
+    pub history: Vec<UiAgentHistoryEntry>,
+    /// How many oldest history entries fell off the retention cap.
+    pub history_dropped: u32,
 }
 
 impl UiAgentView {
@@ -47,6 +53,8 @@ impl UiAgentView {
             turns: Vec::new(),
             usage: UiAgentUsage::default(),
             estimated_cost: None,
+            history: Vec::new(),
+            history_dropped: 0,
         }
     }
 
@@ -78,6 +86,35 @@ impl UiAgentView {
             },
         )
     }
+
+    /// The Revert action for one history entry: restage that edit's source
+    /// through the normal overlay flow (confirm-less — Save-gated like any
+    /// staged edit).
+    pub fn revert_action(&self, turn: u32) -> UiAction {
+        UiAction::from_op(
+            ControllerId::new(AgentController::NODE_ID),
+            AgentOp::RevertToTurn {
+                artifact: self.artifact.clone(),
+                turn,
+            },
+        )
+    }
+}
+
+/// One staged edit in the session's history filmstrip: a compact projection
+/// of the core-side edit record (the full source stays in core — the view
+/// reverts by turn number through [`UiAgentView::revert_action`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiAgentHistoryEntry {
+    /// Session-scoped edit ordinal (1-based, monotonic across the cap).
+    pub turn: u32,
+    /// The model's one-line intent for the call that staged this edit.
+    pub note: Option<String>,
+    /// 32×32 preview snapshot taken after the engine verdict resolved ok
+    /// (`None` until a post-edit preview lands, or when the edit errored).
+    pub thumb: Option<UiProductPreview>,
+    /// Engine verdict for this edit (`None` while unresolved).
+    pub engine_ok: Option<bool>,
 }
 
 /// Whether the agent can run (settings-derived; Ready ⇔ the SELECTED
@@ -260,6 +297,19 @@ mod tests {
             stop.op_as::<AgentOp>(),
             Some(&AgentOp::Stop {
                 artifact: ArtifactLocation::file("/shader.glsl"),
+            })
+        );
+    }
+
+    #[test]
+    fn revert_action_targets_the_record_by_turn() {
+        let revert = view().revert_action(3);
+        assert!(revert.is_for_node(AgentController::NODE_ID));
+        assert_eq!(
+            revert.op_as::<AgentOp>(),
+            Some(&AgentOp::RevertToTurn {
+                artifact: ArtifactLocation::file("/shader.glsl"),
+                turn: 3,
             })
         );
     }

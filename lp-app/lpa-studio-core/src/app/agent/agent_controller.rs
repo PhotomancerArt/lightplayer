@@ -175,23 +175,34 @@ impl AgentController {
 
     /// Refresh every session's shared bridge cell from the project
     /// controller's per-artifact lookups: engine status (the verdict-wait
-    /// seam) and def-side param records (the params-diff seam). Called
-    /// after every processed actor batch so a running agent observes
-    /// status advances and def changes the pulls bring in.
+    /// seam) and def-side param records (the params-diff seam), then let
+    /// the session settle its edit-history records against the fresh cell
+    /// plus the node's cached visual preview (P4: verdict resolution +
+    /// revision-guarded thumbnail attach). Called after every processed
+    /// actor batch so a running agent observes status advances and def
+    /// changes the pulls bring in. Returns true when any history record
+    /// changed — the caller marks the view dirty, since preview advances
+    /// alone need not move the sync revision the change gate watches.
     pub(crate) fn refresh_engine_status(
         &mut self,
         resolve: impl Fn(&ArtifactLocation) -> Option<crate::AgentEngineStatus>,
         params: impl Fn(&ArtifactLocation) -> Option<Vec<lpa_agent::ParamDefRecord>>,
-    ) {
+        preview: impl Fn(&ArtifactLocation) -> Option<crate::UiProductPreview>,
+    ) -> bool {
+        let mut history_changed = false;
         for session in self.sessions.values_mut() {
-            let mut bridge = session.bridge.borrow_mut();
-            if let Some(status) = resolve(&session.artifact) {
-                bridge.engine = Some(status);
+            {
+                let mut bridge = session.bridge.borrow_mut();
+                if let Some(status) = resolve(&session.artifact) {
+                    bridge.engine = Some(status);
+                }
+                if let Some(defs) = params(&session.artifact) {
+                    bridge.params = Some(defs);
+                }
             }
-            if let Some(defs) = params(&session.artifact) {
-                bridge.params = Some(defs);
-            }
+            history_changed |= session.resolve_edit_outcomes(preview(&session.artifact).as_ref());
         }
+        history_changed
     }
 
     /// Record the outcome of one dispatched `UpsertParam` batch into the
@@ -240,6 +251,52 @@ impl AgentController {
         }
     }
 
+    /// The recorded source for a revert: the lens runtime's session for
+    /// `artifact`, its record with ordinal `turn`. Refused (with the
+    /// user-facing reason) when the session is missing, a run is in
+    /// flight (the agent would race the restage), or the record fell off
+    /// the retention cap.
+    pub(crate) fn revert_source(
+        &self,
+        runtime: Option<RuntimeId>,
+        artifact: &ArtifactLocation,
+        turn: u32,
+    ) -> Result<std::rc::Rc<str>, String> {
+        let session = runtime
+            .and_then(|runtime| {
+                self.sessions
+                    .values()
+                    .find(|session| session.key.runtime == runtime && &session.artifact == artifact)
+            })
+            .ok_or_else(|| "no agent session for this shader".to_string())?;
+        if session.running {
+            return Err("a run is in flight — stop it before reverting".to_string());
+        }
+        session
+            .edit_record(turn)
+            .map(|record| std::rc::Rc::clone(&record.source))
+            .ok_or_else(|| format!("no edit record for turn {turn} (it may have been dropped)"))
+    }
+
+    /// Settle a successfully dispatched revert: mirror the restaged source
+    /// into the session's bridge state (so the next run's `current_source`
+    /// agrees before the async apply round-trips) and append the visible
+    /// transcript notice.
+    pub(crate) fn record_revert(
+        &mut self,
+        runtime: Option<RuntimeId>,
+        artifact: &ArtifactLocation,
+        turn: u32,
+        source: &str,
+    ) {
+        if let Some(session) = self.session_for_mut(runtime, artifact) {
+            session.bridge.borrow_mut().source = source.to_string();
+            session.push_notice(format!(
+                "Reverted to turn {turn} — that edit's source is staged again (Save keeps it)."
+            ));
+        }
+    }
+
     /// Flip the abort flag of the running session for `artifact` (Stop).
     /// The run settles asynchronously (Aborted → SessionDone → RunEnded).
     pub fn request_stop(&mut self, runtime: Option<RuntimeId>, artifact: &ArtifactLocation) {
@@ -283,6 +340,8 @@ impl AgentController {
             bridge.source = ctx.source;
             bridge.led_points = ctx.led_points;
             bridge.context = ctx.context;
+            // Drop stage/event correlation leftovers from an aborted run.
+            bridge.staged_sources.clear();
         }
 
         let mut session = match entry.runtime.borrow_mut().take() {
@@ -440,16 +499,29 @@ impl AgentController {
                 .values()
                 .find(|session| session.key.runtime == runtime && &session.artifact == artifact)
         });
-        let (status, turns, usage) = match session {
+        let (status, turns, usage, history, history_dropped) = match session {
             Some(session) => (
                 session.status.clone(),
                 session.turns.clone(),
                 session.ui_usage(),
+                session
+                    .edits
+                    .iter()
+                    .map(|record| crate::UiAgentHistoryEntry {
+                        turn: record.turn,
+                        note: record.note.clone(),
+                        thumb: record.thumb.clone(),
+                        engine_ok: record.engine_ok,
+                    })
+                    .collect(),
+                session.dropped_edits,
             ),
             None => (
                 crate::UiAgentStatus::Idle,
                 Vec::new(),
                 UiAgentUsage::default(),
+                Vec::new(),
+                0,
             ),
         };
         UiAgentView {
@@ -460,6 +532,8 @@ impl AgentController {
             turns,
             usage,
             estimated_cost: estimated_cost(usage, ctx.cost_rates),
+            history,
+            history_dropped,
         }
     }
 

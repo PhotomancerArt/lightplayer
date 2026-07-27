@@ -17,6 +17,7 @@ pub mod agent_provider_config;
 pub mod agent_session_key;
 pub mod ui_agent_view;
 
+pub use agent_chat_session::{AgentEditRecord, MAX_EDIT_RECORDS};
 pub use agent_controller::{
     AgentController, AgentModelsFetchFuture, AgentRunContext, AgentTaskFuture, AgentTimerFactory,
     AgentTimerFuture, AgentViewContext, instant_agent_timer,
@@ -28,5 +29,6 @@ pub use agent_pricing::{AgentCostRates, format_cost_usd};
 pub use agent_provider_config::AgentProviderConfig;
 pub use agent_session_key::AgentSessionKey;
 pub use ui_agent_view::{
-    UiAgentAvailability, UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
+    UiAgentAvailability, UiAgentHistoryEntry, UiAgentStatus, UiAgentToolRow, UiAgentTurn,
+    UiAgentUsage, UiAgentView,
 };

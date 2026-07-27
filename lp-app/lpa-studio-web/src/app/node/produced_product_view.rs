@@ -200,9 +200,12 @@ fn ControlProductPreview(preview: UiControlProductPreview) -> Element {
     }
 }
 
+/// The raw sRGB8 pixel grid. `pub(crate)` so the agent history filmstrip
+/// renders its thumbnails through the exact preview path (same doctrine as
+/// [`ProductPreview`]'s reuse by faces and playlist strips).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProductPixelGrid(width: u32, height: u32, bytes: Rc<[u8]>) -> Element {
+pub(crate) fn ProductPixelGrid(width: u32, height: u32, bytes: Rc<[u8]>) -> Element {
     let columns = width.max(1);
     let rows = height.max(1);
     let grid_style = format!(
