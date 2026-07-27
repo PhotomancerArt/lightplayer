@@ -39,6 +39,7 @@ pub use provider::{
 pub use session::{AgentError, AgentEvent, AgentSession, AgentTranscript, MAX_TURNS_PER_RUN};
 pub use tool::{
     AgentHost, BindingInfo, ENGINE_VERDICT_BUDGET_MS, EngineStatusKind, EngineVerdict,
-    FixtureSummary, HostError, HostFuture, ITERATE_TOOL_NAME, ShaderContext, ToolPhase,
-    iterate_tool_def, run_iterate,
+    FixtureSummary, HostError, HostFuture, ITERATE_TOOL_NAME, ParamDefRecord, ParamUpsert,
+    ShaderContext, ToolPhase, UPSERT_PARAM_TOOL_NAME, iterate_tool_def, run_iterate,
+    run_upsert_param, upsert_param_tool_def,
 };

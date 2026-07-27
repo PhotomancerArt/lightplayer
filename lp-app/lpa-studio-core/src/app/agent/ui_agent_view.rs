@@ -177,25 +177,32 @@ impl UiAgentToolRow {
         if let Some(error) = &self.error {
             return format!("Tool failed: {error}");
         }
-        let compile = match self.shader_ok {
-            Some(true) => "compile ok",
-            Some(false) => "compile error",
-            None => "no compile",
-        };
-        let mut line = match &self.note {
-            Some(note) => format!("{note} — {compile}"),
-            None => compile.to_string(),
-        };
+        // Compile-less calls (e.g. `upsert_param`) contribute no compile
+        // segment; their line is the note plus what actually happened.
+        let mut segments: Vec<String> = Vec::new();
+        match self.shader_ok {
+            Some(true) => segments.push("compile ok".to_string()),
+            Some(false) => segments.push("compile error".to_string()),
+            None => {}
+        }
         if self.staged {
-            line.push_str(", staged edit");
+            segments.push("staged edit".to_string());
         }
         if self.probes > 0 {
-            line.push_str(&format!(", {} probes", self.probes));
+            segments.push(format!("{} probes", self.probes));
         }
         if self.warnings > 0 {
-            line.push_str(&format!(", {} warnings", self.warnings));
+            segments.push(format!("{} warnings", self.warnings));
         }
-        line
+        let outcome = if segments.is_empty() {
+            "done".to_string()
+        } else {
+            segments.join(", ")
+        };
+        match &self.note {
+            Some(note) => format!("{note} — {outcome}"),
+            None => outcome,
+        }
     }
 }
 

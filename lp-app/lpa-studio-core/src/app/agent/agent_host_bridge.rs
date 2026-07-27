@@ -21,11 +21,14 @@ use core::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lpa_agent::{AgentHost, EngineVerdict, HostError, HostFuture, ShaderContext};
+use lpa_agent::{
+    AgentHost, EngineVerdict, HostError, HostFuture, ParamDefRecord, ParamUpsert, ShaderContext,
+};
 use lpc_model::{ArtifactLocation, Revision};
 use lps_probe::LedPoint;
 
-use crate::app::agent::agent_controller::AgentTimerFactory;
+use crate::app::agent::agent_controller::{AgentController, AgentTimerFactory};
+use crate::app::agent::agent_op::AgentOp;
 use crate::app::project::agent_support::AgentEngineStatus;
 use crate::app::studio::studio_view_channel::CommandSender;
 use crate::{
@@ -35,6 +38,10 @@ use crate::{
 /// One poll step of the engine-verdict wait (matches the verdict-chase
 /// tightened pull interval, so each poll can observe one fresh pull).
 const ENGINE_POLL_STEP_MS: u32 = 250;
+
+/// Budget for the upsert-ack wait: one overlay-mutation round trip plus
+/// generous margin (polled on the same actor timer as the verdict wait).
+const UPSERT_ACK_BUDGET_MS: u32 = 5000;
 
 /// The snapshot the bridge serves between run-start refreshes. Written by
 /// the controller at every Send; `source` is additionally updated by
@@ -54,6 +61,13 @@ pub struct AgentBridgeState {
     /// The target node's latest engine status, written by the controller
     /// after every processed batch (`None` until the node resolves).
     pub engine: Option<AgentEngineStatus>,
+    /// The target node's def-side param records, refreshed alongside
+    /// `engine` (`None` until the node resolves).
+    pub params: Option<Vec<ParamDefRecord>>,
+    /// The latest `UpsertParam` outcome: `(seq, rejection text)`. Written
+    /// by the controller when the dispatched batch acks; the bridge's
+    /// `upsert_param` polls it up by its allocated `seq`.
+    pub upsert_ack: Option<(u64, Option<String>)>,
 }
 
 /// The host handed to `lpa_agent::AgentSession` for one shader node.
@@ -66,6 +80,9 @@ pub struct AgentHostBridge {
     /// The engine-status Revision observed when the last stage was
     /// enqueued; the verdict wait resolves once the cell advances past it.
     pre_stage_revision: Option<Revision>,
+    /// Correlation counter for `UpsertParam` dispatches (acks carry it
+    /// back through [`AgentBridgeState::upsert_ack`]).
+    upsert_seq: u64,
 }
 
 impl AgentHostBridge {
@@ -79,6 +96,7 @@ impl AgentHostBridge {
             tx,
             timer,
             pre_stage_revision: None,
+            upsert_seq: 0,
         }
     }
 
@@ -149,6 +167,68 @@ impl AgentHost for AgentHostBridge {
             ));
             self.state.borrow_mut().source = source.to_string();
             Ok(())
+        })
+    }
+
+    fn shader_params(&mut self) -> HostFuture<'_, Option<Vec<ParamDefRecord>>> {
+        Box::pin(async move { self.state.borrow().params.clone() })
+    }
+
+    fn upsert_param<'a>(
+        &'a mut self,
+        upsert: &'a ParamUpsert,
+    ) -> HostFuture<'a, Result<(), HostError>> {
+        Box::pin(async move {
+            let artifact = self
+                .state
+                .borrow()
+                .artifact
+                .clone()
+                .ok_or_else(|| HostError::new("no shader source artifact resolved"))?;
+            // The def change flips the node's needs-compile: mark the
+            // pre-stage engine Revision BEFORE enqueuing, exactly like a
+            // staged source edit, so the following verdict wait resolves
+            // on this edit's outcome.
+            self.pre_stage_revision = self
+                .state
+                .borrow()
+                .engine
+                .as_ref()
+                .map(|status| status.revision);
+            self.upsert_seq += 1;
+            let seq = self.upsert_seq;
+            self.state.borrow_mut().upsert_ack = None;
+            self.tx.send(StudioCommand::Action(
+                UiAction::from_op(
+                    ControllerId::new(AgentController::NODE_ID),
+                    AgentOp::UpsertParam {
+                        artifact,
+                        seq,
+                        upsert: upsert.clone(),
+                    },
+                )
+                .with_summary("Stage the agent's param record edit."),
+            ));
+            // The ApplyBody-style correlation, surfaced through the shared
+            // cell: poll on the actor timer until this seq's ack lands.
+            let mut waited_ms = 0u32;
+            loop {
+                let ack = self.state.borrow().upsert_ack.clone();
+                if let Some((ack_seq, rejection)) = ack
+                    && ack_seq == seq
+                {
+                    return match rejection {
+                        None => Ok(()),
+                        Some(reason) => Err(HostError::new(reason)),
+                    };
+                }
+                if waited_ms >= UPSERT_ACK_BUDGET_MS {
+                    return Err(HostError::new("param upsert was not acknowledged in time"));
+                }
+                let step = ENGINE_POLL_STEP_MS.min(UPSERT_ACK_BUDGET_MS - waited_ms);
+                (self.timer.borrow_mut())(Duration::from_millis(u64::from(step))).await;
+                waited_ms += step;
+            }
         })
     }
 
@@ -331,6 +411,106 @@ mod tests {
             fresh.message.as_deref(),
             Some("missing uniform field `speed`")
         );
+    }
+
+    #[test]
+    fn shader_params_serves_the_refreshed_cell() {
+        let (mut bridge, _rx, state) = bridge_with_artifact();
+        assert_eq!(drive(bridge.shader_params()), None, "nothing resolved yet");
+        state.borrow_mut().params = Some(vec![ParamDefRecord {
+            name: "speed".into(),
+            ..ParamDefRecord::default()
+        }]);
+        let params = drive(bridge.shader_params()).expect("records");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "speed");
+    }
+
+    #[test]
+    fn upsert_param_enqueues_the_agent_op_and_resolves_on_its_ack() {
+        let (tx, rx) = command_channel();
+        let state = Rc::new(RefCell::new(AgentBridgeState {
+            artifact: Some(ArtifactLocation::file("/shader.glsl")),
+            engine: Some(engine_status(7, EngineStatusKind::Ok)),
+            ..AgentBridgeState::default()
+        }));
+        // The ack lands mid-wait, like a processed actor batch would: the
+        // first timer poll records it — with a STALE seq first, which the
+        // wait must ignore until this dispatch's own seq arrives.
+        let acks = Rc::new(RefCell::new(vec![
+            (1, None),
+            (0, Some("stale".to_string())),
+        ]));
+        let timer_state = Rc::clone(&state);
+        let timer_acks = Rc::clone(&acks);
+        let timer: AgentTimerFactory = Rc::new(RefCell::new(move |_delay| {
+            if let Some(ack) = timer_acks.borrow_mut().pop() {
+                timer_state.borrow_mut().upsert_ack = Some(ack);
+            }
+            Box::pin(core::future::ready(()))
+                as core::pin::Pin<Box<dyn core::future::Future<Output = ()>>>
+        }));
+        let mut bridge = AgentHostBridge::new(Rc::clone(&state), tx, timer);
+
+        let upsert = lpa_agent::ParamUpsert {
+            name: "speed".into(),
+            default: Some(1.0),
+            ..lpa_agent::ParamUpsert::default()
+        };
+        drive(bridge.upsert_param(&upsert)).expect("acked clean");
+
+        // The op went out once, with the bridge's seq and the artifact.
+        let batch = rx.try_recv_all_for_test();
+        assert_eq!(batch.len(), 1);
+        let StudioCommand::Action(action) = &batch[0] else {
+            panic!("expected an action, got {:?}", batch[0]);
+        };
+        assert!(action.is_for_node(crate::AgentController::NODE_ID));
+        assert_eq!(
+            action.op_as::<AgentOp>(),
+            Some(&AgentOp::UpsertParam {
+                artifact: ArtifactLocation::file("/shader.glsl"),
+                seq: 1,
+                upsert,
+            })
+        );
+        // The def change marked the pre-stage revision, like stage_source:
+        // a same-revision verdict wait keeps polling (times out unknown).
+        let verdict = drive(bridge.await_engine_verdict(250)).expect("verdict");
+        assert_eq!(verdict.status, EngineStatusKind::Unknown);
+    }
+
+    #[test]
+    fn rejected_upsert_acks_resolve_to_host_errors() {
+        let (tx, _rx) = command_channel();
+        let state = Rc::new(RefCell::new(AgentBridgeState {
+            artifact: Some(ArtifactLocation::file("/shader.glsl")),
+            ..AgentBridgeState::default()
+        }));
+        let timer_state = Rc::clone(&state);
+        let timer: AgentTimerFactory = Rc::new(RefCell::new(move |_delay| {
+            timer_state.borrow_mut().upsert_ack = Some((1, Some("unknown slot path".to_string())));
+            Box::pin(core::future::ready(()))
+                as core::pin::Pin<Box<dyn core::future::Future<Output = ()>>>
+        }));
+        let mut bridge = AgentHostBridge::new(state, tx, timer);
+        let error = drive(bridge.upsert_param(&lpa_agent::ParamUpsert {
+            name: "speed".into(),
+            ..lpa_agent::ParamUpsert::default()
+        }))
+        .expect_err("rejection surfaces");
+        assert!(error.message.contains("unknown slot path"));
+    }
+
+    #[test]
+    fn unacked_upserts_time_out_with_an_actionable_error() {
+        let (mut bridge, _rx, _state) = bridge_with_artifact();
+        let error = drive(bridge.upsert_param(&lpa_agent::ParamUpsert {
+            name: "speed".into(),
+            ..lpa_agent::ParamUpsert::default()
+        }))
+        .expect_err("no ack ever lands");
+        assert!(error.message.contains("not acknowledged"));
     }
 
     #[test]

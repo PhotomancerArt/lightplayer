@@ -173,17 +173,40 @@ impl AgentController {
         self.timer = Some(Rc::new(RefCell::new(timer)));
     }
 
-    /// Refresh every session's shared engine-status cell from `resolve`
-    /// (the project controller's per-artifact status lookup). Called after
-    /// every processed actor batch so a running agent's verdict wait
-    /// observes status advances the pulls bring in.
+    /// Refresh every session's shared bridge cell from the project
+    /// controller's per-artifact lookups: engine status (the verdict-wait
+    /// seam) and def-side param records (the params-diff seam). Called
+    /// after every processed actor batch so a running agent observes
+    /// status advances and def changes the pulls bring in.
     pub(crate) fn refresh_engine_status(
         &mut self,
         resolve: impl Fn(&ArtifactLocation) -> Option<crate::AgentEngineStatus>,
+        params: impl Fn(&ArtifactLocation) -> Option<Vec<lpa_agent::ParamDefRecord>>,
     ) {
         for session in self.sessions.values_mut() {
+            let mut bridge = session.bridge.borrow_mut();
             if let Some(status) = resolve(&session.artifact) {
-                session.bridge.borrow_mut().engine = Some(status);
+                bridge.engine = Some(status);
+            }
+            if let Some(defs) = params(&session.artifact) {
+                bridge.params = Some(defs);
+            }
+        }
+    }
+
+    /// Record the outcome of one dispatched `UpsertParam` batch into the
+    /// artifact's session bridge cell (`rejection` = joined rejection text
+    /// when any command was refused). The awaiting run future polls it up
+    /// by `seq`.
+    pub(crate) fn record_upsert_ack(
+        &mut self,
+        artifact: &ArtifactLocation,
+        seq: u64,
+        rejection: Option<String>,
+    ) {
+        for session in self.sessions.values_mut() {
+            if &session.artifact == artifact {
+                session.bridge.borrow_mut().upsert_ack = Some((seq, rejection.clone()));
             }
         }
     }

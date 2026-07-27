@@ -26,6 +26,16 @@ pub enum AgentOp {
     },
     /// Flip the running session's abort flag (the Stop button).
     Stop { artifact: ArtifactLocation },
+    /// The agent's `upsert_param` write (dispatched by the host bridge, not
+    /// the web layer): send ONE `PutSlotEdit` batch on the target node's
+    /// def artifact and record the outcome into the session's bridge cell
+    /// under `seq`, where the awaiting run future polls it up.
+    UpsertParam {
+        artifact: ArtifactLocation,
+        /// Bridge-allocated correlation id for the ack.
+        seq: u64,
+        upsert: lpa_agent::ParamUpsert,
+    },
 }
 
 impl ControllerOp for AgentOp {
@@ -40,6 +50,11 @@ impl ControllerOp for AgentOp {
                 "Stop",
                 "Stop the running agent turn.",
                 ActionPriority::Secondary,
+            ),
+            Self::UpsertParam { .. } => ActionMeta::new(
+                "Upsert param",
+                "Stage the agent's param record edit as a pending edit.",
+                ActionPriority::Primary,
             ),
         }
     }

@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 
 use crate::provider::model_provider::ToolDef;
 use crate::tool::iterate_host::{AgentHost, EngineVerdict};
+use crate::tool::params_section::params_json;
 use crate::tool::tool_phase::ToolPhase;
 
 /// The tool's wire name.
@@ -171,6 +172,11 @@ pub async fn run_iterate(
                 "reason": "current shader did not compile" }),
         }
     });
+    // The params section: declared uniforms (this compile) vs the host's
+    // def records, orphans both ways (before the cache consumes `compiled`).
+    let defs = host.shader_params().await;
+    let params = params_json(result.compiled.as_ref(), defs.as_deref());
+
     if let Some(compiled) = result.compiled.take() {
         *prev_compiled = Some(compiled);
     }
@@ -199,6 +205,7 @@ pub async fn run_iterate(
         obj.insert("note".into(), json!(note));
     }
     obj.insert("staged".into(), json!(staged));
+    obj.insert("params".into(), params);
     if let Some(verdict) = &engine {
         obj.insert("engine".into(), engine_json(verdict));
     }
@@ -233,8 +240,9 @@ pub async fn run_iterate(
     }
 }
 
-/// The `engine` section: `{status, message?, line_col?}`.
-fn engine_json(verdict: &EngineVerdict) -> Value {
+/// The `engine` section: `{status, message?, line_col?}` (shared with the
+/// `upsert_param` tool's post-update verdict).
+pub(crate) fn engine_json(verdict: &EngineVerdict) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert("status".into(), json!(verdict.status.as_str()));
     if let Some(message) = &verdict.message {
@@ -285,7 +293,10 @@ Run one iteration on the shader: optionally stage new GLSL source (an unsaved \
 edit the user can Save or revert), then compile it and evaluate probes on the \
 f32 reference interpreter. Every call returns compile diagnostics, a health \
 report over a 16x16 grid plus the LED points (NaN/Inf counts, near-black \
-fraction, mean luminance, clip fraction), per-probe results, and warnings. \
+fraction, mean luminance, clip fraction), per-probe results, warnings, and a \
+`params` section diffing the declared uniforms against the def-side param \
+records (orphans flagged both ways; `declared_only` orphans fail at engine \
+render time until a record exists — see `upsert_param`). \
 Compile errors come back as normal data — read the diagnostics and iterate. \
 Probes evaluate a GLSL expression over a domain (point/points/grid/line/leds \
 or a scalar sweep), optionally swept over ordered `vary` values of one \

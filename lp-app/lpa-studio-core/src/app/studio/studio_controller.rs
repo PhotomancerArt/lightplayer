@@ -242,15 +242,18 @@ impl StudioController {
         self.agent.set_timer(timer);
     }
 
-    /// Write every agent session's latest engine status into its shared
-    /// bridge cell (P2: the engine-verdict seam). Runs at the end of every
-    /// processed batch — cheap while no sessions exist — so a running
-    /// agent's bounded verdict wait observes the status Revision advancing
-    /// as pulls land.
+    /// Write every agent session's latest engine status and def-side param
+    /// records into its shared bridge cell (P2: the engine-verdict seam;
+    /// P3: the params-diff seam). Runs at the end of every processed batch
+    /// — cheap while no sessions exist — so a running agent's bounded
+    /// verdict wait observes the status Revision advancing as pulls land,
+    /// and its params diff sees acked def edits.
     fn refresh_agent_engine_status(&mut self) {
         let project = &self.project;
-        self.agent
-            .refresh_engine_status(|artifact| project.agent_engine_status(artifact));
+        self.agent.refresh_engine_status(
+            |artifact| project.agent_engine_status(artifact),
+            |artifact| project.agent_param_defs(artifact),
+        );
     }
 
     /// Fold one spawned-run feedback message into the agent state and mark
@@ -2750,6 +2753,48 @@ impl StudioController {
                 Ok(UiNotices::new())
             }
             crate::AgentOp::Send { artifact, text } => self.agent_send(artifact, text).await,
+            crate::AgentOp::UpsertParam {
+                artifact,
+                seq,
+                upsert,
+            } => self.agent_upsert_param(artifact, seq, upsert).await,
+        }
+    }
+
+    /// Execute one agent `upsert_param` dispatch: ONE `PutSlotEdit` batch
+    /// on the target node's def artifact through the project controller,
+    /// then record the outcome into the session's bridge cell — including
+    /// failures, so the awaiting run future reports an actionable host
+    /// error instead of timing out.
+    async fn agent_upsert_param(
+        &mut self,
+        artifact: lpc_model::ArtifactLocation,
+        seq: u64,
+        upsert: lpa_agent::ParamUpsert,
+    ) -> UiResult {
+        let outcome = match self
+            .pool
+            .lens_session_mut()
+            .and_then(|session| session.client_mut())
+        {
+            Ok(server) => {
+                self.project
+                    .upsert_shader_param(server, &artifact, &upsert)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        match outcome {
+            Ok((run, rejection)) => {
+                self.record_logs(run.logs);
+                self.agent.record_upsert_ack(&artifact, seq, rejection);
+                Ok(run.notices)
+            }
+            Err(error) => {
+                self.agent
+                    .record_upsert_ack(&artifact, seq, Some(error.to_string()));
+                Err(error)
+            }
         }
     }
 
