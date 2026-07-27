@@ -7,7 +7,9 @@ use crate::app::agent::agent_pricing::AgentCostRates;
 use crate::app::agent::agent_provider_config::AgentProviderConfig;
 use crate::app::settings::agent_provider::{AgentProvider, provider_guidance};
 use crate::app::settings::settings_layer::SettingsLayer;
-use crate::app::settings::studio_settings::{DEFAULT_AGENT_MODEL, StudioSettings};
+use crate::app::settings::studio_settings::{
+    DEFAULT_AGENT_MODEL, DEFAULT_OPENROUTER_MODEL, OPENROUTER_BASE_URL, StudioSettings,
+};
 use crate::app::settings::ui_settings_view::{
     UiAgentSettingsView, UiSettingsView, masked_key_preview,
 };
@@ -68,6 +70,12 @@ impl SettingsStore {
         self.user.agent.custom_api_key = normalized(key);
     }
 
+    /// Set or clear the OpenRouter key (written by the Connect flow's
+    /// exchange, cleared by Disconnect).
+    pub fn set_agent_openrouter_api_key(&mut self, key: Option<String>) {
+        self.user.agent.openrouter_api_key = normalized(key);
+    }
+
     /// Set or clear the user's model override (trimmed; empty ⇒ clear).
     pub fn set_agent_model(&mut self, model: Option<String>) {
         self.user.agent.model = normalized(model);
@@ -118,6 +126,11 @@ impl SettingsStore {
                 .agent
                 .custom_api_key
                 .as_deref()),
+            AgentProvider::OpenRouter => self.user.agent.openrouter_api_key.as_deref().or(self
+                .host
+                .agent
+                .openrouter_api_key
+                .as_deref()),
         }
     }
 
@@ -139,14 +152,19 @@ impl SettingsStore {
             .or(self.host.agent.model.as_deref())
     }
 
-    /// The effective model for the selected provider: Anthropic falls back
-    /// to [`DEFAULT_AGENT_MODEL`]; OpenAI/Custom have no default (model ids
-    /// are provider-specific and never guessed).
+    /// The effective model for the selected provider: Anthropic and
+    /// OpenRouter fall back to their baked defaults (so Connect alone makes
+    /// the agent ready); OpenAI/Custom have no default (model ids are
+    /// provider-specific and never guessed).
     pub fn agent_model(&self) -> Option<&str> {
         match self.agent_provider() {
             AgentProvider::Anthropic => {
                 Some(self.agent_model_override().unwrap_or(DEFAULT_AGENT_MODEL))
             }
+            AgentProvider::OpenRouter => Some(
+                self.agent_model_override()
+                    .unwrap_or(DEFAULT_OPENROUTER_MODEL),
+            ),
             AgentProvider::OpenAi | AgentProvider::Custom => self.agent_model_override(),
         }
     }
@@ -176,6 +194,7 @@ impl SettingsStore {
                     base_url: OPENAI_DEFAULT_BASE_URL.to_string(),
                     api_key: Some(api_key.to_string()),
                     model: self.agent_model()?.to_string(),
+                    extra_headers: Vec::new(),
                 }))
             }
             AgentProvider::Custom => {
@@ -184,6 +203,24 @@ impl SettingsStore {
                     base_url: base_url.to_string(),
                     api_key: self.agent_selected_api_key().map(str::to_string),
                     model: self.agent_model()?.to_string(),
+                    extra_headers: Vec::new(),
+                }))
+            }
+            AgentProvider::OpenRouter => {
+                let api_key = self.agent_selected_api_key()?;
+                Some(AgentProviderConfig::OpenAiCompat(OpenAiCompatConfig {
+                    base_url: OPENROUTER_BASE_URL.to_string(),
+                    api_key: Some(api_key.to_string()),
+                    model: self.agent_model()?.to_string(),
+                    // App attribution in OpenRouter's rankings; harmless
+                    // elsewhere and never sent to other providers.
+                    extra_headers: vec![
+                        (
+                            "HTTP-Referer".to_string(),
+                            "https://lightplayer.app".to_string(),
+                        ),
+                        ("X-Title".to_string(), "LightPlayer Studio".to_string()),
+                    ],
                 }))
             }
         }
@@ -245,6 +282,10 @@ impl SettingsStore {
                 &self.user.agent.custom_api_key,
                 &self.host.agent.custom_api_key,
             ),
+            AgentProvider::OpenRouter => (
+                &self.user.agent.openrouter_api_key,
+                &self.host.agent.openrouter_api_key,
+            ),
         };
         // The model input's placeholder: the effective model when one
         // resolves (default or lower-layer value), or the required-id hint
@@ -275,8 +316,11 @@ impl SettingsStore {
                     &self.host.agent.custom_base_url,
                 ),
                 model_placeholder,
-                model_default: (provider == AgentProvider::Anthropic)
-                    .then(|| DEFAULT_AGENT_MODEL.to_string()),
+                model_default: match provider {
+                    AgentProvider::Anthropic => Some(DEFAULT_AGENT_MODEL.to_string()),
+                    AgentProvider::OpenRouter => Some(DEFAULT_OPENROUTER_MODEL.to_string()),
+                    AgentProvider::OpenAi | AgentProvider::Custom => None,
+                },
                 model_override: self.user.agent.model.clone(),
                 model_layer: Self::layer_of(&self.user.agent.model, &self.host.agent.model),
                 model_missing: self.agent_model().is_none(),
@@ -320,6 +364,7 @@ fn normalized_settings(mut settings: StudioSettings) -> StudioSettings {
     agent.openai_api_key = normalized(agent.openai_api_key.take());
     agent.custom_base_url = normalized(agent.custom_base_url.take());
     agent.custom_api_key = normalized(agent.custom_api_key.take());
+    agent.openrouter_api_key = normalized(agent.openrouter_api_key.take());
     agent.model = normalized(agent.model.take());
     settings
 }
@@ -436,6 +481,37 @@ mod tests {
         assert_eq!(config.base_url, OPENAI_DEFAULT_BASE_URL);
         assert_eq!(config.api_key.as_deref(), Some("sk-oai-x"));
         assert_eq!(config.model, "some-model");
+    }
+
+    #[test]
+    fn openrouter_key_alone_makes_the_agent_ready() {
+        let mut store = SettingsStore::default();
+        store.set_agent_provider(Some(AgentProvider::OpenRouter));
+        assert!(!store.agent_ready());
+        // The Connect flow writes exactly one field; everything else bakes.
+        store.set_agent_openrouter_api_key(Some("sk-or-v1-abc".to_string()));
+        assert!(store.agent_ready());
+        let Some(AgentProviderConfig::OpenAiCompat(config)) = store.agent_provider_config() else {
+            panic!("expected openai-compat config");
+        };
+        assert_eq!(config.base_url, OPENROUTER_BASE_URL);
+        assert_eq!(config.api_key.as_deref(), Some("sk-or-v1-abc"));
+        assert_eq!(config.model, DEFAULT_OPENROUTER_MODEL);
+        assert!(
+            config
+                .extra_headers
+                .iter()
+                .any(|(k, _)| k == "HTTP-Referer")
+        );
+        let view = store.ui_view().agent;
+        assert_eq!(
+            view.model_default.as_deref(),
+            Some(DEFAULT_OPENROUTER_MODEL)
+        );
+        assert!(!view.api_key_optional);
+        // Disconnect = clear the one field.
+        store.set_agent_openrouter_api_key(None);
+        assert!(!store.agent_ready());
     }
 
     #[test]

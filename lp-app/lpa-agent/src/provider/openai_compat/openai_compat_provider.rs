@@ -44,6 +44,9 @@ pub struct OpenAiCompatConfig {
     pub api_key: Option<String>,
     /// The model id, as named by the serving provider.
     pub model: String,
+    /// Additional request headers, e.g. OpenRouter's `HTTP-Referer`/`X-Title`
+    /// attribution pair. Names must not be browser-forbidden header names.
+    pub extra_headers: Vec<(String, String)>,
 }
 
 /// The OpenAI-compatible streaming provider.
@@ -73,6 +76,7 @@ impl<T: HttpSseTransport> OpenAiCompatProvider<T> {
         if let Some(key) = &self.config.api_key {
             headers.push(("authorization".into(), format!("Bearer {key}")));
         }
+        headers.extend(self.config.extra_headers.iter().cloned());
         HttpRequest {
             url: format!(
                 "{}/chat/completions",
@@ -373,6 +377,36 @@ mod tests {
     }
 
     #[test]
+    fn extra_headers_ride_along() {
+        let transport = FakeTransport::respond_once(200, vec![TEXT_TURN.as_bytes().to_vec()]);
+        let provider = OpenAiCompatProvider::new(
+            OpenAiCompatConfig {
+                base_url: DEFAULT_BASE_URL.to_string(),
+                api_key: None,
+                model: "gpt-test".to_string(),
+                extra_headers: vec![("X-Title".to_string(), "LightPlayer Studio".to_string())],
+            },
+            &transport,
+        );
+        let req = TurnRequest {
+            system: "sys".into(),
+            messages: vec![ChatMessage::user_text("hi")],
+            tools: vec![],
+            max_tokens: 1024,
+        };
+        futures_executor::block_on(StreamExt::collect::<Vec<_>>(provider.run_turn(req)));
+        let reqs = transport.requests.borrow();
+        assert!(
+            reqs[0]
+                .headers
+                .iter()
+                .any(|(k, v)| k == "X-Title" && v == "LightPlayer Studio"),
+            "{:?}",
+            reqs[0].headers
+        );
+    }
+
+    #[test]
     fn no_key_omits_the_authorization_header() {
         let transport = FakeTransport::respond_once(200, vec![TEXT_TURN.as_bytes().to_vec()]);
         let events = run_with_key(&transport, None);
@@ -559,6 +593,7 @@ mod tests {
                 base_url: DEFAULT_BASE_URL.to_string(),
                 api_key: api_key.map(str::to_string),
                 model: "gpt-test".to_string(),
+                extra_headers: Vec::new(),
             },
             transport,
         );
