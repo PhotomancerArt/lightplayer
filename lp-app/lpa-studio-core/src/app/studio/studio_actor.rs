@@ -311,6 +311,16 @@ where
             pull_while_watching(pull, watch).await
         };
 
+        // Completion-based pacing: any attempt that RAN (synced, failed,
+        // timed out, or found nothing to refresh) stamps its completion so
+        // the next pull is due one gap later. A bounced early tick (NotDue)
+        // must not re-stamp — that would starve the pull — and a preempted
+        // pull keeps its old stamp so the redo is prompt.
+        let completed = !matches!(
+            outcome,
+            Ok(Some(ProjectRefreshOutcome::NotDue)) | Ok(Some(ProjectRefreshOutcome::Cancelled))
+        );
+
         match outcome {
             Ok(Some(ProjectRefreshOutcome::Synced(sync))) => {
                 if sync.synced {
@@ -328,6 +338,8 @@ where
             }
             // A clean cancel (preempted) is not a failure: no backoff, no mark.
             Ok(Some(ProjectRefreshOutcome::Cancelled)) => {}
+            // An early tick bounced off the pacing gate: nothing ran.
+            Ok(Some(ProjectRefreshOutcome::NotDue)) => {}
             // Nothing to refresh (no loaded project / LightPlayer).
             Ok(None) => {}
             Err(error) => {
@@ -336,6 +348,10 @@ where
                 self.controller_log(UiLogDraft::from_error(error));
                 self.controller.record_passive_refresh_failure();
             }
+        }
+
+        if completed {
+            self.controller.note_passive_refresh_completed();
         }
     }
 

@@ -27,7 +27,7 @@ use lpa_studio_core::{
     UiAgentToolRow, UiAgentTurn, UiAgentView, UiProductPreview,
 };
 
-use crate::app::node::ProductPixelGrid;
+use crate::app::node::ProductPreviewCanvas;
 use crate::base::MarkdownText;
 
 /// Scroll slack under which the transcript stays glued to its bottom.
@@ -307,10 +307,11 @@ fn HistoryChip(
             },
             div { class: "tw:relative tw:h-8 tw:w-8 tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card",
                 match &entry.thumb {
-                    Some(UiProductPreview::VisualSrgb8 { width, height, bytes, .. }) => rsx! {
-                        ProductPixelGrid {
+                    Some(UiProductPreview::VisualSrgb8 { width, height, revision, bytes }) => rsx! {
+                        ProductPreviewCanvas {
                             width: *width,
                             height: *height,
+                            revision: *revision,
                             bytes: bytes.clone(),
                         }
                     },
