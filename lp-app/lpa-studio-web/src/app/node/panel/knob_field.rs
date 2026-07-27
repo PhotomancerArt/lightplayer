@@ -8,7 +8,14 @@
 //!
 //! Interaction: vertical drag (up = increase) dispatching
 //! `SlotEditOp::SetValue` with `oninput` semantics — a continuous flood the
-//! actor coalesces per address, exactly like slider drags.
+//! actor coalesces per address, exactly like slider drags. The knob is also
+//! keyboard-operable (P6 item 3): arrows step (the authored hint step, else
+//! 1% of the range), Shift multiplies by 10, Home/End jump to min/max — all
+//! dispatching the same `slot_set_value` path.
+//!
+//! A bound knob with a live bus reading renders the arc and pointer AT the
+//! live value (already violet); drags and keys still edit the authored
+//! default (P6 item 1).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectSlotAddress, UiAction, UiSlotFieldState};
@@ -31,6 +38,10 @@ const KNOB_SWEEP_DEG: f32 = 270.0;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn KnobField(
     value: f32,
+    /// Live bus reading (display-only): the arc and pointer render AT this
+    /// value while `value` (the authored default) stays the edit target.
+    #[props(default = None)]
+    live_value: Option<f32>,
     min: f32,
     max: f32,
     #[props(default = None)] step: Option<f32>,
@@ -47,7 +58,7 @@ pub fn KnobField(
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let editable = wired.is_some();
-    let frac = knob_fraction(value, min, max);
+    let frac = knob_fraction(live_value.unwrap_or(value), min, max);
     let arc_len = frac * 100.0;
     let pointer_deg = knob_pointer_deg(frac);
     let stroke = knob_value_stroke(&state, bound, editable);
@@ -59,18 +70,32 @@ pub fn KnobField(
     let invalid_title = state.invalid.clone().unwrap_or_default();
 
     let down_wiring = wired.clone();
-    let move_wiring = wired;
+    let move_wiring = wired.clone();
+    let key_wiring = wired;
     // Drag anchor: pointer y and value at pointerdown; None while idle.
     let mut drag = use_signal(|| None::<(f64, f32)>);
 
     rsx! {
         span {
-            class: if editable { "tw:inline-flex tw:flex-none tw:cursor-ns-resize tw:touch-none" } else { "tw:inline-flex tw:flex-none" },
+            class: if editable { "tw:inline-flex tw:flex-none tw:cursor-ns-resize tw:touch-none tw:rounded-full tw:outline-none tw:focus-visible:outline tw:focus-visible:outline-1 tw:focus-visible:outline-border-strong" } else { "tw:inline-flex tw:flex-none" },
             role: "slider",
+            tabindex: if editable { "0" } else { "-1" },
             aria_valuemin: "{min}",
             aria_valuemax: "{max}",
             aria_valuenow: "{value}",
             title: "{invalid_title}",
+            onkeydown: move |event| {
+                let Some((address, handler)) = key_wiring.clone() else {
+                    return;
+                };
+                let multiplier = if event.modifiers().shift() { 10.0 } else { 1.0 };
+                let Some(next) = knob_key_value(value, &event.key(), multiplier, min, max, step)
+                else {
+                    return;
+                };
+                event.prevent_default();
+                handler.call(slot_set_value_action(address, emit.lp_value(next)));
+            },
             onpointerdown: move |event| {
                 if down_wiring.is_none() {
                     return;
@@ -217,6 +242,42 @@ pub(crate) fn knob_drag_value(
     snapped.clamp(min, max)
 }
 
+/// Keyboard step for one arrow press: the authored hint step when present,
+/// else 1% of the range (P6 item 3).
+pub(crate) fn knob_key_step(min: f32, max: f32, step: Option<f32>) -> f32 {
+    match step {
+        Some(step) if step > 0.0 => step,
+        _ => (max - min).max(f32::EPSILON) / 100.0,
+    }
+}
+
+/// Value for one keyboard gesture on the knob: arrows step by
+/// [`knob_key_step`] × `multiplier` (Shift = 10), Home/End jump to the
+/// domain edges; anything else is `None` (not a knob key). Stepped results
+/// snap to the authored step and clamp, exactly like drags.
+pub(crate) fn knob_key_value(
+    value: f32,
+    key: &Key,
+    multiplier: f32,
+    min: f32,
+    max: f32,
+    step: Option<f32>,
+) -> Option<f32> {
+    let delta = knob_key_step(min, max, step) * multiplier;
+    let raw = match key {
+        Key::ArrowUp | Key::ArrowRight => value + delta,
+        Key::ArrowDown | Key::ArrowLeft => value - delta,
+        Key::Home => return Some(min),
+        Key::End => return Some(max),
+        _ => return None,
+    };
+    let snapped = match step {
+        Some(step) if step > 0.0 => (raw / step).round() * step,
+        _ => raw,
+    };
+    Some(snapped.clamp(min, max))
+}
+
 /// Stroke for the value arc and pointer: violet when bound, error when
 /// invalid, subtle when read-only, accent otherwise (green stays valid-only).
 fn knob_value_stroke(state: &UiSlotFieldState, bound: bool, editable: bool) -> &'static str {
@@ -233,9 +294,13 @@ fn knob_value_stroke(state: &UiSlotFieldState, bound: bool, editable: bool) -> &
 
 #[cfg(test)]
 mod tests {
+    use dioxus::prelude::Key;
     use lpa_studio_core::UiSlotFieldState;
 
-    use super::{knob_drag_value, knob_fraction, knob_pointer_deg, knob_value_stroke};
+    use super::{
+        knob_drag_value, knob_fraction, knob_key_step, knob_key_value, knob_pointer_deg,
+        knob_value_stroke,
+    };
 
     #[test]
     fn fraction_clamps_and_survives_degenerate_ranges() {
@@ -266,6 +331,48 @@ mod tests {
     fn drag_snaps_to_step_when_present() {
         let value = knob_drag_value(0.0, 43.0, 0.0, 4.0, Some(0.5));
         assert_eq!(value, 1.0);
+    }
+
+    #[test]
+    fn keyboard_steps_use_the_hint_step_or_one_percent_of_the_range() {
+        assert_eq!(knob_key_step(0.0, 4.0, Some(0.5)), 0.5);
+        assert_eq!(knob_key_step(0.0, 4.0, None), 0.04);
+        // A non-positive authored step falls back to the range fraction.
+        assert_eq!(knob_key_step(0.0, 4.0, Some(0.0)), 0.04);
+    }
+
+    #[test]
+    fn arrow_keys_step_shift_multiplies_and_home_end_jump() {
+        // 1% of the 0..100 range = an exact 1.0 step.
+        assert_eq!(
+            knob_key_value(50.0, &Key::ArrowUp, 1.0, 0.0, 100.0, None),
+            Some(51.0)
+        );
+        assert_eq!(
+            knob_key_value(50.0, &Key::ArrowLeft, 1.0, 0.0, 100.0, None),
+            Some(49.0)
+        );
+        // Shift multiplies the step by 10.
+        assert_eq!(
+            knob_key_value(50.0, &Key::ArrowUp, 10.0, 0.0, 100.0, None),
+            Some(60.0)
+        );
+        // Home/End jump to the domain edges regardless of step.
+        assert_eq!(
+            knob_key_value(2.0, &Key::Home, 1.0, 0.0, 4.0, Some(0.5)),
+            Some(0.0)
+        );
+        assert_eq!(
+            knob_key_value(2.0, &Key::End, 1.0, 0.0, 4.0, Some(0.5)),
+            Some(4.0)
+        );
+        // Stepped knobs snap like drags and clamp at the edges.
+        assert_eq!(
+            knob_key_value(3.9, &Key::ArrowUp, 10.0, 0.0, 4.0, Some(0.5)),
+            Some(4.0)
+        );
+        // Non-knob keys pass through untouched (no dispatch).
+        assert_eq!(knob_key_value(2.0, &Key::Tab, 1.0, 0.0, 4.0, None), None);
     }
 
     #[test]

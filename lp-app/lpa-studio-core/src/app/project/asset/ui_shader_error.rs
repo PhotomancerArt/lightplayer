@@ -51,22 +51,29 @@ impl UiShaderError {
 }
 
 /// Strip the wrapper prefixes down to the human message: the engine's
-/// `shader compile:`, generic `Error:`/`error:` wrappers, the `LpsError`
-/// stage tag (`parse:`, `lower:`, ...; see `lp-shader/src/error.rs`), and
-/// the naga frontend's `GLSL parse error:` (`lps-frontend`'s
-/// `CompileError::Parse` display). Observed live wrappings include
+/// `shader compile:` / `shader render:` context tags, generic
+/// `Error:`/`error:` wrappers, the `LpsError` stage tag (`parse:`,
+/// `lower:`, ...; see `lp-shader/src/error.rs`), and the naga frontend's
+/// `GLSL parse error:` (`lps-frontend`'s `CompileError::Parse` display).
+/// Observed live wrappings include
 /// `shader compile: Error: validation: ...`,
-/// `shader compile: parse: error: ...`, and
-/// `shader compile: parse: GLSL parse error: error: ...` — the pieces
-/// interleave, so peel case-insensitive `error:` around each tag.
+/// `shader compile: parse: error: ...`,
+/// `shader compile: parse: GLSL parse error: error: ...`, and the
+/// render-time double prefix `shader render: render: ...` (the engine's
+/// `err_ctx("shader render")` around `LpsError::Render`'s own `render:`
+/// tag) — the pieces interleave, so peel case-insensitive `error:` around
+/// each tag.
 fn strip_error_prefixes(line: &str) -> &str {
     const STAGE_PREFIXES: [&str; 5] = ["parse:", "lower:", "compile:", "render:", "validation:"];
+    const CONTEXT_PREFIXES: [&str; 2] = ["shader compile:", "shader render:"];
 
     let mut line = line.trim_start();
-    line = line
-        .strip_prefix("shader compile:")
-        .unwrap_or(line)
-        .trim_start();
+    for prefix in CONTEXT_PREFIXES {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            line = rest.trim_start();
+            break;
+        }
+    }
     line = strip_error_word(line);
     for prefix in STAGE_PREFIXES {
         if let Some(rest) = line.strip_prefix(prefix) {
@@ -157,6 +164,17 @@ mod tests {
         let parsed = UiShaderError::parse(text);
         assert_eq!(parsed.message, "Expected ';', found '}'");
         assert_eq!(parsed.line_col, Some((4, 13)));
+    }
+
+    #[test]
+    fn strips_the_render_time_double_prefix() {
+        // Render-time engine errors wrap twice: the shader node's
+        // `err_ctx("shader render")` around `LpsError::Render`'s `render:`
+        // tag (the missing-uniform class the agent's engine section
+        // surfaces).
+        let parsed = UiShaderError::parse("shader render: render: missing uniform field `speed`");
+        assert_eq!(parsed.message, "missing uniform field `speed`");
+        assert_eq!(parsed.line_col, None);
     }
 
     #[test]

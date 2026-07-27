@@ -105,6 +105,10 @@ pub fn AgentChatPane(
         && matches!(view.turns.last(), Some(UiAgentTurn::Assistant { .. }));
     let thinking_row = busy && !streaming_tail;
     let turn_count = view.turns.len();
+    // Total prompt tokens (fresh + cache writes + cache reads) — the
+    // footnote's honest "in" figure now that prompt caching splits usage
+    // into disjoint buckets.
+    let input_tokens = view.usage.total_input_tokens();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0",
@@ -211,10 +215,13 @@ pub fn AgentChatPane(
                     }
                 }
             }
-            // Usage footnote (+ estimated cost when rates are known).
-            if view.usage.input_tokens > 0 || view.usage.output_tokens > 0 {
+            // Usage footnote (+ estimated cost when rates are known). The
+            // "in" figure is TOTAL prompt tokens (fresh + cache writes +
+            // cache reads) — post-caching, the raw `input_tokens` bucket is
+            // only the uncached remainder and would read absurdly low.
+            if !view.usage.is_zero() {
                 p { class: "tw:m-0 tw:border-t tw:border-border-subtle tw:bg-card-subtle tw:px-3 tw:py-1 tw:text-right tw:text-[10px] tw:text-dim-foreground",
-                    "{view.usage.input_tokens} in · {view.usage.output_tokens} out tokens this session"
+                    "{input_tokens} in · {view.usage.output_tokens} out tokens this session"
                     if let Some(cost) = view.estimated_cost.as_deref() {
                         span { title: "estimate based on configured rates", " · {cost}" }
                     }

@@ -23,6 +23,11 @@ use super::knob_field::knob_fraction;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn HFaderField(
     value: f32,
+    /// Live bus reading (display-only; P6 item 1): the fill renders AT this
+    /// value — already violet when bound — while `value` (the authored
+    /// default) stays the edit target under the gesture surface.
+    #[props(default = None)]
+    live_value: Option<f32>,
     min: f32,
     max: f32,
     #[props(default = None)] step: Option<f32>,
@@ -39,7 +44,7 @@ pub fn HFaderField(
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let disabled = wired.is_none();
-    let frac = knob_fraction(value, min, max);
+    let frac = knob_fraction(live_value.unwrap_or(value), min, max);
     let input_class = fader_input_class(bound);
     let fill_style = fader_fill_style(frac, &state, bound);
     let slot_style = fader_slot_style(&state, bound);

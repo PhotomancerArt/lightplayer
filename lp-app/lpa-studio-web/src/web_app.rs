@@ -155,6 +155,31 @@ pub fn App() -> Element {
                     ))
                 }
             });
+            // Model discovery (P8): the settings dropdown's `/models`
+            // listing over the same fetch transport, spawned through the
+            // agent seam and reporting back as `ModelsLoaded`.
+            controller.set_agent_models_fetcher(|config| match config {
+                AgentProviderConfig::Anthropic(config) => {
+                    let config = config.clone();
+                    Box::pin(async move {
+                        lpa_agent::list_anthropic_models(
+                            &config,
+                            &lpa_agent::provider::WebFetchTransport,
+                        )
+                        .await
+                    })
+                }
+                AgentProviderConfig::OpenAiCompat(config) => {
+                    let config = config.clone();
+                    Box::pin(async move {
+                        lpa_agent::list_openai_compat_models(
+                            &config,
+                            &lpa_agent::provider::WebFetchTransport,
+                        )
+                        .await
+                    })
+                }
+            });
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;

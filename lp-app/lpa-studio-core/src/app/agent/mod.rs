@@ -17,7 +17,10 @@ pub mod agent_provider_config;
 pub mod agent_session_key;
 pub mod ui_agent_view;
 
-pub use agent_controller::{AgentController, AgentRunContext, AgentTaskFuture, AgentViewContext};
+pub use agent_controller::{
+    AgentController, AgentModelsFetchFuture, AgentRunContext, AgentTaskFuture, AgentTimerFactory,
+    AgentTimerFuture, AgentViewContext, instant_agent_timer,
+};
 pub use agent_feedback::AgentFeedback;
 pub use agent_host_bridge::{AgentBridgeState, AgentHostBridge};
 pub use agent_op::AgentOp;

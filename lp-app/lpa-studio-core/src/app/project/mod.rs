@@ -49,6 +49,7 @@ pub mod slot;
 pub mod ui_affordance;
 pub mod ui_pending_edit;
 
+pub use agent_support::AgentEngineStatus;
 pub use asset::{
     AssetContentFetchOp, AssetEditOp, MAX_ASSET_BODY_BYTES, PendingAssetEdit, UiAssetContent,
     UiAssetContentBody, UiShaderError,
@@ -79,7 +80,7 @@ pub use project_sync::ProjectSync;
 pub use project_sync_phase::ProjectSyncPhase;
 pub use project_sync_run::ProjectSyncRun;
 pub use project_sync_summary::ProjectSyncSummary;
-pub use project_value_format::{format_lp_value, format_slot_map_key};
+pub use project_value_format::{format_live_scalar, format_lp_value, format_slot_map_key};
 pub use slot::{
     PendingEdit, PendingEditOp, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot,
     SlotBindingFact, SlotBindingFactKind, SlotController, SlotControllerState, SlotEditOp,

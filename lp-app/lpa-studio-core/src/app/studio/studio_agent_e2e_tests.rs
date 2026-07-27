@@ -154,6 +154,151 @@ fn agent_turn_stages_an_overlay_edit_end_to_end() {
     );
 }
 
+/// Stages a shader that compiles fine in the probe world but declares a
+/// uniform (`speed`) the node def has no record for — the engine then fails
+/// at RENDER time ("missing uniform field"), the exact class the probe
+/// harness cannot see.
+const SPEED_SHADER: &str = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(fract(time * speed), 0.0, 0.0, 1.0);\n}\n";
+
+#[test]
+fn staged_engine_render_error_reaches_the_iterate_result() {
+    let input = json!({ "source": SPEED_SHADER, "note": "add a speed control" }).to_string();
+    let scripts = vec![vec![
+        vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: input,
+            },
+            turn_done(StopReason::ToolUse, 20, 30),
+        ],
+        vec![
+            TurnEvent::TextDelta("I need a def record for speed.".into()),
+            turn_done(StopReason::EndTurn, 40, 10),
+        ],
+    ]];
+    let harness = AgentHarness::new(scripts);
+    // Yield-once timers: every engine-verdict poll (and every tool-stage
+    // yield) suspends the run exactly once, handing control back to the
+    // test so it can pump actor batches between polls — the interleaving a
+    // live browser gets from real timers.
+    let (mut actor, handle) = StudioActor::new(harness.controller, |_| {
+        let mut yielded = false;
+        core::future::poll_fn(move |cx| {
+            if yielded {
+                core::task::Poll::Ready(())
+            } else {
+                yielded = true;
+                cx.waker().wake_by_ref();
+                core::task::Poll::Pending
+            }
+        })
+    });
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let agent = agent_view(&snapshot);
+
+    handle
+        .tx
+        .send(StudioCommand::Action(agent.send_action("faster please")));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+
+    // Interleave: poll the run future; while it suspends (stage yields and
+    // verdict-wait timer steps), pump one actor batch with a forced project
+    // refresh — the pull that carries the engine's post-apply status back.
+    let mut run = harness.tasks.borrow_mut().remove(0);
+    let mut live_phases: Vec<String> = Vec::new();
+    {
+        use core::task::{Context, Poll};
+        use std::sync::Arc;
+        use std::task::{Wake, Waker};
+        struct NoopWake;
+        impl Wake for NoopWake {
+            fn wake(self: Arc<Self>) {}
+        }
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut pumps = 0;
+        loop {
+            match run.as_mut().poll(&mut context) {
+                Poll::Ready(()) => break,
+                Poll::Pending => {
+                    pumps += 1;
+                    assert!(pumps < 200, "agent run did not complete");
+                    handle.tx.send(project_action(ProjectOp::RefreshProject));
+                    drive(actor.run_one_batch_for_test());
+                    if let Some(snapshot) = view.try_recv() {
+                        // Record the running row's live activity as the UI
+                        // would render it mid-run.
+                        if let Some(UiAgentTurn::Tool(row)) = agent_view(&snapshot)
+                            .turns
+                            .iter()
+                            .find(|turn| matches!(turn, UiAgentTurn::Tool(_)))
+                            && !row.done
+                        {
+                            live_phases.push(row.summary_line());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("final agent batch emits a snapshot");
+
+    // The running row showed live phase text (note + activity) mid-run.
+    assert!(
+        live_phases
+            .iter()
+            .any(|line| line.starts_with("add a speed control — ")),
+        "live phases: {live_phases:?}"
+    );
+
+    // The tool result the MODEL sees (turn 2's request) carries the engine
+    // section with the render error — message prefix-stripped, no
+    // "shader render: render:" chain.
+    let requests = harness.requests.borrow();
+    assert_eq!(requests.len(), 2);
+    let tool_result = requests[1]
+        .messages
+        .iter()
+        .flat_map(|message| &message.content)
+        .find_map(|block| match block {
+            lpa_agent::ContentBlock::ToolResult { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .expect("turn 2 carries the tool result");
+    let content: serde_json::Value = serde_json::from_str(&tool_result).expect("result json");
+    assert_eq!(content["shader"], "ok", "probe-world compile succeeds");
+    assert_eq!(content["engine"]["status"], "error", "{content}");
+    let message = content["engine"]["message"].as_str().expect("message");
+    assert!(
+        message.contains("missing uniform field"),
+        "engine message: {message}"
+    );
+    assert!(
+        !message.contains("shader render:") && !message.starts_with("render:"),
+        "prefix chain must be stripped: {message}"
+    );
+
+    // The finished row keeps the engine outcome in its summary detail.
+    let agent = agent_view(&snapshot);
+    let UiAgentTurn::Tool(row) = &agent.turns[1] else {
+        panic!("expected a tool row, got {:?}", agent.turns);
+    };
+    assert!(row.done);
+    assert!(row.detail.contains("\"engine\""), "{}", row.detail);
+}
+
 #[test]
 fn provider_error_surfaces_sanely_and_a_retry_recovers() {
     // First run: the provider fails like a bad API key (401, not

@@ -213,6 +213,16 @@ impl StudioController {
         self.agent.set_provider_factory(factory);
     }
 
+    /// Install the agent's model-list fetcher (P8: the web shell wraps
+    /// `lpa_agent::list_*_models` over the browser fetch transport; tests
+    /// inject scripted fakes). Install before the actor takes ownership.
+    pub fn set_agent_models_fetcher(
+        &mut self,
+        fetcher: impl Fn(&crate::AgentProviderConfig) -> crate::AgentModelsFetchFuture + 'static,
+    ) {
+        self.agent.set_models_fetcher(fetcher);
+    }
+
     /// Hand the agent sub-controller the actor's command sender (called by
     /// `StudioActor::new`); run futures report progress through it.
     pub(crate) fn set_agent_command_sender(
@@ -220,6 +230,27 @@ impl StudioController {
         tx: crate::app::studio::studio_view_channel::CommandSender,
     ) {
         self.agent.set_command_sender(tx);
+    }
+
+    /// Install the platform timer factory the agent host bridge's
+    /// engine-verdict wait polls on (called by `StudioActor::new`, boxed
+    /// from its `make_timer`).
+    pub fn set_agent_timer(
+        &mut self,
+        timer: impl FnMut(core::time::Duration) -> crate::AgentTimerFuture + 'static,
+    ) {
+        self.agent.set_timer(timer);
+    }
+
+    /// Write every agent session's latest engine status into its shared
+    /// bridge cell (P2: the engine-verdict seam). Runs at the end of every
+    /// processed batch — cheap while no sessions exist — so a running
+    /// agent's bounded verdict wait observes the status Revision advancing
+    /// as pulls land.
+    fn refresh_agent_engine_status(&mut self) {
+        let project = &self.project;
+        self.agent
+            .refresh_engine_status(|artifact| project.agent_engine_status(artifact));
     }
 
     /// Fold one spawned-run feedback message into the agent state and mark
@@ -265,26 +296,32 @@ impl StudioController {
             SettingsCommand::SetAgentProvider(provider) => {
                 self.settings.set_agent_provider(provider);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentAnthropicApiKey(key) => {
                 self.settings.set_agent_anthropic_api_key(key);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentOpenAiApiKey(key) => {
                 self.settings.set_agent_openai_api_key(key);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentCustomBaseUrl(base_url) => {
                 self.settings.set_agent_custom_base_url(base_url);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentCustomApiKey(key) => {
                 self.settings.set_agent_custom_api_key(key);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentOpenRouterApiKey(key) => {
                 self.settings.set_agent_openrouter_api_key(key);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentModel(model) => {
                 self.settings.set_agent_model(model);
@@ -298,8 +335,46 @@ impl StudioController {
                 self.settings.set_agent_price_output_per_mtok(value);
                 self.persist_user_settings();
             }
+            SettingsCommand::RequestModels { force } => self.request_agent_models(force),
+            SettingsCommand::ModelsLoaded {
+                provider,
+                fingerprint,
+                result,
+            } => {
+                let fetched_at = (self.now_secs)();
+                self.settings
+                    .agent_models_loaded(provider, &fingerprint, result, fetched_at);
+            }
         }
         self.mark_dirty();
+    }
+
+    /// Ensure the selected provider's model list is (being) fetched (P8).
+    /// Resolves the discovery credentials, debounces through the store's
+    /// fingerprint check, and spawns the platform fetch, which reports
+    /// back as [`SettingsCommand::ModelsLoaded`] on the command queue.
+    /// Without sufficient credentials — or without the platform seams
+    /// (host tests, story builds) — any stored state is dropped instead,
+    /// so the dropdown falls back to free text rather than spinning.
+    fn request_agent_models(&mut self, force: bool) {
+        let provider = self.settings.agent_provider();
+        let Some(config) = self.settings.agent_discovery_config() else {
+            self.settings.clear_agent_models(provider);
+            return;
+        };
+        let fingerprint = crate::app::settings::discovery_fingerprint(&config);
+        if !self
+            .settings
+            .request_agent_models(provider, fingerprint.clone(), force)
+        {
+            return;
+        }
+        if !self
+            .agent
+            .spawn_models_fetch(provider, fingerprint, &config)
+        {
+            self.settings.clear_agent_models(provider);
+        }
     }
 
     /// Push the current user layer through the persistence hook (no-op
@@ -827,6 +902,10 @@ impl StudioController {
     /// Calling this records the observed revision and clears the dirty flag, so
     /// the next quiet tick gates out.
     pub fn view_if_changed(&mut self) -> Option<UiStudioView> {
+        // Feed running agents their engine status first: the write targets
+        // a shared cell the spawned run polls, so it must happen whether or
+        // not the change gate emits a snapshot this batch.
+        self.refresh_agent_engine_status();
         let revision = self.current_revision();
         let advanced = revision != self.applied_revision;
         if !self.dirty && !advanced {
@@ -4375,6 +4454,91 @@ mod tests {
         studio.apply_settings_command(SettingsCommand::SetAgentModel(None));
         assert_eq!(studio.settings().agent_model(), Some("host-model"));
         assert_eq!(persisted.borrow().len(), 2);
+    }
+
+    #[test]
+    fn credential_changes_spawn_one_model_fetch_and_results_reach_the_view() {
+        use crate::app::studio::studio_actor::poll_now;
+        use crate::app::studio::studio_view_channel::command_channel;
+        use crate::{AgentTaskFuture, SettingsCommand, StudioCommand};
+        use lpa_agent::ModelInfo;
+
+        let mut studio = StudioController::new(|| 7.0);
+        let tasks: Rc<RefCell<Vec<AgentTaskFuture>>> = Rc::new(RefCell::new(Vec::new()));
+        studio.set_agent_spawner({
+            let tasks = Rc::clone(&tasks);
+            move |future| tasks.borrow_mut().push(future)
+        });
+        studio.set_agent_models_fetcher(|_config| {
+            Box::pin(async {
+                Ok(vec![ModelInfo {
+                    id: "claude-sonnet-5".to_string(),
+                    display_name: Some("Claude Sonnet 5".to_string()),
+                }])
+            })
+        });
+        let (tx, rx) = command_channel();
+        studio.set_agent_command_sender(tx);
+
+        // A key change triggers exactly one spawned fetch; the view flags
+        // the load.
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk-a".to_string(),
+        )));
+        assert_eq!(tasks.borrow().len(), 1);
+        assert!(studio.view().settings.agent.models_loading);
+        // A settings-surface open debounces against the in-flight fetch.
+        studio.apply_settings_command(SettingsCommand::RequestModels { force: false });
+        assert_eq!(tasks.borrow().len(), 1);
+
+        // Drive the fetch: it reports ModelsLoaded through the command
+        // queue; applying it lands the options with the clock's stamp.
+        let task = tasks.borrow_mut().remove(0);
+        poll_now(task).expect("scripted fetch resolves in one poll");
+        let mut loaded = 0;
+        for command in rx.try_recv_all_for_test() {
+            let StudioCommand::Settings(command) = command else {
+                panic!("unexpected command class");
+            };
+            assert!(matches!(command, SettingsCommand::ModelsLoaded { .. }));
+            studio.apply_settings_command(command);
+            loaded += 1;
+        }
+        assert_eq!(loaded, 1);
+        let agent = studio.view().settings.agent;
+        assert!(!agent.models_loading);
+        assert_eq!(agent.model_options.len(), 1);
+        assert_eq!(agent.model_options[0].id, "claude-sonnet-5");
+
+        // Repeat opens stay debounced; a credential change refetches.
+        studio.apply_settings_command(SettingsCommand::RequestModels { force: false });
+        assert!(tasks.borrow().is_empty());
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk-b".to_string(),
+        )));
+        assert_eq!(tasks.borrow().len(), 1);
+    }
+
+    #[test]
+    fn model_requests_without_platform_seams_leave_no_loading_marker() {
+        use crate::{AgentProvider, SettingsCommand};
+
+        // No fetcher/spawner/sender installed (host tests, story builds):
+        // the request must not wedge the view in a perpetual load.
+        let mut studio = StudioController::new(|| 0.0);
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk".to_string(),
+        )));
+        studio.apply_settings_command(SettingsCommand::RequestModels { force: true });
+        let agent = studio.view().settings.agent;
+        assert!(!agent.models_loading);
+        assert!(agent.model_options.is_empty());
+        assert!(
+            studio
+                .settings()
+                .agent_models(AgentProvider::Anthropic)
+                .is_none()
+        );
     }
 
     #[test]
