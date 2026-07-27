@@ -191,6 +191,52 @@ fn device_running_from_a_non_default_storage_dir_classifies_not_empty() {
     assert_eq!(slug, &summary.slug);
 }
 
+/// Save-as-pull regression (2026-07-26 walk): attaching the editor to a
+/// device running from a NON-default storage dir must point library sync
+/// at that dir. A fixed-"studio" pull returned empty and silently
+/// skipped the library half of every save — the device kept the edits,
+/// the library never saw them, and the next connect classified Diverged
+/// ("my edits didn't save locally").
+#[test]
+fn lens_attach_targets_the_devices_real_storage_dir() {
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let library_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_project_dir("bench")
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        crate::ProjectOp::OpenDeviceProject { uid: None },
+    )))
+    .expect("the D29 open attaches the device lens");
+
+    assert_eq!(
+        studio.project_runtime_storage_id_for_test(),
+        "bench",
+        "library sync must target the dir the device actually serves"
+    );
+}
+
 /// Row 1 (happy path, part 2): the card-native stamp→push on an empty
 /// device (M8′ — the dialog's wizard, re-homed onto the card): the name
 /// sheet's op stamps over the real serial framing, the Project-tab
@@ -364,7 +410,10 @@ fn blank_flash_classifies_flashes_and_reaches_needs_a_name() {
     // Scripted flash via the real manage() path (the card's Set-up
     // affordance): the device reboots as LightPlayer, the controller
     // reconnects, and the empty unstamped device lands on Needs-a-name.
-    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware))).unwrap();
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        setup_name: None,
+    })))
+    .unwrap();
     let home = studio.view().home.expect("gallery still shows");
     assert!(
         home.devices
@@ -523,7 +572,10 @@ fn incompatible_no_hello_reflashes_through_the_card() {
     );
 
     // Flash → reboot → Ready (the flashed build speaks the current proto).
-    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware))).unwrap();
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        setup_name: None,
+    })))
+    .unwrap();
     assert!(
         matches!(
             studio.device_state_for_test(),
@@ -581,7 +633,10 @@ fn incompatible_proto_mismatch_reflashes_through_the_card() {
             .any(|card| card.state == crate::RosterCardState::NeedsFirmwareUpdate)
     );
 
-    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware))).unwrap();
+    drive(studio.dispatch(device_action(DeviceOp::ProvisionFirmware {
+        setup_name: None,
+    })))
+    .unwrap();
     assert!(matches!(
         studio.device_state_for_test(),
         Some(DeviceState::Ready { .. })
@@ -680,9 +735,11 @@ fn reconnect_after_gone_rebuilds_the_link_to_ready() {
 
 /// Row 10 (erase lands BlankFlash as success): erasing a healthy device
 /// through the card's Danger tab succeeds — the rebuilt link classifies
-/// `BlankFlash`, the server degrades to no-firmware, and the card
-/// derives Ready-to-set-up (flash stays the next step), all without an
-/// error.
+/// `BlankFlash` and the card derives Ready-to-set-up (flash stays the next
+/// step), all without an error. Device-lifecycle P3: erasing the open
+/// device DETACHES the editor lens, so the top-level server releases to
+/// `Disconnected` (a clean return to the gallery) rather than leaving a
+/// no-firmware server bound to the wiped device.
 #[test]
 fn erase_lands_blank_flash_as_success_through_the_card() {
     let (_store, host) = library();
@@ -711,15 +768,15 @@ fn erase_lands_blank_flash_as_success_through_the_card() {
         studio.device_state_for_test()
     );
     assert!(
-        matches!(
-            studio.snapshot().server.state,
-            ServerState::Failed {
-                kind: ServerFailureKind::NoFirmware,
-                ..
-            }
-        ),
-        "the server degrades to no-firmware, got {:?}",
+        matches!(studio.snapshot().server.state, ServerState::Disconnected),
+        "erasing the open device detaches the lens — the server releases \
+         to the gallery, got {:?}",
         studio.snapshot().server.state
+    );
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        None,
+        "the editor lens is detached after the wipe"
     );
     let home = studio.view().home.expect("gallery shows");
     assert!(
@@ -1446,6 +1503,292 @@ fn d29_click_opens_the_devices_running_project_in_the_editor() {
     );
 }
 
+/// Device-lifecycle P3 (editor sever + post-reset nav): erasing a device
+/// whose project is OPEN in the editor severs the lens — the app returns
+/// to the gallery — and says why. A runtime reset (which keeps the
+/// project) leaves the editor open. This is the fix for the hardware-walk
+/// "factory reset weird state / can't reflash without refresh": the old
+/// path reset the project content but left the lens bound to the wiped
+/// device.
+#[test]
+fn erase_from_the_editor_severs_the_lens_and_returns_to_the_gallery() {
+    use super::studio_edit_e2e_tests::edit_e2e_files;
+    use crate::ProjectOp;
+
+    let (store, host) = library();
+    let sign = store
+        .install_package(
+            "Sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let sign_files = store.open(sign.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(sign_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    // Open the device's project in the editor (lens on the device).
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::OpenDeviceProject { uid: None },
+    )))
+    .expect("the D29 op opens the device project");
+    let device_id = studio
+        .runtime_pool_for_test()
+        .device_session()
+        .expect("device session")
+        .id();
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        Some(device_id),
+        "the editor is a lens on the device"
+    );
+    assert!(studio.view().home.is_none(), "the editor is showing");
+
+    // Erase the device from under the open editor.
+    let outcome = drive(studio.dispatch(device_action(DeviceOp::ResetToBlank)))
+        .expect("erase succeeds even from the editor");
+
+    // The lens is severed → the app is back at the gallery.
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        None,
+        "erasing the open device detaches the lens"
+    );
+    assert!(
+        studio.view().home.is_some(),
+        "erasing the open project returns to the gallery"
+    );
+    assert!(
+        outcome
+            .notices
+            .iter()
+            .any(|notice| notice.message.contains("no longer on this device")),
+        "the sever is explained: {:?}",
+        outcome
+            .notices
+            .iter()
+            .map(|n| &n.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// The state-audit's promise, end-to-end: a card's tab and sheet are
+/// CORE view-state, drivable past the dispatch boundary — no widget
+/// signals involved. The e2e opens the Danger tab and the erase confirm
+/// purely through `HomeOp::CardUi` and reads them back off the view.
+#[test]
+fn card_tab_and_sheet_drive_through_core_ops() {
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{CardSheet, CardUiOp, CardVerb, DeviceCardTab, HomeOp};
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
+            "dev_aaaaaaaaaaaaaaaa",
+            "Bench board",
+        )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let card_key = {
+        let view = studio.view();
+        let home = view.home.as_ref().expect("gallery showing");
+        let card = home
+            .devices
+            .iter()
+            .find(|card| !card.sim)
+            .expect("the connected device card");
+        assert_eq!(card.ui.tab, DeviceCardTab::Status, "fresh card = Status");
+        card.identity_key().to_string()
+    };
+
+    let card_ui =
+        |op: CardUiOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), HomeOp::CardUi(op));
+    drive(studio.dispatch(card_ui(CardUiOp::SelectTab {
+        card: card_key.clone(),
+        tab: DeviceCardTab::Danger,
+    })))
+    .expect("tab select dispatches");
+    drive(studio.dispatch(card_ui(CardUiOp::OpenSheet {
+        card: card_key.clone(),
+        sheet: CardSheet::Confirm(CardVerb::Erase),
+    })))
+    .expect("sheet open dispatches");
+
+    let view = studio.view();
+    let card = view
+        .home
+        .as_ref()
+        .expect("gallery showing")
+        .devices
+        .iter()
+        .find(|card| card.identity_key() == card_key)
+        .expect("the same card by identity");
+    assert_eq!(card.ui.tab, DeviceCardTab::Danger);
+    assert_eq!(card.ui.sheet, Some(CardSheet::Confirm(CardVerb::Erase)));
+
+    drive(studio.dispatch(card_ui(CardUiOp::CloseSheet {
+        card: card_key.clone(),
+    })))
+    .expect("sheet close dispatches");
+    let view = studio.view();
+    let card = view
+        .home
+        .as_ref()
+        .expect("gallery showing")
+        .devices
+        .iter()
+        .find(|card| card.identity_key() == card_key)
+        .expect("the same card");
+    assert_eq!(card.ui.sheet, None, "the sheet closed through core");
+    assert_eq!(
+        card.ui.tab,
+        DeviceCardTab::Danger,
+        "the tab survives the sheet round-trip"
+    );
+}
+
+/// Journey B (state-flow model §1-B, contrast): erasing a DIFFERENT
+/// device leaves the editor alone — the sever is specific to the lens's
+/// own device. A sim-lens editor stays open and bound through a hardware
+/// erase running in the background.
+#[test]
+fn erasing_the_device_leaves_a_sim_lens_editor_alone() {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
+    use crate::app::home::HOME_NODE_ID;
+    use crate::{HomeOp, StudioServerClient};
+    use std::collections::VecDeque;
+
+    let (store, host) = library();
+    let sign = store
+        .install_package(
+            "Sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_identity(FakeDeviceIdentity::new(
+            "dev_aaaaaaaaaaaaaaaa",
+            "Bench board",
+        )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+
+    // The editor opens on the SIM…
+    let sim_io = InProcessServerIo {
+        server: Rc::new(RefCell::new(edit_e2e_server())),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let sim_id = studio.install_stub_sim_with_client_for_test(
+        StudioServerClient::from_io_for_test("in-process", Box::new(sim_io)),
+    );
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            key: sign.uid.to_string(),
+        },
+    )))
+    .expect("open on the sim succeeds");
+    assert_eq!(studio.runtime_pool_for_test().lens(), Some(sim_id));
+
+    // …the hardware connects alongside, and gets erased from its card.
+    connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
+    drive(studio.dispatch(device_action(DeviceOp::ResetToBlank)))
+        .expect("erase succeeds with a sim lens open");
+
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        Some(sim_id),
+        "erasing a different device never touches the editor (model §1-B)"
+    );
+    assert!(
+        studio.view().home.is_none(),
+        "the sim editor stays showing — no gallery bounce"
+    );
+}
+
+/// Device-lifecycle P3 (contrast): the lens DETACH is specific to the
+/// destructive erase. A runtime reset keeps the project on the device, so
+/// it does not detach the lens (its live edit-state resets and reloads on
+/// reattach — that reload path is pre-existing and unchanged here). This
+/// pins that only a wipe sends you back to the gallery.
+#[test]
+fn runtime_reset_from_the_editor_keeps_the_lens_bound() {
+    use super::studio_edit_e2e_tests::edit_e2e_files;
+    use crate::ProjectOp;
+
+    let (store, host) = library();
+    let sign = store
+        .install_package(
+            "Sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let sign_files = store.open(sign.uid).unwrap().read_all_files().unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(sign_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_bbbbbbbbbbbbbbbb",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(crate::ProjectController::NODE_ID),
+        ProjectOp::OpenDeviceProject { uid: None },
+    )))
+    .expect("the D29 op opens the device project");
+    let device_id = studio
+        .runtime_pool_for_test()
+        .device_session()
+        .expect("device session")
+        .id();
+
+    drive(studio.dispatch(device_action(DeviceOp::ResetDevice))).expect("runtime reset succeeds");
+
+    assert_eq!(
+        studio.runtime_pool_for_test().lens(),
+        Some(device_id),
+        "a runtime reset keeps the editor's lens on the device — only a \
+         destructive wipe detaches it"
+    );
+}
+
 /// Row P3-d (sim-open variant): the D29 click while a project is open on
 /// the sim quiesces the sim mirror first and moves the lens; the sim
 /// session STAYS in the pool with its wire client attached.
@@ -1821,6 +2164,218 @@ fn push_from_card_narrates_operation_in_flight_and_settles() {
             .iter()
             .map(|card| card.state.clone())
             .collect::<Vec<_>>()
+    );
+}
+
+/// Regression (2026-07-26 hardware walk): a push to the LIVE device
+/// smeared its "Pushing…" overlay onto a REMEMBERED (unplugged) device's
+/// card too — the overlay's session-op fallback matched any card with a
+/// uid, and an offline card carries one. The session op must narrate only
+/// on the session's own card (stamped identity == card uid).
+#[test]
+fn push_progress_stays_on_the_live_card() {
+    use crate::app::places::{DeviceRegistry, RegisteredDevice};
+    use crate::{UxUpdate, UxUpdateSink};
+
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let v1_files = store.open(summary.uid).unwrap().read_all_files().unwrap();
+    {
+        use lpc_model::AsLpPath;
+        let mut handle = store.open(summary.uid).unwrap();
+        handle
+            .apply_update("/shader.glsl".as_path(), Some(b"v2"))
+            .unwrap();
+        handle.record_save(2.0).unwrap().expect("head advanced");
+    }
+    // The FIRST board: connected earlier, unplugged, remembered — its
+    // offline card still carries the stamped uid.
+    let registry = DeviceRegistry::new(store.fs_handle());
+    registry
+        .upsert(RegisteredDevice {
+            uid: "dev_bbbbbbbbbbbbbbbb".to_string(),
+            name: "First board".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 1.0,
+            association: None,
+        })
+        .unwrap();
+
+    // The SECOND board: live, holding v1 → classifies Behind → push.
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(v1_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    // Mid-push, record which cards wear the in-place op overlay.
+    let seen: Rc<RefCell<Vec<(Option<String>, bool)>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink_seen = Rc::clone(&seen);
+    let sink = UxUpdateSink::new(move |update| {
+        if let UxUpdate::View(view) = update
+            && let Some(home) = &view.home
+        {
+            for card in &home.devices {
+                sink_seen
+                    .borrow_mut()
+                    .push((card.uid.clone(), card.ui.op.is_some()));
+            }
+        }
+    });
+    drive(studio.dispatch_with_updates(
+        deploy_action(DeployOp::PushProject {
+            key: summary.uid.to_string(),
+        }),
+        sink,
+    ))
+    .expect("the push succeeds");
+
+    let seen = seen.borrow();
+    assert!(
+        seen.iter()
+            .any(|(uid, has_op)| uid.as_deref() == Some("dev_aaaaaaaaaaaaaaaa") && *has_op),
+        "the live card narrates its own push: {seen:?}"
+    );
+    assert!(
+        !seen
+            .iter()
+            .any(|(uid, has_op)| uid.as_deref() == Some("dev_bbbbbbbbbbbbbbbb") && *has_op),
+        "the remembered offline card must never wear the live push op: {seen:?}"
+    );
+}
+
+/// The auto-fast-forward fixture (§3c-1): "Porch" installed, a device
+/// remembered with a push association at the given version, and the fake
+/// board holding an EDITED copy of those files. Returns the studio (with
+/// library attached, not yet connected), the endpoint, and the project uid.
+fn diverged_board_fixture(
+    local_moves_after_push: bool,
+) -> (StudioController, FakeEsp32Device, LinkEndpointId, String) {
+    use crate::app::places::{DeviceRegistry, RegisteredDevice};
+
+    let (store, host) = library();
+    let summary = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let pushed_head = store.open(summary.uid).unwrap().history.head().unwrap();
+    let board_files: Vec<(String, Vec<u8>)> = store
+        .open(summary.uid)
+        .unwrap()
+        .read_all_files()
+        .unwrap()
+        .into_iter()
+        .map(|(path, bytes)| {
+            if path.contains("shader.glsl") {
+                (path, b"edited on the board".to_vec())
+            } else {
+                (path, bytes)
+            }
+        })
+        .collect();
+    // the push marker: what WE last pushed to this board is v1
+    DeviceRegistry::new(store.fs_handle())
+        .upsert(RegisteredDevice {
+            uid: "dev_aaaaaaaaaaaaaaaa".to_string(),
+            name: "Bench board".to_string(),
+            transport: "USB".to_string(),
+            last_seen_at: 1.0,
+            association: Some(lpc_history::DeviceAssociation {
+                device: "dev_aaaaaaaaaaaaaaaa".parse().unwrap(),
+                project: summary.uid,
+                version: pushed_head,
+                at: 1.0,
+            }),
+        })
+        .unwrap();
+    if local_moves_after_push {
+        use lpc_model::AsLpPath;
+        let mut handle = store.open(summary.uid).unwrap();
+        handle
+            .apply_update("/shader.glsl".as_path(), Some(b"local v2"))
+            .unwrap();
+        handle.record_save(2.0).unwrap().expect("head advanced");
+    }
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(board_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_aaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    (studio, device, endpoint_id, summary.uid.to_string())
+}
+
+/// §3c-1 happy path: the board's copy diverges but the push marker still
+/// equals the local head (nothing local happened since the push) — the
+/// connect adopts the board's edits automatically; no Edited-on-device
+/// decision, the card lands Running-up-to-date.
+#[test]
+fn connect_auto_fast_forwards_a_pure_board_extension() {
+    let (mut studio, _device, endpoint_id, _uid) = diverged_board_fixture(false);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    let sync = studio.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(
+        *relation,
+        lpc_history::SyncRelation::AtHead,
+        "the pure extension fast-forwarded without asking"
+    );
+    let view = studio.view();
+    let home = view.home.expect("gallery view");
+    assert!(
+        home.devices
+            .iter()
+            .any(|card| matches!(card.state, crate::RosterCardState::RunningUpToDate)),
+        "the card landed Running-up-to-date: {:?}",
+        home.devices
+            .iter()
+            .map(|card| card.state.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// §3c-1 counter-case: local ALSO moved since the push — a genuine fork.
+/// No auto-adopt; the card still asks (Edited-on-device).
+#[test]
+fn connect_keeps_a_true_fork_for_the_user() {
+    let (mut studio, _device, endpoint_id, _uid) = diverged_board_fixture(true);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    let sync = studio.device_sync().expect("device state cached");
+    let DeviceContent::Known { relation, .. } = &sync.content else {
+        panic!("known project classifies, got {:?}", sync.content);
+    };
+    assert_eq!(
+        *relation,
+        lpc_history::SyncRelation::Diverged,
+        "a genuine fork must never auto-resolve"
     );
 }
 

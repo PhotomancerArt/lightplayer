@@ -795,10 +795,13 @@ impl DeviceController {
                 "Firmware operations are separate from project deploys.",
             ))
             .with_actions(vec![
-                UiAction::from_op(self.node_id(), DeviceOp::ProvisionFirmware)
-                    .with_label("Update firmware")
-                    .with_summary("Flash the bundled LightPlayer firmware.")
-                    .with_icon("zap"),
+                UiAction::from_op(
+                    self.node_id(),
+                    DeviceOp::ProvisionFirmware { setup_name: None },
+                )
+                .with_label("Update firmware")
+                .with_summary("Flash the bundled LightPlayer firmware.")
+                .with_icon("zap"),
                 UiAction::from_op(self.node_id(), DeviceOp::ResetToBlank)
                     .with_label("Erase device")
                     .with_summary("Erase the device's flash storage entirely.")

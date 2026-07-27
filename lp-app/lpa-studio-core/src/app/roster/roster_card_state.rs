@@ -29,9 +29,16 @@ pub enum RosterCardState {
         /// The local head's version number, for the "Push vN" label.
         head_version: Option<usize>,
     },
-    /// Running a copy that is not on the project line — a genuine fork,
-    /// already banked at connect (D8). Amber solid; D30 popup resolves.
-    EditedOnDevice,
+    /// Running a copy that is not on the project line — a genuine fork
+    /// (auto-fast-forward already absorbed pure extensions, §3c-1),
+    /// already banked at connect (D8). Amber solid; the two resolve verbs
+    /// ride the card face (§3c-2 — the D30 sheet is gone).
+    EditedOnDevice {
+        /// When the local head was last saved (plain-words comparison).
+        local_saved_at: Option<f64>,
+        /// When we last pushed to this board (its registry association).
+        pushed_at: Option<f64>,
+    },
     /// Running, but the device reported crash recovery / safe mode.
     /// Vocabulary slot only in M2: no substrate signal exists yet, so
     /// derivation never produces it (story-covered for the day it does).
@@ -110,7 +117,7 @@ impl RosterCardState {
                 (RosterTreatment::Filled, UiStatusKind::Good)
             }
             Self::RunningBehind { .. }
-            | Self::EditedOnDevice
+            | Self::EditedOnDevice { .. }
             | Self::Degraded { .. }
             | Self::ReadyToSetUp
             | Self::OtherFirmware
@@ -135,15 +142,10 @@ impl RosterCardState {
     pub fn status_line(&self, now_secs: f64) -> String {
         match self {
             Self::RunningUpToDate => "Running".to_string(),
-            Self::RunningBehind {
-                observed_version: Some(n),
-                ..
-            } => format!("Running v{n} — behind your copy"),
-            Self::RunningBehind {
-                observed_version: None,
-                ..
-            } => "Running — behind your copy".to_string(),
-            Self::EditedOnDevice => "Edited on device".to_string(),
+            // §3a copy rule: no version jargon in the headline — the
+            // Project facts carry the save-distance in plain words.
+            Self::RunningBehind { .. } => "Running an older version".to_string(),
+            Self::EditedOnDevice { .. } => "Changed on the device".to_string(),
             Self::Degraded {
                 reason: DegradedReason::CrashRecovery,
             } => "Recovered from a crash".to_string(),
@@ -181,10 +183,28 @@ impl RosterCardState {
 
     /// The card's ≤1 sub-line: the diverged row's banked note (D8 — the
     /// device copy is already saved, nothing is at risk), and the
-    /// unreadable row's parse detail.
-    pub fn sub_line(&self) -> Option<String> {
+    /// unreadable row's parse detail. `now_secs` feeds the drift times
+    /// (§3c-3); states without time copy ignore it.
+    pub fn sub_line(&self, now_secs: f64) -> Option<String> {
         match self {
-            Self::EditedOnDevice => Some("Device copy saved to history".to_string()),
+            // §3a: explain the situation, not just the label — with the
+            // honest wall-clock facts when we have them (§3c-3).
+            Self::EditedOnDevice {
+                local_saved_at,
+                pushed_at,
+            } => {
+                let pushed = pushed_at
+                    .map(|at| format!(" ({})", time_ago(now_secs, at)))
+                    .unwrap_or_default();
+                let saved = local_saved_at
+                    .map(|at| format!(" Your copy was saved {}.", time_ago(now_secs, at)))
+                    .unwrap_or_default();
+                Some(format!(
+                    "This board's copy has edits your project doesn't — made \
+                     after your last push{pushed}.{saved} A backup is already \
+                     in your library."
+                ))
+            }
             Self::HoldsUnreadableData { detail } => Some(detail.clone()),
             _ => None,
         }
@@ -198,16 +218,18 @@ impl RosterCardState {
             Self::RunningBehind { head_version, .. } => Some(RosterAffordance::PushVersion {
                 version: *head_version,
             }),
-            Self::EditedOnDevice => Some(RosterAffordance::ResolveDrift),
+            // §3c-2: the clear thing to do leads — adopt is
+            // overwrite-with-history, so it needs no gate; Keep-both rides
+            // beside it on the face (rich-object chain).
+            Self::EditedOnDevice { .. } => Some(RosterAffordance::UseBoardCopy),
             Self::Degraded { .. } | Self::NotResponding => Some(RosterAffordance::Troubleshoot),
             Self::ConnectingRetrying { .. }
             | Self::OperationInFlight { .. }
             | Self::InUseElsewhere => None,
-            // choosing a project replaces the unreadable content; erase
-            // rides the card's actions popover
-            Self::ConnectedEmpty | Self::HoldsUnreadableData { .. } => {
-                Some(RosterAffordance::ChooseProject)
-            }
+            Self::ConnectedEmpty => Some(RosterAffordance::ChooseProject),
+            // The way out is BLANK, never push-over (model rev 2026-07-26):
+            // wipe the unreadable content, land on "nothing loaded".
+            Self::HoldsUnreadableData { .. } => Some(RosterAffordance::WipeProject),
             Self::ReadyToSetUp | Self::OtherFirmware => Some(RosterAffordance::SetUp),
             Self::NeedsFirmwareUpdate => Some(RosterAffordance::UpdateFirmware),
             Self::NeedsAName => Some(RosterAffordance::NameDevice),
@@ -273,7 +295,10 @@ mod tests {
                 observed_version: Some(3),
                 head_version: Some(4),
             },
-            RosterCardState::EditedOnDevice,
+            RosterCardState::EditedOnDevice {
+                local_saved_at: None,
+                pushed_at: None,
+            },
             RosterCardState::Degraded {
                 reason: DegradedReason::SafeMode,
             },
@@ -296,7 +321,7 @@ mod tests {
                 head_version: Some(5),
             }
             .status_line(now),
-            "Running v3 — behind your copy"
+            "Running an older version"
         );
         assert_eq!(
             RosterCardState::OperationInFlight {
@@ -321,9 +346,36 @@ mod tests {
 
     #[test]
     fn only_the_diverged_row_carries_the_banked_sub_line() {
-        assert!(RosterCardState::EditedOnDevice.sub_line().is_some());
-        assert!(RosterCardState::RunningUpToDate.sub_line().is_none());
-        assert!(RosterCardState::NotResponding.sub_line().is_none());
+        let now = 1_000_000.0;
+        assert!(
+            RosterCardState::EditedOnDevice {
+                local_saved_at: None,
+                pushed_at: None,
+            }
+            .sub_line(now)
+            .is_some()
+        );
+        assert!(RosterCardState::RunningUpToDate.sub_line(now).is_none());
+        assert!(RosterCardState::NotResponding.sub_line(now).is_none());
+    }
+
+    #[test]
+    fn the_diverged_sub_line_speaks_the_drift_times() {
+        let now = 1_000_000.0;
+        let line = RosterCardState::EditedOnDevice {
+            local_saved_at: Some(now - 240.0),
+            pushed_at: Some(now - 7_200.0),
+        }
+        .sub_line(now)
+        .expect("diverged sub-line");
+        assert!(
+            line.contains("your last push (2h ago)"),
+            "push recency in plain words: {line}"
+        );
+        assert!(
+            line.contains("Your copy was saved 4m ago."),
+            "local save recency in plain words: {line}"
+        );
     }
 
     #[test]
@@ -344,7 +396,7 @@ mod tests {
             .affordance()
             .unwrap()
             .label(),
-            "Push v5"
+            "Push the latest"
         );
         // the self-healing states offer nothing
         for quiet in [

@@ -5,14 +5,9 @@ use lpa_studio_core::UiLogLevel;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::story_fixtures::{
-    editor_shell_story, endpoint_view, error_view, idle_view, shell_story, simulator_ready_view,
-    starting_view, studio_log,
+    endpoint_view, error_view, idle_view, shell_story, simulator_ready_view, starting_view,
+    studio_log,
 };
-
-#[story]
-pub(crate) fn editor_shell() -> Element {
-    editor_shell_story()
-}
 
 #[story]
 pub(crate) fn simulator_idle() -> Element {

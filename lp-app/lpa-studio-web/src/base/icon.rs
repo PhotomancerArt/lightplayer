@@ -93,6 +93,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("copy") => Some(StudioIconName::Copy),
         Some("download") => Some(StudioIconName::Download),
         Some("upload") => Some(StudioIconName::Upload),
+        Some("grow") => Some(StudioIconName::Grow),
         _ => None,
     }
 }

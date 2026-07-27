@@ -18,14 +18,24 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::{
-    BundledFirmware, ConnectPhase, DegradedReason, DeviceCardTab, RosterCardState, UiDeviceCard,
-    UiDeviceProjectChip, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
+    BundledFirmware, CardOp, CardSheet, CardUiState, CardVerb, ConnectPhase, DegradedReason,
+    DeviceCardTab, RosterCardState, UiDeviceCard, UiDeviceProjectChip, UiLogEntry, UiLogLevel,
+    UiLogOrigin, UiLogSource,
 };
 use lpc_wire::FwProvenance;
 
-use crate::app::home::device_card::{
-    DeviceCard, DeviceCardSheet, erase_device_action, stop_simulator_action,
-};
+use crate::app::home::device_card::DeviceCard;
+
+/// Story helper: a card view-state opened on a given tab / sheet (the
+/// capture equivalent of the retired `initial_tab`/`initial_sheet` props —
+/// stories now drive the SAME core state the live app does).
+fn opened(tab: DeviceCardTab, sheet: Option<CardSheet>) -> CardUiState {
+    CardUiState {
+        tab,
+        sheet,
+        op: None,
+    }
+}
 
 /// A fixed "now" so the offline recency never drifts in baselines.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -40,9 +50,17 @@ fn running_behind() -> Element {
     sheet(vec![card(behind_state(), true)])
 }
 
-#[story(description = "Amber filled edge: a genuine fork, already banked at connect (D8/D30).")]
+#[story(
+    description = "Amber filled edge: a genuine fork, already banked at connect (D8). §3c-2: BOTH verbs ride the face — Use board copy (adopt = overwrite-with-history) and Keep both (fork) — plus the editor CTA; the sub-line speaks the drift times in plain words. No Review hop, no sheet, no Stay (walking away is staying)."
+)]
 fn edited_on_device() -> Element {
-    sheet(vec![card(RosterCardState::EditedOnDevice, true)])
+    sheet(vec![card(
+        RosterCardState::EditedOnDevice {
+            local_saved_at: Some(STORY_NOW - 240.0),
+            pushed_at: Some(STORY_NOW - 7_200.0),
+        },
+        true,
+    )])
 }
 
 #[story(
@@ -121,7 +139,10 @@ fn project_picker_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(RosterCardState::ConnectedEmpty, false),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Project, None),
+                    ..device_card(RosterCardState::ConnectedEmpty, false)
+                },
                 now_secs: Some(STORY_NOW),
                 project_choices: vec![
                     UiDeviceProjectChip {
@@ -133,7 +154,6 @@ fn project_picker_open() -> Element {
                         name: "2026-07-18-bedroom-lamp".to_string(),
                     },
                 ],
-                initial_tab: Some(DeviceCardTab::Project),
                 on_action: |_| {},
             }
         }
@@ -152,7 +172,9 @@ fn holds_unreadable_data() -> Element {
     )])
 }
 
-#[story(description = "Amber filled edge: blank flash — provisioning turns it into a Device.")]
+#[story(
+    description = "Amber filled edge: blank flash — the Status tab IS the setup form (state-flow model §1-A): a prefilled date-default name + ONE Install button, no confirm, no separate naming dialog. The name stamps at first post-flash contact."
+)]
 fn ready_to_set_up() -> Element {
     sheet(vec![card(RosterCardState::ReadyToSetUp, false)])
 }
@@ -188,9 +210,11 @@ fn troubleshoot_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(RosterCardState::NotResponding, false),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Status, Some(CardSheet::Troubleshoot)),
+                    ..device_card(RosterCardState::NotResponding, false)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_sheet: Some(DeviceCardSheet::Troubleshoot),
                 on_action: |_| {},
             }
         }
@@ -255,10 +279,12 @@ fn settings_tab_running() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card_with_fw(RosterCardState::RunningUpToDate, true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Settings, None),
+                    ..device_card_with_fw(RosterCardState::RunningUpToDate, true)
+                },
                 now_secs: Some(STORY_NOW),
                 bundled_fw: Some(bundled_firmware()),
-                initial_tab: Some(DeviceCardTab::Settings),
                 on_action: |_| {},
             }
         }
@@ -286,10 +312,12 @@ fn danger_tab_simulator() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: sim_card(true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Danger, None),
+                    ..sim_card(true)
+                },
                 now_secs: Some(STORY_NOW),
                 sim: true,
-                initial_tab: Some(DeviceCardTab::Danger),
                 on_action: |_| {},
             }
         }
@@ -303,12 +331,11 @@ fn erase_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(behind_state(), true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Danger, Some(CardSheet::Confirm(CardVerb::Erase))),
+                    ..device_card(behind_state(), true)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_tab: Some(DeviceCardTab::Danger),
-                initial_sheet: Some(DeviceCardSheet::Confirm(erase_device_action(
-                    "Luna's porch sign".to_string(),
-                ))),
                 on_action: |_| {},
             }
         }
@@ -322,25 +349,11 @@ fn name_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(RosterCardState::NeedsAName, false),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Status, Some(CardSheet::Name)),
+                    ..device_card(RosterCardState::NeedsAName, false)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_sheet: Some(DeviceCardSheet::Name),
-                on_action: |_| {},
-            }
-        }
-    }])
-}
-
-#[story(
-    description = "The D30 drift-resolution sheet on the Edited-on-device card: adopt (use the device's copy) / keep both / stay, entered from the state-table Review affordance. The deploy-dialog era's verbs, now card-resident — M5-A's minimal dialog routing dissolved into this."
-)]
-fn drift_sheet_open() -> Element {
-    sheet(vec![rsx! {
-        div { class: "tw:w-64",
-            DeviceCard {
-                card: device_card(RosterCardState::EditedOnDevice, true),
-                now_secs: Some(STORY_NOW),
-                initial_sheet: Some(DeviceCardSheet::Drift),
                 on_action: |_| {},
             }
         }
@@ -354,11 +367,100 @@ fn stop_sim_sheet_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: sim_card(true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Danger, Some(CardSheet::Confirm(CardVerb::StopSim))),
+                    ..sim_card(true)
+                },
                 now_secs: Some(STORY_NOW),
                 sim: true,
-                initial_tab: Some(DeviceCardTab::Danger),
-                initial_sheet: Some(DeviceCardSheet::Confirm(stop_simulator_action())),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The in-place op overlay (device-lifecycle P2): a firmware install takes over the card BODY where it runs — the tab row is covered and the body blurred behind it, the title bar spared — with a determinate bar and the session's console tail as an open technical terminal. Never an app-level modal."
+)]
+fn op_overlay_determinate() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: CardUiState {
+                        op: Some(CardOp::new("Installing firmware…", Some(62))),
+                        ..CardUiState::default()
+                    },
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The op flow's AwaitingDevice phase (state-flow model §2 I2): the op's EXPECTED disconnect — the board is rebooting after a flash — and the overlay stays up with the reconnect narration. The session is gone; the card-owned flow isn't."
+)]
+fn op_overlay_awaiting_device() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: CardUiState {
+                        op: Some(CardOp::awaiting("Waiting for firmware boot")),
+                        ..CardUiState::default()
+                    },
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The op flow's Failed phase (state-flow model §2 I4): the error in the terminal and ONE exit to the nearest stable state — no in-place Retry, no silent fallback, no refresh."
+)]
+fn op_overlay_failed() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: CardUiState {
+                        op: Some(CardOp::failed(
+                            "Flashing firmware failed",
+                            "esptool: timed out waiting for packet header",
+                            "Back to set up",
+                        )),
+                        ..CardUiState::default()
+                    },
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
+            }
+        }
+    }])
+}
+
+#[story(
+    description = "The in-place op overlay with no known percent (device-lifecycle P2): the bar sweeps indeterminately while an erase runs, technical details streaming below."
+)]
+fn op_overlay_indeterminate() -> Element {
+    sheet(vec![rsx! {
+        div { class: "tw:w-64",
+            DeviceCard {
+                card: UiDeviceCard {
+                    ui: CardUiState {
+                        op: Some(CardOp::new("Erasing device…", None)),
+                        ..CardUiState::default()
+                    },
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
+                now_secs: Some(STORY_NOW),
                 on_action: |_| {},
             }
         }
@@ -387,9 +489,11 @@ fn console_tab_open() -> Element {
     sheet(vec![rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card_with_console(RosterCardState::RunningUpToDate, true),
+                card: UiDeviceCard {
+                    ui: opened(DeviceCardTab::Console, None),
+                    ..device_card_with_console(RosterCardState::RunningUpToDate, true)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_tab: Some(DeviceCardTab::Console),
                 on_action: |_| {},
             }
         }
@@ -495,9 +599,11 @@ fn tabbed(state: RosterCardState, with_project: bool, tab: DeviceCardTab) -> Ele
     rsx! {
         div { class: "tw:w-64",
             DeviceCard {
-                card: device_card(state, with_project),
+                card: UiDeviceCard {
+                    ui: opened(tab, None),
+                    ..device_card(state, with_project)
+                },
                 now_secs: Some(STORY_NOW),
-                initial_tab: Some(tab),
                 on_action: |_| {},
             }
         }
@@ -532,6 +638,7 @@ fn device_card(state: RosterCardState, with_project: bool) -> UiDeviceCard {
         fw: None,
         sim: false,
         console_tail: Vec::new(),
+        ui: Default::default(),
     }
 }
 
@@ -555,6 +662,7 @@ fn sim_card(with_project: bool) -> UiDeviceCard {
         fw: None,
         sim: true,
         console_tail: Vec::new(),
+        ui: Default::default(),
     }
 }
 

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device state-flow · filmstrips</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #161a20; --terminal: #10141a; --border: #262c35;
+    --text: #e6e9ee; --muted: #9aa4b2; --dim: #5c6570;
+    --green: #4ade80; --amber: #fbbf24; --red: #f87171; --gray: #6b7280;
+    --accent: #34d399;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 40px 80px; background: var(--bg); color: var(--text);
+         font: 14px/1.5 -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .04em; }
+  .sub { color: var(--muted); margin: 0 0 36px; max-width: 70ch; }
+  h2 { font-size: 15px; margin: 44px 0 2px; color: var(--accent); letter-spacing: .06em; }
+  .jdesc { color: var(--muted); margin: 0 0 14px; max-width: 90ch; }
+  .budget { display: inline-block; margin-left: 10px; padding: 1px 8px; border: 1px solid var(--border);
+            border-radius: 10px; font-size: 11px; color: var(--muted); }
+  .strip { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding: 12px 4px 20px; }
+  .step { flex: none; }
+  .arrow { flex: none; align-self: center; width: 120px; padding: 0 8px; text-align: center;
+           color: var(--dim); font-size: 11px; }
+  .arrow .who { display: block; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+                font-size: 9.5px; margin-bottom: 2px; }
+  .arrow .who.user { color: var(--accent); }
+  .arrow .who.auto { color: var(--amber); }
+  .arrow .line { display: block; border-top: 1px dashed var(--dim); margin: 6px 0; }
+  .statename { font: 10.5px/1.3 ui-monospace, Menlo, monospace; color: var(--dim);
+               margin: 0 0 6px 4px; letter-spacing: .03em; }
+
+  /* ---- the card mock ---- */
+  .card { position: relative; width: 260px; min-height: 300px; display: flex; flex-direction: column;
+          background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+          overflow: hidden; }
+  .card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--tint); }
+  .card.hollow::before { background: transparent; border-left: 3px double var(--tint); }
+  .card.faded { opacity: .55; }
+  .card.pulsing::before { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .hd { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 8px 6px 14px;
+        background: var(--terminal); border-bottom: 1px solid var(--border); }
+  .hd .glyph { color: var(--muted); font-size: 12px; }
+  .hd .name { font-weight: 600; font-size: 13.5px; flex: 1; min-width: 0; white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; }
+  .hd .tport { color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: .08em; }
+  .hd .grow { color: var(--muted); padding: 2px 6px; }
+  .tabs { display: flex; gap: 2px; padding: 4px 6px; background: var(--terminal);
+          border-bottom: 1px solid var(--border); }
+  .tab { padding: 3px 9px; border-radius: 5px; color: var(--dim); font-size: 12px; }
+  .tab.on { color: var(--text); background: #232a33; }
+  .tab.danger { color: color-mix(in srgb, var(--red) 55%, var(--dim)); }
+  .tab.danger.on { color: var(--red); background: #2a1d1d; }
+  .body { position: relative; flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; }
+  .status-line { font-weight: 600; font-size: 12.5px; color: var(--tint); margin: 0; }
+  .sub-line { color: var(--muted); font-size: 12px; margin: 0; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .chip .sw { width: 12px; height: 12px; border-radius: 3px; background: #7c5cbf; }
+  .btn { display: inline-block; width: fit-content; padding: 5px 12px; border: 1px solid var(--border);
+         border-radius: 6px; background: #1d232b; color: var(--text); font-size: 12.5px; }
+  .btn.primary { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--accent); }
+  .btn.destructive { border-color: color-mix(in srgb, var(--red) 45%, var(--border)); color: var(--red); }
+  .btn.quiet { background: transparent; color: var(--muted); }
+  .field label { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+                 color: var(--dim); text-transform: uppercase; margin-bottom: 3px; }
+  .field input { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+                 background: var(--terminal); color: var(--text); font-size: 13px; }
+  .rows { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+  .kv { display: grid; grid-template-columns: 76px 1fr; gap: 8px; font-size: 12px; }
+  .kv dt { color: var(--dim); font-weight: 700; font-size: 10.5px; text-transform: uppercase; }
+  .kv dd { margin: 0; color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+  .advisory { border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border));
+              color: var(--amber); font-size: 11.5px; border-radius: 6px; padding: 5px 9px;
+              width: fit-content; }
+  .strip-line { margin-top: auto; padding: 5px 10px; background: var(--terminal);
+                border-top: 1px solid var(--border); color: var(--dim);
+                font: 11px ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; }
+
+  /* op overlay */
+  .op { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px;
+        padding: 16px; background: color-mix(in srgb, var(--terminal) 82%, transparent);
+        backdrop-filter: blur(3px); }
+  .op .label { font-weight: 600; font-size: 13px; }
+  .op .bar { position: relative; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .op .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 3px; }
+  .op .bar.ind i { width: 35%; animation: sweep 1.1s ease-in-out infinite; }
+  @keyframes sweep { 0% { left: -35%; } 100% { left: 100%; } }
+  .op .term { flex: 1; min-height: 60px; border: 1px solid var(--border); border-radius: 5px;
+              background: var(--terminal); padding: 7px 9px; overflow: hidden;
+              font: 10.5px/1.6 ui-monospace, Menlo, monospace; color: var(--muted); }
+  .op .term .dim { color: var(--dim); } .op .term .warn { color: var(--amber); }
+  .op .cancelrow { display: flex; justify-content: flex-end; }
+
+  /* sheet mock */
+  .sheet { position: absolute; inset: 42px 8px 8px; background: #1a1f27f2; border: 1px solid var(--border);
+           border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .sheet h4 { margin: 0; font-size: 13px; }
+  .sheet p { margin: 0; color: var(--muted); font-size: 12px; }
+  .sheet .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: auto; }
+
+  .note { border-left: 3px solid var(--amber); padding: 6px 12px; color: var(--muted);
+          font-size: 12.5px; margin: 6px 0 0; max-width: 90ch; }
+  .vocab .strip { flex-wrap: wrap; gap: 20px; }
+</style>
+</head>
+<body>
+<h1>DEVICE STATE-FLOW · FILMSTRIPS</h1>
+<p class="sub">Each journey is the ratified end-state, laid out as the sequence of cards the user
+actually sees — green arrows are user clicks, amber arrows happen on their own. Grounded in the real
+16-state <code>RosterCardState</code> vocabulary; the model doc (§ numbers referenced below) is
+<code>Planning/lp2025/2026-07-26-device-stateflow/model.md</code>.</p>
+<div id="root"></div>
+
+<script>
+// ---------- card renderer ----------
+const TINTS = { green: "var(--green)", amber: "var(--amber)", red: "var(--red)", gray: "var(--gray)" };
+const TABSETS = {
+  full:  ["Status","Project","Settings","Perf","Console","Danger"],
+  lean:  ["Status","Console","Danger"],
+  picker:["Status","Project","Settings","Console","Danger"],
+};
+function card(o) {
+  const tint = TINTS[o.tint];
+  const cls = ["card", o.hollow?"hollow":"", o.faded?"faded":"", o.pulsing?"pulsing":""].join(" ");
+  const tabs = (TABSETS[o.tabs||"lean"]).map(t =>
+    `<span class="tab ${t===((o.activeTab)||"Status")?"on":""} ${t==="Danger"?"danger":""}">${t}</span>`).join("");
+  return `<div class="step"><p class="statename">${o.state}</p>
+    <div class="${cls}" style="--tint:${tint}">
+      <div class="hd"><span class="glyph">${o.sim?"▦":"⌁"}</span><span class="name">${o.name}</span>
+        <span class="tport">${o.tport??"USB"}</span><span class="grow">⤢</span></div>
+      <div class="tabs">${tabs}</div>
+      <div class="body">${o.body||""}${o.sheet||""}${o.op||""}</div>
+      ${o.stripline?`<div class="strip-line">› ${o.stripline}</div>`:""}
+    </div></div>`;
+}
+function op({label, pct, term, cancel}) {
+  const bar = pct==null ? `<div class="bar ind"><i></i></div>` : `<div class="bar"><i style="width:${pct}%"></i></div>`;
+  return `<div class="op"><span class="label">${label}</span>${bar}
+    <div class="term">▾ Technical details<br>${term}</div>
+    ${cancel?`<div class="cancelrow"><span class="btn quiet">Cancel</span></div>`:""}</div>`;
+}
+function arrow(who, text) {
+  return `<div class="arrow"><span class="who ${who}">${who==="user"?"click":"auto"}</span><span class="line"></span>${text}</div>`;
+}
+// A gallery PROJECT/EXAMPLE card (not a device card): used where the
+// gallery itself becomes the project chooser for a blank device.
+function pkgCard(o) {
+  return `<div class="step"><p class="statename">${o.state}</p>
+    <div class="card" style="--tint:transparent; min-height:0">
+      <div style="height:84px; background:linear-gradient(115deg,#3b2d63,#1f6f5c 55%,#7c5cbf)"></div>
+      <div class="body" style="gap:6px">
+        <p class="status-line" style="color:var(--text)">${o.name}</p>
+        <p class="sub-line">${o.kind}</p>
+        ${o.action||""}
+      </div>
+    </div></div>`;
+}
+const statusLine = (txt) => `<p class="status-line">${txt}</p>`;
+const chip = (name) => `<span class="chip"><span class="sw"></span>${name}</span>`;
+
+// ---------- journeys ----------
+const J = [];
+
+J.push({ id:"A", title:"A · BLANK BOARD → RUNNING PROJECT", budget:"2 clicks + optional name tweak",
+  desc:"The provisioning journey (model §1-A). The Status tab IS the setup form — date-default name, one Install button, no confirm, no separate naming dialog. The expected reboot is part of the op (§2 I2). Landing hands off to the GALLERY as the chooser (rev 2026-07-26): with an empty device present, the project/example cards themselves grow the put-on-device affordance — the card-resident Project-tab picker stays as the second door.",
+  steps:[
+    card({state:"ConnectingRetrying", tint:"amber", pulsing:true, name:"New board", tabs:"lean",
+      body: statusLine("Connecting…")+`<p class="sub-line">Checking what's on this board.</p>`}),
+    arrow("auto","classified: blank flash"),
+    card({state:"ReadyToSetUp — Status tab is the setup form", tint:"amber", name:"New board", tabs:"lean",
+      body: statusLine("Ready to set up")+
+        `<div class="field"><label>Device name</label><input value="2026-07-26 14:30 LightPlayer"></div>
+         <span class="btn primary">⚡ Install firmware</span>
+         <p class="sub-line">About a minute. Progress shows here — you can walk away.</p>`}),
+    arrow("user","Install firmware — the ONE click; name stamps automatically"),
+    card({state:"OperationInFlight · Running (§2)", tint:"amber", pulsing:true, name:"2026-07-26 14:30 Light…", tabs:"lean",
+      op: op({label:"Installing firmware…", pct:62, cancel:true,
+        term:`esptool write_flash 0x10000<span class="dim"> · chunk 41/66</span><br>hash verified<span class="dim"> · 0x8000 ok</span>`})}),
+    arrow("auto","flash committed → board reboots (EXPECTED disconnect, op keeps running)"),
+    card({state:"OperationInFlight · AwaitingDevice (§2 I2)", tint:"amber", pulsing:true, name:"2026-07-26 14:30 Light…", tabs:"lean",
+      op: op({label:"Restarting…", pct:null,
+        term:`<span class="dim">port re-enumerating…</span><br><span class="dim">reconnect ladder armed</span>`})}),
+    arrow("auto","reconnected · identity stamped"),
+    card({state:"ConnectedEmpty — landing points at the gallery (§2 I3)", tint:"green", name:"2026-07-26 14:30 Light…", tabs:"picker", activeTab:"Status",
+      body: statusLine("Set up complete")+
+        `<p class="sub-line">Nothing loaded yet — pick any project or example below to put on it.</p>`}),
+    arrow("auto","gallery cards grow the affordance while an empty device is present"),
+    pkgCard({state:"gallery project card AS the chooser (settled: explicit buttons)", name:"porch-sign", kind:"Project · edited today, 1:05 PM",
+      action:`<span class="btn primary">⚡ Put on "2026-07-26 14:30…"</span>
+        <span class="btn">▶ Open in a new sim</span>
+        <p class="sub-line">One button per empty device + one for a sim — the target is always named, never guessed.</p>`}),
+    arrow("user","one click on the project card"),
+    card({state:"OperationInFlight · Running", tint:"amber", pulsing:true, name:"2026-07-26 14:30 Light…", tabs:"lean",
+      op: op({label:"Pushing porch-sign v1…", pct:34, cancel:true,
+        term:`writing nodes/root.json<span class="dim"> · 3/12 files</span>`})}),
+    arrow("auto","push complete"),
+    card({state:"RunningUpToDate", tint:"green", name:"2026-07-26 14:30 Light…", tabs:"full",
+      body: statusLine("Running · up to date")+chip("porch-sign"),
+      stripline:"engine: frame 412 · 60fps"}),
+  ]});
+
+J.push({ id:"B", title:"B · FACTORY RESET / ERASE", budget:"2 clicks (destructive keeps its confirm)",
+  desc:"Erase is a card-owned op flow (§2): the overlay renders even though the op severs the session (I1), the expected disconnect arms the reconnect ladder (I2), and it lands on the setup form — not on a 'Forget device' dead end. From the editor: sever with honest copy, return to gallery only if THIS device backed the open project.",
+  steps:[
+    card({state:"RunningUpToDate · Danger tab", tint:"green", name:"Luna's porch sign", tabs:"full", activeTab:"Danger",
+      body:`<div class="rows"><span class="btn destructive">⚡ Flash firmware…</span>
+        <span class="btn destructive">⌫ Erase device…</span></div>`}),
+    arrow("user","Erase device"),
+    card({state:"Confirm sheet (D41 — destructive keeps consent)", tint:"green", name:"Luna's porch sign", tabs:"full", activeTab:"Danger",
+      sheet:`<div class="sheet"><h4>Erase device</h4>
+        <p>Erase everything on "Luna's porch sign"? Its flash is wiped clean; anything Studio could read was already saved to your library.</p>
+        <div class="btns"><span class="btn quiet">Cancel</span><span class="btn destructive">Erase</span></div></div>`}),
+    arrow("user","Erase"),
+    card({state:"OperationInFlight · Running (I1: session death ≠ op death)", tint:"amber", pulsing:true, name:"Luna's porch sign", tabs:"lean",
+      op: op({label:"Erasing device…", pct:null, cancel:false,
+        term:`esptool erase_flash<span class="dim"> · this takes ~20s</span>`})}),
+    arrow("auto","erase done → board reboots blank (expected)"),
+    card({state:"OperationInFlight · AwaitingDevice", tint:"amber", pulsing:true, name:"Luna's porch sign", tabs:"lean",
+      op: op({label:"Waiting for the board…", pct:null,
+        term:`<span class="dim">reconnect ladder: attempt 1</span>`})}),
+    arrow("auto","reconnected · classified blank"),
+    card({state:"ReadyToSetUp (journey A resumes)", tint:"amber", name:"Luna's porch sign", tabs:"lean",
+      body: statusLine("Ready to set up")+
+        `<div class="field"><label>Device name</label><input value="Luna's porch sign"></div>
+         <span class="btn primary">⚡ Install firmware</span>
+         <p class="sub-line">Erase kept the remembered name — change it or reuse it.</p>`}),
+  ]});
+
+J.push({ id:"C", title:"C · FIRMWARE UPDATE", budget:"1 click",
+  desc:"One click on the Settings-tab chip (the 'restarts after' warning is ambient copy, not a modal — §1-C). Device data survives; the op flows through the same expected-disconnect machinery.",
+  steps:[
+    card({state:"RunningUpToDate + update chip", tint:"green", name:"Luna's porch sign", tabs:"full", activeTab:"Settings",
+      body:`<dl class="kv"><dt>firmware</dt><dd>fw-esp32 · def9876</dd><dt>bundled</dt><dd>abc1234</dd></dl>
+        <span class="advisory">Firmware update available</span>
+        <span class="btn primary">⚡ Update firmware</span>
+        <p class="sub-line">Installs this build's firmware; the device restarts after.</p>`}),
+    arrow("user","Update firmware"),
+    card({state:"OperationInFlight · Running", tint:"amber", pulsing:true, name:"Luna's porch sign", tabs:"lean",
+      op: op({label:"Updating firmware…", pct:78, cancel:true,
+        term:`esptool write_flash 0x10000<span class="dim"> · chunk 52/66</span>`})}),
+    arrow("auto","committed → restart (expected)"),
+    card({state:"OperationInFlight · AwaitingDevice", tint:"amber", pulsing:true, name:"Luna's porch sign", tabs:"lean",
+      op: op({label:"Restarting…", pct:null, term:`<span class="dim">waiting for the board…</span>`})}),
+    arrow("auto","reconnected · project intact"),
+    card({state:"RunningUpToDate", tint:"green", name:"Luna's porch sign", tabs:"full",
+      body: statusLine("Running · up to date")+chip("porch-sign"),
+      stripline:"fw: booted def9876→abc1234"}),
+  ]});
+
+J.push({ id:"D", title:"D · UNPLUG / REPLUG (+ THE SAD BRANCH)", budget:"0 clicks (happy) · troubleshoot sheet (sad)",
+  desc:"Physical disconnects self-heal through the M6 ladder. When the ladder gives up, NotResponding is an honest terminal with the troubleshoot sheet — never a silent dead card (§2 I4). This family has many permutations (unplug mid-op, replug a different board, power-only cables…) — ratified as the SHAPE here; the permutation matrix iterates during reconciliation (model §5).",
+  steps:[
+    card({state:"RunningUpToDate", tint:"green", name:"Luna's porch sign", tabs:"full",
+      body: statusLine("Running · up to date")+chip("porch-sign")}),
+    arrow("auto","unplugged"),
+    card({state:"Offline (remembered)", tint:"gray", hollow:true, faded:true, name:"Luna's porch sign", tabs:"lean",
+      body: statusLine("Offline")+`<p class="sub-line">Last seen just now</p><span class="btn">Reconnect</span>`}),
+    arrow("auto","replugged → ladder"),
+    card({state:"ConnectingRetrying", tint:"amber", pulsing:true, name:"Luna's porch sign", tabs:"lean",
+      body: statusLine("Connecting…")}),
+    arrow("auto","ladder exhausted (sad branch)"),
+    card({state:"NotResponding + Troubleshoot sheet", tint:"red", name:"Luna's porch sign", tabs:"lean",
+      sheet:`<div class="sheet"><h4>Device not responding</h4>
+        <p>· Check the USB cable — charge-only cables never carry data.<br>· Unplug, plug back in, then Reconnect.<br>· Still stuck? Hold BOOT while plugging in, then flash.</p>
+        <div class="btns"><span class="btn primary">Reconnect</span><span class="btn quiet">Flash firmware…</span></div></div>`}),
+  ]});
+
+J.push({ id:"E", title:"E · VOCABULARY — REMAINING STATES", budget:"single cards, no journey", vocab:true,
+  desc:"Every other state, one honest card each (model §3 has the full tab/affordance table). Danger is present on ALL of them — the always-available short-circuit. Copy rule (§3a): explain the situation in plain words, and date/time stamps — never vN — for versions. Backlog (§5): raw .bin backup/restore of a board, especially before wiping something unrecognized.",
+  steps:[
+    card({state:"RunningBehind — timestamps, not vN (copy rule §3a)", tint:"amber", name:"Luna's porch sign", tabs:"full",
+      body: statusLine("Running an older version")+chip("porch-sign")+
+        `<p class="sub-line">On the device: the version from <b>Jul 24, 2:10 PM</b>.<br>Your latest edit: <b>today, 1:05 PM</b>.</p>
+         <span class="btn primary">↑ Push the latest</span>`}),
+    card({state:"EditedOnDevice — explain the situation (copy rule §3a)", tint:"amber", name:"Luna's porch sign", tabs:"full",
+      body: statusLine("Changed on the device")+chip("porch-sign")+
+        `<p class="sub-line">This board's copy has edits your project doesn't — made after your last push. Studio already saved a backup of it to your library.</p>
+         <span class="btn">Review the changes…</span>`}),
+    card({state:"NeedsAName (legacy boards only — journey A never lands here)", tint:"amber", name:"Unnamed device", tabs:"lean",
+      body: statusLine("Needs a name")+
+        `<div class="field"><label>Device name</label><input placeholder="2026-07-26 14:30 LightPlayer"></div><span class="btn primary">Name device</span>`}),
+    card({state:"OtherFirmware", tint:"amber", name:"New board", tabs:"lean",
+      body: statusLine("Other firmware")+
+        `<div class="field"><label>Device name</label><input value="2026-07-26 14:30 LightPlayer"></div>
+         <span class="btn primary">⚡ Replace with LightPlayer</span>
+         <p class="sub-line">Recognized non-LightPlayer firmware; replacing is safe.</p>`}),
+    card({state:"NeedsFirmwareUpdate", tint:"amber", name:"Luna's porch sign", tabs:"lean",
+      body: statusLine("Needs a firmware update")+`<p class="sub-line">Speaks an older protocol — update to manage it.</p><span class="btn primary">⚡ Update firmware</span>`}),
+    card({state:"HoldsUnreadableData — the way out is BLANK, not push (rev)", tint:"amber", name:"Old prototype", tabs:"lean",
+      body: statusLine("Holds unreadable data")+
+        `<p class="sub-line">project.json is not a current-format project. Get the board back to empty, then set it up fresh.</p>
+         <span class="btn destructive">Back up &amp; wipe project…</span>
+         <p class="sub-line">Saves a raw backup to your library first → lands on "nothing loaded".</p>`}),
+    card({state:"InUseElsewhere + take-over (stretch, rev)", tint:"gray", name:"Luna's porch sign", tabs:"lean",
+      body: statusLine("In use elsewhere")+
+        `<p class="sub-line">Another Studio tab holds this port.</p>
+         <span class="btn primary">Use here</span>
+         <p class="sub-line">Closes the connection in the other tab — you're the one holding the board.</p>`}),
+    card({state:"Degraded (vocabulary slot)", tint:"amber", name:"Luna's porch sign", tabs:"picker",
+      body: statusLine("Recovered from a crash")+`<span class="btn">Troubleshoot…</span>`}),
+    card({state:"Offline · Danger → Forget", tint:"gray", hollow:true, faded:true, name:"Old prototype", tabs:"lean", activeTab:"Danger",
+      body:`<div class="rows"><span class="btn destructive">Forget device…</span></div>`}),
+    card({state:"Sim card (D36)", tint:"green", sim:true, tport:"SIM", name:"Simulator", tabs:"picker",
+      body: statusLine("Running")+chip("porch-sign")}),
+    card({state:"OperationInFlight · Failed — ONE exit to the nearest stable state (§2 I4 rev)", tint:"red", name:"Luna's porch sign", tabs:"lean",
+      op:`<div class="op"><span class="label" style="color:var(--red)">Install failed</span>
+        <div class="term">esptool: timed out waiting for packet<br><span class="warn">device disconnected mid-write</span></div>
+        <div class="cancelrow"><span class="btn primary">Back to set up</span></div></div>`}),
+  ]});
+
+// ---------- render ----------
+document.getElementById("root").innerHTML = J.map(j => `
+  <section class="${j.vocab?"vocab":""}">
+    <h2>${j.title}<span class="budget">${j.budget}</span></h2>
+    <p class="jdesc">${j.desc}</p>
+    <div class="strip">${j.steps.join("")}</div>
+  </section>`).join("");
+</script>
+</body>
+</html>

@@ -46,6 +46,12 @@ these apply only to local SCRATCH captures; canonical baselines come from the
   `code-editor` (chip task_16a65557 tracks the churn itself).
 
 **Incident log**
+- 2026-07-26 — device state-flow reconciliation capture: CDP navigate
+  timeout (120s, twice — both passes) on project-pane overview @ lg at
+  concurrency 1, while the `studio-dev` dx server ran on the same
+  machine. Retry with the dev server STOPPED + 180s timeout passed
+  first try. Confirms the "quiet machine" workaround is load-bearing:
+  the dev server alone is enough contention to wedge the heavy sheets.
 - 2026-07-26 — node-card P2/P2b captures: even with a clean process slate and
   concurrency 1 + 120s, full runs decay and wedge after ~700+ navigations
   (wedge story varies per run — positional, not story-specific; the failing
