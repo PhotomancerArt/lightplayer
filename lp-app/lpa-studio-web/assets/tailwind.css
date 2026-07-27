@@ -267,6 +267,9 @@
   .tw\:inline-grid {
     display: inline-grid;
   }
+  .tw\:field-sizing-content {
+    field-sizing: content;
+  }
   .tw\:aspect-\[9\/5\] {
     aspect-ratio: 9/5;
   }
@@ -371,6 +374,9 @@
   }
   .tw\:min-h-9 {
     min-height: calc(var(--tw-spacing) * 9);
+  }
+  .tw\:min-h-20 {
+    min-height: calc(var(--tw-spacing) * 20);
   }
   .tw\:min-h-24 {
     min-height: calc(var(--tw-spacing) * 24);
@@ -551,6 +557,9 @@
   }
   .tw\:max-w-40 {
     max-width: calc(var(--tw-spacing) * 40);
+  }
+  .tw\:max-w-56 {
+    max-width: calc(var(--tw-spacing) * 56);
   }
   .tw\:max-w-72 {
     max-width: calc(var(--tw-spacing) * 72);
@@ -1987,6 +1996,13 @@
     &:hover {
       @media (hover: hover) {
         border-color: var(--tw-color-border-strong);
+      }
+    }
+  }
+  .tw\:hover\:border-border-subtle {
+    &:hover {
+      @media (hover: hover) {
+        border-color: var(--tw-color-border-subtle);
       }
     }
   }

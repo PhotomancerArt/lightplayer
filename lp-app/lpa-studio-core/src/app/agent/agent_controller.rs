@@ -67,6 +67,9 @@ pub struct AgentViewContext {
     pub setup: Option<AgentProviderGuidance>,
     /// Cost rates for the usage estimate (`None` ⇒ tokens only).
     pub cost_rates: Option<AgentCostRates>,
+    /// The model-chip slice (effective model + discovered options) the
+    /// chat footer renders.
+    pub model: crate::UiAgentModelView,
 }
 
 /// Everything a run start needs beyond the message text: the refreshed host
@@ -534,6 +537,7 @@ impl AgentController {
             estimated_cost: estimated_cost(usage, ctx.cost_rates),
             history,
             history_dropped,
+            model: ctx.model.clone(),
         }
     }
 

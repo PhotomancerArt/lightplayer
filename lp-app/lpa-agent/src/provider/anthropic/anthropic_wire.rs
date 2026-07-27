@@ -21,6 +21,20 @@ pub struct MessagesRequest<'a> {
     pub tools: &'a [ToolDef],
 }
 
+/// Extended-thinking request configuration, sent on every turn.
+///
+/// `adaptive` lets the model decide when/how much to think (the only
+/// accepted on-mode on the current model family — `budget_tokens` is
+/// rejected with a 400 on `claude-sonnet-5` and its peers), and
+/// `display: "summarized"` opts back into readable thinking text: without
+/// it the API streams thinking blocks with EMPTY text (the post-4.7
+/// default), which is exactly the "can't see what it's thinking" gap.
+/// No settings surface by design; older pre-4.6 models that still need
+/// `{type: "enabled", budget_tokens}` are out of scope here.
+fn thinking_config() -> serde_json::Value {
+    json!({"type": "adaptive", "display": "summarized"})
+}
+
 impl MessagesRequest<'_> {
     /// Build the request body with two `cache_control` breakpoints
     /// (Anthropic ephemeral prompt cache, default 5-minute TTL):
@@ -43,6 +57,7 @@ impl MessagesRequest<'_> {
             "model": self.model,
             "max_tokens": self.max_tokens,
             "stream": self.stream,
+            "thinking": thinking_config(),
         });
         if !self.system.is_empty() {
             body["system"] = json!([{
@@ -53,14 +68,34 @@ impl MessagesRequest<'_> {
         }
         let mut messages =
             serde_json::to_value(self.messages).expect("message serialization is infallible");
-        if let Some(last_block) = messages
-            .as_array_mut()
-            .and_then(|msgs| msgs.last_mut())
-            .and_then(|msg| msg.get_mut("content"))
-            .and_then(|content| content.as_array_mut())
-            .and_then(|blocks| blocks.last_mut())
-        {
-            last_block["cache_control"] = cache_control_ephemeral();
+        if let Some(msgs) = messages.as_array_mut() {
+            // Unsigned thinking blocks (compat-provider origin) never go on
+            // the wire: the API validates replayed thinking against its
+            // signature, and blocks it did not produce would be rejected.
+            // Signed and redacted blocks pass through verbatim, as the
+            // tool-use loop requires.
+            for msg in msgs.iter_mut() {
+                if let Some(blocks) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
+                    blocks
+                        .retain(|block| !(block["type"] == "thinking" && block["signature"] == ""));
+                }
+            }
+            // The rolling breakpoint skips thinking-family blocks —
+            // `cache_control` is not accepted on them. In practice the last
+            // message is always a user message (text or tool results), so
+            // this is a guard, not the common path.
+            if let Some(last_block) = msgs
+                .last_mut()
+                .and_then(|msg| msg.get_mut("content"))
+                .and_then(|content| content.as_array_mut())
+                .and_then(|blocks| {
+                    blocks.iter_mut().rev().find(|block| {
+                        block["type"] != "thinking" && block["type"] != "redacted_thinking"
+                    })
+                })
+            {
+                last_block["cache_control"] = cache_control_ephemeral();
+            }
         }
         body["messages"] = messages;
         if !self.tools.is_empty() {
@@ -157,6 +192,16 @@ pub enum WireContentBlockStart {
         id: String,
         name: String,
     },
+    /// An extended-thinking block; text/signature stream as deltas.
+    Thinking {
+        #[serde(default)]
+        thinking: String,
+    },
+    /// A redacted thinking block arrives complete — no deltas follow.
+    RedactedThinking {
+        #[serde(default)]
+        data: String,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -170,6 +215,14 @@ pub enum WireBlockDelta {
     },
     InputJsonDelta {
         partial_json: String,
+    },
+    /// A fragment of a thinking block's text.
+    ThinkingDelta {
+        thinking: String,
+    },
+    /// A fragment of a thinking block's signature (arrives at block end).
+    SignatureDelta {
+        signature: String,
     },
     #[serde(other)]
     Unknown,
@@ -262,6 +315,7 @@ mod tests {
             "model": "claude-sonnet-5",
             "max_tokens": 4096,
             "stream": true,
+            "thinking": {"type": "adaptive", "display": "summarized"},
             "system": [{"type": "text", "text": "sys",
                         "cache_control": {"type": "ephemeral"}}],
             "messages": [
@@ -338,6 +392,94 @@ mod tests {
     }
 
     #[test]
+    fn signed_thinking_blocks_replay_and_unsigned_ones_are_dropped() {
+        let messages = vec![
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![
+                    ContentBlock::Thinking {
+                        thinking: "Weighing colors.".into(),
+                        signature: "sig_1".into(),
+                    },
+                    ContentBlock::RedactedThinking {
+                        data: "opaque".into(),
+                    },
+                    // Compat-origin (unsigned) thinking never goes on the
+                    // Anthropic wire.
+                    ContentBlock::Thinking {
+                        thinking: "compat reasoning".into(),
+                        signature: String::new(),
+                    },
+                    ContentBlock::ToolUse {
+                        id: "tu_1".into(),
+                        name: "iterate".into(),
+                        input: json!({}),
+                    },
+                ],
+            },
+            ChatMessage {
+                role: ChatRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "tu_1".into(),
+                    content: "{}".into(),
+                    is_error: None,
+                }],
+            },
+        ];
+        let req = MessagesRequest {
+            model: "m",
+            max_tokens: 1,
+            stream: true,
+            system: "",
+            messages: &messages,
+            tools: &[],
+        };
+        let got = req.body();
+        let assistant = got["messages"][0]["content"].as_array().expect("blocks");
+        assert_eq!(assistant.len(), 3, "{assistant:?}");
+        assert_eq!(assistant[0]["type"], "thinking");
+        assert_eq!(assistant[0]["thinking"], "Weighing colors.");
+        assert_eq!(assistant[0]["signature"], "sig_1");
+        assert_eq!(assistant[1]["type"], "redacted_thinking");
+        assert_eq!(assistant[1]["data"], "opaque");
+        assert_eq!(assistant[2]["type"], "tool_use");
+    }
+
+    #[test]
+    fn rolling_breakpoint_skips_thinking_family_blocks() {
+        // Defensive: were a thinking block ever last, the marker must land
+        // on the nearest earlier cacheable block instead.
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            content: vec![
+                ContentBlock::Text { text: "a".into() },
+                ContentBlock::Thinking {
+                    thinking: "t".into(),
+                    signature: "sig".into(),
+                },
+                ContentBlock::RedactedThinking { data: "d".into() },
+            ],
+        }];
+        let req = MessagesRequest {
+            model: "m",
+            max_tokens: 1,
+            stream: true,
+            system: "",
+            messages: &messages,
+            tools: &[],
+        };
+        let got = req.body();
+        let blocks = got["messages"][0]["content"].as_array().expect("blocks");
+        assert_eq!(
+            blocks[0]["cache_control"],
+            json!({"type": "ephemeral"}),
+            "{blocks:?}"
+        );
+        assert!(blocks[1].get("cache_control").is_none());
+        assert!(blocks[2].get("cache_control").is_none());
+    }
+
+    #[test]
     fn cache_usage_fields_deserialize_and_default_to_zero() {
         let usage: InputUsage = serde_json::from_str(
             r#"{"input_tokens":21,"cache_creation_input_tokens":2100,"cache_read_input_tokens":18000}"#,
@@ -396,6 +538,57 @@ mod tests {
         let p: SsePayload =
             serde_json::from_str(r#"{"type":"brand_new_event","stuff":1}"#).expect("parse");
         assert!(matches!(p, SsePayload::Unknown));
+    }
+
+    #[test]
+    fn thinking_sse_payloads_deserialize() {
+        let p: SsePayload = serde_json::from_str(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}"#,
+        )
+        .expect("parse");
+        assert!(matches!(
+            p,
+            SsePayload::ContentBlockStart {
+                content_block: WireContentBlockStart::Thinking { thinking },
+                ..
+            } if thinking.is_empty()
+        ));
+
+        let p: SsePayload = serde_json::from_str(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me look"}}"#,
+        )
+        .expect("parse");
+        assert!(matches!(
+            p,
+            SsePayload::ContentBlockDelta {
+                delta: WireBlockDelta::ThinkingDelta { thinking },
+                ..
+            } if thinking == "Let me look"
+        ));
+
+        let p: SsePayload = serde_json::from_str(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EqQBCg"}}"#,
+        )
+        .expect("parse");
+        assert!(matches!(
+            p,
+            SsePayload::ContentBlockDelta {
+                delta: WireBlockDelta::SignatureDelta { signature },
+                ..
+            } if signature == "EqQBCg"
+        ));
+
+        let p: SsePayload = serde_json::from_str(
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"EmwKAhgB"}}"#,
+        )
+        .expect("parse");
+        assert!(matches!(
+            p,
+            SsePayload::ContentBlockStart {
+                content_block: WireContentBlockStart::RedactedThinking { data },
+                ..
+            } if data == "EmwKAhgB"
+        ));
     }
 
     #[test]

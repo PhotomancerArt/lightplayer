@@ -13,6 +13,12 @@ use crate::tool::tool_phase::ToolPhase;
 pub enum AgentEvent {
     /// A fragment of assistant text.
     TextDelta(String),
+    /// A fragment of the model's thinking/reasoning text (live UI display;
+    /// redacted thinking is never surfaced).
+    ThinkingDelta(String),
+    /// The current thinking segment finished (visible content follows or
+    /// the turn ended) — the UI's collapse boundary.
+    ThinkingDone,
     /// The model started a tool call.
     ToolUseStart { id: String, name: String },
     /// A fragment of the tool call's input JSON (for live UI display).

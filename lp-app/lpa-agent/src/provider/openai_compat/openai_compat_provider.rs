@@ -272,6 +272,14 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
         let Some(choice) = chunk.choices.into_iter().next() else {
             return; // the trailing usage-only chunk
         };
+        // Reasoning rides ahead of the visible answer on servers that emit
+        // it (DeepSeek/vLLM/Ollama `reasoning_content`, OpenRouter
+        // `reasoning`); nothing special is sent on the request — some
+        // servers reject unknown fields, so enabling is server-side.
+        if let Some(fragment) = choice.delta.reasoning_fragment() {
+            self.pending
+                .push_back(TurnEvent::ThinkingDelta(fragment.to_string()));
+        }
         if let Some(text) = choice.delta.content
             && !text.is_empty()
         {
@@ -464,6 +472,35 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn reasoning_deltas_stream_as_thinking_before_the_answer() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Weighing \"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning\":\"palettes.\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Warmer.\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let transport = FakeTransport::respond_once(200, vec![sse.as_bytes().to_vec()]);
+        let events = run_with_key(&transport, None);
+        assert_eq!(
+            events,
+            vec![
+                TurnEvent::ThinkingDelta("Weighing ".into()),
+                TurnEvent::ThinkingDelta("palettes.".into()),
+                TurnEvent::TextDelta("Warmer.".into()),
+                TurnEvent::TurnDone {
+                    stop_reason: StopReason::EndTurn,
+                    usage: TokenUsage::default()
+                }
+            ]
+        );
+        // No reasoning-enablement field rides the request (unsafe on some
+        // compat servers; OpenRouter opt-in is a follow-up).
+        let reqs = transport.requests.borrow();
+        assert!(!reqs[0].body.contains("\"reasoning\""), "{}", reqs[0].body);
     }
 
     #[test]

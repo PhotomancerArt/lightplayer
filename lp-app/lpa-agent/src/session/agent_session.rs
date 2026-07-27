@@ -143,6 +143,9 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
 
         let mut blocks: Vec<Acc> = Vec::new();
         let mut outcome: Option<StopReason> = None;
+        // True while a thinking segment is streaming; the transition to any
+        // visible content (or the turn's end) emits the collapse boundary.
+        let mut thinking_open = false;
         {
             let mut stream = self.provider.run_turn(req);
             while let Some(ev) = stream.next().await {
@@ -150,7 +153,45 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                     return Ok(TurnStep::Aborted); // dropping `stream` cancels
                 }
                 match ev {
+                    TurnEvent::ThinkingDelta(text) => {
+                        // A delta after the previous block's signature
+                        // closed it starts a NEW thinking block
+                        // (interleaved thinking).
+                        match blocks.last_mut() {
+                            Some(Acc::Thinking {
+                                text: existing,
+                                signature,
+                            }) if signature.is_empty() => existing.push_str(&text),
+                            _ => blocks.push(Acc::Thinking {
+                                text: text.clone(),
+                                signature: String::new(),
+                            }),
+                        }
+                        thinking_open = true;
+                        on_event(AgentEvent::ThinkingDelta(text));
+                    }
+                    TurnEvent::ThinkingSignature(fragment) => {
+                        // Signatures accumulate onto the open block; one
+                        // arriving with no block (display-omitted servers)
+                        // still records a replayable empty-text block.
+                        match blocks.last_mut() {
+                            Some(Acc::Thinking { signature, .. }) => {
+                                signature.push_str(&fragment);
+                            }
+                            _ => blocks.push(Acc::Thinking {
+                                text: String::new(),
+                                signature: fragment,
+                            }),
+                        }
+                    }
+                    TurnEvent::RedactedThinking(data) => {
+                        // Opaque: transcript-only, never shown.
+                        blocks.push(Acc::Redacted { data });
+                    }
                     TurnEvent::TextDelta(text) => {
+                        if std::mem::take(&mut thinking_open) {
+                            on_event(AgentEvent::ThinkingDone);
+                        }
                         match blocks.last_mut() {
                             Some(Acc::Text(t)) => t.push_str(&text),
                             _ => blocks.push(Acc::Text(text.clone())),
@@ -158,6 +199,9 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                         on_event(AgentEvent::TextDelta(text));
                     }
                     TurnEvent::ToolUseStart { id, name } => {
+                        if std::mem::take(&mut thinking_open) {
+                            on_event(AgentEvent::ThinkingDone);
+                        }
                         blocks.push(Acc::Tool {
                             id: id.clone(),
                             name: name.clone(),
@@ -174,6 +218,9 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                         on_event(AgentEvent::ToolInputDelta { id, json_fragment });
                     }
                     TurnEvent::TurnDone { stop_reason, usage } => {
+                        if std::mem::take(&mut thinking_open) {
+                            on_event(AgentEvent::ThinkingDone);
+                        }
                         self.transcript.usage_total.add(usage);
                         on_event(AgentEvent::TurnDone {
                             stop_reason: stop_reason.clone(),
@@ -288,6 +335,17 @@ enum TurnStep {
 /// Accumulator for one streamed content block.
 enum Acc {
     Text(String),
+    /// A thinking block; the signature closes it (Anthropic) or stays
+    /// empty (compat reasoning — recorded for the UI mirror, never
+    /// replayed to a provider).
+    Thinking {
+        text: String,
+        signature: String,
+    },
+    /// An opaque redacted thinking block, passed through verbatim.
+    Redacted {
+        data: String,
+    },
     Tool {
         id: String,
         name: String,
@@ -299,13 +357,18 @@ impl Acc {
     fn tool_id(&self) -> Option<&String> {
         match self {
             Acc::Tool { id, .. } => Some(id),
-            Acc::Text(_) => None,
+            Acc::Text(_) | Acc::Thinking { .. } | Acc::Redacted { .. } => None,
         }
     }
 
     fn to_content_block(&self) -> ContentBlock {
         match self {
             Acc::Text(text) => ContentBlock::Text { text: text.clone() },
+            Acc::Thinking { text, signature } => ContentBlock::Thinking {
+                thinking: text.clone(),
+                signature: signature.clone(),
+            },
+            Acc::Redacted { data } => ContentBlock::RedactedThinking { data: data.clone() },
             Acc::Tool {
                 id,
                 name,
@@ -485,6 +548,107 @@ mod tests {
         );
         // The second turn's system prompt reflects the staged source.
         assert!(provider.requests.borrow()[1].system.contains(GREEN));
+    }
+
+    #[test]
+    fn thinking_blocks_round_trip_into_the_next_request() {
+        // Turn 1 thinks (with a split signature), calls the tool, and the
+        // session must replay the thinking block VERBATIM in turn 2's
+        // request — the Anthropic tool-use protocol requirement.
+        let provider = FakeProvider::new(vec![
+            vec![
+                TurnEvent::ThinkingDelta("Green means ".into()),
+                TurnEvent::ThinkingDelta("more G.".into()),
+                TurnEvent::ThinkingSignature("EqQB".into()),
+                TurnEvent::ThinkingSignature("sig".into()),
+                TurnEvent::RedactedThinking("opaque-data".into()),
+                TurnEvent::TextDelta("Trying green.".into()),
+                TurnEvent::ToolUseStart {
+                    id: "tu_1".into(),
+                    name: "iterate".into(),
+                },
+                turn_done(StopReason::ToolUse, 20, 30),
+            ],
+            vec![
+                TurnEvent::TextDelta("Done.".into()),
+                turn_done(StopReason::EndTurn, 40, 10),
+            ],
+        ]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("make it green".into(), |e| events.push(e))).expect("run");
+
+        // Streamed thinking surfaced, and the boundary landed before the
+        // first visible text.
+        let deltas: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ThinkingDelta(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas, ["Green means ", "more G."]);
+        let done_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::ThinkingDone))
+            .expect("ThinkingDone");
+        let text_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::TextDelta(_)))
+            .expect("TextDelta");
+        assert!(done_at < text_at);
+
+        // The assistant message carries thinking + redacted + text + tool.
+        let assistant = &session.transcript().messages[1];
+        assert_eq!(
+            assistant.content[0],
+            ContentBlock::Thinking {
+                thinking: "Green means more G.".into(),
+                signature: "EqQBsig".into(),
+            }
+        );
+        assert_eq!(
+            assistant.content[1],
+            ContentBlock::RedactedThinking {
+                data: "opaque-data".into(),
+            }
+        );
+
+        // And turn 2's REQUEST replays both blocks exactly as received.
+        let reqs = provider.requests.borrow();
+        let replayed = &reqs[1].messages[1];
+        assert_eq!(replayed.content[0], assistant.content[0]);
+        assert_eq!(replayed.content[1], assistant.content[1]);
+    }
+
+    #[test]
+    fn reasoning_only_turns_close_thinking_at_turn_done() {
+        // Compat servers can stream reasoning with no signature; the
+        // boundary must still arrive when the turn ends.
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::ThinkingDelta("pondering".into()),
+            turn_done(StopReason::EndTurn, 1, 1),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("go".into(), |e| events.push(e))).expect("run");
+        let done_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::ThinkingDone))
+            .expect("ThinkingDone");
+        let turn_done_at = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::TurnDone { .. }))
+            .expect("TurnDone");
+        assert!(done_at < turn_done_at);
+        // The unsigned block is recorded (UI mirror parity)...
+        assert_eq!(
+            session.transcript().messages[1].content[0],
+            ContentBlock::Thinking {
+                thinking: "pondering".into(),
+                signature: String::new(),
+            }
+        );
     }
 
     #[test]

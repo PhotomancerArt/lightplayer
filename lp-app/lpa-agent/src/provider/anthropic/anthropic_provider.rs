@@ -262,6 +262,14 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
                     self.tool_ids.insert(index, id.clone());
                     self.pending.push_back(TurnEvent::ToolUseStart { id, name });
                 }
+                WireContentBlockStart::Thinking { thinking } => {
+                    if !thinking.is_empty() {
+                        self.pending.push_back(TurnEvent::ThinkingDelta(thinking));
+                    }
+                }
+                WireContentBlockStart::RedactedThinking { data } => {
+                    self.pending.push_back(TurnEvent::RedactedThinking(data));
+                }
                 WireContentBlockStart::Unknown => {}
             },
             SsePayload::ContentBlockDelta { index, delta } => match delta {
@@ -275,6 +283,13 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
                             json_fragment: partial_json,
                         });
                     }
+                }
+                WireBlockDelta::ThinkingDelta { thinking } => {
+                    self.pending.push_back(TurnEvent::ThinkingDelta(thinking));
+                }
+                WireBlockDelta::SignatureDelta { signature } => {
+                    self.pending
+                        .push_back(TurnEvent::ThinkingSignature(signature));
                 }
                 WireBlockDelta::Unknown => {}
             },
@@ -413,6 +428,41 @@ mod tests {
                     }
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn thinking_turn_streams_thinking_then_signature_then_text() {
+        // Chunks split mid-event to exercise incremental parsing end-to-end.
+        let bytes = THINKING_TURN.as_bytes();
+        let mid = bytes.len() / 2;
+        let transport =
+            FakeTransport::respond_once(200, vec![bytes[..mid].to_vec(), bytes[mid..].to_vec()]);
+        let events = run(&transport);
+        assert_eq!(
+            events,
+            vec![
+                TurnEvent::ThinkingDelta("Let me consider ".into()),
+                TurnEvent::ThinkingDelta("the palette.".into()),
+                TurnEvent::ThinkingSignature("EqQBsig".into()),
+                TurnEvent::RedactedThinking("EmwKopaque".into()),
+                TurnEvent::TextDelta("Warmer it is.".into()),
+                TurnEvent::TurnDone {
+                    stop_reason: StopReason::EndTurn,
+                    usage: TokenUsage {
+                        input_tokens: 30,
+                        output_tokens: 90,
+                        ..TokenUsage::default()
+                    }
+                }
+            ]
+        );
+        // The request opted into adaptive thinking with summarized display.
+        let reqs = transport.requests.borrow();
+        let body: serde_json::Value = serde_json::from_str(&reqs[0].body).expect("json body");
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({"type": "adaptive", "display": "summarized"})
         );
     }
 
@@ -613,6 +663,33 @@ mod tests {
         "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
         "event: message_delta\n",
         "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":12}}\n\n",
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    );
+
+    const THINKING_TURN: &str = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":30,\"output_tokens\":1}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me consider \"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"the palette.\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"EqQBsig\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"redacted_thinking\",\"data\":\"EmwKopaque\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"text_delta\",\"text\":\"Warmer it is.\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
+        "event: message_delta\n",
+        // Thinking tokens are OUTPUT tokens: the cumulative figure covers
+        // thinking + text together, so the existing bucket already adds up.
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":90}}\n\n",
         "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
     );
 

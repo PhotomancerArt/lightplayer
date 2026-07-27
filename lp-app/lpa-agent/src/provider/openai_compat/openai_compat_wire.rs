@@ -131,8 +131,12 @@ fn assistant_message(message: &ChatMessage) -> WireMessage {
                     arguments: input.to_string(),
                 },
             }),
-            // Tool results never appear in assistant messages.
-            ContentBlock::ToolResult { .. } => {}
+            // Tool results never appear in assistant messages, and thinking
+            // blocks are never echoed back on this dialect (DeepSeek et al.
+            // explicitly reject replayed reasoning_content).
+            ContentBlock::ToolResult { .. }
+            | ContentBlock::Thinking { .. }
+            | ContentBlock::RedactedThinking { .. } => {}
         }
     }
     WireMessage {
@@ -158,8 +162,10 @@ fn user_messages(message: &ChatMessage, out: &mut Vec<WireMessage>) {
                 tool_calls: Vec::new(),
                 tool_call_id: Some(tool_use_id.clone()),
             }),
-            // Tool calls never appear in user messages.
-            ContentBlock::ToolUse { .. } => {}
+            // Tool calls and thinking never appear in user messages.
+            ContentBlock::ToolUse { .. }
+            | ContentBlock::Thinking { .. }
+            | ContentBlock::RedactedThinking { .. } => {}
         }
     }
     if !text_parts.is_empty() {
@@ -189,8 +195,25 @@ pub struct WireChoice {
 pub struct WireDelta {
     #[serde(default)]
     pub content: Option<String>,
+    /// Streamed reasoning text, the DeepSeek/vLLM/Ollama convention.
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
+    /// Alternate reasoning field name some servers use (e.g. OpenRouter).
+    #[serde(default)]
+    pub reasoning: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<WireToolCallDelta>,
+}
+
+impl WireDelta {
+    /// The reasoning fragment, whichever field the server used
+    /// (`reasoning_content` wins when both are present).
+    pub fn reasoning_fragment(&self) -> Option<&str> {
+        self.reasoning_content
+            .as_deref()
+            .or(self.reasoning.as_deref())
+            .filter(|text| !text.is_empty())
+    }
 }
 
 /// One tool-call fragment: `id` and `function.name` arrive on the first
@@ -402,6 +425,57 @@ mod tests {
         assert_eq!((usage.prompt_tokens, usage.completion_tokens), (25, 12));
         // No details block → zero cached tokens.
         assert_eq!(usage.cached_tokens(), 0);
+    }
+
+    #[test]
+    fn reasoning_deltas_deserialize_under_either_field_name() {
+        // DeepSeek/vLLM/Ollama convention.
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning_content":"Hmm, "},"finish_reason":null}]}"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            chunk.choices[0].delta.reasoning_fragment(),
+            Some("Hmm, "),
+            "reasoning_content"
+        );
+
+        // OpenRouter-style `reasoning`.
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning":"weighing options"},"finish_reason":null}]}"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            chunk.choices[0].delta.reasoning_fragment(),
+            Some("weighing options")
+        );
+
+        // Empty fragments and plain content chunks produce nothing.
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[{"delta":{"reasoning_content":"","content":"Hi"},"finish_reason":null}]}"#,
+        )
+        .expect("parse");
+        assert_eq!(chunk.choices[0].delta.reasoning_fragment(), None);
+    }
+
+    #[test]
+    fn thinking_blocks_never_reach_the_compat_wire() {
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "reasoning".into(),
+                    signature: String::new(),
+                },
+                ContentBlock::RedactedThinking { data: "x".into() },
+                ContentBlock::Text {
+                    text: "Answer.".into(),
+                },
+            ],
+        }];
+        let wire = wire_messages("", &messages);
+        assert_eq!(wire.len(), 1);
+        assert_eq!(wire[0].content.as_deref(), Some("Answer."));
     }
 
     #[test]

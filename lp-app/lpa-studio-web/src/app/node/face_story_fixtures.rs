@@ -257,6 +257,7 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
                 phase: None,
                 done: true,
                 staged: true,
+                edit_turn: None,
                 shader_ok: Some(true),
                 probes: 2,
                 warnings: 0,
@@ -284,6 +285,11 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
         estimated_cost: Some("~$0.0162".to_string()),
         history: Vec::new(),
         history_dropped: 0,
+        model: lpa_studio_core::UiAgentModelView {
+            effective: Some("claude-sonnet-5".to_string()),
+            options: Vec::new(),
+            loading: false,
+        },
     }
 }
 

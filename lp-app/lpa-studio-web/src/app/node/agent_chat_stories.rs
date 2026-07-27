@@ -12,10 +12,10 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    AgentProvider, ArtifactLocation, UiAgentAvailability, UiAgentHistoryEntry, UiAgentStatus,
-    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent,
-    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiProductPreview, UiShaderUniform,
-    provider_guidance,
+    AgentProvider, ArtifactLocation, UiAgentAvailability, UiAgentHistoryEntry, UiAgentModelView,
+    UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent,
+    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiModelOption, UiProductPreview,
+    UiShaderUniform, provider_guidance,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -38,6 +38,13 @@ fn agent_fixture(status: UiAgentStatus, turns: Vec<UiAgentTurn>) -> UiAgentView 
         estimated_cost: Some("~$0.0162".to_string()),
         history: Vec::new(),
         history_dropped: 0,
+        // No fetched list by default: the footer chip renders its
+        // fallback-label form (just the effective id).
+        model: UiAgentModelView {
+            effective: Some("claude-sonnet-5".to_string()),
+            options: Vec::new(),
+            loading: false,
+        },
     }
 }
 
@@ -48,6 +55,7 @@ fn done_tool_row() -> UiAgentToolRow {
         phase: None,
         done: true,
         staged: true,
+        edit_turn: Some(1),
         shader_ok: Some(true),
         probes: 2,
         warnings: 0,
@@ -169,6 +177,53 @@ fn streaming() -> Element {
     ];
     rsx! {
         ChatStoryCard { view: agent_fixture(UiAgentStatus::Streaming, turns) }
+    }
+}
+
+#[story(
+    description = "Thinking streams live: the dim strip under the pulsing 'Thinking…' label shows the model's reasoning text as it arrives, before any visible reply."
+)]
+fn thinking_streaming() -> Element {
+    let turns = vec![
+        UiAgentTurn::User {
+            text: "Why does the center flicker?".to_string(),
+        },
+        UiAgentTurn::Thinking {
+            text: "The flicker is probably aliasing near length(pos - 0.5) ≈ 0 — \
+                   the ring frequency of 40.0 exceeds what a 32-pixel grid can \
+                   sample. I should check whether smoothing the sin term or"
+                .to_string(),
+            done: false,
+        },
+    ];
+    rsx! {
+        ChatStoryCard { view: agent_fixture(UiAgentStatus::Streaming, turns) }
+    }
+}
+
+#[story(
+    description = "Thinking collapsed after the turn: a one-line 'Thought for a bit' expander sits above the reply; clicking it reveals the retained reasoning text."
+)]
+fn thinking_collapsed() -> Element {
+    let turns = vec![
+        UiAgentTurn::User {
+            text: "Why does the center flicker?".to_string(),
+        },
+        UiAgentTurn::Thinking {
+            text: "The flicker is aliasing near the center: ring frequency 40.0 \
+                   outruns the fixture's sampling density, so adjacent LEDs land \
+                   on opposite phases of the sin."
+                .to_string(),
+            done: true,
+        },
+        UiAgentTurn::Assistant {
+            text: "The center flickers because the ring frequency is too high for \
+                   the LED density there — I can smooth it with a radial falloff."
+                .to_string(),
+        },
+    ];
+    rsx! {
+        ChatStoryCard { view: agent_fixture(UiAgentStatus::Idle, turns) }
     }
 }
 
@@ -298,6 +353,80 @@ fn history_reverted() -> Element {
 fn history_empty() -> Element {
     rsx! {
         ChatStoryCard { view: agent_fixture(UiAgentStatus::Idle, idle_transcript()) }
+    }
+}
+
+#[story(
+    description = "Staged-edit tool rows carry their snapshot inline in the transcript: the 32-px thumb at the right edge of the verified row, a dim numbered placeholder on the engine-errored one; the filmstrip below stays for one-click reverts."
+)]
+fn tool_row_inline_thumb() -> Element {
+    let mut errored = done_tool_row();
+    errored.id = "tu_2".to_string();
+    errored.note = Some("add a speed uniform".to_string());
+    errored.shader_ok = Some(false);
+    errored.edit_turn = Some(2);
+    errored.detail =
+        "{\n  \"note\": \"add a speed uniform\",\n  \"shader_ok\": false,\n  \"staged\": true\n}"
+            .to_string();
+    let turns = vec![
+        UiAgentTurn::User {
+            text: "Slow the rings, then add a speed uniform".to_string(),
+        },
+        UiAgentTurn::Tool(done_tool_row()),
+        UiAgentTurn::Tool(errored),
+        UiAgentTurn::Assistant {
+            text: "The slowdown is staged and verified; the uniform edit hit a compile error, \
+                   so I left the working version staged."
+                .to_string(),
+        },
+    ];
+    let mut view = agent_fixture(UiAgentStatus::Idle, turns);
+    view.history = history_entries();
+    rsx! {
+        ChatStoryCard { view }
+    }
+}
+
+#[story(
+    description = "Model chip populated: the footnote's compact selector carries the provider's fetched model list (display names), with the session's model selected; switching applies to the next run."
+)]
+fn model_chip_populated() -> Element {
+    let mut view = agent_fixture(UiAgentStatus::Idle, idle_transcript());
+    view.model = UiAgentModelView {
+        effective: Some("claude-sonnet-5".to_string()),
+        options: vec![
+            UiModelOption {
+                id: "claude-sonnet-5".to_string(),
+                label: Some("Claude Sonnet 5".to_string()),
+            },
+            UiModelOption {
+                id: "claude-haiku-4".to_string(),
+                label: Some("Claude Haiku 4".to_string()),
+            },
+            UiModelOption {
+                id: "claude-opus-5".to_string(),
+                label: Some("Claude Opus 5".to_string()),
+            },
+        ],
+        loading: false,
+    };
+    rsx! {
+        ChatStoryCard { view }
+    }
+}
+
+#[story(
+    description = "Model chip fallback label: no fetched list (custom/local server) — the chip still names the session's model; custom ids stay a Settings affair."
+)]
+fn model_chip_fallback_label() -> Element {
+    let mut view = agent_fixture(UiAgentStatus::Idle, idle_transcript());
+    view.model = UiAgentModelView {
+        effective: Some("qwen3-coder:30b".to_string()),
+        options: Vec::new(),
+        loading: false,
+    };
+    rsx! {
+        ChatStoryCard { view }
     }
 }
 

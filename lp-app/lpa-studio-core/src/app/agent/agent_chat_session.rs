@@ -26,6 +26,11 @@ pub type AgentSessionRuntime = AgentSession<Box<dyn ModelProvider>, AgentHostBri
 /// is dropped (and counted, so the UI can say so).
 pub const MAX_EDIT_RECORDS: usize = 50;
 
+/// Per-turn cap on retained thinking text (bytes). Thinking can run long;
+/// the mirror keeps the NEWEST text (the part the user is watching) and
+/// trims the front. Session-scoped only — thinking is never persisted.
+pub const MAX_THINKING_BYTES: usize = 20_000;
+
 /// One staged edit of this session, recorded when its `iterate` call
 /// executed (the source is mirrored core-side at `ToolExecuted` — the
 /// authoritative transcript travels with the run future, so the parked
@@ -109,6 +114,24 @@ impl AgentChatSession {
                     _ => self.turns.push(UiAgentTurn::Assistant { text }),
                 }
             }
+            AgentEvent::ThinkingDelta(text) => {
+                self.status = UiAgentStatus::Streaming;
+                match self.turns.last_mut() {
+                    Some(UiAgentTurn::Thinking {
+                        text: existing,
+                        done: false,
+                    }) => {
+                        existing.push_str(&text);
+                        cap_thinking_text(existing);
+                    }
+                    _ => self.turns.push(UiAgentTurn::Thinking { text, done: false }),
+                }
+            }
+            AgentEvent::ThinkingDone => {
+                if let Some(UiAgentTurn::Thinking { done, .. }) = self.turns.last_mut() {
+                    *done = true;
+                }
+            }
             AgentEvent::ToolUseStart { id, .. } => {
                 self.status = UiAgentStatus::RunningTool;
                 self.turns
@@ -163,9 +186,14 @@ impl AgentChatSession {
                 // Source-staging calls become edit records. `iterate` is
                 // the ONLY source-staging tool (`upsert_param` also reports
                 // `staged: true`, but for a def edit) — the name gate keeps
-                // the bridge's staged-source queue correlated per call.
+                // the bridge's staged-source queue correlated per call. The
+                // record's ordinal stamps the tool row, so the transcript
+                // can carry the edit's snapshot inline.
                 if name == "iterate" && summary_json["staged"].as_bool().unwrap_or(false) {
-                    self.push_edit_record(&summary_json);
+                    let turn = self.push_edit_record(&summary_json);
+                    if let Some(row) = self.tool_row_mut(&id) {
+                        row.edit_turn = Some(turn);
+                    }
                 }
             }
             AgentEvent::TurnDone { usage, .. } => {
@@ -194,6 +222,11 @@ impl AgentChatSession {
     /// The run future finished; settle the terminal status.
     pub fn run_ended(&mut self, error: Option<String>) {
         self.running = false;
+        // A run that ends mid-thought (abort, provider failure) never sent
+        // the boundary event — collapse the trailing thinking strip anyway.
+        if let Some(UiAgentTurn::Thinking { done, .. }) = self.turns.last_mut() {
+            *done = true;
+        }
         match error {
             // `ProviderError` events usually set the error status already;
             // this covers failure paths that end the run without one.
@@ -220,8 +253,9 @@ impl AgentChatSession {
     /// run future, so the bridge mirror is the only readable copy);
     /// `engine_ok` seeds from the summary's engine section when the
     /// in-call verdict already resolved. Past [`MAX_EDIT_RECORDS`] the
-    /// oldest record drops (counted for the UI).
-    fn push_edit_record(&mut self, summary_json: &serde_json::Value) {
+    /// oldest record drops (counted for the UI). Returns the new record's
+    /// ordinal (the tool row's inline-snapshot correlation key).
+    fn push_edit_record(&mut self, summary_json: &serde_json::Value) -> u32 {
         let (source, at) = {
             let mut bridge = self.bridge.borrow_mut();
             let staged = bridge.staged_sources.pop_front();
@@ -252,6 +286,7 @@ impl AgentChatSession {
             engine_ok,
             at,
         });
+        turn
     }
 
     /// Advance the edit records from the shared engine cell plus the
@@ -312,6 +347,19 @@ impl AgentChatSession {
     }
 }
 
+/// Trim one thinking turn's text to [`MAX_THINKING_BYTES`], dropping the
+/// OLDEST text on a char boundary and marking the cut with an ellipsis.
+fn cap_thinking_text(text: &mut String) {
+    if text.len() <= MAX_THINKING_BYTES {
+        return;
+    }
+    let cut = text.len() - MAX_THINKING_BYTES;
+    let boundary = (cut..text.len())
+        .find(|&index| text.is_char_boundary(index))
+        .unwrap_or(text.len());
+    text.replace_range(..boundary, "…");
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -338,6 +386,75 @@ mod tests {
             }]
         );
         assert_eq!(session.status, UiAgentStatus::Streaming);
+    }
+
+    #[test]
+    fn thinking_deltas_stream_then_collapse_at_the_boundary() {
+        let mut session = session();
+        session.apply_event(AgentEvent::ThinkingDelta("Weighing ".into()));
+        session.apply_event(AgentEvent::ThinkingDelta("palettes.".into()));
+        assert_eq!(
+            session.turns,
+            vec![UiAgentTurn::Thinking {
+                text: "Weighing palettes.".into(),
+                done: false,
+            }]
+        );
+        assert_eq!(session.status, UiAgentStatus::Streaming);
+
+        // The boundary collapses the strip; following text starts its own
+        // assistant turn, and a LATER thinking segment is a new turn.
+        session.apply_event(AgentEvent::ThinkingDone);
+        session.apply_event(AgentEvent::TextDelta("Warmer.".into()));
+        session.apply_event(AgentEvent::ThinkingDelta("Next step…".into()));
+        assert_eq!(
+            session.turns,
+            vec![
+                UiAgentTurn::Thinking {
+                    text: "Weighing palettes.".into(),
+                    done: true,
+                },
+                UiAgentTurn::Assistant {
+                    text: "Warmer.".into()
+                },
+                UiAgentTurn::Thinking {
+                    text: "Next step…".into(),
+                    done: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn run_end_collapses_a_trailing_thinking_strip() {
+        let mut session = session();
+        session.running = true;
+        session.apply_event(AgentEvent::ThinkingDelta("half a thought".into()));
+        session.run_ended(None);
+        assert_eq!(
+            session.turns,
+            vec![UiAgentTurn::Thinking {
+                text: "half a thought".into(),
+                done: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn thinking_text_caps_by_dropping_the_oldest_bytes() {
+        let mut session = session();
+        session.apply_event(AgentEvent::ThinkingDelta("start-marker ".into()));
+        // Push well past the cap in chunks (multi-byte chars included).
+        for _ in 0..30 {
+            session.apply_event(AgentEvent::ThinkingDelta("é".repeat(500)));
+        }
+        let Some(UiAgentTurn::Thinking { text, .. }) = session.turns.last() else {
+            panic!("expected thinking turn");
+        };
+        assert!(text.len() <= MAX_THINKING_BYTES + '…'.len_utf8());
+        assert!(text.starts_with('…'), "oldest text is trimmed");
+        assert!(!text.contains("start-marker"));
+        assert!(text.ends_with('é'), "newest text is kept");
     }
 
     #[test]
@@ -519,6 +636,33 @@ mod tests {
         assert_eq!(&*session.edits[1].source, "v2");
         assert_eq!(session.edits[1].engine_ok, Some(false));
         assert!(session.bridge.borrow().staged_sources.is_empty());
+    }
+
+    #[test]
+    fn staged_edits_stamp_their_tool_row_with_the_edit_turn() {
+        let mut session = session();
+        stage_and_execute(&mut session, "tu_1", "v1", Some("ok"));
+        stage_and_execute(&mut session, "tu_2", "v2", Some("ok"));
+        // A probe-only call stays unstamped (no record, no snapshot).
+        session.apply_event(AgentEvent::ToolUseStart {
+            id: "tu_3".into(),
+            name: "iterate".into(),
+        });
+        session.apply_event(AgentEvent::ToolExecuted {
+            id: "tu_3".into(),
+            name: "iterate".into(),
+            summary_json: json!({ "staged": false }),
+        });
+
+        let stamps: Vec<Option<u32>> = session
+            .turns
+            .iter()
+            .filter_map(|turn| match turn {
+                UiAgentTurn::Tool(row) => Some(row.edit_turn),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(stamps, vec![Some(1), Some(2), None]);
     }
 
     #[test]
