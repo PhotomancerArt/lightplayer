@@ -326,6 +326,108 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
     );
 }
 
+/// The D17-deviation gesture (2026-07-27): `HomeOp::CreateProject` mints a
+/// pure-blank one-file package and OPENS it — the UI-level regression test
+/// for the `LibraryStore::create` `format` fix (without `"format": 1` the
+/// minted manifest fails the loader's root gate and this open would err).
+#[test]
+fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost};
+    use crate::{HOME_NODE_ID, HomeOp};
+    use lpc_history::EventKind;
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+
+    // an empty library; create mints the uid and the dated slug
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [5u8; 16]),
+        Rc::new(|| "2026-07-27-0900".to_string()),
+    );
+    controller.attach_library(Rc::new(MemoryLibraryHost::new(
+        store.clone(),
+        Rc::new(|| 2.0),
+    )));
+
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::CreateProject,
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("create-and-open emits a snapshot");
+
+    // create-and-open landed in the editor: home is gone and the blank
+    // project renders zero node cards (the add-node picker is the point)
+    assert!(snapshot.home.is_none(), "the created project opened");
+    assert!(
+        project_editor(&snapshot).nodes.is_empty(),
+        "a blank project has no node cards"
+    );
+
+    // the library holds the package: Created origin + the initial save
+    let summary = store
+        .list()
+        .expect("library lists")
+        .pop()
+        .expect("the create landed exactly one package");
+    assert_eq!(summary.slug, "2026-07-27-0900-project");
+    let library = store.open(summary.uid).expect("created package opens");
+    assert_eq!(library.history.events()[0].kind, EventKind::Created);
+    assert!(
+        library
+            .history
+            .events()
+            .iter()
+            .any(|event| matches!(event.kind, EventKind::Saved { .. })),
+        "the initial save snapshot is recorded"
+    );
+
+    // the open PUSHED the files: the runtime's manifest is the minted
+    // one-file blank (uid + the format the loader's root gate demands)
+    let pushed_manifest = {
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file("/projects/studio/project.json".as_path())
+            .expect("pushed manifest exists in the runtime");
+        String::from_utf8(bytes).expect("utf8 manifest")
+    };
+    assert!(
+        pushed_manifest.contains(&summary.uid.to_string()),
+        "the runtime holds the created package (uid pushed): {pushed_manifest}"
+    );
+    assert!(
+        pushed_manifest.contains("\"format\""),
+        "the minted manifest carries the loader-required format: {pushed_manifest}"
+    );
+
+    // detaching the lens returns to the gallery, where the created card
+    // lists with Created provenance (no provenance line)
+    handle.tx.send(project_action(ProjectOp::DetachLens));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("detach emits a snapshot");
+    let home = snapshot.home.expect("the gallery shows after detach");
+    let card = home
+        .projects
+        .iter()
+        .find(|card| card.uid == summary.uid.to_string())
+        .expect("the created package lists in the gallery");
+    assert!(
+        card.provenance.is_none(),
+        "Created packages carry no provenance line"
+    );
+}
+
 #[test]
 fn device_connect_pulls_classifies_and_adopts() {
     use crate::app::library::{LibraryStore, MemoryLibraryHost};

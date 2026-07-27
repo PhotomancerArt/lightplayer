@@ -4,7 +4,7 @@ use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::{
     error_node_view, failed_dirty_node_view, live_dirty_node_view, nested_dirty_node_view,
-    playlist_node_view, playlist_pending_edits, unsaved_dirty_node_view,
+    node_delete_pane_action, playlist_node_view, playlist_pending_edits, unsaved_dirty_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -42,6 +42,19 @@ pub(crate) fn collapsed_node_pane() -> Element {
 pub(crate) fn error_node() -> Element {
     rsx! {
         NodePane { view: error_node_view() }
+    }
+}
+
+#[story(
+    description = "Node pane header with the always-available delete action (Trash2, generic pane-action path): pressing it runs the confirmation composed core-side from the removal pre-flight — dependents count, pending edits the sweep discards, and the files staged for deletion on save."
+)]
+pub(crate) fn header_delete_action() -> Element {
+    let mut view = playlist_node_view();
+    view.action = Some(story_focus_action());
+    view.header_actions = vec![node_delete_pane_action()];
+
+    rsx! {
+        NodePane { view, on_action: move |_| {} }
     }
 }
 

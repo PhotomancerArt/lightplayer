@@ -1,7 +1,8 @@
 //! Complete node pane data.
 
 use crate::{
-    UiAction, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeTab, UiNodeTabBody, UiPaneAction,
+    UiAction, UiAddNodeMenu, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeTab, UiNodeTabBody,
+    UiPaneAction,
 };
 
 /// The full data model for a Studio node pane.
@@ -30,6 +31,9 @@ pub struct UiNodeView {
     pub collapsed: bool,
     /// Projection or runtime issues for the whole node.
     pub issues: Vec<String>,
+    /// The add-node picker for container nodes (playlists): entries create
+    /// into THIS node's `entries` map. `None` for every other kind.
+    pub add_node_menu: Option<UiAddNodeMenu>,
 }
 
 impl UiNodeView {
@@ -47,6 +51,7 @@ impl UiNodeView {
             action: None,
             collapsed: false,
             issues: Vec::new(),
+            add_node_menu: None,
         }
     }
 

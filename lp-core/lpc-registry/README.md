@@ -29,6 +29,30 @@ The singular `mutate` path applies unconditionally (no validation); it has no
 wire-facing caller and any new caller must route through the same validation
 (see the follow-ups in `docs/adr/2026-07-04-studio-editing-model.md`).
 
+## Node Authoring Operations
+
+`create_node` / `remove_node` (`registry/node_authoring.rs`) are the
+dedicated node-lifecycle operations behind the `CreateNode` / `RemoveNode`
+wire commands (`docs/adr/2026-07-27-node-authoring-operations.md`). They are
+the sanctioned path around the `nodes` map's `read_only_persisted` policy:
+generic slot gestures on the map stay rejected, while the ops validate
+everything up front and then act atomically.
+
+- `create_node` **commits immediately**: it writes asset and def files
+  through the injected `LpFs`, rewrites the attach site's **base** file with
+  the canonical writer (pending overlay edits ride above, never baked in),
+  and re-derives through the same refresh path fs events use. The attach
+  site is a `NodeAttachSite`: the project `nodes` map (policy bypass) or any
+  writable `NodeInvocationSlot` path such as a playlist entry.
+- `remove_node` **stages in the overlay**: an entry `Remove` at the site,
+  `Delete` on the def and every asset exclusively referenced by the removed
+  subtree (computed by inventory diff, so shared artifacts survive), and a
+  recursive sweep of the subtree's pending overlay entries — an orphaned
+  overlay would otherwise abort `commit_overlay` mid-write
+  (`CommitError::Projection`). Reverting a staged removal needs only
+  existing ops (`RemoveSlotEdit` at the site + `ClearArtifact` per staged
+  delete).
+
 ## Commit Filtering (Transient vs Persisted)
 
 `commit_overlay` materializes persisted edits into node-def artifacts and

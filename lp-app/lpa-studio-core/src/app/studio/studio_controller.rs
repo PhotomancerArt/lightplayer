@@ -23,12 +23,12 @@ use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeRevertOp, ProjectConnectResult, ProjectController,
-    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
-    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
-    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
-    UiNotice, UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent,
-    UxActivityTarget, UxUpdate, UxUpdateSink,
+    DeviceController, DeviceOp, NodeCreateOp, NodeRemoveOp, NodeRevertOp, ProjectConnectResult,
+    ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState,
+    ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot, ServerState,
+    SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress, UiResult, UiStatus,
+    UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -1796,6 +1796,14 @@ impl StudioController {
                 let op = action.into_op::<NodeRevertOp>()?;
                 return self.execute_node_revert_op(op).await;
             }
+            if action.op_as::<NodeCreateOp>().is_some() {
+                let op = action.into_op::<NodeCreateOp>()?;
+                return self.execute_node_create_op(op).await;
+            }
+            if action.op_as::<NodeRemoveOp>().is_some() {
+                let op = action.into_op::<NodeRemoveOp>()?;
+                return self.execute_node_remove_op(op).await;
+            }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
         }
@@ -2161,6 +2169,24 @@ impl StudioController {
             }
             HomeOp::OpenExample { id } => {
                 return self.open_from_home(PendingOpen::Example(id), updates).await;
+            }
+            HomeOp::CreateProject => {
+                // Create-and-open (the D17 deviation, 2026-07-27): a pure
+                // blank one-file package lands in the library — "Project",
+                // slugged/dated/deduped by the store; rename lives on the
+                // card kebab — then opens like any card, so the user lands
+                // in the empty editor with the add-node picker.
+                let outcome = self
+                    .run_catalog_op(CatalogOp::Create {
+                        name: "Project".to_string(),
+                    })
+                    .await?;
+                let created = outcome.summary.ok_or_else(|| {
+                    UiError::MissingSession("create produced no package".to_string())
+                })?;
+                return self
+                    .open_from_home(PendingOpen::Package(created.uid.to_string()), updates)
+                    .await;
             }
             HomeOp::RenamePackage { uid, name } => {
                 let name = name.trim();
@@ -2787,6 +2813,22 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.revert_node_edits(server, &op.node).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_node_create_op(&mut self, op: NodeCreateOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.create_node(server, op.kind, &op.attach).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_node_remove_op(&mut self, op: NodeRemoveOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.remove_node(server, &op.node).await
         };
         self.record_project_edit_run(run)
     }
@@ -4571,8 +4613,8 @@ mod tests {
         )));
         let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
 
-        // seed one package (creation happens via examples in the UI — the
-        // gallery has no create op; see D17)
+        // seed one package directly (the gallery's own create op has its
+        // own test below)
         let seeded = store
             .install_package("Seeded", &[], PackageProvenance::Created, 42.0)
             .unwrap();
@@ -4634,6 +4676,73 @@ mod tests {
         // re-stamped from the imported manifest's label; the deleted copy
         // freed the plain stamp+label slot
         assert_eq!(imported.slug, "2026-07-09-1421-porch");
+    }
+
+    #[test]
+    fn home_create_project_mints_blank_packages_with_deduped_slugs() {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpc_history::EventKind;
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let counter = Rc::new(RefCell::new(0u8));
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(move || {
+                *counter.borrow_mut() += 1;
+                [*counter.borrow(); 16]
+            }),
+            Rc::new(|| "2026-07-27-0900".to_string()),
+        );
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 42.0),
+        )));
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        // Two creates in a row. Creation lands FIRST; the follow-on open
+        // then refuses on host (this build has no browser-worker sim), so
+        // the dispatch errs — the successful create-and-open round-trip is
+        // the edit-e2e test's. The packages stick either way.
+        for _ in 0..2 {
+            block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject)))
+                .expect_err("host test builds have no sim runtime to open into");
+        }
+        studio.request_library_refresh();
+        block_on_ready(studio.settle_library());
+
+        let home = studio.view().home.expect("home with library");
+        assert_eq!(home.projects.len(), 2, "both creates landed");
+        let slug_of = |slug: &str| {
+            home.projects
+                .iter()
+                .find(|card| card.slug == slug)
+                .unwrap_or_else(|| panic!("{slug} listed, got {:?}", home.projects))
+        };
+        // dated + slugified from the default "Project" label; the second
+        // create dedups with the `-2` suffix and mints its own uid
+        let first = slug_of("2026-07-27-0900-project");
+        let second = slug_of("2026-07-27-0900-project-2");
+        assert_ne!(first.uid, second.uid, "each create mints a fresh uid");
+        assert!(
+            first.provenance.is_none() && second.provenance.is_none(),
+            "Created packages carry no provenance line"
+        );
+
+        // history: the Created origin plus the initial-save snapshot
+        let handle = store
+            .open(first.uid.parse().expect("card carries the minted uid"))
+            .expect("created package opens");
+        assert_eq!(handle.history.events()[0].kind, EventKind::Created);
+        assert!(
+            handle
+                .history
+                .events()
+                .iter()
+                .any(|event| matches!(event.kind, EventKind::Saved { .. })),
+            "the initial save snapshot is recorded"
+        );
     }
 
     #[test]

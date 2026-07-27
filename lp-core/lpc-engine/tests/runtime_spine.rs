@@ -286,6 +286,97 @@ fn project_apply_asset_body_change_refreshes_existing_shader_node() {
     );
 }
 
+#[test]
+fn project_apply_create_node_op_adds_runtime_node() {
+    // The overlay-free add-via-op path: `ProjectRegistry::create_node`
+    // commits the new def to the filesystem and reports the same change
+    // summary a fs refresh would, so `apply_project_changes` starts the new
+    // node immediately.
+    let fs = clock_project_fs();
+    let services = EngineServices::new(TreePath::parse("/create_op.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let texture_use = NodeUseLocation::root().child(SlotPath::parse("nodes[texture]").unwrap());
+
+    let shapes = engine.slot_shapes().clone();
+    let body = lpc_model::NodeDef::Texture(lpc_model::TextureDef::new(8, 8))
+        .write_json(&shapes)
+        .expect("canonical texture body");
+    let outcome = registry
+        .create_node(
+            &fs,
+            LpPath::new("./texture.json"),
+            body.as_bytes(),
+            &[],
+            &lpc_model::NodeAttachSite::ProjectNodes {
+                key: "texture".into(),
+            },
+            Revision::new(2),
+            &ParseCtx { shapes: &shapes },
+        )
+        .expect("create node");
+    assert!(outcome.changes.uses.added.contains(&texture_use));
+
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &outcome.changes)
+        .expect("apply changes");
+
+    assert_eq!(apply.added_nodes, vec![texture_use.clone()]);
+    assert!(apply.failed_nodes.is_empty());
+    assert!(
+        engine
+            .project_runtime_index()
+            .node_id(&texture_use)
+            .is_some(),
+        "created node must be running after apply"
+    );
+}
+
+#[test]
+fn project_apply_remove_node_op_tears_down_runtime_node() {
+    // The staged remove-via-op path: `ProjectRegistry::remove_node` stages
+    // the entry removal in the overlay and reports `uses.removed`, so
+    // `apply_project_changes` tears down the runtime subtree immediately —
+    // before any commit materializes the staged deletes.
+    let fs = clock_project_fs();
+    let services = EngineServices::new(TreePath::parse("/remove_op.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let clock_use = NodeUseLocation::root().child(SlotPath::parse("nodes[clock]").unwrap());
+    assert!(
+        engine.project_runtime_index().node_id(&clock_use).is_some(),
+        "clock node runs before removal"
+    );
+
+    let shapes = engine.slot_shapes().clone();
+    let outcome = registry
+        .remove_node(
+            &fs,
+            &lpc_model::NodeAttachSite::ProjectNodes {
+                key: "clock".into(),
+            },
+            Revision::new(2),
+            &ParseCtx { shapes: &shapes },
+        )
+        .expect("remove node");
+    assert!(outcome.changes.uses.removed.contains(&clock_use));
+    assert_eq!(
+        outcome.staged_deletes,
+        vec![ArtifactLocation::file("/clock.json")]
+    );
+
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &outcome.changes)
+        .expect("apply changes");
+
+    assert_eq!(apply.removed_nodes, vec![clock_use.clone()]);
+    assert!(apply.failed_nodes.is_empty());
+    assert!(
+        engine.project_runtime_index().node_id(&clock_use).is_none(),
+        "removed node must be torn down after apply"
+    );
+}
+
 // --- Helpers ---
 
 fn clock_project_fs() -> LpFsMemory {
