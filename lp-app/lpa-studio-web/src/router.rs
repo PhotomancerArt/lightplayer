@@ -233,8 +233,10 @@ fn write_url(route: &StudioRoute, mode: HistoryWrite) {
 #[cfg(not(target_arch = "wasm32"))]
 fn write_url(_route: &StudioRoute, _mode: HistoryWrite) {}
 
-/// Drop the pre-router query params (`project`, `connect`); everything
-/// else (e.g. the story capture harness's params) passes through.
+/// Drop the pre-router query params (`project`, `connect`) plus the OAuth
+/// return leg's `code` (normally scrubbed at boot by the OpenRouter
+/// interceptor; this is the second net); everything else (e.g. the story
+/// capture harness's params) passes through.
 #[cfg_attr(
     not(target_arch = "wasm32"),
     allow(
@@ -249,7 +251,7 @@ fn strip_legacy_params(search: &str) -> String {
         .filter(|pair| !pair.is_empty())
         .filter(|pair| {
             let key = pair.split_once('=').map_or(*pair, |(key, _)| key);
-            key != "project" && key != "connect"
+            key != "project" && key != "connect" && key != "code"
         })
         .collect();
     if kept.is_empty() {
