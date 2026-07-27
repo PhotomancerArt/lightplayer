@@ -13,6 +13,16 @@ pub struct SlotMeta {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Marks this slot for the owning node card's front panel (the permanent
+    /// face's control row). Presentation-only: it never affects validation,
+    /// resolution, or writeback.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub panel: bool,
+
+    /// Display unit suffix rendered near the value (e.g. "Hz", "%").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
 }
 
 impl SlotMeta {
@@ -20,6 +30,11 @@ impl SlotMeta {
     pub fn empty() -> Self {
         Self::default()
     }
+}
+
+/// Serde skip helper: omit `panel` when it carries the default `false`.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[cfg(test)]
@@ -31,5 +46,17 @@ mod tests {
         let meta = SlotMeta::default();
         assert_eq!(meta.label, None);
         assert_eq!(meta.description, None);
+        assert!(!meta.panel);
+        assert_eq!(meta.unit, None);
+    }
+
+    #[test]
+    fn slot_meta_presentation_bucket_is_additive_over_old_payloads() {
+        let meta: SlotMeta = serde_json::from_str("{}").expect("empty meta decodes");
+        assert!(!meta.panel);
+        assert_eq!(meta.unit, None);
+
+        let default_json = serde_json::to_string(&SlotMeta::default()).expect("meta encodes");
+        assert_eq!(default_json, "{}", "default meta serializes no keys");
     }
 }

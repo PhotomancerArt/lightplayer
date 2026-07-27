@@ -40,10 +40,21 @@ pub fn AgentChatPane(
     #[props(default = false)]
     tool_rows_expanded: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// The OpenRouter Connect CTA (the funnel-critical path): present ⇒ the
+    /// needs-setup empty state leads with the one-click connect button.
+    #[props(default)]
+    on_connect: Option<EventHandler<()>>,
+    /// Transient connect-flow failure to surface in the empty state.
+    #[props(default)]
+    connect_error: Option<String>,
 ) -> Element {
     if view.availability == UiAgentAvailability::NeedsKey {
         return rsx! {
-            NeedsKeyState { guidance: view.setup }
+            NeedsKeyState {
+                guidance: view.setup,
+                on_connect,
+                connect_error,
+            }
         };
     }
 
@@ -253,18 +264,44 @@ fn dispatch_send(
     draft.set(String::new());
 }
 
-/// The needs-setup empty state: the selected provider's onboarding
-/// guidance (core-supplied copy, same source as the settings popover) plus
-/// the pointer at the settings gear.
+/// The needs-setup empty state: the one-click OpenRouter Connect CTA
+/// (success switches the provider, so it leads regardless of the current
+/// selection), then the selected provider's onboarding guidance
+/// (core-supplied copy, same source as the settings popover) plus the
+/// pointer at the settings gear.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NeedsKeyState(guidance: Option<AgentProviderGuidance>) -> Element {
+fn NeedsKeyState(
+    guidance: Option<AgentProviderGuidance>,
+    #[props(default)] on_connect: Option<EventHandler<()>>,
+    #[props(default)] connect_error: Option<String>,
+) -> Element {
     let provider_label = guidance.map(|g| g.label).unwrap_or("a provider");
     rsx! {
         div { class: "tw:flex tw:flex-col tw:items-center tw:gap-1.5 tw:bg-card tw:px-6 tw:py-10 tw:text-center",
             p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground", "Shader agent" }
             p { class: "tw:m-0 tw:max-w-96 tw:text-sm tw:text-muted-foreground",
-                "Chat with an agent that edits this shader for you. To enable it, finish setting up {provider_label} in Settings (the gear icon, top right)."
+                "Chat with an agent that edits this shader for you."
+            }
+            if let Some(on_connect) = on_connect {
+                button {
+                    class: "tw:mt-2 tw:flex-none tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-accent tw:transition tw:duration-300 tw:hover:bg-accent-wash",
+                    r#type: "button",
+                    title: "Sign in on openrouter.ai and come right back — no key to paste",
+                    onclick: move |_| on_connect.call(()),
+                    "Connect OpenRouter — use your own account"
+                }
+                p { class: "tw:m-0 tw:max-w-96 tw:text-xs tw:text-dim-foreground",
+                    "Pay-as-you-go from your OpenRouter credits; every major model."
+                }
+            }
+            if let Some(error) = connect_error.as_deref() {
+                p { class: "tw:m-0 tw:max-w-96 tw:text-xs tw:font-bold tw:text-status-warning-foreground",
+                    "{error}"
+                }
+            }
+            p { class: "tw:m-0 tw:mt-2 tw:max-w-96 tw:text-sm tw:text-muted-foreground",
+                "Or finish setting up {provider_label} in Settings (the gear icon, top right)."
             }
             if let Some(guidance) = guidance {
                 p { class: "tw:m-0 tw:max-w-96 tw:text-xs tw:text-muted-foreground", "{guidance.setup}" }

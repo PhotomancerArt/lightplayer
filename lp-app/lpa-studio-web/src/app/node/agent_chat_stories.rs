@@ -71,7 +71,9 @@ fn idle_transcript() -> Vec<UiAgentTurn> {
 fn ChatStoryCard(view: UiAgentView, #[props(default = false)] tool_rows_expanded: bool) -> Element {
     rsx! {
         div { class: "tw:w-full tw:max-w-2xl tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
-            AgentChatPane { view, tool_rows_expanded }
+            // The inert connect handler makes the needs-setup stories render
+            // the OpenRouter CTA exactly as the product does.
+            AgentChatPane { view, tool_rows_expanded, on_connect: move |_| {} }
         }
     }
 }
