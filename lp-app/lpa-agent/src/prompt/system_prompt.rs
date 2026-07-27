@@ -77,7 +77,29 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
     p.push_str(&builtin_reference());
     p.push('\n');
 
-    // 5. Tool doctrine.
+    // 5. Params doctrine: what drift means, when to upsert vs advise.
+    p.push_str(
+        "## Params\n\
+         \n\
+         Every uniform this shader declares needs a def-side param record \
+         before the engine can render it; `iterate`'s `params` section diffs \
+         the declared uniforms against those records.\n\
+         \n\
+         - `declared_only` orphans mean the engine WILL fail at render time \
+         (\"missing uniform field\") even when the probe compile is ok. \
+         Repair float uniforms yourself with `upsert_param` right after \
+         staging source that declares them; for non-float uniforms, advise \
+         the user instead.\n\
+         - `def_only` orphans are stale records for uniforms the source no \
+         longer declares — harmless to rendering. Mention them to the user; \
+         you cannot delete records.\n\
+         - A `bound` record is bus-driven at runtime: its authored default \
+         is inert while bound, so do not fight a bound param by editing its \
+         default.\n\
+         - `outputSize` is engine-managed and never needs a record.\n\n",
+    );
+
+    // 6. Tool doctrine.
     p.push_str(
         "## Working method\n\
          \n\
@@ -91,15 +113,18 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          - Probe values are oracle semantics: a CPU f32 reference \
          interpreter. GPU output may differ in last-ulp ways; do not chase \
          tiny numeric differences.\n\
-         - Your edits land as unsaved changes in the user's editor; the user \
-         can Save or revert them. Say what you changed.\n\
-         - Your write surface is THIS shader's source only. For anything else \
-         (adding bindings, wiring buses, fixtures, other nodes), advise the \
-         user on what to do — do not attempt it.\n\n",
+         - Your edits land as unsaved changes in the user's editor — staged \
+         source and `upsert_param` records alike; the user can Save or \
+         revert them. Say what you changed.\n\
+         - Your write surface is THIS shader's source plus its float param \
+         records (`upsert_param`). For anything else (non-float params, \
+         wiring buses, fixtures, other nodes), advise the user on what to do \
+         — do not attempt it.\n\n",
     );
 
-    // 6. Caps and the reduce rule.
-    p.push_str(
+    // 7. Caps, the reduce rule, and the batch-experiments doctrine.
+    let _ = write!(
+        p,
         "## Experiment budget\n\
          \n\
          Caps per `iterate` call: 8 probes, 4096 evaluations per probe \
@@ -107,7 +132,14 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          total evaluations. Probes over budget are skipped with a reason. \
          Evaluation takes seconds at maximum size, so design domains that fit \
          the question: use `stats` or `histogram` reductions for anything \
-         bigger than a handful of points, and keep raw-row probes tiny.\n",
+         bigger than a handful of points, and keep raw-row probes tiny.\n\
+         \n\
+         You also have a turn budget: at most {max_turns} model turns per \
+         user request. Plan your turns. Prefer ONE experiment that covers \
+         several hypotheses — a `sweep` domain, `vary` over the candidate \
+         values, several probes in one call — over a sequence of \
+         single-value calls; batching answers N questions for one turn.\n",
+        max_turns = crate::session::agent_session::MAX_TURNS_PER_RUN,
     );
 
     p
@@ -174,7 +206,13 @@ mod tests {
             "probe, \
          don't assert from memory",
             "unsaved changes",
-            "THIS shader's source only",
+            "THIS shader's source plus its float param records",
+            "## Params",
+            "declared_only",
+            "missing uniform field",
+            "turn budget",
+            "over a sequence of \
+         single-value calls",
             "16384",
         ] {
             assert!(prompt.contains(needle), "missing {needle:?}");

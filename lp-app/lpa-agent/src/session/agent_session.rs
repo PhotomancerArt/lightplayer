@@ -21,6 +21,9 @@ use crate::session::agent_event::AgentEvent;
 use crate::session::agent_transcript::AgentTranscript;
 use crate::tool::iterate_host::AgentHost;
 use crate::tool::iterate_tool::{ITERATE_TOOL_NAME, IterateOutcome, iterate_tool_def, run_iterate};
+use crate::tool::upsert_param_tool::{
+    UPSERT_PARAM_TOOL_NAME, run_upsert_param, upsert_param_tool_def,
+};
 
 /// Model turns (API calls) allowed per user message.
 pub const MAX_TURNS_PER_RUN: u32 = 16;
@@ -134,7 +137,7 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
         let req = TurnRequest {
             system,
             messages: self.transcript.messages.clone(),
-            tools: vec![iterate_tool_def()],
+            tools: vec![iterate_tool_def(), upsert_param_tool_def()],
             max_tokens: self.max_tokens,
         };
 
@@ -242,6 +245,15 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                         });
                     },
                 )
+                .await
+            } else if name == UPSERT_PARAM_TOOL_NAME {
+                let progress_id = id.clone();
+                run_upsert_param(&input, &mut self.host, &mut |phase| {
+                    on_event(AgentEvent::ToolProgress {
+                        id: progress_id.clone(),
+                        phase,
+                    });
+                })
                 .await
             } else {
                 IterateOutcome {
@@ -364,8 +376,9 @@ mod tests {
         let reqs = provider.requests.borrow();
         assert_eq!(reqs.len(), 1);
         assert!(reqs[0].system.contains(RED));
-        assert_eq!(reqs[0].tools.len(), 1);
+        assert_eq!(reqs[0].tools.len(), 2);
         assert_eq!(reqs[0].tools[0].name, "iterate");
+        assert_eq!(reqs[0].tools[1].name, "upsert_param");
     }
 
     #[test]

@@ -45,6 +45,25 @@ pub trait AgentHost {
         Box::pin(async { None })
     }
 
+    /// The def-side shader param records (the node def's `consumed` map),
+    /// as the host last saw them. `None` = this host has no def knowledge
+    /// (tests, evals) — the iterate result then carries no def/orphan
+    /// diff in its `params` section.
+    fn shader_params(&mut self) -> HostFuture<'_, Option<Vec<ParamDefRecord>>> {
+        Box::pin(async { None })
+    }
+
+    /// Create or update one f32 param def record through the host's
+    /// Save-gated overlay path (the `upsert_param` tool's write seam).
+    /// Only the fields present in `upsert` are written.
+    fn upsert_param<'a>(
+        &'a mut self,
+        upsert: &'a ParamUpsert,
+    ) -> HostFuture<'a, Result<(), HostError>> {
+        let _ = upsert;
+        Box::pin(async { Err(HostError::new("this host cannot edit param records")) })
+    }
+
     /// The target fixture's LED sample points (normalized coordinates).
     fn led_points(&self) -> Vec<LedPoint>;
 
@@ -97,6 +116,39 @@ impl EngineStatusKind {
             Self::Unknown => "unknown",
         }
     }
+}
+
+/// One def-side shader param record (a `consumed` map entry), as the host
+/// reports it for the iterate `params` diff.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ParamDefRecord {
+    /// The uniform name (the `consumed` map key).
+    pub name: String,
+    /// Authored display label (empty = unlabeled).
+    pub label: String,
+    pub default: Option<f32>,
+    pub min: Option<f32>,
+    pub max: Option<f32>,
+    /// Whether the record is flagged for the card's front panel (knob).
+    pub panel: bool,
+    /// Display unit suffix (e.g. "Hz"), when authored.
+    pub unit: Option<String>,
+    /// Whether the uniform is bound to a bus/producer (bus-driven at
+    /// runtime; the authored default is then inert).
+    pub bound: bool,
+}
+
+/// One `upsert_param` write: `name` is required, every other field is
+/// written only when present (f32 params only in v1).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ParamUpsert {
+    pub name: String,
+    pub label: Option<String>,
+    pub default: Option<f32>,
+    pub min: Option<f32>,
+    pub max: Option<f32>,
+    pub unit: Option<String>,
+    pub panel: Option<bool>,
 }
 
 /// A host-side failure (project unavailable, write refused, ...). These are

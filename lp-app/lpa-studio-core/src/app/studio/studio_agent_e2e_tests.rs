@@ -299,6 +299,192 @@ fn staged_engine_render_error_reaches_the_iterate_result() {
     assert!(row.detail.contains("\"engine\""), "{}", row.detail);
 }
 
+/// The full detect→report→repair loop on the REAL in-process server, all in
+/// the staged (Save-less) overlay state: stage a shader declaring a uniform
+/// with no def record → `iterate` reports the `declared_only` orphan AND the
+/// engine's render error → `upsert_param` dispatches the `PutSlotEdit` batch
+/// → the def change recompiles the node → a follow-up `iterate` shows params
+/// clean and the engine ok — and the panel knob appears on the shader face
+/// through the existing derivation, no UI change involved.
+#[test]
+fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
+    let iterate_input =
+        json!({ "source": SPEED_SHADER, "note": "add a speed control" }).to_string();
+    let upsert_input = json!({
+        "name": "speed", "label": "Speed", "default": 1.0,
+        "min": 0.0, "max": 4.0, "panel": true,
+    })
+    .to_string();
+    let verify_input = json!({ "note": "verify params" }).to_string();
+    let scripts = vec![vec![
+        vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: iterate_input,
+            },
+            turn_done(StopReason::ToolUse, 10, 10),
+        ],
+        vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_2".into(),
+                name: "upsert_param".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_2".into(),
+                json_fragment: upsert_input,
+            },
+            turn_done(StopReason::ToolUse, 10, 10),
+        ],
+        vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_3".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_3".into(),
+                json_fragment: verify_input,
+            },
+            turn_done(StopReason::ToolUse, 10, 10),
+        ],
+        vec![
+            TurnEvent::TextDelta("Speed knob ready.".into()),
+            turn_done(StopReason::EndTurn, 10, 10),
+        ],
+    ]];
+    let harness = AgentHarness::new(scripts);
+    // Yield-once timers, exactly like the render-error e2e: every bridge
+    // poll (upsert ack + engine verdict) hands control back to the test so
+    // it can pump actor batches with forced refreshes between polls.
+    let (mut actor, handle) = StudioActor::new(harness.controller, |_| {
+        let mut yielded = false;
+        core::future::poll_fn(move |cx| {
+            if yielded {
+                core::task::Poll::Ready(())
+            } else {
+                yielded = true;
+                cx.waker().wake_by_ref();
+                core::task::Poll::Pending
+            }
+        })
+    });
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let agent = agent_view(&snapshot);
+
+    handle
+        .tx
+        .send(StudioCommand::Action(agent.send_action("add a speed knob")));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+
+    let mut run = harness.tasks.borrow_mut().remove(0);
+    let mut last_snapshot = None;
+    {
+        use core::task::{Context, Poll};
+        use std::sync::Arc;
+        use std::task::{Wake, Waker};
+        struct NoopWake;
+        impl Wake for NoopWake {
+            fn wake(self: Arc<Self>) {}
+        }
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut pumps = 0;
+        loop {
+            match run.as_mut().poll(&mut context) {
+                Poll::Ready(()) => break,
+                Poll::Pending => {
+                    pumps += 1;
+                    assert!(pumps < 400, "agent run did not complete");
+                    handle.tx.send(project_action(ProjectOp::RefreshProject));
+                    drive(actor.run_one_batch_for_test());
+                    if let Some(snapshot) = view.try_recv() {
+                        last_snapshot = Some(snapshot);
+                    }
+                }
+            }
+        }
+    }
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().or(last_snapshot).expect("final snapshot");
+
+    let requests = harness.requests.borrow();
+    assert_eq!(requests.len(), 4);
+
+    // Turn 1's result: probe-world compile ok, the params diff flags the
+    // declared_only orphan, and the engine reports the render error.
+    let content = tool_result_json(&requests[1]);
+    assert_eq!(content["shader"], "ok");
+    assert_eq!(
+        content["params"]["orphans"]["declared_only"],
+        json!(["speed"]),
+        "{content}"
+    );
+    assert_eq!(content["params"]["orphans"]["def_only"], json!([]));
+    assert_eq!(content["engine"]["status"], "error");
+    assert!(
+        content["engine"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("missing uniform field"),
+        "{content}"
+    );
+
+    // Turn 2's result: the upsert applied and the def change flipped the
+    // engine back to ok within the same call's verdict window.
+    let content = tool_result_json(&requests[2]);
+    assert_eq!(content["applied"], true, "{content}");
+    assert_eq!(content["param"]["name"], "speed");
+    assert_eq!(content["engine"]["status"], "ok", "{content}");
+
+    // Turn 3's result: params clean both ways, the new record is visible
+    // with its authored fields, engine still ok.
+    let content = tool_result_json(&requests[3]);
+    assert_eq!(content["params"]["orphans"]["declared_only"], json!([]));
+    assert_eq!(content["params"]["orphans"]["def_only"], json!([]));
+    let speed = content["params"]["def_records"]
+        .as_array()
+        .expect("def records")
+        .iter()
+        .find(|record| record["name"] == "speed")
+        .expect("speed record");
+    assert_eq!(speed["label"], "Speed");
+    assert_eq!(speed["panel"], true);
+    assert_eq!(speed["min"], 0.0);
+    assert_eq!(speed["max"], 4.0);
+    assert_eq!(content["engine"]["status"], "ok", "{content}");
+
+    // Everything is STAGED, not saved: the save panel counts pending edits.
+    let (persisted, _transient) = editor_dirty(&snapshot);
+    assert!(persisted > 0, "the upsert rides the Save-gated overlay");
+
+    // The knob appears on the shader face via the EXISTING panel
+    // derivation — the def record alone makes it so.
+    let face = shader_face(&snapshot);
+    let knob = face
+        .controls
+        .iter()
+        .find(|control| control.label == "Speed")
+        .expect("panel knob for the new param");
+    assert!(
+        matches!(
+            knob.widget,
+            crate::UiPanelWidget::Knob { min, max, .. } if min == 0.0 && max == 4.0
+        ),
+        "knob range follows the authored min/max: {:?}",
+        knob.widget
+    );
+}
+
 #[test]
 fn provider_error_surfaces_sanely_and_a_retry_recovers() {
     // First run: the provider fails like a bad API key (401, not
@@ -448,6 +634,39 @@ fn turn_done(stop_reason: StopReason, input: u32, output: u32) -> TurnEvent {
             ..TokenUsage::default()
         },
     }
+}
+
+/// The tool result carried into a turn's request (the JSON the MODEL sees).
+fn tool_result_json(request: &TurnRequest) -> serde_json::Value {
+    let content = request
+        .messages
+        .iter()
+        .flat_map(|message| &message.content)
+        .rev()
+        .find_map(|block| match block {
+            lpa_agent::ContentBlock::ToolResult { content, .. } => Some(content.clone()),
+            _ => None,
+        })
+        .expect("request carries a tool result");
+    serde_json::from_str(&content).expect("tool result is json")
+}
+
+/// The shader node's face DTO.
+fn shader_face(view: &UiStudioView) -> crate::UiShaderFace {
+    view.panes
+        .iter()
+        .find_map(|pane| match &pane.body {
+            crate::UiViewContent::ProjectEditor(editor) => Some(editor),
+            _ => None,
+        })
+        .expect("project editor pane")
+        .nodes
+        .iter()
+        .find_map(|node| match &node.face {
+            Some(crate::UiNodeFace::Shader(face)) => Some(face.clone()),
+            _ => None,
+        })
+        .expect("shader node carries a face")
 }
 
 /// The decorated agent chat DTO on the shader node's inline editor.

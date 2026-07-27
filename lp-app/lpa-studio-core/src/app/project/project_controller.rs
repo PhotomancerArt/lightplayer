@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
-use crate::app::project::agent_support::{AgentShaderBinding, AgentShaderTarget};
+use crate::app::project::agent_support::{
+    AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
+};
 use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -672,6 +674,16 @@ impl ProjectController {
         &self,
         artifact: &ArtifactLocation,
     ) -> Option<crate::AgentEngineStatus> {
+        let node = self.agent_shader_node(artifact)?;
+        Some(crate::AgentEngineStatus {
+            revision: node.status_frame(),
+            verdict: crate::app::project::agent_support::engine_verdict(node.status()),
+        })
+    }
+
+    /// The shader node whose resolved `source` asset is `artifact` (the
+    /// agent's per-artifact node lookup).
+    fn agent_shader_node(&self, artifact: &ArtifactLocation) -> Option<&NodeController> {
         fn find<'a>(
             controller: &'a ProjectController,
             nodes: &'a [NodeController],
@@ -693,11 +705,113 @@ impl ProjectController {
             }
             None
         }
-        let node = find(self, &self.root_nodes, artifact)?;
-        Some(crate::AgentEngineStatus {
-            revision: node.status_frame(),
-            verdict: crate::app::project::agent_support::engine_verdict(node.status()),
-        })
+        find(self, &self.root_nodes, artifact)
+    }
+
+    /// The def-side param records of the shader node behind `artifact`
+    /// (its `consumed` map), for the agent's params diff. `None` when no
+    /// shader node uses the artifact. Written into the agent bridge cell
+    /// on every pull, like [`Self::agent_engine_status`].
+    pub(crate) fn agent_param_defs(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<Vec<lpa_agent::ParamDefRecord>> {
+        let node = self.agent_shader_node(artifact)?;
+        let bound = self.bound_consumed_names(node.target().node_id);
+        Some(agent_param_def_records(node, &bound))
+    }
+
+    /// The consumed-slot names of `node_id` with a live binding in the
+    /// graph snapshot (bus-driven at runtime; the authored default is then
+    /// inert). Authored binds and materialized `default_bind`s both land in
+    /// the graph, so this covers every bound origin.
+    fn bound_consumed_names(&self, node_id: NodeId) -> BTreeSet<String> {
+        let Some(graph) = self.binding_graph() else {
+            return BTreeSet::new();
+        };
+        graph
+            .bindings
+            .iter()
+            .filter(|binding| {
+                binding.node == node_id
+                    && binding.direction == lpc_wire::WireBindingDirection::Consumes
+            })
+            .filter_map(|binding| binding.slot.as_ref())
+            .filter_map(|slot| match slot.segments().first() {
+                Some(SlotPathSegment::Field(name)) => Some(name.as_str().to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Dispatch one agent `upsert_param` as ONE `MutationCmdBatch` of
+    /// `PutSlotEdit`s on the def artifact of the shader node behind
+    /// `artifact` (batch shape and ack handling like
+    /// [`Self::apply_asset_body`]; the exact edit list is
+    /// [`param_upsert_edits`]). Returns the edit run plus the joined
+    /// rejection text when any command was refused; a clean ack arms the
+    /// verdict chase — the def change flips the node's needs-compile, so
+    /// the agent's engine-verdict wait observes the fresh outcome.
+    pub(crate) async fn upsert_shader_param(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+        upsert: &lpa_agent::ParamUpsert,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let def_artifact = {
+            let node = self.agent_shader_node(artifact).ok_or_else(|| {
+                UiError::UnsupportedAction(format!(
+                    "no shader node uses {}",
+                    artifact.file_path().as_str()
+                ))
+            })?;
+            self.def_artifacts
+                .get(&node.target().node_id)
+                .cloned()
+                .ok_or_else(|| {
+                    UiError::Project(format!(
+                        "no def artifact is known for the shader node of {}",
+                        artifact.file_path().as_str()
+                    ))
+                })?
+        };
+        let batch = MutationCmdBatch::new(
+            param_upsert_edits(upsert)
+                .into_iter()
+                .map(|edit| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: def_artifact.clone(),
+                        edit,
+                    },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        let rejection = (!rejections.is_empty()).then(|| {
+            rejections
+                .iter()
+                .map(rejection_text)
+                .collect::<Vec<_>>()
+                .join("; ")
+        });
+        if rejection.is_none() {
+            // The def change reached the engine; chase its recompile
+            // verdict with the tightened passive ticks (same liveness as
+            // an accepted asset apply).
+            self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+        }
+        Ok((
+            ProjectEditRun {
+                notices: rejection_notices(&rejections),
+                logs: mutation.logs,
+            },
+            rejection,
+        ))
     }
 
     /// Every fixture node with a known def artifact, as `(label, def
@@ -3396,6 +3510,88 @@ fn agent_shader_bindings(node: &NodeController) -> Vec<AgentShaderBinding> {
             }
         })
         .collect()
+}
+
+/// The def-side param records of a shader node, walked from the mirrored
+/// `consumed` map (the same authored data [`shader_uniforms`] keys on):
+/// label plus the optional f32/bool/string fields the params diff and the
+/// panel derivation read. `bound` marks bus-driven names (from the binding
+/// graph). Non-shader nodes yield an empty vec.
+fn agent_param_def_records(
+    node: &NodeController,
+    bound: &BTreeSet<String>,
+) -> Vec<lpa_agent::ParamDefRecord> {
+    fn last_field_is(slot: &SlotController, name: &str) -> bool {
+        matches!(
+            slot.address().path.segments().last(),
+            Some(SlotPathSegment::Field(field)) if field.as_str() == name
+        )
+    }
+
+    fn find_consumed_map(slot: &SlotController) -> Option<&SlotController> {
+        if slot.kind() == SlotKind::Map && last_field_is(slot, "consumed") {
+            return Some(slot);
+        }
+        slot.children().iter().find_map(find_consumed_map)
+    }
+
+    /// The field's effective value: options read through their `some`
+    /// child (absent option ⇒ `None`), value slots read directly.
+    fn field_value<'a>(entry: &'a SlotController, name: &str) -> Option<&'a lpc_model::LpValue> {
+        let field = entry
+            .children()
+            .iter()
+            .find(|child| last_field_is(child, name))?;
+        match field.kind() {
+            SlotKind::Option => field
+                .children()
+                .iter()
+                .find(|child| last_field_is(child, "some"))
+                .and_then(SlotController::value),
+            _ => field.value(),
+        }
+    }
+
+    fn f32_of(value: Option<&lpc_model::LpValue>) -> Option<f32> {
+        match value {
+            Some(lpc_model::LpValue::F32(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    let Some(consumed) = node.slots().iter().find_map(find_consumed_map) else {
+        return Vec::new();
+    };
+    let mut records = Vec::new();
+    for entry in consumed.children() {
+        let Some(SlotPathSegment::Key(SlotMapKey::String(name))) =
+            entry.address().path.segments().last()
+        else {
+            continue;
+        };
+        let label = match field_value(entry, "label") {
+            Some(lpc_model::LpValue::String(label)) => label.clone(),
+            _ => String::new(),
+        };
+        let unit = match field_value(entry, "unit") {
+            Some(lpc_model::LpValue::String(unit)) if !unit.is_empty() => Some(unit.clone()),
+            _ => None,
+        };
+        records.push(lpa_agent::ParamDefRecord {
+            name: name.clone(),
+            label,
+            default: f32_of(field_value(entry, "default")),
+            min: f32_of(field_value(entry, "min")),
+            max: f32_of(field_value(entry, "max")),
+            panel: matches!(
+                field_value(entry, "panel"),
+                Some(lpc_model::LpValue::Bool(true))
+            ),
+            unit,
+            bound: bound.contains(name),
+        });
+    }
+    records
 }
 
 fn default_focus_node_mut(nodes: &mut [NodeController]) -> Option<&mut NodeController> {
