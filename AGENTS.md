@@ -326,24 +326,32 @@ index are architecture signals — surface them when you see one repeat.
 ## Studio UI visual baselines
 
 Story baselines are **CI-canonical** (see
-`docs/adr/2026-07-26-ci-canonical-story-capture.md`): the committed PNGs under
+`docs/adr/2026-07-26-ci-canonical-story-capture.md` and
+`docs/adr/2026-07-26-ci-story-auto-commit.md`): the committed PNGs under
 `lp-app/lpa-studio-web/story-images/` are captured by the `validate-stories`
 CI job in a pinned environment (x64 Linux, Chrome for Testing, bundled fonts).
 **Never commit locally-captured baselines** — macOS rendering differs and will
-churn the whole set. CI never commits either; the branch owner does:
+churn the whole set. On drift, CI commits the refresh itself:
 
 1. Push UI changes (a PR triggers the path-gated `validate-stories` job).
-2. If the job fails with story drift, it uploads the fresh capture set as the
-   `story-images-fresh` artifact. On the branch, run:
+2. On story drift, the job commits the fresh baselines directly to the PR
+   branch as `github-actions[bot]`, passes, and posts a sticky PR comment
+   summarizing the changes. Review the PNG diff in the PR's Files-changed
+   view, and **`git pull` before pushing again** — the bot commit is now the
+   branch head. Note the green run sits on the commit *before* the bot's
+   (GITHUB_TOKEN pushes don't trigger CI runs); that is expected.
+3. Fallback (fork PRs, push races, main-push drift): the job fails and
+   uploads the fresh set as the `story-images-fresh` artifact. On the branch,
+   run `just studio-story-pull` to stage it, review, commit, push, and
+   confirm the re-run is green.
+4. Mention the affected story baselines in the final summary either way.
 
-   ```bash
-   just studio-story-pull
-   ```
-
-   This downloads the artifact and stages the baseline changes.
-3. Review the staged PNG diff, commit it (with the UI change or as a follow-up
-   baseline commit on the same PR), push, and confirm the re-run is green.
-   Mention the affected story baselines in the final summary.
+If pushes to a PR branch suddenly create **no CI runs at all**, check
+`gh api repos/{owner}/{repo}/pulls/N --jq .mergeable_state` — `dirty` means a
+baseline PNG conflict with main is blocking the merge ref and GitHub silently
+skips `pull_request` runs. Merge `main`, resolving every conflicted PNG by
+taking **main's bytes** (if main's copy is stale, the next capture re-drifts
+and the bot fixes it), then push.
 
 For local interactive review, capture scratch PNGs — optionally filtered to a
 story-id substring so small subsets are cheap:

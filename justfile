@@ -293,11 +293,12 @@ studio-story-pngs *filters: studio-web-story-build
     STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
         node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs pngs {{ filters }}
 
-# CI-canonical: story baselines are captured by the `validate-stories` CI job
-# and staged locally via `just studio-story-pull` — do NOT commit
-# locally-captured baselines (macOS rendering differs from the pinned CI
-# environment). This recipe remains as the emergency full-regen escape hatch.
-# See docs/adr/2026-07-26-ci-canonical-story-capture.md.
+# CI-canonical: story baselines are captured by the `validate-stories` CI job,
+# which auto-commits refreshed baselines to same-repo PR branches (fallback
+# paths use `just studio-story-pull`) — do NOT commit locally-captured
+# baselines (macOS rendering differs from the pinned CI environment). This
+# recipe remains as the emergency full-regen escape hatch. See
+# docs/adr/2026-07-26-ci-story-auto-commit.md.
 studio-story-baselines: studio-web-story-build
     #!/usr/bin/env bash
     set -euo pipefail
@@ -311,9 +312,11 @@ studio-story-check *filters: studio-web-story-build
         node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs check {{ filters }}
 
 # Pull CI-captured story baselines for the current branch and stage them.
-# Story baselines are CI-canonical (validate-stories job); do not commit
-# locally-captured baselines — macOS rendering differs from the pinned CI
-# environment. See docs/adr/2026-07-26-ci-canonical-story-capture.md.
+# MANUAL FALLBACK: on same-repo PRs validate-stories auto-commits refreshed
+# baselines to the branch (just `git pull`); this recipe covers fork PRs, push
+# races, and main-push drift. Do not commit locally-captured baselines —
+# macOS rendering differs from the pinned CI environment. See
+# docs/adr/2026-07-26-ci-story-auto-commit.md.
 studio-story-pull:
     node lp-app/lpa-studio-web/scripts/story-pull.mjs
 

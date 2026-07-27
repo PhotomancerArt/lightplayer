@@ -2,12 +2,15 @@
 //
 // Pull CI-captured story baselines for the current branch and stage them.
 //
-// Story baselines are CI-canonical: the `validate-stories` job captures every
-// story in the pinned CI environment and, on drift, uploads the fresh set as
-// the `story-images-fresh` artifact. This helper downloads that artifact,
-// replaces the committed baseline set with it, and stages the result — the
-// branch owner reviews the diff and commits. CI never commits; this helper
-// never commits either.
+// MANUAL FALLBACK. Story baselines are CI-canonical, and on same-repo PRs the
+// `validate-stories` job now auto-commits refreshed baselines to the branch
+// directly (docs/adr/2026-07-26-ci-story-auto-commit.md) — the common case
+// needs no pull at all (just `git pull` the bot commit). This helper covers
+// the paths auto-commit can't: fork PRs, push races, and main-push drift,
+// where the job still fails and uploads the fresh set as the
+// `story-images-fresh` artifact. It downloads that artifact, replaces the
+// committed baseline set with it, and stages the result — the branch owner
+// reviews the diff and commits. This helper never commits.
 
 import { mkdtemp, readdir, rm, unlink, copyFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
