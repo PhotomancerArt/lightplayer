@@ -212,6 +212,23 @@ mod glue {
 #[cfg(target_arch = "wasm32")]
 pub use glue::{exchange, start_connect, take_pending_callback};
 
+/// UI entry point for the Connect buttons: kick off the redirect, routing a
+/// synchronous refusal (no crypto/storage) into the transient error signal.
+/// Host builds (stories, unit tests) are inert — the page can't navigate.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(unused_variables, reason = "host builds render the button inert")
+)]
+pub fn begin_connect(error: Option<dioxus::prelude::Signal<Option<String>>>) {
+    #[cfg(target_arch = "wasm32")]
+    if let Err(message) = start_connect()
+        && let Some(mut error) = error
+    {
+        use dioxus::prelude::*;
+        error.set(Some(format!("Connect failed: {message}")));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

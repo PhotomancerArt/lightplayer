@@ -128,12 +128,19 @@ pub fn ShaderEditorTabs(
                 }
             }
             match active() {
-                ShaderEditorTab::Agent => rsx! {
-                    AgentChatPane {
-                        view: agent,
-                        source_resolved: editor.content.is_some(),
-                        tool_rows_expanded,
-                        on_action,
+                ShaderEditorTab::Agent => {
+                    // The OpenRouter connect wiring (App-provided context;
+                    // absent under stories, which render the CTA inert).
+                    let openrouter_error = try_consume_context::<Signal<Option<String>>>();
+                    rsx! {
+                        AgentChatPane {
+                            view: agent,
+                            source_resolved: editor.content.is_some(),
+                            tool_rows_expanded,
+                            on_action,
+                            on_connect: move |_| crate::openrouter_oauth::begin_connect(openrouter_error),
+                            connect_error: openrouter_error.and_then(|error| error()),
+                        }
                     }
                 },
                 ShaderEditorTab::Code => rsx! {

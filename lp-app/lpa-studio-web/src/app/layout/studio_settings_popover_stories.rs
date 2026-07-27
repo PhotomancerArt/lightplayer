@@ -81,6 +81,45 @@ pub(crate) fn custom_local_server() -> Element {
     panel(agent)
 }
 
+#[story(
+    description = "OpenRouter selected, not yet connected: the one-click Connect button replaces the key field, with a sample exchange-failure warning underneath."
+)]
+pub(crate) fn openrouter_needs_connect() -> Element {
+    let mut agent = openrouter_agent();
+    agent.api_key_masked = None;
+    rsx! {
+        div { class: "tw:w-[340px] tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card",
+            AgentSettingsSection {
+                agent,
+                on_settings: move |_| {},
+                connect_error: Some("Connect failed: OpenRouter rejected the exchange (HTTP 403)".to_string()),
+            }
+        }
+    }
+}
+
+#[story(
+    description = "OpenRouter connected: masked key with the Disconnect affordance and the baked default model."
+)]
+pub(crate) fn openrouter_connected() -> Element {
+    panel(openrouter_agent())
+}
+
+/// The OpenRouter fixture base: connected unless a story clears the key.
+fn openrouter_agent() -> UiAgentSettingsView {
+    let mut agent = UiSettingsView::default().agent;
+    agent.provider = AgentProvider::OpenRouter;
+    agent.provider_overridden = true;
+    agent.provider_layer = SettingsLayer::User;
+    agent.guidance = provider_guidance(AgentProvider::OpenRouter);
+    agent.api_key_masked = Some("•••••r7Kp".to_string());
+    agent.api_key_layer = SettingsLayer::User;
+    agent.api_key_overridden = true;
+    agent.model_default = Some("anthropic/claude-sonnet-5".to_string());
+    agent.model_placeholder = "anthropic/claude-sonnet-5".to_string();
+    agent
+}
+
 fn panel(agent: UiAgentSettingsView) -> Element {
     rsx! {
         div { class: "tw:w-[340px] tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card",
