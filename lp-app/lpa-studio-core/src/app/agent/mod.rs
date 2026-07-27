@@ -29,6 +29,6 @@ pub use agent_pricing::{AgentCostRates, format_cost_usd};
 pub use agent_provider_config::AgentProviderConfig;
 pub use agent_session_key::AgentSessionKey;
 pub use ui_agent_view::{
-    UiAgentAvailability, UiAgentHistoryEntry, UiAgentStatus, UiAgentToolRow, UiAgentTurn,
-    UiAgentUsage, UiAgentView,
+    UiAgentAvailability, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
+    UiAgentTurn, UiAgentUsage, UiAgentView,
 };

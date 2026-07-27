@@ -473,6 +473,18 @@ pub fn App() -> Element {
     let on_settings = move |command: SettingsCommand| {
         settings_bridge.tx.send(StudioCommand::Settings(command));
     };
+    // The chat footer's model chip dispatches the same settings mutations
+    // (SetAgentModel / RequestModels) from deep inside the node tree;
+    // context spares threading a handler through every layer. Stories
+    // provide no context, so the chip renders inert there.
+    let chip_settings_bridge = bridge.clone();
+    use_context_provider(|| {
+        Callback::new(move |command: SettingsCommand| {
+            chip_settings_bridge
+                .tx
+                .send(StudioCommand::Settings(command));
+        })
+    });
 
     // The URL's intent picks the frame: a SIM route whose project the
     // view hasn't reached yet renders the opening frame, not the gallery.

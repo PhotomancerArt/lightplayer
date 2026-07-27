@@ -23,8 +23,9 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus::{html::geometry::PixelsVector2D, prelude::dioxus_core::use_after_render};
 use lpa_studio_core::{
-    AgentProviderGuidance, UiAction, UiAgentAvailability, UiAgentHistoryEntry, UiAgentStatus,
-    UiAgentToolRow, UiAgentTurn, UiAgentView, UiProductPreview,
+    AgentProviderGuidance, SettingsCommand, UiAction, UiAgentAvailability, UiAgentHistoryEntry,
+    UiAgentModelView, UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentView, UiModelOption,
+    UiProductPreview,
 };
 
 use crate::app::node::ProductPreviewCanvas;
@@ -101,10 +102,15 @@ pub fn AgentChatPane(
     };
 
     // Show the streaming cursor inside the last assistant bubble; a busy
-    // run without a trailing assistant bubble gets a thinking row instead.
+    // run without a trailing assistant bubble gets a thinking row instead —
+    // unless a REAL thinking strip is already streaming at the tail.
     let streaming_tail = matches!(view.status, UiAgentStatus::Streaming)
         && matches!(view.turns.last(), Some(UiAgentTurn::Assistant { .. }));
-    let thinking_row = busy && !streaming_tail;
+    let thinking_tail = matches!(
+        view.turns.last(),
+        Some(UiAgentTurn::Thinking { done: false, .. })
+    );
+    let thinking_row = busy && !streaming_tail && !thinking_tail;
     let turn_count = view.turns.len();
     // Total prompt tokens (fresh + cache writes + cache reads) — the
     // footnote's honest "in" figure now that prompt caching splits usage
@@ -152,7 +158,15 @@ pub fn AgentChatPane(
                             }
                         },
                         UiAgentTurn::Tool(row) => rsx! {
-                            ToolRow { key: "{index}-{row.id}", row: row.clone(), default_open: tool_rows_expanded }
+                            ToolRow {
+                                key: "{index}-{row.id}",
+                                row: row.clone(),
+                                default_open: tool_rows_expanded,
+                                history_entry: history_entry_for_row(&view.history, row),
+                            }
+                        },
+                        UiAgentTurn::Thinking { text, done } => rsx! {
+                            ThinkingTurn { key: "{index}-thinking", text: text.clone(), done: *done }
                         },
                         UiAgentTurn::Notice { text } => rsx! {
                             p { key: "{index}", class: "tw:m-0 tw:text-xs tw:italic tw:text-dim-foreground", "{text}" }
@@ -187,11 +201,14 @@ pub fn AgentChatPane(
             if !view.history.is_empty() {
                 HistoryStrip { view: view.clone(), busy, on_action }
             }
-            // Composer.
+            // Composer. Roomy by default (~3 lines) and growing with the
+            // draft up to the cap (`field-sizing: content`; browsers
+            // without it keep the fixed min-height plus the manual resize
+            // handle) — the gate-feedback "cramped box" fix.
             div { class: "tw:flex tw:items-end tw:gap-2 tw:border-t tw:border-border-muted tw:bg-card-subtle tw:px-3 tw:py-2",
                 textarea {
-                    class: "tw:min-h-9 tw:max-h-40 tw:flex-1 tw:resize-y tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card tw:px-2.5 tw:py-2 tw:font-sans tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent-border",
-                    rows: 1,
+                    class: "tw:field-sizing-content tw:min-h-20 tw:max-h-40 tw:flex-1 tw:resize-y tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card tw:px-2.5 tw:py-2 tw:font-sans tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent-border",
+                    rows: 3,
                     placeholder: if source_resolved { "Ask for a change… (Enter sends, Shift+Enter for a new line)" } else { "Loading shader source…" },
                     value: "{draft}",
                     oninput: move |event| draft.set(event.value()),
@@ -223,15 +240,20 @@ pub fn AgentChatPane(
                     }
                 }
             }
-            // Usage footnote (+ estimated cost when rates are known). The
+            // Footnote: the session's model chip (left) and the usage
+            // figures (right; + estimated cost when rates are known). The
             // "in" figure is TOTAL prompt tokens (fresh + cache writes +
             // cache reads) — post-caching, the raw `input_tokens` bucket is
             // only the uncached remainder and would read absurdly low.
-            if !view.usage.is_zero() {
-                p { class: "tw:m-0 tw:border-t tw:border-border-subtle tw:bg-card-subtle tw:px-3 tw:py-1 tw:text-right tw:text-[10px] tw:text-dim-foreground",
-                    "{input_tokens} in · {view.usage.output_tokens} out tokens this session"
-                    if let Some(cost) = view.estimated_cost.as_deref() {
-                        span { title: "estimate based on configured rates", " · {cost}" }
+            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:border-t tw:border-border-subtle tw:bg-card-subtle tw:px-3 tw:py-1",
+                ModelChip { model: view.model.clone(), busy }
+                span { class: "tw:min-w-0 tw:flex-1" }
+                if !view.usage.is_zero() {
+                    p { class: "tw:m-0 tw:flex-none tw:text-right tw:text-[10px] tw:text-dim-foreground",
+                        "{input_tokens} in · {view.usage.output_tokens} out tokens this session"
+                        if let Some(cost) = view.estimated_cost.as_deref() {
+                            span { title: "estimate based on configured rates", " · {cost}" }
+                        }
                     }
                 }
             }
@@ -330,11 +352,71 @@ fn HistoryChip(
     }
 }
 
-/// One `iterate` call: a compact one-liner that expands to the summary
-/// detail. Collapsed/expanded is view-local (like the tab selection).
+/// One thinking segment: while streaming (`done == false`) a dim strip
+/// shows "Thinking…" with the live text (the transcript's sticky-bottom
+/// autoscroll keeps the newest line in view); once done it collapses to a
+/// one-line "Thought for a bit ▸" expander, following the tool-row
+/// expand/collapse grammar. Expanded/collapsed is view-local.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ToolRow(row: UiAgentToolRow, #[props(default = false)] default_open: bool) -> Element {
+fn ThinkingTurn(text: String, done: bool) -> Element {
+    let mut open = use_signal(|| false);
+    if !done {
+        return rsx! {
+            div { class: "tw:min-w-0 tw:max-w-[95%]",
+                div { class: "tw:flex tw:items-center tw:gap-2 tw:text-xs tw:text-status-working-foreground",
+                    span { class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:animate-pulse tw:rounded-full tw:bg-status-working-foreground" }
+                    "Thinking…"
+                }
+                if !text.is_empty() {
+                    p { class: "tw:m-0 tw:mt-1 tw:whitespace-pre-wrap tw:break-words tw:text-xs tw:italic tw:leading-snug tw:text-dim-foreground",
+                        "{text}"
+                    }
+                }
+            }
+        };
+    }
+    let has_text = !text.is_empty();
+    rsx! {
+        div { class: "tw:min-w-0 tw:max-w-[95%]",
+            button {
+                class: "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-xs tw:text-dim-foreground tw:hover:text-muted-foreground",
+                r#type: "button",
+                title: if has_text { "Show what the model thought" } else { "The provider kept this thinking private" },
+                onclick: move |_| open.set(!open()),
+                span { class: "tw:italic", "Thought for a bit" }
+                if has_text {
+                    span { class: "tw:flex-none",
+                        if open() { "▾" } else { "▸" }
+                    }
+                }
+            }
+            if open() && has_text {
+                p { class: "tw:m-0 tw:mt-1 tw:whitespace-pre-wrap tw:break-words tw:text-xs tw:italic tw:leading-snug tw:text-dim-foreground",
+                    "{text}"
+                }
+            }
+        }
+    }
+}
+
+/// One `iterate` call: a compact one-liner that expands to the summary
+/// detail. Collapsed/expanded is view-local (like the tab selection).
+/// Staged-edit calls carry their history entry, so the transcript — the
+/// history the user actually scrolls — shows the edit's snapshot inline
+/// at the row's right edge (the filmstrip stays for one-click reverts):
+/// the 32-px thumb once the verdict resolved ok and a preview landed, a
+/// dim numbered placeholder until then (constant geometry either way).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ToolRow(
+    row: UiAgentToolRow,
+    #[props(default = false)] default_open: bool,
+    /// The staged edit's history entry (matched by `edit_turn`); `None`
+    /// for non-staging calls and cap-dropped records.
+    #[props(default = None)]
+    history_entry: Option<UiAgentHistoryEntry>,
+) -> Element {
     let mut open = use_signal(|| default_open);
     let summary = row.summary_line();
     let has_detail = !row.detail.is_empty();
@@ -347,6 +429,27 @@ fn ToolRow(row: UiAgentToolRow, #[props(default = false)] default_open: bool) ->
                 onclick: move |_| open.set(!open()),
                 span { class: tool_dot_class(&row) }
                 span { class: "tw:min-w-0 tw:flex-1 tw:truncate", "{summary}" }
+                if let Some(entry) = &history_entry {
+                    div {
+                        class: "tw:relative tw:h-8 tw:w-8 tw:flex-none tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card",
+                        title: if entry.thumb.is_some() { "Edit {entry.turn} — how it looked" } else { "Edit {entry.turn} — no snapshot" },
+                        match &entry.thumb {
+                            Some(UiProductPreview::VisualSrgb8 { width, height, revision, bytes }) => rsx! {
+                                ProductPreviewCanvas {
+                                    width: *width,
+                                    height: *height,
+                                    revision: *revision,
+                                    bytes: bytes.clone(),
+                                }
+                            },
+                            _ => rsx! {
+                                span { class: "tw:absolute tw:inset-0 tw:flex tw:items-center tw:justify-center tw:font-mono tw:text-[11px] tw:text-dim-foreground tw:opacity-60",
+                                    "{entry.turn}"
+                                }
+                            },
+                        }
+                    }
+                }
                 if has_detail {
                     span { class: "tw:flex-none tw:text-dim-foreground",
                         if open() { "▾" } else { "▸" }
@@ -360,6 +463,125 @@ fn ToolRow(row: UiAgentToolRow, #[props(default = false)] default_open: bool) ->
             }
         }
     }
+}
+
+/// The staged edit's history entry for one tool row, matched by the
+/// shared edit ordinal (`None` for non-staging calls and records the
+/// retention cap dropped).
+fn history_entry_for_row(
+    history: &[UiAgentHistoryEntry],
+    row: &UiAgentToolRow,
+) -> Option<UiAgentHistoryEntry> {
+    let turn = row.edit_turn?;
+    history.iter().find(|entry| entry.turn == turn).cloned()
+}
+
+/// The footnote's compact model selector: shows the session's model
+/// without opening settings and switches it in place. Options come from
+/// P8's fetched `/models` list (the selector requests a fetch when it
+/// opens; the store debounces); a selection dispatches the SAME
+/// [`SettingsCommand::SetAgentModel`] mutation the popover's model field
+/// uses and applies from the NEXT run (providers rebuild at run start).
+/// Custom free-text ids stay a settings-popover affair — a disabled tail
+/// option points there. Disabled while a run is in flight (switching
+/// mid-run is out of scope); without a configured model the chip is a
+/// plain pointer at Settings.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ModelChip(model: UiAgentModelView, busy: bool) -> Element {
+    // The settings dispatch context (installed by the web shell; absent
+    // under stories, which render the chip inert).
+    let on_settings = try_consume_context::<Callback<SettingsCommand>>();
+    let Some(effective) = model.effective.clone() else {
+        return rsx! {
+            span { class: "tw:flex-none tw:text-[10px] tw:font-bold tw:text-status-warning-foreground",
+                title: "The provider needs a model id — set one in Settings (the gear icon, top right)",
+                "model: set in Settings"
+            }
+        };
+    };
+    let options = model_chip_options(&model);
+    let request_models = move || {
+        if let Some(handler) = on_settings {
+            handler.call(SettingsCommand::RequestModels { force: false });
+        }
+    };
+    rsx! {
+        // The font classes live on this wrapper: the app stylesheet's
+        // unlayered `select { font: inherit }` beats layered utilities on
+        // the select itself, so the chip's type is set by inheritance.
+        span { class: "tw:min-w-0 tw:flex-none tw:font-mono tw:text-[10px]",
+            select {
+                class: model_chip_class(busy),
+                disabled: busy,
+                title: if busy { "Model for the next run — wait for this run to finish to switch" } else { "Model for the next run — custom ids in Settings" },
+                value: "{effective}",
+                // Opening the selector is the fetch trigger
+                // (store-debounced); pointer and keyboard opens both land
+                // here.
+                onpointerdown: move |_| request_models(),
+                onfocus: move |_| request_models(),
+                onchange: move |event| {
+                    let value = event.value();
+                    if let Some(handler) = on_settings
+                        && value != SETTINGS_MODEL_VALUE
+                    {
+                        handler.call(SettingsCommand::SetAgentModel(Some(value)));
+                    }
+                },
+                for option in options {
+                    option {
+                        key: "{option.id}",
+                        value: "{option.id}",
+                        selected: option.id == effective,
+                        "{option.label.as_deref().unwrap_or(&option.id)}"
+                    }
+                }
+                option {
+                    value: SETTINGS_MODEL_VALUE,
+                    disabled: true,
+                    if model.loading { "fetching model list…" } else { "Custom / more — Settings" }
+                }
+            }
+        }
+    }
+}
+
+/// The sentinel value of the chip's inert Settings-pointer option (never
+/// dispatched; the option is disabled and exists as a signpost).
+const SETTINGS_MODEL_VALUE: &str = "__settings__";
+
+/// The chip's option list: the fetched models, with the effective id
+/// prepended when the list does not carry it (an unlisted override, or no
+/// fetch yet — the select must always be able to show the truth).
+fn model_chip_options(model: &UiAgentModelView) -> Vec<UiModelOption> {
+    let mut options = model.options.clone();
+    if let Some(effective) = &model.effective
+        && !options.iter().any(|option| &option.id == effective)
+    {
+        options.insert(
+            0,
+            UiModelOption {
+                id: effective.clone(),
+                label: None,
+            },
+        );
+    }
+    options
+}
+
+/// Model-chip chrome: an unobtrusive borderless select that reveals its
+/// affordance on hover; inert while a run is in flight — constant
+/// geometry either way.
+fn model_chip_class(busy: bool) -> String {
+    let state = if busy {
+        "tw:cursor-default tw:opacity-50"
+    } else {
+        "tw:cursor-pointer tw:hover:border-border-subtle tw:hover:text-muted-foreground"
+    };
+    format!(
+        "tw:min-w-0 tw:max-w-56 tw:flex-none tw:truncate tw:rounded-xs tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:py-0.5 tw:font-mono tw:text-[10px] tw:text-dim-foreground tw:outline-none tw:transition tw:duration-300 {state}"
+    )
 }
 
 /// Send the composer draft (trimmed; empty drafts are ignored) and clear
@@ -554,5 +776,60 @@ mod tests {
         }
         assert!(history_chip_class(true).contains("tw:cursor-default"));
         assert!(history_chip_class(false).contains("tw:cursor-pointer"));
+    }
+
+    #[test]
+    fn tool_rows_adopt_their_history_entry_by_edit_turn() {
+        let entry = UiAgentHistoryEntry {
+            turn: 2,
+            note: Some("warm the palette".into()),
+            thumb: None,
+            engine_ok: Some(true),
+        };
+        let history = vec![entry.clone()];
+
+        let mut staged = row();
+        staged.edit_turn = Some(2);
+        assert_eq!(history_entry_for_row(&history, &staged), Some(entry));
+
+        // A cap-dropped record and a non-staging call both stay bare.
+        staged.edit_turn = Some(1);
+        assert_eq!(history_entry_for_row(&history, &staged), None);
+        assert_eq!(history_entry_for_row(&history, &row()), None);
+    }
+
+    #[test]
+    fn model_chip_options_include_the_unlisted_current_model() {
+        let listed = UiModelOption {
+            id: "claude-sonnet-5".into(),
+            label: Some("Claude Sonnet 5".into()),
+        };
+        let mut model = UiAgentModelView {
+            effective: Some("claude-sonnet-5".into()),
+            options: vec![listed.clone()],
+            loading: false,
+        };
+        // Listed current model: no duplicate.
+        assert_eq!(model_chip_options(&model), vec![listed.clone()]);
+
+        // Unlisted override (or no fetch yet): prepended so the select can
+        // show the truth.
+        model.effective = Some("my-custom-model".into());
+        let options = model_chip_options(&model);
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].id, "my-custom-model");
+        assert_eq!(options[0].label, None);
+        assert_eq!(options[1], listed);
+    }
+
+    #[test]
+    fn model_chip_keeps_geometry_across_run_states() {
+        for busy in [true, false] {
+            let class = model_chip_class(busy);
+            assert!(class.contains("tw:text-[10px]"));
+            assert!(class.contains("tw:transition"));
+        }
+        assert!(model_chip_class(true).contains("tw:cursor-default"));
+        assert!(model_chip_class(false).contains("tw:cursor-pointer"));
     }
 }

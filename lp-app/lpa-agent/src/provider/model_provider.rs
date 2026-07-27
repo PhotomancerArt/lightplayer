@@ -46,6 +46,16 @@ pub struct TurnRequest {
 pub enum TurnEvent {
     /// A fragment of assistant text.
     TextDelta(String),
+    /// A fragment of the model's thinking/reasoning text (Anthropic
+    /// `thinking_delta`, OpenAI-compat `reasoning_content`/`reasoning`).
+    ThinkingDelta(String),
+    /// A fragment of the Anthropic thinking-block signature. Signatures
+    /// close a thinking block and must be replayed with it verbatim;
+    /// compat providers never emit this.
+    ThinkingSignature(String),
+    /// A complete opaque `redacted_thinking` block (Anthropic). Passed
+    /// through the transcript verbatim, never displayed.
+    RedactedThinking(String),
     /// The model started a tool call; input JSON follows as deltas.
     ToolUseStart { id: String, name: String },
     /// A fragment of the tool call's input JSON. The consumer accumulates
@@ -158,6 +168,15 @@ pub enum ContentBlock {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         is_error: Option<bool>,
     },
+    /// An assistant thinking block. Anthropic requires these replayed in
+    /// the transcript exactly as received (text + signature) when the
+    /// session loops back with tool results; the signature is the API's
+    /// integrity proof. Compat-origin thinking has an empty signature and
+    /// is never sent back to any provider.
+    Thinking { thinking: String, signature: String },
+    /// An opaque redacted thinking block (Anthropic), passed through the
+    /// transcript verbatim.
+    RedactedThinking { data: String },
 }
 
 #[cfg(test)]
@@ -191,6 +210,32 @@ mod tests {
                 .is_none(),
             "{json}"
         );
+    }
+
+    #[test]
+    fn thinking_blocks_serialize_to_wire_shapes() {
+        let msg = ChatMessage {
+            role: ChatRole::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "Considering options.".into(),
+                    signature: "sig_abc".into(),
+                },
+                ContentBlock::RedactedThinking {
+                    data: "opaque".into(),
+                },
+                ContentBlock::Text { text: "Hi".into() },
+            ],
+        };
+        let json = serde_json::to_value(&msg).expect("serialize");
+        assert_eq!(json["content"][0]["type"], "thinking");
+        assert_eq!(json["content"][0]["thinking"], "Considering options.");
+        assert_eq!(json["content"][0]["signature"], "sig_abc");
+        assert_eq!(json["content"][1]["type"], "redacted_thinking");
+        assert_eq!(json["content"][1]["data"], "opaque");
+        // And the round trip preserves them exactly (the replay guarantee).
+        let back: ChatMessage = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back, msg);
     }
 
     #[test]

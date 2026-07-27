@@ -724,10 +724,14 @@ impl StudioController {
 
     /// The settings-derived slice the agent view decoration needs:
     /// availability (Ready ⇔ the selected provider is sufficiently
-    /// configured), the provider's setup guidance while it is not, and the
-    /// cost rates for the usage estimate.
+    /// configured), the provider's setup guidance while it is not, the
+    /// cost rates for the usage estimate, and the model-chip slice
+    /// (effective model + P8 discovered options — lifted from the same
+    /// settings view the popover renders, so the chip and the popover can
+    /// never disagree).
     fn agent_view_context(&self) -> crate::AgentViewContext {
         let ready = self.settings.agent_ready();
+        let agent_settings = self.settings.ui_view().agent;
         crate::AgentViewContext {
             availability: if ready {
                 crate::UiAgentAvailability::Ready
@@ -736,6 +740,11 @@ impl StudioController {
             },
             setup: (!ready).then(|| crate::provider_guidance(self.settings.agent_provider())),
             cost_rates: self.settings.agent_cost_rates(),
+            model: crate::UiAgentModelView {
+                effective: agent_settings.model_effective,
+                options: agent_settings.model_options,
+                loading: agent_settings.models_loading,
+            },
         }
     }
 
@@ -4768,6 +4777,53 @@ mod tests {
                 .agent_models(AgentProvider::Anthropic)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn agent_view_context_carries_the_model_slice() {
+        use crate::app::studio::studio_actor::poll_now;
+        use crate::app::studio::studio_view_channel::command_channel;
+        use crate::{AgentTaskFuture, SettingsCommand, StudioCommand};
+        use lpa_agent::ModelInfo;
+
+        let mut studio = StudioController::new(|| 0.0);
+        let tasks: Rc<RefCell<Vec<AgentTaskFuture>>> = Rc::new(RefCell::new(Vec::new()));
+        studio.set_agent_spawner({
+            let tasks = Rc::clone(&tasks);
+            move |future| tasks.borrow_mut().push(future)
+        });
+        studio.set_agent_models_fetcher(|_config| {
+            Box::pin(async {
+                Ok(vec![ModelInfo {
+                    id: "claude-haiku-4".to_string(),
+                    display_name: Some("Claude Haiku 4".to_string()),
+                }])
+            })
+        });
+        let (tx, rx) = command_channel();
+        studio.set_agent_command_sender(tx);
+
+        studio.apply_settings_command(SettingsCommand::SetAgentModel(Some(
+            "claude-sonnet-5".to_string(),
+        )));
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk-a".to_string(),
+        )));
+        assert!(studio.agent_view_context().model.loading);
+        let task = tasks.borrow_mut().remove(0);
+        poll_now(task).expect("scripted fetch resolves in one poll");
+        for command in rx.try_recv_all_for_test() {
+            let StudioCommand::Settings(command) = command else {
+                panic!("unexpected command class");
+            };
+            studio.apply_settings_command(command);
+        }
+
+        let model = studio.agent_view_context().model;
+        assert_eq!(model.effective.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(model.options.len(), 1);
+        assert_eq!(model.options[0].id, "claude-haiku-4");
+        assert!(!model.loading);
     }
 
     #[test]

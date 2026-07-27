@@ -10,6 +10,7 @@ use lpc_model::ArtifactLocation;
 use crate::app::agent::agent_controller::AgentController;
 use crate::app::agent::agent_op::AgentOp;
 use crate::app::settings::agent_provider::AgentProviderGuidance;
+use crate::app::settings::ui_settings_view::UiModelOption;
 use crate::{ControllerId, UiAction, UiProductPreview};
 
 /// The agent chat state for one shader node's editor region.
@@ -40,6 +41,8 @@ pub struct UiAgentView {
     pub history: Vec<UiAgentHistoryEntry>,
     /// How many oldest history entries fell off the retention cap.
     pub history_dropped: u32,
+    /// The session's model context for the footer chip (settings-derived).
+    pub model: UiAgentModelView,
 }
 
 impl UiAgentView {
@@ -55,6 +58,7 @@ impl UiAgentView {
             estimated_cost: None,
             history: Vec::new(),
             history_dropped: 0,
+            model: UiAgentModelView::default(),
         }
     }
 
@@ -117,6 +121,25 @@ pub struct UiAgentHistoryEntry {
     pub engine_ok: Option<bool>,
 }
 
+/// The chat footer's model-chip slice (P10 item 4): the effective model
+/// and the provider's discovered options, so the session's model shows —
+/// and can switch — without opening the settings popover. A chip
+/// selection dispatches the SAME settings mutation the popover's model
+/// field uses ([`crate::SettingsCommand::SetAgentModel`]) and applies
+/// from the NEXT run (providers are rebuilt at each run start); custom
+/// free-text ids stay a settings-popover affair.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct UiAgentModelView {
+    /// The effective model id (`None` while the provider requires one and
+    /// none is configured — the chip then points at Settings).
+    pub effective: Option<String>,
+    /// The provider's fetched `/models` list (P8 store; empty until a
+    /// fetch resolves — the chip requests one when the selector opens).
+    pub options: Vec<UiModelOption>,
+    /// A `/models` fetch is in flight for the selected provider.
+    pub loading: bool,
+}
+
 /// Whether the agent can run (settings-derived; Ready ⇔ the SELECTED
 /// provider is sufficiently configured — Anthropic: key; OpenAI: key +
 /// model; Custom: base URL + model).
@@ -149,6 +172,10 @@ pub enum UiAgentTurn {
     User { text: String },
     /// Assistant text (one contiguous streamed block).
     Assistant { text: String },
+    /// A streamed thinking/reasoning segment: visible while `done` is
+    /// false (the model is working), collapsed to a one-line expander once
+    /// it completes. Session-scoped only — never persisted.
+    Thinking { text: String, done: bool },
     /// A tool call row (compact one-liner, expandable detail).
     Tool(UiAgentToolRow),
     /// A session-level notice (stopped, turn limit, provider error).
@@ -170,6 +197,11 @@ pub struct UiAgentToolRow {
     pub done: bool,
     /// Whether the call staged new source (an overlay edit landed).
     pub staged: bool,
+    /// The staged edit's history ordinal ([`UiAgentHistoryEntry::turn`]),
+    /// stamped when the call's edit record is pushed — the transcript's
+    /// inline snapshot renders through this correlation (`None` for
+    /// non-staging calls).
+    pub edit_turn: Option<u32>,
     /// Compile outcome, once done (`None` until then or on tool errors).
     pub shader_ok: Option<bool>,
     /// Number of probes evaluated.
@@ -191,6 +223,7 @@ impl UiAgentToolRow {
             phase: None,
             done: false,
             staged: false,
+            edit_turn: None,
             shader_ok: None,
             probes: 0,
             warnings: 0,
