@@ -61,10 +61,28 @@ pub fn SlotDetailButton(
     /// `PopoverButton`).
     #[props(default = None)]
     anchor_visual: Option<Element>,
+    /// Custom trigger content replacing the corner icon (the panel
+    /// control's label-as-trigger). The popup content and toned chrome stay
+    /// identical to the icon path.
+    #[props(default = None)]
+    trigger: Option<Element>,
+    /// Button class for the custom trigger at rest.
+    #[props(default = String::new())]
+    trigger_class: String,
+    /// Button class for the custom trigger while open.
+    #[props(default = String::new())]
+    trigger_open_class: String,
 ) -> Element {
     let affordance = primary_affordance(&aspects);
     let style = slot_affordance_style(affordance);
     let menu_label = format!("{label} details");
+    // The icon trigger reserves the slot row's fixed 32px column; a custom
+    // trigger owns its own footprint.
+    let wrapper_class = if trigger.is_some() {
+        "tw:inline-flex tw:min-w-0"
+    } else {
+        "tw:inline-flex tw:w-8 tw:justify-end"
+    };
 
     // When the slot is authorable, its Binding aspect folds INTO the
     // authoring section — one coherent binding block (current wiring, origin
@@ -82,7 +100,7 @@ pub fn SlotDetailButton(
         .flatten();
 
     rsx! {
-        span { class: "tw:inline-flex tw:w-8 tw:justify-end",
+        span { class: wrapper_class,
             DetailPopover {
                 icon: style.icon,
                 label: menu_label.clone(),
@@ -91,6 +109,9 @@ pub fn SlotDetailButton(
                 placement,
                 active: style.active,
                 initially_open,
+                trigger,
+                trigger_class,
+                trigger_open_class,
                 anchor_id,
                 anchor_visual,
                 for aspect in aspects {

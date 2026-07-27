@@ -5,8 +5,9 @@
 //! active child's card below as a sibling, P2c item 2) — the in-system
 //! realization of the spike's v5 board on the flat section grammar with the
 //! left-edge label rail (single treatment settled at the P2c re-gate).
-//! `control-popovers` shows the anchored contiguous outline: the control IS
-//! the trigger (P2c item 3).
+//! `control-popovers` shows the anchored contiguous outline: the control's
+//! LABEL is the trigger and the whole control merges with the aspect card
+//! (P2c item 3, label trigger from the live-review round).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAgentStatus, UiSlotFieldState};
@@ -67,7 +68,7 @@ fn gallery_drawers_open() -> Element {
 }
 
 #[story(
-    description = "Diving into the control (P2c item 3): the control IS the trigger — its outline merges with the identical slot-row aspect card into one contiguous shape via the merged-outline system — bound knob and bound fader."
+    description = "Diving into the control (P2c item 3): the LABEL is the trigger and the whole control's outline merges with the identical slot-row aspect card into one contiguous shape via the merged-outline system — bound knob and bound fader."
 )]
 fn control_popovers() -> Element {
     rsx! {

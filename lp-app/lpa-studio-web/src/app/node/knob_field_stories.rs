@@ -1,9 +1,10 @@
 //! Stories for the panel knob (knob v2: SVG value arc + ticks).
 //!
 //! Coverage: default, an arc sweep across the range, the violet bound
-//! state, unsaved (warning dot), live-transient (blue dot), and the corner
-//! ⓘ pinned open — the SAME `SlotDetailButton` popover as the backing slot
-//! row, with the violet binding section.
+//! state, the label state-color ladder (the label button is the detail
+//! trigger AND the edit-state signal — the old dot is gone), and the
+//! detail popover pinned open via the label — the SAME `SlotDetailButton`
+//! popover as the backing slot row, with the violet binding section.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiNodeDirtyState, UiSlotFieldState, UiSlotSourceState};
@@ -86,9 +87,7 @@ fn bound() -> Element {
     }
 }
 
-#[story(
-    description = "Unsaved edit: the warning dot beside the readout; Save will persist the new value."
-)]
+#[story(description = "Unsaved edit: the warning-colored label; Save will persist the new value.")]
 fn dirty() -> Element {
     rsx! {
         KnobStoryCard {
@@ -108,7 +107,7 @@ fn dirty() -> Element {
 }
 
 #[story(
-    description = "Live transient edit: the blue dot — applied to the running project, never written by Save."
+    description = "Live transient edit: the blue label — applied to the running project, never written by Save."
 )]
 fn live() -> Element {
     rsx! {
@@ -131,7 +130,47 @@ fn live() -> Element {
 }
 
 #[story(
-    description = "Corner ⓘ pinned open on a bound knob: the identical slot-row detail popover, including the violet binding section."
+    description = "The label state-color ladder on one row: quiet (clean), violet (bound), warning (unsaved), blue (live transient), red (write failed), and warning-over-violet-widget (edited while bound) — the label is both the detail trigger and the edit-state signal; the old readout dot is gone."
+)]
+fn label_states() -> Element {
+    let clean = UiSlotFieldState::editable();
+    let dirty = UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty);
+    let live = UiSlotFieldState::editable()
+        .with_dirty(UiNodeDirtyState::Dirty)
+        .with_live(true);
+    let failed = UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error);
+    rsx! {
+        KnobStoryCard {
+            PanelControl {
+                control: knob_control("clean", 1.0, 0.0, 4.0, clean.clone(), UiSlotSourceState::Unset),
+                on_action: move |_| {},
+            }
+            PanelControl {
+                control: knob_control("bound", 1.6, 0.0, 4.0, clean, bound_source()),
+                on_action: move |_| {},
+            }
+            PanelControl {
+                control: knob_control("unsaved", 2.0, 0.0, 4.0, dirty.clone(), UiSlotSourceState::Unset),
+                on_action: move |_| {},
+            }
+            PanelControl {
+                control: knob_control("live", 2.4, 0.0, 4.0, live, UiSlotSourceState::Unset),
+                on_action: move |_| {},
+            }
+            PanelControl {
+                control: knob_control("failed", 3.0, 0.0, 4.0, failed, UiSlotSourceState::Unset),
+                on_action: move |_| {},
+            }
+            PanelControl {
+                control: knob_control("both", 2.8, 0.0, 4.0, dirty, bound_source()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Detail pinned open via the LABEL trigger on a bound knob: the identical slot-row detail popover, its outline merged with the whole control, including the violet binding section."
 )]
 fn detail_open() -> Element {
     rsx! {

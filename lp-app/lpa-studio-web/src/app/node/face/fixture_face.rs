@@ -17,7 +17,8 @@ use crate::app::node::{NodeCardSection, PanelControl};
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn FixtureFace(
     face: UiFixtureFaceData,
-    /// Open the fader's corner ⓘ popover on first render (stories).
+    /// Open the fader's label-trigger detail popover on first render
+    /// (stories).
     #[props(default = false)]
     detail_initially_open: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,

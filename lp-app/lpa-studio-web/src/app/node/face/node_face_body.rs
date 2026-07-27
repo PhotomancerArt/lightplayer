@@ -30,7 +30,8 @@ pub fn NodeFaceBody(
     /// Open the advanced drawer on first render (stories).
     #[props(default = false)]
     advanced_drawer_open: bool,
-    /// Pin this control's corner ⓘ popover open on first render (stories).
+    /// Pin this control's label-trigger detail popover open on first
+    /// render (stories).
     #[props(default = None)]
     detail_open_control: Option<String>,
     /// Platform for code-editor shortcut hints; stories pin it.
