@@ -5,6 +5,8 @@
 //! components.
 
 #[cfg(feature = "stories")]
+pub(crate) mod node_cards_stories;
+#[cfg(feature = "stories")]
 pub(crate) mod node_ui_stories;
 #[cfg(all(feature = "stories", target_arch = "wasm32"))]
 pub(crate) mod preview_lab;

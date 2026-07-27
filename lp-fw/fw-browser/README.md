@@ -77,6 +77,25 @@ runtime code; only the *source* of the delta differs. The `lpa-link`
 `browser-worker` provider selects the mode through
 `BrowserWorkerOptions::tick_mode` (default `SelfTicking`).
 
+## Instance-Fatal Contract (Panics)
+
+This crate builds with `panic=abort`
+(`docs/adr/2026-07-23-per-target-panic-strategy.md`): a Rust panic inside a
+wasm export escapes to JavaScript as a `WebAssembly.RuntimeError` *without
+running Rust drops*, so instance state (notably the runtime registry's
+`RefCell` borrow) is leaked and the instance is permanently condemned —
+calling any further export aborts again (`panic_already_borrowed`). The
+worker wrapper therefore treats any such escaped exception as
+**instance-fatal**: it stops its self-tick, answers every later message with
+a sticky `status: "fatal"` envelope, and never calls the instance again;
+recovery is host-side (spawn a fresh Worker). A panic hook installed with
+the logger captures the primary panic message before the abort (mirrored to
+the console and stashed on the worker global for the fatal status). Shader
+*fuel traps* are not this case: emitted shader modules are separate wasm
+instances whose traps are caught and typed at the shader-call boundary
+(`docs/adr/2026-07-23-sim-wasm-fuel.md`). The `debug_force_panic` export /
+worker message exists to exercise this path deliberately.
+
 ## Validation
 
 ```bash

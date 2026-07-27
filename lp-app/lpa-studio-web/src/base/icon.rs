@@ -1,10 +1,11 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Asterisk, Boxes, ChartLine, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot,
-    CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, FlaskConical, Folder,
-    Funnel, Image, Info, Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed, Maximize2,
-    Minimize2, MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio, Save, Settings, Sparkles,
-    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
+    CircleMinus, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag, FlaskConical,
+    Folder, Funnel, Image, Info, Lightbulb, Link2, Link2Off, ListMusic, Locate, LocateFixed,
+    Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio, Save,
+    Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload,
+    Usb, Waypoints, X, Zap,
 };
 
 #[component]
@@ -71,6 +72,8 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Grow => rsx! { Maximize2 { size } },
         StudioIconName::Shrink => rsx! { Minimize2 { size } },
         StudioIconName::Console => rsx! { SquareTerminal { size } },
+        StudioIconName::Cue => rsx! { Flag { size } },
+        StudioIconName::Agent => rsx! { Sparkles { size } },
         StudioIconName::Performance => rsx! { ChartLine { size } },
         StudioIconName::Danger => rsx! { TriangleAlert { size } },
     }
@@ -161,6 +164,12 @@ pub enum StudioIconName {
     Shrink,
     /// Terminal: the device card's Console tab (D42).
     Console,
+    /// Flag: a playlist entry that waits for a trigger (cue) instead of
+    /// auto-advancing on a duration.
+    Cue,
+    /// Sparkles: the shader-editing agent — the role marker on the node
+    /// face's agent section (P2b item 2).
+    Agent,
     /// Line chart: the device card's data-adaptive Performance tab.
     Performance,
     /// Warning triangle: the device card's Danger tab.

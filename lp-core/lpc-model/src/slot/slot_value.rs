@@ -77,6 +77,12 @@ pub enum ValueEditorHint {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         step: Option<OrderedF32>,
     },
+    Knob {
+        min: OrderedF32,
+        max: OrderedF32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<OrderedF32>,
+    },
     Xy,
     Dimensions,
     Affine2d,

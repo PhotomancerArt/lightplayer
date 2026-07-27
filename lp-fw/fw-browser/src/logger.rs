@@ -19,9 +19,10 @@ use wasm_bindgen::prelude::wasm_bindgen;
 /// Default for the process-global `log::max_level()` gate applied at install.
 const LOG_LEVEL: LevelFilter = LevelFilter::Info;
 
-/// Install the console logger. Idempotent; safe to call from every export
-/// entry point.
+/// Install the console logger and the primary-panic hook. Idempotent;
+/// safe to call from every export entry point.
 pub fn install() {
+    crate::panic_hook::install();
     static INSTALL: Once = Once::new();
     INSTALL.call_once(|| {
         match log::set_logger(&ConsoleLogger) {
@@ -74,5 +75,5 @@ extern "C" {
     fn console_warn(message: &str);
 
     #[wasm_bindgen(js_namespace = console, js_name = error)]
-    fn console_error(message: &str);
+    pub(crate) fn console_error(message: &str);
 }

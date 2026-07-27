@@ -206,6 +206,9 @@ where
             // D32 (M6): the quiet PortHeld retry rides the same cadence —
             // a no-op unless a held port's retry interval elapsed.
             self.controller.run_due_connect_retry().await;
+            // Sim crash detection + guarded auto-reboot rides the same
+            // cadence too — a no-op while the sim worker is healthy.
+            self.controller.run_due_sim_crash_recovery().await;
         }
         // Re-hydrate the gallery / release closed projects' locks when due
         // (attach or LibraryChanged with no action in the batch; actions

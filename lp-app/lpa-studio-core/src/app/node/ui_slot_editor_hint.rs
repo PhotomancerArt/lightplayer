@@ -44,6 +44,17 @@ pub enum UiSlotEditorHint {
         /// Optional preferred slider step.
         step: Option<f32>,
     },
+    /// Render as a rotary knob numeric control. The knob widget lives on
+    /// the node face's front panel; generic slot rows render the hint as a
+    /// constrained number field.
+    Knob {
+        /// Minimum knob value.
+        min: f32,
+        /// Maximum knob value.
+        max: f32,
+        /// Optional preferred knob step.
+        step: Option<f32>,
+    },
     /// Render as a dropdown using the provided options.
     Dropdown(Vec<UiSlotOption>),
     /// Render a two-dimensional value with an XY affordance.
