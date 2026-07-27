@@ -13,6 +13,14 @@
 //! bar, and restores the stashed hash so boot routing sees the pre-redirect
 //! location.
 
+#![cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "the call sites are wasm-only glue; host builds run the unit tests"
+    )
+)]
+
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
