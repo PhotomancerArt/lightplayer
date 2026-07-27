@@ -86,6 +86,7 @@ pub fn PopoverButton(
     let mut panel_size = use_signal(|| None::<SizeSnapshot>);
     let position = use_signal(|| PopoverPosition::hidden(placement));
     let auto_update = use_hook(|| Rc::new(RefCell::new(None::<PopoverAutoUpdate>)));
+    let panel_resize = use_hook(|| Rc::new(RefCell::new(None::<PanelResizeObserver>)));
     let gradient_id = use_hook(|| {
         let id = NEXT_POPOVER_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-popover-grad-{id}")
@@ -124,6 +125,8 @@ pub fn PopoverButton(
     let panel_id_for_effect = panel_id.clone();
     let layer_id_for_effect = layer_id.clone();
     let auto_update_for_effect = auto_update.clone();
+    let panel_resize_for_effect = panel_resize.clone();
+    let panel_resize_for_panel_mount = panel_resize.clone();
     let trigger_id_for_layer_mount = trigger_id.clone();
     let panel_id_for_layer_mount = panel_id.clone();
     let trigger_id_for_panel_mount = trigger_id.clone();
@@ -164,8 +167,23 @@ pub fn PopoverButton(
                 position,
                 placement,
             );
+            // Panel content can grow/shrink while open (e.g. a tab switch);
+            // only a ResizeObserver on the panel itself sees that. On first
+            // open the panel isn't in the DOM yet — the panel's `onmounted`
+            // installs it then.
+            ensure_panel_resize_observer(
+                panel_resize_for_effect.clone(),
+                trigger_id_for_effect.clone(),
+                panel_id_for_effect.clone(),
+                layer_id_for_effect.clone(),
+                panel_size,
+                trigger_rect,
+                position,
+                placement,
+            );
         } else {
             auto_update_for_effect.borrow_mut().take();
+            panel_resize_for_effect.borrow_mut().take();
         }
         // The layer unmounts only when the close animation lands at 0.
         animate_progress(
@@ -178,6 +196,7 @@ pub fn PopoverButton(
     use_drop(move || {
         hide_popover_layer(&layer_id_for_drop);
         auto_update.borrow_mut().take();
+        panel_resize.borrow_mut().take();
     });
 
     rsx! {
@@ -298,6 +317,16 @@ pub fn PopoverButton(
                                     placement,
                                 );
                             });
+                            ensure_panel_resize_observer(
+                                panel_resize_for_panel_mount.clone(),
+                                trigger_id_for_panel_mount.clone(),
+                                panel_id_for_panel_mount.clone(),
+                                layer_id_for_panel_mount.clone(),
+                                panel_size,
+                                trigger_rect,
+                                position,
+                                placement,
+                            );
                         },
                         div { style: "{content_style}", {children} }
                     }
@@ -404,7 +433,13 @@ fn measure_trigger_once(
     let current_panel_size = panel_size_by_id(&panel_id).or_else(|| panel_size());
     if let Some(size) = current_panel_size {
         let mut panel_size = panel_size;
-        panel_size.set(Some(size));
+        // Write only on real change: the panel ResizeObserver funnels back
+        // into this path, and an unconditional set would re-render on every
+        // observer fire (observe → measure → set → …) for no visual gain.
+        let previous = *panel_size.peek();
+        if !previous.is_some_and(|prev| prev.approx_eq(size)) {
+            panel_size.set(Some(size));
+        }
     }
     measure_trigger_element(
         trigger_id,
@@ -733,6 +768,101 @@ impl Drop for PopoverAutoUpdate {
             "resize",
             self.resize_callback.as_ref().unchecked_ref(),
         );
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Small DOM observer install wrapper"
+)]
+fn ensure_panel_resize_observer(
+    observer: Rc<RefCell<Option<PanelResizeObserver>>>,
+    trigger_id: String,
+    panel_id: String,
+    layer_id: String,
+    panel_size: Signal<Option<SizeSnapshot>>,
+    trigger_rect: Signal<Option<RectSnapshot>>,
+    position: Signal<PopoverPosition>,
+    placement: PopoverPlacement,
+) {
+    if observer.borrow().is_some() {
+        return;
+    }
+
+    let Some(installed) = PanelResizeObserver::install(
+        trigger_id,
+        panel_id,
+        layer_id,
+        panel_size,
+        trigger_rect,
+        position,
+        placement,
+    ) else {
+        return;
+    };
+    *observer.borrow_mut() = Some(installed);
+}
+
+/// Watches the open panel element for size changes — content growth or
+/// shrink while open (e.g. a tab switch inside the panel), which window
+/// scroll/resize listeners never see — and funnels them into the same
+/// rAF-coalesced re-measure as [`PopoverAutoUpdate`]. No feedback loop:
+/// ResizeObserver only fires on actual border-box changes, and
+/// `measure_trigger_once` writes `panel_size` only when the measurement
+/// really changed.
+struct PanelResizeObserver {
+    observer: web_sys::ResizeObserver,
+    _callback: Closure<dyn FnMut(web_sys::js_sys::Array)>,
+}
+
+impl PanelResizeObserver {
+    fn install(
+        trigger_id: String,
+        panel_id: String,
+        layer_id: String,
+        panel_size: Signal<Option<SizeSnapshot>>,
+        trigger_rect: Signal<Option<RectSnapshot>>,
+        position: Signal<PopoverPosition>,
+        placement: PopoverPlacement,
+    ) -> Option<Self> {
+        let element = web_sys::window()?
+            .document()?
+            .get_element_by_id(&panel_id)?;
+        let pending = Rc::new(Cell::new(false));
+        let callback = Closure::<dyn FnMut(web_sys::js_sys::Array)>::new(
+            move |_entries: web_sys::js_sys::Array| {
+                request_popover_update(
+                    trigger_id.clone(),
+                    panel_id.clone(),
+                    layer_id.clone(),
+                    panel_size,
+                    trigger_rect,
+                    position,
+                    placement,
+                    pending.clone(),
+                );
+            },
+        );
+        let observer = match web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
+            Ok(observer) => observer,
+            Err(error) => {
+                // Degrade to the pre-observer behavior (open-time measures
+                // plus window scroll/resize) rather than failing the popover.
+                log::warn!("popover: ResizeObserver unavailable: {error:?}");
+                return None;
+            }
+        };
+        observer.observe(&element);
+        Some(Self {
+            observer,
+            _callback: callback,
+        })
+    }
+}
+
+impl Drop for PanelResizeObserver {
+    fn drop(&mut self) {
+        self.observer.disconnect();
     }
 }
 
@@ -1207,6 +1337,15 @@ impl SizeSnapshot {
     fn is_empty(self) -> bool {
         self.width < 1.0 || self.height < 1.0
     }
+
+    /// Equal within measurement noise. Sub-epsilon deltas must not rewrite
+    /// `panel_size` (`measure_trigger_once`'s observer-loop guard); real
+    /// corrections — the stabilization passes chase 1px ones — still land.
+    fn approx_eq(self, other: Self) -> bool {
+        const EPSILON_PX: f64 = 0.1;
+        (self.width - other.width).abs() < EPSILON_PX
+            && (self.height - other.height).abs() < EPSILON_PX
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1459,6 +1598,27 @@ mod tests {
         let visible = anchor(100.0, 40.0);
         let left = snap_to_trigger_edges(98.0, visible, panel(46.0));
         assert_eq!(left, 100.0);
+    }
+
+    #[test]
+    fn panel_size_epsilon_passes_real_changes_and_eats_noise() {
+        // The observer-loop guard: float noise must compare equal (so a
+        // ResizeObserver fire can't rewrite `panel_size` forever), while the
+        // 1px corrections the stabilization passes exist for must not.
+        let base = SizeSnapshot {
+            width: 280.0,
+            height: 180.0,
+        };
+        let noise = SizeSnapshot {
+            width: 280.02,
+            height: 179.98,
+        };
+        let grown = SizeSnapshot {
+            width: 280.0,
+            height: 181.0,
+        };
+        assert!(base.approx_eq(noise));
+        assert!(!base.approx_eq(grown));
     }
 
     #[test]
