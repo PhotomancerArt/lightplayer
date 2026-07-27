@@ -138,9 +138,12 @@ impl PreviewWorker {
                         message,
                     });
                 }
+                // "fatal" is the worker's sticky poisoned-instance status
+                // (escaped panic=abort trap): like "error", it condemns
+                // this worker to the recycle path.
                 BrowserOutputEnvelope::Status {
                     status, message, ..
-                } if status == "error" => {
+                } if status == "error" || status == "fatal" => {
                     self.worker_errors.push(message.unwrap_or_else(|| {
                         "worker reported error status without detail".to_string()
                     }));

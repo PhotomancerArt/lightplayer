@@ -43,6 +43,25 @@ impl LinkConnector {
     pub fn descriptor(&self) -> LinkProviderDescriptor {
         self.kind().descriptor()
     }
+
+    /// The sticky instance-fatal message a session's worker reported —
+    /// only the browser-worker provider has this failure mode (a panic
+    /// escaping its panic=abort wasm instance condemns the instance, and
+    /// recovery is a worker reboot, not a retry). `None` for every other
+    /// provider; the fake provider scripts one for crash-recovery tests.
+    pub fn session_fatal(&self, session_id: &LinkSessionId) -> Option<String> {
+        match self {
+            Self::Fake(provider) => provider.session_fatal(session_id),
+            #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+            Self::BrowserWorker(provider) => provider.session_fatal(session_id),
+            #[allow(
+                unreachable_patterns,
+                reason = "the non-fatal provider arms are feature/target-gated; \
+                          in configurations where none exist, Fake covers everything"
+            )]
+            _ => None,
+        }
+    }
 }
 
 impl LinkProvider for LinkConnector {
