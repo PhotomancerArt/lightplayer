@@ -267,14 +267,18 @@ test module at the bottom anyway.
 New agent planning work uses the Photomancer personal planning workspace, not
 new repo-local plan or roadmap directories.
 
+This repo uses the `pm-*` (pm = Photomancer) skills, **not** the `yona-*`
+skills. The `yona-*` planning/review skills write to repo-local
+`docs/plans/` and `docs/reviews/`, which are legacy locations here; if both
+families are installed, always pick `pm-*`.
+
 - Use `pm-plan` for new planning, roadmap, and investigation artifacts.
 - Use `pm-implement` to execute an existing shared `plan.md`.
 - Use `pm-review` for durable review artifacts.
-- Use `yona-push` for push/PR/CI-watch (there is no `pm-push`). If both
-  `pm-*` and `yona-*` skills are installed, `pm-*` wins for planning,
-  implementation, and review in this repo — the `yona-*` planning/review
-  skills write to repo-local `docs/plans/` and `docs/reviews/`, which are
-  legacy locations here.
+- Push/PR/CI-watch: there is no `pm-push` yet. Follow the same flow
+  (push, create PR, watch checks, focused CI repair) directly, or via
+  `yona-push` — it is location-neutral, so it is the one tolerated
+  `yona-*` skill until a `pm-push` exists.
 - Resolve context from `agent-context.toml`; the repo slug is `lp2025`.
 - Resolve the workspace from `PHOTOMANCER_PLANNING_ROOT`, or from the default
   `~/.photomancer/planning` link.
