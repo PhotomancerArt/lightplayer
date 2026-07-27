@@ -346,6 +346,13 @@ churn the whole set. On drift, CI commits the refresh itself:
    confirm the re-run is green.
 4. Mention the affected story baselines in the final summary either way.
 
+If pushes to a PR branch suddenly create **no CI runs at all**, check
+`gh api repos/{owner}/{repo}/pulls/N --jq .mergeable_state` — `dirty` means a
+baseline PNG conflict with main is blocking the merge ref and GitHub silently
+skips `pull_request` runs. Merge `main`, resolving every conflicted PNG by
+taking **main's bytes** (if main's copy is stale, the next capture re-drifts
+and the bot fixes it), then push.
+
 For local interactive review, capture scratch PNGs — optionally filtered to a
 story-id substring so small subsets are cheap:
 

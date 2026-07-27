@@ -79,6 +79,19 @@ workflow runs. Two consequences, both accepted:
 - After any drift run, the branch owner (human or agent) must `git pull`
   before pushing; a forgotten pull surfaces as a non-fast-forward rejection of
   their own push, not silent damage.
+- **Cross-branch baseline conflicts make the PR silently run-less** (observed
+  live during rollout, on this feature's own PR): the refresh commits a
+  *full* fresh set — including within-tolerance byte wobble — so two branches
+  that both refreshed can conflict on PNGs that never meaningfully changed.
+  GitHub then cannot build the PR merge ref (`mergeable_state: dirty`) and
+  **stops creating `pull_request` runs entirely**; pushes appear to be
+  ignored. Remedy: merge `main` and resolve every conflicted PNG by taking
+  **main's bytes** — if main's copy is genuinely stale, the next capture
+  re-drifts and the bot re-commits the fix (self-healing). If wobble-driven
+  conflicts recur, the structural fix is refreshing only stories that fail
+  tolerance (plus adds/removes) instead of the full set — the check already
+  computes per-file verdicts; it would need to emit a machine-readable drift
+  list for the workflow to consume.
 - The `validate-stories` job holds `contents: write` +
   `pull-requests: write` permissions (repo default is read-only).
 - A deliberate browser/oxipng pin bump PR now self-heals: push the bump and CI
