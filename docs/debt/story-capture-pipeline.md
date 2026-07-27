@@ -242,6 +242,26 @@ on a fresh runner. All criteria met; entry retired. Chip
 task_16a65557 (deterministic slot-story drift) is resolved by the same
 fixes.
 
+- 2026-07-27 — **first post-fix capture (PR #153, run 30309630982):
+  green, no bot commit, 1022 byte-identical + 4 within tolerance.** The
+  two #149 churners reproduced their exact signatures — version-badge
+  85 any-diff/Δ6 and shader-face 62 any-diff/Δ2, both 0 significant px —
+  and were correctly left uncommitted. Caveat for exit tracking: this run
+  does **not** exercise the manifest apply path, because auto-commit only
+  runs when the check FAILS and this check passed. That is worth stating
+  precisely, because it also names the real causal chain on #149: the
+  gutter bug made the check fail, the failure triggered auto-commit, and
+  only then did the wholesale copy drag the tolerated files in. Tolerated
+  stories can therefore only churn when some OTHER story genuinely fails.
+  The manifest path stays CI-unproven until a run legitimately fails
+  (`story-apply-refresh.mjs` is unit-tested locally for replace/add/
+  remove/leave-tolerated plus its refuse-without-manifest guard).
+  Also new this run: `home-gallery__opening-a-project` md+lg tolerated at
+  0.037%/0.028% but with **max Δ199/Δ191** — under the ratio limit, yet far
+  too high-amplitude to be anti-aliasing. Given the code-editor precedent
+  below, treat that as a suspected bistable render, not noise (chip
+  task_4c540503).
+
 **Re-activated 2026-07-27 — narrowed exit criteria.** Criteria (1)–(4)
 remain met and are not revisited; only (5) failed, and the 2026-07-27
 investigation showed why it was always going to: byte-exact commits
