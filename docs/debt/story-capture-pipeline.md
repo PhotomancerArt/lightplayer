@@ -1,5 +1,5 @@
 ---
-status: retired      # 2026-07-26: all five exit criteria met — but see the 2026-07-27 incident: criterion (5) "churner set empty" has since been disproven; Yona to decide whether to re-activate
+status: active       # re-activated 2026-07-27: criterion (5) was disproven by the PR #149 recurrence; see the narrowed exit criteria at the bottom
 since: 2026-07-08      # first recorded capture pain (M4-gallery era)
 logged: 2026-07-23
 area: studio-web/story-capture
@@ -184,6 +184,51 @@ committed-as-well-as-working-tree UI changes; (4) failures are loud
   `data-preview-painted` after its first blit and the capture ready-wait
   refuses readiness while any `ux-produced-product-pixel-canvas` in the
   story lacks it — same pattern as the font and `data-story-wait` gates.
+- 2026-07-27 — **THE CHURN WAS TWO DIFFERENT THINGS, and the pixel
+  tolerance already knew.** `check` has always tolerated sub-threshold
+  diffs (`STUDIO_STORY_MAX_CHANNEL_DELTA` 64, `MAX_DIFF_PIXEL_RATIO`
+  0.0005), and measured against it the three PR #149 flips split cleanly:
+  shader-face drawer and version-badge scored **0** significant pixels
+  (pure AA/raster jitter — correctly tolerated), while code-editor scored
+  489/468000 = 0.001045, twice the limit (correctly rejected). The
+  tolerance was right both times; the **auto-commit ignored it**. It
+  deleted every baseline and copied the whole fresh capture, so tolerated
+  files got committed anyway and flipped back on the next run — the
+  ping-pong was a commit-path bug, not a comparison-threshold problem.
+  Fixed: `check` now writes `.refresh-manifest.json` naming exactly the
+  stale files, and both consumers (CI auto-commit, `story-pull`) apply it
+  through `story-apply-refresh.mjs` instead of swapping the set. Tolerated
+  bytes stay put, so sub-threshold jitter can no longer churn a baseline.
+- 2026-07-27 — **code-editor churn is a REAL USER-VISIBLE BUG the capture
+  caught — root-caused, NOT yet fixed.** Reproduced live in the dev build:
+  the line-number gutter advances **14px** per row while code lines
+  advance **18px**, so numbers walk out of alignment with the lines they
+  label (drift grows down the file; the lint marker ends up beside the
+  wrong line). Mechanism: CodeMirror sizes gutter elements from
+  `viewState.heightOracle.lineHeight`, which caches **14** — `normal` at
+  the theme's 12px — while content lays out at **18** (the theme's
+  `line-height: 1.5` on `.cm-scroller`). The oracle is measured once and
+  keeps the stale value. It is bistable because a later *forced content
+  re-measure* does correct it to 18 (observed directly), and whether
+  anything forces one is timing-dependent — so aligned and misaligned are
+  both stable end states, which is exactly what the two CI runs captured.
+  **Hypotheses tested and DISPROVEN** (record so the next attempt does not
+  repeat them — each was verified live against `heightOracle.lineHeight`):
+  `view.requestMeasure()` does not re-read text size (oracle stays 14); a
+  `window` resize event does not; an empty `dispatch({})` does not; a
+  selection-only dispatch does not; and moving `line-height: 1.5` onto the
+  editor root `&` in the theme leaves the root computing 18px but the
+  oracle still 14 at construction. What DID correct it: mutating
+  `contentDOM` (appending a probe `.cm-line`) and a real document change —
+  i.e. only a genuine content re-measure. **Next step:** find the
+  supported CM6 way to force a text-size re-measure after mount, or ensure
+  the theme's styles are applied before the first measurement can run
+  (this is a theme-CSS/measure ordering race, NOT the webfont-metrics race
+  first suspected). Related in spirit to the 2026-07-26 popover
+  `fonts.ready` re-measure fix: **components that cache text geometry at
+  mount are a recurring hazard class here.** Lesson for the pipeline: a
+  churner is a signal to diagnose, not merely noise to suppress — this one
+  was load-bearing.
 
 **Exit-criteria status after the 2026-07-26 paydown** — (1) isolated
 pinned CI runner ✓; (2) clean ephemeral runners make restart cheap and
@@ -196,3 +241,19 @@ guarded ✓; (5) churner set EMPTY ✓ — after the settling-race fixes
 on a fresh runner. All criteria met; entry retired. Chip
 task_16a65557 (deterministic slot-story drift) is resolved by the same
 fixes.
+
+**Re-activated 2026-07-27 — narrowed exit criteria.** Criteria (1)–(4)
+remain met and are not revisited; only (5) failed, and the 2026-07-27
+investigation showed why it was always going to: byte-exact commits
+cannot coexist with a tolerance-based check. What remains:
+- (5a) No baseline is ever committed for a diff the check tolerates —
+  delivered by the refresh manifest; **confirm on the next two CI captures
+  that no tolerated story appears in a bot commit.**
+- (5b) Every story that exceeds the tolerance is a real defect that gets
+  diagnosed, not suppressed. Precedent set today: the code-editor flip is
+  a genuine gutter-alignment bug (root-caused above, fix still open).
+  Raising the thresholds to silence a story is explicitly NOT an exit
+  path.
+Exit when both hold across a few captures. If a new over-tolerance
+churner appears and resists diagnosis, that is the architecture signal —
+escalate rather than widening the threshold.
