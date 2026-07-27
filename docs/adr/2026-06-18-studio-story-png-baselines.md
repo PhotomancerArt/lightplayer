@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted.
+Accepted. **Partially superseded by
+[ADR 2026-07-26](2026-07-26-ci-canonical-story-capture.md):** capture is now
+CI-canonical — baselines are captured by the `validate-stories` CI job and
+staged locally via `just studio-story-pull`; the local
+`studio-story-baselines-if-needed` pre-commit workflow described below is
+retired. The premises that stand: curated baseline PNGs committed to the
+repo, visible in PRs, and never committed by CI.
 
 ## Context
 
