@@ -2,9 +2,15 @@
 # Pick a dev-server port that lets multiple worktrees (agent sessions) coexist
 # on one machine.
 #
-# Usage: scripts/dev-port.sh <service-name> [pinned-port]
+# Usage: scripts/dev-port.sh [--query] <service-name> [pinned-port]
 #
 # Prints the chosen port on stdout; everything else goes to stderr.
+#
+# --query computes the same port with NO side effects: no eviction, no
+# probing. Use it to predict where a server will land (e.g. generating
+# .claude/launch.json) without disturbing anything that is running. If a
+# process outside this worktree holds the port, --query warns on stderr
+# but still prints the hash slot — the real launch will probe past it.
 #
 # The default port is derived from a hash of (worktree root, service name), so
 # each worktree gets a stable port across restarts and different worktrees
@@ -22,7 +28,13 @@ PORT_BASE=20000
 PORT_RANGE=20000
 MAX_PROBES=50
 
-service="${1:?usage: dev-port.sh <service-name> [pinned-port]}"
+query=0
+if [[ "${1:-}" == "--query" ]]; then
+    query=1
+    shift
+fi
+
+service="${1:?usage: dev-port.sh [--query] <service-name> [pinned-port]}"
 pinned="${2:-}"
 
 worktree_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -64,6 +76,13 @@ evict() {
 
 if [[ -n "$pinned" ]]; then
     pids="$(listeners "$pinned")"
+    if [[ "$query" == 1 ]]; then
+        if [[ -n "$pids" ]] && ! owned_by_this_worktree "$pids"; then
+            echo "dev-port: pinned port ${pinned} is currently held by another process (pid ${pids//$'\n'/ }, not this worktree)" >&2
+        fi
+        echo "$pinned"
+        exit 0
+    fi
     if [[ -n "$pids" ]]; then
         if owned_by_this_worktree "$pids"; then
             evict "$pinned" "$pids"
@@ -78,6 +97,15 @@ fi
 
 hash="$(printf '%s' "${worktree_root}:${service}" | cksum | cut -d' ' -f1)"
 port=$((PORT_BASE + hash % PORT_RANGE))
+
+if [[ "$query" == 1 ]]; then
+    pids="$(listeners "$port")"
+    if [[ -n "$pids" ]] && ! owned_by_this_worktree "$pids"; then
+        echo "dev-port: hash port ${port} is currently held by another worktree's server; a real launch would probe upward" >&2
+    fi
+    echo "$port"
+    exit 0
+fi
 
 for _ in $(seq 1 "$MAX_PROBES"); do
     pids="$(listeners "$port")"
