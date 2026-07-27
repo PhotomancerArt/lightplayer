@@ -36,4 +36,4 @@ pub use texture_format::{
     LpsTexture2DDescriptor, LpsTexture2DValue, TextureBindingSpec, TextureFilter, TextureShapeHint,
     TextureStorageFormat, TextureWrap,
 };
-pub use types::{LayoutRules, LpsType, StructMember};
+pub use types::{LayoutRules, LpsType, StructMember, glsl_type_name};

@@ -282,11 +282,18 @@ Run the dev server and open:
 http://127.0.0.1:2820/#/stories
 ```
 
-Generate or update visual baselines with:
+Visual baselines are **CI-canonical**: the `validate-stories` CI job captures
+them in a pinned environment (x64 Linux, Chrome for Testing, bundled fonts)
+and uploads drift as the `story-images-fresh` artifact. Stage it on your
+branch with:
 
 ```bash
-just studio-story-baselines-if-needed
+just studio-story-pull
 ```
+
+Do not commit locally-captured baselines — local rendering differs from the
+canonical environment. See `docs/adr/2026-07-26-ci-canonical-story-capture.md`
+and AGENTS.md "Studio UI visual baselines".
 
 Baselines are captured for `sm`, `md`, and `lg` viewports. Files are named as a
 story id plus viewport suffix, for example:
@@ -300,10 +307,16 @@ studio__editor-shell__lg.png
 Useful commands:
 
 ```bash
-just studio-story-pngs        # scratch captures under story-images/.scratch
-just studio-story-baselines   # update committed sm/md/lg baselines
-just studio-story-check       # compare fresh captures with committed baselines
+just studio-story-pngs [filter...]   # scratch captures under story-images/.scratch
+just studio-story-check [filter...]  # compare fresh captures with committed baselines
+just studio-story-pull               # stage CI-captured baselines for this branch
+just studio-story-baselines          # emergency full local regen (do not commit)
 ```
+
+Filters are case-insensitive story-id substrings (OR-matched), so
+`just studio-story-pngs slot-value-editor popover` captures just those story
+families. Local captures and checks are non-authoritative next to the CI
+environment — use them for quick interactive review.
 
 Baseline and check modes require `oxipng` so committed and fresh PNGs are
 losslessly normalized. Install it with `brew install oxipng` or
@@ -373,6 +386,20 @@ hand-authored), plus this shader's consumed uniforms (typed as the
 generated uniform header declares them) and the `render` entry snippet.
 Accepting inserts a snippet with navigable placeholders; non-GLSL editors
 pass no completions and never grow a popup.
+
+The user's **own symbols complete live**: ~200 ms after typing stops the
+buffer is re-analyzed client-side by the LightPlayer GLSL compiler's front
+half (`lps_glsl::analyze_symbols` — parse + signature pass only, in the
+studio wasm; never the device, never the wire), so user-defined functions
+(with typed signature detail and call snippets), globals/consts, structs
+(with construction snippets), and text-declared uniforms join the popup,
+ranked above the builtins via a CodeMirror `boost`. Text-declared uniforms
+dedup against the slot-derived set by name (slot wins — its type is the
+applied truth), and the `render` template entry drops once the buffer
+defines `render`. A failed analysis (the normal mid-edit state, e.g. an
+unbalanced brace) keeps the last good symbol set, so the popup never
+blanks while typing — the same keep-last-good philosophy as the engine's
+shader handling.
 
 ## Boundary
 

@@ -14,6 +14,8 @@ import {
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
+import { createReadStream } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -27,7 +29,7 @@ const publicDir = path.resolve(
   process.env.STUDIO_STORY_SITE_DIR ?? "target/dx/lpa-studio-web/debug/web/public",
 );
 const storyRoot = path.join(repoRoot, "lp-app/lpa-studio-web");
-const mode = parseMode(process.argv.slice(2));
+const { mode, storyFilters } = parseCliArgs(process.argv.slice(2));
 // Default to an OS-assigned free port so parallel runs (multiple agents, each in
 // its own git worktree — which isolates files but NOT ports) never fight over a
 // fixed port. Set STUDIO_STORY_PNGS_PORT to pin one (e.g. for debugging).
@@ -42,6 +44,12 @@ const cdpCallTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CDP_TIMEOUT_MS", 
 // resumes from the already-captured files and has always completed in practice,
 // so retry the pass in-process instead of taxing callers with a manual re-run.
 const captureAttempts = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_ATTEMPTS", 2);
+// Fresh browser every N captures: a long-lived capture browser degrades into
+// permanent navigation stalls after a few hundred same-process navigations of
+// the release wasm bundle (CI runners wedge around ~200; a CPU-limited local
+// container around ~580). Restarts cost ~1-2s and resume from disk, so a low
+// ceiling is cheap insurance everywhere, including local runs.
+const browserRestartEvery = parsePositiveIntegerEnv("STUDIO_STORY_BROWSER_RESTART_EVERY", 120);
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
@@ -180,22 +188,32 @@ if (resuming) {
   }
 }
 
-const server = spawn("python3", ["-m", "http.server", port, "--bind", "127.0.0.1"], {
-  cwd: publicDir,
-  stdio: ["ignore", "pipe", "pipe"],
-});
-const serverExited = once(server, "exit").catch(() => {});
-server.once("error", (error) => {
-  console.error(`Failed to start static server from ${publicDir}: ${error.message}`);
+// In-process static server. This replaced `python3 -m http.server`, which
+// WEDGES under capture load: when a CDP timeout kills a Chrome page
+// mid-download, the serving thread blocks forever in a kernel socket send
+// (observed in sock_alloc_send_pskb) and the whole server stops answering —
+// turning one transiently slow story into a permanent all-pages navigation
+// wedge (the debt entry's long-mysterious "heavy end-of-queue sheets" class).
+// Node destroys dead sockets instead of blocking on them.
+const server = createStaticServer(publicDir);
+await new Promise((resolve, reject) => {
+  server.once("error", reject);
+  server.listen(Number(port), "127.0.0.1", resolve);
 });
 
 try {
   await waitForServer(baseUrl);
-  const storyIds = await discoverStoryIds();
-  if (storyIds.length === 0) {
+  const discoveredStoryIds = await discoverStoryIds();
+  if (discoveredStoryIds.length === 0) {
     throw new Error("No story links were discovered from the storybook page.");
   }
+  const storyIds = filterStoryIds(discoveredStoryIds, storyFilters);
 
+  // Clear any sentinel from a previous completed check so a crashed capture
+  // can't inherit it (the sentinel is rewritten after a complete comparison).
+  if (mode === "check") {
+    await rm(path.join(captureDir, ".check-complete"), { force: true });
+  }
   const files = await captureStoriesWithRetry(storyIds, captureDir);
   await optimizePngs(files, { required: mode !== "pngs" });
 
@@ -204,6 +222,13 @@ try {
     console.log(`Story baselines: ${path.relative(repoRoot, outputDir)}`);
   } else if (mode === "check") {
     const ok = await compareBaselines(storyIds, baselineDir, outputDir);
+    // Sentinel: the comparison ran over a COMPLETE capture. Consumers of the
+    // fresh-capture set (the CI artifact and `story-pull`) require this so a
+    // crashed partial capture can't masquerade as story drift — staging a
+    // partial set would delete every baseline it didn't reach.
+    if (storyFilters.length === 0) {
+      await writeFile(path.join(outputDir, ".check-complete"), `${new Date().toISOString()}\n`);
+    }
     if (!ok) {
       console.error("\nStory baselines differ. Run `just studio-story-baselines` to update them.");
       process.exitCode = 1;
@@ -212,19 +237,104 @@ try {
     console.log(`Story PNGs: ${path.relative(repoRoot, outputDir)}`);
   }
 } finally {
-  if (server.exitCode === null) {
-    server.kill("SIGTERM");
-  }
-  await Promise.race([serverExited, delay(1_000)]);
+  server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
 }
 
-function parseMode(args) {
-  const value = args[0] ?? "pngs";
-  if (["pngs", "baselines", "check"].includes(value)) {
-    return value;
+// Minimal static file server over publicDir. MIME types cover what the story
+// build actually serves; `application/wasm` is load-bearing (streaming
+// compile refuses other types).
+function createStaticServer(rootDir) {
+  const mimeTypes = {
+    ".css": "text/css",
+    ".html": "text/html; charset=utf-8",
+    ".ico": "image/x-icon",
+    ".js": "text/javascript",
+    ".json": "application/json",
+    ".mjs": "text/javascript",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".wasm": "application/wasm",
+    ".woff2": "font/woff2",
+  };
+  return createHttpServer((request, response) => {
+    const fatal = (status) => {
+      response.writeHead(status);
+      response.end();
+    };
+    let pathname;
+    try {
+      pathname = decodeURIComponent(new URL(request.url, "http://localhost/").pathname);
+    } catch {
+      return fatal(400);
+    }
+    if (pathname.endsWith("/")) {
+      pathname += "index.html";
+    }
+    const filePath = path.join(rootDir, pathname);
+    // path.join normalizes ".." segments; anything escaping rootDir is refused.
+    if (!filePath.startsWith(rootDir + path.sep)) {
+      return fatal(403);
+    }
+    const stream = createReadStream(filePath);
+    stream.once("error", () => fatal(404));
+    stream.once("open", () => {
+      response.writeHead(200, {
+        "content-type": mimeTypes[path.extname(filePath)] ?? "application/octet-stream",
+        "cache-control": "no-store",
+      });
+      stream.pipe(response);
+    });
+    // A page killed mid-download (CDP timeout recycling) must tear down the
+    // stream, never block the server.
+    response.once("close", () => stream.destroy());
+  });
+}
+
+function parseCliArgs(args) {
+  const modes = ["pngs", "baselines", "check"];
+  let mode = "pngs";
+  let storyFilters = args;
+  if (args.length > 0 && modes.includes(args[0])) {
+    mode = args[0];
+    storyFilters = args.slice(1);
   }
-  console.error("Usage: studio-story-pngs.mjs [pngs|baselines|check]");
-  process.exit(2);
+  if (storyFilters.some((term) => term.startsWith("-"))) {
+    console.error("Usage: studio-story-pngs.mjs [pngs|baselines|check] [story-filter...]");
+    process.exit(2);
+  }
+  // Baselines are always the full story set: the committed set is replaced
+  // wholesale (replaceBaselineImages), and canonical captures come from CI —
+  // a partial local regeneration would silently delete every other baseline.
+  if (mode === "baselines" && storyFilters.length > 0) {
+    console.error(
+      "Story filters are not supported for baselines: the committed set is always " +
+        "regenerated in full (and canonically on CI). Use `pngs` or `check` with filters.",
+    );
+    process.exit(2);
+  }
+  return { mode, storyFilters };
+}
+
+// Case-insensitive substring OR-match over story ids. An empty filter list
+// keeps every story.
+function filterStoryIds(storyIds, filters) {
+  if (filters.length === 0) {
+    return storyIds;
+  }
+  const needles = filters.map((term) => term.toLowerCase());
+  const matched = storyIds.filter((storyId) => {
+    const haystack = storyId.toLowerCase();
+    return needles.some((needle) => haystack.includes(needle));
+  });
+  if (matched.length === 0) {
+    console.error(
+      `No stories match filter(s): ${filters.join(", ")} (${storyIds.length} stories discovered).`,
+    );
+    process.exit(2);
+  }
+  console.log(`Filter matched ${matched.length}/${storyIds.length} stories.`);
+  return matched;
 }
 
 // Ask the OS for a free TCP port by binding to 0, then release it and hand the
@@ -382,54 +492,77 @@ async function captureStoriesWithRetry(storyIds, directory) {
 
 async function captureStories(storyIds, directory) {
   const targets = storyTargets(storyIds);
-  const concurrency = Math.min(requestedCaptureConcurrency, targets.length);
   const files = new Array(targets.length);
-  const browser = await launchCaptureBrowser(concurrency);
-  let nextTargetIndex = 0;
 
+  // Resume: viewports already captured for this build are kept as-is (the
+  // capture dir is wiped at startup whenever the build changed). Filtering
+  // them out here keeps the browser-restart budget below proportional to
+  // real capture work, so resumed runs don't pay restarts for skipped files.
+  const pending = [];
+  for (let targetIndex = 0; targetIndex < targets.length; targetIndex += 1) {
+    const target = targets[targetIndex];
+    const file = path.join(directory, storyFileName(target.storyId, target.viewport));
+    if (await isNonEmptyFile(file)) {
+      files[targetIndex] = file;
+    } else {
+      pending.push({ target, targetIndex });
+    }
+  }
+  if (pending.length === 0) {
+    return files;
+  }
+
+  const concurrency = Math.min(requestedCaptureConcurrency, pending.length);
   console.log(
-    `Capturing ${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
+    `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
   );
 
-  try {
-    await Promise.all(
-      Array.from({ length: concurrency }, (_, pageIndex) =>
-        captureStoryWorker({
-          browser,
-          directory,
-          files,
-          nextTargetIndex: () => nextTargetIndex++,
-          pageIndex,
-          targets,
-        }),
-      ),
-    );
-  } finally {
-    await browser.close();
+  // Defense in depth: capture in chunks with a fresh browser per chunk
+  // (~1-2s each, resume from disk). The historical navigation wedges were
+  // ultimately the static server's fault (see createStaticServer), but a
+  // bounded browser lifetime keeps any future renderer-side degradation
+  // from ever wedging a whole run. See docs/debt/story-capture-pipeline.md.
+  for (let start = 0; start < pending.length; start += browserRestartEvery) {
+    const chunk = pending.slice(start, start + browserRestartEvery);
+    const chunkConcurrency = Math.min(concurrency, chunk.length);
+    if (start > 0) {
+      console.log(
+        `Restarting capture browser (${start}/${pending.length} captured this pass)...`,
+      );
+    }
+    const browser = await launchCaptureBrowser(chunkConcurrency);
+    let nextChunkIndex = 0;
+    try {
+      await Promise.all(
+        Array.from({ length: chunkConcurrency }, (_, pageIndex) =>
+          captureStoryWorker({
+            browser,
+            directory,
+            files,
+            nextPending: () => chunk[nextChunkIndex++],
+            pageIndex,
+          }),
+        ),
+      );
+    } finally {
+      await browser.close();
+    }
   }
   return files;
 }
 
-async function captureStoryWorker({
-  browser,
-  directory,
-  files,
-  nextTargetIndex,
-  pageIndex,
-  targets,
-}) {
+async function captureStoryWorker({ browser, directory, files, nextPending, pageIndex }) {
   while (true) {
-    const targetIndex = nextTargetIndex();
-    if (targetIndex >= targets.length) {
+    const entry = nextPending();
+    if (entry === undefined) {
       return;
     }
 
-    const target = targets[targetIndex];
+    const { target, targetIndex } = entry;
     const file = path.join(directory, storyFileName(target.storyId, target.viewport));
-    // A viewport already captured for this build is kept as-is. Any non-empty
-    // file here is from the current build: the capture dir is wiped at startup
-    // whenever the build changed, so this covers both cross-run resume and the
-    // in-process retry pass after a failed capture attempt.
+    // Already-captured check stays as a safety even though captureStories
+    // pre-filters: the in-process retry pass re-enters with fresh pending
+    // lists built from the same on-disk state.
     if (await isNonEmptyFile(file)) {
       files[targetIndex] = file;
       continue;
@@ -458,6 +591,10 @@ async function launchCaptureBrowser(pageCount) {
     [
       "--headless=new",
       "--disable-gpu",
+      // Shared-memory transport can exhaust /dev/shm on Linux CI runners;
+      // falling back to /tmp is the standard headless-CI setting and is
+      // harmless elsewhere.
+      "--disable-dev-shm-usage",
       "--hide-scrollbars",
       "--no-first-run",
       "--no-default-browser-check",
@@ -528,6 +665,7 @@ async function createCapturePage(cdp) {
             " transition: none !important;" +
             " animation: none !important;" +
             " caret-color: transparent !important;" +
+            " scroll-behavior: auto !important;" +
             " }";
           document.head.appendChild(style);
         });
@@ -556,19 +694,68 @@ async function createCapturePage(cdp) {
       await cdp.send("Page.navigate", { url }, sessionId);
       await waitForCaptureBox(cdp, sessionId, storyId);
       await waitForStoryReady(cdp, sessionId, storyId);
+      // <select> widgets paint their label at first layout and do not reliably
+      // repaint when a webfont lands afterwards, so a select that painted
+      // before its font decoded keeps fallback-metric text for the life of the
+      // page — bistable run-to-run depending on who won the race (the last
+      // churner standing after the font gate above: subpixel-shifted select
+      // text, ~Δ100). Force each select through a display toggle after fonts
+      // are ready so its label re-renders with the real font.
+      await evaluate(
+        cdp,
+        sessionId,
+        `
+        (() => {
+          document.querySelectorAll('select').forEach((s) => {
+            const d = s.style.display;
+            s.style.display = 'none';
+            void s.offsetWidth;
+            s.style.display = d;
+          });
+          return true;
+        })()
+      `,
+      );
+      await settleFocus(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
-      const { data } = await cdp.send(
-        "Page.captureScreenshot",
-        {
-          format: "png",
-          captureBeyondViewport: true,
-          fromSurface: true,
-          clip,
-        },
-        sessionId,
-      );
-      await writeFile(file, Buffer.from(data, "base64"));
+      const shoot = async () => {
+        const { data } = await cdp.send(
+          "Page.captureScreenshot",
+          {
+            format: "png",
+            captureBeyondViewport: true,
+            fromSurface: true,
+            clip,
+          },
+          sessionId,
+        );
+        return Buffer.from(data, "base64");
+      };
+      // Stable-pair capture: accept only two consecutive identical shots.
+      // The story-ready wait proves the page settled ENOUGH to paint, but
+      // bistable late settling still churned a known story set — a font-swap
+      // repaint landing after first paint (select text ghosting) and an
+      // autofocus ring appearing between shots. Both converge to a terminal
+      // state, so requiring shot N == shot N-1 captures that steady state
+      // deterministically. Genuinely non-settling stories exhaust the
+      // attempts; keep the last shot and warn so they surface as churn, not
+      // as a capture failure.
+      let shot = await shoot();
+      let stable = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const next = await shoot();
+        if (next.equals(shot)) {
+          stable = true;
+          break;
+        }
+        shot = next;
+      }
+      if (!stable) {
+        console.warn(`unstable render (kept last shot): ${storyId} (${viewport.name})`);
+      }
+      await writeFile(file, shot);
     },
 
     async close() {
@@ -644,6 +831,50 @@ async function waitForCaptureBox(cdp, sessionId, storyId) {
   throw new Error(`Timed out waiting for story capture target: ${storyId}`);
 }
 
+// Stories that mount an [autofocus] element (e.g. the device-card name sheet)
+// flickered run-to-run: focus lands a beat after first paint, autofocus
+// scrolls the element into view (shifting the capture box), and whether the
+// focus ring survives later re-renders is itself racy — so neither "ring" nor
+// "no ring" is a stable terminal state of the page. Make captures
+// deterministic at this layer: wait for the autofocus candidate to take focus
+// (so a late-landing focus can't race the blur), then blur it and reset
+// scroll. Baselines therefore always show the unfocused state. Bounded and
+// non-fatal: an autofocus element that can never take focus (hidden in a
+// closed sheet) costs this story the timeout, not the run.
+async function settleFocus(cdp, sessionId, storyId) {
+  const focusedExpression = `
+    (() => {
+      const af = document.querySelector('[autofocus]');
+      return !af || document.activeElement === af;
+    })()
+  `;
+  const started = Date.now();
+  let settled = false;
+  while (Date.now() - started < 3_000) {
+    if (await evaluate(cdp, sessionId, focusedExpression)) {
+      settled = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (!settled) {
+    console.warn(`autofocus never settled (capturing anyway): ${storyId}`);
+  }
+  await evaluate(
+    cdp,
+    sessionId,
+    `
+    (() => {
+      if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.blur();
+      }
+      window.scrollTo(0, 0);
+      return true;
+    })()
+  `,
+  );
+}
+
 async function waitForStoryReady(cdp, sessionId, storyId) {
   const expression = `
     (() => {
@@ -651,11 +882,29 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
       if (!el || el.getAttribute('data-story-id') !== ${JSON.stringify(storyId)}) {
         return false;
       }
-      // Webfont fallback metrics shift text by a few pixels; a capture that
-      // races font decoding diffs nondeterministically run-to-run (scattered
-      // ~Δ180 text pixels on whichever pages lost the race).
-      if (document.fonts && document.fonts.status !== 'loaded') {
-        return false;
+      // Webfont fallback metrics shift text; a capture that races font
+      // decoding diffs nondeterministically run-to-run — from scattered text
+      // pixels up to whole-page layout shifts when line wrapping changes.
+      // document.fonts.status alone is a trap: it reports 'loaded' whenever
+      // no loads are PENDING, which is trivially true before the first
+      // element requests a face. Demand every bundled face explicitly,
+      // kicking off its load so the check converges even for faces the
+      // current story hasn't touched yet.
+      if (document.fonts) {
+        const faces = [
+          '400 1em Inter', '500 1em Inter', '600 1em Inter',
+          '700 1em Inter', '800 1em Inter',
+          "400 1em 'JetBrains Mono'", "600 1em 'JetBrains Mono'",
+          "700 1em 'JetBrains Mono'",
+        ];
+        const missing = faces.filter((f) => !document.fonts.check(f));
+        if (missing.length > 0) {
+          missing.forEach((f) => document.fonts.load(f));
+          return false;
+        }
+        if (document.fonts.status !== 'loaded') {
+          return false;
+        }
       }
       return !document.querySelector('[data-story-wait="1"]');
     })()
@@ -745,7 +994,9 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   const expectedFiles = new Set(
     targets.map((target) => storyFileName(target.storyId, target.viewport)),
   );
-  const baselineFiles = await listPngFiles(expectedDir);
+  // A filtered run only captures a partial target set, so baselines outside it
+  // can't be judged as removed stories — skip the removed-story scan entirely.
+  const baselineFiles = storyFilters.length > 0 ? [] : await listPngFiles(expectedDir);
   const unexpected = baselineFiles.filter((file) => !expectedFiles.has(file));
   const missing = [];
   const changed = [];

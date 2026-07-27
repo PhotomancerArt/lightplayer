@@ -325,29 +325,38 @@ index are architecture signals — surface them when you see one repeat.
 
 ## Studio UI visual baselines
 
-When a change touches non-generated files under `lp-app/lpa-studio-web/`, run the
-Studio story baseline helper before committing:
+Story baselines are **CI-canonical** (see
+`docs/adr/2026-07-26-ci-canonical-story-capture.md`): the committed PNGs under
+`lp-app/lpa-studio-web/story-images/` are captured by the `validate-stories`
+CI job in a pinned environment (x64 Linux, Chrome for Testing, bundled fonts).
+**Never commit locally-captured baselines** — macOS rendering differs and will
+churn the whole set. CI never commits either; the branch owner does:
+
+1. Push UI changes (a PR triggers the path-gated `validate-stories` job).
+2. If the job fails with story drift, it uploads the fresh capture set as the
+   `story-images-fresh` artifact. On the branch, run:
+
+   ```bash
+   just studio-story-pull
+   ```
+
+   This downloads the artifact and stages the baseline changes.
+3. Review the staged PNG diff, commit it (with the UI change or as a follow-up
+   baseline commit on the same PR), push, and confirm the re-run is green.
+   Mention the affected story baselines in the final summary.
+
+For local interactive review, capture scratch PNGs — optionally filtered to a
+story-id substring so small subsets are cheap:
 
 ```bash
-just studio-story-baselines-if-needed
+just studio-story-pngs slot-value-editor   # scratch captures, filter optional
+just studio-story-check slot-value-editor  # compare against committed baselines
 ```
 
-If it updates files under `lp-app/lpa-studio-web/story-images/`, include those
-PNG changes in the same commit and mention the affected story baselines in the
-final summary. The helper intentionally ignores generated web artifacts,
-scratch PNGs, fresh check PNGs, and the baseline PNGs themselves.
-
-Useful related commands:
-
-```bash
-just studio-story-pngs        # ignored scratch PNGs for quick local review
-just studio-story-baselines   # update committed story baselines
-just studio-story-check       # compare fresh PNGs to committed baselines
-```
-
-`studio-story-baselines` and `studio-story-check` require `oxipng`; run
-`scripts/dev-init.sh` or install it with `cargo install oxipng` /
-`brew install oxipng`.
+Local check output is **non-authoritative** (macOS rendering ≠ CI): use it for
+quick "did my change move only the stories I expected" sanity, not as a gate.
+`studio-story-check` requires `oxipng`; run `scripts/dev-init.sh` or install it
+with `cargo install oxipng` / `brew install oxipng`.
 
 Do not add an auto-mutating Git hook for this workflow unless the user asks for
 one explicitly. Hooks that rewrite the working tree during commit are annoying
