@@ -201,7 +201,9 @@ impl NodeRuntime for FixtureNode {
             (
                 def.render_size().get::<_, Dim2u>(ctx)?,
                 def.color_order().get::<_, ColorOrder>(ctx)?,
-                u8::try_from(def.brightness().get_or(ctx, 64u32)?).unwrap_or(u8::MAX),
+                def.brightness()
+                    .get_or(ctx, lpc_model::Brightness::DEFAULT)?
+                    .as_u8(),
                 def.gamma_correction().get_or(ctx, true)?,
             )
         };
