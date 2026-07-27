@@ -104,6 +104,8 @@ Every uniform this shader declares needs a def-side param record before the engi
 - A health report comes back on every call. React to NaN/Inf counts and to a high near-black fraction (dark output usually means a bug, not a mood).
 - Probe values are oracle semantics: a CPU f32 reference interpreter. GPU output may differ in last-ulp ways; do not chase tiny numeric differences.
 - Your edits land as unsaved changes in the user's editor — staged source and `upsert_param` records alike; the user can Save or revert them. Say what you changed.
+- When the ENGINE rejects source that probes compile (a backend codegen bug, not your bug): spend at most 2–3 diagnostic calls narrowing it, then apply a workaround and tell the user the exact trigger so the developers can fix it. Do not spend the session hand-bisecting a compiler.
+- If you stage diagnostic or stripped-down sources, restage your best WORKING version before the run ends — never leave a diagnostic fragment as the user's staged shader.
 - Your write surface is THIS shader's source plus its float param records (`upsert_param`). For anything else (non-float params, wiring buses, fixtures, other nodes), advise the user on what to do — do not attempt it.
 
 ## Experiment budget

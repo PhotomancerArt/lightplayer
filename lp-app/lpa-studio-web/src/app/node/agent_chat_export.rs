@@ -37,12 +37,26 @@ pub(crate) fn chat_markdown(view: &UiAgentView) -> String {
                 out.push_str(&format!("**Tool** — {note}\n"));
                 if let Some(shader_ok) = row.shader_ok {
                     out.push_str(&format!(
-                        "- compile {}, {} probes, {} warnings{}\n",
+                        "- probe compile {}, {} probes, {} warnings{}\n",
                         if shader_ok { "ok" } else { "failed" },
                         row.probes,
                         row.warnings,
                         if row.staged { ", staged an edit" } else { "" },
                     ));
+                }
+                // The ENGINE verdict is a different compile world than the
+                // probe harness (backend codegen can reject what probes
+                // accept) — say both, or the log reads "ok" while the
+                // engine is failing.
+                if let Some(entry) = row
+                    .edit_turn
+                    .and_then(|turn| view.history.iter().find(|entry| entry.turn == turn))
+                {
+                    out.push_str(match entry.engine_ok {
+                        Some(true) => "- engine: ok\n",
+                        Some(false) => "- engine: ERROR (backend rejected the staged source)\n",
+                        None => "- engine: unresolved\n",
+                    });
                 }
                 if let Some(error) = &row.error {
                     out.push_str(&format!("- error: {error}\n"));
@@ -64,6 +78,16 @@ pub(crate) fn chat_markdown(view: &UiAgentView) -> String {
             view.usage.total_input_tokens(),
             view.usage.output_tokens
         ));
+        // Cache buckets, spelled out: "no cache hits" on a long session is
+        // a prompt-caching regression signal, not a detail to hide.
+        if view.usage.cache_read_tokens > 0 {
+            out.push_str(&format!(
+                " · {} cached reads, {} cache writes",
+                view.usage.cache_read_tokens, view.usage.cache_write_tokens
+            ));
+        } else {
+            out.push_str(" · NO CACHE HITS");
+        }
         if let Some(cost) = view.estimated_cost.as_deref() {
             out.push_str(&format!(" · {cost}"));
         }
