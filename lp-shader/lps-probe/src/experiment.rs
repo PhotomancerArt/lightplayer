@@ -14,7 +14,7 @@ use crate::experiment_result::{
     ProbeValueRow, ProbeValues, ShaderCompileOutcome,
 };
 use crate::experiment_spec::{BindingValue, ExperimentSpec};
-use crate::health::{evaluate_health, health_sites};
+use crate::health::{HealthReport, evaluate_health, health_sites};
 use crate::interp_harness::{CompiledShader, InterpInstance};
 use crate::probe_domain::{ProbeDomain, ProbeSite};
 use crate::probe_reduce::ProbeReduce;
@@ -46,33 +46,106 @@ pub const MAX_OPS_PER_EVAL: u64 = MAX_TOTAL_EVALS as u64 * 64;
 /// LPIR interpreter, and report diagnostics, health, and probe outcomes.
 ///
 /// See the crate README for the determinism contract (site and vary
-/// ordering) and the evaluation caps.
+/// ordering) and the evaluation caps. Callers that need to interleave work
+/// between stages (e.g. UI yield points) drive an [`ExperimentRunner`]
+/// directly; this function is the single-shot wrapper over it.
 pub fn run_experiment(source: &str, spec: &ExperimentSpec) -> ExperimentResult {
-    let mut warnings = Vec::new();
-
-    let compiled = match CompiledShader::compile(source) {
-        Ok(c) => c,
-        Err(diagnostics) => return failed_result(spec, diagnostics),
-    };
-    if let Err(diag) = validate_render_signature(&compiled) {
-        return failed_result(spec, vec![diag]);
+    let mut runner = ExperimentRunner::new(source, spec);
+    if runner.compile() {
+        for idx in 0..runner.probe_count() {
+            runner.run_probe(idx);
+        }
     }
-    let mut health_inst = match compiled.instantiate() {
-        Ok(i) => i,
-        Err(e) => return failed_result(spec, vec![format!("shader init failed: {e}")]),
-    };
-    apply_bindings(&mut health_inst, spec, Some(&mut warnings));
-    let health = evaluate_health(&mut health_inst, spec, &mut warnings);
+    runner.finish()
+}
 
-    let mut total_evals = health_sites(spec).len();
-    let mut probes: VecMap<String, ProbeOutcome> = VecMap::new();
-    for (idx, probe) in spec.probes.iter().enumerate() {
-        if probes.get(&probe.id).is_some() {
-            warnings.push(format!(
+/// Stepped form of [`run_experiment`]: `compile` (base shader + health),
+/// then `run_probe` per spec probe in order, then `finish`. Behavior is
+/// identical to the single-shot function — the split exists so a caller on
+/// a single-threaded executor can yield between the (potentially slow)
+/// stages.
+pub struct ExperimentRunner<'a> {
+    source: &'a str,
+    spec: &'a ExperimentSpec,
+    warnings: Vec<String>,
+    /// `Some` once `compile` succeeded; `None` before, or after a failure.
+    compiled: Option<CompiledShader>,
+    health: Option<HealthReport>,
+    probes: VecMap<String, ProbeOutcome>,
+    total_evals: usize,
+    /// Compile-stage diagnostics; set exactly when compilation failed.
+    failure_diagnostics: Option<Vec<String>>,
+}
+
+impl<'a> ExperimentRunner<'a> {
+    pub fn new(source: &'a str, spec: &'a ExperimentSpec) -> Self {
+        Self {
+            source,
+            spec,
+            warnings: Vec::new(),
+            compiled: None,
+            health: None,
+            probes: VecMap::new(),
+            total_evals: 0,
+            failure_diagnostics: None,
+        }
+    }
+
+    /// Number of probes the spec asks for (cap-independent; the per-probe
+    /// caps apply inside [`Self::run_probe`]).
+    pub fn probe_count(&self) -> usize {
+        self.spec.probes.len()
+    }
+
+    /// Compile the base shader and evaluate the health report. Returns
+    /// `false` on a compile/validation failure — probes are then skipped
+    /// and [`Self::finish`] reports the diagnostics.
+    pub fn compile(&mut self) -> bool {
+        let compiled = match CompiledShader::compile(self.source) {
+            Ok(c) => c,
+            Err(diagnostics) => {
+                self.failure_diagnostics = Some(diagnostics);
+                return false;
+            }
+        };
+        if let Err(diag) = validate_render_signature(&compiled) {
+            self.failure_diagnostics = Some(vec![diag]);
+            return false;
+        }
+        let mut health_inst = match compiled.instantiate() {
+            Ok(i) => i,
+            Err(e) => {
+                self.failure_diagnostics = Some(vec![format!("shader init failed: {e}")]);
+                return false;
+            }
+        };
+        apply_bindings(&mut health_inst, self.spec, Some(&mut self.warnings));
+        self.health = Some(evaluate_health(
+            &mut health_inst,
+            self.spec,
+            &mut self.warnings,
+        ));
+        self.total_evals = health_sites(self.spec).len();
+        self.compiled = Some(compiled);
+        true
+    }
+
+    /// Evaluate spec probe `idx` (duplicate-id and cap rules identical to
+    /// the single-shot path). No-op before a successful `compile` or for an
+    /// out-of-range index.
+    pub fn run_probe(&mut self, idx: usize) {
+        if self.compiled.is_none() {
+            return;
+        }
+        let Some(probe) = self.spec.probes.get(idx) else {
+            return;
+        };
+        if self.probes.get(&probe.id).is_some() {
+            self.warnings.push(format!(
                 "duplicate probe id '{}'; later occurrence ignored",
                 probe.id
             ));
-            continue;
+            return;
         }
         let outcome = if idx >= MAX_PROBES {
             ProbeOutcome::Skipped {
@@ -82,17 +155,23 @@ pub fn run_experiment(source: &str, spec: &ExperimentSpec) -> ExperimentResult {
                 ),
             }
         } else {
-            run_probe(source, spec, probe, &mut total_evals)
+            run_probe(self.source, self.spec, probe, &mut self.total_evals)
         };
-        probes.insert(probe.id.clone(), outcome);
+        self.probes.insert(probe.id.clone(), outcome);
     }
 
-    ExperimentResult {
-        shader: ShaderCompileOutcome::Ok,
-        compiled: Some(compiled),
-        health: Some(health),
-        probes,
-        warnings,
+    /// Assemble the [`ExperimentResult`].
+    pub fn finish(self) -> ExperimentResult {
+        if let Some(diagnostics) = self.failure_diagnostics {
+            return failed_result(self.spec, diagnostics);
+        }
+        ExperimentResult {
+            shader: ShaderCompileOutcome::Ok,
+            compiled: self.compiled,
+            health: self.health,
+            probes: self.probes,
+            warnings: self.warnings,
+        }
     }
 }
 

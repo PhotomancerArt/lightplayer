@@ -7,10 +7,9 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::app::settings::local_model_probe::{self as probe, ProbeOutcome};
-use lpa_studio_core::app::settings::model_catalog::{CatalogModel, CatalogPrice, ModelCatalog};
 use lpa_studio_core::{
-    AgentProvider, BrowserFacts, LocalModelProbeState, ModelCatalogState, SettingsLayer,
-    UiAgentSettingsView, UiSettingsView, provider_guidance,
+    AgentProvider, BrowserFacts, LocalModelProbeState, SettingsLayer, UiAgentSettingsView,
+    UiModelOption, UiSettingsView, provider_guidance,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -160,122 +159,6 @@ pub(crate) fn custom_scan_running() -> Element {
 }
 
 #[story(
-    description = "The model picker over OpenRouter's catalog: published $/MTok rates per row, a filter box because the list is long, and the configured model marked as chosen."
-)]
-pub(crate) fn model_picker_openrouter() -> Element {
-    let mut agent = openrouter_agent();
-    agent.model_override = Some("anthropic/claude-sonnet-5".to_string());
-    agent.model_placeholder = "anthropic/claude-sonnet-5".to_string();
-    catalog_panel(
-        agent,
-        ModelCatalogState {
-            open: true,
-            loading: false,
-            error: None,
-            catalog: Some(ModelCatalog {
-                // Ids, rates and scores are the real ones from
-                // openrouter.ai/api/v1/models, in the order the picker
-                // produces (best published coding score first).
-                models: vec![
-                    priced(
-                        "anthropic/claude-opus-5",
-                        "Anthropic: Claude Opus 5",
-                        5.0,
-                        25.0,
-                        78.0,
-                    ),
-                    priced("openai/gpt-5.6-sol", "OpenAI: GPT-5.6 Sol", 5.0, 30.0, 77.4),
-                    priced(
-                        "anthropic/claude-fable-5",
-                        "Anthropic: Claude Fable 5",
-                        10.0,
-                        50.0,
-                        76.5,
-                    ),
-                    priced("moonshotai/kimi-k3", "MoonshotAI: Kimi K3", 3.0, 15.0, 76.2),
-                    priced(
-                        "anthropic/claude-opus-4.8",
-                        "Anthropic: Claude Opus 4.8",
-                        5.0,
-                        25.0,
-                        74.3,
-                    ),
-                    priced("x-ai/grok-4.5", "xAI: Grok 4.5", 2.0, 6.0, 72.4),
-                    priced(
-                        "anthropic/claude-sonnet-5",
-                        "Anthropic: Claude Sonnet 5",
-                        2.0,
-                        10.0,
-                        71.5,
-                    ),
-                    priced(
-                        "openai/gpt-5.6-luna",
-                        "OpenAI: GPT-5.6 Luna",
-                        0.5,
-                        3.0,
-                        71.4,
-                    ),
-                    priced("z-ai/glm-5.2", "Z.AI: GLM-5.2", 0.6, 2.2, 68.8),
-                ],
-                hidden: 66,
-            }),
-            loaded_for: Some("OpenRouter|".to_string()),
-        },
-    )
-}
-
-#[story(
-    description = "The picker over a local server's short list: no filter box needed, no prices to show, and one non-chat model (an embedding model) accounted for underneath."
-)]
-pub(crate) fn model_picker_local() -> Element {
-    let mut agent = custom_agent();
-    agent.model_override = Some("qwen3-coder:30b".to_string());
-    agent.model_placeholder = "qwen3-coder:30b".to_string();
-    agent.model_missing = false;
-    catalog_panel(
-        agent,
-        ModelCatalogState {
-            open: true,
-            loading: false,
-            error: None,
-            catalog: Some(ModelCatalog {
-                models: vec![
-                    plain("llama3.2"),
-                    plain("qwen3-coder:30b"),
-                    plain("qwen3.5:9b"),
-                ],
-                hidden: 1,
-            }),
-            loaded_for: Some("Custom|http://localhost:11434/v1".to_string()),
-        },
-    )
-}
-
-#[story(
-    description = "The picker with nothing to show yet: the provider needs a credential before it can be asked, so the reason replaces the list and Try again is the only affordance."
-)]
-pub(crate) fn model_picker_needs_key() -> Element {
-    let mut agent = UiSettingsView::default().agent;
-    agent.provider = AgentProvider::OpenAi;
-    agent.provider_overridden = true;
-    agent.provider_layer = SettingsLayer::User;
-    agent.guidance = provider_guidance(AgentProvider::OpenAi);
-    agent.model_default = None;
-    agent.model_placeholder = "model id from your provider — see its docs".to_string();
-    agent.model_missing = true;
-    catalog_panel(
-        agent,
-        ModelCatalogState {
-            open: true,
-            loading: false,
-            error: Some("Add your OpenAI API key first, then browse models.".to_string()),
-            catalog: None,
-            loaded_for: None,
-        },
-    )
-}
-
-#[story(
     description = "OpenRouter selected, not yet connected: the one-click Connect button replaces the key field, with a sample exchange-failure warning underneath."
 )]
 pub(crate) fn openrouter_needs_connect() -> Element {
@@ -297,6 +180,93 @@ pub(crate) fn openrouter_needs_connect() -> Element {
 )]
 pub(crate) fn openrouter_connected() -> Element {
     panel(openrouter_agent())
+}
+
+#[story(
+    description = "Model discovery populated (P8): the model field is a dropdown over the fetched /models ids with display names, the override selecting one of them; Custom… is the free-text escape."
+)]
+pub(crate) fn model_dropdown_populated() -> Element {
+    let mut agent = UiSettingsView::default().agent;
+    agent.api_key_masked = Some("•••••h3Fk".to_string());
+    agent.api_key_layer = SettingsLayer::User;
+    agent.api_key_overridden = true;
+    agent.model_options = vec![
+        UiModelOption {
+            id: "claude-sonnet-5".to_string(),
+            label: Some("Claude Sonnet 5".to_string()),
+            detail: None,
+        },
+        UiModelOption {
+            id: "claude-opus-5".to_string(),
+            label: Some("Claude Opus 5".to_string()),
+            detail: None,
+        },
+        UiModelOption {
+            id: "claude-haiku-4-5".to_string(),
+            label: Some("Claude Haiku 4.5".to_string()),
+            detail: None,
+        },
+    ];
+    agent.model_override = Some("claude-opus-5".to_string());
+    agent.model_layer = SettingsLayer::User;
+    panel(agent)
+}
+
+#[story(
+    description = "Model discovery failed (P8): a local server fetch error keeps the free-text field, with the mapped error line pointing back at the guidance's CORS note."
+)]
+pub(crate) fn model_fetch_error() -> Element {
+    let mut agent = UiSettingsView::default().agent;
+    agent.provider = AgentProvider::Custom;
+    agent.provider_overridden = true;
+    agent.provider_layer = SettingsLayer::User;
+    agent.guidance = provider_guidance(AgentProvider::Custom);
+    agent.api_key_optional = true;
+    agent.base_url_effective = Some("http://localhost:11434/v1".to_string());
+    agent.base_url_override = Some("http://localhost:11434/v1".to_string());
+    agent.base_url_layer = SettingsLayer::User;
+    agent.model_default = None;
+    agent.model_effective = Some("llama3.2".to_string());
+    agent.model_override = Some("llama3.2".to_string());
+    agent.model_placeholder = "llama3.2".to_string();
+    agent.model_layer = SettingsLayer::User;
+    agent.models_error = Some(
+        "model list unavailable — server unreachable (check the base URL and the CORS note above)"
+            .to_string(),
+    );
+    panel(agent)
+}
+
+#[story(
+    description = "Model discovery with a custom entry (P8): the fetched list is present but the override is a hand-typed id outside it, so the dropdown sits on Custom… with the text input open underneath."
+)]
+pub(crate) fn model_custom_entry() -> Element {
+    let mut agent = UiSettingsView::default().agent;
+    agent.provider = AgentProvider::OpenAi;
+    agent.provider_overridden = true;
+    agent.provider_layer = SettingsLayer::User;
+    agent.guidance = provider_guidance(AgentProvider::OpenAi);
+    agent.api_key_masked = Some("•••••q8Zw".to_string());
+    agent.api_key_layer = SettingsLayer::User;
+    agent.api_key_overridden = true;
+    agent.model_options = vec![
+        UiModelOption {
+            id: "gpt-5.2".to_string(),
+            label: None,
+            detail: None,
+        },
+        UiModelOption {
+            id: "gpt-5.2-mini".to_string(),
+            label: None,
+            detail: None,
+        },
+    ];
+    agent.model_default = None;
+    agent.model_effective = Some("ft:gpt-5.2:acme:leds:9k3".to_string());
+    agent.model_override = Some("ft:gpt-5.2:acme:leds:9k3".to_string());
+    agent.model_placeholder = "ft:gpt-5.2:acme:leds:9k3".to_string();
+    agent.model_layer = SettingsLayer::User;
+    panel(agent)
 }
 
 /// The OpenRouter fixture base: connected unless a story clears the key.
@@ -332,23 +302,6 @@ fn probe_panel(probe: LocalModelProbeState) -> Element {
     }
 }
 
-/// A panel with the model picker expanded. The fingerprint mirrors the
-/// fixture's own `loaded_for`, since a mismatch is exactly what the picker
-/// treats as another provider's stale list.
-fn catalog_panel(agent: UiAgentSettingsView, catalog: ModelCatalogState) -> Element {
-    let catalog_fingerprint = catalog.loaded_for.clone().unwrap_or_default();
-    rsx! {
-        div { class: "tw:w-[340px] tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card",
-            AgentSettingsSection {
-                agent,
-                on_settings: move |_| {},
-                catalog,
-                catalog_fingerprint,
-            }
-        }
-    }
-}
-
 /// The Custom-provider fixture base: local server selected, nothing chosen.
 fn custom_agent() -> UiAgentSettingsView {
     let mut agent = UiSettingsView::default().agent;
@@ -361,26 +314,6 @@ fn custom_agent() -> UiAgentSettingsView {
     agent.model_placeholder = "model id from your provider — see its docs".to_string();
     agent.model_missing = true;
     agent
-}
-
-/// A catalog row as OpenRouter serves one: name, rates, and the published
-/// coding score the ordering is built on.
-fn priced(id: &str, label: &str, input: f64, output: f64, score: f64) -> CatalogModel {
-    CatalogModel {
-        label: Some(label.to_string()),
-        price: Some(CatalogPrice {
-            input_per_mtok: input,
-            output_per_mtok: output,
-        }),
-        coding_score: Some(score),
-        supports_tools: Some(true),
-        ..CatalogModel::new(id)
-    }
-}
-
-/// A catalog row from a server that publishes no names, prices, or scores.
-fn plain(id: &str) -> CatalogModel {
-    CatalogModel::new(id)
 }
 
 /// One finding, diagnosed through the same core path the browser glue uses.

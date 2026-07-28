@@ -72,7 +72,20 @@ pub fn SlotDetailButton(
     /// Button class for the custom trigger while open.
     #[props(default = String::new())]
     trigger_open_class: String,
+    /// Friendly name overriding the type-info section's "Name" row (P6
+    /// item 2): panel controls pass their authored control label so the
+    /// popover titles "Speed" instead of the backing field row's label
+    /// ("Default"). Slot rows pass nothing and keep the row's own name.
+    #[props(default = None)]
+    name_override: Option<String>,
 ) -> Element {
+    let aspects = match &name_override {
+        Some(name) => aspects
+            .into_iter()
+            .map(|aspect| override_type_info_name(aspect, name))
+            .collect(),
+        None => aspects,
+    };
     let affordance = primary_affordance(&aspects);
     let style = slot_affordance_style(affordance);
     let menu_label = format!("{label} details");
@@ -193,6 +206,23 @@ pub(crate) fn slot_row_class(affordance: UiSlotAffordance, index: usize) -> &'st
             "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-color-surface-subtle)_0%,var(--studio-color-surface-subtle)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
     }
+}
+
+/// Replace (or seed) the type-info aspect's "Name" row with the caller's
+/// friendly name; other aspects pass through untouched.
+fn override_type_info_name(mut aspect: UiSlotAspect, name: &str) -> UiSlotAspect {
+    if aspect.kind != UiSlotAspectKind::TypeInfo {
+        return aspect;
+    }
+    match aspect
+        .rows
+        .iter_mut()
+        .find(|row| row.label.eq_ignore_ascii_case("Name"))
+    {
+        Some(row) => row.value = name.to_string(),
+        None => aspect.rows.insert(0, UiSlotAspectRow::new("Name", name)),
+    }
+    aspect
 }
 
 pub(crate) fn primary_affordance(aspects: &[UiSlotAspect]) -> UiSlotAffordance {
@@ -514,16 +544,19 @@ pub(crate) fn aspect_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> 
         .collect()
 }
 
+/// The type-info section's headline: the friendly "Name" row (the authored
+/// label) first, falling back to the raw "Path" row (P6 item 2 flipped the
+/// preference — paths now render as their own detail row instead).
 fn type_info_title(aspect: &UiSlotAspect) -> String {
     aspect
         .rows
         .iter()
-        .find(|row| row.label.eq_ignore_ascii_case("Path") && !row.value.is_empty())
+        .find(|row| row.label.eq_ignore_ascii_case("Name") && !row.value.is_empty())
         .or_else(|| {
             aspect
                 .rows
                 .iter()
-                .find(|row| row.label.eq_ignore_ascii_case("Name") && !row.value.is_empty())
+                .find(|row| row.label.eq_ignore_ascii_case("Path") && !row.value.is_empty())
         })
         .map(|row| row.value.clone())
         .unwrap_or_else(|| aspect.title.clone())
@@ -533,9 +566,7 @@ fn type_info_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> {
     aspect
         .rows
         .iter()
-        .filter(|row| {
-            !row.label.eq_ignore_ascii_case("Path") && !row.label.eq_ignore_ascii_case("Name")
-        })
+        .filter(|row| !row.label.eq_ignore_ascii_case("Name"))
         .cloned()
         .collect()
 }
@@ -670,5 +701,46 @@ fn aspect_heading_class(tone: AspectTone) -> &'static str {
         AspectTone::Good => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-good-foreground",
         AspectTone::Bound => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-bound-foreground",
         AspectTone::Quiet => "tw:m-0 tw:text-xs tw:font-bold tw:text-heading",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_studio_core::{UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
+
+    use super::{override_type_info_name, type_info_detail_rows, type_info_title};
+
+    fn info_aspect() -> UiSlotAspect {
+        UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
+            .with_row(UiSlotAspectRow::new("Name", "Speed"))
+            .with_row(UiSlotAspectRow::new("Path", "consumed[speed].default"))
+    }
+
+    #[test]
+    fn title_prefers_the_friendly_name_over_the_path() {
+        assert_eq!(type_info_title(&info_aspect()), "Speed");
+
+        // Without a Name row the raw path still titles the section.
+        let path_only = UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
+            .with_row(UiSlotAspectRow::new("Path", "brightness.some"));
+        assert_eq!(type_info_title(&path_only), "brightness.some");
+    }
+
+    #[test]
+    fn detail_rows_keep_the_path_and_drop_the_name() {
+        let rows = type_info_detail_rows(&info_aspect());
+        assert!(rows.iter().any(|row| row.label == "Path"));
+        assert!(rows.iter().all(|row| row.label != "Name"));
+    }
+
+    #[test]
+    fn name_override_retitles_only_the_type_info_aspect() {
+        let overridden = override_type_info_name(info_aspect(), "Speed knob");
+        assert_eq!(type_info_title(&overridden), "Speed knob");
+
+        let binding = UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+            .with_row(UiSlotAspectRow::new("Bound", "bus:time"));
+        let untouched = override_type_info_name(binding.clone(), "Speed knob");
+        assert_eq!(untouched, binding);
     }
 }

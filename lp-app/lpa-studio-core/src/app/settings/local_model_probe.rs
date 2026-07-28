@@ -497,16 +497,20 @@ pub fn scan_summary(findings: &[ProbeFinding], facts: &BrowserFacts) -> ProbeSum
     }
 }
 
-/// The model ids a `/models` body lists, in the order the server gave
-/// them. Shared shape-reading with the picker's catalog (which additionally
-/// filters and sorts) — a diagnosis shows what the server actually serves.
+/// The model ids a `/models` body lists, in the order the server gave them.
+///
+/// Reads through the agent crate's discovery parser, so a diagnosis and the
+/// settings dropdown can never disagree about what a body means — including
+/// the `{"data":null}` empty listing Ollama answers with nothing pulled.
 pub fn parse_models(body: &str) -> Result<Vec<String>, String> {
-    Ok(
-        crate::app::settings::model_catalog::parse_catalog_entries(body)?
-            .into_iter()
-            .map(|model| model.id)
-            .collect(),
-    )
+    lpa_agent::provider::model_discovery::parse_models_page(body)
+        .map(|models| models.into_iter().map(|model| model.id).collect())
+        .map_err(|error| match error {
+            lpa_agent::ListModelsError::Parse { message } => {
+                format!("the response was not a model list: {message}")
+            }
+            other => format!("{other:?}"),
+        })
 }
 
 /// A short, quote-worthy slice of an error body.
@@ -861,11 +865,12 @@ mod tests {
             parse_models(r#"{"object":"list","data":null}"#).unwrap(),
             Vec::<String>::new()
         );
-        // Ollama's native /api/tags shape is not the OpenAI one.
+        // Ollama's native /api/tags shape is not the OpenAI one — a body
+        // with no `data` at all means the base URL is missing its /v1.
         let error = parse_models(r#"{"models":[{"name":"llama3.2"}]}"#).unwrap_err();
-        assert!(error.contains("\"data\""), "{error}");
+        assert!(error.contains("data"), "{error}");
         let error = parse_models("<html>404</html>").unwrap_err();
-        assert!(error.contains("not JSON"), "{error}");
+        assert!(error.contains("not a model list"), "{error}");
     }
 
     #[test]

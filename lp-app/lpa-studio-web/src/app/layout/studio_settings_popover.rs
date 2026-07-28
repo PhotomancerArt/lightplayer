@@ -7,15 +7,17 @@
 //! is pure so stories can render fixtures.
 
 use dioxus::prelude::*;
-use lpa_studio_core::app::settings::model_catalog::filter_models;
 use lpa_studio_core::{
-    AgentProvider, CatalogModel, LocalModelProbeState, ModelCatalogState, ProbeFinding, ProbeLevel,
-    SettingsCommand, SettingsLayer, UiAgentSettingsView, UiSettingsView, adopt_model_commands,
+    AgentProvider, LocalModelProbeState, ProbeFinding, ProbeLevel, SettingsCommand, SettingsLayer,
+    UiAgentSettingsView, UiModelOption, UiSettingsView,
 };
 
 use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
 use crate::local_model_probe::ProbeRequest;
-use crate::model_catalog::CatalogQuery;
+
+/// The model dropdown's free-text escape hatch (its option value; never a
+/// plausible model id).
+const CUSTOM_MODEL_VALUE: &str = "__custom__";
 
 /// Header gear button opening the Studio settings popover.
 #[component]
@@ -31,28 +33,11 @@ pub fn StudioSettingsPopover(
     // popover content unmounts when the popover closes, and a result the
     // user just read should still be there when they reopen it.
     let mut probe = use_signal(LocalModelProbeState::default);
-    // The provider's model list, kept across popover open/close for the same
-    // reason (and re-fetched whenever the provider or address changes).
-    let mut catalog = use_signal(ModelCatalogState::default);
     // The effective model, for the "does this server serve it" check — the
     // placeholder IS the effective model whenever one resolves.
     let configured_model = (!settings.agent.model_missing)
         .then(|| settings.agent.model_placeholder.clone())
         .filter(|_| settings.agent.provider == AgentProvider::Custom);
-    let catalog_query = CatalogQuery {
-        provider: settings.agent.provider,
-        base_url: settings.agent.base_url_effective.clone(),
-        // Resolved at click time (the view holds only a masked key).
-        api_key: None,
-    };
-    // Which provider+address the picker is currently about. A loaded list
-    // whose fingerprint no longer matches is another provider's answer and
-    // must not stay on screen.
-    let catalog_fingerprint = lpa_studio_core::app::settings::model_catalog::catalog_fingerprint(
-        catalog_query.provider,
-        catalog_query.base_url.as_deref(),
-    );
-    let query_fingerprint = catalog_fingerprint.clone();
     rsx! {
         IconPopoverButton {
             class: TRIGGER_CLASS.to_string(),
@@ -64,6 +49,9 @@ pub fn StudioSettingsPopover(
             popup_class: POPUP_CLASS.to_string(),
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomEnd,
+            // Panel children render only while open, so this mounts (and
+            // fires) exactly when the settings surface opens.
+            RequestModelsOnOpen { on_settings }
             AgentSettingsSection {
                 agent: settings.agent,
                 on_settings,
@@ -74,23 +62,6 @@ pub fn StudioSettingsPopover(
                     probe.set(crate::local_model_probe::running_state(&request));
                     let model = configured_model.clone();
                     spawn_probe(probe, request, model);
-                },
-                catalog: catalog(),
-                catalog_fingerprint,
-                on_browse: move |open: bool| {
-                    if !open {
-                        catalog.with_mut(|state| state.open = false);
-                        return;
-                    }
-                    // Opening on an already-loaded list is instant; Refresh
-                    // (same handler, already open) always re-asks.
-                    if !catalog.peek().needs_load(&query_fingerprint) && !catalog.peek().open {
-                        catalog.with_mut(|state| state.open = true);
-                        return;
-                    }
-                    let loading = crate::model_catalog::loading_state(&catalog.peek().clone());
-                    catalog.set(loading);
-                    spawn_catalog_load(catalog, catalog_query.clone());
                 },
             }
         }
@@ -124,28 +95,82 @@ fn spawn_probe(
     }
 }
 
-/// Load the selected provider's model list into the picker's state. Like
-/// [`spawn_probe`], wasm-only: stories render fixtures.
-#[cfg_attr(
-    not(target_arch = "wasm32"),
-    allow(unused_variables, reason = "host builds never fetch")
-)]
-fn spawn_catalog_load(
-    #[allow(unused_mut, reason = "only the wasm body writes the signal")] mut catalog: Signal<
-        ModelCatalogState,
-    >,
-    query: CatalogQuery,
-) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let query = CatalogQuery {
-            api_key: crate::settings_io::effective_api_key(query.provider),
-            ..query
-        };
-        wasm_bindgen_futures::spawn_local(async move {
-            let state = crate::model_catalog::load(query).await;
-            catalog.set(state);
-        });
+/// Requests the selected provider's model list once on mount — the
+/// settings-surface-open trigger for the discovery dropdown (P8). The
+/// store debounces repeats against its config fingerprint, so re-opens
+/// are free once a list (or error) is in.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RequestModelsOnOpen(on_settings: EventHandler<SettingsCommand>) -> Element {
+    use_hook(move || on_settings.call(SettingsCommand::RequestModels { force: false }));
+    rsx! {}
+}
+
+/// One probed address: what happened, how to fix it, and — when it works —
+/// one-click adoption of the server and model it serves.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ProbeFindingCard(finding: ProbeFinding, on_settings: EventHandler<SettingsCommand>) -> Element {
+    let base_url = finding.base_url.clone();
+    let adopt_url = base_url.clone();
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:rounded-sm tw:border {level_border_class(finding.level)} tw:bg-card-muted tw:px-2 tw:py-1.5",
+            div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-2",
+                code { class: "tw:font-mono tw:text-[11px] tw:text-muted-foreground", "{base_url}" }
+                if let Some(label) = finding.server_label.as_deref() {
+                    span { class: HINT_CLASS, "{label}" }
+                }
+            }
+            span { class: "tw:text-[11px] tw:font-bold tw:leading-snug {level_text_class(finding.level)}",
+                "{finding.headline}"
+            }
+            if let Some(detail) = finding.detail.as_deref() {
+                p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground", "{detail}" }
+            }
+            if let Some(fix) = finding.fix.as_deref() {
+                p { class: "tw:m-0 tw:font-mono tw:text-[11px] tw:leading-snug tw:text-soft-foreground tw:select-all tw:[overflow-wrap:anywhere]",
+                    "{fix}"
+                }
+            }
+            // A model chip adopts the whole answer in one click: this
+            // server's address AND the id it actually serves.
+            if !finding.models.is_empty() {
+                div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:gap-1",
+                    for model in finding.models.iter().take(MAX_LISTED_MODELS) {
+                        button {
+                            key: "{model}",
+                            class: MODEL_CHIP_CLASS,
+                            r#type: "button",
+                            title: "Use this server and model",
+                            onclick: {
+                                let url = base_url.clone();
+                                let model = model.clone();
+                                move |_| {
+                                    on_settings.call(SettingsCommand::SetAgentCustomBaseUrl(Some(url.clone())));
+                                    on_settings.call(SettingsCommand::SetAgentModel(Some(model.clone())));
+                                }
+                            },
+                            "{model}"
+                        }
+                    }
+                    if finding.models.len() > MAX_LISTED_MODELS {
+                        span { class: HINT_CLASS, "+{finding.models.len() - MAX_LISTED_MODELS} more" }
+                    }
+                }
+            } else if finding.level != ProbeLevel::Error {
+                // Nothing to pick, but the address itself is worth keeping
+                // (the CORS case: right port, one server setting away).
+                button {
+                    class: "{CLEAR_BUTTON_CLASS} tw:justify-self-start",
+                    r#type: "button",
+                    title: "Save this address as the base URL",
+                    onclick: move |_| {
+                        on_settings.call(SettingsCommand::SetAgentCustomBaseUrl(Some(adopt_url.clone())));
+                    },
+                    "Use this address"
+                }
+            }
+        }
     }
 }
 
@@ -169,31 +194,29 @@ pub fn AgentSettingsSection(
     /// Test / Scan requests (absent under stories ⇒ the buttons are inert).
     #[props(default)]
     on_probe: Option<EventHandler<ProbeRequest>>,
-    /// The provider's model list, for the Model field's picker.
-    #[props(default)]
-    catalog: ModelCatalogState,
-    /// Identity of the provider+address the picker is about, so a list
-    /// loaded for a different one is not shown as this one's.
-    #[props(default)]
-    catalog_fingerprint: String,
-    /// Open (`true`, also = refresh) or close the picker (absent under
-    /// stories ⇒ the toggle is inert).
-    #[props(default)]
-    on_browse: Option<EventHandler<bool>>,
 ) -> Element {
+    let key_hint = key_provenance_hint(&agent);
     // Uncontrolled-input mirror for the base-URL field (see its `oninput`):
     // presentational state only — the committed value stays the prop.
     let mut base_url_draft = use_signal(|| None::<String>);
-    let key_hint = key_provenance_hint(&agent);
+    // What Test probes when the field has not been touched this session.
+    let base_url_effective = agent.base_url_effective.clone();
     let model_hint = model_provenance_hint(&agent);
     let model_value = agent.model_override.clone().unwrap_or_default();
     let base_url_value = agent.base_url_override.clone().unwrap_or_default();
-    // What Test probes when the field has not been touched this session.
-    let base_url_effective = agent.base_url_effective.clone();
     let price_input_value = agent.price_input_override.clone().unwrap_or_default();
     let price_output_value = agent.price_output_override.clone().unwrap_or_default();
     let provider = agent.provider;
     let key_field_provider = provider;
+    // Model discovery (P8): dropdown when a fetched list exists, free text
+    // otherwise. `model_custom` is the explicit "Custom…" escape; an
+    // override that is not in the list lands on Custom… by itself.
+    let mut model_custom = use_signal(|| false);
+    let model_select_value = selected_model_value(&agent, model_custom());
+    let has_model_options = !agent.model_options.is_empty();
+    let show_model_input = !has_model_options || model_select_value == CUSTOM_MODEL_VALUE;
+    let model_options = agent.model_options.clone();
+    let models_error = agent.models_error.clone();
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:p-3",
             div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
@@ -250,7 +273,7 @@ pub fn AgentSettingsSection(
                 }
             }
 
-            // Base URL + local-server discovery (Custom provider only).
+            // Base URL (Custom provider only).
             if provider == AgentProvider::Custom {
                 div { class: "tw:grid tw:min-w-0 tw:gap-1",
                     label { class: LABEL_CLASS, r#for: "studio-settings-base-url", "Base URL" }
@@ -425,50 +448,77 @@ pub fn AgentSettingsSection(
                 }
             }
 
-            // Model id — typed, or picked from the provider's own list.
+            // Model id: discovery dropdown over the fetched `/models` list
+            // when one exists, free text otherwise (and behind "Custom…").
             div { class: "tw:grid tw:min-w-0 tw:gap-1",
                 div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
-                    label { class: LABEL_CLASS, r#for: "studio-settings-model", "Model" }
+                    label {
+                        class: LABEL_CLASS,
+                        r#for: if has_model_options { "studio-settings-model-select" } else { "studio-settings-model" },
+                        "Model"
+                    }
                     button {
-                        class: PROBE_BUTTON_CLASS,
+                        class: CLEAR_BUTTON_CLASS,
                         r#type: "button",
-                        aria_expanded: "{catalog.open}",
-                        title: "List the models this provider serves",
+                        title: "Fetch the provider's model list again",
                         onclick: move |_| {
-                            if let Some(on_browse) = on_browse {
-                                on_browse.call(!catalog.open);
-                            }
+                            on_settings.call(SettingsCommand::RequestModels { force: true });
                         },
-                        if catalog.open { "Hide models" } else { "Browse models ▾" }
+                        "Refresh"
                     }
                 }
-                input {
-                    id: "studio-settings-model",
-                    class: INPUT_CLASS,
-                    r#type: "text",
-                    value: "{model_value}",
-                    placeholder: "{agent.model_placeholder}",
-                    autocomplete: "off",
-                    spellcheck: "false",
-                    onchange: move |event| {
-                        on_settings.call(SettingsCommand::SetAgentModel(Some(event.value())));
-                    },
-                }
-                if catalog.open {
-                    ModelPicker {
-                        catalog: catalog.clone(),
-                        fingerprint: catalog_fingerprint.clone(),
-                        current_model: agent.model_placeholder.clone(),
-                        model_missing: agent.model_missing,
-                        on_settings,
-                        on_refresh: move |_| {
-                            if let Some(on_browse) = on_browse {
-                                on_browse.call(true);
+                if has_model_options {
+                    select {
+                        id: "studio-settings-model-select",
+                        class: INPUT_CLASS,
+                        value: "{model_select_value}",
+                        onchange: move |event| {
+                            let value = event.value();
+                            if value == CUSTOM_MODEL_VALUE {
+                                model_custom.set(true);
+                            } else {
+                                model_custom.set(false);
+                                on_settings.call(SettingsCommand::SetAgentModel(Some(value)));
                             }
+                        },
+                        for option in model_options {
+                            option {
+                                key: "{option.id}",
+                                value: "{option.id}",
+                                selected: option.id == model_select_value,
+                                "{model_option_label(&option)}"
+                            }
+                        }
+                        option {
+                            value: CUSTOM_MODEL_VALUE,
+                            selected: model_select_value == CUSTOM_MODEL_VALUE,
+                            "Custom…"
+                        }
+                    }
+                }
+                if show_model_input {
+                    input {
+                        id: "studio-settings-model",
+                        class: INPUT_CLASS,
+                        r#type: "text",
+                        value: "{model_value}",
+                        placeholder: "{agent.model_placeholder}",
+                        autocomplete: "off",
+                        spellcheck: "false",
+                        onchange: move |event| {
+                            on_settings.call(SettingsCommand::SetAgentModel(Some(event.value())));
                         },
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2",
+                    if agent.models_loading {
+                        span { class: HINT_CLASS, "fetching model list…" }
+                    }
+                    if let Some(error) = models_error {
+                        span { class: "tw:text-[0.68rem] tw:font-bold tw:text-status-warning-foreground",
+                            "{error}"
+                        }
+                    }
                     if agent.model_missing {
                         span { class: "tw:text-[0.68rem] tw:font-bold tw:text-status-warning-foreground",
                             "required — the agent stays off until a model id is set"
@@ -519,238 +569,7 @@ pub fn AgentSettingsSection(
                     }
                 }
                 p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
-                    "Powers the ~$ estimate in the chat. Filled in when you pick a model that "
-                    "publishes rates; blank uses built-in rates for known models."
-                }
-            }
-        }
-    }
-}
-
-/// The provider's own model list: filter, pick, refresh.
-///
-/// The typed field stays the source of truth (ids the picker filters out, or
-/// a provider that lists nothing, must remain reachable) — this only fills
-/// it in.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ModelPicker(
-    catalog: ModelCatalogState,
-    /// The provider+address this picker is about; a catalog loaded for
-    /// another one is treated as absent (switching provider with the picker
-    /// open must not leave the old provider's models listed).
-    fingerprint: String,
-    /// The effective model id, highlighted in the list.
-    current_model: String,
-    /// No model is configured yet (so nothing is highlighted).
-    model_missing: bool,
-    on_settings: EventHandler<SettingsCommand>,
-    on_refresh: EventHandler<()>,
-) -> Element {
-    let mut query = use_signal(String::new);
-    let query_text = query();
-    let stale = catalog
-        .loaded_for
-        .as_deref()
-        .is_some_and(|loaded| loaded != fingerprint);
-    let models = catalog
-        .catalog
-        .as_ref()
-        .filter(|_| !stale)
-        .map(|catalog| &catalog.models);
-    let total = models.map_or(0, Vec::len);
-    // The query only applies while its box is on screen. Without this, a
-    // query typed against a long list survives a refresh onto a short one
-    // and hides everything with no visible way to clear it.
-    let filterable = total > FILTERABLE_MODEL_COUNT;
-    // Whether this provider published the scores the order is built on (only
-    // OpenRouter does today) — the legend would be a lie otherwise.
-    let ranked = models.is_some_and(|models| models.iter().any(|m| m.coding_score.is_some()));
-    let matches = models
-        .map(|models| {
-            if filterable {
-                filter_models(models, &query_text)
-            } else {
-                models.iter().collect()
-            }
-        })
-        .unwrap_or_default();
-    rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:p-1.5",
-            if catalog.loading {
-                span { class: "tw:text-[11px] tw:text-status-working-foreground", "Asking the provider…" }
-            }
-            if stale && !catalog.loading {
-                div { class: "tw:grid tw:min-w-0 tw:gap-1",
-                    span { class: HINT_CLASS, "The list you loaded belongs to another provider." }
-                    button {
-                        class: "{CLEAR_BUTTON_CLASS} tw:justify-self-start",
-                        r#type: "button",
-                        onclick: move |_| on_refresh.call(()),
-                        "List this provider's models"
-                    }
-                }
-            }
-            if let Some(error) = catalog.error.as_deref() {
-                div { class: "tw:grid tw:min-w-0 tw:gap-1",
-                    span { class: "tw:text-[11px] tw:leading-snug tw:text-status-warning-foreground",
-                        "{error}"
-                    }
-                    button {
-                        class: "{CLEAR_BUTTON_CLASS} tw:justify-self-start",
-                        r#type: "button",
-                        onclick: move |_| on_refresh.call(()),
-                        "Try again"
-                    }
-                }
-            }
-            // A search box only earns its space once the list is long enough
-            // to need one (OpenRouter lists hundreds; Anthropic a handful).
-            if filterable {
-                input {
-                    class: INPUT_CLASS,
-                    r#type: "text",
-                    value: "{query_text}",
-                    placeholder: "Filter {total} models",
-                    autocomplete: "off",
-                    spellcheck: "false",
-                    oninput: move |event| query.set(event.value()),
-                }
-            }
-            if models.is_some() {
-                if matches.is_empty() {
-                    span { class: HINT_CLASS,
-                        if total == 0 { "This provider listed no models." } else { "Nothing matches that filter." }
-                    }
-                } else {
-                    if ranked {
-                        span { class: HINT_CLASS, "best for code first, by the provider's own score" }
-                    }
-                    div { class: "tw:grid tw:max-h-52 tw:min-w-0 tw:gap-0.5 tw:overflow-y-auto",
-                        for model in matches.iter().take(MAX_PICKER_ROWS) {
-                            button {
-                                key: "{model.id}",
-                                class: model_row_class(!model_missing && model.id == current_model),
-                                r#type: "button",
-                                title: "Use this model",
-                                // Adopting a model also carries its rates
-                                // (or clears the last model's).
-                                onclick: {
-                                    let model = (*model).clone();
-                                    move |_| {
-                                        for command in adopt_model_commands(&model) {
-                                            on_settings.call(command);
-                                        }
-                                    }
-                                },
-                                span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[11px]", "{model.id}" }
-                                // The score is why this row sits where it
-                                // does; showing it keeps the order legible.
-                                if let Some(score) = model.coding_score {
-                                    span { class: "tw:shrink-0 tw:text-[10px] tw:text-status-good-foreground",
-                                        "{score:.0}"
-                                    }
-                                }
-                                if let Some(price) = model.price {
-                                    span { class: "tw:shrink-0 tw:text-[10px] tw:text-subtle-foreground", "{price.summary()}" }
-                                }
-                            }
-                        }
-                    }
-                    if matches.len() > MAX_PICKER_ROWS {
-                        span { class: HINT_CLASS,
-                            "showing {MAX_PICKER_ROWS} of {matches.len()} — keep typing to narrow it"
-                        }
-                    }
-                }
-            }
-            div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
-                if let Some(hidden) = catalog.catalog.as_ref().filter(|_| !stale).map(|c| c.hidden).filter(|h| *h > 0) {
-                    span { class: HINT_CLASS,
-                        "{hidden} {plural(hidden, \"model\")} hidden — no tool calling, or not chat"
-                    }
-                }
-                if catalog.catalog.is_some() && !stale && !catalog.loading {
-                    button {
-                        class: "{CLEAR_BUTTON_CLASS} tw:ml-auto",
-                        r#type: "button",
-                        title: "Ask the provider again",
-                        onclick: move |_| on_refresh.call(()),
-                        "Refresh"
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// One probed address: what happened, how to fix it, and — when it works —
-/// one-click adoption of the server and model it serves.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProbeFindingCard(finding: ProbeFinding, on_settings: EventHandler<SettingsCommand>) -> Element {
-    let base_url = finding.base_url.clone();
-    let adopt_url = base_url.clone();
-    rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:rounded-sm tw:border {level_border_class(finding.level)} tw:bg-card-muted tw:px-2 tw:py-1.5",
-            div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-2",
-                code { class: "tw:font-mono tw:text-[11px] tw:text-muted-foreground", "{base_url}" }
-                if let Some(label) = finding.server_label.as_deref() {
-                    span { class: HINT_CLASS, "{label}" }
-                }
-            }
-            span { class: "tw:text-[11px] tw:font-bold tw:leading-snug {level_text_class(finding.level)}",
-                "{finding.headline}"
-            }
-            if let Some(detail) = finding.detail.as_deref() {
-                p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground", "{detail}" }
-            }
-            if let Some(fix) = finding.fix.as_deref() {
-                p { class: "tw:m-0 tw:font-mono tw:text-[11px] tw:leading-snug tw:text-soft-foreground tw:select-all tw:[overflow-wrap:anywhere]",
-                    "{fix}"
-                }
-            }
-            // A model chip adopts the whole answer in one click: this
-            // server's address AND the id it actually serves.
-            if !finding.models.is_empty() {
-                div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:gap-1",
-                    for model in finding.models.iter().take(MAX_LISTED_MODELS) {
-                        button {
-                            key: "{model}",
-                            class: MODEL_CHIP_CLASS,
-                            r#type: "button",
-                            title: "Use this server and model",
-                            onclick: {
-                                let url = base_url.clone();
-                                // A local server publishes no rates, so this
-                                // also clears any carried over from a priced
-                                // model (see `adopt_model_commands`).
-                                let model = CatalogModel::new(model.clone());
-                                move |_| {
-                                    on_settings.call(SettingsCommand::SetAgentCustomBaseUrl(Some(url.clone())));
-                                    for command in adopt_model_commands(&model) {
-                                        on_settings.call(command);
-                                    }
-                                }
-                            },
-                            "{model}"
-                        }
-                    }
-                    if finding.models.len() > MAX_LISTED_MODELS {
-                        span { class: HINT_CLASS, "+{finding.models.len() - MAX_LISTED_MODELS} more" }
-                    }
-                }
-            } else if finding.level != ProbeLevel::Error {
-                // Nothing to pick, but the address itself is worth keeping
-                // (the CORS case: right port, one server setting away).
-                button {
-                    class: "{CLEAR_BUTTON_CLASS} tw:justify-self-start",
-                    r#type: "button",
-                    title: "Save this address as the base URL",
-                    onclick: move |_| {
-                        on_settings.call(SettingsCommand::SetAgentCustomBaseUrl(Some(adopt_url.clone())));
-                    },
-                    "Use this address"
+                    "Powers the ~$ estimate in the chat. Blank uses built-in rates for known models."
                 }
             }
         }
@@ -763,35 +582,12 @@ const POPUP_CLASS: &str = "tw:grid tw:w-[min(340px,calc(100vw-24px))] tw:overflo
 const INPUT_CLASS: &str = "tw:h-7 tw:w-full tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:font-mono tw:text-xs tw:text-muted-foreground";
 const CLEAR_BUTTON_CLASS: &str = "tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:text-[11px] tw:text-muted-foreground tw:hover:text-soft-foreground";
 const CONNECT_BUTTON_CLASS: &str = "tw:justify-self-start tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-accent tw:transition tw:duration-300 tw:hover:bg-accent-wash";
-const LABEL_CLASS: &str = "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground";
-const HINT_CLASS: &str = "tw:text-[0.68rem] tw:text-subtle-foreground";
 const PROBE_BUTTON_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:px-2 tw:py-1 tw:text-[11px] tw:font-bold tw:text-muted-foreground tw:transition tw:duration-200 tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:text-dim-foreground";
 const MODEL_CHIP_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-accent tw:hover:bg-accent-wash";
 /// How many served model ids a finding lists before collapsing the rest.
 const MAX_LISTED_MODELS: usize = 6;
-/// Above this many models the picker earns a filter box.
-const FILTERABLE_MODEL_COUNT: usize = 8;
-/// How many picker rows render at once (OpenRouter lists hundreds; the
-/// filter is the way through them, not a thousand-row DOM).
-const MAX_PICKER_ROWS: usize = 40;
-
-/// `model` / `models` for a count.
-fn plural(count: usize, noun: &str) -> String {
-    if count == 1 {
-        noun.to_string()
-    } else {
-        format!("{noun}s")
-    }
-}
-
-/// One picker row; the configured model reads as chosen.
-fn model_row_class(current: bool) -> &'static str {
-    if current {
-        "tw:flex tw:min-w-0 tw:cursor-default tw:items-baseline tw:justify-between tw:gap-2 tw:rounded-xs tw:border tw:border-accent-border tw:bg-accent-wash tw:px-1.5 tw:py-0.5 tw:text-left tw:text-accent"
-    } else {
-        "tw:flex tw:min-w-0 tw:cursor-pointer tw:items-baseline tw:justify-between tw:gap-2 tw:rounded-xs tw:border tw:border-transparent tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-left tw:text-muted-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground"
-    }
-}
+const LABEL_CLASS: &str = "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground";
+const HINT_CLASS: &str = "tw:text-[0.68rem] tw:text-subtle-foreground";
 
 /// Status foreground for a probe level.
 fn level_text_class(level: ProbeLevel) -> &'static str {
@@ -874,6 +670,36 @@ fn base_url_placeholder(agent: &UiAgentSettingsView) -> String {
     }
 }
 
+/// The model dropdown's selected value: the effective model when the
+/// fetched list contains it, the Custom… sentinel otherwise (an explicit
+/// Custom… pick, a hand-typed id outside the list, or no resolvable model).
+fn selected_model_value(agent: &UiAgentSettingsView, custom_mode: bool) -> String {
+    if custom_mode {
+        return CUSTOM_MODEL_VALUE.to_string();
+    }
+    let current = agent
+        .model_override
+        .as_ref()
+        .or(agent.model_effective.as_ref());
+    match current {
+        Some(model) if agent.model_options.iter().any(|option| &option.id == model) => {
+            model.clone()
+        }
+        _ => CUSTOM_MODEL_VALUE.to_string(),
+    }
+}
+
+/// Option row text: the provider's display name over the raw id.
+fn model_option_label(option: &UiModelOption) -> String {
+    let name = option.label.as_deref().unwrap_or(&option.id);
+    match option.detail.as_deref() {
+        // The detail is why this option sits where it does in the list
+        // (`code 78 · $5/$25`); without it a ranked order looks arbitrary.
+        Some(detail) => format!("{name} — {detail}"),
+        None => name.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -940,5 +766,61 @@ mod tests {
         // With a user override, the input has a value; the example returns.
         agent.base_url_override = Some("http://box:8080/v1".to_string());
         assert_eq!(base_url_placeholder(&agent), "http://localhost:11434/v1");
+    }
+
+    fn options(ids: &[&str]) -> Vec<UiModelOption> {
+        ids.iter()
+            .map(|id| UiModelOption {
+                id: id.to_string(),
+                label: None,
+                detail: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dropdown_selects_the_effective_model_when_listed() {
+        let mut agent = agent_view();
+        agent.model_options = options(&["claude-sonnet-5", "claude-opus-5"]);
+        // No override: the effective (default) model selects.
+        assert_eq!(selected_model_value(&agent, false), "claude-sonnet-5");
+        // An in-list override wins over the effective model.
+        agent.model_override = Some("claude-opus-5".to_string());
+        assert_eq!(selected_model_value(&agent, false), "claude-opus-5");
+    }
+
+    #[test]
+    fn unlisted_or_missing_models_land_on_custom() {
+        let mut agent = agent_view();
+        agent.model_options = options(&["claude-sonnet-5"]);
+        agent.model_override = Some("my-finetune".to_string());
+        assert_eq!(selected_model_value(&agent, false), CUSTOM_MODEL_VALUE);
+        // No resolvable model at all (OpenAI pre-onboarding) → Custom.
+        agent.model_override = None;
+        agent.model_effective = None;
+        assert_eq!(selected_model_value(&agent, false), CUSTOM_MODEL_VALUE);
+    }
+
+    #[test]
+    fn explicit_custom_mode_wins_over_a_listed_model() {
+        let mut agent = agent_view();
+        agent.model_options = options(&["claude-sonnet-5"]);
+        assert_eq!(selected_model_value(&agent, true), CUSTOM_MODEL_VALUE);
+    }
+
+    #[test]
+    fn option_rows_prefer_display_names_over_ids() {
+        let named = UiModelOption {
+            id: "claude-sonnet-5".to_string(),
+            label: Some("Claude Sonnet 5".to_string()),
+            detail: None,
+        };
+        assert_eq!(model_option_label(&named), "Claude Sonnet 5");
+        let bare = UiModelOption {
+            id: "llama3.2:latest".to_string(),
+            label: None,
+            detail: None,
+        };
+        assert_eq!(model_option_label(&bare), "llama3.2:latest");
     }
 }
