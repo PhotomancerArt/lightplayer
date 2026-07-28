@@ -29,7 +29,9 @@ use crate::{
 /// - **failed** ([`Self::failure`]) carries the parked failure reason
 ///   (rejection, transport, or the client-side size guard), presented like a
 ///   failed slot edit.
-#[derive(Clone, Debug, Eq, PartialEq)]
+// PartialEq only: the agent chat DTO carries preview thumbnails
+// (`UiProductPreview`, float-adjacent payloads are PartialEq-only).
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiAssetEditor {
     /// The artifact the editor edits — the Apply/Revert mutation target.
     pub artifact: ArtifactLocation,
