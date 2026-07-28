@@ -9,6 +9,8 @@ pub mod bus;
 pub mod device;
 pub mod home;
 pub mod layout;
+#[cfg(feature = "stories")]
+pub(crate) mod mapping_editor_stories;
 pub mod node;
 pub mod project;
 pub mod roster;

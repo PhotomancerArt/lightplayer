@@ -22,5 +22,5 @@ pub use editor_core::view_geometry::{
     ArrowInput, LAMPS_PER_UNIVERSE, MapArrowOverlay, MapArrowSeg, lamp_universe, neutral_lamp_rgb,
     universe_rgb, wiring_arrows,
 };
-pub use view::map_editor::{EditorFileOps, MapEditor};
+pub use view::map_editor::{EditorFileOps, EditorViewOptions, MapEditor};
 pub use view::map_editor_page::MapEditorPage;

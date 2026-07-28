@@ -56,12 +56,35 @@ pub fn MapEditor(
     #[props(default)] on_doc_change: Option<EventHandler<String>>,
     #[props(default)] file_ops: Option<EditorFileOps>,
     #[props(default = false)] scene_menu: bool,
+    /// Deterministic mount state for stories: `[x, y, scale]` camera (fit
+    /// runs when absent), preselected objects, an in-progress path draft,
+    /// and view-option overrides.
+    #[props(default)]
+    initial_camera: Option<[f32; 3]>,
+    #[props(default)] initial_selection: Vec<usize>,
+    #[props(default)] initial_draft: Vec<[f32; 2]>,
+    #[props(default)] initial_view: Option<EditorViewOptions>,
 ) -> Element {
-    let mut session = use_signal(|| MapEditorSession::new(doc.clone()));
-    let camera = use_signal(Camera::new);
-    let view_opts = use_signal(EditorViewOptions::default);
+    let mut session = use_signal(|| {
+        let mut session = MapEditorSession::new(doc.clone());
+        for index in &initial_selection {
+            session.selection.objects.insert(*index);
+        }
+        if !initial_draft.is_empty() {
+            session.tool = MapTool::Path {
+                draft: initial_draft.clone(),
+            };
+        }
+        session
+    });
+    let camera = use_signal(|| {
+        initial_camera
+            .map(|[x, y, scale]| Camera { x, y, scale })
+            .unwrap_or_default()
+    });
+    let view_opts = use_signal(move || initial_view.unwrap_or_default());
     let viewport = use_signal(|| [1200.0f32, 800.0f32]);
-    let mut fit_pending = use_signal(|| true);
+    let mut fit_pending = use_signal(|| initial_camera.is_none());
     let drag = use_signal(|| None::<CanvasDrag>);
 
     // Re-seed when the host bumps the epoch (render-time guarded write).
