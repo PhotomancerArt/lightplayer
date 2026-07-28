@@ -7,8 +7,9 @@
 //! - Communicate via serial buffers
 
 mod tests {
+    use lp_emu_core::LogLevel;
     use lp_riscv_elf::load_elf;
-    use lp_riscv_emu::{LogLevel, Riscv32Emulator};
+    use lp_riscv_emu::Riscv32Emulator;
 
     use std::sync::Mutex;
 

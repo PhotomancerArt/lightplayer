@@ -20,8 +20,8 @@ pub mod perf_event;
 pub use jit_symbols::{JitSymbolRecord, JitSymbols};
 pub use perf_event::{EVENT_PROFILE_END, EVENT_PROFILE_START, PerfEvent, PerfEventKind};
 
-pub use crate::emu::cycle_model::InstClass;
 pub use cpu::{CpuCollector, StackFrameSample};
+use lp_emu_core::InstClass;
 
 /// A symbol entry shared across profile metadata (`meta.json`).
 #[derive(Debug, Clone, Serialize)]

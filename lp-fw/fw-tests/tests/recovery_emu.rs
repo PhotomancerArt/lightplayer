@@ -16,10 +16,11 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use fw_tests::transport_emu_serial::SerialEmuClientTransport;
+use lp_emu_core::{LogLevel, TimeMode};
 use lp_recovery::{CrashCause, RecoveryLevel, RecoveryRegion, RecoverySnapshot};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
-    EmulatorError, LogLevel, Riscv32Emulator, TimeMode,
+    EmulatorError, Riscv32Emulator,
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_emu_shared::recovery_handshake as hs;

@@ -5,13 +5,13 @@ extern crate alloc;
 use super::super::{
     error::EmulatorError,
     executor::{LoggingDisabled, LoggingEnabled, decode_execute},
-    logging::LogLevel,
     memory::Memory,
 };
 use super::state::Riscv32Emulator;
 use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use log;
+use lp_emu_core::LogLevel;
 use lp_riscv_emu_shared::{SERIAL_ERROR_INVALID_POINTER, SYSCALL_JIT_MAP_LOAD, SYSCALL_PERF_EVENT};
 use lp_riscv_inst::Gpr;
 

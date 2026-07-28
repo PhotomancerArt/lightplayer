@@ -6,7 +6,7 @@ use ::alloc::vec::Vec;
 use std::any::Any;
 use std::collections::HashMap;
 
-use crate::emu::cycle_model::InstClass;
+use lp_emu_core::InstClass;
 
 use super::{Collector, FinishCtx, GateAction, PcSymbolizer};
 

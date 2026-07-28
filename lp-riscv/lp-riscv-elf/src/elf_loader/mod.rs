@@ -151,7 +151,8 @@ pub fn load_elf(elf_data: &[u8]) -> Result<ElfLoadInfo, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_riscv_emu::{LogLevel, Riscv32Emulator, StepResult};
+    use lp_emu_core::LogLevel;
+    use lp_riscv_emu::{Riscv32Emulator, StepResult};
     use lp_riscv_inst::Gpr;
     use std::println;
 
