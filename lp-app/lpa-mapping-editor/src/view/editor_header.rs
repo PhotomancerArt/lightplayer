@@ -1,5 +1,7 @@
-//! The editor header: title/status, corpus scenes, file ops, view toggles,
-//! zoom — the pinned home for editor chrome (M3 gate direction).
+//! The editor header: title/status, tools, corpus scenes, file ops, view
+//! toggles — the pinned home for editor chrome (M3 gate direction). Zoom
+//! lives in the canvas pane's floating control, not here (M5 gate
+//! direction).
 
 use base64::Engine as _;
 use dioxus::prelude::*;
@@ -8,7 +10,6 @@ use dioxus_icons::lucide::{
 };
 use lpc_mapping::{Map2dDoc, corpus, resolve};
 
-use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::MapEditorSession;
 use crate::editor_core::map_tool::MapTool;
 use crate::view::map_editor::{EditorFileOps, EditorViewOptions};
@@ -17,8 +18,11 @@ use crate::view::map_editor::{EditorFileOps, EditorViewOptions};
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn EditorHeader(
     session: Signal<MapEditorSession>,
-    camera: Signal<Camera>,
     view_opts: Signal<EditorViewOptions>,
+    /// The host chrome owns the view toggles (fixture-face embed): hide the
+    /// header's own cluster.
+    #[props(default = false)]
+    external_view: bool,
     fit_pending: Signal<bool>,
     #[props(default)] file_ops: Option<EditorFileOps>,
     #[props(default = false)] scene_menu: bool,
@@ -39,7 +43,6 @@ pub fn EditorHeader(
         "data:application/json;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(doc_json.as_bytes())
     );
-    let zoom_percent = (camera().scale * 100.0).round() as u32;
 
     let toggle_class = |on: bool| {
         if on {
@@ -60,7 +63,7 @@ pub fn EditorHeader(
         header { class: "lpme-header",
             span { class: "lpme-title", "mapping" }
             span { class: "lpme-status",
-                "{lamp_count} lamps · {universe_count} u · {zoom_percent}%"
+                "{lamp_count} lamps · {universe_count} u"
                 if dirty {
                     span { class: "lpme-dirty", title: "unsaved changes", " ●" }
                 }
@@ -132,63 +135,33 @@ pub fn EditorHeader(
                     "save"
                 }
             }
-            span { class: "lpme-sep" }
-            button {
-                class: toggle_class(opts.numbers),
-                title: "wiring numbers",
-                onclick: move |_| view_opts.write().numbers = !opts.numbers,
-                Hash { size: 13 }
-            }
-            button {
-                class: toggle_class(opts.arrows),
-                title: "wiring arrows",
-                onclick: move |_| view_opts.write().arrows = !opts.arrows,
-                Route { size: 13 }
-            }
-            button {
-                class: toggle_class(opts.universes),
-                title: "universe colors (170 lamps each)",
-                onclick: move |_| view_opts.write().universes = !opts.universes,
-                Layers { size: 13 }
-            }
-            button {
-                class: toggle_class(opts.fit_preview),
-                title: "texture-frame preview (how the doc fits shader space)",
-                onclick: move |_| view_opts.write().fit_preview = !opts.fit_preview,
-                Scan { size: 13 }
-            }
-            span { class: "lpme-sep" }
-            button {
-                class: "lpme-btn",
-                title: "zoom out",
-                onclick: move |_| {
-                    let center = viewport_center(&camera);
-                    camera.write().zoom_at(center, 0.8);
-                },
-                "−"
-            }
-            button {
-                class: "lpme-btn",
-                title: "zoom to fit",
-                onclick: move |_| fit_pending.set(true),
-                "fit"
-            }
-            button {
-                class: "lpme-btn",
-                title: "zoom in",
-                onclick: move |_| {
-                    let center = viewport_center(&camera);
-                    camera.write().zoom_at(center, 1.25);
-                },
-                "+"
+            if !external_view {
+                span { class: "lpme-sep" }
+                button {
+                    class: toggle_class(opts.numbers),
+                    title: "wiring numbers",
+                    onclick: move |_| view_opts.write().numbers = !opts.numbers,
+                    Hash { size: 13 }
+                }
+                button {
+                    class: toggle_class(opts.arrows),
+                    title: "wiring arrows",
+                    onclick: move |_| view_opts.write().arrows = !opts.arrows,
+                    Route { size: 13 }
+                }
+                button {
+                    class: toggle_class(opts.universes),
+                    title: "universe colors (170 lamps each)",
+                    onclick: move |_| view_opts.write().universes = !opts.universes,
+                    Layers { size: 13 }
+                }
+                button {
+                    class: toggle_class(opts.fit_preview),
+                    title: "texture-frame preview (how the doc fits shader space)",
+                    onclick: move |_| view_opts.write().fit_preview = !opts.fit_preview,
+                    Scan { size: 13 }
+                }
             }
         }
     }
-}
-
-/// Placeholder zoom anchor: the header has no viewport measurement, so
-/// button zooms anchor on a stable point; the canvas wheel zoom anchors on
-/// the cursor.
-fn viewport_center(_camera: &Signal<Camera>) -> [f32; 2] {
-    [600.0, 400.0]
 }

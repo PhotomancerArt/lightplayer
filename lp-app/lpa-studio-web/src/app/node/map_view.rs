@@ -12,7 +12,7 @@
 //! input and keeps the Studio-side SVG overlay + toggle chrome components.
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{ArrowInput, wiring_arrows};
+use lpa_mapping_editor::{ArrowInput, EditorViewOptions, wiring_arrows};
 use lpa_studio_core::ControlLayout2d;
 
 use crate::base::icon::{StudioIcon, StudioIconName};
@@ -38,6 +38,44 @@ impl Default for MapViewOptions {
             universes: false,
             live: true,
         }
+    }
+}
+
+// One view state serves both faces of the output section (the toggle bar
+// stays live across the view ⇄ edit flip): the editor's options are the
+// superset, these conversions carry the shared fields.
+impl From<EditorViewOptions> for MapViewOptions {
+    fn from(opts: EditorViewOptions) -> Self {
+        Self {
+            numbers: opts.numbers,
+            arrows: opts.arrows,
+            universes: opts.universes,
+            live: opts.live,
+        }
+    }
+}
+
+impl MapViewOptions {
+    /// Editor options with these shared fields and editor-only fields at
+    /// their defaults (initial face state).
+    #[must_use]
+    pub fn into_editor(self) -> EditorViewOptions {
+        EditorViewOptions {
+            numbers: self.numbers,
+            arrows: self.arrows,
+            universes: self.universes,
+            live: self.live,
+            fit_preview: false,
+        }
+    }
+
+    /// Write the shared fields into `editor`, preserving editor-only state
+    /// (fit preview).
+    pub fn apply_to_editor(self, editor: &mut EditorViewOptions) {
+        editor.numbers = self.numbers;
+        editor.arrows = self.arrows;
+        editor.universes = self.universes;
+        editor.live = self.live;
     }
 }
 
