@@ -48,6 +48,14 @@ Two more guards keep the schemas honest:
   appears in an RV32 firmware graph — schema generation is host-only
   tooling behind the non-default `schema-gen` features.
 
+## Additive fields
+
+Optional fields that serialize skip-if-default are **additive** — they grow
+the schemas without a format bump, and existing artifacts stay
+byte-identical (precedent: `ProjectDef`'s `controls`/`author`/`version`/
+`license`, effects-are-projects ADR). A bump is only for changes that break
+reading existing artifacts.
+
 ## Format version and the bump procedure
 
 `project.json` carries `"format": N` (`PROJECT_FORMAT_VERSION` in

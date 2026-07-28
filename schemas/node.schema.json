@@ -189,6 +189,27 @@
       },
       "type": "object"
     },
+    "lpc_model::nodes::project::promoted_control_def::PromotedControlDef": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "max": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "target": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "lpc_model::nodes::shader::glsl_opts::GlslOpts": {
       "additionalProperties": false,
       "properties": {
@@ -307,6 +328,15 @@
     {
       "additionalProperties": false,
       "properties": {
+        "author": {
+          "type": "string"
+        },
+        "controls": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::project::promoted_control_def::PromotedControlDef"
+          },
+          "type": "object"
+        },
         "format": {
           "maximum": 4294967295,
           "minimum": 0,
@@ -314,6 +344,9 @@
         },
         "kind": {
           "const": "Project"
+        },
+        "license": {
+          "type": "string"
         },
         "name": {
           "type": "string"
@@ -351,6 +384,9 @@
           "type": "object"
         },
         "uid": {
+          "type": "string"
+        },
+        "version": {
           "type": "string"
         }
       },

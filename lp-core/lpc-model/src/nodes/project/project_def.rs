@@ -2,6 +2,8 @@ use alloc::string::String;
 
 use crate::{MapSlot, NodeInvocationSlot, OptionSlot, Slotted, ValueSlot};
 
+use super::PromotedControlDef;
+
 /// Monotonic format version of authored `project.json` artifacts.
 ///
 /// The project root carries this as its top-level `format` key; child node
@@ -36,6 +38,17 @@ pub struct ProjectDef {
     /// slot edits under this map.
     #[slot(policy = "read_only_persisted")]
     pub nodes: MapSlot<String, NodeInvocationSlot>,
+    /// Promoted controls — the project's curated public knobs, keyed by a
+    /// stable user-facing name (effects-are-projects ADR). Each entry
+    /// aliases a slot on a direct child; values live on the target slot.
+    pub controls: MapSlot<String, PromotedControlDef>,
+    /// Provenance: effect author attribution (plain string, optional).
+    pub author: OptionSlot<ValueSlot<String>>,
+    /// Provenance: authored version string (no semver semantics yet).
+    pub version: OptionSlot<ValueSlot<String>>,
+    /// Provenance: license identifier (e.g. `"CC0-1.0"`). Repo samples are
+    /// CC0 unless otherwise noted.
+    pub license: OptionSlot<ValueSlot<String>>,
 }
 
 impl ProjectDef {
@@ -162,6 +175,69 @@ mod tests {
         assert_eq!(policy("format"), SlotPolicy::read_only_persisted());
         assert_eq!(policy("nodes"), SlotPolicy::read_only_persisted());
         assert_eq!(policy("name"), SlotPolicy::writable_persisted());
+    }
+
+    #[test]
+    fn project_def_without_new_fields_writes_byte_identically() {
+        // Effects-are-projects ADR: `controls`/`author`/`version`/`license`
+        // are additive and serialize skip-if-default — existing artifacts
+        // must stay byte-identical.
+        let json = "{\n  \"kind\": \"Project\",\n  \"format\": 1,\n  \"name\": \"basic\",\n  \"nodes\": {\n    \"shader\": {\n      \"ref\": \"./shader.json\"\n    }\n  }\n}\n";
+        let def = NodeDef::read_json(&registry(), json).unwrap();
+        let rewritten = def.write_json(&registry()).unwrap();
+        assert_eq!(rewritten, json);
+        assert!(!rewritten.contains("controls"), "{rewritten}");
+        assert!(!rewritten.contains("author"), "{rewritten}");
+        assert!(!rewritten.contains("version"), "{rewritten}");
+        assert!(!rewritten.contains("license"), "{rewritten}");
+    }
+
+    #[test]
+    fn project_def_controls_and_provenance_round_trip_byte_stably() {
+        use crate::nodes::project::PromotedControlDef;
+        use crate::{BindingRef, MapSlot, OptionSlot, ValueSlot};
+        use lp_collection::VecMap;
+
+        let mut controls = VecMap::new();
+        let mut speed =
+            PromotedControlDef::to_target(BindingRef::parse("node:./shader#speed").unwrap());
+        speed.label = OptionSlot::some(ValueSlot::new("Speed".to_string()));
+        speed.min = OptionSlot::some(ValueSlot::new(0.0));
+        speed.max = OptionSlot::some(ValueSlot::new(4.0));
+        controls.insert("speed".to_string(), speed);
+
+        let def = crate::ProjectDef {
+            format: crate::ProjectDef::current_format_slot(),
+            name: OptionSlot::some(ValueSlot::new("glow".to_string())),
+            controls: MapSlot::new(controls),
+            author: OptionSlot::some(ValueSlot::new("photomancer".to_string())),
+            version: OptionSlot::some(ValueSlot::new("1".to_string())),
+            license: OptionSlot::some(ValueSlot::new("CC0-1.0".to_string())),
+            ..crate::ProjectDef::default()
+        };
+        let first = NodeDef::Project(def).write_json(&registry()).unwrap();
+        assert!(first.contains("\"controls\""), "{first}");
+        assert!(
+            first.contains("\"target\": \"node:shader#speed\""),
+            "{first}"
+        );
+        assert!(first.contains("\"license\": \"CC0-1.0\""), "{first}");
+
+        let read = NodeDef::read_json(&registry(), &first).unwrap();
+        let NodeDef::Project(project) = &read else {
+            panic!("expected project");
+        };
+        let control = project.controls.entries.get("speed").expect("speed");
+        assert_eq!(
+            control.target.value(),
+            &crate::BindingRef::parse("node:./shader#speed").unwrap()
+        );
+        assert_eq!(
+            control.min.data.as_ref().map(|slot| *slot.value()),
+            Some(0.0)
+        );
+        let second = read.write_json(&registry()).unwrap();
+        assert_eq!(first, second);
     }
 
     fn registry() -> SlotShapeRegistry {
