@@ -91,6 +91,7 @@ impl ProviderCfg {
                 base_url,
                 api_key: std::env::var("LPA_EVAL_API_KEY").ok(),
                 model,
+                extra_headers: Vec::new(),
             }));
         }
         let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
@@ -590,9 +591,14 @@ impl AgentHost for EvalHost {
         Ok(self.source.borrow().clone())
     }
 
-    fn stage_source(&mut self, source: &str) -> Result<(), HostError> {
-        *self.source.borrow_mut() = source.to_string();
-        Ok(())
+    fn stage_source<'a>(
+        &'a mut self,
+        source: &'a str,
+    ) -> lpa_agent::HostFuture<'a, Result<(), HostError>> {
+        Box::pin(async move {
+            *self.source.borrow_mut() = source.to_string();
+            Ok(())
+        })
     }
 
     fn led_points(&self) -> Vec<LedPoint> {
@@ -620,20 +626,22 @@ fn render_report(outcomes: &[(EvalTask, TaskOutcome)], provider_cfg: &ProviderCf
     let _ = writeln!(out, "shader agent eval report — {}", provider_cfg.label());
     let _ = writeln!(
         out,
-        "{:<17} {:<6} {:>7} {:>6} {:>9} {:>9} {:>8}",
-        "task", "result", "checks", "turns", "in_tok", "out_tok", "wall_s"
+        "{:<17} {:<6} {:>7} {:>6} {:>9} {:>9} {:>9} {:>9} {:>8}",
+        "task", "result", "checks", "turns", "in_tok", "cache_w", "cache_r", "out_tok", "wall_s"
     );
     let mut total = TokenUsage::default();
     for (task, o) in outcomes {
         let passed = o.checks.iter().filter(|c| c.pass).count();
         let _ = writeln!(
             out,
-            "{:<17} {:<6} {:>7} {:>6} {:>9} {:>9} {:>8.1}",
+            "{:<17} {:<6} {:>7} {:>6} {:>9} {:>9} {:>9} {:>9} {:>8.1}",
             task.name,
             if o.passed() { "PASS" } else { "FAIL" },
             format!("{passed}/{}", o.checks.len()),
             o.turns,
             o.usage.input_tokens,
+            o.usage.cache_write_tokens,
+            o.usage.cache_read_tokens,
             o.usage.output_tokens,
             o.wall_secs,
         );
@@ -641,21 +649,29 @@ fn render_report(outcomes: &[(EvalTask, TaskOutcome)], provider_cfg: &ProviderCf
     }
     match provider_cfg {
         ProviderCfg::Anthropic { .. } => {
-            let input_m = f64::from(total.input_tokens) / 1e6;
-            let output_m = f64::from(total.output_tokens) / 1e6;
-            let cost = input_m * USD_PER_M_INPUT + output_m * USD_PER_M_OUTPUT;
+            // Cache rates follow the provider convention (and the app's
+            // `AgentCostRates::from_io`): write = 1.25x input, read = 0.1x.
+            let cost = f64::from(total.input_tokens) / 1e6 * USD_PER_M_INPUT
+                + f64::from(total.cache_write_tokens) / 1e6 * USD_PER_M_INPUT * 1.25
+                + f64::from(total.cache_read_tokens) / 1e6 * USD_PER_M_INPUT * 0.1
+                + f64::from(total.output_tokens) / 1e6 * USD_PER_M_OUTPUT;
             let _ = writeln!(
                 out,
-                "total: {} input + {} output tokens; est. ${cost:.2} at claude-sonnet-5 \
-                 standard rates (${USD_PER_M_INPUT}/M in, ${USD_PER_M_OUTPUT}/M out)",
-                total.input_tokens, total.output_tokens
+                "total: {} uncached-in + {} cache-write + {} cache-read + {} out tokens; \
+                 est. ${cost:.2} at claude-sonnet-5 standard rates (${USD_PER_M_INPUT}/M in \
+                 [write 1.25x, read 0.1x], ${USD_PER_M_OUTPUT}/M out)",
+                total.input_tokens,
+                total.cache_write_tokens,
+                total.cache_read_tokens,
+                total.output_tokens
             );
         }
         ProviderCfg::OpenAiCompat(_) => {
             let _ = writeln!(
                 out,
-                "total: {} input + {} output tokens (local/compat server; no cost estimate)",
-                total.input_tokens, total.output_tokens
+                "total: {} input ({} cached reads) + {} output tokens (local/compat server; \
+                 no cost estimate)",
+                total.input_tokens, total.cache_read_tokens, total.output_tokens
             );
         }
     }

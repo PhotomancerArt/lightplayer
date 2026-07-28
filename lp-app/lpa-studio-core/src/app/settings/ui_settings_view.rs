@@ -33,9 +33,13 @@ impl Default for UiSettingsView {
                 base_url_layer: SettingsLayer::Default,
                 model_placeholder: DEFAULT_AGENT_MODEL.to_string(),
                 model_default: Some(DEFAULT_AGENT_MODEL.to_string()),
+                model_effective: Some(DEFAULT_AGENT_MODEL.to_string()),
                 model_override: None,
                 model_layer: SettingsLayer::Default,
                 model_missing: false,
+                model_options: Vec::new(),
+                models_loading: false,
+                models_error: None,
                 price_input_override: None,
                 price_output_override: None,
             },
@@ -79,6 +83,9 @@ pub struct UiAgentSettingsView {
     /// The baked default model id, when the provider has one (Anthropic
     /// only) — for "Use default (…)" copy.
     pub model_default: Option<String>,
+    /// The effective model id when one resolves (any layer or the baked
+    /// default) — what the discovery dropdown selects.
+    pub model_effective: Option<String>,
     /// The user's model override, when one exists — the input's value.
     pub model_override: Option<String>,
     /// Which layer supplies the effective model id.
@@ -86,10 +93,28 @@ pub struct UiAgentSettingsView {
     /// The provider requires a model id and none is configured (OpenAI /
     /// Custom before onboarding completes).
     pub model_missing: bool,
+    /// Discovered models for the dropdown (P8), in server order. Empty ⇒
+    /// the model field renders as free text.
+    pub model_options: Vec<UiModelOption>,
+    /// A `/models` fetch is in flight for the selected provider.
+    pub models_loading: bool,
+    /// Display copy for a failed fetch (mapped in core; the guidance block
+    /// above the field carries the per-provider remedies).
+    pub models_error: Option<String>,
     /// The user's $/MTok input-rate override, formatted for its input.
     pub price_input_override: Option<String>,
     /// The user's $/MTok output-rate override, formatted for its input.
     pub price_output_override: Option<String>,
+}
+
+/// One entry of the model discovery dropdown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiModelOption {
+    /// The id the provider expects (the option's value).
+    pub id: String,
+    /// Human-readable name when the provider supplies one (the option's
+    /// text; the id renders otherwise).
+    pub label: Option<String>,
 }
 
 /// Mask an API key for display: enough of the tail to recognize which key

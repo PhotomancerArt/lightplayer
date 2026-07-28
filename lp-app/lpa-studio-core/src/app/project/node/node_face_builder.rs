@@ -31,10 +31,11 @@
 use lpc_model::{FixtureDef, PlaylistDef, ShaderDef};
 
 use crate::{
-    ProjectSlotAddress, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody,
-    UiFixtureFace, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
-    UiShaderFace, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint, UiSlotValue, UiSlotValueKind,
+    ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
+    UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
+    UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget, UiPlaylistEntry,
+    UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect,
+    UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -43,18 +44,18 @@ use crate::{
 ///
 /// **The playlist arm filters `children` in place** — this is the "one live
 /// surface" rule (P4): while the strip face is up, the strip represents
-/// every entry, so exactly one entry's child renders as a sibling card
-/// below the playlist card. Which one follows **selection, then active**
-/// (revised 2026-07-28 — see [`playlist_face`]). The filter rides the same
-/// derivation as the face so the two can never disagree; when the face does
-/// not derive (missing entries row, no `active_entry` status yet, the
-/// resolved entry's child not mounted), `children` is left untouched and
-/// the card falls back to today's full rendering. An **empty** entries map
-/// still derives a face — the strip's empty state (with its add affordance)
-/// is the card's surface for a freshly created playlist — with no child
+/// every entry, so only the ACTIVE entry's child renders as a sibling card
+/// below the playlist card. The filter rides the same derivation as the
+/// face so the two can never disagree; when the face does not derive
+/// (missing entries row, no `active_entry` status yet, active entry's
+/// child not mounted), `children` is left untouched and the card falls
+/// back to today's full rendering. An **empty** entries map still derives
+/// a face — the strip's empty state (with its add affordance) is the
+/// card's surface for a freshly created playlist — with no child
 /// filtering, since there are no entry children to filter.
 pub(in crate::app::project) fn kind_face(
     ty: &str,
+    address: &ProjectNodeAddress,
     sections: &[UiNodeSection],
     children: &mut Vec<UiNodeChild>,
 ) -> Option<UiNodeFace> {
@@ -62,11 +63,11 @@ pub(in crate::app::project) fn kind_face(
         ShaderDef::KIND => shader_face(sections).map(UiNodeFace::Shader),
         FixtureDef::KIND => fixture_face(sections).map(UiNodeFace::Fixture),
         PlaylistDef::KIND => {
-            let (face, rendered_child) = playlist_face(sections, children)?;
-            if let Some(index) = rendered_child {
-                let rendered = children.swap_remove(index);
+            let (face, active_child) = playlist_face(address, sections, children)?;
+            if let Some(index) = active_child {
+                let active = children.swap_remove(index);
                 children.clear();
-                children.push(rendered);
+                children.push(active);
             }
             // NOTE: the surviving child does NOT set `UiNodeChild::active`
             // — the web maps that flag onto the pane's *selection* look
@@ -219,7 +220,26 @@ fn shader_uniform_control(
     if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
         replace_binding_aspect(&mut control.aspects, binding);
     }
+    // A wired uniform's live bus reading rides the binding-derived row
+    // (keyed by the bare uniform name), not the authored default row the
+    // knob edits — mirror it onto the control for display (P6 item 1).
+    if control.live_value.is_none() {
+        control.live_value = top_rows
+            .iter()
+            .find(|row| row.key == name)
+            .and_then(|row| bound_live_value(row));
+    }
     Some(control)
+}
+
+/// A row's live bus reading (display-only), from the bound source endpoint
+/// the project walk decorates with the consumed channel's current value
+/// (P6 item 1).
+fn bound_live_value(slot: &UiConfigSlot) -> Option<String> {
+    match &slot.source {
+        UiSlotSourceState::Bound(endpoint) => endpoint.live_value.clone(),
+        _ => None,
+    }
 }
 
 /// A map-entry row's key segment (the trailing bracket key of the row's
@@ -308,37 +328,16 @@ fn string_field(fields: &[UiConfigSlot], name: &str) -> Option<String> {
 
 // -- playlist face -------------------------------------------------------------
 
-/// The playlist card's face: the entries strip plus the index in `children`
-/// of the ONE entry child that renders below the card.
-///
-/// # Selection, then active
-///
-/// The rendered child follows the **Studio's node selection** (the shared,
-/// project-wide `NodeState.focused`, already projected onto
-/// [`UiNodeChild::focused`]), falling back to the engine's **active entry**
-/// when nothing inside this playlist is selected. The two are different
-/// axes: `active` is playback, `selected` is editing focus, and
-/// [`UiPlaylistFace::active`] keeps driving the ACTIVE placard regardless
-/// of selection.
-///
-/// This revises the original "one live surface" rule, which pinned the
-/// rendered child to the active entry and so left every non-active entry
-/// uneditable — clicking its chip set focus on a card that was then
-/// filtered away (`docs/defects/2026-07-28-playlist-entry-selection.md`).
-/// Exactly one child still renders; only the coupling to playback is gone.
-///
-/// The fallback is free at load time: `default_focus_node_mut` only ever
-/// focuses one of the ROOT's direct children, so it can never land inside
-/// a playlist, and a freshly opened project shows the active entry.
-///
-/// `None` — full-rendering fallback — when the def has no entries row, or
-/// when entries exist but the produced `active_entry` status has not
-/// arrived and nothing is selected, or the resolved entry's child is not
-/// among the built child DTOs. An empty entries map derives an empty-strip
-/// face (`active: None`, `selected: None`, no child to filter) — a freshly
-/// created playlist's card is the strip's empty state, not the generic
-/// fallback.
+/// The playlist card's face: the entries strip plus the index of the ACTIVE
+/// entry's child in `children`. `None` — full-rendering fallback — when the
+/// def has no entries row, or when entries exist but the produced
+/// `active_entry` status has not arrived, the active key names no strip
+/// entry, or the active entry's child is not among the built child DTOs.
+/// An empty entries map derives an empty-strip face (`active: None`, no
+/// child to filter) — a freshly created playlist's card is the strip's
+/// empty state, not the generic fallback.
 fn playlist_face(
+    address: &ProjectNodeAddress,
     sections: &[UiNodeSection],
     children: &[UiNodeChild],
 ) -> Option<(UiPlaylistFace, Option<usize>)> {
@@ -350,48 +349,40 @@ fn playlist_face(
     else {
         return None;
     };
-    let entries: Vec<(UiPlaylistEntry, Option<usize>)> = entries_map
+    let mut entries: Vec<(UiPlaylistEntry, Option<usize>)> = entries_map
         .fields
         .iter()
-        .filter_map(|row| playlist_entry(row, children))
+        .filter_map(|row| playlist_entry(address, row, children))
         .collect();
     if entries.is_empty() {
         let face = UiPlaylistFace {
             entries: Vec::new(),
             active: None,
-            selected: None,
         };
         return Some((face, None));
     }
     // The status seam: `PlaylistState.active_entry` (produced u32 =
     // entries-map key), projected as a ProducedValues row. Its display is
-    // `u32::to_string`, so the parse is the exact inverse. Optional: a
-    // selected entry can carry the card on its own before the first status
-    // lands.
-    let active_key = produced_u32(sections, "active_entry");
-    let active_child = active_key.and_then(|key| {
-        entries
-            .iter()
-            .find(|(entry, _)| entry.key == key)
-            .and_then(|(_, child)| *child)
-    });
-
-    // Selection wins: the entry whose mounted child holds the project-wide
-    // node focus. Focus is exclusive, so at most one can match.
-    let selected = entries
+    // `u32::to_string`, so the parse is the exact inverse.
+    let active_key = produced_u32(sections, "active_entry")?;
+    // The ACTIVE entry is already playing, so its chip keeps the child's
+    // select action (activating it would be a no-op poke); every other
+    // chip activates. P7 spec: "the activate op for non-active entries".
+    for (entry, child) in &mut entries {
+        if entry.key == active_key {
+            entry.action = child.and_then(|index| children[index].action.clone());
+        }
+    }
+    let active_child = entries
         .iter()
-        .find(|(_, child)| child.is_some_and(|index| children[index].focused));
-    let selected_key = selected.map(|(entry, _)| entry.key);
-    let selected_child = selected.and_then(|(_, child)| *child);
-
-    let rendered_child = selected_child.or(active_child)?;
+        .find(|(entry, _)| entry.key == active_key)
+        .and_then(|(_, child)| *child)?;
 
     let face = UiPlaylistFace {
         entries: entries.into_iter().map(|(entry, _)| entry).collect(),
-        active: active_key,
-        selected: selected_key,
+        active: Some(active_key),
     };
-    Some((face, Some(rendered_child)))
+    Some((face, Some(active_child)))
 }
 
 /// One `entries[<key>]` record row → its strip entry plus the index of its
@@ -399,6 +390,7 @@ fn playlist_face(
 /// entry `name`, else `entry_<key>`). Dangling entries (no mounted child)
 /// still chip into the strip, name-only and inert.
 fn playlist_entry(
+    address: &ProjectNodeAddress,
     row: &UiConfigSlot,
     children: &[UiNodeChild],
 ) -> Option<(UiPlaylistEntry, Option<usize>)> {
@@ -419,6 +411,7 @@ fn playlist_entry(
     let name = authored_name
         .or_else(|| child.map(|index| children[index].label.clone()))
         .unwrap_or_else(|| format!("Entry {key}"));
+    let activate_label = format!("Activate {name}");
     let entry = UiPlaylistEntry {
         key,
         name,
@@ -427,7 +420,20 @@ fn playlist_entry(
             .map(|seconds| (f64::from(seconds) * 1000.0).round() as u64),
         cue: option_list_field_is_non_empty(fields, "trigger_ids"),
         thumb: child.and_then(|index| child_visual_snapshot(&children[index])),
-        action: child.and_then(|index| children[index].action.clone()),
+        // Entry click = activate NOW through the runtime command channel
+        // (P7). A poke, not an edit: nothing stages in the overlay. Every
+        // entry gets it, mounted child or not — activation addresses the
+        // entries-map key, which exists independent of child mounting.
+        action: Some(
+            UiAction::from_op(
+                ControllerId::new(ProjectController::NODE_ID),
+                PlaylistActivateOp {
+                    node: address.clone(),
+                    entry: key,
+                },
+            )
+            .with_label(activate_label),
+        ),
     };
     Some((entry, child))
 }
@@ -499,6 +505,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
         address: row_edit_address(slot),
         widget,
         value: value.clone(),
+        live_value: bound_live_value(slot),
         unit: value.unit.clone(),
         state: slot.state.clone(),
         aspects: slot.visible_aspects(),
@@ -552,11 +559,18 @@ mod tests {
     };
     use lpc_model::SlotPath;
 
+    /// The stable authored address faces are built for; entry activation
+    /// actions carry it (P7's runtime command channel).
+    fn test_address() -> ProjectNodeAddress {
+        ProjectNodeAddress::parse("/demo.project/node.playlist").expect("valid address")
+    }
+
     #[test]
     fn shader_face_builds_knobs_from_panel_flagged_uniforms() {
         let sections = shader_sections();
 
-        let face = kind_face("shader", &sections, &mut Vec::new()).expect("shader face");
+        let face =
+            kind_face("shader", &test_address(), &sections, &mut Vec::new()).expect("shader face");
         let UiNodeFace::Shader(face) = face else {
             panic!("expected a shader face");
         };
@@ -599,7 +613,9 @@ mod tests {
             );
         }
 
-        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &sections, &mut Vec::new()) else {
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &sections, &mut Vec::new())
+        else {
             panic!("expected a shader face");
         };
         assert!(
@@ -609,10 +625,41 @@ mod tests {
     }
 
     #[test]
+    fn bound_uniform_mirrors_the_wired_rows_live_reading() {
+        let mut sections = shader_sections();
+        // The binding-derived row, decorated with the channel's quantized
+        // live reading by the project walk (P6 item 1).
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1] {
+            rows.push(
+                UiConfigSlot::empty("speed", "Speed").with_source(UiSlotSourceState::Bound(
+                    UiBindingEndpoint::new("bus:master-tempo").with_live_value("2.72"),
+                )),
+            );
+        }
+
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a shader face");
+        };
+        assert_eq!(
+            face.controls[0].live_value.as_deref(),
+            Some("2.72"),
+            "the display-only live reading rides the control"
+        );
+        assert_eq!(
+            face.controls[0].value.kind,
+            UiSlotValueKind::F32(2.0),
+            "the authored default stays the edit target"
+        );
+    }
+
+    #[test]
     fn fixture_face_projects_the_panel_fader_at_the_interior_address() {
         let sections = fixture_sections();
 
-        let Some(UiNodeFace::Fixture(face)) = kind_face("fixture", &sections, &mut Vec::new())
+        let Some(UiNodeFace::Fixture(face)) =
+            kind_face("fixture", &test_address(), &sections, &mut Vec::new())
         else {
             panic!("expected a fixture face");
         };
@@ -647,16 +694,29 @@ mod tests {
     #[test]
     fn other_kinds_and_faceless_sections_stay_generic() {
         assert_eq!(
-            kind_face("clock", &shader_sections(), &mut Vec::new()),
+            kind_face(
+                "clock",
+                &test_address(),
+                &shader_sections(),
+                &mut Vec::new()
+            ),
             None
         );
         assert_eq!(
-            kind_face("playlist", &shader_sections(), &mut Vec::new()),
+            kind_face(
+                "playlist",
+                &test_address(),
+                &shader_sections(),
+                &mut Vec::new()
+            ),
             None
         );
         // A shader with no produced visual row keeps the sections view.
         let no_products = vec![UiNodeSection::ConfigSlots(Vec::new())];
-        assert_eq!(kind_face("shader", &no_products, &mut Vec::new()), None);
+        assert_eq!(
+            kind_face("shader", &test_address(), &no_products, &mut Vec::new()),
+            None
+        );
         // A fixture whose rows carry no panel flag keeps the sections view.
         let unflagged = vec![
             UiNodeSection::ProducedProducts(vec![UiProducedProduct::control("Output")]),
@@ -666,15 +726,19 @@ mod tests {
                 UiSlotValue::u32(64),
             )]),
         ];
-        assert_eq!(kind_face("fixture", &unflagged, &mut Vec::new()), None);
+        assert_eq!(
+            kind_face("fixture", &test_address(), &unflagged, &mut Vec::new()),
+            None
+        );
     }
 
     #[test]
-    fn playlist_face_derives_the_strip_and_keeps_only_the_active_child_when_nothing_is_selected() {
+    fn playlist_face_derives_the_strip_and_keeps_only_the_active_child() {
         let sections = playlist_sections(Some(1));
         let mut children = playlist_children();
 
-        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        let Some(UiNodeFace::Playlist(face)) =
+            kind_face("playlist", &test_address(), &sections, &mut children)
         else {
             panic!("expected a playlist face");
         };
@@ -698,9 +762,7 @@ mod tests {
             "strip click reuses the child's node-select action"
         );
 
-        // The one-live-surface rule: with nothing selected, the ACTIVE
-        // entry's child is the one that remains.
-        assert_eq!(face.selected, None, "nothing in this playlist is focused");
+        // The one-live-surface rule: only the ACTIVE entry's child remains.
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].label, "Idle");
         assert!(
@@ -711,93 +773,14 @@ mod tests {
     }
 
     #[test]
-    fn selecting_a_non_active_entry_renders_that_child_and_leaves_active_alone() {
-        // The 2026-07-28 defect: clicking a non-active chip set focus on a
-        // child the face then filtered away, so only the active entry was
-        // ever editable.
-        let sections = playlist_sections(Some(1));
-        let mut children = playlist_children();
-        // `active` is entry 2's child; entry 1's child (`idle`) is playing.
-        children[1].focused = true;
-
-        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
-        else {
-            panic!("expected a playlist face");
-        };
-
-        assert_eq!(
-            face.active,
-            Some(1),
-            "playback is untouched by an editing selection"
-        );
-        assert_eq!(face.selected, Some(2), "the focused entry is marked");
-        assert_eq!(children.len(), 1, "still exactly one live surface");
-        assert_eq!(
-            children[0].label, "Active",
-            "the SELECTED entry's child is the one that renders"
-        );
-    }
-
-    #[test]
-    fn selecting_the_active_entry_renders_that_same_child() {
-        let sections = playlist_sections(Some(1));
-        let mut children = playlist_children();
-        children[0].focused = true; // `idle` is both active and selected
-
-        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
-        else {
-            panic!("expected a playlist face");
-        };
-
-        assert_eq!((face.active, face.selected), (Some(1), Some(1)));
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].label, "Idle");
-    }
-
-    #[test]
-    fn focus_outside_the_playlist_falls_back_to_the_active_entry() {
-        // Node focus is project-wide exclusive, so focusing an unrelated
-        // node leaves every entry child unfocused and the strip snaps back
-        // to showing the active entry.
-        let sections = playlist_sections(Some(1));
-        let mut children = playlist_children();
-        assert!(children.iter().all(|child| !child.focused));
-
-        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
-        else {
-            panic!("expected a playlist face");
-        };
-
-        assert_eq!(face.selected, None);
-        assert_eq!(children[0].label, "Idle", "the active entry's child");
-    }
-
-    #[test]
-    fn a_selected_entry_carries_the_face_before_any_active_status_lands() {
-        // Selection alone is enough to render a surface: without it, no
-        // `active_entry` status means the generic fallback (asserted by
-        // `playlist_without_active_status_keeps_all_children_and_no_face`).
-        let sections = playlist_sections(None);
-        let mut children = playlist_children();
-        children[1].focused = true;
-
-        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
-        else {
-            panic!("expected a playlist face");
-        };
-
-        assert_eq!(face.active, None, "no placard without a status");
-        assert_eq!(face.selected, Some(2));
-        assert_eq!(children.len(), 1);
-        assert_eq!(children[0].label, "Active");
-    }
-
-    #[test]
     fn playlist_without_active_status_keeps_all_children_and_no_face() {
         let sections = playlist_sections(None);
         let mut children = playlist_children();
 
-        assert_eq!(kind_face("playlist", &sections, &mut children), None);
+        assert_eq!(
+            kind_face("playlist", &test_address(), &sections, &mut children),
+            None
+        );
         assert_eq!(children.len(), 2, "fallback renders every child as today");
     }
 
@@ -815,7 +798,8 @@ mod tests {
         }
         let mut children = Vec::new();
 
-        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        let Some(UiNodeFace::Playlist(face)) =
+            kind_face("playlist", &test_address(), &sections, &mut children)
         else {
             panic!("expected an empty playlist face");
         };
@@ -830,7 +814,7 @@ mod tests {
             entries.fields.clear();
         }
         assert!(matches!(
-            kind_face("playlist", &early, &mut Vec::new()),
+            kind_face("playlist", &test_address(), &early, &mut Vec::new()),
             Some(UiNodeFace::Playlist(_))
         ));
     }
@@ -841,7 +825,10 @@ mod tests {
         let sections = playlist_sections(Some(7));
         let mut children = playlist_children();
 
-        assert_eq!(kind_face("playlist", &sections, &mut children), None);
+        assert_eq!(
+            kind_face("playlist", &test_address(), &sections, &mut children),
+            None
+        );
         assert_eq!(children.len(), 2);
     }
 
@@ -865,7 +852,8 @@ mod tests {
         let mut children = playlist_children();
         children.push(child("entry_3", "Entry 3"));
 
-        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        let Some(UiNodeFace::Playlist(face)) =
+            kind_face("playlist", &test_address(), &sections, &mut children)
         else {
             panic!("expected a playlist face");
         };

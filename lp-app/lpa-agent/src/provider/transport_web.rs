@@ -1,4 +1,5 @@
-//! wasm [`HttpSseTransport`]: web-sys `fetch` + `ReadableStream` reader.
+//! wasm [`HttpSseTransport`] + [`HttpGetTransport`]: web-sys `fetch` +
+//! `ReadableStream` reader.
 //!
 //! Works from both the main thread (`Window`) and workers
 //! (`WorkerGlobalScope`). An `AbortController` is wired to the body stream's
@@ -13,7 +14,7 @@ use web_sys::{
 };
 
 use crate::provider::http_transport::{
-    HttpRequest, HttpResponse, HttpSseTransport, LocalBoxFuture, TransportError,
+    HttpGetTransport, HttpRequest, HttpResponse, HttpSseTransport, LocalBoxFuture, TransportError,
 };
 
 /// The browser fetch transport (stateless).
@@ -25,7 +26,11 @@ impl HttpSseTransport for WebFetchTransport {
         &self,
         req: HttpRequest,
     ) -> LocalBoxFuture<'static, Result<HttpResponse, TransportError>> {
-        Box::pin(async move { fetch_sse(req).await.map_err(to_transport_error) })
+        Box::pin(async move {
+            fetch_streaming("POST", &req.url, &req.headers, Some(&req.body))
+                .await
+                .map_err(to_transport_error)
+        })
     }
 
     fn sleep_ms(&self, ms: u32) -> LocalBoxFuture<'static, ()> {
@@ -33,20 +38,41 @@ impl HttpSseTransport for WebFetchTransport {
     }
 }
 
-async fn fetch_sse(req: HttpRequest) -> Result<HttpResponse, JsValue> {
+impl HttpGetTransport for WebFetchTransport {
+    fn get(
+        &self,
+        url: String,
+        headers: Vec<(String, String)>,
+    ) -> LocalBoxFuture<'static, Result<HttpResponse, TransportError>> {
+        Box::pin(async move {
+            fetch_streaming("GET", &url, &headers, None)
+                .await
+                .map_err(to_transport_error)
+        })
+    }
+}
+
+async fn fetch_streaming(
+    method: &str,
+    url: &str,
+    request_headers: &[(String, String)],
+    body: Option<&str>,
+) -> Result<HttpResponse, JsValue> {
     let controller = AbortController::new()?;
 
     let headers = Headers::new()?;
-    for (name, value) in &req.headers {
+    for (name, value) in request_headers {
         headers.append(name, value)?;
     }
     let init = RequestInit::new();
-    init.set_method("POST");
+    init.set_method(method);
     init.set_headers(&headers);
-    init.set_body(&JsValue::from_str(&req.body));
+    if let Some(body) = body {
+        init.set_body(&JsValue::from_str(body));
+    }
     init.set_signal(Some(&controller.signal()));
 
-    let request = Request::new_with_str_and_init(&req.url, &init)?;
+    let request = Request::new_with_str_and_init(url, &init)?;
     let response: Response = JsFuture::from(fetch_with_request(&request)?)
         .await?
         .dyn_into()?;
