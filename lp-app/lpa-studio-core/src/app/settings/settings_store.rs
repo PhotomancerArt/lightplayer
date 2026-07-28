@@ -1,26 +1,32 @@
 //! The pure layered settings store: per-field merge + provenance.
 
 use lpa_agent::provider::openai_compat::DEFAULT_BASE_URL as OPENAI_DEFAULT_BASE_URL;
-use lpa_agent::{AnthropicConfig, OpenAiCompatConfig};
+use lpa_agent::{AnthropicConfig, ListModelsError, ModelInfo, OpenAiCompatConfig};
 
 use crate::app::agent::agent_pricing::AgentCostRates;
 use crate::app::agent::agent_provider_config::AgentProviderConfig;
+use crate::app::settings::agent_models::{AgentModelsFetch, AgentModelsState, models_error_copy};
 use crate::app::settings::agent_provider::{AgentProvider, provider_guidance};
 use crate::app::settings::settings_layer::SettingsLayer;
 use crate::app::settings::studio_settings::{
     DEFAULT_AGENT_MODEL, DEFAULT_OPENROUTER_MODEL, OPENROUTER_BASE_URL, StudioSettings,
 };
 use crate::app::settings::ui_settings_view::{
-    UiAgentSettingsView, UiSettingsView, masked_key_preview,
+    UiAgentSettingsView, UiModelOption, UiSettingsView, masked_key_preview,
 };
 
 /// Two overlays over the baked defaults, merged per-field with
 /// **user > host > default** precedence. Pure state (sans-IO): the platform
 /// edges load the layers and persist the user layer; the store only merges.
+/// Also carries the transient per-provider discovered-model state (P8) —
+/// never persisted, fed by the controller's spawned fetches.
 #[derive(Clone, Debug, Default)]
 pub struct SettingsStore {
     host: StudioSettings,
     user: StudioSettings,
+    /// Per-provider `/models` fetch state (at most one entry per provider;
+    /// linear scan — four providers exist).
+    models: Vec<(AgentProvider, AgentModelsState)>,
 }
 
 impl SettingsStore {
@@ -179,12 +185,27 @@ impl SettingsStore {
     /// while it is not sufficiently configured (Anthropic: key; OpenAI:
     /// key + model; Custom: base URL + model, key optional).
     pub fn agent_provider_config(&self) -> Option<AgentProviderConfig> {
+        let model = self.agent_model()?.to_string();
+        self.provider_config_with_model(model)
+    }
+
+    /// Connection settings for model DISCOVERY (P8): the same
+    /// credential/endpoint resolution as [`Self::agent_provider_config`],
+    /// but a missing model id does not block — discovery exists precisely
+    /// to find one (the config's model field is blank then, unused by the
+    /// listing GET).
+    pub fn agent_discovery_config(&self) -> Option<AgentProviderConfig> {
+        let model = self.agent_model().unwrap_or_default().to_string();
+        self.provider_config_with_model(model)
+    }
+
+    fn provider_config_with_model(&self, model: String) -> Option<AgentProviderConfig> {
         match self.agent_provider() {
             AgentProvider::Anthropic => {
                 let api_key = self.agent_anthropic_api_key()?;
                 Some(AgentProviderConfig::Anthropic(AnthropicConfig {
                     api_key: api_key.to_string(),
-                    model: self.agent_model()?.to_string(),
+                    model,
                     base_url: lpa_agent::provider::anthropic::DEFAULT_BASE_URL.to_string(),
                 }))
             }
@@ -193,7 +214,7 @@ impl SettingsStore {
                 Some(AgentProviderConfig::OpenAiCompat(OpenAiCompatConfig {
                     base_url: OPENAI_DEFAULT_BASE_URL.to_string(),
                     api_key: Some(api_key.to_string()),
-                    model: self.agent_model()?.to_string(),
+                    model,
                     extra_headers: Vec::new(),
                 }))
             }
@@ -202,7 +223,7 @@ impl SettingsStore {
                 Some(AgentProviderConfig::OpenAiCompat(OpenAiCompatConfig {
                     base_url: base_url.to_string(),
                     api_key: self.agent_selected_api_key().map(str::to_string),
-                    model: self.agent_model()?.to_string(),
+                    model,
                     extra_headers: Vec::new(),
                 }))
             }
@@ -211,7 +232,7 @@ impl SettingsStore {
                 Some(AgentProviderConfig::OpenAiCompat(OpenAiCompatConfig {
                     base_url: OPENROUTER_BASE_URL.to_string(),
                     api_key: Some(api_key.to_string()),
-                    model: self.agent_model()?.to_string(),
+                    model,
                     // App attribution in OpenRouter's rankings; harmless
                     // elsewhere and never sent to other providers.
                     extra_headers: vec![
@@ -226,9 +247,92 @@ impl SettingsStore {
         }
     }
 
+    // -- discovered models (P8) --------------------------------------------
+
+    /// Begin (or debounce) a model-list fetch for `provider` under
+    /// `fingerprint`. Returns whether the caller should actually spawn the
+    /// fetch: an entry already carrying this fingerprint — in flight, or
+    /// resolved and not `force`d — debounces to `false`. A `true` return
+    /// installs the `Loading` marker.
+    pub fn request_agent_models(
+        &mut self,
+        provider: AgentProvider,
+        fingerprint: String,
+        force: bool,
+    ) -> bool {
+        if let Some(state) = self.agent_models(provider)
+            && state.fingerprint == fingerprint
+        {
+            let in_flight = state.fetch == AgentModelsFetch::Loading;
+            if in_flight || !force {
+                return false;
+            }
+        }
+        self.set_agent_models(
+            provider,
+            AgentModelsState {
+                fingerprint,
+                fetch: AgentModelsFetch::Loading,
+            },
+        );
+        true
+    }
+
+    /// Land a fetch result. `fetched_at` is the controller clock's stamp.
+    /// A result whose fingerprint no longer matches the stored entry —
+    /// the credentials changed while it was in flight — is dropped.
+    pub fn agent_models_loaded(
+        &mut self,
+        provider: AgentProvider,
+        fingerprint: &str,
+        result: Result<Vec<ModelInfo>, ListModelsError>,
+        fetched_at: f64,
+    ) {
+        let Some(state) = self.agent_models(provider) else {
+            return;
+        };
+        if state.fingerprint != fingerprint {
+            return;
+        }
+        let fetch = match result {
+            Ok(models) => AgentModelsFetch::Loaded { models, fetched_at },
+            Err(error) => AgentModelsFetch::Failed { error },
+        };
+        self.set_agent_models(
+            provider,
+            AgentModelsState {
+                fingerprint: fingerprint.to_string(),
+                fetch,
+            },
+        );
+    }
+
+    /// Drop a provider's discovered-model state (its credentials became
+    /// insufficient, or no platform fetcher exists to serve a request).
+    pub fn clear_agent_models(&mut self, provider: AgentProvider) {
+        self.models.retain(|(entry, _)| *entry != provider);
+    }
+
+    /// A provider's discovered-model state, when any fetch has run.
+    pub fn agent_models(&self, provider: AgentProvider) -> Option<&AgentModelsState> {
+        self.models
+            .iter()
+            .find(|(entry, _)| *entry == provider)
+            .map(|(_, state)| state)
+    }
+
+    fn set_agent_models(&mut self, provider: AgentProvider, state: AgentModelsState) {
+        match self.models.iter_mut().find(|(entry, _)| *entry == provider) {
+            Some((_, existing)) => *existing = state,
+            None => self.models.push((provider, state)),
+        }
+    }
+
     /// Cost rates for the usage estimate: per-field settings overrides win
     /// over the built-in table; both rates must resolve or there is no
-    /// estimate (unknown model, no overrides ⇒ tokens only).
+    /// estimate (unknown model, no overrides ⇒ tokens only). Overrides
+    /// stay two fields (input/output) — the cache-write/read rates always
+    /// derive from the resolved input rate by the standard multipliers.
     pub fn agent_cost_rates(&self) -> Option<AgentCostRates> {
         let table = self.agent_model().and_then(AgentCostRates::for_model);
         let input = self
@@ -237,10 +341,7 @@ impl SettingsStore {
         let output = self
             .price_override(|agent| agent.price_output_per_mtok)
             .or(table.map(|rates| rates.output_per_mtok))?;
-        Some(AgentCostRates {
-            input_per_mtok: input,
-            output_per_mtok: output,
-        })
+        Some(AgentCostRates::from_io(input, output))
     }
 
     fn price_override(
@@ -294,6 +395,27 @@ impl SettingsStore {
             Some(model) => model.to_string(),
             None => "model id from your provider — see its docs".to_string(),
         };
+        // The discovered-model slice (P8): options only from a Loaded
+        // fetch; Loading and Failed render as flags on the free-text path.
+        let (model_options, models_loading, models_error) =
+            match self.agent_models(provider).map(|state| &state.fetch) {
+                Some(AgentModelsFetch::Loading) => (Vec::new(), true, None),
+                Some(AgentModelsFetch::Loaded { models, .. }) => (
+                    models
+                        .iter()
+                        .map(|model| UiModelOption {
+                            id: model.id.clone(),
+                            label: model.display_name.clone(),
+                        })
+                        .collect(),
+                    false,
+                    None,
+                ),
+                Some(AgentModelsFetch::Failed { error }) => {
+                    (Vec::new(), false, Some(models_error_copy(provider, error)))
+                }
+                None => (Vec::new(), false, None),
+            };
         UiSettingsView {
             agent: UiAgentSettingsView {
                 provider,
@@ -321,9 +443,13 @@ impl SettingsStore {
                     AgentProvider::OpenRouter => Some(DEFAULT_OPENROUTER_MODEL.to_string()),
                     AgentProvider::OpenAi | AgentProvider::Custom => None,
                 },
+                model_effective: self.agent_model().map(str::to_string),
                 model_override: self.user.agent.model.clone(),
                 model_layer: Self::layer_of(&self.user.agent.model, &self.host.agent.model),
                 model_missing: self.agent_model().is_none(),
+                model_options,
+                models_loading,
+                models_error,
                 price_input_override: self.user.agent.price_input_per_mtok.map(format_rate),
                 price_output_override: self.user.agent.price_output_per_mtok.map(format_rate),
             },
@@ -610,5 +736,149 @@ mod tests {
         let mut settings = StudioSettings::default();
         build(&mut settings.agent);
         settings
+    }
+
+    // -- discovered models (P8) --------------------------------------------
+
+    fn model(id: &str, display_name: Option<&str>) -> ModelInfo {
+        ModelInfo {
+            id: id.to_string(),
+            display_name: display_name.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn discovery_config_resolves_without_a_model() {
+        let mut store = SettingsStore::default();
+        store.set_agent_provider(Some(AgentProvider::OpenAi));
+        store.set_agent_openai_api_key(Some("sk-oai-x".to_string()));
+        // No model: the run config is unavailable, discovery is not.
+        assert!(store.agent_provider_config().is_none());
+        let Some(AgentProviderConfig::OpenAiCompat(config)) = store.agent_discovery_config() else {
+            panic!("expected discovery config");
+        };
+        assert_eq!(config.model, "");
+        assert_eq!(config.api_key.as_deref(), Some("sk-oai-x"));
+        // Without the key, discovery is unavailable too.
+        store.set_agent_openai_api_key(None);
+        assert!(store.agent_discovery_config().is_none());
+    }
+
+    #[test]
+    fn model_fetch_lifecycle_reaches_the_view() {
+        let mut store = SettingsStore::default();
+        store.set_agent_anthropic_api_key(Some("sk-ant-x".to_string()));
+        let provider = AgentProvider::Anthropic;
+
+        // Request → Loading (and the view flags it).
+        assert!(store.request_agent_models(provider, "fp1".into(), false));
+        assert!(store.ui_view().agent.models_loading);
+        // A second request under the same fingerprint debounces, forced or
+        // not — a fetch is in flight.
+        assert!(!store.request_agent_models(provider, "fp1".into(), false));
+        assert!(!store.request_agent_models(provider, "fp1".into(), true));
+
+        // Loaded → options in the view, labels preferred.
+        store.agent_models_loaded(
+            provider,
+            "fp1",
+            Ok(vec![
+                model("claude-sonnet-5", Some("Claude Sonnet 5")),
+                model("claude-haiku-4-5", None),
+            ]),
+            42.0,
+        );
+        let agent = store.ui_view().agent;
+        assert!(!agent.models_loading);
+        assert_eq!(
+            agent.model_options,
+            vec![
+                UiModelOption {
+                    id: "claude-sonnet-5".into(),
+                    label: Some("Claude Sonnet 5".into()),
+                },
+                UiModelOption {
+                    id: "claude-haiku-4-5".into(),
+                    label: None,
+                },
+            ]
+        );
+        assert!(matches!(
+            store.agent_models(provider).map(|s| &s.fetch),
+            Some(AgentModelsFetch::Loaded { fetched_at, .. }) if *fetched_at == 42.0
+        ));
+
+        // Same fingerprint, resolved: only `force` refetches.
+        assert!(!store.request_agent_models(provider, "fp1".into(), false));
+        assert!(store.request_agent_models(provider, "fp1".into(), true));
+    }
+
+    #[test]
+    fn stale_results_are_dropped_and_new_fingerprints_refetch() {
+        let mut store = SettingsStore::default();
+        let provider = AgentProvider::Anthropic;
+        assert!(store.request_agent_models(provider, "fp-old".into(), false));
+        // Credentials change mid-flight: a new fingerprint starts fresh...
+        assert!(store.request_agent_models(provider, "fp-new".into(), false));
+        // ...and the old fetch's landing is dropped as stale.
+        store.agent_models_loaded(provider, "fp-old", Ok(vec![model("stale", None)]), 1.0);
+        assert!(matches!(
+            store.agent_models(provider).map(|s| &s.fetch),
+            Some(AgentModelsFetch::Loading)
+        ));
+        store.agent_models_loaded(provider, "fp-new", Ok(vec![model("fresh", None)]), 2.0);
+        assert_eq!(store.ui_view().agent.model_options[0].id, "fresh");
+    }
+
+    #[test]
+    fn failed_fetches_surface_mapped_error_copy_per_provider() {
+        let mut store = SettingsStore::default();
+        store.set_agent_anthropic_api_key(Some("sk-bad".to_string()));
+        let provider = AgentProvider::Anthropic;
+        assert!(store.request_agent_models(provider, "fp".into(), false));
+        store.agent_models_loaded(
+            provider,
+            "fp",
+            Err(ListModelsError::Auth {
+                message: "401".into(),
+            }),
+            1.0,
+        );
+        let agent = store.ui_view().agent;
+        assert!(agent.model_options.is_empty());
+        assert!(
+            agent
+                .models_error
+                .as_deref()
+                .is_some_and(|copy| copy.contains("key was rejected")),
+            "{:?}",
+            agent.models_error
+        );
+        // The error state debounces like a resolved fetch; force retries.
+        assert!(!store.request_agent_models(provider, "fp".into(), false));
+        assert!(store.request_agent_models(provider, "fp".into(), true));
+    }
+
+    #[test]
+    fn model_state_is_per_provider_and_clearable() {
+        let mut store = SettingsStore::default();
+        assert!(store.request_agent_models(AgentProvider::Anthropic, "a".into(), false));
+        assert!(store.request_agent_models(AgentProvider::Custom, "c".into(), false));
+        store.agent_models_loaded(
+            AgentProvider::Anthropic,
+            "a",
+            Ok(vec![model("claude-sonnet-5", None)]),
+            1.0,
+        );
+        // The view follows the SELECTED provider: Anthropic sees its list,
+        // Custom still shows its in-flight fetch.
+        store.set_agent_anthropic_api_key(Some("sk".to_string()));
+        assert_eq!(store.ui_view().agent.model_options.len(), 1);
+        store.set_agent_provider(Some(AgentProvider::Custom));
+        assert!(store.ui_view().agent.models_loading);
+        // Clearing drops one provider's state only.
+        store.clear_agent_models(AgentProvider::Custom);
+        assert!(store.agent_models(AgentProvider::Custom).is_none());
+        assert!(store.agent_models(AgentProvider::Anthropic).is_some());
     }
 }
