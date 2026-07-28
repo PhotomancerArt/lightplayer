@@ -106,6 +106,7 @@ bookkeeping fact.
 | policy-leak | 2026-07-17 | [hardware-attach-opened-editor](2026-07-17-hardware-attach-opened-editor.md) | fixed | lpa-studio-core/studio |
 | stand-in-divergence | 2026-07-23 | [popover-open-resizes-card](2026-07-23-popover-open-resizes-card.md) | fixed | lpa-studio-web/base/popover |
 | stale-measurement | 2026-07-26 | [popover-outline-stale-on-content-resize](2026-07-26-popover-outline-stale-on-content-resize.md) | fixed | lpa-studio-web/base/popover |
+| inline-emit-stack-imbalance | 2026-07-27 | [wasm-q32-fabs-stack-leak](2026-07-27-wasm-q32-fabs-stack-leak.md) | fixed | lpvm-wasm emit (+ lpvm-cranelift trunc) |
 
 ## Predecessor: `docs/bugs/`
 
