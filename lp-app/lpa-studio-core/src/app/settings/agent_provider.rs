@@ -111,7 +111,8 @@ pub fn provider_guidance(provider: AgentProvider) -> AgentProviderGuidance {
             setup: "Any OpenAI-compatible server works — e.g. Ollama: run \
                     `ollama serve`, set the base URL to http://localhost:11434/v1, \
                     no key needed. LM Studio, llama.cpp, vLLM: use the base URL \
-                    the server shows, and the model id it serves.",
+                    the server shows, and the model id it serves. Not sure? \
+                    Press Find my server and Studio will look.",
             links: &[("ollama.com", "https://ollama.com/")],
             note: Some(
                 "Browser note: the server must allow cross-origin requests — \

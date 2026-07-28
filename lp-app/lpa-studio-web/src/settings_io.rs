@@ -13,7 +13,7 @@
 //!   Electron shell would replace this fetch with IPC/preload carrying the
 //!   same JSON shape.
 
-use lpa_studio_core::StudioSettings;
+use lpa_studio_core::{AgentProvider, StudioSettings};
 
 /// localStorage key holding the user settings layer (a `StudioSettings`
 /// JSON document).
@@ -40,6 +40,53 @@ pub fn store_user_settings_json(json: &str) {
     if let Err(error) = storage.set_item(SETTINGS_STORAGE_KEY, json) {
         log::warn!("settings not saved to localStorage: {error:?}");
     }
+}
+
+/// The effective API key for one provider (user layer > host layer), for
+/// the connection test and the model picker.
+///
+/// The view DTO carries only a masked preview — deliberately, so no raw key
+/// rides on a snapshot — so these two features read the value from the two
+/// layers this edge already owns instead. The user layer is re-read from
+/// localStorage on each call, which is exactly current: the controller
+/// persists it synchronously as the user changes it.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(dead_code, reason = "only the wasm probe/picker read a credential")
+)]
+pub fn effective_api_key(provider: AgentProvider) -> Option<String> {
+    let field = |settings: &StudioSettings| match provider {
+        AgentProvider::Anthropic => settings.agent.anthropic_api_key.clone(),
+        AgentProvider::OpenAi => settings.agent.openai_api_key.clone(),
+        AgentProvider::OpenRouter => settings.agent.openrouter_api_key.clone(),
+        AgentProvider::Custom => settings.agent.custom_api_key.clone(),
+    };
+    let user = load_user_settings_json()
+        .and_then(|json| StudioSettings::from_json_str(&json).ok())
+        .as_ref()
+        .and_then(field);
+    user.or_else(|| HOST_LAYER.with_borrow(|host| host.as_ref().and_then(field)))
+}
+
+/// The Custom provider's key, for the local-server connection test.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(dead_code, reason = "only the wasm probe reads a credential")
+)]
+pub fn effective_custom_api_key() -> Option<String> {
+    effective_api_key(AgentProvider::Custom)
+}
+
+thread_local! {
+    /// The host layer, kept for the credential lookup above (the store owns
+    /// the authoritative copy; this is a read-only echo of the same fetch).
+    static HOST_LAYER: std::cell::RefCell<Option<StudioSettings>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Remember the fetched host layer for [`effective_custom_api_key`].
+pub fn remember_host_layer(settings: &StudioSettings) {
+    HOST_LAYER.with_borrow_mut(|host| *host = Some(settings.clone()));
 }
 
 /// Fetch the host-provided settings layer. A 404 or network error means the

@@ -232,6 +232,7 @@ pub fn App() -> Element {
         let settings_tx = handle.tx.clone();
         spawn(async move {
             if let Some(host) = crate::settings_io::fetch_dev_settings().await {
+                crate::settings_io::remember_host_layer(&host);
                 settings_tx.send(StudioCommand::Settings(SettingsCommand::HostLayerLoaded(
                     host,
                 )));

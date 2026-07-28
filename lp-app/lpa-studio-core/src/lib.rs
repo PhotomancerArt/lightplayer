@@ -93,9 +93,11 @@ pub use app::server::{
     StudioServerClient,
 };
 pub use app::settings::{
-    AgentProvider, AgentProviderGuidance, AgentSettings, DEFAULT_AGENT_MODEL, SettingsCommand,
-    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiSettingsView,
-    provider_guidance,
+    AgentProvider, AgentProviderGuidance, AgentSettings, BrowserFacts, COMMON_LOCAL_SERVERS,
+    CatalogModel, CatalogPrice, DEFAULT_AGENT_MODEL, FindingKind, LocalModelProbeState,
+    LocalServer, ModelCatalog, ModelCatalogRequest, ModelCatalogState, ProbeFinding, ProbeLevel,
+    ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
+    UiAgentSettingsView, UiSettingsView, adopt_model_commands, provider_guidance,
 };
 pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
