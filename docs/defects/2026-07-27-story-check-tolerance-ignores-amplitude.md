@@ -46,19 +46,35 @@ Consequences:
   leniently at `lg` than at `sm` (0.028% vs 0.042% for identical pixel
   counts — visible in run 30310410368's numbers).
 
-**Fix** — none yet. What the investigation established the shape of:
+**Fix** — mitigated 2026-07-27 (`this change`); the gate itself remains
+count-only, so the entry stays open. What landed:
 
-1. Add an amplitude term beside the count term. A tolerated diff should
-   also have to satisfy something like `max Δ ≤ 64`, or a
-   significant-pixel *cluster* bound; today `max Δ` is computed and
-   printed but never gates anything.
-2. Retain the evidence whenever anything lands in the informational
-   bucket above a low amplitude bar — upload `story-images-fresh` (or
-   just the tolerated files) even on a passing run. Without this, any
-   future tolerated-diff investigation starts with the pixels already
-   gone.
-3. Print the **significant/any-diff ratio** in the summary line. It is
-   the cheap discriminator between the failure classes, measured below.
+1. **Evidence retention, unconditional on the verdict**: whenever a
+   complete check has a non-empty tolerated set, the workflow uploads
+   `story-images-tolerated` — fresh **and** committed-baseline variants
+   of just the tolerated files plus the manifest (a few hundred KB,
+   14-day retention). Deliberately a different artifact name from
+   `story-images-fresh`: `story-pull` selects runs by that artifact's
+   presence, and a passing run must never shadow a real drift capture.
+   The manifest gained a `tolerated` name list to drive it
+   (`story-apply-refresh` ignores the field by construction).
+2. **Warn-only amplitude line**: a tolerated file with
+   `significantPixels > 0` — under the ratio but containing deltas the
+   significance test itself calls real — prints a loud WARNING naming
+   this entry. The condition is principled, not a new tunable: every
+   benign churner class in the calibration below diffs at **0**
+   significant pixels, and the first post-#153 healthy run's tolerated
+   set topped out at Δ6 (1036 byte-identical / 5 tolerated, all Δ≤6) —
+   the Δ199 outlier is thirty times outside the benign class.
+
+Still open, in promotion order once a few real runs have confirmed the
+boundary:
+
+1. Promote the warn line to a gate (fail on tolerated-with-significant),
+   with the retained artifacts as the calibration data.
+2. A cluster/locality term, and printing the **significant/any-diff
+   ratio** in the summary line — the cheap class discriminator measured
+   below. Both are single-story-calibrated so far.
 
 **Fingerprint calibration** — synthesised on the pinned story build in a
 Linux container that reproduces CI's exact layout (720×618 / 1080×618 /
@@ -85,8 +101,11 @@ separates the classes cleanly: ≤8% is rasterisation, >50% is content.
 The CI diff sits at 20% with content-class amplitude, matching no single
 synthetic class — a broad faint halo plus ~166 hard pixels.
 
-**Regression coverage** — none. A test would assert that a synthetic
-one-pixel Δ255 change fails the check; today it passes.
+**Regression coverage** — none automated. A test would assert that a
+synthetic one-pixel Δ255 change fails the check; today it passes (with a
+WARNING since the mitigation — verified manually on a live filtered
+check: a 9-px Δ200 patch warns and names this entry, a 9-px Δ30 patch
+stays silent, a pristine capture is byte-identical).
 
 **Lesson** — A tolerance threshold is a stand-in for a human looking at
 the image, and it inherits the burden of proof for everything it

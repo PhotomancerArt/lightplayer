@@ -240,7 +240,15 @@ try {
       // jitter became committed baseline churn.
       await writeFile(
         path.join(outputDir, REFRESH_MANIFEST_FILE),
-        `${JSON.stringify({ replace: comparison.replace, remove: comparison.remove }, null, 2)}\n`,
+        `${JSON.stringify(
+          {
+            replace: comparison.replace,
+            remove: comparison.remove,
+            tolerated: comparison.tolerated,
+          },
+          null,
+          2,
+        )}\n`,
       );
     }
     if (!ok) {
@@ -1048,7 +1056,7 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
       if (diff.withinTolerance) {
         // Deliberately NOT added to `replace`: the committed bytes stay put,
         // so sub-threshold jitter can never ping-pong the baseline.
-        tolerated.push(`${fileName} (${diff.summary})`);
+        tolerated.push({ fileName, diff });
       } else {
         changed.push(`${fileName} (${diff.summary})`);
         replace.push(fileName);
@@ -1059,9 +1067,46 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   printComparison("changed", changed);
   printComparison("new", missing);
   printComparison("removed", unexpected);
-  printComparison("within tolerance (informational)", tolerated);
+  printComparison(
+    "within tolerance (informational)",
+    tolerated.map(({ fileName, diff }) => `${fileName} (${diff.summary})`),
+  );
 
-  const manifest = { replace, remove: unexpected };
+  // Amplitude heuristic (warn-only): every benign raster-churner class ever
+  // observed on this pipeline (compositor layer promotion, border AA — the
+  // version-badge/shader-face family) diffs at 0 significant pixels; a
+  // tolerated file with significant pixels squeaked UNDER the ratio limit
+  // while containing per-channel deltas the significance test itself calls
+  // real. That is the fingerprint of a bistable render or a content change
+  // hiding under the count-only gate — see
+  // docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md.
+  // Warn loudly; do not fail (single-story calibration so far — promote to a
+  // gate once a few real runs have confirmed where the boundary sits).
+  const suspects = tolerated.filter(({ diff }) => diff.significantPixels > 0);
+  if (suspects.length > 0) {
+    console.warn(
+      `\nWARNING: ${suspects.length} tolerated file(s) contain significant pixels ` +
+        `(Δ>${significanceDelta}) — under the ratio limit but NOT raster jitter, ` +
+        "which always diffs at 0 significant pixels. Suspected bistable render " +
+        "or under-the-ratio content change:",
+    );
+    for (const { fileName, diff } of suspects) {
+      console.warn(`  ${fileName} (max Δ${diff.maxDelta}, ${diff.significantPixels} significant)`);
+    }
+    console.warn(
+      "  Fresh + baseline pixels are retained as the story-images-tolerated CI artifact.\n" +
+        "  See docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md.",
+    );
+  }
+
+  const manifest = {
+    replace,
+    remove: unexpected,
+    // Names only (consumers replace/remove by name; tolerated is evidence
+    // retention, applied by the workflow's artifact step, never by
+    // story-apply-refresh).
+    tolerated: tolerated.map(({ fileName }) => fileName),
+  };
   if (changed.length === 0 && missing.length === 0 && unexpected.length === 0) {
     console.log(
       `Story baselines match (${identical} byte-identical, ${tolerated.length} within tolerance).`,
@@ -1123,6 +1168,8 @@ function comparePngPixels(expected, actual) {
   const significantRatio = significantPixels / totalPixels;
   return {
     withinTolerance: significantRatio <= maxSignificantPixelRatio,
+    significantPixels,
+    maxDelta,
     summary:
       `${significantPixels}/${totalPixels} px (${(significantRatio * 100).toFixed(3)}%)` +
       ` exceed Δ${significanceDelta} [${diffPixels} any-diff, max Δ${maxDelta}]`,
