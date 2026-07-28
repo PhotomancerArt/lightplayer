@@ -125,6 +125,36 @@ mod tests {
     }
 
     #[test]
+    fn dump_parses_through_the_harness_reader() {
+        // The harness's typed reader (`lpa_agent_harness::parse_dump`) is
+        // what tests and the headless runner assert with — keep it locked
+        // to REAL exporter output, not just hand-written samples.
+        let stats = vec![AgentTurnStat {
+            stop_reason: StopReason::Other("pause_turn".into()),
+            usage: TokenUsage::default(),
+        }];
+        let edits = vec![AgentEditRecord {
+            turn: 1,
+            note: None,
+            source: std::rc::Rc::from("vec4 render(vec2 pos) { return vec4(1.0); }"),
+            thumb: None,
+            engine_ok: None,
+            at: Revision::default(),
+        }];
+        let json = debug_dump_json("nodes/a.glsl", None, &transcript(), &stats, &edits);
+        let dump = lpa_agent_harness::parse_dump(&json).expect("real dump parses");
+        assert_eq!(dump.format, 1);
+        assert_eq!(dump.artifact, "nodes/a.glsl");
+        assert_eq!(dump.provider, "unconfigured");
+        assert_eq!(dump.usage_total.cache_read_tokens, 40);
+        assert_eq!(dump.turns[0].stop_reason, "other:pause_turn");
+        assert_eq!(dump.edits[0].turn, 1);
+        assert_eq!(dump.edits[0].engine_ok, None);
+        assert!(dump.edits[0].source.contains("render"));
+        assert_eq!(dump.messages.len(), 1);
+    }
+
+    #[test]
     fn dump_names_the_provider_but_never_the_key() {
         let config = AgentProviderConfig::Anthropic(lpa_agent::AnthropicConfig {
             api_key: "sk-secret".to_string(),

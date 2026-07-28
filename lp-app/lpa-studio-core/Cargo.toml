@@ -54,8 +54,9 @@ lpa-server = { path = "../lpa-server" }
 # scripted fake device); the feature is dev-only.
 lpa-link = { path = "../lpa-link", features = ["fake-device"] }
 async-trait = { version = "0.1" }
-# Scripted model-provider streams in the agent e2e tests.
-futures-util = "0.3"
+# Scripted model-provider double in the agent e2e tests; debug-dump
+# parsing in the export tests.
+lpa-agent-harness = { path = "../lpa-agent-harness" }
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 

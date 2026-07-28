@@ -26,6 +26,11 @@
 pub mod prompt;
 pub mod provider;
 pub mod session;
+/// Canonical test doubles (FakeHost, ScriptedProvider). In-src unit tests
+/// use them via `crate::`; external suites via `lpa-agent-harness`, which
+/// enables the `test-doubles` feature and re-exports them.
+#[cfg(any(test, feature = "test-doubles"))]
+pub mod test_double;
 pub mod tool;
 
 pub use prompt::build_system_prompt;

@@ -1,0 +1,18 @@
+[package]
+name = "lpa-agent-harness"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Dev-only shader-agent test harness: scripted provider, fake host, eval tasks, debug-dump parsing"
+
+[dependencies]
+lpa-agent = { path = "../lpa-agent", features = ["test-doubles"] }
+lps-probe = { path = "../../lp-shader/lps-probe" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

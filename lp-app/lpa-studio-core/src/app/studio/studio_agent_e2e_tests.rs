@@ -11,9 +11,8 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use lpa_agent::provider::model_provider::{
-    BoxStream, ModelProvider, StopReason, TokenUsage, TurnEvent, TurnRequest,
-};
+use lpa_agent::provider::model_provider::{StopReason, TokenUsage, TurnEvent, TurnRequest};
+use lpa_agent_harness::ScriptedProvider;
 use serde_json::json;
 
 use crate::app::studio::studio_edit_e2e_tests::{
@@ -731,21 +730,6 @@ impl AgentHarness {
             tasks,
             requests,
         }
-    }
-}
-
-/// One-turn-script provider (the `lpa-agent` FakeProvider pattern, shared
-/// request log so assertions survive the factory rebuilds).
-struct ScriptedProvider {
-    turns: RefCell<VecDeque<Vec<TurnEvent>>>,
-    requests: Rc<RefCell<Vec<TurnRequest>>>,
-}
-
-impl ModelProvider for ScriptedProvider {
-    fn run_turn(&self, req: TurnRequest) -> BoxStream<'_, TurnEvent> {
-        self.requests.borrow_mut().push(req);
-        let events = self.turns.borrow_mut().pop_front().unwrap_or_default();
-        Box::pin(futures_util::stream::iter(events))
     }
 }
 
