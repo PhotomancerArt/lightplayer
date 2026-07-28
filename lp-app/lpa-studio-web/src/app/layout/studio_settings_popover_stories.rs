@@ -173,33 +173,51 @@ pub(crate) fn model_picker_openrouter() -> Element {
             loading: false,
             error: None,
             catalog: Some(ModelCatalog {
+                // Ids, rates and scores are the real ones from
+                // openrouter.ai/api/v1/models, in the order the picker
+                // produces (best published coding score first).
                 models: vec![
                     priced(
-                        "anthropic/claude-opus-4-8",
+                        "anthropic/claude-opus-5",
+                        "Anthropic: Claude Opus 5",
+                        5.0,
+                        25.0,
+                        78.0,
+                    ),
+                    priced("openai/gpt-5.6-sol", "OpenAI: GPT-5.6 Sol", 5.0, 30.0, 77.4),
+                    priced(
+                        "anthropic/claude-fable-5",
+                        "Anthropic: Claude Fable 5",
+                        10.0,
+                        50.0,
+                        76.5,
+                    ),
+                    priced("moonshotai/kimi-k3", "MoonshotAI: Kimi K3", 3.0, 15.0, 76.2),
+                    priced(
+                        "anthropic/claude-opus-4.8",
                         "Anthropic: Claude Opus 4.8",
                         5.0,
                         25.0,
+                        74.3,
                     ),
+                    priced("x-ai/grok-4.5", "xAI: Grok 4.5", 2.0, 6.0, 72.4),
                     priced(
                         "anthropic/claude-sonnet-5",
                         "Anthropic: Claude Sonnet 5",
-                        3.0,
-                        15.0,
+                        2.0,
+                        10.0,
+                        71.5,
                     ),
-                    priced("google/gemini-3-pro", "Google: Gemini 3 Pro", 1.25, 10.0),
                     priced(
-                        "meta-llama/llama-3.3-70b-instruct",
-                        "Llama 3.3 70B",
-                        0.12,
-                        0.3,
+                        "openai/gpt-5.6-luna",
+                        "OpenAI: GPT-5.6 Luna",
+                        0.5,
+                        3.0,
+                        71.4,
                     ),
-                    priced("openai/gpt-5", "OpenAI: GPT-5", 1.25, 10.0),
-                    priced("qwen/qwen3-coder-30b", "Qwen3 Coder 30B", 0.07, 0.28),
-                    priced("z-ai/glm-5", "Z.AI: GLM-5", 0.6, 2.2),
-                    priced("deepseek/deepseek-v4", "DeepSeek V4", 0.28, 1.1),
-                    priced("mistralai/mistral-large-3", "Mistral Large 3", 2.0, 6.0),
+                    priced("z-ai/glm-5.2", "Z.AI: GLM-5.2", 0.6, 2.2, 68.8),
                 ],
-                hidden: 14,
+                hidden: 66,
             }),
             loaded_for: Some("OpenRouter|".to_string()),
         },
@@ -314,11 +332,19 @@ fn probe_panel(probe: LocalModelProbeState) -> Element {
     }
 }
 
-/// A panel with the model picker expanded.
+/// A panel with the model picker expanded. The fingerprint mirrors the
+/// fixture's own `loaded_for`, since a mismatch is exactly what the picker
+/// treats as another provider's stale list.
 fn catalog_panel(agent: UiAgentSettingsView, catalog: ModelCatalogState) -> Element {
+    let catalog_fingerprint = catalog.loaded_for.clone().unwrap_or_default();
     rsx! {
         div { class: "tw:w-[340px] tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card",
-            AgentSettingsSection { agent, on_settings: move |_| {}, catalog }
+            AgentSettingsSection {
+                agent,
+                on_settings: move |_| {},
+                catalog,
+                catalog_fingerprint,
+            }
         }
     }
 }
@@ -337,25 +363,24 @@ fn custom_agent() -> UiAgentSettingsView {
     agent
 }
 
-/// A catalog row with published rates ($/MTok).
-fn priced(id: &str, label: &str, input: f64, output: f64) -> CatalogModel {
+/// A catalog row as OpenRouter serves one: name, rates, and the published
+/// coding score the ordering is built on.
+fn priced(id: &str, label: &str, input: f64, output: f64, score: f64) -> CatalogModel {
     CatalogModel {
-        id: id.to_string(),
         label: Some(label.to_string()),
         price: Some(CatalogPrice {
             input_per_mtok: input,
             output_per_mtok: output,
         }),
+        coding_score: Some(score),
+        supports_tools: Some(true),
+        ..CatalogModel::new(id)
     }
 }
 
-/// A catalog row from a server that publishes no names or prices.
+/// A catalog row from a server that publishes no names, prices, or scores.
 fn plain(id: &str) -> CatalogModel {
-    CatalogModel {
-        id: id.to_string(),
-        label: None,
-        price: None,
-    }
+    CatalogModel::new(id)
 }
 
 /// One finding, diagnosed through the same core path the browser glue uses.

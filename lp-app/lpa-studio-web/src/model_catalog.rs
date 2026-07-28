@@ -180,11 +180,7 @@ mod tests {
             loading: false,
             error: Some("stale failure".to_string()),
             catalog: Some(ModelCatalog {
-                models: vec![CatalogModel {
-                    id: "llama3.2".to_string(),
-                    label: None,
-                    price: None,
-                }],
+                models: vec![CatalogModel::new("llama3.2")],
                 hidden: 0,
             }),
             loaded_for: Some("Custom|http://localhost:11434/v1".to_string()),
