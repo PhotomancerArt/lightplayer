@@ -1176,8 +1176,18 @@ label:has(> input:not(:disabled)) {
     font-size: 8px;
     font-weight: 600;
     line-height: 1;
-    color: rgba(10, 11, 13, 0.92);
-    text-shadow: 0 0 2px rgba(255, 255, 255, 0.35);
+    /* White fill + 8-direction black outline: readable over any lamp color,
+       lit or unlit (the lp2014 outline treatment). */
+    color: #fff;
+    text-shadow:
+        1px 0 0 #000,
+        -1px 0 0 #000,
+        0 1px 0 #000,
+        0 -1px 0 #000,
+        1px 1px 0 #000,
+        -1px 1px 0 #000,
+        1px -1px 0 #000,
+        -1px -1px 0 #000;
 }
 
 .ux-map-arrows {
