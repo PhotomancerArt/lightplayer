@@ -80,14 +80,33 @@ fn kind_display(kind: &UiPendingEditKind, old_value: Option<&str>) -> String {
         (UiPendingEditKind::Removed, Some(old_value)) => format!("removed (was {old_value})"),
         (UiPendingEditKind::Removed, None) => "removed".to_string(),
         (UiPendingEditKind::Moved { from, to }, _) => format!("key {from} \u{2192} {to}"),
+        // A staged body deletion is a file fate, not a value change: say so
+        // instead of the replace form ("body → deleted").
+        (UiPendingEditKind::AssetBody { detail }, _) if detail == "deleted" => {
+            "file deleted on save".to_string()
+        }
         (UiPendingEditKind::AssetBody { detail }, _) => format!("body \u{2192} {detail}"),
+        // The staged removal row: the entry's label is the removed node's
+        // name and its path is the attachment site; the staged file
+        // deletions list separately as their own file rows.
+        (UiPendingEditKind::NodeRemoved, _) => {
+            "node removed \u{2014} staged until save".to_string()
+        }
     }
 }
 
 /// Revert-button wording matching the per-slot detail popups: "Revert" for
 /// unsaved persisted edits (and failed entries, where it clears the parked
-/// error), "Reset" for live controls.
+/// error), "Reset" for live controls — except the staged node removal,
+/// whose revert restores the node (and cancels its staged file deletions),
+/// so it reads "Restore".
 fn revert_label(edit: &UiPendingEdit) -> (&'static str, &'static str) {
+    if matches!(edit.kind, UiPendingEditKind::NodeRemoved) {
+        return (
+            "Restore",
+            "Restore this node and cancel its staged file deletions",
+        );
+    }
     match edit.phase {
         UiPendingEditPhase::Persisted => ("Revert", "Discard this pending edit"),
         UiPendingEditPhase::Live => ("Reset", "Reset this live control to its authored value"),
@@ -276,6 +295,50 @@ mod tests {
         ] {
             assert_eq!(bucket_section_tint(bucket, 0), DetailSectionTint::None);
         }
+    }
+
+    #[test]
+    fn node_removed_and_deleted_file_rows_read_as_fates_not_value_changes() {
+        // The staged removal row (label = removed node, path = the site).
+        assert_eq!(
+            kind_display(&UiPendingEditKind::NodeRemoved, None),
+            "node removed \u{2014} staged until save"
+        );
+        // Old values never leak onto the removal row (the site's base JSON
+        // would be noise; the label already names the node).
+        assert_eq!(
+            kind_display(&UiPendingEditKind::NodeRemoved, Some("{\"node\":1}")),
+            "node removed \u{2014} staged until save"
+        );
+        // Staged file deletions are file fates…
+        assert_eq!(
+            kind_display(
+                &UiPendingEditKind::AssetBody {
+                    detail: "deleted".to_string()
+                },
+                None
+            ),
+            "file deleted on save"
+        );
+        // …while body replacements keep the replace form.
+        assert_eq!(
+            kind_display(
+                &UiPendingEditKind::AssetBody {
+                    detail: "3.2 KB".to_string()
+                },
+                None
+            ),
+            "body \u{2192} 3.2 KB"
+        );
+    }
+
+    #[test]
+    fn node_removed_revert_reads_restore() {
+        let mut removal = edit("nodes[orbit]", UiPendingEditPhase::Persisted);
+        removal.kind = UiPendingEditKind::NodeRemoved;
+        let (label, title) = revert_label(&removal);
+        assert_eq!(label, "Restore");
+        assert!(title.contains("staged file deletions"));
     }
 
     #[test]

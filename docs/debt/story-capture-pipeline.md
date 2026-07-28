@@ -168,6 +168,26 @@ committed-as-well-as-working-tree UI changes; (4) failures are loud
   back**: the run that found drift passes after committing, and the bot
   head ships with unapproved checks.
 
+- 2026-07-27 — **churner recurrence, second consecutive PR** (#154, node
+  authoring). The auto-commit refreshed 103 baselines; 99 were the
+  change's real drift (gallery New chip, project-pane losing its header
+  "+" and gaining the tree add row, workspace add button, playlist ADD
+  chip, node delete action, 5 new stories). The other **4 are churn**,
+  and they are not full 3-size sets — the tell that a story drifted for
+  reasons unrelated to the diff:
+  `studio__layout__version-badge__loaded__sm` and
+  `studio__node__shader-face__advanced-open__{lg,sm}` (both repeat
+  PR #149's set, and shader-face now churns at TWO viewports, not one)
+  plus `studio__roster__roster-card__op-overlay-failed__lg` — a **new
+  member** of the set, from a story family this branch never touched.
+  So the 2026-07-27 finding is not a one-off: the set is non-empty AND
+  growing across unrelated branches, which strengthens the case for
+  re-activating this entry (exit criterion 5). Nothing was reverted —
+  post-paydown the CI capture is canonical and the job passed on its own
+  commit. The "green one commit back" steady state held, and the
+  bot-triggered `action_required` run was left unapproved per the
+  2026-07-27 lesson above.
+
 **Exit-criteria status after the 2026-07-26 paydown** — (1) isolated
 pinned CI runner ✓; (2) clean ephemeral runners make restart cheap and
 the in-script retry/resume is retained ✓; (3) CI check always compares
