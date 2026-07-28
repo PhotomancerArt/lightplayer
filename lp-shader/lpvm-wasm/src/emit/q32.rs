@@ -278,11 +278,7 @@ pub(crate) fn emit_q32_fdiv_recip(
 
 pub(crate) fn emit_q32_fabs(sink: &mut InstructionSink<'_>, src: u32, dst: u32) {
     let t = BlockType::Result(ValType::I32);
-    sink.local_get(src)
-        .local_get(src)
-        .i32_const(0)
-        .i32_lt_s()
-        .if_(t);
+    sink.local_get(src).i32_const(0).i32_lt_s().if_(t);
     sink.i32_const(0).local_get(src).i32_sub();
     sink.else_();
     sink.local_get(src);

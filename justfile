@@ -320,6 +320,34 @@ studio-story-check *filters: studio-web-story-build
 studio-story-pull:
     node lp-app/lpa-studio-web/scripts/story-pull.mjs
 
+# Write this worktree's .claude/launch.json with the SAME port
+# `just studio-dev` will pick (scripts/dev-port.sh hash of worktree +
+# service). The file is per-worktree and gitignored — never commit it, and
+# never hand-edit a fixed port into it; a stale pinned port sends the
+# harness browser pane to another worktree's server (see
+# docs/defects/2026-07-27-launch-json-pinned-port.md). Run this before
+# opening a harness preview; it is idempotent.
+claude-launch-json:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="$(scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}")"
+    mkdir -p .claude
+    cat > .claude/launch.json <<EOF
+    {
+      "version": "0.0.1",
+      "configurations": [
+        {
+          "name": "studio-dev",
+          "runtimeExecutable": "just",
+          "runtimeArgs": ["studio-dev"],
+          "port": ${port},
+          "autoPort": false
+        }
+      ]
+    }
+    EOF
+    echo "wrote .claude/launch.json (studio-dev port ${port})"
+
 studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
