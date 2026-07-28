@@ -1,5 +1,6 @@
 use core::fmt::Write;
 
+use crate::app::runtime_pool::CONSOLE_TAIL_LEN;
 use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::{
     ActionPriority, UiActivityView, UiPaneView, UiStatus, UiViewContent, UxActivityTarget,
@@ -136,6 +137,54 @@ impl UiStudioView {
         pane.body = UiViewContent::Activity(activity);
     }
 
+    /// Apply the CARD-OWNED op flow's live state in place, so a long
+    /// management op (flash / erase / reset) narrates on its card while
+    /// it runs — the counterpart of [`Self::apply_activity`] for the
+    /// card overlay rather than a pane section.
+    ///
+    /// The matching rule is [`UiDeviceCard::takes_card_op`], the same one
+    /// the controller's view build uses, so the mid-flight card and the
+    /// snapshot that replaces it never disagree. The lens card is the
+    /// same card grown into the editor (D43), so it takes the op too.
+    pub fn apply_card_op(&mut self, uid: Option<&str>, op: crate::CardOp) {
+        for card in self.device_cards_mut() {
+            if card.takes_card_op(uid) {
+                card.ui.op = Some(op.clone());
+            }
+        }
+    }
+
+    /// Append one stamped entry to the console tail of whichever card is
+    /// mid-op, so the op overlay's technical-details region streams the
+    /// work's own output (esptool's writes, the device's boot lines)
+    /// rather than sitting on "Waiting for device output…".
+    ///
+    /// Scoped to cards already wearing an op: action dispatch is
+    /// serialized through the actor, so at most one card carries an op
+    /// flow at a time and there is no one else to smear onto.
+    ///
+    /// Capped at [`CONSOLE_TAIL_LEN`] like the session-fed tail this
+    /// stands in for — a firmware flash emits hundreds of lines and
+    /// every progressive publish clones the view.
+    pub fn push_card_op_console(&mut self, entry: crate::UiLogEntry) {
+        for card in self.device_cards_mut() {
+            if card.ui.op.is_some() {
+                card.console_tail.push(entry.clone());
+                let overflow = card.console_tail.len().saturating_sub(CONSOLE_TAIL_LEN);
+                card.console_tail.drain(..overflow);
+            }
+        }
+    }
+
+    /// Every device card the view carries: the gallery roster plus the
+    /// lens card (the same card grown into the editor pane, D43).
+    fn device_cards_mut(&mut self) -> impl Iterator<Item = &mut crate::app::home::UiDeviceCard> {
+        self.home
+            .iter_mut()
+            .flat_map(|home| home.devices.iter_mut())
+            .chain(self.lens_card.iter_mut().map(|card| card.as_mut()))
+    }
+
     pub fn render_text(&self) -> String {
         let mut output = String::new();
         if let Some(home) = &self.home {
@@ -180,5 +229,115 @@ fn priority_label(priority: ActionPriority) -> &'static str {
         ActionPriority::Primary => "primary",
         ActionPriority::Secondary => "secondary",
         ActionPriority::Tertiary => "tertiary",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::home::{CardUiState, UiDeviceCard, UiHomeView};
+    use crate::app::roster::RosterCardState;
+    use crate::{CardOp, UiLogEntry, UiLogLevel, UiLogOrigin};
+
+    fn card(uid: Option<&str>, state: RosterCardState) -> UiDeviceCard {
+        UiDeviceCard {
+            uid: uid.map(str::to_string),
+            name: "Board".to_string(),
+            transport: "USB".to_string(),
+            state,
+            project: None,
+            fw: None,
+            sim: false,
+            console_tail: Vec::new(),
+            ui: CardUiState::default(),
+        }
+    }
+
+    fn view_with(devices: Vec<UiDeviceCard>) -> UiStudioView {
+        UiStudioView::empty().with_home(Some(UiHomeView {
+            devices,
+            projects: Vec::new(),
+            examples: Vec::new(),
+            library_available: true,
+            opening: None,
+            issue: None,
+        }))
+    }
+
+    fn line(message: &str) -> UiLogEntry {
+        UiLogEntry::new(1.0, UiLogLevel::Info, UiLogOrigin::Link, message)
+    }
+
+    #[test]
+    fn a_stamped_op_lands_on_its_own_card_only() {
+        let mut view = view_with(vec![
+            card(Some("dev_a"), RosterCardState::RunningUpToDate),
+            card(Some("dev_b"), RosterCardState::RunningUpToDate),
+        ]);
+
+        view.apply_card_op(Some("dev_a"), CardOp::new("Writing…", Some(42)));
+
+        let devices = &view.home.as_ref().unwrap().devices;
+        assert_eq!(devices[0].ui.op, Some(CardOp::new("Writing…", Some(42))));
+        assert_eq!(devices[1].ui.op, None, "the op must not smear across cards");
+    }
+
+    #[test]
+    fn an_unstamped_op_rides_the_live_card_never_a_remembered_one() {
+        let mut view = view_with(vec![
+            card(
+                Some("dev_offline"),
+                RosterCardState::Offline { last_seen_at: None },
+            ),
+            card(None, RosterCardState::ConnectedEmpty),
+        ]);
+
+        view.apply_card_op(None, CardOp::new("Installing…", Some(10)));
+
+        let devices = &view.home.as_ref().unwrap().devices;
+        assert_eq!(devices[0].ui.op, None, "a remembered card is not live");
+        assert!(devices[1].ui.op.is_some(), "the blank live board takes it");
+    }
+
+    #[test]
+    fn op_console_lines_reach_the_card_mid_op_and_stay_bounded() {
+        let mut view = view_with(vec![
+            card(Some("dev_a"), RosterCardState::RunningUpToDate),
+            card(Some("dev_b"), RosterCardState::RunningUpToDate),
+        ]);
+        view.apply_card_op(Some("dev_a"), CardOp::new("Writing…", None));
+
+        for index in 0..CONSOLE_TAIL_LEN + 5 {
+            view.push_card_op_console(line(&format!("Writing at {index:#x}")));
+        }
+
+        let devices = &view.home.as_ref().unwrap().devices;
+        assert_eq!(
+            devices[0].console_tail.len(),
+            CONSOLE_TAIL_LEN,
+            "a long flash must not grow the tail without bound"
+        );
+        assert_eq!(
+            devices[0].console_tail.last().unwrap().message,
+            format!("Writing at {:#x}", CONSOLE_TAIL_LEN + 4),
+            "the newest line survives the trim"
+        );
+        assert!(
+            devices[1].console_tail.is_empty(),
+            "only the card mid-op shows the op's output"
+        );
+    }
+
+    #[test]
+    fn the_lens_card_tracks_the_op_it_is_the_same_card_grown() {
+        let mut view = view_with(Vec::new())
+            .with_lens_card(Some(card(Some("dev_a"), RosterCardState::RunningUpToDate)));
+
+        view.apply_card_op(Some("dev_a"), CardOp::new("Writing…", Some(7)));
+        view.push_card_op_console(line("Writing at 0x0"));
+
+        let lens = view.lens_card.as_ref().unwrap();
+        assert_eq!(lens.ui.op, Some(CardOp::new("Writing…", Some(7))));
+        assert_eq!(lens.console_tail.len(), 1);
     }
 }
