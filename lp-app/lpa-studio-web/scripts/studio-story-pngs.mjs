@@ -956,9 +956,9 @@ async function settleFocus(cdp, sessionId, storyId) {
 // Widening the viewport instead of scrolling is what actually works here: the
 // story page is not a scroll container, so `window.scrollTo` moves nothing.
 // Width is never touched — sm/md/lg mean width, and the responsive layout must
-// not change. Height-dependent layout (100vh panels, height media queries) does
-// see a taller viewport now; that is the intended trade, since a story box is
-// meant to be photographed whole.
+// not change. The viewport is restored to its normal height before the capture
+// (see below), so the grown height is a measurement window, not the height any
+// story is photographed at.
 // See docs/defects/2026-07-27-code-editor-gutter-misaligned.md
 async function fitViewportToStory(cdp, sessionId, viewport, storyId) {
   const needed = await evaluate(
@@ -998,6 +998,27 @@ async function fitViewportToStory(cdp, sessionId, viewport, storyId) {
   // Measurement runs on requestAnimationFrame and a headless page stops
   // producing frames on its own, so force one and let the story settle at the
   // new height before anything reads geometry again.
+  await forceFrame(cdp, sessionId);
+  await waitForStoryReady(cdp, sessionId, storyId);
+  // Then put the viewport back. The point of growing it was to let widgets take
+  // a measurement they refuse to take off screen, and those measurements stick
+  // — CodeMirror's height oracle keeps the corrected line height once it has
+  // one. Capturing at the grown height would instead bake the taller viewport
+  // into every tall story: layout that keys on viewport height (a pane sized to
+  // fill the window) expands, and the story box grows by that much empty space.
+  // Measured on studio-shell/simulator-ready at sm, the grown capture was 91px
+  // taller with pixel-identical content — a baseline change that carries no
+  // information. Restoring first keeps the fix and leaves those baselines alone.
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    {
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    },
+    sessionId,
+  );
   await forceFrame(cdp, sessionId);
   await waitForStoryReady(cdp, sessionId, storyId);
 }
