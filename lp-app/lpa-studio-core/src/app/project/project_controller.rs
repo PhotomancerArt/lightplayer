@@ -2777,11 +2777,7 @@ impl ProjectController {
             .as_bytes()
             .to_vec();
         if let Some((source_path, _)) = envelope.assets.iter().next() {
-            let extension = source_path
-                .rsplit_once('.')
-                .map(|(_, ext)| ext.to_string())
-                .unwrap_or_else(|| "bin".to_string());
-            let target = format!("./{name}.{extension}");
+            let target = format!("./{name}{}", asset_extension(source_path));
             asset_paths.insert(source_path.clone(), target.clone());
             let body_text = core::str::from_utf8(&body)
                 .map_err(|_| UiError::Project("the pasted node body is not text".to_string()))?;
@@ -3770,6 +3766,21 @@ pub struct ProjectEditRun {
     pub logs: Vec<UiLogDraft>,
 }
 
+/// A pasted asset's extension, INCLUDING the dot (`""` when it has none).
+///
+/// Split the file NAME, never the whole path: `"./orbit"` has no
+/// extension, but naively splitting the path at its last `.` finds the
+/// leading `./` and yields `"/orbit"` — a pasted asset would land at
+/// `./name./orbit`.
+fn asset_extension(source_path: &str) -> String {
+    let file_name = source_path.rsplit('/').next().unwrap_or(source_path);
+    match file_name.rsplit_once('.') {
+        // A leading-dot name (`.hidden`) is not an extension either.
+        Some((stem, ext)) if !stem.is_empty() => format!(".{ext}"),
+        _ => String::new(),
+    }
+}
+
 /// Why an attach target could not be used, in the caller's words.
 fn attach_unavailable_notice(attach: &UiAttachTarget) -> UiNotice {
     match attach {
@@ -4386,6 +4397,39 @@ fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
 
 fn no_library_error() -> UiError {
     UiError::MissingSession("no local library is attached".to_string())
+}
+
+#[cfg(test)]
+mod asset_extension_tests {
+    use super::asset_extension;
+
+    #[test]
+    fn ordinary_assets_keep_their_extension() {
+        assert_eq!(asset_extension("./orbit.glsl"), ".glsl");
+        assert_eq!(asset_extension("./logo.png"), ".png");
+        assert_eq!(asset_extension("nested/dir/pulse.glsl"), ".glsl");
+    }
+
+    #[test]
+    fn the_leading_dot_slash_is_not_an_extension() {
+        // The bug this guards: splitting the whole PATH at its last `.`
+        // finds the `./` prefix on an extensionless asset and yields
+        // "/orbit", so the paste would land at `./name./orbit`.
+        assert_eq!(asset_extension("./orbit"), "");
+        assert_eq!(asset_extension("./LICENSE"), "");
+        assert_eq!(asset_extension("orbit"), "");
+    }
+
+    #[test]
+    fn a_dotfile_has_no_extension() {
+        assert_eq!(asset_extension("./.gitignore"), "");
+        assert_eq!(asset_extension(".hidden"), "");
+    }
+
+    #[test]
+    fn only_the_last_extension_counts() {
+        assert_eq!(asset_extension("./orbit.tar.gz"), ".gz");
+    }
 }
 
 #[cfg(test)]
