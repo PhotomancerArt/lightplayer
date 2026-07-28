@@ -426,10 +426,23 @@ mod tests {
     use lps_probe::LedPoint;
 
     use super::*;
-    use crate::tool::iterate_host::{EngineStatusKind, HostError, HostFuture, ShaderContext};
+    use crate::test_double::FakeHost;
+    use crate::tool::iterate_host::EngineStatusKind;
 
     const RED: &str = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
     const GREEN: &str = "vec4 render(vec2 pos) { return vec4(0.0, 1.0, 0.0, 1.0); }";
+
+    /// A [`FakeHost`] carrying the single LED sample point these tests'
+    /// health reports and `leds` domains have always used.
+    fn led_host(source: &str) -> FakeHost {
+        let mut host = FakeHost::new(source);
+        host.leds = vec![LedPoint {
+            label: "led0".into(),
+            channel: 0,
+            at: [0.5, 0.5],
+        }];
+        host
+    }
 
     /// Drive one `run_iterate` call to completion, discarding progress.
     fn run(
@@ -470,7 +483,7 @@ mod tests {
 
     #[test]
     fn unknown_input_fields_are_rejected_in_band() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         let mut cache = None;
         let outcome = run(&json!({ "sorce": "typo" }), &mut host, &mut cache);
         assert!(!outcome.is_error);
@@ -479,12 +492,12 @@ mod tests {
             "{}",
             outcome.content
         );
-        assert!(host.staged.is_empty());
+        assert!(host.staged.borrow().is_empty());
     }
 
     #[test]
     fn health_only_call_uses_current_source() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         let mut cache = None;
         let outcome = run(&json!({}), &mut host, &mut cache);
         assert!(!outcome.is_error);
@@ -492,13 +505,13 @@ mod tests {
         assert_eq!(content["shader"], "ok");
         assert_eq!(content["staged"], false);
         assert_eq!(content["health"]["nan_count"], 0);
-        assert!(host.staged.is_empty());
+        assert!(host.staged.borrow().is_empty());
         assert!(cache.is_some(), "successful compile is cached");
     }
 
     #[test]
     fn source_is_staged_before_probes_and_compile_errors_are_data() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         let mut cache = None;
         let broken = "vec4 render(vec2 pos) { return oops; }";
         let outcome = run(&json!({ "source": broken }), &mut host, &mut cache);
@@ -510,14 +523,14 @@ mod tests {
         );
         assert_eq!(content["staged"], true);
         // Staged even though the compile failed.
-        assert_eq!(host.staged, vec![broken.to_string()]);
+        assert_eq!(*host.staged.borrow(), vec![broken.to_string()]);
         assert!(cache.is_none());
         assert_eq!(outcome.summary["shader_ok"], false);
     }
 
     #[test]
     fn oversized_source_is_precheck_rejected_without_staging() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         let mut cache = None;
         let big = format!("// {}\n{RED}", "x".repeat(MAX_SOURCE_BYTES));
         let outcome = run(&json!({ "source": big }), &mut host, &mut cache);
@@ -528,14 +541,14 @@ mod tests {
             outcome.content
         );
         assert!(
-            host.staged.is_empty(),
+            host.staged.borrow().is_empty(),
             "oversized source must not be staged"
         );
     }
 
     #[test]
     fn capture_is_reserved() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         let mut cache = None;
         let outcome = run(&json!({ "capture": {} }), &mut host, &mut cache);
         let content: Value = serde_json::from_str(&outcome.content).expect("json");
@@ -551,7 +564,7 @@ mod tests {
 
     #[test]
     fn diff_reports_against_cached_previous_compile() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         let mut cache = None;
 
         // First call: nothing to diff against yet.
@@ -585,8 +598,7 @@ mod tests {
 
     #[test]
     fn probe_results_are_rounded_for_transport() {
-        let mut host =
-            FakeHost::new("vec4 render(vec2 pos) { return vec4(0.123456, 0.0, 0.0, 1.0); }");
+        let mut host = led_host("vec4 render(vec2 pos) { return vec4(0.123456, 0.0, 0.0, 1.0); }");
         let mut cache = None;
         let outcome = run(
             &json!({ "probes": [ { "id": "p", "ty": "float", "expr": "render(pos).r",
@@ -604,7 +616,7 @@ mod tests {
 
     #[test]
     fn host_failures_are_error_results() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         host.fail_stage = true;
         let mut cache = None;
         let outcome = run(&json!({ "source": GREEN }), &mut host, &mut cache);
@@ -614,7 +626,7 @@ mod tests {
 
     #[test]
     fn staged_call_awaits_and_reports_the_engine_verdict() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         host.verdict = Some(EngineVerdict {
             status: EngineStatusKind::Error,
             message: Some("missing uniform field `speed`".into()),
@@ -629,7 +641,10 @@ mod tests {
             &mut |phase| phases.push(phase),
         ));
         // Staged ⇒ a bounded wait with the full budget.
-        assert_eq!(host.verdict_budgets, vec![ENGINE_VERDICT_BUDGET_MS]);
+        assert_eq!(
+            *host.verdict_budgets.borrow(),
+            vec![ENGINE_VERDICT_BUDGET_MS]
+        );
         let content: Value = serde_json::from_str(&outcome.content).expect("json");
         assert_eq!(content["engine"]["status"], "error");
         assert_eq!(
@@ -652,7 +667,7 @@ mod tests {
 
     #[test]
     fn unstaged_call_reports_last_known_engine_status_without_waiting() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         host.verdict = Some(EngineVerdict {
             status: EngineStatusKind::Ok,
             message: None,
@@ -667,7 +682,7 @@ mod tests {
             &mut |phase| phases.push(phase),
         ));
         // No stage ⇒ budget 0 (immediate last-known read), no wait phase.
-        assert_eq!(host.verdict_budgets, vec![0]);
+        assert_eq!(*host.verdict_budgets.borrow(), vec![0]);
         assert!(!phases.contains(&ToolPhase::AwaitingEngine));
         let content: Value = serde_json::from_str(&outcome.content).expect("json");
         assert_eq!(content["engine"]["status"], "ok");
@@ -675,7 +690,7 @@ mod tests {
 
     #[test]
     fn hosts_without_an_engine_produce_no_engine_section() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         let mut cache = None;
         let outcome = run(&json!({}), &mut host, &mut cache);
         let content: Value = serde_json::from_str(&outcome.content).expect("json");
@@ -685,7 +700,7 @@ mod tests {
 
     #[test]
     fn probe_phases_are_indexed_over_the_spec() {
-        let mut host = FakeHost::new(RED);
+        let mut host = led_host(RED);
         let mut cache = None;
         let mut phases = Vec::new();
         futures_executor::block_on(run_iterate(
@@ -708,70 +723,5 @@ mod tests {
                 ToolPhase::Finishing,
             ]
         );
-    }
-
-    // -- helpers ----------------------------------------------------------
-
-    struct FakeHost {
-        source: String,
-        staged: Vec<String>,
-        fail_stage: bool,
-        /// Scripted engine verdict (`None` = host without an engine link).
-        verdict: Option<EngineVerdict>,
-        /// Budgets `await_engine_verdict` was called with.
-        verdict_budgets: Vec<u32>,
-    }
-
-    impl FakeHost {
-        fn new(source: &str) -> Self {
-            Self {
-                source: source.to_string(),
-                staged: Vec::new(),
-                fail_stage: false,
-                verdict: None,
-                verdict_budgets: Vec::new(),
-            }
-        }
-    }
-
-    impl AgentHost for FakeHost {
-        fn current_source(&self) -> Result<String, HostError> {
-            Ok(self.source.clone())
-        }
-
-        fn stage_source<'a>(
-            &'a mut self,
-            source: &'a str,
-        ) -> HostFuture<'a, Result<(), HostError>> {
-            Box::pin(async move {
-                if self.fail_stage {
-                    return Err(HostError::new("overlay write refused"));
-                }
-                self.staged.push(source.to_string());
-                self.source = source.to_string();
-                Ok(())
-            })
-        }
-
-        fn await_engine_verdict(
-            &mut self,
-            budget_ms: u32,
-        ) -> HostFuture<'_, Option<EngineVerdict>> {
-            self.verdict_budgets.push(budget_ms);
-            let verdict = self.verdict.clone();
-            Box::pin(async move { verdict })
-        }
-
-        fn led_points(&self) -> Vec<LedPoint> {
-            vec![LedPoint {
-                label: "led0".into(),
-                channel: 0,
-                at: [0.5, 0.5],
-            }]
-        }
-
-        fn shader_context(&self) -> ShaderContext {
-            ShaderContext::default()
-        }
     }
 }

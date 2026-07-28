@@ -307,14 +307,9 @@ fn host_error(message: String) -> IterateOutcome {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
-    use lps_probe::LedPoint;
-
     use super::*;
-    use crate::tool::iterate_host::{
-        EngineStatusKind, EngineVerdict, HostError, HostFuture, ParamDefRecord, ShaderContext,
-    };
+    use crate::test_double::FakeHost;
+    use crate::tool::iterate_host::{EngineStatusKind, EngineVerdict, ParamDefRecord};
 
     const SPEED_SHADER: &str = "layout(binding = 0) uniform float speed;\n\
          vec4 render(vec2 pos) { return vec4(fract(speed), 0.0, 0.0, 1.0); }";
@@ -477,77 +472,5 @@ mod tests {
         let outcome = run(&json!({ "name": "speed" }), &mut host);
         assert!(outcome.is_error);
         assert!(outcome.content.contains("param upsert failed"));
-    }
-
-    // -- helpers ----------------------------------------------------------
-
-    struct FakeHost {
-        source: String,
-        params: Option<Vec<ParamDefRecord>>,
-        upserts: RefCell<Vec<ParamUpsert>>,
-        fail_upsert: bool,
-        verdict: Option<EngineVerdict>,
-        verdict_budgets: RefCell<Vec<u32>>,
-    }
-
-    impl FakeHost {
-        fn new(source: &str) -> Self {
-            Self {
-                source: source.to_string(),
-                params: Some(Vec::new()),
-                upserts: RefCell::new(Vec::new()),
-                fail_upsert: false,
-                verdict: None,
-                verdict_budgets: RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl AgentHost for FakeHost {
-        fn current_source(&self) -> Result<String, HostError> {
-            Ok(self.source.clone())
-        }
-
-        fn stage_source<'a>(
-            &'a mut self,
-            _source: &'a str,
-        ) -> HostFuture<'a, Result<(), HostError>> {
-            Box::pin(async { Ok(()) })
-        }
-
-        fn shader_params(&mut self) -> HostFuture<'_, Option<Vec<ParamDefRecord>>> {
-            let params = self.params.clone();
-            Box::pin(async move { params })
-        }
-
-        fn upsert_param<'a>(
-            &'a mut self,
-            upsert: &'a ParamUpsert,
-        ) -> HostFuture<'a, Result<(), HostError>> {
-            Box::pin(async move {
-                if self.fail_upsert {
-                    return Err(HostError::new("overlay write refused"));
-                }
-                self.upserts.borrow_mut().push(upsert.clone());
-                Ok(())
-            })
-        }
-
-        fn await_engine_verdict(
-            &mut self,
-            budget_ms: u32,
-        ) -> HostFuture<'_, Option<EngineVerdict>> {
-            self.verdict_budgets.borrow_mut().push(budget_ms);
-            let verdict = self.verdict.clone();
-            Box::pin(async move { verdict })
-        }
-
-        fn led_points(&self) -> Vec<LedPoint> {
-            Vec::new()
-        }
-
-        fn shader_context(&self) -> ShaderContext {
-            ShaderContext::default()
-        }
     }
 }

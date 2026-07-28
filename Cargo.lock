@@ -5407,6 +5407,7 @@ dependencies = [
  "gloo-timers",
  "js-sys",
  "lp-collection 1.0.0",
+ "lpa-agent-harness",
  "lps-builtins",
  "lps-probe",
  "reqwest",
@@ -5416,6 +5417,16 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "lpa-agent-harness"
+version = "40.0.0"
+dependencies = [
+ "lpa-agent",
+ "lps-probe",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5506,11 +5517,11 @@ name = "lpa-studio-core"
 version = "40.0.0"
 dependencies = [
  "async-trait",
- "futures-util",
  "js-sys",
  "log",
  "lp-gfx-lpvm",
  "lpa-agent",
+ "lpa-agent-harness",
  "lpa-client",
  "lpa-link",
  "lpa-server",

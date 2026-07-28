@@ -43,6 +43,9 @@ web-sys = { version = "0.3", features = [
 
 [dev-dependencies]
 futures-executor = "0.3"
+# The shared test doubles (FakeHost, ScriptedProvider) and the eval corpus.
+# Dev-only cycle (harness depends on this crate's lib); cargo allows it.
+lpa-agent-harness = { path = "../lpa-agent-harness" }
 # Runtime for the live eval harness (tests/evals.rs); reqwest needs a tokio
 # reactor. Host-only (dev), never built for wasm targets.
 tokio = { version = "1", features = ["rt", "time"] }
@@ -52,6 +55,10 @@ default = []
 # Host (non-wasm) Anthropic SSE transport over reqwest; used by evals and
 # integration tests. The wasm transport needs no feature — it is target-gated.
 host-transport = ["dep:reqwest", "dep:tokio"]
+# Expose the canonical test doubles (`test_double` module) to external test
+# crates; lpa-agent-harness enables this and re-exports them. Dev-only —
+# never enabled by a production dependency edge.
+test-doubles = []
 
 [lints]
 workspace = true

@@ -431,15 +431,10 @@ impl Acc {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::collections::VecDeque;
-
-    use futures_util::stream;
-    use lps_probe::LedPoint;
-
     use super::*;
-    use crate::provider::model_provider::{BoxStream, ChatRole, TokenUsage};
-    use crate::tool::iterate_host::{HostError, HostFuture, ShaderContext};
+    use crate::provider::model_provider::{ChatRole, TokenUsage};
+    use crate::test_double::{FakeHost, ScriptedProvider};
+    use crate::tool::iterate_host::ShaderContext;
     use crate::tool::tool_phase::ToolPhase;
 
     const RED: &str = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }";
@@ -447,12 +442,12 @@ mod tests {
 
     #[test]
     fn text_only_turn_completes_the_session() {
-        let provider = FakeProvider::new(vec![vec![
+        let provider = ScriptedProvider::new(vec![vec![
             TurnEvent::TextDelta("All ".into()),
             TurnEvent::TextDelta("done.".into()),
             turn_done(StopReason::EndTurn, 10, 5),
         ]]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let mut events = Vec::new();
         block_on(session.run("hello".into(), |e| events.push(e))).expect("run");
 
@@ -482,7 +477,7 @@ mod tests {
     fn tool_turn_stages_source_and_feeds_result_back() {
         let input = format!("{{\"source\": {}, \"note\": \"go green\"}}", json!(GREEN));
         let mid = input.len() / 2;
-        let provider = FakeProvider::new(vec![
+        let provider = ScriptedProvider::new(vec![
             vec![
                 TurnEvent::TextDelta("Trying green.".into()),
                 TurnEvent::ToolUseStart {
@@ -504,7 +499,7 @@ mod tests {
                 turn_done(StopReason::EndTurn, 40, 10),
             ],
         ]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let mut events = Vec::new();
         block_on(session.run("make it green".into(), |e| events.push(e))).expect("run");
 
@@ -589,7 +584,7 @@ mod tests {
         // Turn 1 thinks (with a split signature), calls the tool, and the
         // session must replay the thinking block VERBATIM in turn 2's
         // request — the Anthropic tool-use protocol requirement.
-        let provider = FakeProvider::new(vec![
+        let provider = ScriptedProvider::new(vec![
             vec![
                 TurnEvent::ThinkingDelta("Green means ".into()),
                 TurnEvent::ThinkingDelta("more G.".into()),
@@ -608,7 +603,7 @@ mod tests {
                 turn_done(StopReason::EndTurn, 40, 10),
             ],
         ]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let mut events = Vec::new();
         block_on(session.run("make it green".into(), |e| events.push(e))).expect("run");
 
@@ -659,11 +654,11 @@ mod tests {
     fn reasoning_only_turns_close_thinking_at_turn_done() {
         // Compat servers can stream reasoning with no signature; the
         // boundary must still arrive when the turn ends.
-        let provider = FakeProvider::new(vec![vec![
+        let provider = ScriptedProvider::new(vec![vec![
             TurnEvent::ThinkingDelta("pondering".into()),
             turn_done(StopReason::EndTurn, 1, 1),
         ]]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let mut events = Vec::new();
         block_on(session.run("go".into(), |e| events.push(e))).expect("run");
         let done_at = events
@@ -696,8 +691,8 @@ mod tests {
                 turn_done(StopReason::ToolUse, 1, 1),
             ]
         };
-        let provider = FakeProvider::new(vec![tool_turn(), tool_turn(), tool_turn()]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let provider = ScriptedProvider::new(vec![tool_turn(), tool_turn(), tool_turn()]);
+        let mut session = AgentSession::new(&provider, test_host(RED));
         session.max_turns = 2;
         let mut events = Vec::new();
         block_on(session.run("loop forever".into(), |e| events.push(e))).expect("run");
@@ -719,12 +714,12 @@ mod tests {
 
     #[test]
     fn abort_between_events_stops_the_run() {
-        let provider = FakeProvider::new(vec![vec![
+        let provider = ScriptedProvider::new(vec![vec![
             TurnEvent::TextDelta("one".into()),
             TurnEvent::TextDelta("two".into()),
             turn_done(StopReason::EndTurn, 1, 1),
         ]]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let abort = session.abort_handle();
         let mut events = Vec::new();
         block_on(session.run("go".into(), |e| {
@@ -748,11 +743,11 @@ mod tests {
 
     #[test]
     fn provider_error_fails_the_run() {
-        let provider = FakeProvider::new(vec![vec![TurnEvent::ProviderError {
+        let provider = ScriptedProvider::new(vec![vec![TurnEvent::ProviderError {
             message: "boom".into(),
             retryable: false,
         }]]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let mut events = Vec::new();
         let err = block_on(session.run("go".into(), |e| events.push(e))).expect_err("fails");
         assert_eq!(
@@ -769,7 +764,7 @@ mod tests {
 
     #[test]
     fn unknown_tool_returns_error_result_and_continues() {
-        let provider = FakeProvider::new(vec![
+        let provider = ScriptedProvider::new(vec![
             vec![
                 TurnEvent::ToolUseStart {
                     id: "tu_1".into(),
@@ -782,7 +777,7 @@ mod tests {
                 turn_done(StopReason::EndTurn, 1, 1),
             ],
         ]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let mut events = Vec::new();
         block_on(session.run("go".into(), |e| events.push(e))).expect("run");
         match &session.transcript().messages[2].content[0] {
@@ -800,7 +795,7 @@ mod tests {
     fn max_tokens_cut_drops_the_dangling_tool_call_and_reports_truncation() {
         // The output budget ran out mid-tool-input-JSON — the live failure:
         // stream ends with `max_tokens`, the tool call's input is torn.
-        let provider = FakeProvider::new(vec![vec![
+        let provider = ScriptedProvider::new(vec![vec![
             TurnEvent::TextDelta("Rewriting the shader.".into()),
             TurnEvent::ToolUseStart {
                 id: "tu_1".into(),
@@ -812,7 +807,7 @@ mod tests {
             },
             turn_done(StopReason::MaxTokens, 10, 8192),
         ]]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let mut events = Vec::new();
         block_on(session.run("bounce a ball".into(), |e| events.push(e))).expect("run");
 
@@ -852,11 +847,11 @@ mod tests {
 
     #[test]
     fn other_stop_reason_reports_truncation_without_a_tool_drop() {
-        let provider = FakeProvider::new(vec![vec![
+        let provider = ScriptedProvider::new(vec![vec![
             TurnEvent::TextDelta("Half a thought".into()),
             turn_done(StopReason::Other("pause_turn".into()), 1, 1),
         ]]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let mut events = Vec::new();
         block_on(session.run("go".into(), |e| events.push(e))).expect("run");
         assert!(events.iter().any(|e| matches!(
@@ -874,7 +869,7 @@ mod tests {
         // executes, so the second must never run — but its recorded
         // tool_use still needs an answer for the transcript to replay.
         let input = format!("{{\"source\": {}, \"note\": \"go green\"}}", json!(GREEN));
-        let provider = FakeProvider::new(vec![vec![
+        let provider = ScriptedProvider::new(vec![vec![
             TurnEvent::ToolUseStart {
                 id: "tu_1".into(),
                 name: "iterate".into(),
@@ -893,7 +888,7 @@ mod tests {
             },
             turn_done(StopReason::ToolUse, 1, 1),
         ]]);
-        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut session = AgentSession::new(&provider, test_host(RED));
         let abort = session.abort_handle();
         let mut events = Vec::new();
         block_on(session.run("go".into(), |e| {
@@ -929,6 +924,18 @@ mod tests {
 
     // -- helpers ----------------------------------------------------------
 
+    /// The canonical [`FakeHost`] with these tests' fixed prompt context.
+    fn test_host(source: &str) -> FakeHost {
+        let mut host = FakeHost::new(source);
+        host.context = ShaderContext {
+            project_name: "Test Project".into(),
+            node_name: "test-shader".into(),
+            fixture: None,
+            bindings: Vec::new(),
+        };
+        host
+    }
+
     fn turn_done(stop_reason: StopReason, input: u32, output: u32) -> TurnEvent {
         TurnEvent::TurnDone {
             stop_reason,
@@ -942,71 +949,5 @@ mod tests {
 
     fn block_on<F: Future>(f: F) -> F::Output {
         futures_executor::block_on(f)
-    }
-
-    struct FakeProvider {
-        turns: RefCell<VecDeque<Vec<TurnEvent>>>,
-        requests: RefCell<Vec<TurnRequest>>,
-    }
-
-    impl FakeProvider {
-        fn new(turns: Vec<Vec<TurnEvent>>) -> Self {
-            Self {
-                turns: RefCell::new(turns.into()),
-                requests: RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl ModelProvider for &FakeProvider {
-        fn run_turn(&self, req: TurnRequest) -> BoxStream<'_, TurnEvent> {
-            self.requests.borrow_mut().push(req);
-            let events = self.turns.borrow_mut().pop_front().unwrap_or_default();
-            Box::pin(stream::iter(events))
-        }
-    }
-
-    struct FakeHost {
-        source: RefCell<String>,
-        staged: RefCell<Vec<String>>,
-    }
-
-    impl FakeHost {
-        fn new(source: &str) -> Self {
-            Self {
-                source: RefCell::new(source.to_string()),
-                staged: RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl AgentHost for FakeHost {
-        fn current_source(&self) -> Result<String, HostError> {
-            Ok(self.source.borrow().clone())
-        }
-
-        fn stage_source<'a>(
-            &'a mut self,
-            source: &'a str,
-        ) -> HostFuture<'a, Result<(), HostError>> {
-            Box::pin(async move {
-                self.staged.borrow_mut().push(source.to_string());
-                *self.source.borrow_mut() = source.to_string();
-                Ok(())
-            })
-        }
-
-        fn led_points(&self) -> Vec<LedPoint> {
-            Vec::new()
-        }
-
-        fn shader_context(&self) -> ShaderContext {
-            ShaderContext {
-                project_name: "Test Project".into(),
-                node_name: "test-shader".into(),
-                fixture: None,
-                bindings: Vec::new(),
-            }
-        }
     }
 }
