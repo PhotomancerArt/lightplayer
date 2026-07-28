@@ -1988,7 +1988,9 @@ mod tests {
     }
 
     #[test]
-    fn fixture_svg_path_mapping_rejects_curve_commands() {
+    fn fixture_svg_path_mapping_flattens_curve_commands() {
+        // Curves flatten to endpoint lines on import (P3 gate direction) —
+        // a curved export loads instead of erroring.
         let fs = svg_fixture_project(
             br#"
 <svg viewBox="0 0 20 10">
@@ -1998,8 +2000,8 @@ mod tests {
         );
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
-        assert_fixture_node_error(&rt, "unsupported SVG path command");
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load svg fixture project");
+        assert!(node_for_def_path(&rt, "/fixture.json").is_some());
     }
 
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {

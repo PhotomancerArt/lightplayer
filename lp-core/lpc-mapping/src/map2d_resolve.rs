@@ -160,19 +160,22 @@ fn resolve_ring(
     if ring.rings == 0 {
         return Err(invalid("ring needs at least one ring"));
     }
-    if ring.rings > 1 && ring.spacing <= 0.0 {
-        return Err(invalid("multi-ring spacing must be positive"));
-    }
-
-    let mut radii = Vec::with_capacity(ring.rings as usize);
+    // Rings auto-space evenly from the outer radius toward the center
+    // (never reaching zero); per-ring counts come from the outer→inner
+    // `counts` overrides, falling back to circumference-derived.
+    let mut rings_outer_first: Vec<(f32, u32)> = Vec::with_capacity(ring.rings as usize);
     for ring_index in 0..ring.rings {
-        let radius = ring.radius - ring_index as f32 * ring.spacing;
-        if radius > f32::EPSILON {
-            radii.push(radius);
-        }
+        let radius = ring.radius * (ring.rings - ring_index) as f32 / ring.rings as f32;
+        let count = ring
+            .counts
+            .get(ring_index as usize)
+            .copied()
+            .filter(|count| *count > 0)
+            .unwrap_or_else(|| derived_ring_count(ring.outer_count, radius, ring.radius));
+        rings_outer_first.push((radius, count));
     }
     if ring.order == RingOrder::InnerFirst {
-        radii.reverse();
+        rings_outer_first.reverse();
     }
 
     let sign = match ring.dir {
@@ -180,8 +183,7 @@ fn resolve_ring(
         RingDir::Ccw => -1.0f32,
     };
     let mut positions = Vec::new();
-    for radius in radii {
-        let count = derived_ring_count(ring.outer_count, radius, ring.radius);
+    for (radius, count) in rings_outer_first {
         let step = 360.0 / count as f32;
         for lamp in 0..count {
             let degrees = ring.start_angle_deg + sign * lamp as f32 * step;
@@ -339,7 +341,7 @@ mod tests {
             radius: 10.0,
             outer_count: 4,
             rings: 1,
-            spacing: 0.0,
+            counts: Vec::new(),
             order: RingOrder::OuterFirst,
             start_angle_deg: -90.0,
             dir: RingDir::Cw,
@@ -488,7 +490,7 @@ mod tests {
             radius: 90.0,
             outer_count: 16,
             rings: 2,
-            spacing: 45.0,
+            counts: Vec::new(),
             order: RingOrder::OuterFirst,
             start_angle_deg: -90.0,
             dir: RingDir::Cw,
