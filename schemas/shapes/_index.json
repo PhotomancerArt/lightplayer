@@ -24,6 +24,7 @@
   "lpc_model::nodes::playlist::playlist_entry::PlaylistEntry": 899201012,
   "lpc_model::nodes::playlist::playlist_state::PlaylistState": 237636858,
   "lpc_model::nodes::project::project_def::ProjectDef": 2328756067,
+  "lpc_model::nodes::project::promoted_control_def::PromotedControlDef": 2602397900,
   "lpc_model::nodes::radio::control_radio_def::ControlRadioDef": 4099574392,
   "lpc_model::nodes::radio::control_radio_def::ControlRadioState": 1057824914,
   "lpc_model::nodes::shader::compute_shader_def::ComputeShaderDef": 3622644300,

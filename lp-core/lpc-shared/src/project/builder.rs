@@ -211,9 +211,9 @@ impl ProjectBuilder {
         }
         let project = ProjectDef {
             format: ProjectDef::current_format_slot(),
-            uid: OptionSlot::none(),
             name: OptionSlot::some(ValueSlot::new(self.name.clone())),
             nodes: MapSlot::new(nodes),
+            ..ProjectDef::default()
         };
         let project_json = authored_node_json(&registry, &NodeDef::Project(project));
         self.write_file_helper("/project.json", project_json.as_bytes())

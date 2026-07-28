@@ -43,5 +43,5 @@ pub use starter::{
     NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, starter_def_for_kind,
     starter_for_kind,
 };
-pub use starter_project::starter_project_files;
+pub use starter_project::{effect_starter_files, starter_project_files};
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

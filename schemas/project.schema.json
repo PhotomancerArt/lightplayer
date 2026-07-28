@@ -1,13 +1,48 @@
 {
+  "$defs": {
+    "lpc_model::nodes::project::promoted_control_def::PromotedControlDef": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "max": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "target": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
   "$id": "https://lightplayer.dev/schemas/project.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "author": {
+      "type": "string"
+    },
+    "controls": {
+      "additionalProperties": {
+        "$ref": "#/$defs/lpc_model::nodes::project::promoted_control_def::PromotedControlDef"
+      },
+      "type": "object"
+    },
     "format": {
       "const": 1
     },
     "kind": {
       "const": "Project"
+    },
+    "license": {
+      "type": "string"
     },
     "name": {
       "type": "string"
@@ -45,6 +80,9 @@
       "type": "object"
     },
     "uid": {
+      "type": "string"
+    },
+    "version": {
       "type": "string"
     }
   },

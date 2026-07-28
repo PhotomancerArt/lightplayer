@@ -1136,7 +1136,12 @@ fn register_node_bindings(
     // Unloaded/errored defs project with the `Project` fallback kind and
     // register nothing — same tolerance the attach arms' kind filters gave
     // them (the node renders as an error node; the load must not fail).
+    // Real project defs register no bindings either, but their promoted
+    // controls are validated here so a bad alias fails the load loudly.
     if node.kind == NodeKind::Project {
+        if let Ok(NodeDef::Project(config)) = projected_node_config(registry, node) {
+            validate_promoted_controls(projected_nodes, node, config)?;
+        }
         return Ok(());
     }
     match projected_node_config(registry, node)?.clone() {
@@ -1436,6 +1441,52 @@ fn register_node_bindings(
             )?;
         }
         NodeDef::Project(_) | NodeDef::Texture(_) => {}
+    }
+    Ok(())
+}
+
+/// Validate a project node's promoted controls (effects-are-projects ADR):
+/// every `controls{}` target must be the node form and resolve to a
+/// **direct child** of the project node. Deeper or unresolvable targets are
+/// a load error with a path-qualified message — a bad alias fails loudly at
+/// load, not as a silently dead knob. (Slot-path existence on the child is
+/// not validated here: shader slots are dynamic, so the face layer renders
+/// unresolvable slot paths as disabled controls instead.)
+fn validate_promoted_controls(
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
+    config: &lpc_model::ProjectDef,
+) -> Result<(), ProjectLoadError> {
+    for (name, control) in config.controls.entries.iter() {
+        let target = control.target.value();
+        let node_ref = match target {
+            AuthoredBindingRef::Node(node_slot) => node_slot,
+            other => {
+                return Err(ProjectLoadError::InvalidProjectReference {
+                    path: node_label(current),
+                    reason: format!(
+                        "promoted control `{name}`: target `{other}` must be a node:<child>#<slot> ref"
+                    ),
+                });
+            }
+        };
+        let resolved = resolve_relative_node_ref(projected_nodes, current, node_ref.node())
+            .ok_or_else(|| ProjectLoadError::InvalidProjectReference {
+                path: node_label(current),
+                reason: format!(
+                    "promoted control `{name}`: target node `{}` does not resolve",
+                    node_ref.node()
+                ),
+            })?;
+        if resolved.parent != Some(current.id) {
+            return Err(ProjectLoadError::InvalidProjectReference {
+                path: node_label(current),
+                reason: format!(
+                    "promoted control `{name}`: target `{}` must be a direct child of the project",
+                    node_ref.node()
+                ),
+            });
+        }
     }
     Ok(())
 }
@@ -4754,6 +4805,114 @@ mod tests {
         assert!(playlist_output.value_leaf().is_some());
     }
 
+    #[test]
+    fn child_project_format_is_tolerated_and_ignored() {
+        // Effects-are-projects ADR: `format` is only probed at the root, so
+        // a vendored effect folder keeps its own `format` (staying
+        // standalone-openable) and loads unchanged when embedded.
+        let fs = nested_project_fs(false);
+        fs.write_file(
+            "/fx/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "shader": { "ref": "./shader.json" }
+  }
+}
+"#,
+        )
+        .expect("rewrite fx project with format");
+        let services = EngineServices::new(TreePath::parse("/nested.show").expect("path"));
+        let rt =
+            ProjectLoader::load_from_root(&fs, services).expect("format on a child is ignored");
+        let root = rt.tree().root();
+        let fx = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fx").unwrap())
+            .expect("fx project node");
+        assert!(
+            rt.tree()
+                .lookup_sibling(fx, NodeName::parse("shader").unwrap())
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn promoted_control_targets_must_resolve_to_direct_children() {
+        let write_fx_controls = |controls: &str| {
+            let fs = nested_project_fs(false);
+            fs.write_file(
+                "/fx/project.json".as_path(),
+                alloc::format!(
+                    r#"{{
+  "kind": "Project",
+  "nodes": {{
+    "shader": {{ "ref": "./shader.json" }}
+  }},
+  "controls": {{ {controls} }}
+}}"#
+                )
+                .as_bytes(),
+            )
+            .expect("rewrite fx project with controls");
+            fs
+        };
+        let services = || EngineServices::new(TreePath::parse("/nested.show").expect("path"));
+
+        let load_err = |fs: &LpFsMemory| -> ProjectLoadError {
+            match ProjectLoader::load_from_root(
+                fs,
+                EngineServices::new(TreePath::parse("/nested.show").expect("path")),
+            ) {
+                Ok(_) => panic!("load unexpectedly succeeded"),
+                Err(err) => err,
+            }
+        };
+
+        // A direct-child alias loads.
+        let fs = write_fx_controls(r#""speed": { "target": "node:shader#speed" }"#);
+        ProjectLoader::load_from_root(&fs, services()).expect("direct-child alias loads");
+
+        // An unresolvable node fails loudly with the control's name.
+        let fs = write_fx_controls(r#""speed": { "target": "node:missing#speed" }"#);
+        let err = load_err(&fs);
+        assert!(err.to_string().contains("speed"), "{err}");
+        assert!(err.to_string().contains("does not resolve"), "{err}");
+
+        // A bus target is not an alias.
+        let fs = write_fx_controls(r#""speed": { "target": "bus:time" }"#);
+        let err = load_err(&fs);
+        assert!(
+            err.to_string()
+                .contains("must be a node:<child>#<slot> ref"),
+            "{err}"
+        );
+
+        // A deeper-than-direct-child target is rejected (host reaching into
+        // the effect's inner tree from the root project's controls).
+        let fs = nested_project_fs(false);
+        fs.write_file(
+            "/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "host": { "ref": "./host.json" },
+    "fx": { "ref": "./fx/project.json" }
+  },
+  "controls": { "inner": { "target": "node:fx/shader#speed" } }
+}
+"#,
+        )
+        .expect("rewrite root with deep control");
+        let err = load_err(&fs);
+        assert!(err.to_string().contains("direct child"), "{err}");
+    }
+
     /// Scope postconditions over the shipped examples: every consumed bus
     /// endpoint either reads a channel some binding writes at exactly that
     /// scope, or falls back to the root scope (rule 3's contract); flat
@@ -4797,7 +4956,7 @@ mod tests {
             // a playlist-entry anonymous scope. (Nesting cannot occur in the
             // shipped flat examples, so this pins single-root-scope parity.)
             for binding in rt.tree().bindings() {
-                let mut check = |channel: &ScopedChannel| {
+                let check = |channel: &ScopedChannel| {
                     assert!(
                         channel.scope == root_scope || matches!(channel.scope, ScopeId::Entry(_)),
                         "{name}: unexpected scope on {channel}"

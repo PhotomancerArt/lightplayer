@@ -118,9 +118,9 @@ pub use nodes::{
     ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
     ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
     ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef,
-    TextureDefView, TextureFormat, TextureState, TextureStateView, generate_compute_shader_header,
-    glsl_type_for_lp_type, read_project_format_json, resolve_artifact_specifier,
-    starter_def_for_kind, starter_for_kind, starter_project_files,
+    TextureDefView, TextureFormat, TextureState, TextureStateView, effect_starter_files,
+    generate_compute_shader_header, glsl_type_for_lp_type, read_project_format_json,
+    resolve_artifact_specifier, starter_def_for_kind, starter_for_kind, starter_project_files,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,

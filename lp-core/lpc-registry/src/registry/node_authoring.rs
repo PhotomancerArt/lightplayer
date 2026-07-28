@@ -125,26 +125,23 @@ impl ProjectRegistry {
             .unwrap_or_else(|| LpPath::new("/"))
             .to_path_buf();
 
-        // Body parses as a node definition; `Project` cannot be created as a
-        // child node (nested sub-projects are future work).
+        // Body parses as a node definition. A `Project` def IS creatable as
+        // a child node (effects-are-projects ADR: an effect is a project
+        // embedded as a node); the path-safety and occupancy checks below
+        // still apply, and the occupancy check keeps the project root path
+        // itself uncreatable.
         let text = core::str::from_utf8(body).map_err(|_| {
             reject(
                 MutationRejectionReason::InvalidBody,
                 "node body is not valid UTF-8".into(),
             )
         })?;
-        let def = NodeDef::read_json(ctx.shapes, text).map_err(|err| {
+        NodeDef::read_json(ctx.shapes, text).map_err(|err| {
             reject(
                 MutationRejectionReason::InvalidBody,
                 format!("node body does not parse as a node definition: {err}"),
             )
         })?;
-        if matches!(def, NodeDef::Project(_)) {
-            return Err(reject(
-                MutationRejectionReason::InvalidBody,
-                "kind Project cannot be created as a child node".into(),
-            ));
-        }
 
         // Def and asset paths: project-relative, path-safe, unoccupied on
         // disk and in the effective inventory, and unique within the request.
@@ -1075,7 +1072,7 @@ mod tests {
     }
 
     #[test]
-    fn create_rejects_unparsable_and_project_kind_bodies() {
+    fn create_rejects_unparsable_bodies_and_accepts_project_kind() {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
 
@@ -1092,8 +1089,11 @@ mod tests {
         assert_eq!(rejection.reason, MutationRejectionReason::InvalidBody);
         assert_nothing_written(&fs, "/new.json");
 
+        // The former "kind Project cannot be created as a child node" guard
+        // is lifted (effects-are-projects ADR): a bare child project is a
+        // valid create.
         let project_body = br#"{ "kind": "Project", "format": 1, "nodes": {} }"#;
-        let rejection = create(
+        create(
             &fs,
             &mut registry,
             &shapes,
@@ -1102,9 +1102,7 @@ mod tests {
             &[],
             &project_nodes("new"),
         )
-        .expect_err("Project kind body rejects");
-        assert_eq!(rejection.reason, MutationRejectionReason::InvalidBody);
-        assert_nothing_written(&fs, "/new.json");
+        .expect("Project kind body is creatable as a child node");
     }
 
     #[test]
@@ -1574,6 +1572,151 @@ mod tests {
     }
 
     // --- Helpers ---
+
+    /// Canonical bytes for a minimal effect folder: a child project def
+    /// with one promoted control plus its shader def and GLSL source.
+    fn effect_folder_bodies(shapes: &SlotShapeRegistry) -> (String, String, Vec<u8>) {
+        use lpc_model::{BindingRef, MapSlot, OptionSlot, ProjectDef, ValueSlot};
+        let mut controls = lp_collection::VecMap::new();
+        controls.insert(
+            alloc::string::String::from("speed"),
+            lpc_model::nodes::project::PromotedControlDef::to_target(
+                BindingRef::parse("node:shader#speed").unwrap(),
+            ),
+        );
+        let mut nodes = lp_collection::VecMap::new();
+        nodes.insert(
+            alloc::string::String::from("shader"),
+            lpc_model::NodeInvocationSlot::new(lpc_model::NodeInvocation::path(
+                lpc_model::ArtifactSpec::path("./shader.json"),
+            )),
+        );
+        let project = NodeDef::Project(ProjectDef {
+            format: ProjectDef::current_format_slot(),
+            name: OptionSlot::some(ValueSlot::new(alloc::string::String::from("glow"))),
+            nodes: MapSlot::new(nodes),
+            controls: MapSlot::new(controls),
+            ..ProjectDef::default()
+        })
+        .write_json(shapes)
+        .expect("effect project body");
+        let shader = NodeDef::from_json_str(
+            r#"{ "kind": "Shader", "source": { "path": "./main.glsl" },
+                 "consumed": { "speed": { "kind": "value", "value": "f32", "default": 1.0, "panel": true } } }"#,
+        )
+        .expect("shader def")
+        .write_json(shapes)
+        .expect("canonical shader body");
+        let glsl =
+            b"vec4 render(vec2 pos) { return vec4(mod(speed, 1.0), 0.0, 0.0, 1.0); }".to_vec();
+        (project, shader, glsl)
+    }
+
+    #[test]
+    fn create_project_child_effect_folder_at_project_nodes() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let (project_body, shader_body, glsl) = effect_folder_bodies(&shapes);
+
+        let outcome = create(
+            &fs,
+            &mut registry,
+            &shapes,
+            "./effects/glow/project.json",
+            project_body.as_bytes(),
+            &[
+                (
+                    LpPathBuf::from("./effects/glow/shader.json"),
+                    shader_body.into_bytes(),
+                ),
+                (LpPathBuf::from("./effects/glow/main.glsl"), glsl),
+            ],
+            &project_nodes("glow"),
+        )
+        .expect("a Project def is creatable as a child node (guard lifted)");
+
+        // The effect's own def loads and its inner shader is discovered as a
+        // node def through the folder-relative ref.
+        let effect_def = root_def("/effects/glow/project.json");
+        assert!(matches!(
+            registry.def(&effect_def).expect("effect def").state,
+            NodeDefState::Loaded(NodeDef::Project(_))
+        ));
+        let shader_def = root_def("/effects/glow/shader.json");
+        assert!(matches!(
+            registry.def(&shader_def).expect("inner shader def").state,
+            NodeDefState::Loaded(NodeDef::Shader(_))
+        ));
+        assert!(outcome.changes.defs.added.contains(&effect_def));
+        let glow_use = NodeUseLocation::root().child(SlotPath::parse("nodes[glow]").unwrap());
+        assert!(outcome.changes.uses.added.contains(&glow_use));
+        let shader_use = glow_use.child(SlotPath::parse("nodes[shader]").unwrap());
+        assert!(outcome.changes.uses.added.contains(&shader_use));
+    }
+
+    #[test]
+    fn create_project_child_effect_folder_at_playlist_entry() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = playlist_project(&shapes);
+        let (project_body, shader_body, glsl) = effect_folder_bodies(&shapes);
+        let attach = NodeAttachSite::Slot {
+            artifact: ArtifactLocation::file("/playlist.json"),
+            path: SlotPath::parse("entries[2].node").unwrap(),
+        };
+
+        let outcome = create(
+            &fs,
+            &mut registry,
+            &shapes,
+            "./effects/glow/project.json",
+            project_body.as_bytes(),
+            &[
+                (
+                    LpPathBuf::from("./effects/glow/shader.json"),
+                    shader_body.into_bytes(),
+                ),
+                (LpPathBuf::from("./effects/glow/main.glsl"), glsl),
+            ],
+            &attach,
+        )
+        .expect("effect folder attaches at a playlist entry");
+
+        let entry_use = NodeUseLocation::root()
+            .child(SlotPath::parse("nodes[playlist]").unwrap())
+            .child(SlotPath::parse("entries[2].node").unwrap());
+        assert!(outcome.changes.uses.added.contains(&entry_use));
+        assert!(matches!(
+            registry
+                .def(&root_def("/effects/glow/project.json"))
+                .expect("effect def")
+                .state,
+            NodeDefState::Loaded(NodeDef::Project(_))
+        ));
+    }
+
+    #[test]
+    fn create_project_def_at_root_path_stays_rejected() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let (project_body, _, _) = effect_folder_bodies(&shapes);
+
+        let rejection = create(
+            &fs,
+            &mut registry,
+            &shapes,
+            "./project.json",
+            project_body.as_bytes(),
+            &[],
+            &project_nodes("self"),
+        )
+        .expect_err("the project root path is occupied");
+        assert!(
+            rejection.message.contains("project.json")
+                || rejection.reason == MutationRejectionReason::InvalidPath
+                || rejection.reason == MutationRejectionReason::TargetOccupied,
+            "{rejection:?}"
+        );
+    }
 
     fn clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
