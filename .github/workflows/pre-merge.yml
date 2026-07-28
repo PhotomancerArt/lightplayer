@@ -5,6 +5,16 @@ on:
     branches: ["main", "feature/*"]
   push:
     branches: ["main"]
+  # Manual story-baseline refresh: pick a branch in the Actions UI and run.
+  # ONLY `validate-stories` runs (the validate jobs skip themselves below), so
+  # this is the ~10-minute recapture, not the full suite. It exists because
+  # the auto-commit path only fires on a *push-triggered* run: after a merge
+  # that resolves baseline conflicts by hand, or any time the branch's PNGs
+  # are stale with nothing new to push, there was no way to ask for a
+  # recapture short of an empty commit. GitHub only shows the Run-workflow
+  # button for workflows on the DEFAULT branch, so this trigger becomes
+  # usable once it lands on main.
+  workflow_dispatch:
 
 # Cancel stale in-flight runs when new commits land on the same ref, except on
 # main where every push should be validated.
@@ -72,6 +82,9 @@ jobs:
     name: Validate (x64)
     runs-on: ubuntu-24.04
     needs: detect-shader-changes
+    # A manual dispatch is a story-baseline recapture, not a revalidation:
+    # the branch's code was already validated by the run that reviewed it.
+    if: github.event_name != 'workflow_dispatch'
     # x64: full check + build + test
     steps:
       - name: Install system deps (libudev for serialport)
@@ -196,7 +209,9 @@ jobs:
     name: Validate GFX (ARM)
     runs-on: ubuntu-24.04-arm
     needs: detect-gfx-changes
-    if: needs.detect-gfx-changes.outputs.gfx == 'true'
+    if: >-
+      needs.detect-gfx-changes.outputs.gfx == 'true' &&
+      github.event_name != 'workflow_dispatch'
     steps:
       - name: Install system deps (libudev for serialport)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
@@ -245,7 +260,9 @@ jobs:
     name: Validate Browser (x64)
     runs-on: ubuntu-24.04
     needs: detect-gfx-changes
-    if: needs.detect-gfx-changes.outputs.browser == 'true'
+    if: >-
+      needs.detect-gfx-changes.outputs.browser == 'true' &&
+      github.event_name != 'workflow_dispatch'
     steps:
       - name: Install system deps (libudev for serialport)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
@@ -563,11 +580,16 @@ jobs:
         if: >-
           steps.story_check.outcome == 'failure' &&
           steps.check_complete.outputs.complete == 'true' &&
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
+          (
+            (github.event_name == 'pull_request' &&
+             github.event.pull_request.head.repo.full_name == github.repository) ||
+            (github.event_name == 'workflow_dispatch' && github.ref_name != 'main')
+          )
         shell: bash
         env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          # A manual dispatch names its branch directly; main is excluded above
+          # so a mis-aimed dispatch cannot push baselines straight to it.
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           set -euo pipefail
           cd lp2025
@@ -608,7 +630,9 @@ jobs:
           fi
 
       - name: Post baseline-change PR comment
-        if: steps.auto_commit.outputs.resolved == 'pushed'
+        if: >-
+          steps.auto_commit.outputs.resolved == 'pushed' &&
+          github.event_name == 'pull_request'
         # Cosmetic: a comment failure must not fail the job — the push already
         # landed, and GITHUB_TOKEN pushes don't retrigger CI, so a red run
         # here would stay red with no follow-up run to clear it.
@@ -627,14 +651,15 @@ jobs:
         shell: bash
         env:
           BOT_SHA: ${{ steps.auto_commit.outputs.bot_sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           {
             echo "## Story baselines auto-committed"
             echo
-            echo "Drift was detected and resolved: fresh baselines were committed to the"
-            echo "PR branch as \`${BOT_SHA}\`. GITHUB_TOKEN pushes do not trigger workflow"
-            echo "runs, so that commit has no CI run of its own — this green run is the"
-            echo "validating run. Remember to \`git pull\` before pushing again."
+            echo "Drift was detected and resolved: fresh baselines were committed to"
+            echo "\`${HEAD_REF}\` as \`${BOT_SHA}\`. GITHUB_TOKEN pushes do not trigger"
+            echo "workflow runs, so that commit has no CI run of its own — this green run"
+            echo "is the validating run. Remember to \`git pull\` before pushing again."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Fallback artifact path: fork PRs, push races, and main-push drift.
