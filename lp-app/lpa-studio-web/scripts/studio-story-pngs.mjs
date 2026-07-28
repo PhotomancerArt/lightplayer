@@ -474,6 +474,13 @@ function parsePositiveIntegerEnv(name, defaultValue) {
   return parsed;
 }
 
+// HARNESS SEAM — second half of the contract documented at
+// `component_overview_id` in src/stories/story_book.rs: the story book
+// synthesizes one `<family>/[<category>/]<component>/overview` page per
+// component that stacks every story of that component, and no `#[story]`
+// function can claim that id (pinned by a unit test there).
+const OVERVIEW_COMPOSITE_SUFFIX = "/overview";
+
 async function discoverStoryIds() {
   const html = await runChrome([
     "--headless=new",
@@ -488,6 +495,20 @@ async function discoverStoryIds() {
     .map((match) => decodeURIComponent(match[1]))
     .map((storyId) => storyId.split(/[?#]/, 1)[0])
     .filter((value, index, values) => values.indexOf(value) === index)
+    // Generated `overview` composites are NOT pixel baselines. They stack a
+    // whole component's stories on one page — 10k-25k px tall against a 760px
+    // viewport, where every non-composite story fits in 3400 — and
+    // `captureBeyondViewport` does not reliably paint composited effects that
+    // far below the fold: in the flip that filed
+    // docs/defects/2026-07-28-overview-composite-capture-races.md, the device
+    // card's `backdrop-filter` overlays kept their blur but lost their own
+    // background and children, at every overlay story in the page and nowhere
+    // above y=5658. Both terminals survive the stable pair, so each capture
+    // committed a coin flip and every auto-refresh commit retriggered CI.
+    // They also carried no coverage the per-story captures don't: every state
+    // in a composite is captured on its own page too. Browse them in the story
+    // book; do not baseline them.
+    .filter((storyId) => !storyId.endsWith(OVERVIEW_COMPOSITE_SUFFIX))
     .sort();
 }
 
