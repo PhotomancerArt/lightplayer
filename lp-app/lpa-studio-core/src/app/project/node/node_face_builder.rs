@@ -43,14 +43,15 @@ use crate::{
 ///
 /// **The playlist arm filters `children` in place** — this is the "one live
 /// surface" rule (P4): while the strip face is up, the strip represents
-/// every entry, so only the ACTIVE entry's child renders as a sibling card
-/// below the playlist card. The filter rides the same derivation as the
-/// face so the two can never disagree; when the face does not derive
-/// (missing entries row, no `active_entry` status yet, active entry's
-/// child not mounted), `children` is left untouched and the card falls
-/// back to today's full rendering. An **empty** entries map still derives
-/// a face — the strip's empty state (with its add affordance) is the
-/// card's surface for a freshly created playlist — with no child
+/// every entry, so exactly one entry's child renders as a sibling card
+/// below the playlist card. Which one follows **selection, then active**
+/// (revised 2026-07-28 — see [`playlist_face`]). The filter rides the same
+/// derivation as the face so the two can never disagree; when the face does
+/// not derive (missing entries row, no `active_entry` status yet, the
+/// resolved entry's child not mounted), `children` is left untouched and
+/// the card falls back to today's full rendering. An **empty** entries map
+/// still derives a face — the strip's empty state (with its add affordance)
+/// is the card's surface for a freshly created playlist — with no child
 /// filtering, since there are no entry children to filter.
 pub(in crate::app::project) fn kind_face(
     ty: &str,
@@ -61,11 +62,11 @@ pub(in crate::app::project) fn kind_face(
         ShaderDef::KIND => shader_face(sections).map(UiNodeFace::Shader),
         FixtureDef::KIND => fixture_face(sections).map(UiNodeFace::Fixture),
         PlaylistDef::KIND => {
-            let (face, active_child) = playlist_face(sections, children)?;
-            if let Some(index) = active_child {
-                let active = children.swap_remove(index);
+            let (face, rendered_child) = playlist_face(sections, children)?;
+            if let Some(index) = rendered_child {
+                let rendered = children.swap_remove(index);
                 children.clear();
-                children.push(active);
+                children.push(rendered);
             }
             // NOTE: the surviving child does NOT set `UiNodeChild::active`
             // — the web maps that flag onto the pane's *selection* look
@@ -307,14 +308,36 @@ fn string_field(fields: &[UiConfigSlot], name: &str) -> Option<String> {
 
 // -- playlist face -------------------------------------------------------------
 
-/// The playlist card's face: the entries strip plus the index of the ACTIVE
-/// entry's child in `children`. `None` — full-rendering fallback — when the
-/// def has no entries row, or when entries exist but the produced
-/// `active_entry` status has not arrived, the active key names no strip
-/// entry, or the active entry's child is not among the built child DTOs.
-/// An empty entries map derives an empty-strip face (`active: None`, no
-/// child to filter) — a freshly created playlist's card is the strip's
-/// empty state, not the generic fallback.
+/// The playlist card's face: the entries strip plus the index in `children`
+/// of the ONE entry child that renders below the card.
+///
+/// # Selection, then active
+///
+/// The rendered child follows the **Studio's node selection** (the shared,
+/// project-wide `NodeState.focused`, already projected onto
+/// [`UiNodeChild::focused`]), falling back to the engine's **active entry**
+/// when nothing inside this playlist is selected. The two are different
+/// axes: `active` is playback, `selected` is editing focus, and
+/// [`UiPlaylistFace::active`] keeps driving the ACTIVE placard regardless
+/// of selection.
+///
+/// This revises the original "one live surface" rule, which pinned the
+/// rendered child to the active entry and so left every non-active entry
+/// uneditable — clicking its chip set focus on a card that was then
+/// filtered away (`docs/defects/2026-07-28-playlist-entry-selection.md`).
+/// Exactly one child still renders; only the coupling to playback is gone.
+///
+/// The fallback is free at load time: `default_focus_node_mut` only ever
+/// focuses one of the ROOT's direct children, so it can never land inside
+/// a playlist, and a freshly opened project shows the active entry.
+///
+/// `None` — full-rendering fallback — when the def has no entries row, or
+/// when entries exist but the produced `active_entry` status has not
+/// arrived and nothing is selected, or the resolved entry's child is not
+/// among the built child DTOs. An empty entries map derives an empty-strip
+/// face (`active: None`, `selected: None`, no child to filter) — a freshly
+/// created playlist's card is the strip's empty state, not the generic
+/// fallback.
 fn playlist_face(
     sections: &[UiNodeSection],
     children: &[UiNodeChild],
@@ -336,23 +359,39 @@ fn playlist_face(
         let face = UiPlaylistFace {
             entries: Vec::new(),
             active: None,
+            selected: None,
         };
         return Some((face, None));
     }
     // The status seam: `PlaylistState.active_entry` (produced u32 =
     // entries-map key), projected as a ProducedValues row. Its display is
-    // `u32::to_string`, so the parse is the exact inverse.
-    let active_key = produced_u32(sections, "active_entry")?;
-    let active_child = entries
+    // `u32::to_string`, so the parse is the exact inverse. Optional: a
+    // selected entry can carry the card on its own before the first status
+    // lands.
+    let active_key = produced_u32(sections, "active_entry");
+    let active_child = active_key.and_then(|key| {
+        entries
+            .iter()
+            .find(|(entry, _)| entry.key == key)
+            .and_then(|(_, child)| *child)
+    });
+
+    // Selection wins: the entry whose mounted child holds the project-wide
+    // node focus. Focus is exclusive, so at most one can match.
+    let selected = entries
         .iter()
-        .find(|(entry, _)| entry.key == active_key)
-        .and_then(|(_, child)| *child)?;
+        .find(|(_, child)| child.is_some_and(|index| children[index].focused));
+    let selected_key = selected.map(|(entry, _)| entry.key);
+    let selected_child = selected.and_then(|(_, child)| *child);
+
+    let rendered_child = selected_child.or(active_child)?;
 
     let face = UiPlaylistFace {
         entries: entries.into_iter().map(|(entry, _)| entry).collect(),
-        active: Some(active_key),
+        active: active_key,
+        selected: selected_key,
     };
-    Some((face, Some(active_child)))
+    Some((face, Some(rendered_child)))
 }
 
 /// One `entries[<key>]` record row → its strip entry plus the index of its
@@ -631,7 +670,7 @@ mod tests {
     }
 
     #[test]
-    fn playlist_face_derives_the_strip_and_keeps_only_the_active_child() {
+    fn playlist_face_derives_the_strip_and_keeps_only_the_active_child_when_nothing_is_selected() {
         let sections = playlist_sections(Some(1));
         let mut children = playlist_children();
 
@@ -659,7 +698,9 @@ mod tests {
             "strip click reuses the child's node-select action"
         );
 
-        // The one-live-surface rule: only the ACTIVE entry's child remains.
+        // The one-live-surface rule: with nothing selected, the ACTIVE
+        // entry's child is the one that remains.
+        assert_eq!(face.selected, None, "nothing in this playlist is focused");
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].label, "Idle");
         assert!(
@@ -667,6 +708,88 @@ mod tests {
             "the child card must NOT wear the selection look (the web maps \
              `active` onto pane focus); the strip placard presents active-ness"
         );
+    }
+
+    #[test]
+    fn selecting_a_non_active_entry_renders_that_child_and_leaves_active_alone() {
+        // The 2026-07-28 defect: clicking a non-active chip set focus on a
+        // child the face then filtered away, so only the active entry was
+        // ever editable.
+        let sections = playlist_sections(Some(1));
+        let mut children = playlist_children();
+        // `active` is entry 2's child; entry 1's child (`idle`) is playing.
+        children[1].focused = true;
+
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        else {
+            panic!("expected a playlist face");
+        };
+
+        assert_eq!(
+            face.active,
+            Some(1),
+            "playback is untouched by an editing selection"
+        );
+        assert_eq!(face.selected, Some(2), "the focused entry is marked");
+        assert_eq!(children.len(), 1, "still exactly one live surface");
+        assert_eq!(
+            children[0].label, "Active",
+            "the SELECTED entry's child is the one that renders"
+        );
+    }
+
+    #[test]
+    fn selecting_the_active_entry_renders_that_same_child() {
+        let sections = playlist_sections(Some(1));
+        let mut children = playlist_children();
+        children[0].focused = true; // `idle` is both active and selected
+
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        else {
+            panic!("expected a playlist face");
+        };
+
+        assert_eq!((face.active, face.selected), (Some(1), Some(1)));
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].label, "Idle");
+    }
+
+    #[test]
+    fn focus_outside_the_playlist_falls_back_to_the_active_entry() {
+        // Node focus is project-wide exclusive, so focusing an unrelated
+        // node leaves every entry child unfocused and the strip snaps back
+        // to showing the active entry.
+        let sections = playlist_sections(Some(1));
+        let mut children = playlist_children();
+        assert!(children.iter().all(|child| !child.focused));
+
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        else {
+            panic!("expected a playlist face");
+        };
+
+        assert_eq!(face.selected, None);
+        assert_eq!(children[0].label, "Idle", "the active entry's child");
+    }
+
+    #[test]
+    fn a_selected_entry_carries_the_face_before_any_active_status_lands() {
+        // Selection alone is enough to render a surface: without it, no
+        // `active_entry` status means the generic fallback (asserted by
+        // `playlist_without_active_status_keeps_all_children_and_no_face`).
+        let sections = playlist_sections(None);
+        let mut children = playlist_children();
+        children[1].focused = true;
+
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        else {
+            panic!("expected a playlist face");
+        };
+
+        assert_eq!(face.active, None, "no placard without a status");
+        assert_eq!(face.selected, Some(2));
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].label, "Active");
     }
 
     #[test]

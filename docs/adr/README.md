@@ -107,6 +107,9 @@ holds the full context.
 | Display-driven per-surface probe sizing, capped by the runtime tier | `2026-07-27-completion-based-refresh-pacing` | Multi-node probing has soaked and card-size feedback plumbing is worth the plumbing |
 | Probe revision-gating on the wire (skip unchanged probe bytes; display-layout's `IfChanged` read is the precedent) | `2026-07-27-completion-based-refresh-pacing` | Steady-state probe bytes dominate tick cost on a real link |
 | Sim "non-collapsed" probe scope becomes real (collapse is view-local today, so sim probes ALL nodes) | `2026-07-27-completion-based-refresh-pacing` | The ui-state-audit plan moves live collapse state into core |
+| Share-envelope format migration (`format` mismatches are refused outright during alpha, never migrated) | `2026-07-28-share-envelopes`; `../debt/library-format-migration-gap.md` | The authored formats settle enough that migration is written once, not weekly |
+| Wire-read (`FsRequest`) export for device-hosted projects absent from the local library (editor-popup export is library-backed only) | `2026-07-28-share-envelopes` | Someone needs to export a project that only exists on a device |
+| Size guard on node share envelopes (a large binary asset base64s into something no clipboard should carry) | `2026-07-28-share-envelopes` | A real shader-with-texture share hits a clipboard limit |
 
 ## Relationship To Shared Planning
 

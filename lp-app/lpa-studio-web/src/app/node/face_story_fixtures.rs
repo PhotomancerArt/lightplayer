@@ -398,11 +398,25 @@ fn entry_select_action(name: &str) -> UiAction {
         .with_label(format!("Select {name}"))
 }
 
-/// The playlist face with Aurora active.
+/// The playlist face with Aurora active and nothing selected — the
+/// load-time default, where the card below follows the active entry.
 pub(crate) fn playlist_face() -> UiPlaylistFace {
     UiPlaylistFace {
         entries: playlist_entries(),
         active: Some(1),
+        selected: None,
+    }
+}
+
+/// The playlist face with Aurora active but a DIFFERENT entry selected —
+/// the case the 2026-07-28 selection fix introduced, where the strip marks
+/// two entries for two different reasons and the card below follows the
+/// selected one.
+pub(crate) fn playlist_face_selected_not_active() -> UiPlaylistFace {
+    UiPlaylistFace {
+        entries: playlist_entries(),
+        active: Some(1),
+        selected: Some(3),
     }
 }
 
@@ -469,6 +483,7 @@ pub(crate) fn empty_playlist_node_view() -> UiNodeView {
     view.face = Some(UiNodeFace::Playlist(UiPlaylistFace {
         entries: Vec::new(),
         active: None,
+        selected: None,
     }));
     view
 }

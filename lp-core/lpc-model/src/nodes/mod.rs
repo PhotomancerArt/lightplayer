@@ -40,8 +40,8 @@ pub use shader::{
     generate_compute_shader_header, glsl_type_for_lp_type,
 };
 pub use starter::{
-    NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, starter_def_for_kind,
-    starter_for_kind,
+    NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, node_def_asset_ref,
+    set_node_def_asset_ref, starter_def_for_kind, starter_for_kind,
 };
 pub use starter_project::starter_project_files;
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

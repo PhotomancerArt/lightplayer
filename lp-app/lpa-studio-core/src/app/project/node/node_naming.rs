@@ -65,6 +65,48 @@ pub fn unique_node_name(slug: &str, taken: &BTreeSet<String>) -> String {
     unreachable!("unbounded suffix search")
 }
 
+/// Coerce arbitrary text into a usable node name.
+///
+/// Auto-created nodes get a kind slug, which is already safe. A **pasted**
+/// node brings its own label from wherever it was copied, and that becomes
+/// both a `nodes` map key and a tree segment name — so the result must
+/// satisfy [`lpc_model::NodeName`]: `[A-Za-z0-9_]` with **no leading
+/// digit** (see this module's header).
+///
+/// Anything else folds to `_`, runs collapse, a leading digit gets an `n`
+/// prefix, and an empty or all-punctuation result falls back to `node`.
+pub fn sanitize_node_name(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let mut last_was_underscore = false;
+    for ch in label.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() {
+            ch.to_ascii_lowercase()
+        } else {
+            '_'
+        };
+        if mapped == '_' {
+            if last_was_underscore || out.is_empty() {
+                continue;
+            }
+            last_was_underscore = true;
+        } else {
+            last_was_underscore = false;
+        }
+        out.push(mapped);
+    }
+    while out.ends_with('_') {
+        out.pop();
+    }
+    if out.is_empty() {
+        return "node".to_string();
+    }
+    // Tree segment names may not lead with a digit.
+    if out.starts_with(|ch: char| ch.is_ascii_digit()) {
+        out.insert(0, 'n');
+    }
+    out
+}
+
 /// The stem of a project file path: the file name up to its first `.`
 /// (`/nested/shader_2.json` → `shader_2`). Auto-names dedup against these.
 pub fn file_stem(path: &str) -> &str {
@@ -114,6 +156,60 @@ mod tests {
         // `nodes` key `texture` is free.
         let taken: BTreeSet<String> = [file_stem("/texture.json").to_string()].into();
         assert_eq!(unique_node_name("texture", &taken), "texture_2");
+    }
+
+    #[test]
+    fn pasted_labels_become_safe_file_stems() {
+        // A pasted node's label comes from wherever it was copied and
+        // becomes a filename, so it cannot be trusted the way a kind slug
+        // can.
+        assert_eq!(sanitize_node_name("Orbit"), "orbit");
+        assert_eq!(sanitize_node_name("My Cool Shader"), "my_cool_shader");
+        assert_eq!(sanitize_node_name("a/../../etc/passwd"), "a_etc_passwd");
+        assert_eq!(sanitize_node_name("dots.and.dots"), "dots_and_dots");
+        assert_eq!(sanitize_node_name("  spaced  out  "), "spaced_out");
+        assert_eq!(sanitize_node_name("kebab-case"), "kebab_case");
+    }
+
+    #[test]
+    fn unusable_labels_fall_back_rather_than_producing_an_empty_name() {
+        for label in ["", "   ", "!!!", "///", "___"] {
+            assert_eq!(sanitize_node_name(label), "node", "{label:?}");
+        }
+    }
+
+    #[test]
+    fn every_sanitized_name_parses_as_a_tree_segment_name() {
+        // The property that matters: whatever a copied label was, the
+        // pasted node's name must be legal — including the no-leading-digit
+        // rule this module's header calls out.
+        for label in [
+            "Orbit",
+            "2 Cool 4 School",
+            "99",
+            "🌈 rainbow",
+            "a/../../etc/passwd",
+            "",
+            "!!!",
+            "-leading-dash",
+        ] {
+            let name = sanitize_node_name(label);
+            assert!(
+                lpc_model::NodeName::parse(&name).is_ok(),
+                "{label:?} sanitized to {name:?}, which is not a valid node name"
+            );
+        }
+    }
+
+    #[test]
+    fn sanitized_names_still_dedup_through_unique_node_name() {
+        let taken: BTreeSet<String> = ["orbit".to_string(), "orbit_2".to_string()]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            unique_node_name(&sanitize_node_name("Orbit"), &taken),
+            "orbit_3"
+        );
     }
 
     #[test]

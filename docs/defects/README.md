@@ -103,6 +103,7 @@ bookkeeping fact.
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
 | state-conflation | 2026-07-26 | [worker-poisoned-instance-reuse](2026-07-26-worker-poisoned-instance-reuse.md) | fixed | fw-browser + lpa-link/browser-worker |
+| state-conflation | 2026-07-28 | [playlist-entry-selection](2026-07-28-playlist-entry-selection.md) | fixed | lpa-studio-core/project (node face derivation) |
 | assumed-context | 2026-07-17 | [storage-slot-assumed](2026-07-17-storage-slot-assumed.md) | fixed | lpa-studio-core/places |
 | assumed-context | 2026-07-23 | [deploy-dialog-ignores-running-project](2026-07-23-deploy-dialog-ignores-running-project.md) | fixed | lpa-studio-core/device |
 | assumed-context | 2026-07-27 | [launch-json-pinned-port](2026-07-27-launch-json-pinned-port.md) | fixed | dev tooling (launch.json + dev-port.sh) |

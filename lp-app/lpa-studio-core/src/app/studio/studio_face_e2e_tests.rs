@@ -186,8 +186,12 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
     assert_eq!(cued.duration_ms, Some(4000), "authored 4 s → 4000 ms chip");
     assert!(cued.cue, "trigger_ids entry reads as a cue entry");
 
-    // -- one live surface: exactly the ACTIVE entry's child below the card --
-    assert_eq!(playlist.children.len(), 1, "only the active child renders");
+    // -- one live surface: with nothing selected, the ACTIVE entry's child --
+    assert_eq!(
+        playlist.children.len(),
+        1,
+        "one live surface — the active child, nothing being selected yet"
+    );
     let child = &playlist.children[0];
     assert_eq!(child.label, "Idle");
     assert!(
@@ -215,14 +219,31 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
         "clicking the active entry focuses its (rendered) child"
     );
 
-    // Clicking a non-active entry selects its (strip-represented) child;
-    // the strip stays the single surface for it — child list unchanged.
+    // -- the 2026-07-28 fix, end to end ------------------------------------
+    // Clicking a NON-active entry brings that entry's card up for editing.
+    // Before the fix the click set focus correctly but the face filtered the
+    // focused child away, so the strip kept showing the active entry and
+    // only it could ever be edited
+    // (`docs/defects/2026-07-28-playlist-entry-selection.md`).
     handle.tx.send(StudioCommand::Action(select_active));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("focus emits a snapshot");
     let playlist = node_by_kind(&snapshot, "Playlist");
-    assert_eq!(playlist.children.len(), 1);
-    assert_eq!(playlist.children[0].label, "Idle");
+    assert_eq!(playlist.children.len(), 1, "still one live surface");
+    assert_eq!(
+        playlist.children[0].label, "Active",
+        "the SELECTED entry's child is the one that renders"
+    );
+    assert!(playlist.children[0].focused);
+    let UiNodeFace::Playlist(face) = playlist.face.as_ref().expect("playlist face") else {
+        panic!("expected a playlist face");
+    };
+    assert_eq!(
+        face.active,
+        Some(1),
+        "playback keeps naming the engine's active entry, not the selection"
+    );
+    assert_eq!(face.selected, Some(2), "the strip marks the selected entry");
 }
 
 #[test]
