@@ -276,6 +276,14 @@ pub(crate) fn emit_q32_fdiv_recip(
     sink.local_set(dst);
 }
 
+/// Q16.16 `abs`.
+///
+/// The `if` produces the single result consumed by `local_set(dst)` — do not
+/// push `src` ahead of the condition. An extra operand here leaks one value per
+/// `abs` onto the WASM operand stack; a trailing `return` masks it (the implicit
+/// function `end` is then unreachable), so it only surfaces as
+/// "values remaining on stack at end of block" when the enclosing block falls
+/// through, e.g. `abs` in an `if` inside a loop.
 pub(crate) fn emit_q32_fabs(sink: &mut InstructionSink<'_>, src: u32, dst: u32) {
     let t = BlockType::Result(ValType::I32);
     sink.local_get(src).i32_const(0).i32_lt_s().if_(t);
@@ -391,4 +399,111 @@ pub(crate) fn emit_q32_ftrunc(sink: &mut InstructionSink<'_>, src: u32, dst: u32
     sink.local_get(dst);
     sink.end();
     sink.local_set(dst);
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use wasm_encoder::{CodeSection, Function, FunctionSection, Module, TypeSection, ValType};
+
+    use super::*;
+    use crate::emit::FdivRecipLocals;
+
+    /// Locals in the harness function: `0..=7` are `i32`, `8` is `i64`.
+    const I32_LOCALS: u32 = 8;
+    const I64_SCRATCH: u32 = 8;
+
+    /// Emit `body` into a function whose implicit `end` is **reachable** (no
+    /// trailing `return`), then validate.
+    ///
+    /// The reachable end is the whole point: WASM validation goes polymorphic
+    /// after `return`, so an emitter that leaks operands is invisible in a
+    /// straight-line function that returns. It only trips validation where the
+    /// enclosing block falls through — an `if` inside a loop, say. Validating a
+    /// fallthrough body here pins every helper's stack balance directly.
+    fn assert_balanced(name: &str, body: impl FnOnce(&mut InstructionSink<'_>)) {
+        let mut types = TypeSection::new();
+        types.ty().function(vec![], vec![]);
+        let mut funcs = FunctionSection::new();
+        funcs.function(0);
+
+        let mut f = Function::new(vec![(I32_LOCALS, ValType::I32), (1, ValType::I64)]);
+        {
+            let mut sink = f.instructions();
+            body(&mut sink);
+            sink.end();
+        }
+        let mut code = CodeSection::new();
+        code.function(&f);
+
+        let mut module = Module::new();
+        module.section(&types);
+        module.section(&funcs);
+        module.section(&code);
+        let bytes = module.finish();
+
+        if let Err(e) = wasmparser::Validator::new().validate_all(&bytes) {
+            panic!("{name} leaves the WASM operand stack unbalanced: {e}");
+        }
+    }
+
+    const FDIV_RECIP_LOCALS: FdivRecipLocals = FdivRecipLocals {
+        divisor: 0,
+        dividend: 1,
+        sign: 2,
+        abs_dividend: 3,
+        abs_divisor: 4,
+        recip: 5,
+        quot: 6,
+    };
+
+    /// Every Q32 helper must be stack-neutral: LPIR is a register machine, so an
+    /// op consumes and produces only locals. Regression for the 2026-07-27
+    /// `emit_q32_fabs` leak (`abs()` in an `if` inside a `for`).
+    #[test]
+    fn q32_helpers_are_stack_neutral() {
+        #[allow(clippy::type_complexity)]
+        let cases: Vec<(&str, fn(&mut InstructionSink<'_>))> = vec![
+            ("emit_q32_fabs", |s| emit_q32_fabs(s, 0, 1)),
+            ("emit_q32_fadd_wrap", |s| emit_q32_fadd_wrap(s, 0, 1, 2)),
+            ("emit_q32_fsub_wrap", |s| emit_q32_fsub_wrap(s, 0, 1, 2)),
+            ("emit_q32_fmul_wrap", |s| emit_q32_fmul_wrap(s, 0, 1, 2)),
+            ("emit_q32_fadd", |s| emit_q32_fadd(s, 0, 1, 2, I64_SCRATCH)),
+            ("emit_q32_fsub", |s| emit_q32_fsub(s, 0, 1, 2, I64_SCRATCH)),
+            ("emit_q32_fmul", |s| emit_q32_fmul(s, 0, 1, 2, I64_SCRATCH)),
+            ("emit_q32_fdiv", |s| emit_q32_fdiv(s, 0, 1, 2)),
+            ("emit_q32_fdiv_recip", |s| {
+                emit_q32_fdiv_recip(s, 0, 1, 7, &FDIV_RECIP_LOCALS);
+            }),
+            ("emit_q32_fdiv_const_fast", |s| {
+                emit_q32_fdiv_const_fast(s, 0, 2.0, 1);
+            }),
+            ("emit_q32_fdiv_const_fast(0)", |s| {
+                emit_q32_fdiv_const_fast(s, 0, 0.0, 1);
+            }),
+            ("emit_q32_ftoi_sat_s", |s| emit_q32_ftoi_sat_s(s, 0, 1)),
+            ("emit_q32_ftoi_sat_u", |s| emit_q32_ftoi_sat_u(s, 0, 1)),
+            ("emit_q32_itof_s", |s| emit_q32_itof_s(s, 0, 1, I64_SCRATCH)),
+            ("emit_q32_itof_u", |s| emit_q32_itof_u(s, 0, 1, I64_SCRATCH)),
+            ("emit_q32_ffloor", |s| emit_q32_ffloor(s, 0, 1)),
+            ("emit_q32_fceil", |s| emit_q32_fceil(s, 0, 1)),
+            ("emit_q32_ftrunc", |s| emit_q32_ftrunc(s, 0, 1)),
+        ];
+
+        for (name, emit) in cases {
+            assert_balanced(name, emit);
+        }
+    }
+
+    /// `emit_q32_sat_from_i64` is the one helper that is *not* neutral by
+    /// contract: it consumes an `i64` and leaves one `i32`.
+    #[test]
+    fn q32_sat_from_i64_consumes_i64_leaves_i32() {
+        assert_balanced("emit_q32_sat_from_i64", |s| {
+            s.i64_const(0);
+            emit_q32_sat_from_i64(s, I64_SCRATCH);
+            s.drop();
+        });
+    }
 }
