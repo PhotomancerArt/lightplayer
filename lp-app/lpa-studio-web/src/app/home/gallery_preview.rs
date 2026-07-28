@@ -94,6 +94,14 @@ pub(crate) struct ThumbCanvas {
 /// Monotonic thumb-frame ids (one per mounted `CardThumb`).
 static NEXT_THUMB_ID: AtomicU64 = AtomicU64::new(0);
 
+/// Marker context provided by the story-book renderer: under it, thumbs
+/// render the static stack only — no `PreviewHost` boot, no lease, and no
+/// live badge. Live thumbs would race story capture (the host's fail-soft
+/// error badges appear whenever the store probe loses the race), and the
+/// badge states have dedicated static-injection stories instead.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct StaticThumbPreviews;
+
 /// Drive one card thumb's live preview and snapshot it for rendering.
 ///
 /// `source: None` (stories, non-wasm builds, cards without previews) is
@@ -107,6 +115,11 @@ pub(crate) fn use_thumb_preview(source: Option<PreviewSource>) -> ThumbPreview {
         let id = NEXT_THUMB_ID.fetch_add(1, Ordering::Relaxed);
         format!("gallery-thumb-{id}")
     });
+    let source = if try_consume_context::<StaticThumbPreviews>().is_some() {
+        None
+    } else {
+        source
+    };
     #[cfg(target_arch = "wasm32")]
     {
         wasm::use_live_thumb(frame_id, source)
