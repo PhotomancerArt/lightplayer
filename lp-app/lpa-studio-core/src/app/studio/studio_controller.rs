@@ -2507,17 +2507,11 @@ impl StudioController {
         // narration. Targeting: the stamped uid when the managed device
         // had one; an identity-less blank board's op rides the live
         // (non-offline) hardware card.
-        if !card.sim
-            && let Some((target_uid, slot)) = self.device_card_op.as_ref()
+        if let Some((target_uid, slot)) = self.device_card_op.as_ref()
+            && card.takes_card_op(target_uid.as_deref())
         {
-            let matches_target = match target_uid {
-                Some(uid) => card.uid.as_deref() == Some(uid.as_str()),
-                None => !matches!(card.state, crate::RosterCardState::Offline { .. }),
-            };
-            if matches_target {
-                card.ui.op = Some(slot.borrow().clone());
-                return card;
-            }
+            card.ui.op = Some(slot.borrow().clone());
+            return card;
         }
         // the live op: the session whose card this is, mid-operation
         let op_label = if card.sim {
@@ -4096,6 +4090,7 @@ impl StudioController {
             format!("{}…", spec.progress_label),
             None,
         )));
+        let managed_uid_for_events = managed_uid.clone();
         self.device_card_op = Some((managed_uid, Rc::clone(&card_op)));
         if let Some(session) = self.pool.session_mut(device_id) {
             session.disconnect_server();
@@ -4111,6 +4106,15 @@ impl StudioController {
             UiActivityView::new(spec.progress_label)
                 .with_progress(UiProgress::indeterminate(spec.progress_label)),
         ));
+        // MOUNT THE OVERLAY BEFORE THE WORK STARTS. The op slot went in
+        // just above, and only a full view build carries it onto a card
+        // (`overlay_card_ui`) — but everything below holds `&mut self`
+        // until the operation ends, so this is the last chance to build
+        // one. Without it the first view wearing the op is the one
+        // `attach_runtime` emits AFTER the flash, which is what made a
+        // minute-long install look like a dead button.
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
         updates.emit(UxUpdate::Activity {
             target: target.clone(),
             status: UiStatus::working("Managing"),
@@ -4122,6 +4126,7 @@ impl StudioController {
             Rc::clone(&activity),
             Rc::clone(&captured_logs),
             Rc::clone(&card_op),
+            managed_uid_for_events.clone(),
             spec.reconnect_detail,
         );
         let manage_result = {
@@ -4174,8 +4179,15 @@ impl StudioController {
             spec.reconnect_detail,
         );
         // The reattach half is the op's AwaitingDevice phase (I2) — the
-        // overlay stays up, narrating the expected gap.
+        // overlay stays up, narrating the expected gap. It is a LONG
+        // phase (the board reboots and re-enumerates), so the delta goes
+        // out too: the dispatch has not returned, and only a full
+        // snapshot would otherwise carry the phase change.
         *card_op.borrow_mut() = crate::CardOp::awaiting(spec.reconnect_detail);
+        updates.emit(UxUpdate::CardOp {
+            uid: managed_uid_for_events,
+            op: card_op.borrow().clone(),
+        });
         self.mark_dirty();
         // The link was already rebuilt inside `manage`; what remains is the
         // server reattach + post-attach sequence on the managed session.

@@ -13,8 +13,9 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::{
     ProjectController, ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeView,
     ProjectSyncPhase, RosterCardState, UiAgentStatus, UiDeviceCard, UiDeviceProjectChip,
-    UiExampleCard, UiHomeView, UiMetric, UiNodeFace, UiNodeHeader, UiNodeTab, UiNodeView,
-    UiPackageCard, UiPaneView, UiStatus, UiStepState, UiStudioView, UiViewContent,
+    UiExampleCard, UiHomeView, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNodeFace,
+    UiNodeHeader, UiNodeTab, UiNodeView, UiPackageCard, UiPaneView, UiStatus, UiStudioView,
+    UiViewContent,
 };
 
 use crate::app::home::HomeGallery;
@@ -23,9 +24,7 @@ use crate::app::node::face_story_fixtures::{
     fixture_node_view, playlist_node_face_view, shader_face, shader_sections,
 };
 use crate::app::story_fixtures::{
-    browser_worker_metrics, connect_device_complete, device_view, disconnect_device_action,
-    disconnect_lightplayer_action, project_editor_summary, project_synced_metrics,
-    select_connection_complete, shell_story, stack_section, story_node_status, tree_item,
+    project_editor_summary, project_synced_metrics, shell_story, story_node_status, tree_item,
 };
 
 /// A fixed "now" so relative times in baselines never drift (matches the
@@ -33,20 +32,26 @@ use crate::app::story_fixtures::{
 const STORY_NOW: f64 = 1_800_000_000.0;
 
 #[story(
+    screenshot,
     description = "README front-page hero: the full Studio editing a loaded show — sidebar node tree, the focused Aurora shader card (TRACKED visual preview with rendered output, knob row, agent chat, code drawer), and the connected simulator pane. Single-state and deterministic on purpose; the repo README embeds the lg capture."
 )]
 fn studio_hero() -> Element {
+    // The right column is the D43 LENS CARD — the same DeviceCard the
+    // gallery shows, docked as the editor's device surface. (The legacy
+    // step-stack device pane renders only when no lens card exists.)
     shell_story(
         UiStudioView::new(
-            vec![readme_project_pane(), readme_device_pane()],
+            vec![readme_project_pane()],
             lpa_studio_core::UiConsoleView::empty(),
-        ),
+        )
+        .with_lens_card(Some(readme_lens_card())),
         true,
         Vec::new(),
     )
 }
 
 #[story(
+    screenshot,
     description = "README home shot: the gallery with the simulator running a project, a connected device, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
 )]
 fn home_gallery() -> Element {
@@ -63,6 +68,7 @@ fn home_gallery() -> Element {
 }
 
 #[story(
+    screenshot,
     description = "README node-card band: playlist strip, shader, and fixture cards side by side, every preview TRACKED and rendering deterministic output (aurora pixel fields, ring lamp layout). Single-state; the repo README embeds the lg capture."
 )]
 fn node_cards() -> Element {
@@ -180,30 +186,36 @@ fn readme_playlist_node() -> UiNodeView {
     view
 }
 
-/// A compact simulator device pane: connected and ready, without the
-/// open-project step, so the hero column stays within README height.
-fn readme_device_pane() -> UiPaneView {
-    device_view(
-        UiStatus::good("LightPlayer ready"),
-        vec![
-            select_connection_complete("Simulator"),
-            connect_device_complete(browser_worker_metrics()),
-            stack_section(
-                "connect-lightplayer",
-                "Connect LightPlayer",
-                UiStepState::Complete,
-                UiViewContent::Metrics(vec![UiMetric::new(
-                    "Protocol",
-                    "fw-browser-post-message-v1",
-                )]),
-                vec![disconnect_device_action(), disconnect_lightplayer_action()],
-            ),
+/// The hero's lens card: the simulator running this show, with a healthy
+/// console tail so the card's permanent console region reads as live.
+fn readme_lens_card() -> UiDeviceCard {
+    let line = |offset: f64, message: &str| {
+        UiLogEntry::new(
+            STORY_NOW + offset,
+            UiLogLevel::Info,
+            UiLogSource::with_detail(UiLogOrigin::Device, "fw-browser"),
+            message,
+        )
+    };
+    UiDeviceCard {
+        uid: None,
+        name: "Simulator".to_string(),
+        transport: String::new(),
+        state: RosterCardState::RunningUpToDate,
+        project: Some(UiDeviceProjectChip {
+            uid: "prj_9sLm2Xc44dQnUv7BgWkEyt".to_string(),
+            name: "evening-glow".to_string(),
+        }),
+        fw: None,
+        sim: true,
+        console_tail: vec![
+            line(0.0, "engine: project loaded · 241 points"),
+            line(1.0, "engine: frame 41022 · 60fps"),
+            line(2.0, "shader: aurora.glsl compiled · 3 uniforms"),
+            line(3.0, "engine: frame 41142 · 60fps"),
         ],
-        vec![
-            "[fw-browser] ready",
-            "[lp-server] loaded project evening-glow",
-        ],
-    )
+        ui: Default::default(),
+    }
 }
 
 /// Home gallery content for the README shot: simulator running a project,
