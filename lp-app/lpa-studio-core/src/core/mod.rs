@@ -32,7 +32,4 @@ pub use view::activity_view::UiActivityStep;
 pub use view::activity_view::UiActivityStepState;
 pub use view::activity_view::UiActivityView;
 pub use view::pane_view::UiPaneView;
-pub use view::steps_view::UiStepState;
-pub use view::steps_view::UiStepView;
-pub use view::steps_view::UiStepsView;
 pub use view::view_content::UiViewContent;

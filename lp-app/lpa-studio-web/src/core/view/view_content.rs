@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiViewContent};
 
 use crate::app::{BusPaneBody, ProjectPane};
-use crate::core::{ActivityView, IssueView, MetricGrid, ProgressBar, StepsView};
+use crate::core::{ActivityView, IssueView, MetricGrid, ProgressBar};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -12,7 +12,6 @@ pub fn ViewContent(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     match body {
-        UiViewContent::Empty => rsx! {},
         UiViewContent::Text(text) => rsx! {
             p { class: "tw:m-0 tw:text-sm tw:leading-normal tw:text-muted-foreground", "{text}" }
         },
@@ -27,13 +26,6 @@ pub fn ViewContent(
         },
         UiViewContent::Metrics(metrics) => rsx! {
             MetricGrid { metrics }
-        },
-        UiViewContent::Stack(stack) => rsx! {
-            StepsView {
-                stack: *stack,
-                running,
-                on_action,
-            }
         },
         // `PaneView` intercepts the project editor to attach the pane's
         // status and actions to the ProjectPane header; this arm only

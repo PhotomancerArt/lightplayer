@@ -2,8 +2,7 @@ use core::fmt::Write;
 
 use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::{
-    ActionPriority, UiActivityView, UiPaneView, UiStatus, UiStepState, UiViewContent,
-    UxActivityTarget,
+    ActionPriority, UiActivityView, UiPaneView, UiStatus, UiViewContent, UxActivityTarget,
 };
 
 /// Which runtime session the editor lens is bound to (D35/D37 — the SDI
@@ -134,27 +133,7 @@ impl UiStudioView {
             return;
         };
         pane.status = status;
-
-        match target {
-            UxActivityTarget::Pane { .. } => {
-                pane.body = UiViewContent::Activity(activity);
-            }
-            UxActivityTarget::StackSection { section_id, .. } => {
-                if let UiViewContent::Stack(stack) = &mut pane.body {
-                    if let Some(section) = stack
-                        .sections
-                        .iter_mut()
-                        .find(|section| &section.id == section_id)
-                    {
-                        section.state = UiStepState::Active;
-                        section.body = UiViewContent::Activity(activity);
-                        section.actions.clear();
-                        return;
-                    }
-                }
-                pane.body = UiViewContent::Activity(activity);
-            }
-        }
+        pane.body = UiViewContent::Activity(activity);
     }
 
     pub fn render_text(&self) -> String {

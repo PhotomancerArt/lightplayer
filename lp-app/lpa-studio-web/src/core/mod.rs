@@ -43,5 +43,4 @@ pub use status_chip::StatusChip;
 pub use terminal_output::TerminalOutput;
 pub use view::activity_view::ActivityView;
 pub use view::pane_view::PaneView;
-pub use view::stack_view::StepsView;
 pub use view::view_content::ViewContent;
