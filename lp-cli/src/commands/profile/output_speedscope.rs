@@ -252,7 +252,7 @@ pub fn build(cpu: &CpuCollector, sym: &dyn PcSymbolizer, workload: &str, mode: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_riscv_emu::emu::cycle_model::InstClass;
+    use lp_emu_core::InstClass;
     use lp_riscv_emu::profile::cpu::ROOT_PC;
     use lp_riscv_emu::profile::{Collector, GateAction, TraceSymbol};
 

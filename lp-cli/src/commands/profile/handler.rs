@@ -1,9 +1,10 @@
 //! `lp-cli profile` — run a workload under the emulator with unified profiling.
 
 use anyhow::{Context, Result, bail};
+use lp_emu_core::{LogLevel, TimeMode};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
-    LogLevel, Riscv32Emulator, TimeMode,
+    Riscv32Emulator,
     profile::alloc::AllocCollector,
     profile::cpu::CpuCollector,
     profile::events::EventsCollector,

@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
 
-pub use crate::emu::cycle_model::InstClass;
+pub use lp_emu_core::InstClass;
 
 /// Trait for compile-time logging mode control.
 pub trait LoggingMode {

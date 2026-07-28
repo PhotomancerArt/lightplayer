@@ -10,6 +10,7 @@ description = "RISC-V 32-bit emulator runtime"
 workspace = true
 
 [dependencies]
+lp-emu-core = { path = "../../lp-emu/lp-emu-core" }
 lp-riscv-inst = { path = "../lp-riscv-inst" }
 lp-riscv-emu-shared = { path = "../lp-riscv-emu-shared" }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
@@ -24,6 +25,7 @@ libc = { version = "0.2", optional = true }
 
 [features]
 std = [
+    "lp-emu-core/std",
     "env_logger",
     "log/std",
     "serde",

@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use lp_riscv_emu::LogLevel;
+use lp_emu_core::LogLevel;
 use lps_shared::LpsValueF32;
 use walkdir::WalkDir;
 
@@ -346,7 +346,7 @@ fn sweep_directive(
     tf: &parse::TestFile,
     compiled: &CompiledShader,
     target: &Target,
-    cycle_model: lp_riscv_emu::CycleModel,
+    cycle_model: lp_emu_core::CycleModel,
 ) -> SweepRecord {
     let (func_name, arg_strings) = match parse_assert::parse_function_call(&d.expression_str) {
         Ok(v) => v,

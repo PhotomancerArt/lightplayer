@@ -211,7 +211,7 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_riscv_emu::emu::cycle_model::InstClass;
+    use lp_emu_core::InstClass;
     use lp_riscv_emu::profile::{Collector, GateAction, TraceSymbol};
 
     use crate::commands::profile::symbolize::Symbolizer;

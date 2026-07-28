@@ -1,4 +1,4 @@
-//! Compile-time configuration for lp-riscv-emu.
+//! Compile-time configuration for lp-emu-core.
 
 /// Maximum number of instruction log entries to retain in the rolling buffer.
 /// When exceeded, oldest entries are removed (FIFO).

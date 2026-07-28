@@ -2,17 +2,15 @@
 
 extern crate alloc;
 
-use super::super::{
-    cycle_model::CycleModel, executor::ExecutionResult, logging::LogLevel, memory::Memory,
-};
-use crate::serial::host_serial::HostSerial;
-use crate::time::TimeMode;
+use super::super::{executor::ExecutionResult, memory::Memory};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 #[cfg(feature = "std")]
 use alloc::string::String;
 use alloc::vec::Vec;
 use cranelift_codegen::ir::TrapCode;
+use lp_emu_core::serial::host_serial::HostSerial;
+use lp_emu_core::{CycleModel, LogLevel, TimeMode};
 
 #[cfg(feature = "std")]
 use std::path::PathBuf;
@@ -373,7 +371,7 @@ impl Riscv32Emulator {
     pub fn serial_write_line(
         &mut self,
         line: &str,
-    ) -> Result<usize, crate::serial::host_serial::SerialError> {
+    ) -> Result<usize, lp_emu_core::serial::host_serial::SerialError> {
         let serial = self.get_or_create_serial_host();
         serial.host_write_line(line)
     }
@@ -507,8 +505,8 @@ impl Riscv32Emulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::TimeMode;
     use alloc::vec;
+    use lp_emu_core::TimeMode;
 
     #[test]
     fn step_returns_profile_stop_when_stop_pending_set() {

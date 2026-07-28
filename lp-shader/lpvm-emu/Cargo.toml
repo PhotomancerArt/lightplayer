@@ -14,6 +14,7 @@ std = ["lpvm/std", "lp-riscv-emu/std", "lpvm-cranelift/std"]
 
 [dependencies]
 lpvm = { path = "../lpvm", default-features = false }
+lp-emu-core = { path = "../../lp-emu/lp-emu-core", features = ["std"] }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf" }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lpvm-cranelift = { path = "../lpvm-cranelift", default-features = false, features = [

@@ -1,0 +1,17 @@
+[package]
+name = "lp-emu-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Architecture-neutral emulator infrastructure shared by LightPlayer emulators"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-riscv-emu-shared = { path = "../../lp-riscv/lp-riscv-emu-shared" }
+log = { workspace = true, default-features = false }
+
+[features]
+std = ["log/std", "lp-riscv-emu-shared/std"]

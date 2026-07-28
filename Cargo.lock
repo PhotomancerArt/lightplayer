@@ -3892,6 +3892,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-cli",
+ "lp-emu-core",
  "lp-recovery",
  "lp-riscv-elf",
  "lp-riscv-emu",
@@ -5183,6 +5184,7 @@ dependencies = [
  "jsonschema",
  "log",
  "lp-collection 1.0.0",
+ "lp-emu-core",
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-riscv-elf",
@@ -5234,6 +5236,14 @@ version = "1.0.0"
 source = "git+https://github.com/light-player/lp-common?branch=main#c27c24b3ce4bf6e7af1c3e1db84c20095d0aad56"
 dependencies = [
  "rustc-hash 2.1.1",
+]
+
+[[package]]
+name = "lp-emu-core"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-riscv-emu-shared",
 ]
 
 [[package]]
@@ -5323,6 +5333,7 @@ dependencies = [
  "cranelift-object",
  "hashbrown 0.15.5",
  "log",
+ "lp-emu-core",
  "lp-riscv-emu",
  "lp-riscv-inst",
  "object",
@@ -5342,6 +5353,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "libc",
  "log",
+ "lp-emu-core",
  "lp-riscv-elf",
  "lp-riscv-emu-shared",
  "lp-riscv-inst",
@@ -5795,10 +5807,10 @@ dependencies = [
  "glsl",
  "libm",
  "lp-collection 1.0.0",
+ "lp-emu-core",
  "lp-gfx-lpvm",
  "lp-gfx-wgpu",
  "lp-riscv-elf",
- "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
  "lpir",
@@ -5931,6 +5943,7 @@ name = "lpvm-emu"
 version = "40.0.0"
 dependencies = [
  "cranelift-codegen 0.127.0",
+ "lp-emu-core",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lpir",
@@ -5948,6 +5961,7 @@ dependencies = [
  "cranelift-codegen 0.127.0",
  "log",
  "lp-collection 1.0.0",
+ "lp-emu-core",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",

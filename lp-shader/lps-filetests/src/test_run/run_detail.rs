@@ -13,7 +13,7 @@ use crate::test_run::record_result;
 use crate::test_run::set_uniform;
 use crate::test_run::texture_fixture;
 use anyhow::Result;
-use lp_riscv_emu::LogLevel;
+use lp_emu_core::LogLevel;
 use std::path::{Path, PathBuf};
 
 use crate::colors;
