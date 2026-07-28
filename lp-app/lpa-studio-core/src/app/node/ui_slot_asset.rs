@@ -16,7 +16,9 @@ pub enum UiAssetEditorKind {
 }
 
 /// Editor-ready asset content carried by a config slot.
-#[derive(Clone, Debug, Eq, PartialEq)]
+// PartialEq only: the inline editor's agent chat DTO carries preview
+// thumbnails (PartialEq-only payloads).
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiSlotAsset {
     /// Asset path, inline label, or source reference.
     pub source: String,

@@ -8,6 +8,7 @@
 
 pub mod anthropic;
 pub mod http_transport;
+pub mod model_discovery;
 pub mod model_provider;
 pub mod openai_compat;
 pub mod sse_parser;
@@ -16,7 +17,12 @@ pub mod transport_host;
 #[cfg(target_arch = "wasm32")]
 pub mod transport_web;
 
-pub use http_transport::{HttpRequest, HttpResponse, HttpSseTransport, TransportError};
+pub use http_transport::{
+    HttpGetTransport, HttpRequest, HttpResponse, HttpSseTransport, TransportError,
+};
+pub use model_discovery::{
+    ListModelsError, ModelInfo, list_anthropic_models, list_openai_compat_models,
+};
 pub use model_provider::{
     BoxStream, ChatMessage, ChatRole, ContentBlock, ModelProvider, StopReason, TokenUsage, ToolDef,
     TurnEvent, TurnRequest,
