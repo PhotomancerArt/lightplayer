@@ -53,6 +53,10 @@ const browserRestartEvery = parsePositiveIntegerEnv("STUDIO_STORY_BROWSER_RESTAR
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
+// Written beside `.check-complete` by a complete `check`: the baseline files
+// that actually need replacing/removing. See the write site for why consumers
+// must not just swap the whole set.
+const REFRESH_MANIFEST_FILE = ".refresh-manifest.json";
 // Captures of the same build still differ in a few pixels from anti-aliasing and
 // sub-pixel text layout jitter (high per-channel delta, but only along glyph edges).
 // So `check` counts pixels whose per-channel delta exceeds a significance threshold
@@ -221,13 +225,23 @@ try {
     await replaceBaselineImages(captureDir, outputDir);
     console.log(`Story baselines: ${path.relative(repoRoot, outputDir)}`);
   } else if (mode === "check") {
-    const ok = await compareBaselines(storyIds, baselineDir, outputDir);
+    const comparison = await compareBaselines(storyIds, baselineDir, outputDir);
+    const ok = comparison.ok;
     // Sentinel: the comparison ran over a COMPLETE capture. Consumers of the
     // fresh-capture set (the CI artifact and `story-pull`) require this so a
     // crashed partial capture can't masquerade as story drift — staging a
     // partial set would delete every baseline it didn't reach.
     if (storyFilters.length === 0) {
       await writeFile(path.join(outputDir, ".check-complete"), `${new Date().toISOString()}\n`);
+      // Refresh manifest: exactly which baselines the comparison judged stale.
+      // Consumers must replace only these instead of swapping the whole set —
+      // a wholesale copy also drags in the files this comparison deliberately
+      // TOLERATED (sub-threshold AA noise), which is how run-to-run raster
+      // jitter became committed baseline churn.
+      await writeFile(
+        path.join(outputDir, REFRESH_MANIFEST_FILE),
+        `${JSON.stringify({ replace: comparison.replace, remove: comparison.remove }, null, 2)}\n`,
+      );
     }
     if (!ok) {
       console.error("\nStory baselines differ. Run `just studio-story-baselines` to update them.");
@@ -906,6 +920,18 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
           return false;
         }
       }
+      // Preview canvases paint via putImageData from an async task after
+      // mount, so "mounted but not yet painted" is a real page state. Both
+      // painted and unpainted survive a stable pair, so without this gate a
+      // baseline could freeze either one — bistable run-to-run. The app
+      // stamps data-preview-painted on each canvas after its first blit;
+      // demand it on every preview canvas in the story.
+      const unpainted = el.querySelectorAll(
+        'canvas.ux-produced-product-pixel-canvas:not([data-preview-painted])',
+      );
+      if (unpainted.length > 0) {
+        return false;
+      }
       return !document.querySelector('[data-story-wait="1"]');
     })()
   `;
@@ -1001,6 +1027,8 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   const missing = [];
   const changed = [];
   const tolerated = [];
+  // File names (not the annotated display strings) for the refresh manifest.
+  const replace = [];
   let identical = 0;
 
   for (const target of targets) {
@@ -1012,14 +1040,18 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
 
     if (!expected) {
       missing.push(fileName);
+      replace.push(fileName);
     } else if (expected.equals(actual)) {
       identical += 1;
     } else {
       const diff = comparePngPixels(expected, actual);
       if (diff.withinTolerance) {
+        // Deliberately NOT added to `replace`: the committed bytes stay put,
+        // so sub-threshold jitter can never ping-pong the baseline.
         tolerated.push(`${fileName} (${diff.summary})`);
       } else {
         changed.push(`${fileName} (${diff.summary})`);
+        replace.push(fileName);
       }
     }
   }
@@ -1029,14 +1061,15 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   printComparison("removed", unexpected);
   printComparison("within tolerance (informational)", tolerated);
 
+  const manifest = { replace, remove: unexpected };
   if (changed.length === 0 && missing.length === 0 && unexpected.length === 0) {
     console.log(
       `Story baselines match (${identical} byte-identical, ${tolerated.length} within tolerance).`,
     );
-    return true;
+    return { ok: true, ...manifest };
   }
   console.log(`Fresh PNGs: ${path.relative(repoRoot, actualDir)}`);
-  return false;
+  return { ok: false, ...manifest };
 }
 
 function comparePngPixels(expected, actual) {

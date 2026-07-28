@@ -733,6 +733,13 @@ pub const COMPLETIONS: &[CompletionEntry] = &[
         description: "",
     },
     CompletionEntry {
+        name: "step",
+        module: "glsl",
+        detail: "step(edge, x)",
+        snippet: "step(${edge}, ${x})",
+        description: "",
+    },
+    CompletionEntry {
         name: "tan",
         module: "glsl",
         detail: "tan(x)",
