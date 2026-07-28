@@ -15,9 +15,18 @@ pub struct StoryDescriptor {
     pub story: &'static str,
     pub label: &'static str,
     pub description: &'static str,
+    /// `#[story(screenshot)]`: this capture is a published image (README
+    /// hero, docs figure), not a design-record baseline. It renders bare —
+    /// no story frame, size label, or checkerboard — and is captured at
+    /// `lg` only.
+    pub screenshot: bool,
 }
 
 impl StoryDescriptor {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "constructed only by the generated registry, never by hand"
+    )]
     pub const fn new(
         id: &'static str,
         source_path: &'static str,
@@ -27,6 +36,7 @@ impl StoryDescriptor {
         story: &'static str,
         label: &'static str,
         description: &'static str,
+        screenshot: bool,
     ) -> Self {
         Self {
             id,
@@ -37,6 +47,7 @@ impl StoryDescriptor {
             story,
             label,
             description,
+            screenshot,
         }
     }
 

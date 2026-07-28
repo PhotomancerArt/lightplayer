@@ -85,10 +85,14 @@ measure. Growing the viewport removes the condition instead of compensating for
 it, and generalises to any widget that measures on first visibility.
 
 Blast radius, sampled by capturing families twice with and without the change:
-`core/view` 42/42 byte-identical, `exploration/node-cards` 9/12. The three that
-differ are the popover-bearing overviews, where a popover currently gets
-repositioned to stay inside the short viewport and now sits by its anchor —
-reviewed and accepted as the more honest render.
+`core/view` 42/42 byte-identical, `exploration/node-cards` 9/12. The only three
+that differed were `node-cards__overview__*`, where a popover currently gets
+repositioned to stay inside the short viewport and now sits by its anchor — and
+those are `overview` composites, which stopped being baselines on 2026-07-28.
+So on the committed set this is close to inert: 142 of 945 baselines are still
+taller than the viewport, and none of the ones sampled changed. It earns its
+place as a standing guarantee for tall stories rather than as a visible
+refresh.
 
 The alternative, measured and rejected:
 
@@ -114,15 +118,20 @@ because the story page is not scrollable.
 **Not the same thing as the composite race** — `base__code-editor__overview__sm`
 also appears in [overview-composite-capture-races](2026-07-28-overview-composite-capture-races.md),
 which diagnoses composite flip-flops as a CSS transition captured mid-flight.
-These are two mechanisms on one story, distinguishable by the pixels: this one
-is a discrete 18px↔14px change in gutter row spacing, not blurred or faded
-content. Fixing either alone will not stop that baseline from flipping.
+Two mechanisms on one story, distinguishable by the pixels: this one is a
+discrete 18px↔14px change in gutter row spacing, not blurred or faded content.
 
 **Regression coverage** — `gutter-alignment-probe.mjs` is the deterministic
 check (exits non-zero on misalignment); run it at viewport height 400 to hold
-the failing condition. Not yet wired into CI. The story baseline
-`base__code-editor__overview__*` is the incidental detector that caught this,
-but it only fires when the editor happens to straddle the fold.
+the failing condition. Not yet wired into CI.
+
+That probe is now the *only* route to coverage, not a nicer alternative to a
+flaky one. `base__code-editor__overview__*` is what caught this by flipping, and
+generated `overview` composites stopped being pixel baselines on 2026-07-28
+(nondeterministic for the unrelated reason above). The surviving per-story
+`base__code-editor__*` baselines sit in short stories where the editor is
+already in view, so they froze the aligned terminal and will never report a
+flip. Nothing in CI detects this defect today.
 
 **Lesson** — Three things. A flaky visual baseline is evidence, not noise: this
 was written off as capture churn across two sessions before anyone diffed the

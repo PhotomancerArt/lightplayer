@@ -59,3 +59,18 @@ pub trait HttpSseTransport {
     /// Sleep for `ms` milliseconds (retry backoff).
     fn sleep_ms(&self, ms: u32) -> LocalBoxFuture<'static, ()>;
 }
+
+/// Plain GET (model discovery — no SSE, no body). A sibling of
+/// [`HttpSseTransport`] rather than a required method on it, so the many
+/// scripted fake transports in provider/session tests stay untouched; the
+/// two real platform transports implement both. The response reuses the
+/// streamed [`HttpResponse`] shape — callers drain the body to completion.
+pub trait HttpGetTransport {
+    /// Send a GET; resolve once response headers are available. Non-2xx
+    /// responses still carry their body (the API's JSON error).
+    fn get(
+        &self,
+        url: String,
+        headers: Vec<(String, String)>,
+    ) -> LocalBoxFuture<'static, Result<HttpResponse, TransportError>>;
+}

@@ -45,23 +45,27 @@ fn gallery() -> Element {
     description = "The same board with the shader's code drawer and the fixture's advanced drawer open: growth is downward-only from a stable top."
 )]
 fn gallery_drawers_open() -> Element {
+    // Disclosure is core-owned: stories seed each DTO's card UI state.
+    let mut shader = shader_node_view(true, UiAgentStatus::Idle);
+    shader.card_ui.code_open = true;
+    let mut fixture = fixture_node_view();
+    fixture.card_ui.advanced_open = true;
+    let mut playlist = playlist_node_face_view();
+    playlist.card_ui.advanced_open = true;
     rsx! {
         div { class: "tw:grid tw:w-full tw:max-w-7xl tw:items-start tw:gap-6 tw:xl:grid-cols-3",
             NodePane {
-                view: shader_node_view(true, UiAgentStatus::Idle),
+                view: shader,
                 on_action: move |_| {},
-                face_code_drawer_open: true,
                 face_platform: crate::base::Platform::Mac,
             }
             NodePane {
-                view: fixture_node_view(),
+                view: fixture,
                 on_action: move |_| {},
-                face_advanced_drawer_open: true,
             }
             NodePane {
-                view: playlist_node_face_view(),
+                view: playlist,
                 on_action: move |_| {},
-                face_advanced_drawer_open: true,
             }
         }
     }
