@@ -416,17 +416,78 @@ jobs:
       # Only a COMPLETE comparison may publish an artifact: a crashed partial
       # capture staged via story-pull would delete every baseline it didn't
       # reach. The capture script writes .check-complete only after comparing
-      # a full capture set.
+      # a full capture set. Runs on the success path too (not just failure):
+      # the tolerated-evidence step below needs the completeness verdict and
+      # the manifest's tolerated count even when the check passed.
       - name: Detect completed comparison
         id: check_complete
-        if: steps.story_check.outcome == 'failure'
         shell: bash
         run: |
-          if [ -f lp2025/lp-app/lpa-studio-web/story-images/.new/.check-complete ]; then
+          new_dir=lp2025/lp-app/lpa-studio-web/story-images/.new
+          if [ -f "$new_dir/.check-complete" ]; then
             echo "complete=true" >> "$GITHUB_OUTPUT"
           else
             echo "complete=false" >> "$GITHUB_OUTPUT"
           fi
+          count=0
+          if [ -f "$new_dir/.refresh-manifest.json" ]; then
+            count=$(jq '.tolerated | length' "$new_dir/.refresh-manifest.json" 2>/dev/null || echo 0)
+          fi
+          echo "tolerated_count=$count" >> "$GITHUB_OUTPUT"
+
+      # Evidence retention for tolerated diffs. The check tolerates
+      # sub-ratio pixel diffs and (before this step) THREW THE PIXELS AWAY —
+      # `story-images-fresh` uploads only on failure, so a tolerated diff
+      # left one log line of counts and nothing to diff. That is how the
+      # Δ199 `opening-a-project` flip became undiagnosable (see
+      # docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md).
+      # Uploads BOTH variants (fresh + committed baseline) of just the
+      # tolerated files — a few hundred KB, never the whole set. Runs on
+      # pass and fail alike: the auto-commit path also drops tolerated
+      # pixels (the bot commit contains only manifest-listed files).
+      # Deliberately a different artifact name from story-images-fresh:
+      # story-pull selects runs by that artifact's presence, and a passing
+      # run must never shadow a real drift capture.
+      - name: Preserve tolerated-diff evidence (story-images-tolerated)
+        if: >-
+          steps.check_complete.outputs.complete == 'true' &&
+          steps.check_complete.outputs.tolerated_count != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lp2025
+          new_dir=lp-app/lpa-studio-web/story-images/.new
+          baseline_dir=lp-app/lpa-studio-web/story-images
+          dest="$RUNNER_TEMP/story-tolerated"
+          mkdir -p "$dest/fresh" "$dest/baseline"
+          cp "$new_dir/.refresh-manifest.json" "$dest/"
+          while IFS= read -r name; do
+            cp "$new_dir/$name" "$dest/fresh/$name"
+            cp "$baseline_dir/$name" "$dest/baseline/$name"
+          done < <(jq -r '.tolerated[]?' "$new_dir/.refresh-manifest.json")
+          {
+            echo "## Tolerated story diffs (evidence retained)"
+            echo
+            echo 'The check tolerated pixel diffs on these stories. Both variants are'
+            echo 'in the `story-images-tolerated` artifact — if the log above flags any'
+            echo 'as suspected bistable (significant pixels > 0), diff them from there.'
+            echo
+            echo '```'
+            jq -r '.tolerated[]' "$new_dir/.refresh-manifest.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload tolerated-diff evidence
+        if: >-
+          steps.check_complete.outputs.complete == 'true' &&
+          steps.check_complete.outputs.tolerated_count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-images-tolerated
+          path: ${{ runner.temp }}/story-tolerated/
+          retention-days: 14
+          if-no-files-found: error
+          include-hidden-files: true
 
       # Same-repo PRs only: fork PRs get a read-only token and fall through to
       # the artifact path below. Never --force, never rebase — a push race
