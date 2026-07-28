@@ -122,9 +122,9 @@ pub use nodes::{
     resolve_artifact_specifier,
 };
 pub use product::{
-    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ProductKind, ProductRef,
-    VisualProduct,
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
+    ControlProduct, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ProductKind,
+    ProductRef, VisualProduct,
 };
 pub use project::overlay::{
     ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,

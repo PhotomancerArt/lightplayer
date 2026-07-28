@@ -17,7 +17,9 @@ use lpa_studio_core::{
     UiSlotUnit, UiSlotValue, UiStatus,
 };
 
-use crate::app::node::node_story_fixtures::control_preview_product;
+use crate::app::node::node_story_fixtures::{
+    control_preview_product, map2d_control_preview_product,
+};
 
 /// Story-only slot address so panel fields render wired (dispatch goes to
 /// the story's no-op handler).
@@ -319,6 +321,19 @@ pub(crate) fn shader_node_view(speed_bound: bool, agent_status: UiAgentStatus) -
 pub(crate) fn fixture_face() -> UiFixtureFace {
     UiFixtureFace {
         preview: control_preview_product("output"),
+        brightness: fader_control(
+            184.0,
+            UiSlotFieldState::editable(),
+            UiSlotSourceState::Unset,
+        ),
+    }
+}
+
+/// A fixture face whose lamp layout comes from a shared mapping-corpus
+/// document (16×16 fixture render target, like the real fyeah fixture).
+pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
+    UiFixtureFace {
+        preview: map2d_control_preview_product("output", doc, (16, 16)),
         brightness: fader_control(
             184.0,
             UiSlotFieldState::editable(),

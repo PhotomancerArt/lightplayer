@@ -9,7 +9,7 @@ publish = false
 description = "Static Dioxus web shell for LightPlayer Studio"
 
 [features]
-stories = ["dep:lpa-studio-web-story-macros"]
+stories = ["dep:lpa-studio-web-story-macros", "dep:lpc-mapping"]
 
 [dependencies]
 async-trait = "0.1"
@@ -24,6 +24,8 @@ lpa-client = { path = "../lpa-client", default-features = false }
 lpa-link = { path = "../lpa-link", features = ["browser-worker"] }
 lpa-agent = { path = "../lpa-agent" }
 lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }
+# Story fixtures build lamp layouts from the shared mapping corpus.
+lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false, optional = true }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 # Markdown parsing for agent chat replies (parser only; rendering goes
