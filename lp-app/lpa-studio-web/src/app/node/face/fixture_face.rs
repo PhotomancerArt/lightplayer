@@ -54,6 +54,8 @@ pub fn FixtureFace(
     let mut view = use_signal(move || initial_map_view.unwrap_or_default().into_editor());
     let mut editing = use_signal(|| edit_initially_open);
     let mut expanded = use_signal(|| false);
+    // Bumped on expand/collapse: the editor re-fits to the new box size.
+    let mut refit = use_signal(|| 0_u64);
     let show_toggles = preview.kind == UiProductKind::Control;
     let editable = face.mapping_editor.is_some();
     let edit_open = editable && editing();
@@ -106,6 +108,8 @@ pub fn FixtureFace(
                                 onclick: move |_| {
                                     let now = *expanded.peek();
                                     expanded.set(!now);
+                                    let bump = *refit.peek() + 1;
+                                    refit.set(bump);
                                 },
                                 if full {
                                     Minimize2 { size: 13 }
@@ -132,6 +136,7 @@ pub fn FixtureFace(
                             editor,
                             shared_view: view,
                             live_colors,
+                            refit_epoch: refit(),
                             on_action,
                         }
                     }

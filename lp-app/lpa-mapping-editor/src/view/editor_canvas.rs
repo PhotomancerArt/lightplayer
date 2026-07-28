@@ -140,6 +140,17 @@ pub fn EditorCanvas(
             viewport.set(Some(size));
         }
     };
+    // Element `onresize` does not fire for the svg in this stack, so a real
+    // ResizeObserver keeps `viewport` tracking the box (rail dock,
+    // full-page expand). Held for the canvas's lifetime; disconnects on
+    // drop (the popover panel-observer precedent). The observer routes
+    // through a Dioxus [`Callback`], NOT a bare closure: a signal write
+    // from a raw JS callback has no runtime context, so subscribers (the
+    // fit effect) would never be notified.
+    let measure_cb = use_callback(move |()| measure());
+    #[cfg(target_arch = "wasm32")]
+    let resize_observer =
+        use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<CanvasResizeObserver>)));
     let cam = camera();
     let opts = view_opts();
     let session_read = session.read();
@@ -163,11 +174,16 @@ pub fn EditorCanvas(
     // Lamp screen size is CAPPED: proportional at fit zoom, but circles stop
     // growing past ~11px screen radius as you zoom in — near-coincident
     // lamps (out-and-back wiring runs) separate visually instead of staying
-    // stacked at every zoom. A floor keeps dots visible when zoomed far out.
+    // stacked at every zoom. A floor keeps dots visible when zoomed far out
+    // and keeps sparse layouts (big gaps → tiny proportional dots)
+    // readable and clickable.
     let radius = {
         let base = lamp_display_radius(&resolved);
-        (base * cam.scale).clamp(3.5, 11.0) / cam.scale
+        (base * cam.scale).clamp(5.0, 11.0) / cam.scale
     };
+    // Pointer targets never shrink below ~9px screen radius: sparse lamps
+    // get an invisible hit ring so clicking doesn't demand pixel aim.
+    let hit_radius = (9.0 / cam.scale).max(radius);
     let canvas_rect = doc.canvas_bounds();
     let fit_rect = opts.fit_preview.then(|| {
         let frame = canvas_rect
@@ -283,13 +299,23 @@ pub fn EditorCanvas(
                     anchor.set(CanvasAnchor {
                         element: Some(element.clone()),
                     });
+                    *resize_observer.borrow_mut() =
+                        CanvasResizeObserver::install(element, move || measure_cb.call(()));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                let _ = &evt;
+                let _ = (&evt, &measure_cb);
                 measure();
             },
-            onresize: move |_| measure(),
+            // Right-drag pans regardless of tool (the context menu is
+            // suppressed below); left button keeps the tool grammar.
             onpointerdown: move |evt| {
+                if secondary_button(&evt) {
+                    capture_pointer(&evt);
+                    drag.set(Some(CanvasDrag::Pan {
+                        last: event_view_point(&anchor, &evt),
+                    }));
+                    return;
+                }
                 capture_pointer(&evt);
                 let doc_point = event_doc_point(&anchor, &camera, &evt);
                 let shift = evt.data().modifiers().shift();
@@ -405,6 +431,7 @@ pub fn EditorCanvas(
                 }
             },
             onpointercancel: move |_| drag.set(None),
+            oncontextmenu: move |evt| evt.prevent_default(),
             ondoubleclick: move |_| {
                 if matches!(session.read().tool, MapTool::Path { .. })
                     && session.write().path_finish().is_some()
@@ -554,6 +581,9 @@ pub fn EditorCanvas(
                                     points: points.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" "),
                                     stroke_width: "{14.0 / cam.scale}",
                                     onpointerdown: move |evt| {
+                                        if secondary_button(&evt) {
+                                            return;
+                                        }
                                         evt.stop_propagation();
                                         select_and_start_move(session, drag, anchor, camera, object_index, &evt);
                                     },
@@ -606,11 +636,33 @@ pub fn EditorCanvas(
                                 },
                                 cursor: if tool_is_select { "move" } else { "crosshair" },
                                 onpointerdown: move |evt| {
+                                    if secondary_button(&evt) {
+                                        return;
+                                    }
                                     if matches!(session.read().tool, MapTool::Select) {
                                         evt.stop_propagation();
                                         select_and_start_move(session, drag, anchor, camera, object_index, &evt);
                                     }
                                 },
+                            }
+                            if hit_radius > radius * 1.15 {
+                                circle {
+                                    key: "lh{lamp.index}",
+                                    class: "lpme-lamp-hit",
+                                    cx: "{lamp.pos[0]}",
+                                    cy: "{lamp.pos[1]}",
+                                    r: "{hit_radius}",
+                                    cursor: if tool_is_select { "move" } else { "crosshair" },
+                                    onpointerdown: move |evt| {
+                                        if secondary_button(&evt) {
+                                            return;
+                                        }
+                                        if matches!(session.read().tool, MapTool::Select) {
+                                            evt.stop_propagation();
+                                            select_and_start_move(session, drag, anchor, camera, object_index, &evt);
+                                        }
+                                    },
+                                }
                             }
                         }
                     }
@@ -687,6 +739,9 @@ pub fn EditorCanvas(
                             height: "{2.0 * handle_half}",
                             stroke_width: "{1.4 / cam.scale}",
                             onpointerdown: move |evt| {
+                                if secondary_button(&evt) {
+                                    return;
+                                }
                                 evt.stop_propagation();
                                 capture_pointer(&evt);
                                 let doc_point = event_doc_point(&anchor, &camera, &evt);
@@ -714,6 +769,9 @@ pub fn EditorCanvas(
                                 height: "{2.0 * half}",
                                 stroke_width: "{1.4 / cam.scale}",
                                 onpointerdown: move |evt| {
+                                    if secondary_button(&evt) {
+                                        return;
+                                    }
                                     evt.stop_propagation();
                                     capture_pointer(&evt);
                                     {
@@ -779,6 +837,12 @@ pub fn EditorCanvas(
             }
         }
     }
+}
+
+/// True for the secondary (right) button — those pointerdowns fall through
+/// to the canvas pan instead of tool/selection actions.
+fn secondary_button(evt: &Event<PointerData>) -> bool {
+    evt.data().trigger_button() == Some(dioxus::html::input_data::MouseButton::Secondary)
 }
 
 /// Select `object_index` (respecting shift-toggle) and arm a move drag.
@@ -852,6 +916,38 @@ impl CanvasAnchor {
             }
         }
         None
+    }
+}
+
+/// Owns the canvas's ResizeObserver and its JS callback; disconnects on
+/// drop. The svg's `onresize` attribute never fires in this stack, so this
+/// is what keeps the measured viewport current across embed-box changes.
+#[cfg(target_arch = "wasm32")]
+struct CanvasResizeObserver {
+    observer: web_sys::ResizeObserver,
+    _callback: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::js_sys::Array)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl CanvasResizeObserver {
+    fn install(element: &web_sys::Element, mut measure: impl FnMut() + 'static) -> Option<Self> {
+        use wasm_bindgen::JsCast;
+        let callback = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::js_sys::Array)>::new(
+            move |_entries: web_sys::js_sys::Array| measure(),
+        );
+        let observer = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()).ok()?;
+        observer.observe(element);
+        Some(Self {
+            observer,
+            _callback: callback,
+        })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for CanvasResizeObserver {
+    fn drop(&mut self) {
+        self.observer.disconnect();
     }
 }
 

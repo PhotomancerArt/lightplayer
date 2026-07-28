@@ -7,12 +7,18 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use base64::Engine as _;
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{Download, Upload};
 use lpa_mapping_editor::{EditorViewOptions, Map2dDoc, MapEditor};
 use lpa_studio_core::{UiAction, UiAssetEditor};
 
 use crate::base::icon::{StudioIcon, StudioIconName};
+
+/// Monotonic ids for the hidden upload inputs (one per mounted editor).
+static NEXT_UPLOAD_INPUT_ID: AtomicU64 = AtomicU64::new(0);
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -24,6 +30,9 @@ pub fn MappingAssetEditor(
     /// Live lamp colors by wiring index (the face's control preview feed).
     #[props(default)]
     live_colors: Vec<[u8; 3]>,
+    /// Bumped by the face to request a zoom-to-fit (full-page expand).
+    #[props(default)]
+    refit_epoch: u64,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     // One-shot base-body fetch per artifact (the code editor's guard).
@@ -95,6 +104,28 @@ pub fn MappingAssetEditor(
         }
     };
 
+    // File in/out: mappings are worth keeping as local files. Download is a
+    // data-URL of the current (applied) body, pretty-printed; upload parses
+    // the picked file and applies it whole-body — the editor re-seeds from
+    // the pipeline echo like any external change.
+    let upload_input_id = use_hook(|| {
+        format!(
+            "lpme-upload-{}",
+            NEXT_UPLOAD_INPUT_ID.fetch_add(1, Ordering::Relaxed)
+        )
+    });
+    let mut upload_error = use_signal(|| None::<String>);
+    let download_href = content_text.as_ref().map(|text| {
+        let pretty = Map2dDoc::from_json(text)
+            .map(|doc| doc.to_json_pretty())
+            .unwrap_or_else(|_| text.clone());
+        format!(
+            "data:application/json;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(pretty.as_bytes())
+        )
+    });
+    let upload_editor = editor.clone();
+
     rsx! {
         div { class: "lpme-face-editor",
             if let Some(failure) = parse_failure() {
@@ -105,6 +136,7 @@ pub fn MappingAssetEditor(
                     doc,
                     shared_view,
                     live_colors: live_colors.clone(),
+                    refit_epoch,
                     on_doc_change,
                 }
                 div { class: "lpme-face-editor-bar",
@@ -115,7 +147,58 @@ pub fn MappingAssetEditor(
                     if let Some(failure) = &editor.failure {
                         span { class: "lpme-face-editor-failure", "{failure}" }
                     }
+                    if let Some(failure) = upload_error() {
+                        span { class: "lpme-face-editor-failure", "{failure}" }
+                    }
                     div { class: "lpme-spacer" }
+                    button {
+                        class: "lpme-btn",
+                        title: "load a .map2d.json from disk (applies to this fixture)",
+                        onclick: {
+                            let input_id = upload_input_id.clone();
+                            move |_| click_element(&input_id)
+                        },
+                        Upload { size: 13 }
+                    }
+                    if let Some(href) = &download_href {
+                        a {
+                            class: "lpme-btn",
+                            title: "download the current mapping document",
+                            href: "{href}",
+                            download: "{editor.source}",
+                            Download { size: 13 }
+                        }
+                    }
+                    input {
+                        id: "{upload_input_id}",
+                        class: "lpme-hidden-input",
+                        r#type: "file",
+                        accept: ".json,application/json",
+                        onchange: move |evt| {
+                            let file = evt.files().first().cloned();
+                            let editor = upload_editor.clone();
+                            async move {
+                                let Some(file) = file else { return };
+                                let name = file.name();
+                                match file.read_string().await {
+                                    Ok(text) => match Map2dDoc::from_json(&text) {
+                                        Ok(parsed) => {
+                                            upload_error.set(None);
+                                            if let Some(handler) = &on_action {
+                                                handler.call(editor.apply_action(&parsed.to_json()));
+                                            }
+                                        }
+                                        Err(error) => {
+                                            upload_error.set(Some(format!("{name}: {error}")));
+                                        }
+                                    },
+                                    Err(error) => {
+                                        upload_error.set(Some(format!("could not read {name}: {error}")));
+                                    }
+                                }
+                            }
+                        },
+                    }
                     span {
                         class: if dirty { "lpme-status lpme-dirty" } else { "lpme-status" },
                         if dirty { "Unsaved" } else { "Saved" }
@@ -154,6 +237,26 @@ pub fn MappingAssetEditor(
                 div { class: "lpme-face-editor-loading", "loading {editor.source}…" }
             }
         }
+    }
+}
+
+/// Click a DOM element by id (file dialogs only open from a user gesture,
+/// which the bar button provides).
+fn click_element(id: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        if let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(id))
+            && let Ok(element) = element.dyn_into::<web_sys::HtmlElement>()
+        {
+            element.click();
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = id;
     }
 }
 
