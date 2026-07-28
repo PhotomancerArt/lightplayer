@@ -6,13 +6,34 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Dev-only shader-agent test harness: scripted provider, fake host, eval tasks, debug-dump parsing"
+description = "Dev-only shader-agent test harness: scripted provider, fake host, eval tasks, debug-dump parsing, headless session runner"
 
 [dependencies]
 lpa-agent = { path = "../lpa-agent", features = ["test-doubles"] }
 lps-probe = { path = "../../lp-shader/lps-probe" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# `runner`-feature only: the headless session runner drives the REAL
+# in-process studio stack (lpa-studio-core's `harness` world) on a tokio
+# current-thread runtime, with the host reqwest transport for real
+# (spend-gated) provider runs.
+lpa-studio-core = { path = "../lpa-studio-core", features = [
+    "harness",
+], optional = true }
+tokio = { version = "1", features = ["macros", "rt", "time"], optional = true }
+
+[features]
+default = []
+# The headless agent-session runner (`agent-run` bin + `runner` module).
+# Off by default so `cargo test`'s graph stays free of the dev-only
+# harness → studio-core edge (lpa-studio-core dev-depends on this crate's
+# doubles; the runner feature must never ride that cycle).
+runner = ["dep:lpa-studio-core", "dep:tokio", "lpa-agent/host-transport"]
+
+[[bin]]
+name = "agent-run"
+path = "src/bin/agent_run.rs"
+required-features = ["runner"]
 
 [lints]
 workspace = true

@@ -1,0 +1,24 @@
+{
+  "runs": [
+    [
+      [
+        { "text": "Trying a solid green." },
+        {
+          "tool_use": {
+            "id": "tu_1",
+            "name": "iterate",
+            "input": {
+              "source": "layout(binding = 0) uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.0, 1.0, 0.0, 1.0);\n}\n",
+              "note": "go green"
+            }
+          }
+        },
+        { "done": { "stop_reason": "tool_use", "input_tokens": 20, "output_tokens": 30 } }
+      ],
+      [
+        { "text": "The lights are green now." },
+        { "done": { "stop_reason": "end_turn", "input_tokens": 40, "output_tokens": 10 } }
+      ]
+    ]
+  ]
+}

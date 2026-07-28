@@ -33,7 +33,9 @@ pub struct StudioServerClient {
 }
 
 impl StudioServerClient {
-    #[cfg(test)]
+    /// A client over an injected io — tests and the `harness` feature's
+    /// in-process studio world.
+    #[cfg(any(test, feature = "harness"))]
     pub(crate) fn from_io_for_test(protocol: impl Into<String>, io: Box<dyn ClientIo>) -> Self {
         Self {
             client: LpClient::new(io),

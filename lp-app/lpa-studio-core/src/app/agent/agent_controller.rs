@@ -102,6 +102,11 @@ pub struct AgentController {
     /// The platform timer factory the host bridge's engine-verdict wait
     /// polls on (installed by `StudioActor::new`; `None` ⇒ instant timers).
     timer: Option<AgentTimerFactory>,
+    /// Harness-only per-run turn-cap override (`None` ⇒ the session's
+    /// `lpa_agent::MAX_TURNS_PER_RUN` default). The headless runner's
+    /// `--max-turns`; never settable from product code.
+    #[cfg(any(test, feature = "harness"))]
+    max_turns_override: Option<u32>,
 }
 
 impl AgentController {
@@ -115,6 +120,13 @@ impl AgentController {
     /// Install the platform spawner (before the actor takes ownership).
     pub fn set_spawner(&mut self, spawner: impl Fn(AgentTaskFuture) + 'static) {
         self.spawner = Some(Rc::new(spawner));
+    }
+
+    /// Override the per-run turn cap for sessions started AFTER this call
+    /// (the headless runner's `--max-turns`; harness/tests only).
+    #[cfg(any(test, feature = "harness"))]
+    pub fn set_max_turns(&mut self, turns: u32) {
+        self.max_turns_override = Some(turns);
     }
 
     /// Install the provider factory (before the actor takes ownership).
@@ -396,6 +408,10 @@ impl AgentController {
                 ),
             ),
         };
+        #[cfg(any(test, feature = "harness"))]
+        if let Some(turns) = self.max_turns_override {
+            session.max_turns = turns;
+        }
         entry.abort = session.abort_handle();
         entry.running = true;
         // A new run invalidates any embedded export (the raw transcript it

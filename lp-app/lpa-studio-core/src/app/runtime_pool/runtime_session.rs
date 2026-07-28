@@ -625,9 +625,10 @@ impl RuntimeSession {
     }
 }
 
-/// Test seams: stubbed payloads and direct state injection for
-/// view/derivation tests that must not script a whole fake device.
-#[cfg(test)]
+/// Stub seams shared by the in-crate tests and the `harness` feature's
+/// studio world (the headless agent runner attaches through the same
+/// stub-sim + injected-client fixture the e2e tests use).
+#[cfg(any(test, feature = "harness"))]
 impl RuntimeSession {
     /// Replace the payload in place, keeping the wire client and server
     /// state (the retired slots were independently settable in tests).
@@ -635,15 +636,20 @@ impl RuntimeSession {
         self.payload = payload;
     }
 
-    pub(crate) fn set_server_state_for_test(&mut self, state: ServerState) {
-        self.server_state = state;
-    }
-
     pub(crate) fn set_client_for_test(&mut self, client: StudioServerClient) {
         let protocol = client.protocol().to_string();
         self.client = Some(client);
         self.server_state = ServerState::Connected { protocol };
         self.requested_log_level = UiLogLevel::Info;
+    }
+}
+
+/// Test seams: direct state injection for view/derivation tests that must
+/// not script a whole fake device.
+#[cfg(test)]
+impl RuntimeSession {
+    pub(crate) fn set_server_state_for_test(&mut self, state: ServerState) {
+        self.server_state = state;
     }
 
     /// Push a console line into the device-console buffer, as the live
@@ -664,7 +670,10 @@ impl RuntimePayload {
             console_logs: Rc::new(RefCell::new(Vec::new())),
         }))
     }
+}
 
+#[cfg(any(test, feature = "harness"))]
+impl RuntimePayload {
     /// A stubbed SIMULATOR payload (record-level fake connector, synthetic
     /// session records) — the "connected but not hardware" fixture. The
     /// connector holds no real session, so flows that close it will error;

@@ -66,18 +66,25 @@ pub enum ProviderCfg {
 
 impl ProviderCfg {
     pub fn from_env() -> Option<Self> {
-        let model = std::env::var("LPA_EVAL_MODEL").ok();
-        if let Ok(base_url) = std::env::var("LPA_EVAL_BASE_URL") {
+        Self::from_env_with(&|name| std::env::var(name).ok())
+    }
+
+    /// [`Self::from_env`] over an injected lookup, so the runner's
+    /// spend-gate tests resolve against a fake environment instead of
+    /// mutating the process env.
+    pub fn from_env_with(lookup: &dyn Fn(&str) -> Option<String>) -> Option<Self> {
+        let model = lookup("LPA_EVAL_MODEL");
+        if let Some(base_url) = lookup("LPA_EVAL_BASE_URL") {
             let model = model
                 .expect("LPA_EVAL_BASE_URL requires LPA_EVAL_MODEL (compat servers have no default model id)");
             return Some(Self::OpenAiCompat(OpenAiCompatConfig {
                 base_url,
-                api_key: std::env::var("LPA_EVAL_API_KEY").ok(),
+                api_key: lookup("LPA_EVAL_API_KEY"),
                 model,
                 extra_headers: Vec::new(),
             }));
         }
-        let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
+        let api_key = lookup("ANTHROPIC_API_KEY")?;
         Some(Self::Anthropic { api_key, model })
     }
 
