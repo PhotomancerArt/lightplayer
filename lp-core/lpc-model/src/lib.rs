@@ -111,15 +111,16 @@ pub use nodes::{
     ControlRadioState, ControlRadioStateView, DivMode, FixtureDef, FixtureDefView,
     FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView, FluidDef,
     FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, InvocationSite, MappingConfig,
-    MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    MulMode, NodeDefParseError, NodeStarter, OutputDef, OutputDefView, OutputDriverOptionsConfig,
     OutputDriverOptionsConfigView, PROJECT_FORMAT_VERSION, PathSpec, PlaylistDef, PlaylistDefView,
     PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView,
-    ProjectFormatProbe, RingOrder, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
-    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
-    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderStateView,
-    ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
-    generate_compute_shader_header, glsl_type_for_lp_type, read_project_format_json,
-    resolve_artifact_specifier,
+    ProjectFormatProbe, RingOrder, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, ScalarHint,
+    ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
+    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
+    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef,
+    TextureDefView, TextureFormat, TextureState, TextureStateView, generate_compute_shader_header,
+    glsl_type_for_lp_type, read_project_format_json, resolve_artifact_specifier,
+    starter_def_for_kind, starter_for_kind, starter_project_files,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
@@ -135,7 +136,7 @@ pub use project::overlay_mutation::{
     StoredSlotEdit,
 };
 pub use project::{
-    ChangeSummary, CommitResult, LocationSeg, MutationBatchResults, MutationResult,
+    ChangeSummary, CommitResult, LocationSeg, MutationBatchResults, MutationResult, NodeAttachSite,
     NodeUseLocation, ProjectChangeSummary, ProjectConfig, ProjectInventory, ProjectNode,
     ProjectNodeOrigin, ProjectNodePlacement, ProjectTree, Revision,
 };

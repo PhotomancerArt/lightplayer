@@ -1,9 +1,10 @@
 //! Project commands that are not runtime project reads.
 
 use crate::{
-    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
-    WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
-    WireProjectInventoryReadRequest, WireProjectInventoryReadResponse,
+    WireCreateNodeRequest, WireCreateNodeResponse, WireOverlayCommitRequest,
+    WireOverlayCommitResponse, WireOverlayMutationRequest, WireOverlayMutationResponse,
+    WireOverlayReadRequest, WireOverlayReadResponse, WireProjectInventoryReadRequest,
+    WireProjectInventoryReadResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 
 /// Project command request.
@@ -22,6 +23,12 @@ pub enum WireProjectCommand {
     ReadInventory {
         request: WireProjectInventoryReadRequest,
     },
+    CreateNode {
+        request: WireCreateNodeRequest,
+    },
+    RemoveNode {
+        request: WireRemoveNodeRequest,
+    },
 }
 
 /// Project command response.
@@ -39,6 +46,12 @@ pub enum WireProjectCommandResponse {
     },
     ReadInventory {
         response: WireProjectInventoryReadResponse,
+    },
+    CreateNode {
+        response: WireCreateNodeResponse,
+    },
+    RemoveNode {
+        response: WireRemoveNodeResponse,
     },
 }
 
@@ -79,5 +92,44 @@ mod tests {
         let json = serde_json::to_string(&overlay).unwrap();
         let decoded: WireProjectCommandResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, overlay);
+    }
+
+    #[test]
+    fn create_node_command_round_trips() {
+        use lpc_model::{LpPathBuf, NodeAttachSite};
+
+        let request = WireProjectCommand::CreateNode {
+            request: crate::WireCreateNodeRequest::new(
+                LpPathBuf::from("./clock-2.json"),
+                b"{\n  \"kind\": \"Clock\"\n}\n".to_vec(),
+                Vec::new(),
+                NodeAttachSite::ProjectNodes {
+                    key: "clock-2".into(),
+                },
+            ),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        let decoded: WireProjectCommand = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, request);
+        assert!(json.contains("create_node"));
+    }
+
+    #[test]
+    fn remove_node_command_round_trips() {
+        use lpc_model::NodeAttachSite;
+
+        let request = WireProjectCommand::RemoveNode {
+            request: crate::WireRemoveNodeRequest::new(NodeAttachSite::ProjectNodes {
+                key: "clock-2".into(),
+            }),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        let decoded: WireProjectCommand = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, request);
+        assert!(json.contains("remove_node"));
     }
 }

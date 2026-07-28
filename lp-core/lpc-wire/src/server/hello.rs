@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// old peer misread a new frame or vice versa. There is no negotiation and
 /// no compatibility shim (see AGENTS.md wire-compat policy): differing
 /// versions mean "assume nothing works; upgrade the firmware".
-pub const WIRE_PROTO_VERSION: u32 = 1;
+pub const WIRE_PROTO_VERSION: u32 = 2;
 
 /// Unsolicited/boot-time server identity and version report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +71,7 @@ mod tests {
             device_uid: Some("dev_0000000000000001".to_string()),
         };
         let json = crate::json::to_string(&hello).unwrap();
-        assert!(json.contains("\"proto\":1"));
+        assert!(json.contains(&alloc::format!("\"proto\":{WIRE_PROTO_VERSION}")));
         assert!(json.contains("\"deviceUid\""));
         let back: ServerHello = crate::json::from_str(&json).unwrap();
         assert_eq!(back, hello);

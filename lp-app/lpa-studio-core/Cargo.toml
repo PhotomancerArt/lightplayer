@@ -57,6 +57,8 @@ async-trait = { version = "0.1" }
 # Scripted model-provider streams in the agent e2e tests.
 futures-util = "0.3"
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
+# Library create → loader round-trip tests drive the real root format gate.
+lpc-registry = { path = "../../lp-core/lpc-registry" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 
 [features]

@@ -242,7 +242,14 @@ impl LibraryStore {
                 view.write_file(path.as_str().as_path(), bytes)?;
             }
             if !view.file_exists(package_manifest::MANIFEST_PATH.as_path())? {
-                let minimal = serde_json::json!({ "kind": "Project", "name": label });
+                // `format` is required by the loader's root format gate
+                // (`ProjectRegistry::check_root_format`); without it a
+                // Created package would be unloadable.
+                let minimal = serde_json::json!({
+                    "kind": "Project",
+                    "format": lpc_model::PROJECT_FORMAT_VERSION,
+                    "name": label,
+                });
                 view.write_file(
                     package_manifest::MANIFEST_PATH.as_path(),
                     serde_json::to_vec_pretty(&minimal)
@@ -653,6 +660,28 @@ mod tests {
             summary.uid
         );
         assert!(store.resolve_key(&old_slug).is_err());
+    }
+
+    #[test]
+    fn created_package_loads_through_project_registry() {
+        // Would have failed before the minimal manifest carried `format`:
+        // the loader's root format gate rejects `found: None`.
+        let store = store();
+        let summary = store.create("Fresh", 1.0).unwrap();
+        let handle = store.open(summary.uid).unwrap();
+
+        let shapes = lpc_model::SlotShapeRegistry::default();
+        let ctx = lpc_registry::ParseCtx { shapes: &shapes };
+        let mut registry = lpc_registry::ProjectRegistry::new();
+        let package_fs = handle.package_fs.borrow();
+        registry
+            .load_root(
+                &*package_fs,
+                LpPath::new("/project.json"),
+                lpc_model::Revision::new(1),
+                &ctx,
+            )
+            .expect("a freshly created package must load through the registry");
     }
 
     #[test]

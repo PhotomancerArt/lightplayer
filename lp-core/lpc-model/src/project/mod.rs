@@ -19,6 +19,7 @@
 pub mod change_summary;
 pub mod config;
 pub mod inventory;
+pub mod node_attach_site;
 pub mod overlay;
 pub mod overlay_commit;
 pub mod overlay_mutation;
@@ -32,6 +33,7 @@ pub use inventory::project_inventory::ProjectInventory;
 pub use inventory::project_node::{ProjectNode, ProjectNodeOrigin};
 pub use inventory::project_node_placement::ProjectNodePlacement;
 pub use inventory::project_tree::ProjectTree;
+pub use node_attach_site::NodeAttachSite;
 pub use overlay_commit::commit_result::CommitResult;
 pub use overlay_mutation::mutation_result::{MutationBatchResults, MutationResult};
 pub use overlay_mutation::project_change_summary::ProjectChangeSummary;
