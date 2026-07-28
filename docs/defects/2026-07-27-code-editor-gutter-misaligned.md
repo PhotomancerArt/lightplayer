@@ -1,11 +1,13 @@
 ---
-status: open
+status: fixed
 found: 2026-07-27      # how: ci (story-capture churn), then reproduced headlessly
+fixed: 20875491f      # capture-side; see the Fix section for why that layer
 area: lpa-studio-web/base/code_editor (vendored CodeMirror 6)
 class: stale-measurement
 related:
   - 2026-07-26-popover-outline-stale-on-content-resize.md
   - 2026-07-27-story-check-tolerance-ignores-amplitude.md
+  - 2026-07-28-overview-composite-capture-races.md
   - ../debt/story-capture-pipeline.md
   - ../adr/2026-07-26-ci-canonical-story-capture.md
 ---
@@ -66,7 +68,29 @@ macOS at the real story viewport does not reproduce it (the editor lands just
 above the fold); CPU throttling to 8× does not change that. The viewport height
 is the load-bearing variable, not machine speed.
 
-**Fix** — none yet; the tree is unchanged. Candidates, both measured:
+**Fix** — the capture now grows its viewport to hold the whole story box
+(`fitViewportToStory` in `studio-story-pngs.mjs`), so nothing is below the fold
+and every lazily-measured widget measures for real. Verified with the probe:
+below the fold, 0/2 runs aligned before and 2/2 after, oracle corrected 14 → 18
+and the label offset down to 0.
+
+Capture-side is the right layer here, which is worth stating because the
+symptom looks like an app bug. In the app the editor recovers the moment it
+scrolls into view, so a user sees at worst a flash; the story is the only place
+the state is permanent, because a story page does not scroll. Fixing it in the
+app would mean either overriding CodeMirror's row heights in CSS (the
+alternative below — leaves a residual offset because the oracle is still wrong)
+or reaching into CodeMirror internals to fake the geometry it refuses to
+measure. Growing the viewport removes the condition instead of compensating for
+it, and generalises to any widget that measures on first visibility.
+
+Blast radius, sampled by capturing families twice with and without the change:
+`core/view` 42/42 byte-identical, `exploration/node-cards` 9/12. The three that
+differ are the popover-bearing overviews, where a popover currently gets
+repositioned to stay inside the short viewport and now sits by its anchor —
+reviewed and accepted as the more honest render.
+
+The alternative, measured and rejected:
 
 1. **Pin the gutter row height in CSS** so it stops depending on whether a
    measurement happened:
@@ -78,12 +102,6 @@ is the load-bearing variable, not machine speed.
    the oracle is correct), because the oracle is still wrong. Safe only while
    `EditorView.lineWrapping` stays off — one line is then always exactly one
    line box.
-2. **Capture with a viewport tall enough to hold the story box**, so nothing is
-   ever below the fold and every lazily-measured widget measures for real. This
-   addresses the cause rather than the symptom and would generalise past
-   CodeMirror, but it changes the rendering conditions for every story and would
-   refresh a large number of baselines — a blast-radius decision, not a
-   mechanical one.
 
 Ruled out by testing, recorded so they are not retried: `view.requestMeasure()`,
 a `window` resize event, an empty `dispatch({})`, a selection-only dispatch, and
@@ -92,6 +110,13 @@ them set `mustMeasureContent`, and none can get past the `inWindow` guard while
 the editor is off screen. Forcing `mustMeasureContent` directly does not help
 either, for the same reason. A `window.scrollTo` sweep in the capture is a no-op
 because the story page is not scrollable.
+
+**Not the same thing as the composite race** — `base__code-editor__overview__sm`
+also appears in [overview-composite-capture-races](2026-07-28-overview-composite-capture-races.md),
+which diagnoses composite flip-flops as a CSS transition captured mid-flight.
+These are two mechanisms on one story, distinguishable by the pixels: this one
+is a discrete 18px↔14px change in gutter row spacing, not blurred or faded
+content. Fixing either alone will not stop that baseline from flipping.
 
 **Regression coverage** — `gutter-alignment-probe.mjs` is the deterministic
 check (exits non-zero on misalignment); run it at viewport height 400 to hold
