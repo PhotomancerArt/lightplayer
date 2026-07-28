@@ -86,6 +86,11 @@ const STORY_VIEWPORTS = [
   { id: "md", width: 720, height: 760 },
   { id: "lg", width: 1080, height: 760 },
 ];
+// Stories marked `#[story(screenshot)]` are published images (README heroes,
+// docs figures), not the three-size design record: they capture at one size
+// only, so the unused sizes cannot churn baselines. Populated by discovery.
+const SCREENSHOT_VIEWPORT_ID = "lg";
+const SCREENSHOT_STORY_IDS = new Set();
 
 class CdpConnection {
   static async open(url) {
@@ -494,9 +499,16 @@ async function discoverStoryIds() {
     "--dump-dom",
     `${baseUrl}?story-discovery=${Date.now()}#/stories`,
   ]);
-  return Array.from(html.matchAll(/href="#\/stories\/([^"]+)"/g))
-    .map((match) => decodeURIComponent(match[1]))
-    .map((storyId) => storyId.split(/[?#]/, 1)[0])
+  const storyIds = [];
+  for (const anchor of html.matchAll(/<a\b[^>]*href="#\/stories\/([^"]+)"[^>]*>/g)) {
+    const storyId = decodeURIComponent(anchor[1]).split(/[?#]/, 1)[0];
+    // `#[story(screenshot)]` rides the discovery link (see story_book.rs).
+    if (/data-story-screenshot="1"/.test(anchor[0])) {
+      SCREENSHOT_STORY_IDS.add(storyId);
+    }
+    storyIds.push(storyId);
+  }
+  return storyIds
     .filter((value, index, values) => values.indexOf(value) === index)
     // Generated `overview` composites are NOT pixel baselines. They stack a
     // whole component's stories on one page — 10k-25k px tall against a 760px
@@ -560,7 +572,7 @@ async function captureStories(storyIds, directory) {
 
   const concurrency = Math.min(requestedCaptureConcurrency, pending.length);
   console.log(
-    `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
+    `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories, up to ${STORY_VIEWPORTS.length} sizes each) with ${concurrency} Chrome pages...`,
   );
 
   // Defense in depth: capture in chunks with a fresh browser per chunk
@@ -1469,7 +1481,16 @@ function printComparison(label, files) {
 
 function storyTargets(storyIds) {
   return storyIds.flatMap((storyId) =>
-    STORY_VIEWPORTS.map((viewport) => ({ storyId, viewport })),
+    viewportsFor(storyId).map((viewport) => ({ storyId, viewport })),
+  );
+}
+
+function viewportsFor(storyId) {
+  if (!SCREENSHOT_STORY_IDS.has(storyId)) {
+    return STORY_VIEWPORTS;
+  }
+  return STORY_VIEWPORTS.filter(
+    (viewport) => viewport.id === SCREENSHOT_VIEWPORT_ID,
   );
 }
 
