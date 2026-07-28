@@ -225,6 +225,22 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: command -v wasm-bindgen-test-runner >/dev/null || cargo install wasm-bindgen-cli --version 0.2.114
 
+      # The smoke check drives Chrome over a raw CDP WebSocket; pin node so
+      # the global WebSocket client is guaranteed (same rationale as the
+      # stories job).
+      - name: Install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # End-to-end smoke: builds the fw-browser wasm bundle, loads smoke.html
+      # in headless Chrome (preinstalled on the x64 image), and fails unless
+      # the page reaches dataset.smoke === "ok" — the gate that catches page
+      # rot and wasm-emission regressions the unit suites can't see. Runs
+      # before the unit suites so a suite failure can't mask smoke signal.
+      - name: fw-browser smoke check
+        run: cd lp2025 && just fw-browser-smoke-check
+
       - name: Browser wasm tests
         run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test
 
