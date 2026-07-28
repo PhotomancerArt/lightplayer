@@ -100,6 +100,7 @@ impl StoryModule {
                 function_name: function.sig.ident.to_string(),
                 label: metadata.label,
                 description: metadata.description,
+                screenshot: metadata.screenshot,
             });
         }
 
@@ -175,12 +176,14 @@ impl StoryPathInfo {
 struct StoryMetadata {
     label: String,
     description: String,
+    screenshot: bool,
 }
 
 impl StoryMetadata {
     fn from_attribute(attribute: &Attribute, function_name: &str) -> Result<Self, String> {
         let mut label = None;
         let mut description = None;
+        let mut screenshot = false;
         let mut errors = Vec::new();
 
         match &attribute.meta {
@@ -210,6 +213,16 @@ impl StoryMetadata {
                             return Ok(());
                         }
 
+                        if meta.path.is_ident("screenshot") {
+                            if screenshot {
+                                errors.push(format!(
+                                    "`{function_name}` has duplicate `screenshot` entries in #[story]"
+                                ));
+                            }
+                            screenshot = true;
+                            return Ok(());
+                        }
+
                         let name = meta
                             .path
                             .get_ident()
@@ -217,7 +230,8 @@ impl StoryMetadata {
                             .unwrap_or_else(|| "<unknown>".to_string());
                         errors.push(format!(
                             "`{function_name}` uses unsupported #[story] argument `{name}`; \
-                             use `#[story]`, `label = \"...\"`, or `description = \"...\"`"
+                             use `#[story]`, `label = \"...\"`, `description = \"...\"`, \
+                             or `screenshot`"
                         ));
                         Ok(())
                     })
@@ -240,6 +254,7 @@ impl StoryMetadata {
         Ok(Self {
             label: label.unwrap_or_else(|| story_label_from_ident(function_name)),
             description: description.unwrap_or_default(),
+            screenshot,
         })
     }
 }
@@ -277,6 +292,7 @@ struct StorySpec {
     function_name: String,
     label: String,
     description: String,
+    screenshot: bool,
 }
 
 fn validate_story_ids(story_modules: &[StoryModule]) {
@@ -348,6 +364,9 @@ fn generate_registry(story_modules: &[StoryModule]) -> String {
             generated.push_str("            \"");
             generated.push_str(&rust_string_literal(&story.description));
             generated.push_str("\",\n");
+            generated.push_str("            ");
+            generated.push_str(if story.screenshot { "true" } else { "false" });
+            generated.push_str(",\n");
             generated.push_str("        ),\n");
         }
     }
