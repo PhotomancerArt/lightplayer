@@ -527,6 +527,27 @@ fn control_lamp_render(
         .collect()
 }
 
+/// Live lamp colors indexed by wiring index — the same sample decode the
+/// display renderer uses, packaged for the mapping editor's live view.
+pub(crate) fn control_live_lamp_colors(preview: &UiControlProductPreview) -> Vec<[u8; 3]> {
+    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_ref() else {
+        return Vec::new();
+    };
+    let len = layout
+        .lamps
+        .iter()
+        .map(|lamp| lamp.lamp_index as usize + 1)
+        .max()
+        .unwrap_or(0);
+    let mut colors = vec![[0_u8; 3]; len];
+    for lamp in &layout.lamps {
+        if let Some(rgb) = control_rgb_at_sample(preview, lamp.sample_start) {
+            colors[lamp.lamp_index as usize] = rgb;
+        }
+    }
+    colors
+}
+
 fn control_rgb_at_sample(preview: &UiControlProductPreview, sample_start: u32) -> Option<[u8; 3]> {
     let span = preview.sample_layout.spans.iter().find(|span| {
         matches!(span.encoding, ControlSampleEncoding::RgbPixels { .. })

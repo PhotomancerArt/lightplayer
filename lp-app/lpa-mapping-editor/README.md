@@ -18,7 +18,12 @@ assets, routes, or the Studio server — hosts own persistence:
   drag-and-drop), save (data-URL download), and localStorage autosave.
 - `MapEditor` is the embeddable seam: `doc` + `doc_epoch` in,
   `on_doc_change(json)` out on every committed change. The fixture face
-  will mount it and sync via the asset pipeline's whole-body apply.
+  mounts it and syncs via the asset pipeline's whole-body apply. Two
+  optional host hooks serve that embed: `shared_view` (a host-owned
+  `Signal<EditorViewOptions>` — the face's toggle bar drives the canvas
+  layers and the header hides its own view cluster) and `live_colors`
+  (per-wiring-index lamp colors; rendered when the `live` view option
+  is on, so the editing surface can show real engine output).
 
 This is deliberate Studio modularization: the first Dioxus
 component-library crate carved out of the app, and the template for the

@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{Map2dDoc, MapEditor};
+use lpa_mapping_editor::{EditorViewOptions, Map2dDoc, MapEditor};
 use lpa_studio_core::{UiAction, UiAssetEditor};
 
 use crate::base::icon::{StudioIcon, StudioIconName};
@@ -18,6 +18,12 @@ use crate::base::icon::{StudioIcon, StudioIconName};
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn MappingAssetEditor(
     editor: UiAssetEditor,
+    /// Face-owned view options (the output section's toggle bar).
+    #[props(default)]
+    shared_view: Option<Signal<EditorViewOptions>>,
+    /// Live lamp colors by wiring index (the face's control preview feed).
+    #[props(default)]
+    live_colors: Vec<[u8; 3]>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     // One-shot base-body fetch per artifact (the code editor's guard).
@@ -47,18 +53,34 @@ pub fn MappingAssetEditor(
         .and_then(|content| content.text().map(str::to_string));
     if let Some(text) = &content_text {
         let echo = last_applied.borrow().as_deref() == Some(text.as_str());
-        let already = seeded
-            .peek()
-            .as_ref()
-            .is_some_and(|(_, doc)| doc.to_json() == *text || echo);
-        if !already {
+        if !echo {
+            // Compare PARSED documents, never serialized text: the stored
+            // file is pretty-printed while the editor emits compact JSON,
+            // so text comparison never matches and every render would bump
+            // the epoch — re-seeding the session (wiping selection/undo)
+            // and re-arming fit on every host re-render (per-frame, now
+            // that the live color feed re-renders this component).
+            // All signal writes below are guarded: this runs during render.
             match Map2dDoc::from_json(text) {
                 Ok(doc) => {
-                    let epoch = seeded.peek().as_ref().map_or(0, |(epoch, _)| epoch + 1);
-                    seeded.set(Some((epoch, doc)));
-                    parse_failure.set(None);
+                    let same = seeded
+                        .peek()
+                        .as_ref()
+                        .is_some_and(|(_, current)| *current == doc);
+                    if !same {
+                        let epoch = seeded.peek().as_ref().map_or(0, |(epoch, _)| epoch + 1);
+                        seeded.set(Some((epoch, doc)));
+                    }
+                    if parse_failure.peek().is_some() {
+                        parse_failure.set(None);
+                    }
                 }
-                Err(error) => parse_failure.set(Some(error.to_string())),
+                Err(error) => {
+                    let message = error.to_string();
+                    if parse_failure.peek().as_deref() != Some(message.as_str()) {
+                        parse_failure.set(Some(message));
+                    }
+                }
             }
         }
     }
@@ -81,6 +103,8 @@ pub fn MappingAssetEditor(
                 MapEditor {
                     doc_epoch: epoch,
                     doc,
+                    shared_view,
+                    live_colors: live_colors.clone(),
                     on_doc_change,
                 }
                 div { class: "lpme-face-editor-bar",

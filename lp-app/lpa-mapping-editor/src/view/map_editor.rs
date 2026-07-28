@@ -33,6 +33,9 @@ pub struct EditorViewOptions {
     pub numbers: bool,
     pub arrows: bool,
     pub universes: bool,
+    /// Fill lamps from host-supplied live colors (`live_colors` prop);
+    /// without a feed this falls back to the object palette.
+    pub live: bool,
     pub fit_preview: bool,
 }
 
@@ -42,6 +45,7 @@ impl Default for EditorViewOptions {
             numbers: true,
             arrows: true,
             universes: false,
+            live: false,
             fit_preview: false,
         }
     }
@@ -64,6 +68,15 @@ pub fn MapEditor(
     #[props(default)] initial_selection: Vec<usize>,
     #[props(default)] initial_draft: Vec<[f32; 2]>,
     #[props(default)] initial_view: Option<EditorViewOptions>,
+    /// Host-owned view options (the fixture face's toggle bar drives the
+    /// editor with the same buttons as display mode). When set, the header
+    /// hides its own view-toggle cluster — the host chrome owns it.
+    #[props(default)]
+    shared_view: Option<Signal<EditorViewOptions>>,
+    /// Live lamp colors indexed by wiring index, fed per frame by the host
+    /// (the fixture face's control preview). Empty = no live feed.
+    #[props(default)]
+    live_colors: Vec<[u8; 3]>,
 ) -> Element {
     let mut session = use_signal(|| {
         let mut session = MapEditorSession::new(doc.clone());
@@ -82,7 +95,8 @@ pub fn MapEditor(
             .map(|[x, y, scale]| Camera { x, y, scale })
             .unwrap_or_default()
     });
-    let view_opts = use_signal(move || initial_view.unwrap_or_default());
+    let local_view = use_signal(move || initial_view.unwrap_or_default());
+    let view_opts = shared_view.unwrap_or(local_view);
     // Measured canvas size (CSS px), fed by the canvas's mount/resize
     // handlers. `None` until the first measurement — fit waits for it, so
     // the embedded editor fits its real box, not a guessed window.
@@ -118,16 +132,28 @@ pub fn MapEditor(
             if fit_pending_effect()
                 && let Some([width, height]) = viewport_now
             {
+                // Frame the authored canvas when there is one — the display
+                // mode renders exactly that region, so the view ⇄ edit flip
+                // (and explicit fit) land on the same framing. Docs without
+                // a canvas fall back to the resolved lamp bounds.
                 let bounds = {
                     let session_read = session.read();
                     let doc = session_read.doc();
-                    resolve(doc)
-                        .ok()
-                        .and_then(|resolved| bounds_of_points(&resolved.positions()))
-                        .or_else(|| doc.canvas_bounds())
+                    doc.canvas_bounds().or_else(|| {
+                        resolve(doc)
+                            .ok()
+                            .and_then(|resolved| bounds_of_points(&resolved.positions()))
+                    })
                 };
                 if let Some(bounds) = bounds {
-                    camera.write().fit(bounds, width, height, 60.0);
+                    // Match the display-mode framing (`ux-map-inset`, 5.5%
+                    // inset) so flipping view ⇄ edit keeps the fixture at
+                    // the same on-screen size: pad by 5.5% of the limiting
+                    // viewport dimension.
+                    let width_limited =
+                        bounds.width / bounds.height.max(1e-6) >= width / height.max(1.0);
+                    let padding = 0.055 * if width_limited { width } else { height };
+                    camera.write().fit(bounds, width, height, padding);
                 }
                 fit_pending_effect.set(false);
             }
@@ -154,8 +180,8 @@ pub fn MapEditor(
             },
             EditorHeader {
                 session,
-                camera,
                 view_opts,
+                external_view: shared_view.is_some(),
                 fit_pending,
                 file_ops,
                 scene_menu,
@@ -168,11 +194,56 @@ pub fn MapEditor(
                     view_opts,
                     viewport,
                     drag,
+                    live_colors,
                     on_committed,
                 }
                 ObjectList { session, on_committed }
                 PropertiesPopover { session, camera, viewport, drag, on_committed }
                 div { class: "lpme-hint", "{tool_hint}" }
+                ZoomFloat { camera, viewport, fit_pending }
+            }
+        }
+    }
+}
+
+/// Floating zoom control, bottom-right of the canvas pane (the M5 gate
+/// direction: zoom is canvas furniture, not toolbar chrome). The percent
+/// readout doubles as "zoom to fit". Anchors button zooms on the measured
+/// viewport center.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ZoomFloat(
+    camera: Signal<Camera>,
+    viewport: Signal<Option<[f32; 2]>>,
+    fit_pending: Signal<bool>,
+) -> Element {
+    let mut camera = camera;
+    let mut fit_pending = fit_pending;
+    let percent = (camera().scale * 100.0).round() as u32;
+    let center = move || {
+        viewport.peek().map_or([600.0, 400.0], |[width, height]| {
+            [width / 2.0, height / 2.0]
+        })
+    };
+    rsx! {
+        div { class: "lpme-zoom-float",
+            button {
+                class: "lpme-btn",
+                title: "zoom out",
+                onclick: move |_| camera.write().zoom_at(center(), 0.8),
+                "−"
+            }
+            button {
+                class: "lpme-btn lpme-zoom-pct",
+                title: "zoom to fit (0)",
+                onclick: move |_| fit_pending.set(true),
+                "{percent}%"
+            }
+            button {
+                class: "lpme-btn",
+                title: "zoom in",
+                onclick: move |_| camera.write().zoom_at(center(), 1.25),
+                "+"
             }
         }
     }
@@ -225,6 +296,10 @@ fn handle_key(
                 "u" => {
                     let current = view_opts.peek().universes;
                     view_opts.write().universes = !current;
+                }
+                "l" => {
+                    let current = view_opts.peek().live;
+                    view_opts.write().live = !current;
                 }
                 "f" => {
                     let current = view_opts.peek().fit_preview;

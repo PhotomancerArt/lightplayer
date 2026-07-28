@@ -21,6 +21,7 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeEntryState, TreeError};
+use crate::nodes::FixtureMap2dSource;
 use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 use crate::nodes::{
     ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
@@ -590,18 +591,14 @@ impl ProjectLoader {
                 continue;
             };
             match resolve_fixture_mapping(fs, registry, node, &config) {
-                Ok(mapping) => {
+                Ok((mapping, map2d_source)) => {
+                    let mut fixture =
+                        FixtureNode::new(node.id, mapping, *config.sampling.value(), frame);
+                    if let Some(source) = map2d_source {
+                        fixture = fixture.with_map2d_source(source);
+                    }
                     runtime
-                        .attach_runtime_node(
-                            node.id,
-                            Box::new(FixtureNode::new(
-                                node.id,
-                                mapping,
-                                *config.sampling.value(),
-                                frame,
-                            )),
-                            frame,
-                        )
+                        .attach_runtime_node(node.id, Box::new(fixture), frame)
                         .map_err(|e| ProjectLoadError::InvalidProjectReference {
                             path: node_label(node),
                             reason: format!("attach fixture runtime: {e}"),
@@ -857,7 +854,7 @@ fn resolve_fixture_mapping(
     registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     config: &FixtureDef,
-) -> Result<MappingConfig, ProjectLoadError> {
+) -> Result<(MappingConfig, Option<FixtureMap2dSource>), ProjectLoadError> {
     match config.mapping.value() {
         MappingConfig::SvgPath {
             sample_diameter, ..
@@ -874,12 +871,13 @@ fn resolve_fixture_mapping(
                     path: node_label(node),
                     reason: format!("resolve svg fixture mapping: {e}"),
                 })?;
-            mapping_from_map2d_doc(&doc, config.render_width(), config.render_height()).map_err(
-                |e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("resolve svg fixture mapping: {e}"),
-                },
-            )
+            let mapping =
+                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("resolve svg fixture mapping: {e}"),
+                    })?;
+            Ok((mapping, None))
         }
         MappingConfig::Map2d { .. } => {
             let text = materialize_node_text_asset(
@@ -895,14 +893,23 @@ fn resolve_fixture_mapping(
                     reason: format!("resolve map2d fixture mapping: {e}"),
                 }
             })?;
-            mapping_from_map2d_doc(&doc, config.render_width(), config.render_height()).map_err(
-                |e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("resolve map2d fixture mapping: {e}"),
-                },
-            )
+            let mapping =
+                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("resolve map2d fixture mapping: {e}"),
+                    })?;
+            // Keep the source so the runtime node can re-resolve on asset
+            // refresh (the in-place editor's apply path).
+            let source = FixtureMap2dSource {
+                location: text.location,
+                revision: text.revision,
+                render_width: config.render_width(),
+                render_height: config.render_height(),
+            };
+            Ok((mapping, Some(source)))
         }
-        other => Ok(other.clone()),
+        other => Ok((other.clone(), None)),
     }
 }
 

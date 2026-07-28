@@ -117,6 +117,10 @@ pub fn EditorCanvas(
     view_opts: Signal<EditorViewOptions>,
     viewport: Signal<Option<[f32; 2]>>,
     drag: Signal<Option<CanvasDrag>>,
+    /// Live lamp colors indexed by wiring index (host feed); rendered when
+    /// `view_opts.live` is on, falling back per-lamp when absent.
+    #[props(default)]
+    live_colors: Vec<[u8; 3]>,
     /// Fired after any committed (undoable) change.
     on_committed: EventHandler<()>,
 ) -> Element {
@@ -572,20 +576,28 @@ pub fn EditorCanvas(
                     {
                         let object_index = lamp.object as usize;
                         let selected = selection.objects.contains(&object_index);
+                        // Fill precedence mirrors the display renderer:
+                        // live output > universe color > object palette.
+                        let fill = opts
+                            .live
+                            .then(|| live_colors.get(lamp.index as usize))
+                            .flatten()
+                            .map(|[r, g, b]| format!("rgb({r} {g} {b})"))
+                            .unwrap_or_else(|| {
+                                if opts.universes {
+                                    let [r, g, b] = universe_rgb(lamp.index);
+                                    format!("rgb({r} {g} {b})")
+                                } else {
+                                    object_color(object_index).to_string()
+                                }
+                            });
                         rsx! {
                             circle {
                                 key: "l{lamp.index}",
                                 cx: "{lamp.pos[0]}",
                                 cy: "{lamp.pos[1]}",
                                 r: "{radius}",
-                                fill: if opts.universes {
-                                    {
-                                        let [r, g, b] = universe_rgb(lamp.index);
-                                        format!("rgb({r} {g} {b})")
-                                    }
-                                } else {
-                                    object_color(object_index).to_string()
-                                },
+                                fill,
                                 stroke: if selected { SELECTION_COLOR } else { "#000" },
                                 stroke_width: if selected {
                                     "{(radius * 0.28).clamp(0.6, 2.4)}"

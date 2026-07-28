@@ -87,6 +87,7 @@ pub(crate) fn editor_fit_preview() -> Element {
                     numbers: false,
                     arrows: true,
                     universes: false,
+                    live: false,
                     fit_preview: true,
                 }),
             }
@@ -107,6 +108,7 @@ pub(crate) fn editor_universes() -> Element {
                     numbers: false,
                     arrows: false,
                     universes: true,
+                    live: false,
                     fit_preview: false,
                 }),
             }
