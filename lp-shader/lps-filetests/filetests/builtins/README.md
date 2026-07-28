@@ -10,8 +10,21 @@ ever runs**. A file built entirely from literals is a frontend/constant-folder
 test wearing a codegen test's name, and it passes identically on all five
 targets whether or not the backends are correct.
 
-As of 2026-07-27 that is most of this directory: **20 of 67 files** launder any
-operand through a runtime value. The rest — including the entire rounding family
+As of 2026-07-27 that is most of this directory: **20 of the 68 `.glsl` files
+directly in `builtins/`** launder any operand through a runtime value (the
+`debug/` subdirectory is excluded — it is not part of the conformance suite).
+Recount with:
+
+```bash
+ls lp-shader/lps-filetests/filetests/builtins/*.glsl | wc -l
+grep -l u_runtime_zero lp-shader/lps-filetests/filetests/builtins/*.glsl | wc -l
+```
+
+(These count your working tree, deliberately — a `git ls-tree main …` form
+silently reports whatever your local `main` ref happens to be parked on, which
+is how the figure above was wrong on first writing.)
+
+The rest — including the entire rounding family
 (`common-floor`, `common-ceil`, `common-trunc`, `common-fract`, `common-mod`,
 `common-round`, `common-sign`, `common-clamp`, `common-mix`, `common-smoothstep`
 …) — are literal-only.
