@@ -1,0 +1,21 @@
+{
+  "kind": "Project",
+  "format": 1,
+  "name": "Plasma",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  },
+  "controls": {
+    "speed": {
+      "target": "node:shader#speed"
+    },
+    "scale": {
+      "target": "node:shader#scale"
+    }
+  },
+  "author": "Photomancer",
+  "version": "1",
+  "license": "CC0-1.0"
+}

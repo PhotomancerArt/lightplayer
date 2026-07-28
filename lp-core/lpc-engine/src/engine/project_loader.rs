@@ -4913,6 +4913,71 @@ mod tests {
         assert!(err.to_string().contains("direct child"), "{err}");
     }
 
+    /// The shipped effect examples render through the full chain: host
+    /// clock → effect scope → inner shader(s) → project mirror → forwarded
+    /// texture. Nonzero pixels prove the GLSL compiles and the mirror's
+    /// render forwarding works (a compile failure would render black — the
+    /// swallowed-failure defect class).
+    #[test]
+    fn effect_examples_render_through_their_mirrors() {
+        for (dir, effect_name) in [("plasma", "plasma"), ("meteor", "meteor")] {
+            let fs = LpFsStd::new(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../examples/effects")
+                    .join(dir),
+            );
+            let services = EngineServices::new(TreePath::parse("/effect.show").expect("path"));
+            let mut rt = ProjectLoader::load_from_root(&fs, services)
+                .unwrap_or_else(|e| panic!("load {dir}: {e}"));
+            rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+                lp_shader::ShaderFrontend::LpsGlsl,
+            ))));
+            let root = rt.tree().root();
+            let effect = rt
+                .tree()
+                .lookup_sibling(root, NodeName::parse(effect_name).unwrap())
+                .expect("effect node");
+
+            // Two ticks so meteor's dt integration has a nonzero step.
+            rt.tick(16).expect("first tick");
+            rt.tick(16).expect("second tick");
+
+            let (mirror, _) = rt
+                .resolve_with_engine_host(
+                    QueryKey::ProducedSlot {
+                        node: effect,
+                        slot: SlotPath::parse("output").expect("output"),
+                    },
+                    ResolveLogLevel::Off,
+                )
+                .unwrap_or_else(|e| panic!("{dir}: resolve mirror: {e:?}"));
+            let LpValue::Product(ProductRef::Visual(product)) =
+                mirror.value_leaf().expect("mirror value").value()
+            else {
+                panic!("{dir}: mirror should carry a visual product");
+            };
+            let texture = rt
+                .render_texture_for_test(
+                    *product,
+                    &RenderTextureRequest {
+                        width: 32,
+                        height: 8,
+                        format: TextureStorageFormat::Rgba16Unorm,
+                        time_seconds: 0.5,
+                    },
+                )
+                .unwrap_or_else(|e| panic!("{dir}: render effect mirror: {e:?}"));
+            assert!(
+                texture
+                    .try_raw_bytes()
+                    .expect("bytes")
+                    .chunks_exact(8)
+                    .any(|px| px[..6].iter().any(|byte| *byte != 0)),
+                "{dir}: the effect's forwarded visual should contain nonzero RGB"
+            );
+        }
+    }
+
     /// Scope postconditions over the shipped examples: every consumed bus
     /// endpoint either reads a channel some binding writes at exactly that
     /// scope, or falls back to the root scope (rule 3's contract); flat

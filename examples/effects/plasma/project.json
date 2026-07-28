@@ -1,0 +1,19 @@
+{
+  "kind": "Project",
+  "format": 1,
+  "name": "plasma",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    },
+    "plasma": {
+      "ref": "./plasma/project.json"
+    }
+  }
+}

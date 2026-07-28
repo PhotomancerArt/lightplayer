@@ -62,10 +62,10 @@ pub use app::preview_host::{
     PreviewTier,
 };
 pub use app::project::{
-    AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
-    MAX_ASSET_BODY_BYTES, NodeCardDrawer, NodeCardUiState, NodeController, NodeControllerState,
-    NodeCreateOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PendingAssetEdit, PendingEdit,
-    PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
+    AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, EffectImportOp,
+    LoadedProjectChoice, MAX_ASSET_BODY_BYTES, NodeCardDrawer, NodeCardUiState, NodeController,
+    NodeControllerState, NodeCreateOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PendingAssetEdit,
+    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
     ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
     ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
     ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,

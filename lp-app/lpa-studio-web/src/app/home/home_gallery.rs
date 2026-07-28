@@ -38,6 +38,27 @@ pub fn HomeGallery(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut drag_active = use_signal(|| 0_i32);
+    // Example kind filter (chips): `None` = all kinds.
+    let mut example_filter: Signal<Option<String>> = use_signal(|| None);
+    let example_kinds: Vec<String> = {
+        let mut kinds: Vec<String> = Vec::new();
+        for card in &home.examples {
+            if !kinds.contains(&card.kind) {
+                kinds.push(card.kind.clone());
+            }
+        }
+        kinds
+    };
+    let filtered_examples: Vec<_> = home
+        .examples
+        .iter()
+        .filter(|card| {
+            example_filter()
+                .as_ref()
+                .is_none_or(|kind| &card.kind == kind)
+        })
+        .cloned()
+        .collect();
     // only touch the browser's serial API when the caller didn't already
     // answer the grant question (stories always do — headless Chrome's
     // getPorts is crash-prone, and the probe is pointless there anyway)
@@ -227,14 +248,28 @@ pub fn HomeGallery(
             section { class: "tw:grid tw:gap-3",
                 header { class: "tw:flex tw:items-center tw:gap-3",
                     h2 { class: section_title_class(), "Examples" }
-                    // kind filter chips: Modules stays hidden while no module
-                    // examples exist (M6 grows this)
-                    span { class: "tw:rounded-full tw:border tw:border-border tw:px-2.5 tw:py-0.5 tw:text-xs tw:font-semibold tw:text-muted-foreground",
-                        "Projects"
+                    // Kind filter chips, real since the Effects category
+                    // exists: shown only when more than one kind is present
+                    // (a single-kind gallery keeps its pre-chip look).
+                    if example_kinds.len() > 1 {
+                        for kind in example_kinds.clone() {
+                            button {
+                                class: example_chip_class(example_filter() == Some(kind.clone())),
+                                onclick: {
+                                    let kind = kind.clone();
+                                    move |_| {
+                                        let next = (example_filter() != Some(kind.clone()))
+                                            .then(|| kind.clone());
+                                        example_filter.set(next);
+                                    }
+                                },
+                                "{example_kind_chip_label(&kind)}"
+                            }
+                        }
                     }
                 }
                 div { class: card_grid_class(),
-                    for card in home.examples.clone() {
+                    for card in filtered_examples.clone() {
                         ExampleCard {
                             key: "{card.id}",
                             opening: home.opening.as_deref() == Some(card.id.as_str()),
@@ -328,4 +363,18 @@ fn card_grid_class() -> &'static str {
 /// Examples keep the compact grid.
 fn device_grid_class() -> &'static str {
     "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] tw:gap-3.5 tw:[grid-auto-rows:minmax(300px,auto)]"
+}
+
+/// Chip styling: the selected kind fills; unselected chips stay quiet.
+fn example_chip_class(selected: bool) -> &'static str {
+    if selected {
+        "tw:rounded-full tw:border tw:border-border tw:bg-foreground/10 tw:px-2.5 tw:py-0.5 tw:text-xs tw:font-semibold tw:text-foreground tw:cursor-pointer"
+    } else {
+        "tw:rounded-full tw:border tw:border-border tw:px-2.5 tw:py-0.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:cursor-pointer"
+    }
+}
+
+/// Pluralized chip label for an example kind ("Project" → "Projects").
+fn example_kind_chip_label(kind: &str) -> String {
+    format!("{kind}s")
 }

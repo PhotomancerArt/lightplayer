@@ -2898,6 +2898,127 @@ impl ProjectController {
             )
         };
 
+        self.send_create_node_request(server, handle_id, request, parent, expected_name, name)
+            .await
+    }
+
+    /// Import a shipped effect example ([`crate::EffectImportOp`]): extract
+    /// the effect subfolder from the example's workbench files (the single
+    /// `nodes{}` entry of the workbench root that refs a subfolder
+    /// `project.json` — resolved from the root's bytes, never a hardcoded
+    /// name), vendor it by copy into `effects/<name>/…`, and attach it via
+    /// the same `CreateNode` seam as every other create.
+    pub async fn import_effect(
+        &mut self,
+        server: &mut StudioServerClient,
+        example_id: &str,
+        attach: &UiAttachTarget,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let Some(example) = crate::app::home::embedded_example(example_id) else {
+            return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                "Unknown effect example {example_id}"
+            ))));
+        };
+        let files = example.files();
+        let Some((folder, effect_files)) = extract_effect_subfolder(&files) else {
+            return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                "Example {example_id} carries no effect subfolder"
+            ))));
+        };
+
+        // Vendor under effects/<name>/, deduping against node keys and
+        // existing effect folders.
+        let mut taken = self.taken_node_names();
+        for artifact in self.def_artifacts.values() {
+            let path = artifact.file_path().as_str();
+            if let Some(rest) = path.strip_prefix("/effects/")
+                && let Some((existing, _)) = rest.split_once('/')
+            {
+                taken.insert(existing.to_string());
+            }
+        }
+        let name = unique_node_name(&folder, &taken);
+
+        let (site, parent, expected_name) = match attach {
+            UiAttachTarget::ProjectRoot => {
+                let Some(root) = self.root_nodes.first() else {
+                    return Ok(ProjectEditRun::notice(UiNotice::warning(
+                        "Cannot add an effect before the project tree has synced",
+                    )));
+                };
+                (
+                    NodeAttachSite::ProjectNodes { key: name.clone() },
+                    root.address().clone(),
+                    name.clone(),
+                )
+            }
+            UiAttachTarget::Playlist { node } => {
+                let Some(playlist) = self.node(node) else {
+                    return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                        "Cannot add to {node}: the playlist is not in the synced project"
+                    ))));
+                };
+                let Some(artifact) = self.def_artifacts.get(&playlist.target().node_id) else {
+                    return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                        "Cannot add to {node}: its definition artifact is unknown"
+                    ))));
+                };
+                let staged = self.overlay_entry_keys(artifact);
+                let key = playlist_next_entry_key(playlist, &staged);
+                let path = SlotPath::parse(&format!("entries[{key}].node"))
+                    .expect("entries[<u32>].node is a valid slot path");
+                (
+                    NodeAttachSite::Slot {
+                        artifact: artifact.clone(),
+                        path,
+                    },
+                    node.clone(),
+                    format!("entry_{key}"),
+                )
+            }
+        };
+
+        let mut body = None;
+        let mut assets = Vec::new();
+        for (relative, bytes) in effect_files {
+            if relative == "project.json" {
+                body = Some(bytes);
+            } else {
+                assets.push((
+                    lpc_model::LpPathBuf::from(format!("./effects/{name}/{relative}").as_str()),
+                    bytes,
+                ));
+            }
+        }
+        let Some(body) = body else {
+            return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                "Example {example_id}'s effect folder has no project.json"
+            ))));
+        };
+        let request = WireCreateNodeRequest::new(
+            lpc_model::LpPathBuf::from(format!("./effects/{name}/project.json").as_str()),
+            body,
+            assets,
+            site,
+        );
+        self.send_create_node_request(server, handle_id, request, parent, expected_name, name)
+            .await
+    }
+
+    /// Send one `CreateNode` request and run the shared post-ack flow:
+    /// pending focus, immediate refresh, def-artifact re-read, save-pull,
+    /// and the added/rejected notices. Used by blank creates, effect
+    /// folder creates, and effect imports.
+    async fn send_create_node_request(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        request: WireCreateNodeRequest,
+        parent: ProjectNodeAddress,
+        expected_name: String,
+        name: String,
+    ) -> Result<ProjectEditRun, UiError> {
         let outcome = server.project_create_node(handle_id, request).await?;
         let mut logs = outcome.logs;
         match outcome.response {
@@ -3965,6 +4086,34 @@ fn mutation_touches_bindings(mutation: &MutationOp) -> bool {
         MutationOp::ClearArtifact { .. } | MutationOp::Clear => true,
         MutationOp::SetArtifactBody { .. } => false,
     }
+}
+
+/// The workbench's effect subfolder: parse the workbench root's
+/// `project.json`, find the single `nodes{}` ref pointing at a subfolder
+/// `project.json`, and return that folder's name plus its files rebased
+/// folder-relative. `None` when the root has no subfolder-project child.
+fn extract_effect_subfolder(
+    files: &[(String, Vec<u8>)],
+) -> Option<(String, Vec<(String, Vec<u8>)>)> {
+    let (_, root_bytes) = files.iter().find(|(path, _)| path == "project.json")?;
+    let root = lpc_model::NodeDef::from_json_str(core::str::from_utf8(root_bytes).ok()?).ok()?;
+    let project = root.as_project()?;
+    let folder = project.nodes.entries.values().find_map(|invocation| {
+        let spec = invocation.value().ref_specifier()?;
+        let spec = spec.to_string();
+        let rest = spec.strip_prefix("./").unwrap_or(&spec);
+        let (folder, file) = rest.split_once('/')?;
+        (file == "project.json").then(|| folder.to_string())
+    })?;
+    let prefix = format!("{folder}/");
+    let effect_files: Vec<(String, Vec<u8>)> = files
+        .iter()
+        .filter_map(|(path, bytes)| {
+            path.strip_prefix(&prefix)
+                .map(|relative| (relative.to_string(), bytes.clone()))
+        })
+        .collect();
+    (!effect_files.is_empty()).then_some((folder, effect_files))
 }
 
 fn rejection_text(rejection: &MutationRejection) -> String {

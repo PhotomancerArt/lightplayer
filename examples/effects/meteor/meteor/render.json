@@ -1,0 +1,38 @@
+{
+  "kind": "Shader",
+  "source": "render.glsl",
+  "render_order": 0,
+  "bindings": {
+    "meteors": {
+      "source": "node:../sim#meteors"
+    }
+  },
+  "glsl_opts": {
+    "add_sub": "wrapping",
+    "mul": "wrapping",
+    "div": "reciprocal"
+  },
+  "consumed": {
+    "meteors": {
+      "kind": "map",
+      "value": "lp::fluid::Emitter",
+      "key": "u32",
+      "default": 0,
+      "mapping": {
+        "kind": "sentinel",
+        "len": 4,
+        "key": "id",
+        "empty_key": 0
+      }
+    },
+    "decay": {
+      "kind": "value",
+      "value": "f32",
+      "default": 3,
+      "min": 0.5,
+      "max": 8,
+      "label": "Decay",
+      "panel": true
+    }
+  }
+}

@@ -4,8 +4,10 @@ use lpc_model::NodeKind;
 
 use crate::{ControllerId, UiAction};
 
-use super::node_create_op::{NodeCreateOp, UiAttachTarget};
+use super::node_create_op::{EffectImportOp, NodeCreateOp, UiAttachTarget};
 use super::node_naming::{node_kind_label, node_kind_slug};
+
+use crate::app::home::embedded_examples;
 
 /// Picker order: the common authoring targets first, hardware-/niche kinds
 /// last. Stable — the picker never reorders. `Project` is excluded (it is
@@ -30,6 +32,10 @@ const PICKER_KINDS: &[NodeKind] = &[
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiAddNodeMenu {
     pub entries: Vec<UiAddNodeMenuEntry>,
+    /// The Effects source section: shipped effect examples, vendored by
+    /// copy on selection ([`EffectImportOp`]). Rendered as its own picker
+    /// section below the kind rows.
+    pub effects: Vec<UiAddNodeMenuEntry>,
 }
 
 /// One picker entry. `action` is the ready-to-dispatch create (pane grammar:
@@ -85,7 +91,28 @@ pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
         .with_label("New Effect")
         .with_summary("Create a new effect: a small embedded project with promoted controls."),
     });
-    UiAddNodeMenu { entries }
+    let effects = embedded_examples()
+        .iter()
+        .filter(|example| example.kind == "Effect")
+        .map(|example| UiAddNodeMenuEntry {
+            kind: NodeKind::Project,
+            label: example.name.to_string(),
+            icon: String::from("effect"),
+            action: UiAction::from_op(
+                ControllerId::new(crate::ProjectController::NODE_ID),
+                EffectImportOp {
+                    example: example.id.to_string(),
+                    attach: attach.clone(),
+                },
+            )
+            .with_label(format!("Add {}", example.name))
+            .with_summary(format!(
+                "Copy the {} effect into this project.",
+                example.name
+            )),
+        })
+        .collect();
+    UiAddNodeMenu { entries, effects }
 }
 
 #[cfg(test)]
