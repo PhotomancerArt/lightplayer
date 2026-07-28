@@ -19,12 +19,14 @@ env:
   RUSTUP_PERMIT_COPY_RENAME: 1
 
 jobs:
-  # validate-x64 was disabled 2026-06 because the x86_64 host JIT path
-  # (`lpvm-cranelift`) produced x64-only test failures, with a note to
-  # re-enable "once the host backend swap is complete". That swap completed
-  # 2026-07-11 (host JIT removed; wasm is the host target), so this runs
-  # again — alongside validate-arm for a comparison window; the loser gets
-  # removed once timings and stability are in.
+  # The main validate job runs on x64. It was ARM from 2026-06 (x64 was
+  # disabled over x86_64 host-JIT failures in `lpvm-cranelift`; that JIT was
+  # removed 2026-07-11), and a 2026-07 side-by-side comparison run showed x64
+  # green at equivalent wall-clock (19m23s x64 vs 19m51s ARM, warm caches).
+  # Consolidated on x64 2026-07-27: every browser-dependent job is x64-only
+  # anyway (Google Chrome ships no linux-arm64 build), and x64 runner images
+  # are the better-supported default. validate-gfx stays on ARM deliberately —
+  # it needs no browser and keeps a second architecture compiling the tree.
   validate-x64:
     name: Validate (x64)
     runs-on: ubuntu-24.04
@@ -55,53 +57,10 @@ jobs:
         run: rustup target add ${{ env.RISC_V_TARGET }}
 
       # rust-cache keys on the job id, so this job's cache stays separate
-      # from validate-arm's and neither evicts the other.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: lp2025 -> target
-
-      - name: Install just
-        uses: extractions/setup-just@v3
-
-      - name: Validate
-        run: cd lp2025 && just check build-ci test
-
-  validate-arm:
-    name: Validate (ARM)
-    runs-on: ubuntu-24.04-arm
-    # ARM: full check + build + test (lp-cranelift handles membarrier ENOSYS)
-    steps:
-      - name: Install system deps (libudev for serialport)
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
-
-      - name: Checkout lp2025
-        uses: actions/checkout@v4
-        with:
-          path: lp2025
-
-      - name: Checkout lp-regalloc2
-        uses: actions/checkout@v4
-        with:
-          repository: light-player/lp-regalloc2
-          path: lp-regalloc2
-
-      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly-2026-04-27
-          components: rustfmt, clippy, rust-src
-
-      - name: Install RISC-V target
-        run: rustup target add ${{ env.RISC_V_TARGET }}
-
-      # The previous actions/cache config listed `target/` at the workspace
-      # root, but the repo checks out into `lp2025/`, so build artifacts were
-      # never cached and every run was a full cold build. rust-cache handles
-      # the cargo registry + the workspace target dir, keys on Cargo.lock and
-      # rustc version, and prunes stale artifacts so the cache doesn't grow
-      # unboundedly.
+      # from the other jobs' and none evicts another. (The pre-2026-07
+      # actions/cache config listed `target/` at the workspace root while the
+      # repo checks out into `lp2025/`, so nothing was ever cached; rust-cache
+      # keys on Cargo.lock + rustc version and prunes stale artifacts.)
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -185,7 +144,7 @@ jobs:
           components: rustfmt, clippy, rust-src
 
       # rust-cache keys on the job id, so this job's cache (wgpu tree) stays
-      # separate from validate-arm's and neither evicts the other.
+      # separate from validate-x64's and neither evicts the other.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
