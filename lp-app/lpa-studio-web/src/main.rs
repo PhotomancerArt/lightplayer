@@ -4,7 +4,9 @@ pub mod core;
 pub mod exploration;
 #[cfg(target_arch = "wasm32")]
 mod library_host_opfs;
+mod local_model_probe;
 mod local_store;
+mod model_catalog;
 mod openrouter_oauth;
 mod router;
 mod settings_io;

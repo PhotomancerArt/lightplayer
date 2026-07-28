@@ -345,6 +345,9 @@
   .tw\:max-h-48 {
     max-height: calc(var(--tw-spacing) * 48);
   }
+  .tw\:max-h-52 {
+    max-height: calc(var(--tw-spacing) * 52);
+  }
   .tw\:max-h-56 {
     max-height: calc(var(--tw-spacing) * 56);
   }
@@ -1142,12 +1145,6 @@
   .tw\:bg-card-subtle {
     background-color: var(--tw-color-card-subtle);
   }
-  .tw\:bg-card-subtle\/60 {
-    background-color: var(--tw-color-card-subtle);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--tw-color-card-subtle) 60%, transparent);
-    }
-  }
   .tw\:bg-panel-primary {
     background-color: var(--tw-color-panel-primary);
   }
@@ -1611,6 +1608,9 @@
     --tw-tracking: var(--tw-tracking-wide);
     letter-spacing: var(--tw-tracking-wide);
   }
+  .tw\:\[overflow-wrap\:anywhere\] {
+    overflow-wrap: anywhere;
+  }
   .tw\:break-words {
     overflow-wrap: break-word;
   }
@@ -1828,6 +1828,10 @@
   .tw\:outline-none {
     --tw-outline-style: none;
     outline-style: none;
+  }
+  .tw\:select-all {
+    -webkit-user-select: all;
+    user-select: all;
   }
   .tw\:select-none {
     -webkit-user-select: none;
@@ -2215,6 +2219,11 @@
   .tw\:disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
+    }
+  }
+  .tw\:disabled\:text-dim-foreground {
+    &:disabled {
+      color: var(--tw-color-dim-foreground);
     }
   }
   .tw\:disabled\:opacity-40 {
