@@ -84,15 +84,15 @@ or reaching into CodeMirror internals to fake the geometry it refuses to
 measure. Growing the viewport removes the condition instead of compensating for
 it, and generalises to any widget that measures on first visibility.
 
-Blast radius, sampled by capturing families twice with and without the change:
-`core/view` 42/42 byte-identical, `exploration/node-cards` 9/12. The only three
-that differed were `node-cards__overview__*`, where a popover currently gets
-repositioned to stay inside the short viewport and now sits by its anchor — and
-those are `overview` composites, which stopped being baselines on 2026-07-28.
-So on the committed set this is close to inert: 142 of 945 baselines are still
-taller than the viewport, and none of the ones sampled changed. It earns its
-place as a standing guarantee for tall stories rather than as a visible
-refresh.
+The grown viewport is a measurement window, not the height anything is
+photographed at — it is restored before the capture. That matters: a CI run of
+the first version refreshed 26 surviving baselines, all tall stories, and the
+change was pure growth. `studio-shell/simulator-ready` at sm went 3155px →
+3246px with the first 3142 rows pixel-identical and 91px of empty space added,
+because layout that sizes itself to the window expands with it. Restoring the
+viewport keeps the corrected measurement (verified: the oracle stays 18 with
+the editor back below the fold, 2/2 aligned) while leaving those baselines
+untouched, so the change carries no baseline churn at all.
 
 The alternative, measured and rejected:
 
