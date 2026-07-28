@@ -621,6 +621,14 @@ build-fw-emu: install-rv32-target
 [parallel]
 build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
 
+# What CI actually builds before running tests: just the cross-target
+# prerequisites host tests embed/spawn (the builtins ELF and the emu guest
+# app). Everything else is built by `cargo test` itself — a separate
+# build-host pass only duplicated that work (~12 min/run when CI ran
+# `build-ci` as its own phase).
+[parallel]
+ci-prereqs: build-rv32-builtins build-rv32-emu-guest-test-app
+
 # riscv32: builtins only (for filetests; no ESP32 firmware)
 build-rv32-builtins: install-rv32-target
     ./scripts/build-builtins.sh
@@ -737,15 +745,22 @@ clippy-glsl-fix:
 [parallel]
 test: test-rust test-filetests
 
-test-rust:
+test-rust-core:
     cargo test
-    # Studio web view layer is outside default-members (Dioxus web dep tree);
-    # its unit tests are pure host-runnable view helpers. Separate invocation
-    # per the no-workspace-wide-cargo rule (feature unification).
-    # `stories` is on because the story book carries host-testable invariants of
-    # the capture harness seam (see `overview_ids_are_reserved_for_generated_composites`);
-    # without it that module is not compiled and its tests silently do not run.
+
+# Studio web view layer is outside default-members (Dioxus web dep tree);
+# its unit tests are pure host-runnable view helpers. Separate invocation
+# per the no-workspace-wide-cargo rule (feature unification).
+# `stories` is on because the story book carries host-testable invariants of
+# the capture harness seam (see `overview_ids_are_reserved_for_generated_composites`);
+# without it that module is not compiled and its tests silently do not run.
+# CI gates this recipe on studio paths (the feature-unified Dioxus rebuild is
+# the single most expensive test compile); locally it is part of `test-rust`.
+test-studio-host:
     cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
+
+# Local parity: all host tests. CI composes the same pieces path-gated.
+test-rust: test-rust-core test-studio-host
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
@@ -794,8 +809,17 @@ test-glsl-filetests:
 # CI and validation
 # ============================================================================
 
+# CI runs the lint-only half (`check-lint`) as its own parallel job and runs
+# `schema-check` inside the Validate job instead: schema-check needs a real
+# dev build of lp-cli, which shares warm artifacts with the test builds there
+# but shares nothing with clippy's check-mode output (racing clippy for cores
+# was measured at ~18 min for the pair on a 4-core runner). Local `check`
+# keeps the full meaning.
 [parallel]
-check: fmt-check clippy lint-serde-content lint-schemars-fw schema-check lint-torture-corpus
+check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus
+
+[parallel]
+check: check-lint schema-check
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.

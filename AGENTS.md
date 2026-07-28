@@ -427,18 +427,24 @@ cargo test -p lpa-server --no-run
 
 ## CI gate (run this before pushing)
 
-CI on `feature/*` branches runs `just check build-ci test` (see
-`.github/workflows/pre-merge.yml`). To avoid the round-trip of
-"push → wait 3 min → CI fails on lint → fix → repeat", run the same
-locally before every push:
+CI (see `.github/workflows/pre-merge.yml`) is path-gated per job: one
+`detect-changes` job computes the gates, then `Lint (x64)` runs
+`just check-lint` in parallel with `Validate (x64)`, which runs
+`just ci-prereqs`, the gated test recipes (`test-rust-core`, plus
+`test-studio-host` when studio paths changed, plus `test-filetests` when
+shader paths changed), then `schema-check`. Docs-only PRs skip every job.
+Pushes to main force all gates true, so filter misses surface on the next
+merge. To avoid the round-trip of "push → wait → CI fails on lint → fix →
+repeat", run the local equivalent before every push:
 
 ```bash
-just check                   # fmt-check + clippy-host + clippy-rv32  (the usual blocker)
-just build-ci                # host + rv32 builtins + emu-guest
+just check                   # check-lint + schema-check  (the usual blocker)
 just test                    # cargo test (+ studio-web view tests) + glsl filetests
 ```
 
-Or, in one go: `just ci` (which is the parallel composition above).
+Or, in one go: `just ci`. CI builds with sccache, `CARGO_INCREMENTAL=0`,
+and `debug=0`; local builds don't — a green local run is still the same
+lint/test signal.
 
 ### Why the nightly date is pinned
 
@@ -465,7 +471,7 @@ To bump the toolchain, do it deliberately as its own change:
 3. Update the hardcoded `toolchain:` value in every job in
    `.github/workflows/pre-merge.yml` (the workflow carries a
    "keep this in sync" comment at each site).
-4. Run the full gate (`just check build-ci test`) before pushing, and
+4. Run the full gate (`just check test`) before pushing, and
    expect new-lint fallout in the same change.
 
 ### Architecture coverage
