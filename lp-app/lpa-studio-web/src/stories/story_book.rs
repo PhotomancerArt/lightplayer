@@ -66,10 +66,14 @@ pub fn StoryBook() -> Element {
                                 for story in component.stories.iter() {
                                     {
                                         let story_href = story_hash(story.id, selected_viewport);
+                                        // The capture script scrapes these links to
+                                        // discover stories; the flag rides along so it
+                                        // can capture screenshot stories at lg only.
                                         rsx! {
                                             a {
                                                 href: "{story_href}",
                                                 tabindex: "-1",
+                                                "data-story-screenshot": if story.screenshot { "1" } else { "0" },
                                                 "{story.label}"
                                             }
                                         }
@@ -457,9 +461,30 @@ pub fn should_show_story_book() -> bool {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn StoryCanvas(story_id: &'static str, viewport: StoryViewport) -> Element {
+fn StoryCanvas(
+    story_id: &'static str,
+    viewport: StoryViewport,
+    /// `#[story(screenshot)]`: render the story bare, so the capture is
+    /// the app itself — no frame, size label, or checkerboard to crop out
+    /// of a README or docs page.
+    #[props(default = false)]
+    screenshot: bool,
+) -> Element {
     let frame_style = viewport.frame_style();
     let canvas_label = viewport.canvas_label();
+
+    if screenshot {
+        return rsx! {
+            div {
+                class: "tw:inline-grid tw:w-max tw:overflow-visible",
+                "data-story-capture": "1",
+                "data-story-id": "{story_id}",
+                div { class: "tw:flow-root tw:min-w-0 tw:overflow-hidden", style: "{frame_style}",
+                    {render_story(story_id)}
+                }
+            }
+        };
+    }
 
     rsx! {
         div {
@@ -509,6 +534,7 @@ fn render_story_selection(selection: &StorySelection, viewport: StoryViewport) -
                 key: "{story.id}",
                 story_id: story.id,
                 viewport,
+                screenshot: story.screenshot,
             }
         },
         StorySelection::ComponentOverview { id, stories, .. } => rsx! {
