@@ -112,6 +112,14 @@ as `Edge placement`. Use `#[story(label = "...")]` only when the derived label
 would be misleading, and `description = "..."` only when the storybook chrome
 needs extra context.
 
+`#[story(screenshot)]` marks a story whose capture is a **published image** —
+a README hero, a docs figure — rather than a design-record baseline. A
+screenshot story renders bare (no story frame, size label, or checkerboard),
+so the PNG is the app itself and needs no cropping, and it is captured at
+`lg` only: the other sizes would be unused files that can still churn
+baselines. Reach for it only when the image is embedded somewhere outside the
+storybook; ordinary stories want the frame.
+
 The storybook creates one synthetic overview route per component, such as:
 
 ```text
