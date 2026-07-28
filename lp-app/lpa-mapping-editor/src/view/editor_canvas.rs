@@ -172,7 +172,19 @@ pub fn EditorCanvas(
                     marker_width: "4",
                     marker_height: "4",
                     orient: "auto-start-reverse",
-                    path { d: "M0,0.8 L7.4,4 L0,7.2 z", fill: "currentColor" }
+                    // Opaque fill: the translucent line ends under the head,
+                    // and alpha-stacking there reads as a glitch.
+                    path { d: "M0,0.8 L7.4,4 L0,7.2 z", fill: "#c6ccd4" }
+                }
+                marker {
+                    id: "lpme-arrow-head-chain",
+                    view_box: "0 0 8 8",
+                    ref_x: "7",
+                    ref_y: "4",
+                    marker_width: "4",
+                    marker_height: "4",
+                    orient: "auto-start-reverse",
+                    path { d: "M0,0.8 L7.4,4 L0,7.2 z", fill: "#e4c065" }
                 }
             }
             g {
@@ -249,7 +261,7 @@ pub fn EditorCanvas(
                             x2: "{seg.x2}",
                             y2: "{seg.y2}",
                             stroke_width: "{(radius * 0.14).clamp(0.4, 1.6)}",
-                            marker_end: "url(#lpme-arrow-head)",
+                            marker_end: if seg.chain { "url(#lpme-arrow-head-chain)" } else { "url(#lpme-arrow-head)" },
                         }
                     }
                 }

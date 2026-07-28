@@ -1279,7 +1279,6 @@ label:has(> input:not(:disabled)) {
 .lpme-fit-rect {
     fill: rgba(90, 169, 230, 0.05);
     stroke: rgba(90, 169, 230, 0.75);
-    stroke-dasharray: 8 6;
 }
 
 .lpme-fit-label {
@@ -1323,6 +1322,20 @@ label:has(> input:not(:disabled)) {
 
 .lpme-hidden-input {
     display: none;
+}
+
+.lpme-hint {
+    position: absolute;
+    bottom: 10px;
+    left: 12px;
+    pointer-events: none;
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    color: var(--studio-color-text-muted);
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+    padding: 4px 10px;
 }
 
 /* ---- mapping view layers (wiring numbers / arrows / toggles) ---------- */
