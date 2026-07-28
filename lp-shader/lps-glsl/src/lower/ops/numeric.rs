@@ -301,6 +301,43 @@ pub(in crate::lower::ops) fn lower_smoothstep_lane(
     dst
 }
 
+/// `step(edge, x)` = `x < edge ? 0.0 : 1.0`, component-wise.
+///
+/// Emitted as `x >= edge ? 1.0 : 0.0` to match the naga frontend's
+/// `emit_step_vregs`: the two forms agree everywhere except on NaN, where the
+/// GLSL spec is silent and the frontends must not disagree.
+///
+/// Do not "correct" this to the spec's wording — no test will catch it, now or
+/// later. Per `lps-filetests/src/targets/mod.rs` this frontend runs on exactly
+/// one target, `rv32lpn.q32`; every other target uses naga. That target is Q32
+/// and has no IEEE NaN, so no target both runs this lowering and has NaNs.
+/// This comment is the only guard the choice will ever have.
+pub(in crate::lower::ops) fn lower_step_lane(
+    ctx: &mut LowerCtx<'_>,
+    edge: &LowerValue,
+    x: &LowerValue,
+    index: usize,
+) -> VReg {
+    let edge = lane_at(edge, index);
+    let x = lane_at(x, index);
+    let at_or_above = ctx.fb.alloc_vreg(IrType::I32);
+    ctx.fb.push(LpirOp::Fge {
+        dst: at_or_above,
+        lhs: x,
+        rhs: edge,
+    });
+    let one = fconst(ctx, 1.0);
+    let zero = fconst(ctx, 0.0);
+    let dst = ctx.fb.alloc_vreg(IrType::F32);
+    ctx.fb.push(LpirOp::Select {
+        dst,
+        cond: at_or_above,
+        if_true: one,
+        if_false: zero,
+    });
+    dst
+}
+
 pub(in crate::lower::ops) fn fconst(ctx: &mut LowerCtx<'_>, value: f32) -> VReg {
     let dst = ctx.fb.alloc_vreg(IrType::F32);
     ctx.fb.push(LpirOp::FconstF32 { dst, value });

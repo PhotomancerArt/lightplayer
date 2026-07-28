@@ -2472,14 +2472,7 @@ INTRINS = [
     Intrin("max", "max(v, 0.25)", lambda v, i: max(v, 0.25)),
     Intrin("clamp", "clamp(v, -0.5, 0.5)", lambda v, i: _clamp(v, -0.5, 0.5)),
     Intrin("mix", "mix(v, 1.0, 0.25)", lambda v, i: v + (1.0 - v) * 0.25),
-    # `step` is missing from the lps-glsl builtin inventory (`smoothstep` is
-    # there); the naga-frontend targets compile it fine.
-    Intrin(
-        "step",
-        "step(0.0, v)",
-        lambda v, i: 0.0 if v < 0.0 else 1.0,
-        unimplemented=("rv32lpn.q32",),
-    ),
+    Intrin("step", "step(0.0, v)", lambda v, i: 0.0 if v < 0.0 else 1.0),
     Intrin(
         "smoothstep",
         "smoothstep(0.0, 1.0, v)",
