@@ -7,8 +7,9 @@ use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
     ClientRequest, FsRequest, NodeReadQuery, NodeRuntimeStatus, ProjectReadQuery,
     ProjectReadRequest, ReadLevel, ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery,
-    WireChannelSampleFormat, WireProjectHandle, WireRuntimeBufferMetadataPayload,
-    WireServerMessage, WireServerMsgBody, json, messages::ClientMessage,
+    WIRE_PROTO_VERSION, WireChannelSampleFormat, WireProjectHandle,
+    WireRuntimeBufferMetadataPayload, WireServerMessage, WireServerMsgBody, json,
+    messages::ClientMessage,
 };
 use lpfs::{LpFs, LpFsMemory};
 use serde::Serialize;
@@ -49,7 +50,13 @@ fn runtime_serves_protocol_messages_after_tick() {
         initial.contains("\\\"hello\\\""),
         "hello missing: {initial}"
     );
-    assert!(initial.contains("\\\"proto\\\":1"));
+    // Against the constant, not a literal: `WIRE_PROTO_VERSION` is hand-bumped
+    // on every breaking wire change, and a pinned number here just goes stale
+    // one bump later (it did — 1 -> 2).
+    assert!(
+        initial.contains(&format!("\\\"proto\\\":{WIRE_PROTO_VERSION}")),
+        "hello must carry proto {WIRE_PROTO_VERSION}: {initial}"
+    );
 
     // Raising the global level opens the gate: the same input now carries the
     // debug envelope, proving the line is gated rather than gone. Restore
