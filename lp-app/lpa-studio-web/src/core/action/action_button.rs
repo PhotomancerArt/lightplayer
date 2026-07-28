@@ -68,7 +68,13 @@ pub fn ActionButton(
     }
 }
 
-fn confirmation_confirmed(confirmation: Option<&lpa_studio_core::ActionConfirmation>) -> bool {
+/// Run an action's optional [`ActionConfirmation`](lpa_studio_core::ActionConfirmation)
+/// through the native confirm dialog. Shared by every generic action
+/// renderer ([`ActionButton`], the pane header's action buttons) so
+/// confirmation semantics never fork per surface.
+pub(crate) fn confirmation_confirmed(
+    confirmation: Option<&lpa_studio_core::ActionConfirmation>,
+) -> bool {
     let Some(confirmation) = confirmation else {
         return true;
     };

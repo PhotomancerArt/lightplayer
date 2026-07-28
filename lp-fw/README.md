@@ -59,17 +59,24 @@ cargo test -p fw-browser --target wasm32-unknown-unknown --no-run
 just fw-browser-build
 ```
 
-To manually run the browser smoke page:
+For a pass/fail verdict on the browser smoke page:
+
+```bash
+just fw-browser-smoke-check
+```
+
+It runs `smoke.html` in headless Chrome and exits non-zero unless the page
+reaches `dataset.smoke == "ok"`.
+
+To watch the page instead:
 
 ```bash
 just fw-browser-smoke
 ```
 
-Then open:
-
-```text
-http://127.0.0.1:2819/smoke.html
-```
+Then open the URL the recipe prints (its port comes from
+`scripts/dev-port.sh`). That recipe only serves the page — it never exits and
+cannot fail on its own.
 
 Success means the page shows `ok` and
 `document.documentElement.dataset.smoke == "ok"`. The current page writes a

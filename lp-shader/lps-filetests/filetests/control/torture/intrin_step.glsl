@@ -29,13 +29,9 @@ float test_intrin_step_store(int count) {
     return s;
 }
 
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_store(0) ~= 0.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_store(1) ~= 0.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_store(3) ~= 0.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_store(8) ~= 4.000000
 
 float test_intrin_step_unused(int count) {
@@ -55,13 +51,9 @@ float test_intrin_step_unused(int count) {
     return s;
 }
 
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_unused(0) ~= 0.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_unused(1) ~= -1.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_unused(3) ~= -2.062500
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_unused(8) ~= 0.750000
 
 float test_intrin_step_swizzle(int count) {
@@ -82,13 +74,9 @@ float test_intrin_step_swizzle(int count) {
     return a[0] + a[1] + a[2] + a[3];
 }
 
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_swizzle(0) ~= 0.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_swizzle(1) ~= 0.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_swizzle(3) ~= 0.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_swizzle(8) ~= 0.000000
 
 float test_intrin_step_nested(int count) {
@@ -112,11 +100,7 @@ float test_intrin_step_nested(int count) {
     return s;
 }
 
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_nested(0) ~= 0.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_nested(1) ~= 1.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_nested(3) ~= 3.000000
-// @unimplemented(rv32lpn.q32)
 // run: test_intrin_step_nested(8) ~= 8.000000

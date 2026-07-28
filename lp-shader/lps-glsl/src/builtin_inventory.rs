@@ -77,6 +77,7 @@ pub const INLINED_BUILTINS: &[InlinedBuiltin] = &[
     entry("sign", &["x"]),
     entry("smoothstep", &["edge0", "edge1", "x"]),
     entry("sqrt", &["x"]),
+    entry("step", &["edge", "x"]),
     entry("transpose", &["m"]),
     entry("trunc", &["x"]),
     entry("uaddCarry", &["x", "y", "carry"]),
@@ -120,7 +121,7 @@ mod tests {
         }
         // Canary: bump alongside a new `BuiltinKind` variant + its
         // `builtin_kind` arm — the inventory entry is part of adding one.
-        assert_eq!(INLINED_BUILTINS.len(), 51);
+        assert_eq!(INLINED_BUILTINS.len(), 52);
     }
 
     #[test]

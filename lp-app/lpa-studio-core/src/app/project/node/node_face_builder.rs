@@ -48,7 +48,10 @@ use crate::{
 /// face so the two can never disagree; when the face does not derive
 /// (missing entries row, no `active_entry` status yet, active entry's
 /// child not mounted), `children` is left untouched and the card falls
-/// back to today's full rendering.
+/// back to today's full rendering. An **empty** entries map still derives
+/// a face — the strip's empty state (with its add affordance) is the
+/// card's surface for a freshly created playlist — with no child
+/// filtering, since there are no entry children to filter.
 pub(in crate::app::project) fn kind_face(
     ty: &str,
     sections: &[UiNodeSection],
@@ -59,9 +62,11 @@ pub(in crate::app::project) fn kind_face(
         FixtureDef::KIND => fixture_face(sections).map(UiNodeFace::Fixture),
         PlaylistDef::KIND => {
             let (face, active_child) = playlist_face(sections, children)?;
-            let active = children.swap_remove(active_child);
-            children.clear();
-            children.push(active);
+            if let Some(index) = active_child {
+                let active = children.swap_remove(index);
+                children.clear();
+                children.push(active);
+            }
             // NOTE: the surviving child does NOT set `UiNodeChild::active`
             // — the web maps that flag onto the pane's *selection* look
             // (`focused || active`, a story-fixture affordance), and the
@@ -304,13 +309,16 @@ fn string_field(fields: &[UiConfigSlot], name: &str) -> Option<String> {
 
 /// The playlist card's face: the entries strip plus the index of the ACTIVE
 /// entry's child in `children`. `None` — full-rendering fallback — when the
-/// def has no entries row, the produced `active_entry` status has not
-/// arrived, the active key names no strip entry, or the active entry's
-/// child is not among the built child DTOs.
+/// def has no entries row, or when entries exist but the produced
+/// `active_entry` status has not arrived, the active key names no strip
+/// entry, or the active entry's child is not among the built child DTOs.
+/// An empty entries map derives an empty-strip face (`active: None`, no
+/// child to filter) — a freshly created playlist's card is the strip's
+/// empty state, not the generic fallback.
 fn playlist_face(
     sections: &[UiNodeSection],
     children: &[UiNodeChild],
-) -> Option<(UiPlaylistFace, usize)> {
+) -> Option<(UiPlaylistFace, Option<usize>)> {
     let rows = config_rows(sections);
     let UiConfigSlotBody::Record(entries_map) = rows
         .iter()
@@ -319,16 +327,22 @@ fn playlist_face(
     else {
         return None;
     };
-    // The status seam: `PlaylistState.active_entry` (produced u32 =
-    // entries-map key), projected as a ProducedValues row. Its display is
-    // `u32::to_string`, so the parse is the exact inverse.
-    let active_key = produced_u32(sections, "active_entry")?;
-
     let entries: Vec<(UiPlaylistEntry, Option<usize>)> = entries_map
         .fields
         .iter()
         .filter_map(|row| playlist_entry(row, children))
         .collect();
+    if entries.is_empty() {
+        let face = UiPlaylistFace {
+            entries: Vec::new(),
+            active: None,
+        };
+        return Some((face, None));
+    }
+    // The status seam: `PlaylistState.active_entry` (produced u32 =
+    // entries-map key), projected as a ProducedValues row. Its display is
+    // `u32::to_string`, so the parse is the exact inverse.
+    let active_key = produced_u32(sections, "active_entry")?;
     let active_child = entries
         .iter()
         .find(|(entry, _)| entry.key == active_key)
@@ -338,7 +352,7 @@ fn playlist_face(
         entries: entries.into_iter().map(|(entry, _)| entry).collect(),
         active: Some(active_key),
     };
-    Some((face, active_child))
+    Some((face, Some(active_child)))
 }
 
 /// One `entries[<key>]` record row → its strip entry plus the index of its
@@ -662,6 +676,40 @@ mod tests {
 
         assert_eq!(kind_face("playlist", &sections, &mut children), None);
         assert_eq!(children.len(), 2, "fallback renders every child as today");
+    }
+
+    #[test]
+    fn playlist_with_no_entries_derives_an_empty_strip_face() {
+        // A freshly created playlist: entries map present but empty, and no
+        // entry children. The face must still derive (the strip's empty
+        // state carries the add affordance) instead of falling back to the
+        // generic sections view.
+        let mut sections = playlist_sections(Some(1));
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[2]
+            && let UiConfigSlotBody::Record(entries) = &mut rows[0].body
+        {
+            entries.fields.clear();
+        }
+        let mut children = Vec::new();
+
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
+        else {
+            panic!("expected an empty playlist face");
+        };
+        assert!(face.entries.is_empty());
+        assert_eq!(face.active, None);
+
+        // Same shape without the produced status yet: still the empty face.
+        let mut early = playlist_sections(None);
+        if let UiNodeSection::ConfigSlots(rows) = &mut early[1]
+            && let UiConfigSlotBody::Record(entries) = &mut rows[0].body
+        {
+            entries.fields.clear();
+        }
+        assert!(matches!(
+            kind_face("playlist", &early, &mut Vec::new()),
+            Some(UiNodeFace::Playlist(_))
+        ));
     }
 
     #[test]

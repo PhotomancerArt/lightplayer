@@ -208,6 +208,13 @@ const renderCanvas = document.getElementById('render-product');
 const outputCanvas = document.getElementById('output-channels');
 const logLines = [];
 
+// Bulk-bearing probe result variant per probe kind: a chunked result streams as
+// a header plus bytes, and recombines into this variant.
+const BULK_PROBE_VARIANTS = {
+  render_product: 'texture',
+  control_product: 'preview',
+};
+
 try {
   const { frameNum } = await runSmoke();
   setStatus(`ok frame=${frameNum}`);
@@ -228,11 +235,14 @@ async function runSmoke() {
     let projectHandle = null;
     let outputNodeId = null;
     let shaderNodeId = null;
+    let nodeReadId = null;
+    let visualReadId = null;
     let finalFrameNum = 0;
     let smokeSatisfied = false;
     let liveReadTimer = null;
     let projectWriteResponses = 0;
     const outputSignatures = [];
+    const openReads = new Map();
 
     const timeout = setTimeout(() => {
       worker.terminate();
@@ -312,16 +322,27 @@ async function runSmoke() {
         requestNodeRead();
         return;
       }
-      if (msg?.projectRequest?.response && (outputNodeId == null || shaderNodeId == null)) {
-        const nodeIds = readNodeIds(msg.projectRequest.response);
+      if (!msg?.projectRead) {
+        return;
+      }
+
+      // Project reads answer with an ordered event stream spread across
+      // envelope frames (`seq`/`fin`); nothing is usable until the stream ends.
+      const read = collectProjectRead(response, msg.projectRead.events);
+      if (!read) {
+        return;
+      }
+
+      if (response.id === nodeReadId) {
+        const nodeIds = readNodeIds(read);
         outputNodeId = nodeIds.output;
         shaderNodeId = nodeIds.shader;
         setCheck('nodes');
         requestVisualRead();
         return;
       }
-      if (msg?.projectRequest?.response && outputNodeId != null && shaderNodeId != null) {
-        const visual = readVisualFrame(msg.projectRequest.response, outputNodeId);
+      if (response.id === visualReadId) {
+        const visual = readVisualFrame(read, outputNodeId);
         finalFrameNum = visual.frame_num;
         drawRenderProduct(visual.renderProduct);
         drawOutputChannels(visual.outputChannels);
@@ -359,8 +380,8 @@ async function runSmoke() {
     }
 
     function requestNodeRead() {
-      sendProtocol({
-        projectRequest: {
+      nodeReadId = sendProtocol({
+        projectRead: {
           handle: projectHandle,
           request: {
             since: null,
@@ -382,8 +403,8 @@ async function runSmoke() {
 
     function requestVisualRead() {
       clearTimeout(liveReadTimer);
-      sendProtocol({
-        projectRequest: {
+      visualReadId = sendProtocol({
+        projectRead: {
           handle: projectHandle,
           request: {
             since: null,
@@ -420,16 +441,230 @@ async function runSmoke() {
     }
 
     function sendProtocol(msg) {
+      const id = nextId++;
       worker.postMessage({
         kind: 'protocol_in',
-        frame: JSON.stringify({ id: nextId++, msg }),
+        frame: JSON.stringify({ id, msg }),
       });
+      return id;
     }
 
     function tick(delta_ms) {
       worker.postMessage({ kind: 'tick', delta_ms });
     }
+
+    // Fold one `projectRead` frame into its request's stream state, returning
+    // the collected `{ results, probes }` aggregate once the envelope closes
+    // the stream (`fin`), or `null` while more frames are expected.
+    function collectProjectRead(envelope, events) {
+      let state = openReads.get(envelope.id);
+      if (!state) {
+        state = {
+          results: [],
+          probes: [],
+          pendingPayloads: new Map(),
+          pendingProbes: new Map(),
+          completed: false,
+        };
+        openReads.set(envelope.id, state);
+      }
+
+      for (const event of events || []) {
+        applyProjectReadEvent(state, event);
+      }
+
+      // `fin` defaults to true and is omitted when default.
+      if (envelope.fin === false) {
+        return null;
+      }
+      openReads.delete(envelope.id);
+      if (!state.completed) {
+        throw new Error(`project read ${envelope.id} stream ended without an end event`);
+      }
+      return { results: state.results, probes: state.probes };
+    }
   });
+}
+
+function applyProjectReadEvent(state, event) {
+  const [tag, body] = splitEvent(event);
+  switch (tag) {
+    case 'begin':
+      return;
+    case 'end':
+      state.completed = true;
+      return;
+    case 'error':
+      throw new Error(`project read failed: ${body.message}`);
+    case 'query':
+      applyQueryEvent(state, body.index, body.event);
+      return;
+    case 'probe':
+      applyProbeEvent(state, body.index, body.event);
+      return;
+    default:
+      throw new Error(`unknown project-read event: ${tag}`);
+  }
+}
+
+function applyQueryEvent(state, index, event) {
+  const [family, inner] = splitEvent(event);
+  if (family === 'runtime') {
+    state.results[index] = { runtime: inner };
+    return;
+  }
+
+  const [tag, body] = splitEvent(inner);
+  if (family === 'nodes') {
+    if (tag === 'begin') {
+      state.results[index] = { nodes: { level: body.level, tree_deltas: [], slot_roots: [] } };
+      return;
+    }
+    const nodes = requireResult(state, index, 'nodes');
+    switch (tag) {
+      case 'tree_deltas':
+        nodes.tree_deltas.push(...body.deltas);
+        return;
+      case 'slot_root':
+        nodes.slot_roots.push(body);
+        return;
+      case 'end':
+        return;
+      default:
+        throw new Error(`unknown node read event: ${tag}`);
+    }
+  }
+
+  if (family === 'resources') {
+    if (tag === 'begin') {
+      state.results[index] = {
+        resources: { level: body.level, summaries: [], runtime_buffer_payloads: [] },
+      };
+      return;
+    }
+    const resources = requireResult(state, index, 'resources');
+    switch (tag) {
+      case 'summary':
+        resources.summaries.push(body);
+        return;
+      case 'runtime_buffer_payload':
+        resources.runtime_buffer_payloads.push({ ...body, bytes: decodeBase64(body.bytes) });
+        return;
+      case 'runtime_buffer_payload_begin':
+        state.pendingPayloads.set(refKey(body.ref), {
+          ref: body.ref,
+          revision: body.revision,
+          metadata: body.metadata,
+          bytes: new Uint8Array(body.byte_length),
+        });
+        return;
+      case 'runtime_buffer_payload_bytes': {
+        const pending = requirePending(state.pendingPayloads, refKey(body.ref), 'runtime buffer payload');
+        pending.bytes.set(decodeBase64(body.bytes), body.offset);
+        return;
+      }
+      case 'runtime_buffer_payload_end': {
+        const key = refKey(body.ref);
+        const pending = requirePending(state.pendingPayloads, key, 'runtime buffer payload');
+        state.pendingPayloads.delete(key);
+        resources.runtime_buffer_payloads.push(pending);
+        return;
+      }
+      case 'membership':
+        resources.membership = body.refs;
+        return;
+      case 'end':
+        return;
+      default:
+        throw new Error(`unknown resource read event: ${tag}`);
+    }
+  }
+
+  if (family === 'shapes') {
+    // The smoke read never asks for shapes; ignore them rather than fail if it
+    // ever does.
+    return;
+  }
+  throw new Error(`unknown project-read query family: ${family}`);
+}
+
+function applyProbeEvent(state, index, event) {
+  const [tag, body] = splitEvent(event);
+  switch (tag) {
+    case 'result':
+      state.probes[index] = decodeProbeResult(body);
+      return;
+    case 'result_begin':
+      state.pendingProbes.set(index, {
+        header: body.header,
+        bytes: new Uint8Array(body.byte_length),
+      });
+      return;
+    case 'result_bytes': {
+      const pending = requirePending(state.pendingProbes, index, 'probe result');
+      pending.bytes.set(decodeBase64(body.bytes), body.offset);
+      return;
+    }
+    case 'result_end': {
+      const pending = requirePending(state.pendingProbes, index, 'probe result');
+      state.pendingProbes.delete(index);
+      state.probes[index] = probeResultFromHeader(pending.header, pending.bytes);
+      return;
+    }
+    default:
+      throw new Error(`unknown probe event: ${tag}`);
+  }
+}
+
+function probeResultFromHeader(header, bytes) {
+  const [kind, fields] = splitEvent(header);
+  const variant = BULK_PROBE_VARIANTS[kind];
+  if (!variant) {
+    throw new Error(`unknown chunked probe result kind: ${kind}`);
+  }
+  return { [kind]: { [variant]: { ...fields, bytes } } };
+}
+
+function decodeProbeResult(result) {
+  const [kind, outcome] = splitEvent(result);
+  const [variant, body] = splitEvent(outcome);
+  if (body && typeof body.bytes === 'string') {
+    return { [kind]: { [variant]: { ...body, bytes: decodeBase64(body.bytes) } } };
+  }
+  return result;
+}
+
+// Split an externally tagged serde enum value into `[tag, body]`. Unit variants
+// encode as a bare string and carry no body.
+function splitEvent(event) {
+  if (typeof event === 'string') {
+    return [event, null];
+  }
+  const tag = Object.keys(event || {})[0];
+  if (tag == null) {
+    throw new Error(`malformed tagged value: ${JSON.stringify(event)}`);
+  }
+  return [tag, event[tag]];
+}
+
+function requireResult(state, index, family) {
+  const result = state.results[index]?.[family];
+  if (!result) {
+    throw new Error(`${family} event for query ${index} arrived before its begin event`);
+  }
+  return result;
+}
+
+function requirePending(pending, key, what) {
+  const entry = pending.get(key);
+  if (!entry) {
+    throw new Error(`${what} chunk for ${JSON.stringify(key)} arrived before its begin event`);
+  }
+  return entry;
+}
+
+function refKey(resourceRef) {
+  return JSON.stringify(resourceRef);
 }
 
 async function fetchSmokeProject() {
@@ -490,7 +725,7 @@ function readVisualFrame(response, outputNodeId) {
   }
 
   const outputPayload = findOutputPayload(resources, outputNodeId);
-  const outputBytes = decodeBase64(outputPayload.bytes);
+  const outputBytes = outputPayload.bytes;
   const stats = outputStats(outputBytes);
   const outputChannels = {
     metadata: outputPayload.metadata.output_channels,
@@ -517,7 +752,7 @@ function readVisualFrame(response, outputNodeId) {
       width: texture.width,
       height: texture.height,
       format: texture.format,
-      bytes: decodeBase64(texture.bytes),
+      bytes: texture.bytes,
     },
   };
 }
@@ -620,7 +855,10 @@ function recordWorkerMessage(message) {
     appendLog(message.level, message.message);
   } else if (message.kind === 'protocol_out') {
     const response = JSON.parse(message.frame);
-    appendLog('protocol', `id=${response.id} ${Object.keys(response.msg || {})[0] || 'unknown'}`);
+    // Streamed bodies (project reads) span several frames per request id, so
+    // log the envelope's stream position to keep them apart.
+    const stream = response.fin === false ? ` seq=${response.seq ?? 0}` : '';
+    appendLog('protocol', `id=${response.id}${stream} ${Object.keys(response.msg || {})[0] || 'unknown'}`);
   } else {
     appendLog(message.kind || 'message', JSON.stringify(message));
   }

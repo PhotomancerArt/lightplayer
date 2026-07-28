@@ -81,6 +81,14 @@ pub enum UiPendingEditKind {
         /// "deleted" for a pending body deletion.
         detail: String,
     },
+    /// A staged node removal (the dedicated `RemoveNode` op): the entry's
+    /// label is the removed node's name and `slot_path_display` is the
+    /// attachment site (`nodes[<key>]` / `entries[<k>]`). The row's revert
+    /// dispatches `SlotEditOp::Revert` at the site; the controller expands
+    /// it into the inverse composed batch (`RemoveSlotEdit` at the site plus
+    /// `ClearArtifact` per staged file deletion). The staged deletions
+    /// themselves also list as [`Self::AssetBody`] "deleted" file rows.
+    NodeRemoved,
 }
 
 /// Save-panel section for a pending edit — the entry-level mirror of the
