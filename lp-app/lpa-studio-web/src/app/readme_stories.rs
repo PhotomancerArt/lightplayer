@@ -33,6 +33,7 @@ use crate::app::story_fixtures::{
 const STORY_NOW: f64 = 1_800_000_000.0;
 
 #[story(
+    screenshot,
     description = "README front-page hero: the full Studio editing a loaded show — sidebar node tree, the focused Aurora shader card (TRACKED visual preview with rendered output, knob row, agent chat, code drawer), and the connected simulator pane. Single-state and deterministic on purpose; the repo README embeds the lg capture."
 )]
 fn studio_hero() -> Element {
@@ -47,6 +48,7 @@ fn studio_hero() -> Element {
 }
 
 #[story(
+    screenshot,
     description = "README home shot: the gallery with the simulator running a project, a connected device, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
 )]
 fn home_gallery() -> Element {
@@ -63,6 +65,7 @@ fn home_gallery() -> Element {
 }
 
 #[story(
+    screenshot,
     description = "README node-card band: playlist strip, shader, and fixture cards side by side, every preview TRACKED and rendering deterministic output (aurora pixel fields, ring lamp layout). Single-state; the repo README embeds the lg capture."
 )]
 fn node_cards() -> Element {
