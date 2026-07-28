@@ -1,0 +1,142 @@
+//! The fixture face's in-place mapping editor: the embeddable
+//! [`MapEditor`] wired to the asset pipeline — fetch the `.map2d.json`
+//! body, edit locally (editor-owned undo), apply committed documents
+//! whole-body (`AssetEditOp::ApplyBody`), Save = project `SaveOverlay`,
+//! Revert = drop the applied edit. The "one home" flip: this mounts inside
+//! the fixture face's output section, no separate pane.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use dioxus::prelude::*;
+use lpa_mapping_editor::{Map2dDoc, MapEditor};
+use lpa_studio_core::{UiAction, UiAssetEditor};
+
+use crate::base::icon::{StudioIcon, StudioIconName};
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn MappingAssetEditor(
+    editor: UiAssetEditor,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    // One-shot base-body fetch per artifact (the code editor's guard).
+    let fetch_requested = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    if editor.content.is_none() {
+        let uri = editor.artifact.to_uri();
+        let mut requested = fetch_requested.borrow_mut();
+        if requested.as_deref() != Some(uri.as_str()) {
+            *requested = Some(uri);
+            if let Some(handler) = on_action {
+                let fetch = editor.fetch_action();
+                spawn(async move {
+                    handler.call(fetch);
+                });
+            }
+        }
+    }
+
+    // Seed / re-seed the editor from pipeline content, suppressing the echo
+    // of our own applies so in-editor undo history survives its round-trip.
+    let mut seeded = use_signal(|| None::<(u64, Map2dDoc)>);
+    let last_applied = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    let mut parse_failure = use_signal(|| None::<String>);
+    let content_text = editor
+        .content
+        .as_ref()
+        .and_then(|content| content.text().map(str::to_string));
+    if let Some(text) = &content_text {
+        let echo = last_applied.borrow().as_deref() == Some(text.as_str());
+        let already = seeded
+            .peek()
+            .as_ref()
+            .is_some_and(|(_, doc)| doc.to_json() == *text || echo);
+        if !already {
+            match Map2dDoc::from_json(text) {
+                Ok(doc) => {
+                    let epoch = seeded.peek().as_ref().map_or(0, |(epoch, _)| epoch + 1);
+                    seeded.set(Some((epoch, doc)));
+                    parse_failure.set(None);
+                }
+                Err(error) => parse_failure.set(Some(error.to_string())),
+            }
+        }
+    }
+
+    let dirty = editor.content.as_ref().is_some_and(|content| content.dirty);
+    let apply_editor = editor.clone();
+    let apply_last = Rc::clone(&last_applied);
+    let on_doc_change = move |json: String| {
+        *apply_last.borrow_mut() = Some(json.clone());
+        if let Some(handler) = &on_action {
+            handler.call(apply_editor.apply_action(&json));
+        }
+    };
+
+    rsx! {
+        div { class: "lpme-face-editor",
+            if let Some(failure) = parse_failure() {
+                div { class: "lpme-error", "{editor.source}: {failure}" }
+            } else if let Some((epoch, doc)) = seeded() {
+                MapEditor {
+                    doc_epoch: epoch,
+                    doc,
+                    on_doc_change,
+                }
+                div { class: "lpme-face-editor-bar",
+                    span { class: "lpme-status", "{editor.source}" }
+                    if editor.in_flight {
+                        span { class: "lpme-status", "applying…" }
+                    }
+                    if let Some(failure) = &editor.failure {
+                        span { class: "lpme-face-editor-failure", "{failure}" }
+                    }
+                    div { class: "lpme-spacer" }
+                    span {
+                        class: if dirty { "lpme-status lpme-dirty" } else { "lpme-status" },
+                        if dirty { "Unsaved" } else { "Saved" }
+                    }
+                    button {
+                        class: "lpme-btn",
+                        title: "discard the applied edit and return to the saved file",
+                        disabled: !dirty,
+                        onclick: {
+                            let editor = editor.clone();
+                            let last = Rc::clone(&last_applied);
+                            move |_| {
+                                *last.borrow_mut() = None;
+                                if let Some(handler) = &on_action {
+                                    handler.call(editor.revert_action());
+                                }
+                            }
+                        },
+                        StudioIcon { name: StudioIconName::Revert, size: 13 }
+                        "Revert"
+                    }
+                    button {
+                        class: "lpme-btn",
+                        title: "save the project (writes the applied mapping to disk)",
+                        disabled: !dirty,
+                        onclick: move |_| {
+                            if let Some(handler) = &on_action {
+                                handler.call(save_overlay_action());
+                            }
+                        },
+                        StudioIcon { name: StudioIconName::Save, size: 13 }
+                        "Save"
+                    }
+                }
+            } else {
+                div { class: "lpme-face-editor-loading", "loading {editor.source}…" }
+            }
+        }
+    }
+}
+
+fn save_overlay_action() -> UiAction {
+    use lpa_studio_core::{ControllerId, ProjectController, ProjectOp};
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::SaveOverlay,
+    )
+}

@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
-    fixture_node_view, fyeah_presentable_doc, map2d_fixture_face,
+    fixture_node_view, fyeah_presentable_doc, map2d_fixture_face, map2d_fixture_face_editing,
 };
 use crate::app::node::map_view::MapViewOptions;
 use crate::app::node::{FixtureFace, NodePane};
@@ -124,6 +124,21 @@ fn button_rings_numbered() -> Element {
                     universes: false,
                     live: true,
                 },
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "One home, edit mode: the output section flipped into the in-place mapping editor (asset-pipeline synced), pencil toggle active."
+)]
+fn mapping_edit_mode() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: map2d_fixture_face_editing(&fyeah_presentable_doc()),
+                edit_initially_open: true,
                 on_action: move |_| {},
             }
         }

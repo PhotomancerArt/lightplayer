@@ -99,6 +99,7 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
     Some(UiFixtureFace {
         preview,
         brightness,
+        mapping_editor: inline_editor_of_kind(sections, UiAssetEditorKind::Map2d),
     })
 }
 
@@ -137,17 +138,27 @@ fn config_rows(sections: &[UiNodeSection]) -> Vec<&UiConfigSlot> {
 /// drawer reuses it verbatim (it is the SAME editor the sections view
 /// renders, minus the studio-level agent decoration).
 fn glsl_inline_editor(sections: &[UiNodeSection]) -> Option<UiAssetEditor> {
-    fn in_slots(slots: &[UiConfigSlot]) -> Option<UiAssetEditor> {
+    inline_editor_of_kind(sections, UiAssetEditorKind::Glsl)
+}
+
+/// First inline editor of `kind` anywhere in the asset/config slot rows
+/// (records searched recursively) — the face derives from section DTOs,
+/// never from controller state.
+fn inline_editor_of_kind(
+    sections: &[UiNodeSection],
+    kind: UiAssetEditorKind,
+) -> Option<UiAssetEditor> {
+    fn in_slots(slots: &[UiConfigSlot], kind: UiAssetEditorKind) -> Option<UiAssetEditor> {
         slots.iter().find_map(|slot| match &slot.body {
-            UiConfigSlotBody::Asset(asset) if asset.editor == UiAssetEditorKind::Glsl => {
-                asset.inline_editor.clone()
-            }
-            UiConfigSlotBody::Record(record) => in_slots(&record.fields),
+            UiConfigSlotBody::Asset(asset) if asset.editor == kind => asset.inline_editor.clone(),
+            UiConfigSlotBody::Record(record) => in_slots(&record.fields, kind),
             _ => None,
         })
     }
     sections.iter().find_map(|section| match section {
-        UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => in_slots(slots),
+        UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => {
+            in_slots(slots, kind)
+        }
         _ => None,
     })
 }

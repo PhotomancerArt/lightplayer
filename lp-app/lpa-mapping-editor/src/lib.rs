@@ -23,4 +23,7 @@ pub use editor_core::view_geometry::{
     universe_rgb, wiring_arrows,
 };
 pub use view::map_editor::{EditorFileOps, EditorViewOptions, MapEditor};
+// The document type IS the component input type; re-exported so hosts that
+// only embed the editor need no direct lpc-mapping dependency.
+pub use lpc_mapping::Map2dDoc;
 pub use view::map_editor_page::MapEditorPage;

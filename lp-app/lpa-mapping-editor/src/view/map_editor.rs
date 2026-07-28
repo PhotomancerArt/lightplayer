@@ -83,7 +83,10 @@ pub fn MapEditor(
             .unwrap_or_default()
     });
     let view_opts = use_signal(move || initial_view.unwrap_or_default());
-    let viewport = use_signal(|| [1200.0f32, 800.0f32]);
+    // Measured canvas size (CSS px), fed by the canvas's mount/resize
+    // handlers. `None` until the first measurement — fit waits for it, so
+    // the embedded editor fits its real box, not a guessed window.
+    let viewport = use_signal(|| None::<[f32; 2]>);
     let mut fit_pending = use_signal(|| initial_camera.is_none());
     let drag = use_signal(|| None::<CanvasDrag>);
 
@@ -109,7 +112,12 @@ pub fn MapEditor(
         let mut camera = camera;
         let mut fit_pending_effect = fit_pending;
         use_effect(move || {
-            if fit_pending_effect() {
+            // Reactive on BOTH: a pending fit waits for the first real
+            // viewport measurement and re-runs when it lands.
+            let viewport_now = viewport();
+            if fit_pending_effect()
+                && let Some([width, height]) = viewport_now
+            {
                 let bounds = {
                     let session_read = session.read();
                     let doc = session_read.doc();
@@ -119,7 +127,6 @@ pub fn MapEditor(
                         .or_else(|| doc.canvas_bounds())
                 };
                 if let Some(bounds) = bounds {
-                    let [width, height] = *viewport.peek();
                     camera.write().fit(bounds, width, height, 60.0);
                 }
                 fit_pending_effect.set(false);

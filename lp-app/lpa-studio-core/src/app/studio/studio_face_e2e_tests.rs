@@ -97,6 +97,11 @@ fn node_faces_derive_and_edit_end_to_end() {
         .clone()
         .expect("fader edits are addressed");
     assert_eq!(fader_address.path.to_string(), "brightness.some");
+    let mapping_editor = face
+        .mapping_editor
+        .as_ref()
+        .expect("map2d fixture derives the in-face mapping editor");
+    assert_eq!(mapping_editor.source, "sign.map2d.json");
 
     // -- fallback: the clock keeps the generic sections ---------------------
     assert_eq!(node_by_kind(&snapshot, "Clock").face, None);
@@ -317,10 +322,17 @@ fn face_e2e_server() -> LpServer {
   "kind": "Fixture",
   "render_size": { "width": 4, "height": 4 },
   "brightness": 200,
+  "mapping": { "kind": "Map2d", "source": "sign.map2d.json" },
   "bindings": {
     "input": { "source": "bus:visual.out" },
     "output": { "target": "bus:control.out" }
   }
+}"#;
+    let map2d_json = r#"{
+  "format": 1,
+  "objects": [
+    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
+  ]
 }"#;
     let output_json = r#"{
   "kind": "Output",
@@ -334,6 +346,7 @@ fn face_e2e_server() -> LpServer {
         ("clock.json", clock_json),
         ("shader.json", shader_json),
         ("fixture.json", fixture_json),
+        ("sign.map2d.json", map2d_json),
         ("output.json", output_json),
         ("shader.glsl", FACE_SHADER),
     ];
