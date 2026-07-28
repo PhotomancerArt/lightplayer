@@ -24,12 +24,12 @@ Data-driven controls. These render generic `Ui*` data structs from
 Rules:
 
 - May depend on `lpa-studio-core` generic UI types such as `UiAction`,
-  `UiStatus`, `UiProgress`, `UiIssue`, `UiActivityView`, `UiPaneView`,
-  and `UiStepsView`.
+  `UiStatus`, `UiProgress`, `UiIssue`, `UiActivityView`, and
+  `UiPaneView`.
 - May compose `base`.
 - Should not own Studio-specific workflows when `app` can compose them.
-- Use the `view` submodule for composed render surfaces such as pane bodies,
-  activities, and step workflows. Smaller controls such as status chips,
+- Use the `view` submodule for composed render surfaces such as pane bodies
+  and activities. Smaller controls such as status chips,
   progress bars, log lists, and issue views live directly under `core`.
 
 Examples: action strips, status chips, progress bars, metric grids, issue
@@ -82,7 +82,7 @@ Examples:
 ```text
 src/base/popover_stories.rs             -> base/popover/<story>
 src/core/action/action_strip_stories.rs  -> core/action/action-strip/<story>
-src/app/device/device_pane_stories.rs  -> studio/device/device-pane/<story>
+src/app/home/home_gallery_stories.rs     -> studio/home/home-gallery/<story>
 src/exploration/node_ui_stories.rs       -> exploration/node-ui/<story>
 ```
 

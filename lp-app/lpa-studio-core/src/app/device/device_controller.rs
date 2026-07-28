@@ -31,22 +31,17 @@ use std::rc::Rc;
 
 use lpa_link::providers::{LinkEnv, LinkProviderRegistry};
 use lpa_link::{
-    DeviceSession, DeviceState, DeviceTimers, LinkConnector, LinkEndpointId, LinkProvider,
-    LinkProviderKind,
+    DeviceSession, DeviceTimers, LinkConnector, LinkEndpointId, LinkProvider, LinkProviderKind,
 };
 
 use crate::app::device::connect_choices::{provider_auto_connects, provider_choices};
 use crate::app::device::device_event_adapter::console_event_sink;
 use crate::app::device::link_ux::{link_session_logs, map_link_error};
 use crate::app::runtime_pool::runtime_session::DeviceHandle;
-use crate::core::view::steps_view::{UiStepState, UiStepView};
 use crate::{
     ConnectFlowState, ConnectedDeviceSummary, Controller, ControllerId, DeviceOp, EndpointChoice,
-    ProgressState, RuntimePayload, ServerFailureKind, ServerState, SimAttachment, UiAction,
-    UiError, UiIssue, UiLogDraft, UiMetric, UiPaneView, UiStatus, UiStepsView, UiViewContent,
+    ProgressState, RuntimePayload, SimAttachment, UiError, UiIssue, UiLogDraft,
 };
-
-use crate::app::places::{DeviceContent, DeviceSyncState};
 
 use crate::app::device::link_ux::is_port_held_error;
 
@@ -82,28 +77,6 @@ pub struct DeviceController {
     pending_device_logs: Rc<RefCell<Vec<UiLogDraft>>>,
 }
 
-/// The runtime evidence the device pane derives its sections from, read
-/// off the [`RuntimePool`](crate::RuntimePool) by `StudioController` (the
-/// controller itself is slotless).
-pub(crate) struct DeviceRuntimeEvidence {
-    /// The attached runtime is real hardware (the sim is not a device —
-    /// D22).
-    pub is_hardware: bool,
-    /// The attached runtime is the simulator.
-    pub is_sim: bool,
-    /// The attached hardware's device state, when hardware is attached.
-    pub device_state: Option<DeviceState>,
-    /// The lens session's server protocol state (`Disconnected` when no
-    /// session exists).
-    pub server_state: ServerState,
-}
-
-impl DeviceRuntimeEvidence {
-    fn has_lightplayer_state(&self) -> bool {
-        matches!(self.server_state, ServerState::Connected { .. })
-    }
-}
-
 /// Outcome of [`DeviceController::open_provider`].
 pub enum DeviceOpenOutcome {
     /// Endpoint discovery finished; the picker state carries the choices.
@@ -125,11 +98,6 @@ pub enum DeviceOpenOutcome {
 
 impl DeviceController {
     pub const NODE_ID: &'static str = "studio|device";
-    /// The pane's single device section — also the activity target the
-    /// connect/flash/push flows report progress against.
-    pub const SECTION_DEVICE: &'static str = "device";
-    /// Firmware operations, visually separate from project deploy (D15).
-    pub const SECTION_FIRMWARE: &'static str = "firmware";
 
     pub fn new() -> Self {
         Self::with_registry(LinkProviderRegistry::from_env(LinkEnv::default()))
@@ -636,178 +604,6 @@ impl DeviceController {
             _ => None,
         }
     }
-
-    // -----------------------------------------------------------------
-    // Views
-    // -----------------------------------------------------------------
-
-    /// The editor's device pane (D23). `runtime` is the pool-derived
-    /// runtime evidence; `device_sync` is the connect-time pull result;
-    /// `usual_device` names where this project usually lives when nothing
-    /// is connected.
-    pub(crate) fn view(
-        &self,
-        runtime: &DeviceRuntimeEvidence,
-        device_sync: Option<&DeviceSyncState>,
-        usual_device: Option<String>,
-    ) -> UiPaneView {
-        let sections = if runtime.is_hardware {
-            let mut sections = vec![self.connected_device_section(runtime, device_sync)];
-            sections.push(self.firmware_section());
-            sections
-        } else {
-            vec![self.disconnected_device_section(runtime, usual_device)]
-        };
-        UiPaneView::new(
-            Self::NODE_ID,
-            "Device",
-            self.status(runtime, device_sync),
-            UiViewContent::Stack(Box::new(UiStepsView::new(sections))),
-            Vec::new(),
-        )
-    }
-
-    fn status(
-        &self,
-        runtime: &DeviceRuntimeEvidence,
-        device_sync: Option<&DeviceSyncState>,
-    ) -> UiStatus {
-        if !runtime.is_hardware {
-            return UiStatus::neutral("No device");
-        }
-        // Incompatible firmware outranks the server state: the ONE
-        // affordance is reflashing (explicit, never automatic).
-        if matches!(runtime.device_state, Some(DeviceState::Incompatible { .. })) {
-            return UiStatus::attention("Reflash needed");
-        }
-        match &runtime.server_state {
-            ServerState::Failed {
-                kind: ServerFailureKind::NoFirmware,
-                ..
-            } => UiStatus::attention("Ready to flash"),
-            ServerState::Failed { .. } => UiStatus::error("Needs attention"),
-            ServerState::Connecting { .. } => UiStatus::working("Connecting"),
-            ServerState::Connected { .. } => {
-                match device_sync.and_then(|sync| sync.identity.as_ref()) {
-                    Some(identity) => UiStatus::good(identity.name.clone()),
-                    None => UiStatus::good("Connected"),
-                }
-            }
-            ServerState::Disconnected => UiStatus::working("Connecting"),
-        }
-    }
-
-    /// The pane when no hardware is attached: association line, ambient
-    /// runtime line, and the dialog entry.
-    fn disconnected_device_section(
-        &self,
-        runtime: &DeviceRuntimeEvidence,
-        usual_device: Option<String>,
-    ) -> UiStepView {
-        let mut lines = Vec::new();
-        if let Some(usual) = usual_device {
-            lines.push(usual);
-        }
-        if runtime.is_sim && runtime.has_lightplayer_state() {
-            // D16: name where you are — ambient, not a "device"
-            lines.push("Running in the simulator.".to_string());
-        }
-        if lines.is_empty() {
-            lines.push("No device connected.".to_string());
-        }
-        UiStepView::new(Self::SECTION_DEVICE, "Device", UiStepState::Pending)
-            .with_body(UiViewContent::text(lines.join("\n")))
-            // M8′: the dialog is gone — the pane's door is the connect
-            // flow itself (the gallery card carries everything else)
-            .with_actions(vec![
-                UiAction::from_op(
-                    self.node_id(),
-                    DeviceOp::OpenProvider {
-                        provider_id: LinkProviderKind::BrowserSerialEsp32,
-                    },
-                )
-                .with_label("Connect device…")
-                .with_summary("Connect a LightPlayer device over USB.")
-                .with_icon("usb"),
-            ])
-    }
-
-    /// The pane when hardware is attached: identity, contents relation,
-    /// and the push/disconnect actions.
-    fn connected_device_section(
-        &self,
-        runtime: &DeviceRuntimeEvidence,
-        device_sync: Option<&DeviceSyncState>,
-    ) -> UiStepView {
-        // Incompatible surfaces here with its reflash-only explanation; the
-        // firmware section below carries the affordance.
-        if let Some(DeviceState::Incompatible { reason }) = &runtime.device_state {
-            return UiStepView::new(Self::SECTION_DEVICE, "Device", UiStepState::NeedsAttention)
-                .with_body(UiViewContent::Issue(UiIssue::new(reason.message())))
-                .with_actions(self.connected_device_actions());
-        }
-        let state = match &runtime.server_state {
-            ServerState::Failed { .. } => UiStepState::NeedsAttention,
-            ServerState::Connecting { .. } | ServerState::Disconnected => UiStepState::Active,
-            ServerState::Connected { .. } => UiStepState::Complete,
-        };
-        let mut metrics = Vec::new();
-        if let Some(sync) = device_sync {
-            if let Some(identity) = &sync.identity {
-                metrics.push(UiMetric::new("Name", &identity.name));
-            }
-            metrics.push(UiMetric::new("Holds", content_line(&sync.content)));
-        }
-        if let ServerState::Connected { protocol } = &runtime.server_state {
-            metrics.push(UiMetric::new("Protocol", protocol));
-        }
-        let body = if metrics.is_empty() {
-            match &runtime.server_state {
-                ServerState::Failed {
-                    kind: ServerFailureKind::NoFirmware,
-                    ..
-                } => UiViewContent::text("No LightPlayer firmware is running on this device."),
-                ServerState::Failed { issue, .. } => UiViewContent::Issue(issue.clone()),
-                _ => UiViewContent::text("Connecting to the device…"),
-            }
-        } else {
-            UiViewContent::Metrics(metrics)
-        };
-        UiStepView::new(Self::SECTION_DEVICE, "Device", state)
-            .with_body(body)
-            .with_actions(self.connected_device_actions())
-    }
-
-    fn connected_device_actions(&self) -> Vec<UiAction> {
-        // M8′: pushing lives on the CARDS (the gallery's Push and the
-        // Project-tab picker); the pane keeps only the session verb.
-        vec![
-            UiAction::from_op(self.node_id(), DeviceOp::DisconnectDevice)
-                .with_label("Disconnect")
-                .with_summary("Close the device session."),
-        ]
-    }
-
-    /// Firmware ops, visually separate from deploy (D15).
-    fn firmware_section(&self) -> UiStepView {
-        UiStepView::new(Self::SECTION_FIRMWARE, "Firmware", UiStepState::Complete)
-            .with_body(UiViewContent::text(
-                "Firmware operations are separate from project deploys.",
-            ))
-            .with_actions(vec![
-                UiAction::from_op(
-                    self.node_id(),
-                    DeviceOp::ProvisionFirmware { setup_name: None },
-                )
-                .with_label("Update firmware")
-                .with_summary("Flash the bundled LightPlayer firmware.")
-                .with_icon("zap"),
-                UiAction::from_op(self.node_id(), DeviceOp::ResetToBlank)
-                    .with_label("Erase device")
-                    .with_summary("Erase the device's flash storage entirely.")
-                    .with_icon("remove"),
-            ])
-    }
 }
 
 /// Test seams: stubbed connect-flow state for view/derivation tests that
@@ -878,23 +674,6 @@ async fn open_sim_attachment(
         }),
         logs,
     ))
-}
-
-/// One line for what the device holds, from the connect-time pull.
-fn content_line(content: &DeviceContent) -> String {
-    match content {
-        DeviceContent::Empty => "Nothing yet".to_string(),
-        DeviceContent::Known { slug, relation, .. } => match relation {
-            lpc_history::SyncRelation::AtHead => format!("{slug} — up to date"),
-            lpc_history::SyncRelation::Behind => format!("{slug} — behind your copy"),
-            lpc_history::SyncRelation::Diverged => format!("{slug} — edited elsewhere"),
-        },
-        DeviceContent::Adopted { slug, .. } => format!("{slug} — pulled into your library"),
-        DeviceContent::PendingIdentity { .. } => {
-            "A project — name this device to keep it".to_string()
-        }
-        DeviceContent::Unreadable { .. } => "Contents unreadable".to_string(),
-    }
 }
 
 impl Controller for DeviceController {

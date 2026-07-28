@@ -3,7 +3,7 @@ use lpa_studio_core::{UiProgress, UiViewContent};
 use lpa_studio_web_story_macros::story;
 
 use crate::core::ViewContent;
-use crate::core::story_fixtures::{story_activity, story_issue, story_metrics, story_steps};
+use crate::core::story_fixtures::{story_activity, story_issue, story_metrics};
 
 #[story]
 pub(crate) fn body_variants() -> Element {
@@ -46,7 +46,7 @@ pub(crate) fn composed_variants() -> Element {
                 on_action: move |_| {},
             }
             ViewContent {
-                body: UiViewContent::Stack(Box::new(story_steps())),
+                body: UiViewContent::Issue(story_issue()),
                 running: false,
                 on_action: move |_| {},
             }

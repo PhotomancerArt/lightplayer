@@ -1,6 +1,4 @@
-use crate::{
-    ProjectEditorView, UiActivityView, UiBusView, UiIssue, UiMetric, UiProgress, UiStepsView,
-};
+use crate::{ProjectEditorView, UiActivityView, UiBusView, UiIssue, UiMetric, UiProgress};
 
 /// Generic body content for panes and workflow steps.
 ///
@@ -9,8 +7,6 @@ use crate::{
 /// DTOs and use these variants for reusable body shapes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiViewContent {
-    /// No visible body content.
-    Empty,
     /// A single paragraph of text.
     Text(String),
     /// Progress for ongoing work.
@@ -21,8 +17,6 @@ pub enum UiViewContent {
     Issue(UiIssue),
     /// A compact label/value metric grid.
     Metrics(Vec<UiMetric>),
-    /// A composed workflow with ordered steps.
-    Stack(Box<UiStepsView>),
     /// Project editor surface.
     ProjectEditor(Box<ProjectEditorView>),
     /// Bus channel surface.
@@ -38,7 +32,6 @@ impl UiViewContent {
     /// Render the body as plain text lines for fallback renderers and tests.
     pub fn render_text_lines(&self) -> Vec<String> {
         match self {
-            Self::Empty => Vec::new(),
             Self::Text(text) => vec![text.clone()],
             Self::Progress(progress) => match &progress.detail {
                 Some(detail) => vec![progress.label.clone(), detail.clone()],
@@ -72,41 +65,6 @@ impl UiViewContent {
                 .iter()
                 .map(|metric| format!("{}: {}", metric.label, metric.value))
                 .collect(),
-            Self::Stack(stack) => {
-                let mut lines = Vec::new();
-                for section in &stack.sections {
-                    lines.push(format!("{} {}", section.state.text_marker(), section.title));
-                    lines.extend(
-                        section
-                            .body
-                            .render_text_lines()
-                            .into_iter()
-                            .map(|line| format!("  {line}")),
-                    );
-                    if !section.actions.is_empty() {
-                        lines.push("  actions:".to_string());
-                        lines.extend(
-                            section
-                                .actions
-                                .iter()
-                                .map(|action| format!("    - {}", action.meta().label)),
-                        );
-                    }
-                }
-                if !stack.terminal.is_empty() {
-                    lines.push("terminal:".to_string());
-                    lines.extend(
-                        stack
-                            .terminal
-                            .iter()
-                            .rev()
-                            .take(12)
-                            .rev()
-                            .map(|line| format!("  {}", line.text)),
-                    );
-                }
-                lines
-            }
             Self::Bus(bus) => {
                 let mut lines = vec![format!("Channels: {}", bus.channels.len())];
                 for channel in &bus.channels {

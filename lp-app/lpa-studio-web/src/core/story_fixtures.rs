@@ -1,12 +1,11 @@
 use core::any::Any;
 
 use lpa_studio_core::core::view::activity_view::{UiActivityStep, UiActivityStepState};
-use lpa_studio_core::core::view::steps_view::{UiStepState, UiStepView};
 use lpa_studio_core::{
     ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerId, ControllerOp,
     PROJECT_ACTION_DEADLINE, UiAction, UiActivityView, UiIssue, UiLogEntry, UiLogLevel,
-    UiLogOrigin, UiLogSource, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView,
-    UiTerminalLine, UiViewContent,
+    UiLogOrigin, UiLogSource, UiMetric, UiPaneView, UiProgress, UiStatus, UiTerminalLine,
+    UiViewContent,
 };
 
 /// Timestamp shared by the core story log fixtures (deterministic stories).
@@ -117,30 +116,15 @@ pub(crate) fn story_activity() -> UiActivityView {
         .with_terminal(story_terminal_lines())
 }
 
-pub(crate) fn story_steps() -> UiStepsView {
-    UiStepsView::new(vec![
-        UiStepView::new("connection", "Select connection", UiStepState::Complete)
-            .with_body(UiViewContent::text("Simulator provider selected.")),
-        UiStepView::new("device", "Connect device", UiStepState::Active)
-            .with_body(UiViewContent::Progress(UiProgress::indeterminate(
-                "Opening link session",
-            )))
-            .with_actions(vec![disabled_action()]),
-        UiStepView::new("project", "Open project", UiStepState::Pending)
-            .with_body(UiViewContent::text("Connect LightPlayer first.")),
-        UiStepView::new("sync", "Sync project", UiStepState::NeedsAttention)
-            .with_body(UiViewContent::Issue(story_issue()))
-            .with_actions(vec![story_action(StoryOp::Retry)]),
-    ])
-    .with_terminal(story_terminal_lines())
-}
-
+/// The generic pane fixture: a bus-shaped body with a confirmation
+/// action, standing in for "a pane with a busy status". Was a Device
+/// step-stack until that pane retired.
 pub(crate) fn story_pane() -> UiPaneView {
     UiPaneView::new(
         ControllerId::new("story|core|pane"),
-        "Device",
-        UiStatus::working("Connecting"),
-        UiViewContent::Stack(Box::new(story_steps())),
+        "Project",
+        UiStatus::working("Syncing"),
+        UiViewContent::Metrics(story_metrics()),
         vec![confirmation_action()],
     )
 }
@@ -154,7 +138,6 @@ pub(crate) enum StoryOp {
     Primary,
     Secondary,
     Tertiary,
-    Retry,
 }
 
 impl ControllerOp for StoryOp {
@@ -178,11 +161,6 @@ impl ControllerOp for StoryOp {
                 ActionPriority::Tertiary,
             )
             .with_icon("disconnect"),
-            Self::Retry => ActionMeta::new(
-                "Retry sync",
-                "Retry the failed project sync.",
-                ActionPriority::Primary,
-            ),
         }
     }
 
