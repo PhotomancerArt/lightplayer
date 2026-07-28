@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 from dataclasses import dataclass, field
@@ -417,21 +418,29 @@ class TestFile:
     notes: list  # extra comment lines
     globals: list = field(default_factory=list)  # (type, name, init_int)
     helpers: list = field(default_factory=list)  # FuncDef
-    tests: list = field(default_factory=list)  # (FuncDef, [args tuples])
+    # (FuncDef, [args tuples]) or (FuncDef, [args tuples], {args: [comment
+    # lines emitted immediately before that run directive]}) — used for
+    # per-target annotations like `@unsupported(wgpu.f32)`.
+    tests: list = field(default_factory=list)
 
     def render(self) -> str:
         funcs = {f.name: f for f in self.helpers}
-        for fn, _runs in self.tests:
+        for entry in self.tests:
+            fn = entry[0]
             funcs[fn.name] = fn
         interp = Interp(funcs, self.globals)
 
         test_lines = []
-        for fn, runs in self.tests:
+        for entry in self.tests:
+            fn, runs = entry[0], entry[1]
+            annots = entry[2] if len(entry) > 2 else {}
             test_lines.append(emit_func(fn))
             test_lines.append("")
             for args in runs:
                 expected = interp.run(fn.name, args)
                 arg_str = ", ".join(str(a) for a in args)
+                for line in annots.get(args, ()):
+                    test_lines.append(f"// {line}")
                 test_lines.append(f"// run: {fn.name}({arg_str}) == {expected}")
             test_lines.append("")
 
@@ -755,6 +764,16 @@ def ifnest_files() -> list:
 # ---------------------------------------------------------------------------
 
 LOOP_KINDS = ["for", "while", "dowhile"]
+
+# wgpu.f32 per-directive annotations (the GPU tier runs the same generated
+# corpus; these mark known-divergent directives so the generator's output
+# matches the annotated files on disk byte-for-byte).
+WGPU_UNSUPPORTED = "@unsupported(wgpu.f32)"
+WGPU_DIVERGES = "wgpu.f32: f32 GPU result diverges (undefined/edge-domain semantics)"
+WGPU_NO_TERMINATE = (
+    "wgpu.f32: shader does not terminate on the GPU tier"
+    " (no fuel; CPU targets rely on fuel-exhaustion traps)"
+)
 
 
 def make_loop(kind: str, var: str, bound, body_stmts: tuple):
@@ -1262,6 +1281,17 @@ def cont_file(kind: str) -> TestFile:
     )
     files_tests.append((fn_d2, [(p,) for p in range(4)]))
 
+    if kind == "dowhile":
+        # Every directive in this file is wgpu-unsupported; the d2_inner p=3
+        # case additionally documents why (the GPU tier has no fuel).
+        annotated = []
+        for fn, runs in files_tests:
+            annots = {args: [WGPU_UNSUPPORTED] for args in runs}
+            if fn.name == "test_cont_dowhile_d2_inner":
+                annots[(3,)] = [WGPU_NO_TERMINATE, WGPU_UNSUPPORTED]
+            annotated.append((fn, runs, annots))
+        files_tests = annotated
+
     return TestFile(
         name=f"cont_{kind}.glsl",
         title=f"continue in {kind} loops",
@@ -1414,6 +1444,242 @@ def brkcont_files() -> list:
 
 
 # ---------------------------------------------------------------------------
+# Axis 3b: break/continue across nested loop pairs, all kind combinations
+# (brknest_*). Motivated by the 2026-07-27 live shader-agent session that
+# blamed "break/continue in nested loops" for a wasm-backend rejection (the
+# actual trigger was the Q32 fabs stack leak, but the corpus had no
+# outer-kind x inner-kind enumeration to rule the control flow out with).
+# ---------------------------------------------------------------------------
+
+
+def make_loop_cont_safe(kind: str, var: str, bound, body_stmts: tuple):
+    """A loop whose body may `continue`: the induction increment precedes the
+    body for while/do-while (the continue-to-condition edge), matching
+    `cont_file`. `for` loops increment in the loop header as usual."""
+    if kind == "for":
+        return make_loop("for", var, bound, body_stmts)
+    inner = (Asn(var, B("+", V(var), L(1))),) + body_stmts
+    if kind == "while":
+        return (Decl(var, L(0)), While(B("<", V(var), bound), inner))
+    if kind == "dowhile":
+        return (Decl(var, L(0)), DoWhile(inner, B("<", V(var), bound)))
+    raise AssertionError(kind)
+
+
+def brknest_file(outer: str, inner: str) -> TestFile:
+    o, i = outer, inner
+
+    # Inner loop carries both continue (j == p) and break (j == q); each must
+    # bind to the inner loop only, across every outer-kind pairing. Site
+    # budget note (applies file-wide): the i32 trace accumulator holds at
+    # most 9 executed sites per run, so bodies keep loop bounds at 2 and
+    # sites sparse; binding mistakes still shift which sites repeat.
+    sa = SiteAlloc()
+    s_in1, s_in2 = sa.site(), sa.site()
+    fn_inner_both = FuncDef(
+        "int",
+        f"test_brknest_{o}_{i}_inner_both",
+        (("int", "p"), ("int", "q")),
+        body(
+            Decl("t", L(0)),
+            *make_loop(
+                o,
+                "i",
+                L(2),
+                body(
+                    *make_loop_cont_safe(
+                        i,
+                        "j",
+                        L(2),
+                        body(
+                            If(B("==", V("j"), V("p")), body(Continue())),
+                            s_in1,
+                            If(B("==", V("j"), V("q")), body(Break())),
+                            s_in2,
+                        ),
+                    ),
+                ),
+            ),
+            sa.site(),
+            Return(V("t")),
+        ),
+    )
+
+    # Outer break placed after an inner loop that continues: the break must
+    # exit the outer loop even though an inner loop body sits between the two.
+    sa2 = SiteAlloc()
+    s2_pre, s2_in, s2_post = sa2.site(), sa2.site(), sa2.site()
+    fn_outer_brk = FuncDef(
+        "int",
+        f"test_brknest_{o}_{i}_outer_brk",
+        (("int", "p"), ("int", "q")),
+        body(
+            Decl("t", L(0)),
+            *make_loop_cont_safe(
+                o,
+                "i",
+                L(2),
+                body(
+                    s2_pre,
+                    *make_loop_cont_safe(
+                        i,
+                        "j",
+                        L(2),
+                        body(If(B("==", V("j"), V("q")), body(Continue())), s2_in),
+                    ),
+                    If(B("==", V("i"), V("p")), body(Break())),
+                    s2_post,
+                ),
+            ),
+            sa2.site(),
+            Return(V("t")),
+        ),
+    )
+
+    # Outer continue placed after an inner loop that breaks: the continue must
+    # re-test the outer condition (increment-first for while/do-while outers).
+    sa3 = SiteAlloc()
+    s3_pre, s3_in, s3_post = sa3.site(), sa3.site(), sa3.site()
+    fn_outer_cont = FuncDef(
+        "int",
+        f"test_brknest_{o}_{i}_outer_cont",
+        (("int", "p"), ("int", "q")),
+        body(
+            Decl("t", L(0)),
+            *make_loop_cont_safe(
+                o,
+                "i",
+                L(2),
+                body(
+                    s3_pre,
+                    *make_loop(
+                        i,
+                        "j",
+                        L(2),
+                        body(If(B("==", V("j"), V("q")), body(Break())), s3_in),
+                    ),
+                    If(B("==", V("i"), V("p")), body(Continue())),
+                    s3_post,
+                ),
+            ),
+            sa3.site(),
+            Return(V("t")),
+        ),
+    )
+
+    return TestFile(
+        name=f"brknest_{o}_{i}.glsl",
+        title=f"break/continue across a {o} loop nesting a {i} loop",
+        notes=[
+            "inner body carries both continue and break (must bind inner);",
+            "outer break and outer continue placed after the inner loop (must",
+            "bind outer). while/do-while induction increments precede the body",
+            "wherever that body can continue.",
+        ],
+        tests=[
+            (fn_inner_both, [(p, q) for p in (0, 1, 3) for q in (0, 2, 3)]),
+            (fn_outer_brk, [(p, q) for p in (0, 1, 3) for q in (0, 1, 2)]),
+            (fn_outer_cont, [(p, q) for p in (0, 1, 3) for q in (0, 1, 2)]),
+        ],
+    )
+
+
+def brknest_files() -> list:
+    files = [brknest_file(o, i) for o in LOOP_KINDS for i in LOOP_KINDS]
+
+    # Depth 3: break innermost, continue middle, break outer — one homogeneous
+    # for-chain and one mixed-kind chain. Sites sit in the innermost body (its
+    # repeat pattern shifts under any wrong binding at any depth); the trailing
+    # site proves the function-level fallthrough is reached.
+    sa = SiteAlloc()
+    s3_site = sa.site()
+    fn_triple = FuncDef(
+        "int",
+        "test_brknest_triple_for",
+        (("int", "p"), ("int", "q"), ("int", "r")),
+        body(
+            Decl("t", L(0)),
+            For(
+                "i",
+                0,
+                B("<", V("i"), L(2)),
+                body(
+                    For(
+                        "j",
+                        0,
+                        B("<", V("j"), L(2)),
+                        body(
+                            If(B("==", V("j"), V("q")), body(Continue())),
+                            For(
+                                "k",
+                                0,
+                                B("<", V("k"), L(2)),
+                                body(If(B("==", V("k"), V("p")), body(Break())), s3_site),
+                            ),
+                        ),
+                    ),
+                    If(B("==", V("i"), V("r")), body(Break())),
+                ),
+            ),
+            sa.site(),
+            Return(V("t")),
+        ),
+    )
+    sa2 = SiteAlloc()
+    s2_site = sa2.site()
+    fn_triple_mixed = FuncDef(
+        "int",
+        "test_brknest_triple_mixed",
+        (("int", "p"), ("int", "q")),
+        body(
+            Decl("t", L(0)),
+            *make_loop_cont_safe(
+                "while",
+                "i",
+                L(2),
+                body(
+                    *make_loop(
+                        "for",
+                        "j",
+                        L(2),
+                        body(
+                            *make_loop_cont_safe(
+                                "dowhile",
+                                "k",
+                                L(2),
+                                body(
+                                    If(B("==", V("k"), V("p")), body(Continue())),
+                                    s2_site,
+                                    If(B("==", V("k"), V("q")), body(Break())),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            sa2.site(),
+            Return(V("t")),
+        ),
+    )
+    files.append(
+        TestFile(
+            name="brknest_triple.glsl",
+            title="break/continue at three nesting depths",
+            notes=[
+                "for/for/for: innermost break, middle continue, outer break;",
+                "while/for/do-while: innermost continue then break. Each must",
+                "bind to its own loop.",
+            ],
+            tests=[
+                (fn_triple, [(p, q, r) for p in (0, 1, 2) for q in (0, 1, 2) for r in (0, 2)]),
+                (fn_triple_mixed, [(p, q) for p in (1, 2, 3) for q in (1, 2, 3)]),
+            ],
+        )
+    )
+    return files
+
+
+# ---------------------------------------------------------------------------
 # Axis 4: early returns from nested blocks (ret_*)
 # ---------------------------------------------------------------------------
 
@@ -1527,7 +1793,13 @@ def ret_files() -> list:
                     "the post-loop site must not run on returning paths.",
                 ],
                 tests=[
-                    (fn, [(p,) for p in range(4)]),
+                    (
+                        fn,
+                        [(p,) for p in range(4)],
+                        {(1,): [WGPU_UNSUPPORTED], (2,): [WGPU_DIVERGES, WGPU_UNSUPPORTED]}
+                        if kind in ("for", "while")
+                        else {},
+                    ),
                     (fn_else, [(p,) for p in range(4)]),
                 ],
             )
@@ -1571,7 +1843,16 @@ def ret_files() -> list:
             name="ret_nested_loop.glsl",
             title="early return from the inner loop of a nested pair",
             notes=["Return fires when (i, j) == (p, q); both loops unwind at once."],
-            tests=[(fn_nested, [(p, q) for p in (0, 1, 2, 3) for q in (0, 1)])],
+            tests=[
+                (
+                    fn_nested,
+                    [(p, q) for p in (0, 1, 2, 3) for q in (0, 1)],
+                    {
+                        (1, 0): [WGPU_UNSUPPORTED],
+                        (2, 0): [WGPU_DIVERGES, WGPU_UNSUPPORTED],
+                    },
+                )
+            ],
         )
     )
 
@@ -2106,6 +2387,297 @@ def terncond_files() -> list:
 
 
 # ---------------------------------------------------------------------------
+# Axis 9: builtin calls inside loop branches (intrin_*)
+#
+# Motivated by the 2026-07-27 `emit_q32_fabs` bug: the WASM Q32 lowering of
+# `abs` left one operand on the stack. A trailing `return` hides that (WASM
+# validation goes polymorphic after `return`, so the implicit function `end` is
+# unreachable and never checked), so the leak only surfaced where the enclosing
+# block *falls through* — a builtin call in an `if` inside a `for`.
+#
+# These shapes therefore put each builtin in exactly that position, and consume
+# the result through an array store, a swizzle store, or not at all. Any
+# emitter that is not stack-neutral fails WASM validation outright, so the
+# assertion that matters here is "it compiles"; the values are a second net.
+# Numeric accuracy per builtin is `filetests/builtins/`, not this axis.
+# ---------------------------------------------------------------------------
+
+
+def _gl(x: float) -> str:
+    """GLSL float literal (always with a decimal point)."""
+    s = f"{x:.6f}".rstrip("0")
+    if s.endswith("."):
+        s += "0"
+    return s
+
+
+def _fract(x: float) -> float:
+    return x - math.floor(x)
+
+
+def _mod(x: float, y: float) -> float:
+    return x - y * math.floor(x / y)
+
+
+def _round(x: float) -> float:
+    # GLSL leaves .5 ties implementation-defined; this axis never generates one.
+    return float(math.floor(x + 0.5))
+
+
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def _smoothstep(e0: float, e1: float, x: float) -> float:
+    t = _clamp((x - e0) / (e1 - e0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+@dataclass(frozen=True)
+class Intrin:
+    """One builtin under test.
+
+    `expr` is GLSL over the loop-local `v` (and `i`); `fn` is the same function
+    in Python over `(v, i)`. `v = voff + vstep * i`, chosen per builtin so every
+    input is exactly representable in both Q16.16 and f32 (and, for `round`,
+    never lands on a .5 tie).
+    """
+
+    name: str
+    expr: str
+    fn: object
+    voff: float = -1.0
+    vstep: float = 0.3125
+    # Targets whose frontend does not implement this builtin yet.
+    unimplemented: tuple = ()
+
+    def v(self, i: int) -> float:
+        return self.voff + self.vstep * i
+
+    def vexpr(self) -> str:
+        sign = "-" if self.voff < 0 else "+"
+        return f"float(i) * {_gl(self.vstep)} {sign} {_gl(abs(self.voff))}"
+
+
+INTRINS = [
+    Intrin("abs", "abs(v)", lambda v, i: abs(v)),
+    Intrin("sign", "sign(v)", lambda v, i: float((v > 0) - (v < 0))),
+    Intrin("floor", "floor(v)", lambda v, i: float(math.floor(v))),
+    Intrin("ceil", "ceil(v)", lambda v, i: float(math.ceil(v))),
+    Intrin("trunc", "trunc(v)", lambda v, i: float(math.trunc(v))),
+    Intrin("round", "round(v)", lambda v, i: _round(v)),
+    Intrin("fract", "fract(v)", lambda v, i: _fract(v)),
+    Intrin("mod", "mod(v, 0.75)", lambda v, i: _mod(v, 0.75)),
+    Intrin("min", "min(v, 0.25)", lambda v, i: min(v, 0.25)),
+    Intrin("max", "max(v, 0.25)", lambda v, i: max(v, 0.25)),
+    Intrin("clamp", "clamp(v, -0.5, 0.5)", lambda v, i: _clamp(v, -0.5, 0.5)),
+    Intrin("mix", "mix(v, 1.0, 0.25)", lambda v, i: v + (1.0 - v) * 0.25),
+    # `step` is missing from the lps-glsl builtin inventory (`smoothstep` is
+    # there); the naga-frontend targets compile it fine.
+    Intrin(
+        "step",
+        "step(0.0, v)",
+        lambda v, i: 0.0 if v < 0.0 else 1.0,
+        unimplemented=("rv32lpn.q32",),
+    ),
+    Intrin(
+        "smoothstep",
+        "smoothstep(0.0, 1.0, v)",
+        lambda v, i: _smoothstep(0.0, 1.0, v),
+    ),
+    # sqrt lowers to an imported builtin call on Q32 — covers the call path.
+    Intrin("sqrt", "sqrt(v)", lambda v, i: math.sqrt(v), voff=0.25, vstep=0.5),
+    Intrin("length", "length(vec2(v, 0.0))", lambda v, i: abs(v)),
+    Intrin(
+        "dot",
+        "dot(vec2(v, 2.0), vec2(0.5, v))",
+        lambda v, i: 0.5 * v + 2.0 * v,
+    ),
+    # Divide by a literal (FdivConstF32) vs by a runtime value (Fdiv).
+    Intrin("div_const", "v / 0.5", lambda v, i: v / 0.5),
+    Intrin(
+        "div_var",
+        "v / (float(i) * 0.25 + 0.5)",
+        lambda v, i: v / (0.25 * i + 0.5),
+    ),
+    # Float→int→float round trip (FtoiSatS / ItofS).
+    Intrin(
+        "cast",
+        "float(int(v * 4.0)) * 0.25",
+        lambda v, i: float(math.trunc(v * 4.0)) * 0.25,
+    ),
+]
+
+
+class IntrinFile:
+    """Renders one `intrin_<name>.glsl`.
+
+    Deliberately templated text rather than the int AST above: this axis needs
+    float locals, arrays, swizzles and builtin calls, none of which the trace
+    interpreter models. Expected values come from `Intrin.fn` directly.
+    """
+
+    N = 8  # loop trip count / array length for the scalar shapes
+    NV = 4  # ditto for the vec2 swizzle shape
+    COUNTS = (0, 1, 3, 8)
+
+    def __init__(self, intr: Intrin):
+        self.intr = intr
+        self.name = f"intrin_{intr.name}.glsl"
+
+    def _e(self, i: int) -> float:
+        return self.intr.fn(self.intr.v(i), i)
+
+    # -- shape A: array store in the taken branch -----------------------------
+    def _store(self) -> tuple:
+        src = f"""float test_intrin_{self.intr.name}_store(int count) {{
+    float a[{self.N}];
+    for (int i = 0; i < {self.N}; i++) {{
+        if (i < count) {{
+            float v = {self.intr.vexpr()};
+            a[i] = {self.intr.expr};
+        }} else {{
+            a[i] = 0.0;
+        }}
+    }}
+    float s = 0.0;
+    for (int j = 0; j < {self.N}; j++) {{
+        s = s + a[j];
+    }}
+    return s;
+}}"""
+        runs = [(c, sum(self._e(i) for i in range(min(c, self.N)))) for c in self.COUNTS]
+        return src, runs
+
+    # -- shape B: result never reaches the return value -----------------------
+    def _unused(self) -> tuple:
+        src = f"""float test_intrin_{self.intr.name}_unused(int count) {{
+    float a[{self.N}];
+    for (int i = 0; i < {self.N}; i++) {{
+        a[i] = 0.0;
+        if (i < count) {{
+            float v = {self.intr.vexpr()};
+            float dead = {self.intr.expr};
+            a[i] = v + 0.0 * dead;
+        }}
+    }}
+    float s = 0.0;
+    for (int j = 0; j < {self.N}; j++) {{
+        s = s + a[j];
+    }}
+    return s;
+}}"""
+        runs = [
+            (c, sum(self.intr.v(i) for i in range(min(c, self.N)))) for c in self.COUNTS
+        ]
+        return src, runs
+
+    # -- shape C: swizzle store beside an array store -------------------------
+    # The swizzle assignment goes through a local `vec2` rather than
+    # `p[i].yx = ...`: storing through an indexed-array swizzle is rejected by
+    # the naga frontend ("store to non-local pointer"), which is a frontend
+    # limitation and not what this axis is testing.
+    def _swizzle(self) -> tuple:
+        src = f"""float test_intrin_{self.intr.name}_swizzle(int count) {{
+    vec2 p[{self.NV}];
+    float a[{self.NV}];
+    for (int i = 0; i < {self.NV}; i++) {{
+        p[i] = vec2(0.0, 0.0);
+        a[i] = 0.0;
+        if (i < count) {{
+            float v = {self.intr.vexpr()};
+            float r = {self.intr.expr};
+            vec2 q = p[i];
+            q.yx = vec2(r, 0.0 - r);
+            p[i] = q;
+            a[i] = p[i].y + p[i].x + r;
+        }}
+    }}
+    return a[0] + a[1] + a[2] + a[3];
+}}"""
+        runs = [
+            (c, sum(self._e(i) for i in range(min(c, self.NV)))) for c in self.COUNTS
+        ]
+        return src, runs
+
+    # -- shape D: call in both arms of a nested if ----------------------------
+    def _nested(self) -> tuple:
+        src = f"""float test_intrin_{self.intr.name}_nested(int count) {{
+    float a[{self.N}];
+    for (int i = 0; i < {self.N}; i++) {{
+        a[i] = 0.0;
+        if (i < count) {{
+            float v = {self.intr.vexpr()};
+            if ((i / 2) * 2 == i) {{
+                a[i] = {self.intr.expr};
+            }} else {{
+                a[i] = 0.0 - ({self.intr.expr});
+            }}
+            a[i] = a[i] + 1.0;
+        }}
+    }}
+    float s = 0.0;
+    for (int j = 0; j < {self.N}; j++) {{
+        s = s + a[j];
+    }}
+    return s;
+}}"""
+
+        def total(c: int) -> float:
+            acc = 0.0
+            for i in range(min(c, self.N)):
+                e = self._e(i)
+                acc += (e if i % 2 == 0 else -e) + 1.0
+            return acc
+
+        runs = [(c, total(c)) for c in self.COUNTS]
+        return src, runs
+
+    def render(self) -> str:
+        lines = ["// test run", ""]
+        lines.append("// " + "=" * 76)
+        lines.append(
+            f"// Control-flow torture: `{self.intr.expr}` inside loop branches"
+        )
+        lines.append("//")
+        lines.append(
+            "// A builtin call in a branch that FALLS THROUGH (no trailing return),"
+        )
+        lines.append(
+            "// with the result stored to an array, to a swizzle, or discarded."
+        )
+        lines.append(
+            "// An emitter that leaves operands on the WASM stack fails to compile here"
+        )
+        lines.append("// even though the same call in a returning function validates.")
+        lines.append("//")
+        lines.append("// GENERATED FILE - do not edit by hand.")
+        lines.append(f"// Regenerate: {REGEN_CMD}")
+        lines.append("// " + "=" * 76)
+        lines.append("")
+        for src, runs in (
+            self._store(),
+            self._unused(),
+            self._swizzle(),
+            self._nested(),
+        ):
+            fname = src.split("(", 1)[0].split()[-1]
+            lines.append(src)
+            lines.append("")
+            for count, expected in runs:
+                # Annotations bind to the next `// run:` only, so repeat them.
+                for target in self.intr.unimplemented:
+                    lines.append(f"// @unimplemented({target})")
+                lines.append(f"// run: {fname}({count}) ~= {expected:.6f}")
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+
+def intrin_files() -> list:
+    return [IntrinFile(i) for i in INTRINS]
+
+
+# ---------------------------------------------------------------------------
 # Corpus assembly + README
 # ---------------------------------------------------------------------------
 
@@ -2117,9 +2689,11 @@ def build_corpus() -> list:
     files += ifloop_files()
     files += mix_files()
     files += brkcont_files()
+    files += brknest_files()
     files += ret_files()
     files += sc_files()
     files += terncond_files()
+    files += intrin_files()
     names = [f.name for f in files]
     assert len(names) == len(set(names)), "duplicate file names in corpus"
     return files
@@ -2178,9 +2752,26 @@ the lowering was fixed. Ternary conditions and arms also evaluate lazily
 | `brk_*`       | break at depth 1 (then/else guard) and depth 2 (inner loop only, nested guard) per loop kind |
 | `cont_*`      | continue, same enumeration; while/do-while variants exercise the continue-to-condition edge |
 | `brkcont_*`   | break and continue mixed across nesting levels / in one body      |
+| `brknest_*`   | nested loop pairs, all outer-kind x inner-kind combinations: inner body with both continue and break, outer break / outer continue placed after the inner loop, plus depth-3 chains (`brknest_triple`) |
 | `ret_*`       | early returns from nested ifs, from each loop kind, from inner loops of nested pairs, from loops inside branches |
 | `sc_*`        | short-circuit `&&`/`||` whose right operand calls a global-mutating function: bare ops, precedence chains, nested groups, and as if/while/ternary conditions |
 | `terncond_*`  | ternaries nested in branch conditions: if conditions, loop bounds, nested ternaries, side-effecting arms |
+| `intrin_*`    | one builtin per file, called inside an `if` inside a `for`, with the result stored to an array, stored through a swizzle, discarded, or negated in the other arm |
+
+## Builtin calls in fall-through branches (`intrin_*`)
+
+Added after the 2026-07-27 `emit_q32_fabs` bug: the WASM Q32 lowering of `abs`
+left one operand on the stack. WASM validation goes polymorphic after `return`,
+so in a straight-line function the implicit `end` is unreachable and the leak is
+never checked — it only surfaced where the enclosing block **falls through**,
+i.e. a builtin call in an `if` inside a loop. Every shape in this axis puts the
+call in exactly that position, so a non-stack-neutral emitter fails to compile
+outright.
+
+The load-bearing assertion here is therefore "it compiles on every backend"; the
+`// run:` values are a second net. Per-builtin numeric accuracy belongs to
+`filetests/builtins/`, not to this axis — inputs are chosen to be exactly
+representable in both Q16.16 and f32 (and never a `.5` tie for `round`).
 
 Each file holds one enumerated shape with `// run:` directives covering every
 (reachable) combination of the branch-selecting parameters, so file names are

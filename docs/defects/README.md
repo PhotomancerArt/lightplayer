@@ -78,6 +78,10 @@ genuinely fits none of these, and define it here in one line.
 - **`stand-in-divergence`** — a stand-in (placeholder, mock, fallback)
   meant to be equivalent to what it replaces diverges in a dimension the
   substitution didn't model.
+- **`inline-emit-stack-imbalance`** — a code-emitter leaves the operand
+  stack unbalanced, and a downstream construct hides it from validation.
+- **`untested-path`** — a variant of a fixed bug survives in a sibling
+  code path the fix and its tests never reached.
 - **`stale-measurement`** — a cached measurement outlives its validity
   because the events that invalidate it aren't all observed.
 
@@ -105,8 +109,11 @@ bookkeeping fact.
 | partial-knowledge-loss | 2026-07-23 | [reconnect-transient-twin-card](2026-07-23-reconnect-transient-twin-card.md) | fixed | lpa-studio-core/home + device |
 | policy-leak | 2026-07-17 | [hardware-attach-opened-editor](2026-07-17-hardware-attach-opened-editor.md) | fixed | lpa-studio-core/studio |
 | stand-in-divergence | 2026-07-23 | [popover-open-resizes-card](2026-07-23-popover-open-resizes-card.md) | fixed | lpa-studio-web/base/popover |
+| stand-in-divergence | 2026-07-27 | [story-check-tolerance-ignores-amplitude](2026-07-27-story-check-tolerance-ignores-amplitude.md) | **open** | lpa-studio-web/scripts + CI |
 | stale-measurement | 2026-07-26 | [popover-outline-stale-on-content-resize](2026-07-26-popover-outline-stale-on-content-resize.md) | fixed | lpa-studio-web/base/popover |
 | stale-measurement | 2026-07-27 | [code-editor-gutter-misaligned](2026-07-27-code-editor-gutter-misaligned.md) | **open** | lpa-studio-web/base/code_editor |
+| inline-emit-stack-imbalance | 2026-07-27 | [wasm-q32-fabs-stack-leak](2026-07-27-wasm-q32-fabs-stack-leak.md) | fixed | lpvm-wasm emit (+ lpvm-cranelift trunc) |
+| untested-path | 2026-07-27 | [cranelift-q32-floor-ceil](2026-07-27-cranelift-q32-floor-ceil.md) | fixed | lpvm-cranelift q32_emit (rv32c) |
 
 ## Predecessor: `docs/bugs/`
 
