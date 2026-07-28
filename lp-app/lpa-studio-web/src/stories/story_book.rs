@@ -9,6 +9,9 @@ use crate::stories::story_registry::{
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StoryBook() -> Element {
+    // Stories render thumbs statically: no PreviewHost boot, no live
+    // badges racing capture (see `StaticThumbPreviews`).
+    use_context_provider(|| crate::app::home::gallery_preview::StaticThumbPreviews);
     let initial_route = selected_story_route_from_hash();
     let mut selected_story_id = use_signal(move || initial_route.story_id);
     let mut viewport = use_signal(move || initial_route.viewport);
