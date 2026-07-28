@@ -23,6 +23,11 @@ use syn::{Error, FnArg, ItemFn, LitStr, ReturnType, Visibility, parse_macro_inpu
 /// ordinary stories should let the build script derive the label from the
 /// function name.
 ///
+/// `screenshot` marks a story whose capture is a published image (README
+/// heroes, docs figures) rather than a design-record baseline: it renders
+/// without the story frame, size label, and checkerboard, and is captured
+/// at `lg` only.
+///
 /// Story route identity is inferred by `lpa-studio-web/build.rs` from the file
 /// path plus function name, so this macro intentionally does not accept an id,
 /// family, category, or component.
@@ -45,6 +50,7 @@ pub fn story(args: TokenStream, item: TokenStream) -> TokenStream {
 struct StoryArgs {
     label: Option<LitStr>,
     description: Option<LitStr>,
+    screenshot: bool,
 }
 
 impl StoryArgs {
@@ -52,6 +58,7 @@ impl StoryArgs {
         let mut args = Self {
             label: None,
             description: None,
+            screenshot: false,
         };
         if input.is_empty() {
             return Ok(args);
@@ -77,13 +84,22 @@ impl StoryArgs {
             return Ok(());
         }
 
+        if meta.path.is_ident("screenshot") {
+            if self.screenshot {
+                return Err(meta.error("duplicate `screenshot` argument in #[story]"));
+            }
+            self.screenshot = true;
+            return Ok(());
+        }
+
         let path = &meta.path;
         let name = path
             .get_ident()
             .map(ToString::to_string)
             .unwrap_or_else(|| quote!(#path).to_string());
         Err(meta.error(format!(
-            "unsupported story argument `{name}`; use `#[story]`, `label = \"...\"`, or `description = \"...\"`"
+            "unsupported story argument `{name}`; use `#[story]`, `label = \"...\"`, \
+             `description = \"...\"`, or `screenshot`"
         )))
     }
 
