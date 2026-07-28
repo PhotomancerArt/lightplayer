@@ -55,9 +55,9 @@ pub use asset::{
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeController, NodeControllerState, NodeCreateOp, NodeRemoveOp, NodeRevertOp,
-    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
-    UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
+    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp,
+    NodeRevertOp, ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent,
+    UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
 };
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{

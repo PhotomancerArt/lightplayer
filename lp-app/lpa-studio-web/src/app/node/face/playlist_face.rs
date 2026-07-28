@@ -1,13 +1,20 @@
 //! The playlist card's permanent face: the ENTRIES strip.
 //!
 //! Children belong OUTSIDE the node body (P2c item 2 — the current child
-//! pattern is cleaner): the face is the strip section only, and the
-//! currently active child's card renders BELOW the playlist card as a
-//! sibling, exactly the way extracted children render under any node
+//! pattern is cleaner): the face is the strip section only, and ONE entry's
+//! child card renders BELOW the playlist card as a sibling, exactly the way
+//! extracted children render under any node
 //! ([`crate::app::node::NodeChildren`]). The playing entry's thumbnail is
 //! replaced by the "ACTIVE" placard (live-blue family — Yona Q5: "ACTIVE",
 //! matching `PlaylistState.active_entry` naming). Entries carry per-entry
 //! duration chips and a cue tag (⚑) when trigger-driven.
+//!
+//! **ACTIVE and selected are different axes** and can land on different
+//! entries: ACTIVE is the engine's playback state (live-blue), selection is
+//! the Studio's editing focus and wears the neutral `selection-border`
+//! color the focused pane uses — deliberately not a status color, so
+//! selection never reads as semantic beside the live tint. The child card
+//! below follows selection, falling back to ACTIVE.
 //!
 //! The strip's tail carries the add chip (authoring P5): an ADDITIVE product
 //! affordance, so it may live on the face per the faces ADR (destructive
@@ -66,6 +73,7 @@ pub fn PlaylistFace(
                     PlaylistEntryChip {
                         key: "{entry.key}",
                         active: face.active == Some(entry.key),
+                        selected: face.selected == Some(entry.key),
                         entry,
                         on_action,
                     }
@@ -105,19 +113,32 @@ fn PlaylistAddChip(menu: UiAddNodeMenu, on_action: EventHandler<UiAction>) -> El
 
 /// One strip entry: thumbnail (or the ACTIVE placard), name, cue tag, and
 /// duration chip. With an entry action and a dispatcher present the chip is
-/// a button — clicking selects/focuses the entry's child node (the reused
+/// a button — clicking selects/focuses the entry's child node, which is
+/// what brings that entry's card up below the playlist (the reused
 /// node-select action; activation-by-click has no wire op today).
+///
+/// `active` and `selected` are independent: the border marks selection
+/// (neutral `selection-border`), the placard marks playback (live-blue), and
+/// an entry can be either, both, or neither.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PlaylistEntryChip(
     entry: UiPlaylistEntry,
     active: bool,
+    #[props(default = false)] selected: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let chip_class = if active {
-        "tw:w-28 tw:flex-none tw:overflow-hidden tw:rounded-sm tw:border tw:border-status-live-border tw:bg-card-subtle tw:ring-1 tw:ring-status-live-border"
+    const CHIP_BASE: &str =
+        "tw:w-28 tw:flex-none tw:overflow-hidden tw:rounded-sm tw:border tw:bg-card-subtle";
+    // Selection outranks the live tint on the BORDER (the placard still
+    // carries active-ness), so the entry being edited is unambiguous even
+    // while it is the one playing.
+    let chip_class = if selected {
+        format!("{CHIP_BASE} tw:border-selection-border tw:ring-1 tw:ring-selection-border")
+    } else if active {
+        format!("{CHIP_BASE} tw:border-status-live-border")
     } else {
-        "tw:w-28 tw:flex-none tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-muted tw:bg-card-subtle"
+        format!("{CHIP_BASE} tw:border-border-muted")
     };
     let label_class = if active {
         "tw:flex tw:items-center tw:gap-1 tw:px-1.5 tw:py-1 tw:text-[11px] tw:text-status-live-foreground"
@@ -169,6 +190,7 @@ fn PlaylistEntryChip(
                 class: "{chip_class} tw:cursor-pointer tw:p-0 tw:text-left tw:hover:border-border",
                 r#type: "button",
                 title: "Select {name}",
+                aria_pressed: "{selected}",
                 onclick: move |event| {
                     event.stop_propagation();
                     handler.call(action.clone());

@@ -87,6 +87,42 @@ impl NodeStarter {
     }
 }
 
+/// A node def's sibling asset reference, when its kind carries one.
+///
+/// Shares [`NodeStarter::for_stem`]'s knowledge of which kinds reference
+/// assets, so a new asset-bearing kind is added in one place.
+pub fn node_def_asset_ref(def: &NodeDef) -> Option<String> {
+    match def {
+        NodeDef::Shader(shader) => shader.source.artifact_value().map(|spec| spec.to_string()),
+        NodeDef::ComputeShader(compute) => {
+            compute.source.artifact_value().map(|spec| spec.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Point a node def's sibling asset reference at `path`.
+///
+/// Used when a copied node is pasted into a project where its original
+/// filename is taken: the asset is written under a free name, and the def
+/// must follow it or the pasted node references a file that is not there.
+/// No-op for kinds that reference no asset.
+pub fn set_node_def_asset_ref(def: &mut NodeDef, path: &str) {
+    match def {
+        NodeDef::Shader(shader) => {
+            if shader.source.artifact_value().is_some() {
+                shader.source = AssetSlot::path(path);
+            }
+        }
+        NodeDef::ComputeShader(compute) => {
+            if compute.source.artifact_value().is_some() {
+                compute.source = AssetSlot::path(path);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Starter template for a node kind: `Some` when the kind carries starter
 /// overrides, `None` when the bare [`NodeDef::default_for_kind`] is already a
 /// usable authoring target (callers then use it directly, with no assets).

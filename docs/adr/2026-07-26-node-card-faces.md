@@ -152,6 +152,19 @@ color.
 
 ### Playlist: one live surface
 
+> **Revised 2026-07-28.** The invariant below pinned the single rendered
+> child to the **active** entry. That made every non-playing entry
+> uneditable: a strip click set focus correctly, and this same derivation
+> then filtered the focused child away
+> (`docs/defects/2026-07-28-playlist-entry-selection.md`). The rule now
+> reads **"exactly one entry child renders: the selected one, falling back
+> to the active one"** — selection being the shared project-wide node
+> focus. `UiPlaylistFace` gained `selected` beside `active`; the ACTIVE
+> placard still tracks the engine, and the two may name different entries.
+> One surface still renders, so the intent below is intact; only its
+> coupling to playback is gone. Activation-by-click remains unbuilt (see
+> Consequences).
+
 The playlist face is the ENTRIES strip only — per-entry name, duration
 chip, cue tag (`trigger_ids` non-empty), and an **ACTIVE** placard
 (matching the engine's `active_entry` vocabulary) replacing the active
