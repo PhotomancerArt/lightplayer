@@ -133,7 +133,16 @@ try {
     process.exitCode = 1;
   }
 } finally {
-  await browser?.close();
+  // Teardown must never overturn the verdict: the smoke result is decided
+  // and reported above, and `process.exitCode` is already set. Letting a
+  // cleanup throw escape turned a PASSING CI run red (ENOTEMPTY unlinking
+  // the Chrome profile). Warn instead — the temp dir is under the OS temp
+  // root, which CI reclaims regardless.
+  try {
+    await browser?.close();
+  } catch (error) {
+    console.warn(`warning: browser teardown failed (smoke verdict stands): ${error}`);
+  }
   server.close();
 }
 
@@ -226,15 +235,46 @@ async function launchBrowser() {
     sessionId,
     async close() {
       try {
-        await cdp.send("Browser.close");
-      } catch {
-        cdp.close();
+        try {
+          await cdp.send("Browser.close");
+        } catch {
+          cdp.close();
+        }
+      } finally {
+        // The child MUST be reaped even if the CDP shutdown above threw: a
+        // live Chrome keeps node's event loop alive, so the script would hang
+        // until the CI job timeout instead of failing in seconds — strictly
+        // worse than a loud error. Hence `finally`, not straight-line code.
+        if (child.exitCode === null) {
+          child.kill("SIGTERM");
+        }
+        // Chrome must also be GONE before the profile directory is removed. A
+        // process still flushing `Default/` races the recursive unlink and
+        // surfaces as ENOTEMPTY (entries are scanned, then rmdir finds a
+        // freshly written file). Escalate rather than trust one fixed grace
+        // period — CI runners shut down slower than dev machines, which is
+        // why this passed locally and failed on the first CI run.
+        if (child.exitCode === null) {
+          await Promise.race([childExited, delay(5_000)]);
+        }
+        if (child.exitCode === null) {
+          child.kill("SIGKILL");
+          await Promise.race([childExited, delay(2_000)]);
+        }
+        // Retries cover the residual race (`force` alone only swallows
+        // ENOENT). A temp dir we cannot remove is not worth failing a passing
+        // smoke run over — the OS temp root gets reclaimed regardless.
+        try {
+          await rm(userDataDir, {
+            recursive: true,
+            force: true,
+            maxRetries: 10,
+            retryDelay: 100,
+          });
+        } catch (error) {
+          console.warn(`warning: could not remove ${userDataDir}: ${error}`);
+        }
       }
-      if (child.exitCode === null) {
-        child.kill("SIGTERM");
-      }
-      await Promise.race([childExited, delay(1_000)]);
-      await rm(userDataDir, { recursive: true, force: true });
     },
   };
 }

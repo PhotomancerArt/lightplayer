@@ -174,6 +174,7 @@ fw-browser-test: install-wasm32-target
 
 # Local project store tests: real browser + real OPFS. Needs a chromedriver
 # matching the local Chrome major version; set CHROMEDRIVER to override.
+# CI runs this (and fw-browser-test) in the path-gated validate-browser job.
 lpa-fs-opfs-test: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -738,6 +739,10 @@ test: test-rust test-filetests
 
 test-rust:
     cargo test
+    # Studio web view layer is outside default-members (Dioxus web dep tree);
+    # its unit tests are pure host-runnable view helpers. Separate invocation
+    # per the no-workspace-wide-cargo rule (feature unification).
+    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
