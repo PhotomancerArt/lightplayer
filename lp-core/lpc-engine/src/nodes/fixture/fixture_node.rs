@@ -9,9 +9,9 @@ use lpc_model::nodes::fixture::{
     ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec, RingOrder,
 };
 use lpc_model::{
-    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct, Dim2u,
-    FixtureDefView, FixtureState, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
-    SlotShapeRegistryError,
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
+    ControlProduct, Dim2u, FixtureDefView, FixtureState, Revision, SlotAccess, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lps_q32::q32::{Q32, ToQ32};
 
@@ -563,12 +563,17 @@ impl ControlNode for FixtureNode {
             })
             .collect();
 
-        Ok(Some(ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-            revision,
-            settings.width,
-            settings.height,
-            lamps,
-        ))))
+        let paths = fixture_path_spans(&self.mapping)
+            .into_iter()
+            .map(|span| ControlPathSpan2d {
+                first_lamp: span.first_lamp,
+                lamp_count: span.lamp_count,
+            })
+            .collect();
+        Ok(Some(ControlDisplayLayout::Layout2d(
+            ControlLayout2d::new(revision, settings.width, settings.height, lamps)
+                .with_paths(paths),
+        )))
     }
 }
 

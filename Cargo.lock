@@ -5549,6 +5549,7 @@ dependencies = [
  "lpa-link",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
+ "lpc-mapping",
  "lpc-wire",
  "lpfs",
  "lps-builtin-completions",
