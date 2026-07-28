@@ -216,6 +216,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          # target/ itself is NOT cached: sccache re-materializes crate
+          # compiles content-addressed (91% hit rate measured on this PR's
+          # warm run), and the 2-3GB-per-job target payloads pushed the repo
+          # past its 10GB Actions-cache budget, which LRU-evicts into
+          # thrash. Build scripts re-run each time — small next to the
+          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -293,6 +300,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          # target/ itself is NOT cached: sccache re-materializes crate
+          # compiles content-addressed (91% hit rate measured on this PR's
+          # warm run), and the 2-3GB-per-job target payloads pushed the repo
+          # past its 10GB Actions-cache budget, which LRU-evicts into
+          # thrash. Build scripts re-run each time — small next to the
+          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -371,6 +385,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          # target/ itself is NOT cached: sccache re-materializes crate
+          # compiles content-addressed (91% hit rate measured on this PR's
+          # warm run), and the 2-3GB-per-job target payloads pushed the repo
+          # past its 10GB Actions-cache budget, which LRU-evicts into
+          # thrash. Build scripts re-run each time — small next to the
+          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -438,6 +459,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          # target/ itself is NOT cached: sccache re-materializes crate
+          # compiles content-addressed (91% hit rate measured on this PR's
+          # warm run), and the 2-3GB-per-job target payloads pushed the repo
+          # past its 10GB Actions-cache budget, which LRU-evicts into
+          # thrash. Build scripts re-run each time — small next to the
+          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
