@@ -59,6 +59,17 @@ pub fn AddNodePicker(
                     }
                 }
             }
+            // Shipped effects, vendored by copy on selection (the source
+            // dimension growing inside this panel, as promised above).
+            if !menu.effects.is_empty() {
+                DetailSection { title: "Effects",
+                    div { class: "tw:grid tw:gap-0.5",
+                        for entry in menu.effects.clone() {
+                            AddNodeMenuRow { entry, on_action }
+                        }
+                    }
+                }
+            }
         }
     }
 }

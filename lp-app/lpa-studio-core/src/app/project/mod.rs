@@ -57,7 +57,7 @@ pub use asset::{
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeController, NodeControllerState, NodeCreateOp, NodeRemoveOp, NodeRevertOp,
+    EffectImportOp, NodeController, NodeControllerState, NodeCreateOp, NodeRemoveOp, NodeRevertOp,
     PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent,
     UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
 };

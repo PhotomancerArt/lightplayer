@@ -23,12 +23,13 @@ use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeCreateOp, NodeRemoveOp, NodeRevertOp, PlaylistActivateOp,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot,
-    ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
-    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress, UiResult,
-    UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    DeviceController, DeviceOp, EffectImportOp, NodeCreateOp, NodeRemoveOp, NodeRevertOp,
+    PlaylistActivateOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
+    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
+    ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction,
+    UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
+    UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
+    UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -1989,6 +1990,10 @@ impl StudioController {
                 let op = action.into_op::<NodeCreateOp>()?;
                 return self.execute_node_create_op(op).await;
             }
+            if action.op_as::<EffectImportOp>().is_some() {
+                let op = action.into_op::<EffectImportOp>()?;
+                return self.execute_effect_import_op(op).await;
+            }
             if action.op_as::<NodeRemoveOp>().is_some() {
                 let op = action.into_op::<NodeRemoveOp>()?;
                 return self.execute_node_remove_op(op).await;
@@ -3104,6 +3109,16 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.create_node(server, op.kind, &op.attach).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_effect_import_op(&mut self, op: EffectImportOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .import_effect(server, &op.example, &op.attach)
+                .await
         };
         self.record_project_edit_run(run)
     }

@@ -1,0 +1,27 @@
+{
+  "kind": "Project",
+  "format": 1,
+  "name": "Meteor",
+  "nodes": {
+    "render": {
+      "ref": "./render.json"
+    },
+    "sim": {
+      "ref": "./sim.json"
+    }
+  },
+  "controls": {
+    "speed": {
+      "target": "node:sim#speed"
+    },
+    "count": {
+      "target": "node:sim#count"
+    },
+    "decay": {
+      "target": "node:render#decay"
+    }
+  },
+  "author": "Photomancer",
+  "version": "1",
+  "license": "CC0-1.0"
+}

@@ -19,7 +19,7 @@ pub mod ui_add_node_menu;
 
 pub(in crate::app::project) use node_controller::root_slot_key;
 pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
-pub use node_create_op::{NodeCreateOp, UiAttachTarget};
+pub use node_create_op::{EffectImportOp, NodeCreateOp, UiAttachTarget};
 pub use node_remove_op::NodeRemoveOp;
 pub use node_remove_preflight::UiNodeRemovePreflight;
 pub use node_revert_op::NodeRevertOp;

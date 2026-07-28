@@ -1,0 +1,36 @@
+{
+  "kind": "Shader",
+  "source": "main.glsl",
+  "render_order": 0,
+  "glsl_opts": {
+    "add_sub": "wrapping",
+    "mul": "wrapping",
+    "div": "reciprocal"
+  },
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "default_bind": "bus:time"
+    },
+    "speed": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0,
+      "max": 4,
+      "label": "Speed",
+      "panel": true
+    },
+    "scale": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Scale",
+      "panel": true
+    }
+  }
+}

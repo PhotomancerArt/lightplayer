@@ -1,0 +1,19 @@
+{
+  "kind": "Project",
+  "format": 1,
+  "name": "meteor",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "meteor": {
+      "ref": "./meteor/project.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    }
+  }
+}

@@ -78,6 +78,51 @@ impl ControllerOp for NodeCreateOp {
     }
 }
 
+/// Import a shipped effect example into the project ([`crate::UiAddNodeMenu`]'s
+/// Effects section): vendor the example's effect subfolder by copy into
+/// `effects/<name>/` and attach it at `attach` — one gesture from "shipped
+/// effect" to "entry in my playlist" (effects-are-projects ADR).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectImportOp {
+    /// The embedded example's stable id (e.g. `examples/effects/plasma`).
+    pub example: String,
+    /// Where the vendored effect attaches.
+    pub attach: UiAttachTarget,
+}
+
+impl ControllerOp for EffectImportOp {
+    fn default_action_meta(&self) -> ActionMeta {
+        ActionMeta::new(
+            "Add effect",
+            "Copy a shipped effect into this project.",
+            ActionPriority::Secondary,
+        )
+        .with_icon("add")
+    }
+
+    fn action_class(&self) -> ActionClass {
+        ActionClass::Foreground {
+            deadline: PROJECT_EDITOR_ACTION_DEADLINE,
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn ControllerOp> {
+        Box::new(self.clone())
+    }
+
+    fn eq_op(&self, other: &dyn ControllerOp) -> bool {
+        other.as_any().downcast_ref::<Self>() == Some(self)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
