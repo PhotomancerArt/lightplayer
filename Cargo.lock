@@ -5482,6 +5482,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-mapping-editor"
+version = "40.0.0"
+dependencies = [
+ "lpc-mapping",
+ "serde_json",
+]
+
+[[package]]
 name = "lpa-server"
 version = "40.0.0"
 dependencies = [
@@ -5547,6 +5555,7 @@ dependencies = [
  "lpa-client",
  "lpa-fs-opfs",
  "lpa-link",
+ "lpa-mapping-editor",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
  "lpc-mapping",

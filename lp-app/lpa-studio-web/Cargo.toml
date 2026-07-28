@@ -26,6 +26,8 @@ lpa-agent = { path = "../lpa-agent" }
 lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }
 # Story fixtures build lamp layouts from the shared mapping corpus.
 lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false, optional = true }
+# Shared lamp-view geometry (universe palette, wiring arrows) + the editor.
+lpa-mapping-editor = { path = "../lpa-mapping-editor" }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 # Markdown parsing for agent chat replies (parser only; rendering goes
