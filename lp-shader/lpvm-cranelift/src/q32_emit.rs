@@ -26,37 +26,49 @@ pub(crate) fn emit_fmax(builder: &mut FunctionBuilder, a: Value, b: Value) -> Va
     builder.ins().select(cmp, a, b)
 }
 
-pub(crate) fn emit_ffloor(builder: &mut FunctionBuilder, v: Value) -> Value {
+/// Clearing the fractional bits of a two's-complement Q16.16 value rounds
+/// toward **-∞**, not toward zero — `-0.6875` (`0xFFFF_5000`) masks to
+/// `0xFFFF_0000` = `-1.0`. So this mask is already `floor`, and `ceil` / `trunc`
+/// below are built from it rather than from a truncation.
+///
+/// Matches `lpvm_wasm::emit::q32::emit_q32_ffloor` (`(v >> 16) << 16`).
+fn emit_mask_to_floor(builder: &mut FunctionBuilder, v: Value) -> Value {
     let int_mask = builder.ins().iconst(types::I32, i64::from(!Q32_FRAC));
-    let truncated = builder.ins().band(v, int_mask);
+    builder.ins().band(v, int_mask)
+}
+
+/// True when `v` has a nonzero fractional part.
+fn emit_has_frac(builder: &mut FunctionBuilder, v: Value) -> Value {
     let frac_mask = builder.ins().iconst(types::I32, i64::from(Q32_FRAC));
     let frac = builder.ins().band(v, frac_mask);
     let zero = builder.ins().iconst(types::I32, 0);
-    let has_frac = builder.ins().icmp(IntCC::NotEqual, frac, zero);
-    let is_neg = builder.ins().icmp(IntCC::SignedLessThan, v, zero);
-    let needs_adjust = builder.ins().band(has_frac, is_neg);
-    let one = builder.ins().iconst(types::I32, 1 << Q32_SHIFT);
-    let adjusted = builder.ins().isub(truncated, one);
-    builder.ins().select(needs_adjust, adjusted, truncated)
+    builder.ins().icmp(IntCC::NotEqual, frac, zero)
+}
+
+pub(crate) fn emit_ffloor(builder: &mut FunctionBuilder, v: Value) -> Value {
+    emit_mask_to_floor(builder, v)
 }
 
 pub(crate) fn emit_fceil(builder: &mut FunctionBuilder, v: Value) -> Value {
-    let int_mask = builder.ins().iconst(types::I32, i64::from(!Q32_FRAC));
-    let truncated = builder.ins().band(v, int_mask);
-    let frac_mask = builder.ins().iconst(types::I32, i64::from(Q32_FRAC));
-    let frac = builder.ins().band(v, frac_mask);
-    let zero = builder.ins().iconst(types::I32, 0);
-    let has_frac = builder.ins().icmp(IntCC::NotEqual, frac, zero);
-    let is_pos = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, v, zero);
-    let needs_adjust = builder.ins().band(has_frac, is_pos);
+    // ceil(v) = floor(v) + (v has a fractional part ? 1 : 0), for either sign.
+    let floored = emit_mask_to_floor(builder, v);
+    let has_frac = emit_has_frac(builder, v);
     let one = builder.ins().iconst(types::I32, 1 << Q32_SHIFT);
-    let adjusted = builder.ins().iadd(truncated, one);
-    builder.ins().select(needs_adjust, adjusted, truncated)
+    let adjusted = builder.ins().iadd(floored, one);
+    builder.ins().select(has_frac, adjusted, floored)
 }
 
 pub(crate) fn emit_ftrunc(builder: &mut FunctionBuilder, v: Value) -> Value {
-    let int_mask = builder.ins().iconst(types::I32, i64::from(!Q32_FRAC));
-    builder.ins().band(v, int_mask)
+    // Truncate toward zero: floor(v), stepped back up by one for negative
+    // non-integers. Matches `lpvm_wasm::emit::q32::emit_q32_ftrunc`.
+    let floored = emit_mask_to_floor(builder, v);
+    let has_frac = emit_has_frac(builder, v);
+    let zero = builder.ins().iconst(types::I32, 0);
+    let is_neg = builder.ins().icmp(IntCC::SignedLessThan, v, zero);
+    let needs_adjust = builder.ins().band(has_frac, is_neg);
+    let one = builder.ins().iconst(types::I32, 1 << Q32_SHIFT);
+    let adjusted = builder.ins().iadd(floored, one);
+    builder.ins().select(needs_adjust, adjusted, floored)
 }
 
 /// Q16.16 → signed integer (truncate toward zero, like C cast)
