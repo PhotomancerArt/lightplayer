@@ -365,12 +365,14 @@ jobs:
           # captures live in the gitignored story-images/.new/ and survive the
           # branch switch in place.
           git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
-          # Mirror story-pull.mjs replacement semantics: delete-then-copy so
-          # story REMOVALS propagate. Only top-level PNGs; dot sentinels
-          # (.check-complete) stay behind.
-          find lp-app/lpa-studio-web/story-images -maxdepth 1 -name '*.png' -delete
-          find lp-app/lpa-studio-web/story-images/.new -maxdepth 1 -name '*.png' \
-            -exec cp {} lp-app/lpa-studio-web/story-images/ \;
+          # Manifest-driven, NOT a wholesale swap: the check tolerates
+          # sub-threshold anti-aliasing jitter, and copying the whole fresh set
+          # committed those tolerated files anyway — that is how run-to-run
+          # raster noise turned into ping-ponging baselines (see
+          # docs/debt/story-capture-pipeline.md). Replace only what the
+          # comparison judged stale; removals still propagate.
+          node lp-app/lpa-studio-web/scripts/story-apply-refresh.mjs \
+            lp-app/lpa-studio-web/story-images/.new
           git add -A -- lp-app/lpa-studio-web/story-images
           if git diff --cached --quiet; then
             # Drift was against the merge commit's baselines but the head
