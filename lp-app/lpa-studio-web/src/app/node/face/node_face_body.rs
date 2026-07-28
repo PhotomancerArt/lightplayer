@@ -22,7 +22,7 @@ use lpa_studio_core::{
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
 
-use super::{FixtureFace, NodeCardDrawers, PlaylistFace, ShaderFace};
+use super::{EffectFace, FixtureFace, NodeCardDrawers, PlaylistFace, ShaderFace};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -95,6 +95,22 @@ pub fn NodeFaceBody(
                 },
                 UiNodeFace::Playlist(playlist) => rsx! {
                     PlaylistFace { face: playlist, add_node_menu, on_action }
+                    NodeCardDrawers {
+                        node,
+                        sections,
+                        advanced_open: card_ui.advanced_open,
+                        platform,
+                        pending_edits,
+                        dirty_tint,
+                        on_action,
+                    }
+                },
+                UiNodeFace::Effect(effect) => rsx! {
+                    EffectFace {
+                        face: effect,
+                        detail_open_control,
+                        on_action,
+                    }
                     NodeCardDrawers {
                         node,
                         sections,

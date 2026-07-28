@@ -13,6 +13,7 @@
 
 use lpa_studio_core::{NodeUiOp, ProjectEditorOp, ProjectEditorTarget, UiAction};
 
+mod effect_face;
 mod fixture_face;
 mod node_card_drawers;
 mod node_card_section;
@@ -20,6 +21,7 @@ mod node_face_body;
 mod playlist_face;
 mod shader_face;
 
+pub use effect_face::EffectFace;
 pub use fixture_face::FixtureFace;
 pub use node_card_drawers::NodeCardDrawers;
 pub use node_card_section::NodeCardSection;

@@ -28,14 +28,15 @@
 //! - Every other kind returns `None` — the card keeps today's generic
 //!   sections.
 
-use lpc_model::{FixtureDef, PlaylistDef, ShaderDef};
+use lpc_model::{FixtureDef, PlaylistDef, ProjectDef, ShaderDef};
 
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
-    UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget, UiPlaylistEntry,
-    UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect,
-    UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
+    UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiEffectFace,
+    UiFixtureFace, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
+    UiShaderFace, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint,
+    UiSlotFieldState, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -76,9 +77,233 @@ pub(in crate::app::project) fn kind_face(
             // ACTIVE placard is the active-ness presentation.
             Some(UiNodeFace::Playlist(face))
         }
+        // An embedded project renders as an effect card; the ROOT project
+        // is not a card and keeps whatever surface renders it today.
+        ProjectDef::KIND if address.path().0.len() > 1 => {
+            effect_face(sections, children).map(UiNodeFace::Effect)
+        }
         // Unknown kinds stay on the generic fallback permanently.
         _ => None,
     }
+}
+
+// -- effect face ---------------------------------------------------------------
+
+/// The effect card's face: output-mirror hero, promoted-control knobs, and
+/// a provenance line. `None` — generic fallback — when the node has no
+/// produced visual row (the mirror has not projected yet). An effect with
+/// no `controls{}` entries still gets its face (preview + provenance);
+/// curation is optional.
+fn effect_face(sections: &[UiNodeSection], children: &[UiNodeChild]) -> Option<UiEffectFace> {
+    let preview = product_of_kind(sections, UiProductKind::Visual)?;
+    let rows = config_rows(sections);
+    let controls = rows
+        .iter()
+        .find(|row| row.key == "controls")
+        .map(|row| &row.body)
+        .and_then(|body| match body {
+            UiConfigSlotBody::Record(map) => Some(map),
+            _ => None,
+        })
+        .map(|map| {
+            map.fields
+                .iter()
+                .filter_map(|entry| promoted_control(entry, children))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(UiEffectFace {
+        preview,
+        controls,
+        provenance: provenance_line(&rows),
+    })
+}
+
+/// Compact "author · v<version> · <license>" line from the def's provenance
+/// rows; `None` when none of the fields are present.
+fn provenance_line(rows: &[&UiConfigSlot]) -> Option<String> {
+    let field = |name: &str| {
+        rows.iter()
+            .find(|row| row.key == name)
+            .filter(|row| row.optionality.is_none_or(|opt| opt.included))
+            .and_then(|row| match &row.body {
+                UiConfigSlotBody::Value(UiSlotValue {
+                    kind: UiSlotValueKind::String(value),
+                    ..
+                }) if !value.is_empty() => Some(value.clone()),
+                _ => None,
+            })
+    };
+    let parts: Vec<String> = [
+        field("author"),
+        field("version").map(|version| format!("v{version}")),
+        field("license"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// One `controls[<name>]` record row → its promoted control: the alias
+/// resolves to the inner child's slot row and the control copies that row's
+/// address/value/state/aspects (DTO-level aliasing — the write path routes
+/// purely by address, so dirty/violet/popovers ride the child's machinery).
+/// An unresolvable target renders DISABLED with an Invalid affordance —
+/// never dropped silently.
+fn promoted_control(entry: &UiConfigSlot, children: &[UiNodeChild]) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    let fields = &record.fields;
+    let name = map_entry_name(entry);
+    let label_override = string_field(fields, "label").filter(|label| !label.is_empty());
+    let unit_override = string_field(fields, "unit")
+        .filter(|unit| !unit.is_empty())
+        .map(|unit| crate::app::project::slot::slot_controller::ui_slot_unit(&unit));
+    let min_override = option_f32_field(fields, "min");
+    let max_override = option_f32_field(fields, "max");
+
+    let resolved =
+        string_field(fields, "target").and_then(|target| resolve_alias_control(&target, children));
+
+    let mut control = match resolved {
+        Some(control) => control,
+        None => {
+            // Disabled placeholder: the effect author (or a rename) broke
+            // the alias; surface it instead of dropping the knob.
+            let mut state = UiSlotFieldState::readonly();
+            state.invalid = Some(String::from("promoted control target does not resolve"));
+            UiPanelControl {
+                label: name.clone(),
+                address: None,
+                widget: UiPanelWidget::Knob {
+                    min: 0.0,
+                    max: 1.0,
+                    step: None,
+                },
+                value: UiSlotValue::unset(),
+                live_value: None,
+                unit: None,
+                state,
+                aspects: vec![
+                    UiSlotAspect::new(UiSlotAspectKind::Validation, "Promoted control")
+                        .with_affordance(UiSlotAffordance::Invalid),
+                ],
+            }
+        }
+    };
+
+    if let Some(label) = label_override {
+        control.label = label;
+    } else if control.label.is_empty() {
+        control.label = name;
+    }
+    if unit_override.is_some() {
+        control.unit = unit_override;
+    }
+    if min_override.is_some() || max_override.is_some() {
+        control.widget = match control.widget {
+            UiPanelWidget::Knob { min, max, step } => UiPanelWidget::Knob {
+                min: min_override.unwrap_or(min),
+                max: max_override.unwrap_or(max),
+                step,
+            },
+            UiPanelWidget::Fader { min, max, step } => UiPanelWidget::Fader {
+                min: min_override.unwrap_or(min),
+                max: max_override.unwrap_or(max),
+                step,
+            },
+            other => other,
+        };
+    }
+    Some(control)
+}
+
+/// Resolve a promoted-control target (`node:<child>#<slot>`) to a panel
+/// control built from the child's own slot rows: shader consumed uniforms
+/// reuse the shader-knob derivation (address = `consumed[<slot>].default
+/// .some` on the CHILD), any other child slot goes through the generic
+/// panel-row projection. `None` when the child or its slot row is missing.
+fn resolve_alias_control(target: &str, children: &[UiNodeChild]) -> Option<UiPanelControl> {
+    let lpc_model::BindingRef::Node(node_slot) = lpc_model::BindingRef::parse(target).ok()? else {
+        return None;
+    };
+    // Depth-1 alias targets only in this slice (validated at load).
+    let node_ref = node_slot.node();
+    if node_ref.parent_hops() != 0 || node_ref.segments().len() != 1 {
+        return None;
+    }
+    let child_name = node_ref.segments().first()?.as_str();
+    let slot = node_slot.slot().to_string();
+    let child = children
+        .iter()
+        .find(|child| child_tree_name(child) == Some(child_name))?;
+    let child_rows = config_rows(&child.sections);
+
+    // Shader-style: the target names a consumed uniform.
+    if let Some(UiConfigSlotBody::Record(consumed)) = child_rows
+        .iter()
+        .find(|row| row.key == "consumed")
+        .map(|row| &row.body)
+        && let Some(entry) = consumed
+            .fields
+            .iter()
+            .find(|row| map_entry_name(row) == slot)
+    {
+        return shader_uniform_control_any(entry, &child_rows);
+    }
+
+    // Generic: a top-level row on the child keyed by the slot name.
+    let row = child_rows.iter().find(|row| row.key == slot)?;
+    let widget = panel_widget(row).unwrap_or(UiPanelWidget::Knob {
+        min: 0.0,
+        max: 1.0,
+        step: None,
+    });
+    panel_control_from_row(row, widget)
+}
+
+/// [`shader_uniform_control`] without the `panel` gate: promotion IS the
+/// curation, so a promoted uniform need not be panel-flagged on the child.
+fn shader_uniform_control_any(
+    entry: &UiConfigSlot,
+    top_rows: &[&UiConfigSlot],
+) -> Option<UiPanelControl> {
+    let UiConfigSlotBody::Record(record) = &entry.body else {
+        return None;
+    };
+    let fields = &record.fields;
+    let default_row = uniform_field(fields, "default")?;
+    let control = panel_control_from_row(
+        default_row,
+        UiPanelWidget::Knob {
+            min: option_f32_field(fields, "min").unwrap_or(0.0),
+            max: option_f32_field(fields, "max").unwrap_or(1.0),
+            step: None,
+        },
+    )?;
+    let name = map_entry_name(entry);
+    let label = string_field(fields, "label")
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| entry.label.clone());
+    let unit = string_field(fields, "unit")
+        .filter(|unit| !unit.is_empty())
+        .map(|unit| crate::app::project::slot::slot_controller::ui_slot_unit(&unit));
+    let mut control = UiPanelControl { label, ..control };
+    if unit.is_some() {
+        control.unit = unit;
+    }
+    if let Some(binding) = uniform_binding_aspect(top_rows, &name) {
+        replace_binding_aspect(&mut control.aspects, binding);
+    }
+    if control.live_value.is_none() {
+        control.live_value = top_rows
+            .iter()
+            .find(|row| row.key == name)
+            .and_then(|row| bound_live_value(row));
+    }
+    Some(control)
 }
 
 /// The shader card's face: visual hero, panel knobs, code drawer. `None`
@@ -860,6 +1085,165 @@ mod tests {
         let entry = face.entries.iter().find(|entry| entry.key == 3).unwrap();
         assert_eq!(entry.name, "Entry 3", "falls back to the child's label");
         assert!(entry.action.is_some(), "matched via the entry_<key> rule");
+    }
+
+    // -- effect face ---------------------------------------------------------
+
+    /// Effect sections: the mirror's produced visual row plus the def's
+    /// `controls{}` map (one alias to the child shader's `speed` uniform,
+    /// with a label + max override) and provenance strings.
+    fn effect_sections() -> Vec<UiNodeSection> {
+        let control = UiConfigSlot::record(
+            "controls[speed]",
+            "speed",
+            vec![
+                UiConfigSlot::value(
+                    "controls[speed].target",
+                    "Target",
+                    UiSlotValue::string("node:shader#speed"),
+                ),
+                UiConfigSlot::value(
+                    "controls[speed].label",
+                    "Label",
+                    UiSlotValue::string("Pulse rate"),
+                ),
+                option_f32("controls[speed].max", "Max", 8.0),
+            ],
+        );
+        vec![
+            UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("Output")]),
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::record("controls", "Controls", vec![control]),
+                UiConfigSlot::value("author", "Author", UiSlotValue::string("photomancer")),
+                UiConfigSlot::value("license", "License", UiSlotValue::string("CC0-1.0")),
+            ]),
+        ]
+    }
+
+    /// An effect child shader named `shader` carrying the `speed` uniform's
+    /// full slot rows (the alias resolves against these).
+    fn effect_child_shader() -> UiNodeChild {
+        let mut child =
+            UiNodeChild::new("Shader", "Shader", "/main.project/fx.project/shader.shader");
+        child.sections = shader_sections();
+        child
+    }
+
+    fn effect_address() -> ProjectNodeAddress {
+        ProjectNodeAddress::parse("/demo.project/fx.project").expect("valid address")
+    }
+
+    #[test]
+    fn effect_face_aliases_promoted_controls_onto_the_child_slot_address() {
+        let sections = effect_sections();
+        let mut children = vec![effect_child_shader()];
+
+        let Some(UiNodeFace::Effect(face)) =
+            kind_face("project", &effect_address(), &sections, &mut children)
+        else {
+            panic!("expected an effect face");
+        };
+
+        assert_eq!(face.preview.kind, UiProductKind::Visual);
+        assert_eq!(face.controls.len(), 1);
+        let control = &face.controls[0];
+        // The alias's own label beats the child's authored one.
+        assert_eq!(control.label, "Pulse rate");
+        // THE aliasing invariant: the edit address is the CHILD's slot —
+        // a knob drag dispatches into the child's artifact through the
+        // standard address-routed write path.
+        assert_eq!(
+            control
+                .address
+                .as_ref()
+                .expect("promoted knob edits are addressed")
+                .path
+                .to_string(),
+            "consumed[speed].default.some"
+        );
+        assert_eq!(
+            control.address.as_ref().unwrap().node.to_string(),
+            "/demo.project/node.shader",
+            "the address names the child node (test fixture's address root)"
+        );
+        // The child's authored min plus the alias's max override.
+        assert_eq!(
+            control.widget,
+            UiPanelWidget::Knob {
+                min: 0.0,
+                max: 8.0,
+                step: None
+            }
+        );
+        assert_eq!(control.value.kind, UiSlotValueKind::F32(2.0));
+        assert_eq!(face.provenance.as_deref(), Some("photomancer · CC0-1.0"));
+
+        // Effect children are collaborators: no one-active-child filtering.
+        assert_eq!(children.len(), 1);
+    }
+
+    #[test]
+    fn effect_face_promotes_non_panel_uniforms_and_marks_broken_aliases() {
+        // Promotion IS the curation: the child's `time` uniform carries no
+        // panel flag but still promotes; a dangling target renders a
+        // disabled Invalid control instead of disappearing.
+        let mut sections = effect_sections();
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[1]
+            && let UiConfigSlotBody::Record(map) = &mut rows[0].body
+        {
+            map.fields.push(UiConfigSlot::record(
+                "controls[warp]",
+                "warp",
+                vec![UiConfigSlot::value(
+                    "controls[warp].target",
+                    "Target",
+                    UiSlotValue::string("node:shader#time"),
+                )],
+            ));
+            map.fields.push(UiConfigSlot::record(
+                "controls[gone]",
+                "gone",
+                vec![UiConfigSlot::value(
+                    "controls[gone].target",
+                    "Target",
+                    UiSlotValue::string("node:missing#speed"),
+                )],
+            ));
+        }
+        let mut children = vec![effect_child_shader()];
+
+        let Some(UiNodeFace::Effect(face)) =
+            kind_face("project", &effect_address(), &sections, &mut children)
+        else {
+            panic!("expected an effect face");
+        };
+        assert_eq!(face.controls.len(), 3);
+        let warp = &face.controls[1];
+        assert!(warp.address.is_some(), "non-panel uniform still promotes");
+        let gone = &face.controls[2];
+        assert!(gone.address.is_none());
+        assert!(!gone.state.editable, "broken alias renders disabled");
+        assert_eq!(
+            gone.primary_affordance(),
+            crate::UiSlotAffordance::Invalid,
+            "broken alias wears the Invalid affordance"
+        );
+        assert_eq!(gone.label, "gone", "falls back to the control's name");
+    }
+
+    #[test]
+    fn root_project_never_wears_the_effect_face() {
+        let sections = effect_sections();
+        let root = ProjectNodeAddress::parse("/demo.project").expect("valid address");
+        assert_eq!(
+            kind_face(
+                "project",
+                &root,
+                &sections,
+                &mut vec![effect_child_shader()]
+            ),
+            None
+        );
     }
 
     // -- fixtures ------------------------------------------------------------
