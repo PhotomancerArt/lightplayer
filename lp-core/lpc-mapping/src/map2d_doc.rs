@@ -107,12 +107,14 @@ pub struct RingShape {
     pub radius: f32,
     /// Lamp count on the outer ring.
     pub outer_count: u32,
-    /// Number of concentric rings (radii step inward by `spacing`).
+    /// Number of concentric rings, auto-spaced evenly from `radius` inward
+    /// (ring `k` of `n` sits at `radius * (n - k) / n`).
     #[serde(default = "default_rings")]
     pub rings: u32,
-    /// Radial gap between rings; required positive when `rings > 1`.
-    #[serde(default)]
-    pub spacing: f32,
+    /// Optional per-ring lamp counts, listed outer→inner. Missing or zero
+    /// entries fall back to the circumference-derived count.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub counts: Vec<u32>,
     #[serde(default)]
     pub order: RingOrder,
     /// Angle of lamp 1 in degrees; -90 is 12 o'clock (screen coordinates,

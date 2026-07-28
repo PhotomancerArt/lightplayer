@@ -334,6 +334,35 @@ impl MapEditorSession {
         });
     }
 
+    /// Illustrator-style expand: replace a parametric object with a plain
+    /// path through its own resolved lamps, ready for hand-tweaking. The
+    /// lamp layout is identical before and after.
+    pub fn expand_object(&mut self, index: usize) {
+        let positions: Vec<[f32; 2]> = {
+            let resolved = self.resolved();
+            let Some(span) = resolved.spans.get(index).copied() else {
+                return;
+            };
+            resolved.lamps[span.start as usize..(span.start + span.count) as usize]
+                .iter()
+                .map(|lamp| lamp.pos)
+                .collect()
+        };
+        if positions.len() < 2 {
+            return;
+        }
+        let count = positions.len() as u32;
+        self.edit(move |doc| {
+            if let Some(object) = doc.objects.get_mut(index) {
+                object.shape = Map2dShape::Path(PathShape {
+                    points: positions,
+                    count,
+                    reversed: false,
+                });
+            }
+        });
+    }
+
     // ---- creation (parent decision D6: click drops defaults) -------------
 
     /// Drop a default 8×8 grid centered on `at`; selects it, tool → select.
@@ -361,7 +390,7 @@ impl MapEditorSession {
                 radius: 80.0,
                 outer_count: 19,
                 rings: 1,
-                spacing: 40.0,
+                counts: Vec::new(),
                 order: RingOrder::OuterFirst,
                 start_angle_deg: -90.0,
                 dir: RingDir::Cw,
@@ -515,7 +544,6 @@ fn scale_shape(shape: &mut Map2dShape, anchor: [f32; 2], factor: f32) {
         Map2dShape::Ring(ring) => {
             ring.center = scale_point(ring.center);
             ring.radius *= factor;
-            ring.spacing *= factor;
         }
         Map2dShape::Path(path) => {
             for point in &mut path.points {
@@ -538,9 +566,6 @@ fn sanitize_doc(doc: &mut Map2dDoc) {
                 ring.outer_count = ring.outer_count.max(1);
                 ring.radius = ring.radius.max(1.0);
                 ring.rings = ring.rings.max(1);
-                if ring.rings > 1 && ring.spacing <= 0.0 {
-                    ring.spacing = 1.0;
-                }
             }
             Map2dShape::Path(path) => {
                 path.count = path.count.max(1);
@@ -683,16 +708,40 @@ mod tests {
         session.edit_object_shape(0, |shape| {
             if let Map2dShape::Ring(ring) = shape {
                 ring.rings = 3;
-                ring.spacing = 0.0; // would fail resolve; sanitized to 1.0
+                ring.counts = vec![16, 0, 4]; // 0 falls back to derived
             }
         });
         assert!(session.resolve_error.is_none());
-        assert!(session.lamp_count() > 0);
+        // Auto radii 90/60/30: 16 + derived(60→11) + forced 4.
+        assert_eq!(session.lamp_count(), 16 + 11 + 4);
         session.undo();
         let Map2dShape::Ring(ring) = &session.doc().objects[0].shape else {
             panic!("expected ring");
         };
         assert_eq!(ring.rings, 2);
+    }
+
+    #[test]
+    fn expand_turns_a_ring_into_an_identical_path() {
+        let mut session = session_with_ring();
+        let before: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        session.expand_object(0);
+        let Map2dShape::Path(path) = &session.doc().objects[0].shape else {
+            panic!("expected path after expand");
+        };
+        assert_eq!(path.points.len(), 24);
+        assert_eq!(path.count, 24);
+        let after: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
+        // Endpoints identical; interior lamps ride the polyline through the
+        // original lamp positions.
+        assert_eq!(before.first(), after.first());
+        assert_eq!(before.last(), after.last());
+        assert!(session.can_undo());
+        session.undo();
+        assert!(matches!(
+            session.doc().objects[0].shape,
+            Map2dShape::Ring(_)
+        ));
     }
 
     #[test]

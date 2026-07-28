@@ -7,6 +7,7 @@
 //! `edit`s. Hidden while a canvas drag is live.
 
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{ChevronDown, ChevronUp, Trash2, Ungroup};
 use lpc_mapping::{
     GridCorner, GridRouting, Map2dShape, RingDir, RingOrder, bounds_of_points, resolve,
 };
@@ -69,6 +70,7 @@ pub fn PropertiesPopover(
             .and_then(|resolved| resolved.spans.get(index).copied())
     });
     let count_summary = selection.objects.len();
+    let object_total = doc.objects.len();
     drop(session_read);
 
     // Shared editing helpers ------------------------------------------------
@@ -109,7 +111,7 @@ pub fn PropertiesPopover(
                 {shape_fields(session, on_committed, index, object.shape.clone())}
                 if let Some(span) = span {
                     div { class: "lpme-pop-meta",
-                        "{span.count} lamps · chain {span.start + 1}–{span.start + span.count}"
+                        "{span.count} lamps · chain {span.start + 1}–{span.start + span.count} · u {crate::view::object_list::universe_range_label(span.start, span.count)}"
                     }
                 }
             } else {
@@ -120,9 +122,51 @@ pub fn PropertiesPopover(
                 div { class: "lpme-pop-meta", "drag corner handles to resize the group" }
             }
             div { class: "lpme-pop-actions",
+                if let (Some(index), Some(object)) = (single, single.and_then(|i| session.read().doc().objects.get(i).cloned()))
+                    && !matches!(object.shape, Map2dShape::Path(_))
+                {
+                    button {
+                        class: "lpme-btn",
+                        title: "expand to a plain path (hand-tweakable, same lamps)",
+                        onclick: move |_| {
+                            session.write().expand_object(index);
+                            on_committed.call(());
+                        },
+                        Ungroup { size: 13 }
+                        "expand"
+                    }
+                }
+                if let Some(index) = single {
+                    button {
+                        class: "lpme-btn",
+                        title: "earlier in the wiring chain",
+                        disabled: index == 0,
+                        onclick: move |_| {
+                            if index > 0 {
+                                session.write().reorder_object(index, index - 1);
+                                on_committed.call(());
+                            }
+                        },
+                        ChevronUp { size: 13 }
+                    }
+                    button {
+                        class: "lpme-btn",
+                        title: "later in the wiring chain",
+                        disabled: index + 1 >= object_total,
+                        onclick: move |_| {
+                            if index + 1 < object_total {
+                                session.write().reorder_object(index, index + 1);
+                                on_committed.call(());
+                            }
+                        },
+                        ChevronDown { size: 13 }
+                    }
+                }
+                div { class: "lpme-spacer" }
                 button {
                     class: "lpme-btn lpme-btn-danger",
                     onclick: delete_selected,
+                    Trash2 { size: 13 }
                     if single.is_some() { "delete" } else { "delete all" }
                 }
             }
@@ -197,11 +241,10 @@ fn shape_fields(
                 NumberField { session, on_committed, index, label: "rings", value: ring.rings as f32, min: 1.0, is_int: true,
                     apply: FieldApply::RingRings }
                 if ring.rings > 1 {
-                    NumberField { session, on_committed, index, label: "spacing", value: ring.spacing, min: 1.0, is_int: false,
-                        apply: FieldApply::RingSpacing }
+                    RingCountsField { session, on_committed, index, counts: ring.counts.clone() }
                     SegField {
                         session, on_committed, index, label: "ring order",
-                        options: vec![("outer", "outer→in"), ("inner", "inner→out")],
+                        options: vec![("outer", "out→in"), ("inner", "in→out")],
                         current: order_current,
                         apply: FieldApply::RingOrder,
                     }
@@ -243,7 +286,6 @@ pub enum FieldApply {
     RingCount,
     RingRadius,
     RingRings,
-    RingSpacing,
     RingOrder,
     RingAngle,
     RingDir,
@@ -259,7 +301,6 @@ fn apply_number(shape: &mut Map2dShape, apply: FieldApply, value: f32) {
         (FieldApply::RingCount, Map2dShape::Ring(ring)) => ring.outer_count = value.max(1.0) as u32,
         (FieldApply::RingRadius, Map2dShape::Ring(ring)) => ring.radius = value,
         (FieldApply::RingRings, Map2dShape::Ring(ring)) => ring.rings = value.max(1.0) as u32,
-        (FieldApply::RingSpacing, Map2dShape::Ring(ring)) => ring.spacing = value,
         (FieldApply::RingAngle, Map2dShape::Ring(ring)) => ring.start_angle_deg = value,
         (FieldApply::PathCount, Map2dShape::Path(path)) => path.count = value.max(1.0) as u32,
         _ => {}
@@ -378,6 +419,55 @@ fn SegField(
                         "{text}"
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Comma-separated per-ring counts (outer→inner); empty = derived. Typing
+/// previews through the gesture path; commit on change.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RingCountsField(
+    session: Signal<MapEditorSession>,
+    on_committed: EventHandler<()>,
+    index: usize,
+    counts: Vec<u32>,
+) -> Element {
+    let shown = counts
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    rsx! {
+        div { class: "lpme-field",
+            label { "ring counts" }
+            input {
+                r#type: "text",
+                placeholder: "auto",
+                value: "{shown}",
+                oninput: move |evt| {
+                    let parsed: Vec<u32> = evt
+                        .value()
+                        .split(',')
+                        .filter_map(|token| token.trim().parse::<u32>().ok())
+                        .collect();
+                    session.write().edit_uncommitted(move |doc| {
+                        if let Some(object) = doc.objects.get_mut(index)
+                            && let Map2dShape::Path(_) = &object.shape
+                        {
+                            // not a ring; ignore
+                        } else if let Some(object) = doc.objects.get_mut(index)
+                            && let Map2dShape::Ring(ring) = &mut object.shape
+                        {
+                            ring.counts = parsed;
+                        }
+                    });
+                },
+                onchange: move |_| {
+                    session.write().commit_gesture();
+                    on_committed.call(());
+                },
             }
         }
     }
