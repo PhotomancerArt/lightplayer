@@ -17,7 +17,7 @@ use super::builtin_integer::{
 use super::matrix::{lower_matrix_determinant, lower_matrix_inverse, lower_matrix_transpose};
 use super::numeric::{
     BinaryFloatOp, UnaryFloatOp, fconst, lane_at, lower_binary_float_lane, lower_bool_mix_lane,
-    lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane,
+    lower_min_max_lane, lower_mix_lane, lower_mod_lane, lower_smoothstep_lane, lower_step_lane,
     lower_unary_float_lane,
 };
 use super::place_write::assign_target;
@@ -278,6 +278,7 @@ pub(in crate::lower) fn lower_builtin(
                 });
                 dst
             }
+            BuiltinKind::Step => lower_step_lane(ctx, &values[0], &values[1], i),
             BuiltinKind::Transpose => {
                 unreachable!("transpose returns before lane-wise builtin lowering")
             }

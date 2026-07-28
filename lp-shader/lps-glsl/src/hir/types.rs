@@ -283,6 +283,7 @@ pub enum BuiltinKind {
     Sign,
     Smoothstep,
     Sqrt,
+    Step,
     Transpose,
     Trunc,
     UaddCarry,
