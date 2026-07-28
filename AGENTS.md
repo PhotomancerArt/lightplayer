@@ -382,12 +382,27 @@ churn the whole set. On drift, CI commits the refresh itself:
    confirm the re-run is green.
 4. Mention the affected story baselines in the final summary either way.
 
+To ask for a recapture **without pushing a commit**, run the `CI` workflow
+manually (Actions → CI → Run workflow → pick the branch), or:
+
+```bash
+gh workflow run "CI" --ref <branch>
+```
+
+A `workflow_dispatch` run skips the validate jobs and runs `validate-stories`
+alone (~10 min), committing any refresh to the branch exactly like the PR
+path. Use it after resolving baseline conflicts by hand, or whenever the
+branch's PNGs are stale with nothing else to push — an empty commit is no
+longer the only lever. Dispatching on `main` deliberately will not
+auto-commit.
+
 If pushes to a PR branch suddenly create **no CI runs at all**, check
 `gh api repos/{owner}/{repo}/pulls/N --jq .mergeable_state` — `dirty` means a
 baseline PNG conflict with main is blocking the merge ref and GitHub silently
 skips `pull_request` runs. Merge `main`, resolving every conflicted PNG by
 taking **main's bytes** (if main's copy is stale, the next capture re-drifts
-and the bot fixes it), then push.
+and the bot fixes it), then push. A modify/delete conflict means main *retired*
+that baseline — take the deletion.
 
 For local interactive review, capture scratch PNGs — optionally filtered to a
 story-id substring so small subsets are cheap:
