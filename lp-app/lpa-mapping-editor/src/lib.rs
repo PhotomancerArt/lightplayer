@@ -12,6 +12,7 @@
 //! thin over the core.
 
 pub mod editor_core;
+pub mod view;
 
 pub use editor_core::camera::Camera;
 pub use editor_core::editor_session::MapEditorSession;
@@ -21,3 +22,5 @@ pub use editor_core::view_geometry::{
     ArrowInput, LAMPS_PER_UNIVERSE, MapArrowOverlay, MapArrowSeg, lamp_universe, neutral_lamp_rgb,
     universe_rgb, wiring_arrows,
 };
+pub use view::map_editor::{EditorFileOps, MapEditor};
+pub use view::map_editor_page::MapEditorPage;

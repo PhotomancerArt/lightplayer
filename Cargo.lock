@@ -5485,8 +5485,13 @@ dependencies = [
 name = "lpa-mapping-editor"
 version = "40.0.0"
 dependencies = [
+ "base64 0.22.1",
+ "dioxus",
+ "dioxus-icons",
  "lpc-mapping",
  "serde_json",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
