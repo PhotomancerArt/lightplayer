@@ -97,7 +97,9 @@ fn devices() -> Vec<UiDeviceCard> {
     ]
 }
 
-#[story]
+#[story(
+    description = "First run, create-first since the D17 deviation (2026-07-27): the empty Projects section header carries the New chip beside Import — a pure-blank create-and-open — and the empty-library copy leads with creating a project before pointing at the examples."
+)]
 fn first_run() -> Element {
     // no devices ever granted: the Connected section collapses to a slim
     // affordance; the library holds nothing yet

@@ -5530,6 +5530,7 @@ dependencies = [
  "lpa-server",
  "lpc-history",
  "lpc-model",
+ "lpc-registry",
  "lpc-shared",
  "lpc-view",
  "lpc-wire",

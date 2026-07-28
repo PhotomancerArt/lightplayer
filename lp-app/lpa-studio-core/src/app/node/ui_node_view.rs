@@ -1,7 +1,8 @@
 //! Complete node pane data.
 
 use crate::{
-    UiAction, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeTab, UiNodeTabBody, UiPaneAction,
+    NodeCardUiState, UiAction, UiAddNodeMenu, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeTab,
+    UiNodeTabBody, UiPaneAction,
 };
 
 /// The full data model for a Studio node pane.
@@ -18,6 +19,11 @@ pub struct UiNodeView {
     /// Kind-specific permanent face for this node's card. `None` (any kind
     /// without a hand-built face) renders the generic tab/section fallback.
     pub face: Option<UiNodeFace>,
+    /// Core-owned card UI view-state (drawer disclosure, agent collapse,
+    /// mirrored composer draft), overlaid by the project controller from
+    /// its address-keyed store. `Default` for fresh cards and unit
+    /// contexts.
+    pub card_ui: NodeCardUiState,
     /// Tabs rendered inside the node pane.
     pub tabs: Vec<UiNodeTab>,
     /// Child nodes extracted from the config slot tree.
@@ -30,6 +36,9 @@ pub struct UiNodeView {
     pub collapsed: bool,
     /// Projection or runtime issues for the whole node.
     pub issues: Vec<String>,
+    /// The add-node picker for container nodes (playlists): entries create
+    /// into THIS node's `entries` map. `None` for every other kind.
+    pub add_node_menu: Option<UiAddNodeMenu>,
 }
 
 impl UiNodeView {
@@ -41,12 +50,14 @@ impl UiNodeView {
             header,
             header_actions: Vec::new(),
             face: None,
+            card_ui: NodeCardUiState::default(),
             tabs,
             children: Vec::new(),
             focused: false,
             action: None,
             collapsed: false,
             issues: Vec::new(),
+            add_node_menu: None,
         }
     }
 

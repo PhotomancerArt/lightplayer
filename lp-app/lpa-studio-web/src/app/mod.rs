@@ -13,6 +13,8 @@ pub mod layout;
 pub(crate) mod mapping_editor_stories;
 pub mod node;
 pub mod project;
+#[cfg(feature = "stories")]
+pub(crate) mod readme_stories;
 pub mod roster;
 #[cfg(feature = "stories")]
 pub(crate) mod story_fixtures;

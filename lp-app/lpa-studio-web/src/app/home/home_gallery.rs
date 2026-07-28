@@ -158,6 +158,15 @@ pub fn HomeGallery(
                     h2 { class: section_title_class(), "Projects" }
                     if home.library_available {
                         div { class: "tw:flex tw:items-center tw:gap-2",
+                            // "New": create a pure-blank project and open it
+                            // (2026-07-27 deviation from D17 — see the ADR at
+                            // docs/adr/2026-07-27-node-authoring-operations.md)
+                            ActionButton {
+                                action: home_action(HomeOp::CreateProject),
+                                running: busy,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
                             // a real button (matching the ActionButton quiet
                             // chip exactly) that forwards to the hidden file
                             // input — a file dialog can't be a UiAction
@@ -183,11 +192,11 @@ pub fn HomeGallery(
                 }
                 if home.library_available {
                     if home.projects.is_empty() {
-                        // the one way to start: open an example (D17 — "new
-                        // project" IS the examples place); imports arrive by
-                        // button or drag
+                        // create-first since the D17 deviation (2026-07-27):
+                        // New makes a blank project; examples still seed a
+                        // copy; imports arrive by button or drag
                         p { class: "tw:m-0 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:px-4 tw:py-5 tw:text-sm tw:text-muted-foreground",
-                            "No projects yet — open an example below to start. It becomes your project on the first save. You can also drop a project zip anywhere on this page."
+                            "No projects yet — create a new project, or open an example below (it becomes yours on the first save). You can also drop a project zip anywhere on this page."
                         }
                     } else {
                         div { class: card_grid_class(),

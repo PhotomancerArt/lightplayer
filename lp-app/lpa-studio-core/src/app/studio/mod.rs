@@ -19,6 +19,11 @@ mod studio_face_e2e_tests;
 /// connect → readiness → pull) against the scripted byte-level fake device.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod studio_link_e2e_tests;
+/// End-to-end node create/remove tests (authoring P4): every picker kind
+/// against a real server, playlist-entry attach, staged removal rows,
+/// revert, and save-materialized deletion.
+#[cfg(test)]
+mod studio_node_crud_e2e_tests;
 pub mod studio_snapshot;
 pub mod studio_view_channel;
 pub mod ui_console_view;

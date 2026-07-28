@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
-use crate::app::project::agent_support::{AgentShaderBinding, AgentShaderTarget};
+use crate::app::project::agent_support::{
+    AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
+};
 use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -14,27 +16,34 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, ProgressState,
-    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
-    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
-    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
-    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
-    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
-    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
-    UiStatus, UiViewContent, UxUpdateSink,
+    NodeCardUiState, NodeUiOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
+    PlaylistActivateOp, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
+    ProjectSyncSummary, SlotEditOp, StudioOverlayMutation, StudioProjectReadOutcome,
+    StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError,
+    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction,
+    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
+    UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
     ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, MutationCmd, MutationCmdBatch,
-    MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, NodeId,
-    ShaderValueShapeRef, SlotEdit, SlotMapKey, SlotPathSegment, SlotPolicy, SlotShapeId,
-    SlotShapeLookup, SlotShapeRegistry, TreePath, glsl_type_for_lp_type,
-    resolve_artifact_specifier, resolve_slot_policy,
+    MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp, MutationRejection,
+    NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef, SlotEdit, SlotMapKey,
+    SlotPath, SlotPathSegment, SlotPolicy, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
+    TreePath, glsl_type_for_lp_type, resolve_artifact_specifier, resolve_slot_policy,
+    starter_for_kind,
 };
 use lpc_view::ProjectView;
+use lpc_wire::{
+    WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
+    WireRemoveNodeRequest, WireRemoveNodeResponse,
+};
 
+use super::node::node_naming::{file_stem, node_kind_slug, unique_node_name};
+use super::node::{UiAttachTarget, UiNodeRemovePreflight, add_node_menu};
 use super::{
     NodeController, ProjectProductSubscriptionIntent, SlotController, SlotKind, node::root_slot_key,
 };
@@ -100,11 +109,49 @@ pub struct ProjectController {
     slot_shapes: SlotShapeRegistry,
     /// `node.{id}.{root}` → root shape id from the last applied view.
     root_shape_ids: BTreeMap<String, SlotShapeId>,
+    /// Node-card UI view-state (drawer disclosure, agent collapse,
+    /// mirrored composer draft), keyed by node address path — the node arm
+    /// of the CardUiState re-home (2026-07-27). Mutated synchronously via
+    /// `ProjectEditorOp::NodeUi`, overlaid onto the editor DTOs at view
+    /// build, pruned with the loaded project.
+    node_card_ui: BTreeMap<String, NodeCardUiState>,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
+    /// Staged node removals recorded from `RemoveNode` acks, keyed by the
+    /// attachment-site slot address the overlay's `Remove` edit lands at.
+    /// Drives the save panel's `NodeRemoved` row (removed-node label) and
+    /// the row's composed revert (`RemoveSlotEdit` at the site plus
+    /// `ClearArtifact` per staged delete). Cleared on save, revert-all, and
+    /// state reset; a reconnect degrades the rows to plain `Removed`/asset
+    /// entries (the overlay itself survives server-side).
+    staged_removals: BTreeMap<ProjectSlotAddress, StagedNodeRemoval>,
+    /// The node a `CreateNode` ack wants focused, matched by tree name once
+    /// the created node lands in an applied project view (tree deltas ride
+    /// `ProjectRead`, so the ack-time refresh usually resolves it
+    /// immediately; a slower delta resolves on the next applied read).
+    pending_focus: Option<PendingNodeFocus>,
     /// The local library, when the platform mounted a store (browser).
     /// Absent on host tests — flows degrade to the legacy deploy path.
     library: Option<LibraryContext>,
+}
+
+/// One staged node removal (see `ProjectController::staged_removals`).
+struct StagedNodeRemoval {
+    /// Display label of the removed node (for the save-panel row).
+    node_label: String,
+    /// Artifacts the server staged `Delete` for this removal; the row's
+    /// revert clears exactly these.
+    staged_deletes: Vec<ArtifactLocation>,
+}
+
+/// A created node awaiting focus (see `ProjectController::pending_focus`).
+struct PendingNodeFocus {
+    /// Stable address of the node the created child attaches under (the
+    /// project root or a playlist).
+    parent: ProjectNodeAddress,
+    /// Expected tree segment name of the created node (the `nodes` key, or
+    /// the loader's `entry_<k>` fallback for unnamed playlist entries).
+    name: String,
 }
 
 /// Library wiring for load-as-push / save-as-pull (roadmap M3), reworked
@@ -151,7 +198,10 @@ impl ProjectController {
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
+            node_card_ui: BTreeMap::new(),
             next_mutation_cmd_id: 1,
+            staged_removals: BTreeMap::new(),
+            pending_focus: None,
             library: None,
         }
     }
@@ -447,6 +497,7 @@ impl ProjectController {
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
             |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
+        let remove_action = |address: &ProjectNodeAddress| self.node_remove_action(address);
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         let subscribes = |node: &NodeController| self.node_subscribes_products(node);
@@ -458,6 +509,7 @@ impl ProjectController {
                     &edits,
                     &extra_config,
                     &asset_editor,
+                    &remove_action,
                     primary_visual.as_ref(),
                     &subscribes,
                 )
@@ -524,6 +576,15 @@ impl ProjectController {
                 authored: (binding.origin == lpc_wire::WireBindingOrigin::Authored)
                     .then(|| endpoint.clone()),
             };
+            // The live bus reading rides the (display-only) endpoint AFTER
+            // the authoring surface is built, so Retarget/Unbind state never
+            // carries the churning value (P6 item 1).
+            if binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint
+                && let Some(live) = live_channel_value(graph, channel, binding.kind)
+            {
+                endpoint = endpoint.with_live_value(live);
+            }
             let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
                 .with_description("Runtime slot wired by binding; it has no authored value here.")
                 .with_state(crate::UiSlotFieldState::readonly())
@@ -654,6 +715,173 @@ impl ProjectController {
             }
         }
         None
+    }
+
+    /// The engine's latest status for the shader node behind `artifact`:
+    /// the retained status Revision plus the verdict classification
+    /// ([`crate::AgentEngineStatus`]). `None` when no shader node uses the
+    /// artifact. Written into the agent bridge cell on every pull so a
+    /// running agent's engine-verdict wait can observe status advances.
+    pub(crate) fn agent_engine_status(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<crate::AgentEngineStatus> {
+        let node = self.agent_shader_node(artifact)?;
+        Some(crate::AgentEngineStatus {
+            revision: node.status_frame(),
+            verdict: crate::app::project::agent_support::engine_verdict(node.status()),
+        })
+    }
+
+    /// The shader node whose resolved `source` asset is `artifact` (the
+    /// agent's per-artifact node lookup).
+    fn agent_shader_node(&self, artifact: &ArtifactLocation) -> Option<&NodeController> {
+        fn find<'a>(
+            controller: &'a ProjectController,
+            nodes: &'a [NodeController],
+            artifact: &ArtifactLocation,
+        ) -> Option<&'a NodeController> {
+            for node in nodes {
+                if node.kind().eq_ignore_ascii_case("shader")
+                    && let Some(source) = shader_source_path(node)
+                    && controller
+                        .resolve_node_asset_artifact(node, &source)
+                        .as_ref()
+                        == Some(artifact)
+                {
+                    return Some(node);
+                }
+                if let Some(found) = find(controller, node.children(), artifact) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        find(self, &self.root_nodes, artifact)
+    }
+
+    /// The cached visual-output preview of the shader node behind
+    /// `artifact` (output 0 — the render product every shader produces),
+    /// for the agent history's thumbnails. `None` when no shader node uses
+    /// the artifact or no probe preview has landed yet (previews are
+    /// reused, never re-plumbed — same doctrine as the playlist strip's
+    /// `child_visual_snapshot`).
+    pub(crate) fn agent_visual_preview(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<crate::UiProductPreview> {
+        let node = self.agent_shader_node(artifact)?;
+        let product = crate::UiProductRef::Visual {
+            node_id: node.target().node_id.0,
+            output: 0,
+        };
+        self.sync.as_ref()?.product_preview(&product).cloned()
+    }
+
+    /// The def-side param records of the shader node behind `artifact`
+    /// (its `consumed` map), for the agent's params diff. `None` when no
+    /// shader node uses the artifact. Written into the agent bridge cell
+    /// on every pull, like [`Self::agent_engine_status`].
+    pub(crate) fn agent_param_defs(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<Vec<lpa_agent::ParamDefRecord>> {
+        let node = self.agent_shader_node(artifact)?;
+        let bound = self.bound_consumed_names(node.target().node_id);
+        Some(agent_param_def_records(node, &bound))
+    }
+
+    /// The consumed-slot names of `node_id` with a live binding in the
+    /// graph snapshot (bus-driven at runtime; the authored default is then
+    /// inert). Authored binds and materialized `default_bind`s both land in
+    /// the graph, so this covers every bound origin.
+    fn bound_consumed_names(&self, node_id: NodeId) -> BTreeSet<String> {
+        let Some(graph) = self.binding_graph() else {
+            return BTreeSet::new();
+        };
+        graph
+            .bindings
+            .iter()
+            .filter(|binding| {
+                binding.node == node_id
+                    && binding.direction == lpc_wire::WireBindingDirection::Consumes
+            })
+            .filter_map(|binding| binding.slot.as_ref())
+            .filter_map(|slot| match slot.segments().first() {
+                Some(SlotPathSegment::Field(name)) => Some(name.as_str().to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Dispatch one agent `upsert_param` as ONE `MutationCmdBatch` of
+    /// `PutSlotEdit`s on the def artifact of the shader node behind
+    /// `artifact` (batch shape and ack handling like
+    /// [`Self::apply_asset_body`]; the exact edit list is
+    /// [`param_upsert_edits`]). Returns the edit run plus the joined
+    /// rejection text when any command was refused; a clean ack arms the
+    /// verdict chase — the def change flips the node's needs-compile, so
+    /// the agent's engine-verdict wait observes the fresh outcome.
+    pub(crate) async fn upsert_shader_param(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+        upsert: &lpa_agent::ParamUpsert,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let def_artifact = {
+            let node = self.agent_shader_node(artifact).ok_or_else(|| {
+                UiError::UnsupportedAction(format!(
+                    "no shader node uses {}",
+                    artifact.file_path().as_str()
+                ))
+            })?;
+            self.def_artifacts
+                .get(&node.target().node_id)
+                .cloned()
+                .ok_or_else(|| {
+                    UiError::Project(format!(
+                        "no def artifact is known for the shader node of {}",
+                        artifact.file_path().as_str()
+                    ))
+                })?
+        };
+        let batch = MutationCmdBatch::new(
+            param_upsert_edits(upsert)
+                .into_iter()
+                .map(|edit| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: def_artifact.clone(),
+                        edit,
+                    },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        let rejection = (!rejections.is_empty()).then(|| {
+            rejections
+                .iter()
+                .map(rejection_text)
+                .collect::<Vec<_>>()
+                .join("; ")
+        });
+        if rejection.is_none() {
+            // The def change reached the engine; chase its recompile
+            // verdict with the tightened passive ticks (same liveness as
+            // an accepted asset apply).
+            self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+        }
+        Ok((
+            ProjectEditRun {
+                notices: rejection_notices(&rejections),
+                logs: mutation.logs,
+            },
+            rejection,
+        ))
     }
 
     /// Every fixture node with a known def artifact, as `(label, def
@@ -819,11 +1047,11 @@ impl ProjectController {
         entry: &SlotEditEntry<'_>,
         old_value: Option<String>,
     ) -> UiPendingEdit {
-        let node_label = self
+        let mut node_label = self
             .node(&entry.address.node)
             .map(|node| node.label().to_string())
             .unwrap_or_else(|| entry.address.node.to_string());
-        let kind = match &entry.op {
+        let mut kind = match &entry.op {
             SlotEditEntrySource::Buffered(op) => match op {
                 PendingEditOp::SetValue { value } => UiPendingEditKind::Assign {
                     value_display: format_lp_value(value),
@@ -838,6 +1066,16 @@ impl ProjectController {
             },
             SlotEditEntrySource::Acked(op) => acked_edit_kind(op),
         };
+        // A recorded staged removal upgrades its site entry into the
+        // NodeRemoved row: the label becomes the REMOVED node's name (the
+        // address itself names the site's owner — root or playlist). The
+        // path display stays the site (`nodes[<key>]` / `entries[<k>]`) and
+        // the revert stays the site-addressed `SlotEditOp::Revert`, which
+        // the controller expands into the inverse composed batch.
+        if let Some(removal) = self.staged_removals.get(entry.address) {
+            kind = UiPendingEditKind::NodeRemoved;
+            node_label = removal.node_label.clone();
+        }
         let phase = if entry.summary.failed > 0 {
             UiPendingEditPhase::Failed {
                 reason: entry
@@ -966,6 +1204,31 @@ impl ProjectController {
             .unwrap_or(SlotPolicy::default().persistence)
     }
 
+    /// Entry keys of `artifact`'s `entries` map that carry pending overlay
+    /// slot edits (typically a staged entry removal). The base file still
+    /// holds these entries until Save, so the create path must treat them as
+    /// occupied even though they left the effective tree.
+    fn overlay_entry_keys(&self, artifact: &ArtifactLocation) -> BTreeSet<u32> {
+        let Some(sync) = &self.sync else {
+            return BTreeSet::new();
+        };
+        sync.overlay_slot_edits()
+            .filter(|(edit_artifact, _, _)| *edit_artifact == artifact)
+            .filter_map(|(_, path, _)| match path.segments() {
+                [SlotPathSegment::Field(field), SlotPathSegment::Key(key), ..]
+                    if field.as_str() == "entries" =>
+                {
+                    match key {
+                        SlotMapKey::U32(key) => Some(*key),
+                        SlotMapKey::I32(key) => u32::try_from(*key).ok(),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Reverse index from def artifact to the node addresses currently using
     /// it, built from the synced controller tree plus the connect-time
     /// def-artifact map.
@@ -1032,6 +1295,9 @@ impl ProjectController {
             self.focus_editor_target(&target);
         }
         ensure_default_node_focus(&mut self.root_nodes);
+        // A freshly created node takes focus once its tree entry lands
+        // (create-op semantics: the user lands on what they made).
+        self.apply_pending_focus();
         Ok(())
     }
 
@@ -1051,6 +1317,49 @@ impl ProjectController {
             node.refresh_binding_facts(&overrides);
         }
         self.apply_default_binding_overlay();
+        self.apply_bound_live_values();
+    }
+
+    /// Decorate every bound slot's endpoint with the consumed channel's
+    /// current reading (P6 item 1) — the display-only `live_value` a bound
+    /// panel control renders in the violet family. Values come off the
+    /// binding-graph snapshot that already rides every pull; quantization
+    /// and the monotonic/time-kind exclusion live in
+    /// [`live_channel_value`], so this pass only dirties DTOs when a
+    /// displayed reading actually moves. Runs after the binding overlays,
+    /// which (re)build the endpoints it decorates.
+    fn apply_bound_live_values(&mut self) {
+        let Some(graph) = self.binding_graph() else {
+            return;
+        };
+        let mut updates: Vec<(NodeId, String, String)> = Vec::new();
+        for binding in &graph.bindings {
+            if binding.direction != lpc_wire::WireBindingDirection::Consumes {
+                continue;
+            }
+            let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint else {
+                continue;
+            };
+            let Some(slot) = binding.slot.as_ref() else {
+                continue;
+            };
+            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+                continue;
+            };
+            let Some(live) = live_channel_value(graph, channel, binding.kind) else {
+                continue;
+            };
+            updates.push((binding.node, name.as_str().to_string(), live));
+        }
+        for (node_id, slot, live) in updates {
+            if let Some(node) = self
+                .root_nodes
+                .iter_mut()
+                .find_map(|node| node.node_by_runtime_id_mut(node_id))
+            {
+                node.apply_bound_live_value(&slot, &live);
+            }
+        }
     }
 
     /// The pending `bindings[…]` edits fact derivation must read through:
@@ -1212,10 +1521,11 @@ impl ProjectController {
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         let asset_editor =
             |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
+        let remove_action = |address: &ProjectNodeAddress| self.node_remove_action(address);
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         let subscribes = |node: &NodeController| self.node_subscribes_products(node);
-        let nodes = self
+        let mut nodes = self
             .root_nodes
             .iter()
             .flat_map(NodeController::children)
@@ -1225,11 +1535,18 @@ impl ProjectController {
                     &edits,
                     &extra_config,
                     &asset_editor,
+                    &remove_action,
                     primary_visual.as_ref(),
                     &subscribes,
                 )
             })
             .collect::<Vec<_>>();
+        // Card UI view-state rides the DTOs (drawer disclosure, agent
+        // collapse, mirrored composer draft), overlaid from the
+        // address-keyed store so it survives re-renders and remounts.
+        for node in &mut nodes {
+            self.overlay_node_card_ui(node);
+        }
         // Node dirty covers slot + node-mapped asset edits across the subtree;
         // asset edits whose artifact maps to no node (a shader's `.glsl`) are
         // added on top so they still count toward Save (see `dirty_summary`).
@@ -1258,6 +1575,7 @@ impl ProjectController {
         .with_dirty(dirty)
         .with_pending_edits(self.pending_edits())
         .with_header_actions(project_header_actions(&dirty))
+        .with_add_node_menu(add_node_menu(&UiAttachTarget::ProjectRoot))
         .with_edits_in_flight(self.edits_in_flight())
     }
 
@@ -1691,6 +2009,43 @@ impl ProjectController {
                 self.active_editor_target = Some(target);
                 Ok(UiNotices::new())
             }
+            // Node-card UI view-state mutations are local and synchronous:
+            // the op carries its own node key, so the action's editor target
+            // is irrelevant here.
+            ProjectEditorOp::NodeUi(op) => {
+                self.apply_node_ui_op(op);
+                Ok(UiNotices::new())
+            }
+        }
+    }
+
+    /// Apply one node-card UI mutation to the address-keyed store (the
+    /// node arm of the CardUiState re-home; see
+    /// [`NodeCardUiState`]'s module doc for the draft-mirroring contract).
+    fn apply_node_ui_op(&mut self, op: NodeUiOp) {
+        self.node_card_ui
+            .entry(op.node().to_string())
+            .or_default()
+            .apply(&op);
+    }
+
+    /// Overlay the saved card UI view-state onto a built node DTO and its
+    /// nested children (keyed by address: `header.path` for panes,
+    /// `detail` for children) — the same pattern as the device roster's
+    /// `overlay_card_ui`.
+    fn overlay_node_card_ui(&self, node: &mut UiNodeView) {
+        if let Some(saved) = self.node_card_ui.get(&node.header.path) {
+            node.card_ui = saved.clone();
+        }
+        self.overlay_child_card_ui(&mut node.children);
+    }
+
+    fn overlay_child_card_ui(&self, children: &mut [crate::UiNodeChild]) {
+        for child in children {
+            if let Some(saved) = self.node_card_ui.get(&child.detail) {
+                child.card_ui = saved.clone();
+            }
+            self.overlay_child_card_ui(&mut child.children);
         }
     }
 
@@ -1835,6 +2190,23 @@ impl ProjectController {
             let mut node_products = Vec::new();
             node.collect_produced_product_refs(&mut node_products);
             products.extend(node_products);
+        }
+        // Entry-thumb warming (P6 item 6): the playlist card's strip face is
+        // a permanent surface whose chips reuse each child's CACHED visual
+        // preview, so the children's visual products stay tracked while the
+        // project is open — otherwise non-active entries render name-only
+        // until first focused. These are the 32×32 `RenderProduct` probe
+        // previews riding the regular pull, never GPU gallery lease slots.
+        if node.is_playlist_kind() {
+            for child in node.children() {
+                let mut child_products = Vec::new();
+                child.collect_produced_product_refs(&mut child_products);
+                products.extend(
+                    child_products
+                        .into_iter()
+                        .filter(|product| matches!(product, UiProductRef::Visual { .. })),
+                );
+            }
         }
         for child in node.children() {
             self.collect_subscribed_products(child, products);
@@ -2010,6 +2382,10 @@ impl ProjectController {
     fn clear_loaded_project_state(&mut self) {
         self.sync = None;
         self.root_nodes.clear();
+        // Card UI view-state follows the loaded project: a closed or
+        // failed project must not leak drawer/collapse state (or a
+        // mirrored composer draft) into the next one.
+        self.node_card_ui.clear();
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
@@ -2017,6 +2393,8 @@ impl ProjectController {
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
         self.root_shape_ids.clear();
+        self.staged_removals.clear();
+        self.pending_focus = None;
         // the library binding follows the loaded project: a disconnected or
         // failed project must not keep pulling saves into (or advertising)
         // the previously open package. Its host lock is queued for release
@@ -2157,6 +2535,51 @@ impl ProjectController {
         }
     }
 
+    /// Execute a [`PlaylistActivateOp`]: dispatch the activate-entry runtime
+    /// command to the playlist's live runtime (the non-overlay command
+    /// channel — nothing staged, nothing in the Save panel).
+    ///
+    /// The op carries the stable authored address; the CURRENT runtime
+    /// `NodeId` is resolved here, at dispatch time, so a queued click never
+    /// addresses a stale runtime id across a reload. Acceptance is quiet —
+    /// the strip's ACTIVE placard following on the next refresh is the
+    /// outcome — but borrows the verdict-chase tightened ticks so the
+    /// switch is visible in UI-time, not device-cadence-time. Rejection
+    /// (stale entry key, dead runtime) surfaces as a warning notice.
+    pub async fn activate_playlist_entry(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PlaylistActivateOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let node_id = self
+            .node(&op.node)
+            .map(|node| node.target().node_id)
+            .ok_or_else(|| {
+                UiError::Project(format!("no node at {} to activate an entry on", op.node))
+            })?;
+        let run = server
+            .node_command(
+                handle_id,
+                node_id,
+                WireNodeCommand::PlaylistActivateEntry { entry: op.entry },
+            )
+            .await?;
+        let notices = match run.response {
+            WireNodeCommandResponse::Accepted => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            WireNodeCommandResponse::Rejected { reason } => UiNotices::new().with_notice(
+                UiNotice::warning(format!("Couldn't activate entry {}: {reason}", op.entry)),
+            ),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
     /// Commit the pending-edit overlay (persisted edits are written back to
     /// def artifacts; transient edits stay pending) and re-sync the overlay
     /// mirror from a follow-up read.
@@ -2181,6 +2604,9 @@ impl ProjectController {
         // The commit rewrote persisted artifacts, so every cached base body
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
+        // Staged node removals materialized (files deleted); the records
+        // backing their save-panel rows are done.
+        self.staged_removals.clear();
 
         let changes = &commit.result.artifact_changes;
         let written = changes.added.len() + changes.changed.len() + changes.removed.len();
@@ -2218,6 +2644,9 @@ impl ProjectController {
         // Every artifact's overlay entry clears with the batch, so cached
         // base bodies re-fetch on the next editor open (invalidate-on-clear).
         self.asset_base_bodies.clear();
+        // The wholesale Clear also un-stages every node removal (site edits
+        // and Delete overlays included) — the records go with them.
+        self.staged_removals.clear();
         let batch = MutationCmdBatch::new(vec![MutationCmd {
             id: self.allocate_mutation_cmd_id(),
             mutation: MutationOp::Clear,
@@ -2266,10 +2695,20 @@ impl ProjectController {
         // Every entry clears locally regardless of whether its artifact still
         // resolves (matching `apply_revert`); an artifact shared by several
         // node uses yields one wire removal per distinct `(artifact, path)`.
+        // A staged node-removal entry additionally releases its staged file
+        // deletes (`ClearArtifact` each), so a subtree revert restores the
+        // removed node whole.
         let mut notices = UiNotices::new();
         let mut wire_targets = BTreeSet::new();
+        let mut cleared_artifacts: BTreeSet<ArtifactLocation> = BTreeSet::new();
         for address in addresses {
             self.edit_buffer.remove(&address);
+            if let Some(removal) = self.staged_removals.remove(&address) {
+                for artifact in removal.staged_deletes {
+                    self.asset_base_bodies.remove(&artifact);
+                    cleared_artifacts.insert(artifact);
+                }
+            }
             match self.resolve_def_artifact(&address) {
                 Ok(artifact) => {
                     wire_targets.insert((artifact, address.path.clone()));
@@ -2282,19 +2721,26 @@ impl ProjectController {
                 }
             }
         }
-        if wire_targets.is_empty() {
+        if wire_targets.is_empty() && cleared_artifacts.is_empty() {
             return Ok(ProjectEditRun {
                 notices,
                 logs: Vec::new(),
             });
         }
-        let commands = wire_targets
+        let mut commands: Vec<MutationCmd> = wire_targets
             .into_iter()
             .map(|(artifact, path)| MutationCmd {
                 id: self.allocate_mutation_cmd_id(),
                 mutation: MutationOp::RemoveSlotEdit { artifact, path },
             })
             .collect();
+        for artifact in cleared_artifacts {
+            commands.push(MutationCmd {
+                id: self.allocate_mutation_cmd_id(),
+                mutation: MutationOp::ClearArtifact { artifact },
+            });
+        }
+        let commands = commands;
         let batch = MutationCmdBatch::new(commands);
         let reverted = batch.commands.len();
         let mutation = server
@@ -2312,6 +2758,563 @@ impl ProjectController {
                     rejection_text(rejection)
                 )))
             })
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: mutation.logs,
+        })
+    }
+
+    // --- Dedicated node create/remove ops (authoring P4) ---------------------
+
+    /// Create one blank node of `kind` at `attach` ([`crate::NodeCreateOp`]):
+    /// auto-name, starter bytes, ONE `CreateNode` wire round-trip
+    /// (commit-immediate server-side), then on ack an immediate project
+    /// refresh (tree deltas ride `ProjectRead`, not the ack), a def-artifact
+    /// map re-read (so the new node is editable right away), the save-pull
+    /// (creation lands in the library as a `Saved` event; library-less
+    /// sessions skip inside), and focus on the new node once its tree entry
+    /// lands. A rejection surfaces as a warning toast; nothing is staged
+    /// client-side for a failed create.
+    pub async fn create_node(
+        &mut self,
+        server: &mut StudioServerClient,
+        kind: NodeKind,
+        attach: &UiAttachTarget,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let name = self.unique_node_name_for(kind);
+        let (site, parent, expected_name) = match attach {
+            UiAttachTarget::ProjectRoot => {
+                let Some(root) = self.root_nodes.first() else {
+                    return Ok(ProjectEditRun::notice(UiNotice::warning(
+                        "Cannot add a node before the project tree has synced",
+                    )));
+                };
+                (
+                    NodeAttachSite::ProjectNodes { key: name.clone() },
+                    root.address().clone(),
+                    name.clone(),
+                )
+            }
+            UiAttachTarget::Playlist { node } => {
+                let Some(playlist) = self.node(node) else {
+                    return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                        "Cannot add to {node}: the playlist is not in the synced project"
+                    ))));
+                };
+                let Some(artifact) = self.def_artifacts.get(&playlist.target().node_id) else {
+                    return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                        "Cannot add to {node}: its definition artifact is unknown"
+                    ))));
+                };
+                // Next free entries key by the map's suggested-key rule
+                // (first free index, gap-filling). Keys with staged overlay
+                // edits (a pending entry removal) count as used: the base
+                // file still holds them until Save, so the server rejects a
+                // create there as TargetOccupied.
+                let staged = self.overlay_entry_keys(artifact);
+                let key = playlist_next_entry_key(playlist, &staged);
+                let path = SlotPath::parse(&format!("entries[{key}].node"))
+                    .expect("entries[<u32>].node is a valid slot path");
+                (
+                    NodeAttachSite::Slot {
+                        artifact: artifact.clone(),
+                        path,
+                    },
+                    node.clone(),
+                    // Created entries carry no authored name; the loader
+                    // mounts them under its `entry_<k>` fallback.
+                    format!("entry_{key}"),
+                )
+            }
+        };
+
+        // Starter bytes: the kind's starter template (bare default when the
+        // table has no entry), stem-substituted, canonically serialized.
+        let starter = starter_for_kind(kind)
+            .unwrap_or_else(|| NodeStarter {
+                def: lpc_model::NodeDef::default_for_kind(kind),
+                assets: Vec::new(),
+            })
+            .for_stem(&name);
+        let body = starter.def.write_json(&self.slot_shapes).map_err(|err| {
+            UiError::Project(format!("cannot serialize the new node definition: {err}"))
+        })?;
+        let assets = starter
+            .assets
+            .into_iter()
+            .map(|(file, bytes)| {
+                (
+                    lpc_model::LpPathBuf::from(format!("./{file}").as_str()),
+                    bytes,
+                )
+            })
+            .collect::<Vec<_>>();
+        let request = WireCreateNodeRequest::new(
+            lpc_model::LpPathBuf::from(format!("./{name}.json").as_str()),
+            body.into_bytes(),
+            assets,
+            site,
+        );
+
+        let outcome = server.project_create_node(handle_id, request).await?;
+        let mut logs = outcome.logs;
+        match outcome.response {
+            WireCreateNodeResponse::Created {
+                artifact_changes, ..
+            } => {
+                // Focus resolves once the created node's tree entry lands in
+                // an applied view (usually the refresh right below).
+                self.pending_focus = Some(PendingNodeFocus {
+                    parent,
+                    name: expected_name,
+                });
+                match self.refresh_project(server).await {
+                    Ok(run) => logs.extend(run.logs),
+                    Err(error) => {
+                        log::warn!("post-create refresh failed (next tick recovers): {error:?}");
+                    }
+                }
+                // The new node's slot edits must resolve their def artifact;
+                // the connect-time map does not know it yet.
+                match server.project_node_def_artifacts(handle_id).await {
+                    Ok((map, inventory_logs)) => {
+                        self.def_artifacts = map;
+                        logs.extend(inventory_logs);
+                    }
+                    Err(error) => {
+                        log::warn!("post-create inventory read failed: {error:?}");
+                    }
+                }
+                let mut notices = UiNotices::new().with_notice(UiNotice::info(format!(
+                    "Added {name} ({} file(s) written)",
+                    artifact_changes.added.len()
+                )));
+                // Creation committed files — pull them into the library so it
+                // lands as a Saved event (reload-safe). Same failure posture
+                // as save: the runtime already committed fine.
+                match self.pull_committed_changes_into_library(server).await {
+                    Ok(Some(warning)) => notices = notices.with_notice(warning),
+                    Ok(None) => {}
+                    Err(error) => {
+                        log::warn!("create save-pull failed (will retry on next save): {error:?}");
+                        notices = notices.with_notice(UiNotice::warning(
+                            "Added to the running project, but not yet to your library — will sync on the next save",
+                        ));
+                    }
+                }
+                Ok(ProjectEditRun { notices, logs })
+            }
+            WireCreateNodeResponse::Rejected { rejection } => Ok(ProjectEditRun {
+                notices: UiNotices::new().with_notice(UiNotice::warning(format!(
+                    "Add node rejected: {}",
+                    rejection_text(&rejection)
+                ))),
+                logs,
+            }),
+        }
+    }
+
+    /// Remove the node at `address` ([`crate::NodeRemoveOp`]): resolve the
+    /// attachment site, ONE `RemoveNode` wire round-trip (staged in the
+    /// server overlay + sweep), then on ack converge the overlay mirror with
+    /// a full overlay read and refresh immediately (the node disappears via
+    /// the parent's `ChildrenChanged`). The staged removal is recorded so
+    /// the save panel lists a `NodeRemoved` row whose revert composes the
+    /// inverse batch. A rejection surfaces as a warning toast.
+    pub async fn remove_node(
+        &mut self,
+        server: &mut StudioServerClient,
+        address: &ProjectNodeAddress,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let Some((site, site_address)) = self.resolve_remove_site(address) else {
+            return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                "Cannot remove {address}: its attachment site could not be resolved"
+            ))));
+        };
+        let node_label = self
+            .node(address)
+            .map(|node| node.label().to_string())
+            .unwrap_or_else(|| address.to_string());
+
+        let outcome = server
+            .project_remove_node(handle_id, WireRemoveNodeRequest::new(site))
+            .await?;
+        let mut logs = outcome.logs;
+        match outcome.response {
+            WireRemoveNodeResponse::Staged {
+                staged_deletes,
+                swept_pending_edits,
+                ..
+            } => {
+                // The server swept the subtree's pending intent; release the
+                // matching local buffer entries so nothing shadows.
+                self.edit_buffer
+                    .retain(|edit_address, _| !edit_address.node.is_self_or_under(address));
+                for artifact in &staged_deletes {
+                    self.asset_edit_buffer.remove(artifact);
+                    self.asset_base_bodies.remove(artifact);
+                }
+                self.staged_removals.insert(
+                    site_address,
+                    StagedNodeRemoval {
+                        node_label: node_label.clone(),
+                        staged_deletes,
+                    },
+                );
+                // Converge the mirror on the staged overlay (site Remove +
+                // Delete entries) rather than reconstructing it from the ack.
+                let read = server.project_overlay_read(handle_id).await?;
+                logs.extend(read.logs);
+                self.sync_mut()?
+                    .apply_overlay_read(read.overlay, read.base_values, read.revision);
+                match self.refresh_project(server).await {
+                    Ok(run) => logs.extend(run.logs),
+                    Err(error) => {
+                        log::warn!("post-remove refresh failed (next tick recovers): {error:?}");
+                    }
+                }
+                // The site artifact's def changed, so the engine may have
+                // rebuilt its runtime node under a fresh id — re-read the
+                // def-artifact map or the staged rows orphan (no NodeRemoved
+                // upgrade, no site revert).
+                match server.project_node_def_artifacts(handle_id).await {
+                    Ok((map, inventory_logs)) => {
+                        self.def_artifacts = map;
+                        logs.extend(inventory_logs);
+                    }
+                    Err(error) => {
+                        log::warn!("post-remove inventory read failed: {error:?}");
+                    }
+                }
+                let mut message =
+                    format!("Removed {node_label} — its files are deleted on the next save");
+                if swept_pending_edits {
+                    message.push_str("; pending edits on it were discarded");
+                }
+                Ok(ProjectEditRun {
+                    notices: UiNotices::new().with_notice(UiNotice::info(message)),
+                    logs,
+                })
+            }
+            WireRemoveNodeResponse::Rejected { rejection } => Ok(ProjectEditRun {
+                notices: UiNotices::new().with_notice(UiNotice::warning(format!(
+                    "Remove node rejected: {}",
+                    rejection_text(&rejection)
+                ))),
+                logs,
+            }),
+        }
+    }
+
+    /// The delete-node header action for `address`: the
+    /// [`crate::NodeRemoveOp`] wearing an [`crate::ActionConfirmation`]
+    /// composed from the removal pre-flight (`HomeOp::DeletePackage`
+    /// pattern). `None` when the node's attachment site cannot be resolved
+    /// (no delete affordance is offered).
+    pub fn node_remove_action(&self, address: &ProjectNodeAddress) -> Option<UiAction> {
+        let preflight = self.node_remove_preflight(address)?;
+        Some(
+            UiAction::from_op(
+                ControllerId::new(Self::NODE_ID),
+                crate::NodeRemoveOp {
+                    node: address.clone(),
+                },
+            )
+            .with_confirmation(preflight.confirmation()),
+        )
+    }
+
+    /// Pre-flight what removing `address` would do, computed entirely from
+    /// the synced client state (no wire round-trip): dependents referencing
+    /// the subtree, pending edits the sweep would discard, and the files
+    /// expected to be staged for deletion. Best effort — the server's
+    /// `RemoveNode` validation is authoritative (it never deletes shared
+    /// artifacts). `None` when the site cannot be resolved.
+    pub fn node_remove_preflight(
+        &self,
+        address: &ProjectNodeAddress,
+    ) -> Option<UiNodeRemovePreflight> {
+        self.resolve_remove_site(address)?;
+        let node = self.node(address)?;
+
+        let mut subtree_nodes = Vec::new();
+        collect_subtree_nodes(node, &mut subtree_nodes);
+        let subtree_ids: BTreeSet<NodeId> = subtree_nodes
+            .iter()
+            .map(|node| node.target().node_id)
+            .collect();
+
+        // Pending edits under the subtree (slot entries plus node-mapped
+        // asset bodies) — the removal sweeps these.
+        let join = self.slot_edit_join();
+        let pending_edit_count = join
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.address.node.is_self_or_under(address))
+            .count()
+            + join
+                .asset_entries()
+                .into_iter()
+                .filter(|entry| {
+                    entry
+                        .node
+                        .is_some_and(|owner| owner.is_self_or_under(address))
+                })
+                .count();
+
+        // Files expected staged for deletion: subtree def artifacts not used
+        // by an outside node, plus client-resolvable shader sources not
+        // shared with an outside shader.
+        let nodes_by_artifact = self.nodes_by_def_artifact();
+        let mut all_nodes = Vec::new();
+        for root in &self.root_nodes {
+            collect_subtree_nodes(root, &mut all_nodes);
+        }
+        let mut staged_files: Vec<String> = Vec::new();
+        let mut push_file = |artifact: &ArtifactLocation| {
+            let path = artifact.file_path().as_str().to_string();
+            if !staged_files.contains(&path) {
+                staged_files.push(path);
+            }
+        };
+        for subtree_node in &subtree_nodes {
+            if let Some(artifact) = self.def_artifacts.get(&subtree_node.target().node_id) {
+                let shared_outside = nodes_by_artifact
+                    .get(artifact)
+                    .is_some_and(|users| users.iter().any(|user| !user.is_self_or_under(address)));
+                if !shared_outside {
+                    push_file(artifact);
+                }
+            }
+            if let Some(source) = shader_source_path(subtree_node)
+                && let Some(artifact) = self.resolve_node_asset_artifact(subtree_node, &source)
+            {
+                let shared_outside = all_nodes.iter().any(|other| {
+                    !other.address().is_self_or_under(address)
+                        && shader_source_path(other).is_some_and(|other_source| {
+                            self.resolve_node_asset_artifact(other, &other_source)
+                                .as_ref()
+                                == Some(&artifact)
+                        })
+                });
+                if !shared_outside {
+                    push_file(&artifact);
+                }
+            }
+        }
+
+        // Dependents: authored bindings crossing the boundary toward the
+        // subtree, plus surviving uses of a subtree def artifact (`node:`
+        // refs / playlist entries elsewhere).
+        let mut dependent_count = 0;
+        if let Some(graph) = self.binding_graph() {
+            for binding in &graph.bindings {
+                if binding.origin != lpc_wire::WireBindingOrigin::Authored {
+                    continue;
+                }
+                let node_inside = subtree_ids.contains(&binding.node);
+                let endpoint_inside = matches!(
+                    &binding.endpoint,
+                    lpc_wire::WireBindingEndpoint::NodeSlot { node, .. }
+                        if subtree_ids.contains(node)
+                );
+                let endpoint_outside_node = matches!(
+                    &binding.endpoint,
+                    lpc_wire::WireBindingEndpoint::NodeSlot { node, .. }
+                        if !subtree_ids.contains(node)
+                );
+                let crossing = match binding.direction {
+                    // An outside node consumes from the removed subtree.
+                    lpc_wire::WireBindingDirection::Consumes => !node_inside && endpoint_inside,
+                    // The removed subtree publishes into an outside slot.
+                    lpc_wire::WireBindingDirection::Publishes => {
+                        node_inside && endpoint_outside_node
+                    }
+                };
+                if crossing {
+                    dependent_count += 1;
+                }
+            }
+        }
+        for subtree_node in &subtree_nodes {
+            if let Some(artifact) = self.def_artifacts.get(&subtree_node.target().node_id)
+                && let Some(users) = nodes_by_artifact.get(artifact)
+            {
+                dependent_count += users
+                    .iter()
+                    .filter(|user| !user.is_self_or_under(address))
+                    .count();
+            }
+        }
+
+        Some(UiNodeRemovePreflight {
+            node_label: node.label().to_string(),
+            dependent_count,
+            pending_edit_count,
+            staged_files,
+        })
+    }
+
+    /// Resolve a node address to its removal site plus the slot address the
+    /// staged `Remove` edit lands at: `nodes[key]` on the project root for
+    /// root children, the whole `entries[k]` entry on the parent playlist
+    /// for playlist entries (matched by the loader's naming rule: authored
+    /// entry name, else `entry_<k>`). `None` for the root itself, unsynced
+    /// nodes, and unrecognized parents.
+    fn resolve_remove_site(
+        &self,
+        address: &ProjectNodeAddress,
+    ) -> Option<(NodeAttachSite, ProjectSlotAddress)> {
+        let node = self.node(address)?;
+        let parent_address = node.parent()?.clone();
+        let name = address.path().0.last()?.name.as_str().to_string();
+        let root_address = self.root_nodes.first()?.address().clone();
+        if parent_address == root_address {
+            let path = SlotPath::parse(&format!("nodes[{name}]")).ok()?;
+            return Some((
+                NodeAttachSite::ProjectNodes { key: name },
+                ProjectSlotAddress::new(root_address, ProjectSlotRoot::def(), path),
+            ));
+        }
+        let parent = self.node(&parent_address)?;
+        let artifact = self.def_artifacts.get(&parent.target().node_id)?.clone();
+        let key = playlist_entry_key_for_child(parent, &name)?;
+        let node_path = SlotPath::parse(&format!("entries[{key}].node")).ok()?;
+        let entry_path = SlotPath::parse(&format!("entries[{key}]")).ok()?;
+        Some((
+            NodeAttachSite::Slot {
+                artifact,
+                path: node_path,
+            },
+            ProjectSlotAddress::new(parent_address, ProjectSlotRoot::def(), entry_path),
+        ))
+    }
+
+    /// Auto-name for a new node of `kind`: the kind slug, `_2`/`_3`-deduped
+    /// against the effective `nodes` keys AND the stems of every project
+    /// file the client knows (def artifacts, overlay artifacts, cached
+    /// bodies, resolved shader sources). The server's occupied-path checks
+    /// remain authoritative; a race simply rejects and toasts.
+    fn unique_node_name_for(&self, kind: NodeKind) -> String {
+        let mut taken: BTreeSet<String> = BTreeSet::new();
+        if let Some(root) = self.root_nodes.first() {
+            for child in root.children() {
+                if let Some(segment) = child.address().path().0.last() {
+                    taken.insert(segment.name.as_str().to_string());
+                }
+            }
+        }
+        let mut take_file = |artifact: &ArtifactLocation| {
+            taken.insert(file_stem(artifact.file_path().as_str()).to_string());
+        };
+        for artifact in self.def_artifacts.values() {
+            take_file(artifact);
+        }
+        for artifact in self.asset_edit_buffer.keys() {
+            take_file(artifact);
+        }
+        for artifact in self.asset_base_bodies.keys() {
+            take_file(artifact);
+        }
+        if let Some(sync) = &self.sync {
+            for (artifact, _, _) in sync.overlay_slot_edits() {
+                take_file(artifact);
+            }
+            for (artifact, _) in sync.overlay_asset_edits() {
+                take_file(artifact);
+            }
+        }
+        let mut all_nodes = Vec::new();
+        for root in &self.root_nodes {
+            collect_subtree_nodes(root, &mut all_nodes);
+        }
+        for node in all_nodes {
+            if let Some(source) = shader_source_path(node)
+                && let Some(artifact) = self.resolve_node_asset_artifact(node, &source)
+            {
+                taken.insert(file_stem(artifact.file_path().as_str()).to_string());
+            }
+        }
+        unique_node_name(node_kind_slug(kind), &taken)
+    }
+
+    /// Focus a freshly created node once its tree entry lands: called at the
+    /// end of every applied project view; consumes [`Self::pending_focus`]
+    /// when the expected child resolves under its parent.
+    fn apply_pending_focus(&mut self) {
+        let target = {
+            let Some(pending) = &self.pending_focus else {
+                return;
+            };
+            let Some(parent) = self.node(&pending.parent) else {
+                return;
+            };
+            let Some(created) = parent.children().iter().find(|child| {
+                child
+                    .address()
+                    .path()
+                    .0
+                    .last()
+                    .is_some_and(|segment| segment.name.as_str() == pending.name)
+            }) else {
+                return;
+            };
+            ProjectEditorTarget::addressed_node(created.target().clone())
+        };
+        self.pending_focus = None;
+        self.focus_editor_target(&target);
+        self.active_editor_target = Some(target);
+    }
+
+    /// Revert one staged node removal (the save panel row's revert at the
+    /// site address): the inverse composed batch — `RemoveSlotEdit` at the
+    /// site plus `ClearArtifact` per staged delete — in ONE wire round-trip
+    /// (P2 guarantees sufficiency; both are existing, policy-exempt ops).
+    async fn revert_staged_removal(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        address: ProjectSlotAddress,
+        removal: StagedNodeRemoval,
+    ) -> Result<ProjectEditRun, UiError> {
+        self.edit_buffer.remove(&address);
+        let artifact = match self.resolve_def_artifact(&address) {
+            Ok(artifact) => artifact,
+            Err(reason) => {
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Revert on {} could not reach the server overlay: {reason}",
+                    address.path
+                ))));
+            }
+        };
+        let mut commands = vec![MutationCmd {
+            id: self.allocate_mutation_cmd_id(),
+            mutation: MutationOp::RemoveSlotEdit {
+                artifact,
+                path: address.path.clone(),
+            },
+        }];
+        for artifact in &removal.staged_deletes {
+            self.asset_base_bodies.remove(artifact);
+            commands.push(MutationCmd {
+                id: self.allocate_mutation_cmd_id(),
+                mutation: MutationOp::ClearArtifact {
+                    artifact: artifact.clone(),
+                },
+            });
+        }
+        let batch = MutationCmdBatch::new(commands);
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        let notices = if rejections.is_empty() {
+            UiNotices::new().with_notice(UiNotice::info(format!("Restored {}", removal.node_label)))
+        } else {
+            rejection_notices(&rejections)
         };
         Ok(ProjectEditRun {
             notices,
@@ -2401,6 +3404,14 @@ impl ProjectController {
         handle_id: u32,
         address: ProjectSlotAddress,
     ) -> Result<ProjectEditRun, UiError> {
+        // A revert at a staged node-removal site expands into the inverse
+        // composed batch (site RemoveSlotEdit + ClearArtifact per staged
+        // delete) so the node comes back whole, not as an errored husk.
+        if let Some(removal) = self.staged_removals.remove(&address) {
+            return self
+                .revert_staged_removal(server, handle_id, address, removal)
+                .await;
+        }
         // A revert always clears the local entry (typically a parked Failed
         // value); the server overlay is cleaned up with a RemoveSlotEdit.
         self.edit_buffer.remove(&address);
@@ -2985,6 +3996,131 @@ fn count_nodes(node: &NodeController) -> usize {
     1 + node.children().iter().map(count_nodes).sum::<usize>()
 }
 
+/// The live reading for a consumed bus channel, prepared for display on a
+/// bound panel control (P6 item 1). `None` — no live display — for:
+///
+/// - **monotonic/time-kind channels** (`Kind::Instant`: `time`, `trigger`),
+///   excluded BY KIND so the per-tick clock advance never dirties node DTOs
+///   (the whole-DTO change gate would fire on every pull otherwise);
+/// - channels without a resolved scalar value ([`format_live_scalar`], which
+///   also quantizes floats to ≤2 decimals before DTO entry).
+fn live_channel_value(
+    graph: &lpc_wire::WireBindingGraph,
+    channel_name: &str,
+    binding_kind: lpc_model::Kind,
+) -> Option<String> {
+    if binding_kind == lpc_model::Kind::Instant {
+        return None;
+    }
+    let channel = graph
+        .channels
+        .iter()
+        .find(|channel| channel.name == channel_name)?;
+    if channel.kind == Some(lpc_model::Kind::Instant) {
+        return None;
+    }
+    let value = channel.value.as_ref()?.value.as_ref()?;
+    crate::app::project::format_live_scalar(value)
+}
+
+/// Collect `node` and every descendant controller (preorder) into `out`.
+fn collect_subtree_nodes<'a>(node: &'a NodeController, out: &mut Vec<&'a NodeController>) {
+    out.push(node);
+    for child in node.children() {
+        collect_subtree_nodes(child, out);
+    }
+}
+
+/// The next free key of a playlist's `entries` map: the first free index
+/// counting up from **1** over the effective entry keys plus `staged`
+/// (keys the base file still holds behind pending overlay edits — see
+/// `overlay_entry_keys`). Playlist entries are 1-based by convention
+/// (`PlaylistDef.idle_entry` defaults to 1, and the shipped examples key
+/// from 1), so the first added entry lands on the bare default's idle key
+/// and starts playing immediately instead of dangling beside it.
+fn playlist_next_entry_key(playlist: &NodeController, staged: &BTreeSet<u32>) -> u32 {
+    let used: BTreeSet<u32> = playlist_entry_keys(playlist)
+        .chain(staged.iter().copied())
+        .collect();
+    (1..)
+        .find(|candidate| !used.contains(candidate))
+        .expect("a finite key set always leaves a free index")
+}
+
+/// The effective `entries` map keys of a playlist node's def root.
+fn playlist_entry_keys(playlist: &NodeController) -> impl Iterator<Item = u32> {
+    playlist_entries_slot(playlist)
+        .map(|entries| {
+            entries
+                .children()
+                .iter()
+                .filter_map(|entry| match entry.address().path.segments().last() {
+                    Some(SlotPathSegment::Key(SlotMapKey::U32(key))) => Some(*key),
+                    Some(SlotPathSegment::Key(SlotMapKey::I32(key))) => u32::try_from(*key).ok(),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+        .into_iter()
+}
+
+/// The `entries` map slot controller inside a playlist node's def root.
+fn playlist_entries_slot(playlist: &NodeController) -> Option<&SlotController> {
+    fn find(slot: &SlotController) -> Option<&SlotController> {
+        if slot.kind() == SlotKind::Map
+            && matches!(
+                slot.address().path.segments().last(),
+                Some(SlotPathSegment::Field(name)) if name.as_str() == "entries"
+            )
+        {
+            return Some(slot);
+        }
+        slot.children().iter().find_map(find)
+    }
+    playlist
+        .slots()
+        .iter()
+        .filter(|slot| matches!(slot.address().root, ProjectSlotRoot::Def))
+        .find_map(find)
+}
+
+/// The `entries` key whose mounted child carries tree name `child_name`,
+/// inverted through the loader's naming rule (authored entry `name`, else
+/// `entry_<k>` — see `projected_node_name_and_ownership`).
+fn playlist_entry_key_for_child(playlist: &NodeController, child_name: &str) -> Option<u32> {
+    let entries = playlist_entries_slot(playlist)?;
+    for entry in entries.children() {
+        let key = match entry.address().path.segments().last() {
+            Some(SlotPathSegment::Key(SlotMapKey::U32(key))) => *key,
+            Some(SlotPathSegment::Key(SlotMapKey::I32(key))) => match u32::try_from(*key) {
+                Ok(key) => key,
+                Err(_) => continue,
+            },
+            _ => continue,
+        };
+        let authored = entry
+            .children()
+            .iter()
+            .find(|child| {
+                matches!(
+                    child.address().path.segments().last(),
+                    Some(SlotPathSegment::Field(field)) if field.as_str() == "name"
+                )
+            })
+            .and_then(SlotController::value)
+            .and_then(|value| match value {
+                lpc_model::LpValue::String(name) if !name.is_empty() => Some(name.clone()),
+                _ => None,
+            });
+        let expected = authored.unwrap_or_else(|| format!("entry_{key}"));
+        if expected == child_name {
+            return Some(key);
+        }
+    }
+    None
+}
+
 /// Humanize a slot field name for display (`entry_time` → `Entry time`).
 fn human_field_label(name: &str) -> String {
     let mut label = name.replace('_', " ");
@@ -3059,19 +4195,24 @@ fn slot_path_display(address: &ProjectSlotAddress) -> String {
 }
 
 /// Contextual project-header actions (D4/D5): Save and Revert-to-saved as
-/// controller-produced [`UiPaneAction`] data, present only while persisted
-/// edits are pending — a clean or live-only project shows no actions.
+/// controller-produced [`UiPaneAction`] data while persisted edits are
+/// pending. Adding nodes does NOT ride the header: the add affordance is the
+/// node tree's "Add node…" row and the workspace's add button, both fed by
+/// [`ProjectEditorView::add_node_menu`] (review round, 2026-07-27 — put
+/// buttons where people look for them; the title-bar "+" was dropped).
 fn project_header_actions(dirty: &DirtySummary) -> Vec<UiPaneAction> {
-    if dirty.persisted == 0 {
-        return Vec::new();
-    }
-    vec![
-        UiPaneAction::new("save", project_action(ProjectOp::SaveOverlay)),
-        UiPaneAction::new(
+    let mut actions = Vec::new();
+    if dirty.persisted > 0 {
+        actions.push(UiPaneAction::new(
+            "save",
+            project_action(ProjectOp::SaveOverlay),
+        ));
+        actions.push(UiPaneAction::new(
             "revert",
             project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
-        ),
-    ]
+        ));
+    }
+    actions
 }
 
 /// An action dispatched to the project controller itself.
@@ -3225,6 +4366,88 @@ fn agent_shader_bindings(node: &NodeController) -> Vec<AgentShaderBinding> {
             }
         })
         .collect()
+}
+
+/// The def-side param records of a shader node, walked from the mirrored
+/// `consumed` map (the same authored data [`shader_uniforms`] keys on):
+/// label plus the optional f32/bool/string fields the params diff and the
+/// panel derivation read. `bound` marks bus-driven names (from the binding
+/// graph). Non-shader nodes yield an empty vec.
+fn agent_param_def_records(
+    node: &NodeController,
+    bound: &BTreeSet<String>,
+) -> Vec<lpa_agent::ParamDefRecord> {
+    fn last_field_is(slot: &SlotController, name: &str) -> bool {
+        matches!(
+            slot.address().path.segments().last(),
+            Some(SlotPathSegment::Field(field)) if field.as_str() == name
+        )
+    }
+
+    fn find_consumed_map(slot: &SlotController) -> Option<&SlotController> {
+        if slot.kind() == SlotKind::Map && last_field_is(slot, "consumed") {
+            return Some(slot);
+        }
+        slot.children().iter().find_map(find_consumed_map)
+    }
+
+    /// The field's effective value: options read through their `some`
+    /// child (absent option ⇒ `None`), value slots read directly.
+    fn field_value<'a>(entry: &'a SlotController, name: &str) -> Option<&'a lpc_model::LpValue> {
+        let field = entry
+            .children()
+            .iter()
+            .find(|child| last_field_is(child, name))?;
+        match field.kind() {
+            SlotKind::Option => field
+                .children()
+                .iter()
+                .find(|child| last_field_is(child, "some"))
+                .and_then(SlotController::value),
+            _ => field.value(),
+        }
+    }
+
+    fn f32_of(value: Option<&lpc_model::LpValue>) -> Option<f32> {
+        match value {
+            Some(lpc_model::LpValue::F32(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    let Some(consumed) = node.slots().iter().find_map(find_consumed_map) else {
+        return Vec::new();
+    };
+    let mut records = Vec::new();
+    for entry in consumed.children() {
+        let Some(SlotPathSegment::Key(SlotMapKey::String(name))) =
+            entry.address().path.segments().last()
+        else {
+            continue;
+        };
+        let label = match field_value(entry, "label") {
+            Some(lpc_model::LpValue::String(label)) => label.clone(),
+            _ => String::new(),
+        };
+        let unit = match field_value(entry, "unit") {
+            Some(lpc_model::LpValue::String(unit)) if !unit.is_empty() => Some(unit.clone()),
+            _ => None,
+        };
+        records.push(lpa_agent::ParamDefRecord {
+            name: name.clone(),
+            label,
+            default: f32_of(field_value(entry, "default")),
+            min: f32_of(field_value(entry, "min")),
+            max: f32_of(field_value(entry, "max")),
+            panel: matches!(
+                field_value(entry, "panel"),
+                Some(lpc_model::LpValue::Bool(true))
+            ),
+            unit,
+            bound: bound.contains(name),
+        });
+    }
+    records
 }
 
 fn default_focus_node_mut(nodes: &mut [NodeController]) -> Option<&mut NodeController> {
@@ -3923,6 +5146,160 @@ mod tests {
         let view = project.editor_view("studio-demo", 7, &inventory);
 
         assert_eq!(view.project_name, "studio-demo");
+    }
+
+    /// Dispatch a `NodeUi` mutation exactly as the web does: through the
+    /// action seam, targeted at the node-tree editor surface (the op
+    /// carries its own node key).
+    fn dispatch_node_ui(project: &mut ProjectController, op: NodeUiOp) {
+        let action = UiAction::from_op(
+            ProjectEditorTarget::node_tree().node_id(),
+            ProjectEditorOp::NodeUi(op),
+        );
+        block_on_ready(project.dispatch_editor_action(action, UxUpdateSink::noop()))
+            .expect("node-ui op applies");
+    }
+
+    #[test]
+    fn node_ui_ops_ride_the_action_seam_into_the_editor_view() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        let orbit = "/demo.project/orbit.shader".to_string();
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDrawer {
+                node: orbit.clone(),
+                drawer: crate::NodeCardDrawer::Code,
+                open: true,
+            },
+        );
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit.clone(),
+                collapsed: true,
+            },
+        );
+
+        let view = project.editor_view("studio-demo", 7, &inventory);
+        assert_eq!(
+            view.nodes[1].card_ui,
+            NodeCardUiState {
+                code_open: true,
+                agent_collapsed: true,
+                ..NodeCardUiState::default()
+            },
+            "the Orbit pane wears its saved card UI state"
+        );
+        assert_eq!(
+            view.nodes[0].card_ui,
+            NodeCardUiState::default(),
+            "state is keyed per node — the Clock pane stays fresh"
+        );
+    }
+
+    #[test]
+    fn agent_collapse_round_trip_preserves_the_mirrored_draft() {
+        // The web's collapse choreography: mirror the draft, collapse,
+        // expand. The mirrored draft must come back out of the DTO so a
+        // remounting composer can seed from it — the draft-survival
+        // contract.
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        let orbit = "/demo.project/orbit.shader".to_string();
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDraft {
+                node: orbit.clone(),
+                draft: "make it pulse slowly".to_string(),
+            },
+        );
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit.clone(),
+                collapsed: true,
+            },
+        );
+        let collapsed = project.editor_view("studio-demo", 7, &inventory);
+        assert!(collapsed.nodes[1].card_ui.agent_collapsed);
+        assert_eq!(
+            collapsed.nodes[1].card_ui.composer_draft,
+            "make it pulse slowly"
+        );
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit,
+                collapsed: false,
+            },
+        );
+        let expanded = project.editor_view("studio-demo", 7, &inventory);
+        assert!(!expanded.nodes[1].card_ui.agent_collapsed);
+        assert_eq!(
+            expanded.nodes[1].card_ui.composer_draft, "make it pulse slowly",
+            "expanding never clears the mirrored draft"
+        );
+    }
+
+    #[test]
+    fn node_card_ui_is_pruned_when_the_loaded_project_closes() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDraft {
+                node: "/demo.project/orbit.shader".to_string(),
+                draft: "stale draft".to_string(),
+            },
+        );
+
+        project.disconnect();
+        project.mark_ready("studio-demo", 8, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+
+        let view = project.editor_view("studio-demo", 8, &inventory);
+        assert_eq!(
+            view.nodes[1].card_ui,
+            NodeCardUiState::default(),
+            "card UI state follows the loaded project"
+        );
+    }
+
+    #[test]
+    fn nested_child_cards_wear_their_own_card_ui_overlay() {
+        let mut project = ProjectController::new();
+        project.apply_node_ui_op(NodeUiOp::SetDrawer {
+            node: "/demo.project/list.playlist/glow.shader".to_string(),
+            drawer: crate::NodeCardDrawer::Advanced,
+            open: true,
+        });
+
+        // A nested child DTO (keyed by `detail` = its address), one level
+        // down — the overlay walk must reach it.
+        let mut children = vec![crate::UiNodeChild::new(
+            "List",
+            "Playlist",
+            "/demo.project/list.playlist",
+        )];
+        children[0].children = vec![crate::UiNodeChild::new(
+            "Glow",
+            "Shader",
+            "/demo.project/list.playlist/glow.shader",
+        )];
+
+        project.overlay_child_card_ui(&mut children);
+        assert!(!children[0].card_ui.advanced_open);
+        assert!(children[0].children[0].card_ui.advanced_open);
     }
 
     #[test]
@@ -4752,6 +6129,152 @@ mod tests {
             panic!("expected wired row to be bound, got {:?}", wired.source);
         };
         assert_eq!(endpoint.label, "bus:visual.out");
+    }
+
+    #[test]
+    fn bound_rows_carry_quantized_live_values_and_skip_time_kind() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let binding = |slot: &str,
+                       channel: &str,
+                       kind: lpc_model::Kind,
+                       origin: lpc_wire::WireBindingOrigin|
+         -> lpc_wire::WireEffectiveBinding {
+            lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse(slot).unwrap()),
+                direction: lpc_wire::WireBindingDirection::Consumes,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: channel.to_string(),
+                },
+                origin,
+                priority: 0,
+                kind,
+            }
+        };
+        let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
+            lpc_wire::WireBusChannel {
+                name: name.to_string(),
+                kind: Some(kind),
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::F32(value)),
+                    error: None,
+                }),
+            }
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: vec![
+                    // Implicit runtime slots → binding-derived rows.
+                    binding(
+                        "wired_in",
+                        "wobble",
+                        lpc_model::Kind::Amplitude,
+                        lpc_wire::WireBindingOrigin::Authored,
+                    ),
+                    binding(
+                        "wired_time",
+                        "time",
+                        lpc_model::Kind::Instant,
+                        lpc_wire::WireBindingOrigin::Authored,
+                    ),
+                    // Backing def row → decorated by the live-value pass
+                    // after the default overlay wires it.
+                    binding(
+                        "brightness",
+                        "wobble",
+                        lpc_model::Kind::Amplitude,
+                        lpc_wire::WireBindingOrigin::Default,
+                    ),
+                ],
+                channels: vec![
+                    channel("wobble", lpc_model::Kind::Amplitude, 0.123_456),
+                    channel("time", lpc_model::Kind::Instant, 12_345.678),
+                ],
+            });
+        project.apply_default_binding_overlay();
+        project.apply_bound_live_values();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let bound_endpoint = |label: &str| -> &crate::UiBindingEndpoint {
+            let row = config.iter().find(|slot| slot.label == label).unwrap();
+            let UiSlotSourceState::Bound(endpoint) = &row.source else {
+                panic!("expected {label} to be bound, got {:?}", row.source);
+            };
+            endpoint
+        };
+
+        // Binding-derived row: quantized (≤2 decimals) live reading.
+        assert_eq!(
+            bound_endpoint("Wired in").live_value.as_deref(),
+            Some("0.12")
+        );
+        // Time-kind channels are excluded so the per-tick clock advance
+        // never dirties the DTO change gate.
+        assert_eq!(bound_endpoint("Wired time").live_value, None);
+        // Def-root slot wired by the overlay: the live pass decorates it.
+        assert_eq!(
+            bound_endpoint("Brightness").live_value.as_deref(),
+            Some("0.12")
+        );
+    }
+
+    #[test]
+    fn playlist_children_visual_products_stay_tracked_for_entry_thumbs() {
+        let mut view = ProjectView::new();
+        let mut playlist = node_entry(
+            1,
+            "/demo.project/list.playlist",
+            None,
+            NodeRuntimeStatus::Ok,
+        );
+        playlist.children = vec![NodeId::new(2)];
+        view.tree.insert(playlist);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.project/list.playlist/glow.shader",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        install_ui_projection_slots(&mut view, 2, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+
+        // The child picks up default focus (only shader in the tree) which
+        // would subscribe ALL its products; pin it unsubscribed so the
+        // assertion isolates the warming path.
+        let child = crate::ProjectNodeAddress::parse("/demo.project/list.playlist/glow.shader")
+            .expect("valid address");
+        project
+            .node_mut(&child)
+            .expect("child controller")
+            .state_mut()
+            .product_subscription_intent = ProjectProductSubscriptionIntent::Unsubscribed;
+
+        // An unsubscribed (unfocused) child would normally be untracked;
+        // the playlist strip face keeps its VISUAL product warm for the
+        // entry thumb (probe previews only — the control product stays
+        // out, and GPU gallery leases are a separate web-side concern).
+        assert_eq!(
+            project.subscribed_products(),
+            vec![UiProductRef::Visual {
+                node_id: 2,
+                output: 0
+            }]
+        );
     }
 
     #[test]
@@ -6078,6 +7601,498 @@ mod tests {
             MutationCmdId::new(id),
             MutationEffect::overlay_changed(true),
         )
+    }
+
+    // --- Node create/remove op contract tests (authoring P4) -----------------
+
+    use lpc_model::ArtifactChangeSummary;
+    use lpc_wire::{WireCreateNodeResponse, WireRemoveNodeResponse};
+
+    fn create_node_response(id: u64, response: WireCreateNodeResponse) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::CreateNode { response },
+            },
+        )
+    }
+
+    fn remove_node_response(id: u64, response: WireRemoveNodeResponse) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::RemoveNode { response },
+            },
+        )
+    }
+
+    fn inventory_read_response(id: u64) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::ReadInventory {
+                    response: Default::default(),
+                },
+            },
+        )
+    }
+
+    /// An inventory read whose runtime-id → def-artifact mapping matches the
+    /// authoring fixture (`authoring_project_with_scripted_client`), so a
+    /// post-op def-artifact re-read keeps the fixture map instead of wiping
+    /// it.
+    fn authoring_inventory_read_response(id: u64) -> WireServerMessage {
+        let root_key = lpc_model::NodeUseLocation::root();
+        let clock_slot = SlotPath::parse("nodes[clock]").unwrap();
+        let clock_key = root_key.child(clock_slot.clone());
+        let response = lpc_wire::WireProjectInventoryReadResponse {
+            defs: Vec::new(),
+            assets: Vec::new(),
+            nodes: vec![
+                lpc_wire::WireProjectNodeInventoryEntry {
+                    key: root_key.clone(),
+                    runtime_id: Some(NodeId::new(1)),
+                    parent: None,
+                    def_location: lpc_model::NodeDefLocation::artifact_root(
+                        ArtifactLocation::file("/project.json"),
+                    ),
+                    origin: lpc_wire::WireProjectNodeOrigin::Root,
+                },
+                lpc_wire::WireProjectNodeInventoryEntry {
+                    key: clock_key,
+                    runtime_id: Some(NodeId::new(4)),
+                    parent: Some(root_key),
+                    def_location: lpc_model::NodeDefLocation::artifact_root(
+                        ArtifactLocation::file("/clock.json"),
+                    ),
+                    origin: lpc_wire::WireProjectNodeOrigin::Invocation {
+                        slot: clock_slot,
+                        role: lpc_model::ProjectNodePlacement::ProjectChild {
+                            name: "clock".to_string(),
+                        },
+                    },
+                },
+            ],
+        };
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::ReadInventory { response },
+            },
+        )
+    }
+
+    fn sent_create_node_requests(
+        sent: &Rc<RefCell<Vec<ClientMessage>>>,
+    ) -> Vec<lpc_wire::WireCreateNodeRequest> {
+        sent.borrow()
+            .iter()
+            .filter_map(|message| match &message.msg {
+                ClientRequest::ProjectCommand {
+                    command: WireProjectCommand::CreateNode { request },
+                    ..
+                } => Some(request.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn sent_remove_node_requests(
+        sent: &Rc<RefCell<Vec<ClientMessage>>>,
+    ) -> Vec<lpc_wire::WireRemoveNodeRequest> {
+        sent.borrow()
+            .iter()
+            .filter_map(|message| match &message.msg {
+                ClientRequest::ProjectCommand {
+                    command: WireProjectCommand::RemoveNode { request },
+                    ..
+                } => Some(request.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Ready project over the scripted client with the three-level tree
+    /// applied (root → group.playlist + clock.clock) and def artifacts for
+    /// the root and the clock installed — the create/remove fixtures.
+    fn authoring_project_with_scripted_client(
+        responses: Vec<WireServerMessage>,
+    ) -> (
+        ProjectController,
+        StudioServerClient,
+        Rc<RefCell<Vec<ClientMessage>>>,
+    ) {
+        let (mut project, client, sent) = ready_project_with_scripted_client(responses);
+        project
+            .apply_project_view(&three_level_tree_view())
+            .unwrap();
+        project.set_node_def_artifacts(BTreeMap::from([
+            (NodeId::new(1), ArtifactLocation::file("/project.json")),
+            (NodeId::new(4), ArtifactLocation::file("/clock.json")),
+        ]));
+        (project, client, sent)
+    }
+
+    #[test]
+    fn create_op_emits_one_create_node_then_refreshes_and_focuses_on_land() {
+        let (mut project, mut client, sent) = authoring_project_with_scripted_client(vec![
+            create_node_response(
+                1,
+                WireCreateNodeResponse::Created {
+                    artifact_changes: ArtifactChangeSummary {
+                        added: vec![ArtifactLocation::file("/clock_2.json")],
+                        changed: vec![ArtifactLocation::file("/project.json")],
+                        removed: Vec::new(),
+                    },
+                    revision: Revision::new(10),
+                },
+            ),
+            runtime_read_response(2, 10, 0),
+            inventory_read_response(3),
+        ]);
+
+        let run = block_on_ready(project.create_node(
+            &mut client,
+            lpc_model::NodeKind::Clock,
+            &crate::UiAttachTarget::ProjectRoot,
+        ))
+        .unwrap();
+
+        // Exactly one CreateNode, auto-named against the taken `clock` key
+        // (`_2` dedup, hyphens are not legal tree names), body = the bare
+        // clock default serialized canonically, no assets.
+        let requests = sent_create_node_requests(&sent);
+        assert_eq!(requests.len(), 1, "exactly one CreateNode is sent");
+        let request = &requests[0];
+        // LpPathBuf normalizes the `./` prefix away; the registry accepts
+        // both forms as project-relative.
+        assert_eq!(request.file.as_str(), "clock_2.json");
+        assert_eq!(
+            request.attach,
+            lpc_model::NodeAttachSite::ProjectNodes {
+                key: "clock_2".to_string(),
+            }
+        );
+        assert!(request.assets.is_empty(), "clock starter has no assets");
+        let body = core::str::from_utf8(&request.body).unwrap();
+        let def = lpc_model::NodeDef::from_json_str(body).expect("body parses");
+        assert_eq!(def.kind(), lpc_model::NodeKind::Clock);
+
+        // The ack triggered exactly one immediate refresh plus the
+        // def-artifact inventory re-read.
+        assert_eq!(sent.borrow().len(), 3, "create + project_read + inventory");
+        assert_eq!(sent_kinds(&sent)[1], "project_read");
+        assert!(
+            run.notices
+                .notices
+                .iter()
+                .any(|notice| notice.message.contains("Added clock_2")),
+            "creation reports itself"
+        );
+
+        // The scripted read carried no tree delta, so focus is still
+        // pending; it lands with the next applied view that contains the
+        // created node.
+        let mut view = three_level_tree_view();
+        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2), NodeId::new(4), NodeId::new(9)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            9,
+            "/demo.project/clock_2.clock",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        project.apply_project_view(&view).unwrap();
+        let created = project
+            .node(&node_address("/demo.project/clock_2.clock"))
+            .expect("created node landed");
+        assert!(created.state().focused, "the created node takes focus");
+    }
+
+    #[test]
+    fn create_rejection_toasts_and_leaves_state_clean() {
+        let (mut project, mut client, sent) =
+            authoring_project_with_scripted_client(vec![create_node_response(
+                1,
+                WireCreateNodeResponse::Rejected {
+                    rejection: MutationRejection::new(
+                        MutationRejectionReason::TargetOccupied,
+                        "file /clock_2.json already exists".to_string(),
+                    ),
+                },
+            )]);
+
+        let run = block_on_ready(project.create_node(
+            &mut client,
+            lpc_model::NodeKind::Clock,
+            &crate::UiAttachTarget::ProjectRoot,
+        ))
+        .unwrap();
+
+        assert!(
+            run.notices.notices.iter().any(|notice| {
+                notice.level == UiNoticeLevel::Warning
+                    && notice.message.contains("Add node rejected")
+            }),
+            "the rejection surfaces as a warning toast"
+        );
+        assert_eq!(
+            sent.borrow().len(),
+            1,
+            "no refresh or inventory read after a rejection"
+        );
+        assert!(
+            project.edit_buffer_for_test().is_empty(),
+            "no pending edit exists for a failed create"
+        );
+        assert!(project.pending_edits().is_empty(), "state stays clean");
+    }
+
+    #[test]
+    fn remove_op_emits_one_remove_node_and_lists_the_node_removed_row() {
+        let mut staged_overlay = ProjectOverlay::new();
+        staged_overlay.put_slot_edit(
+            ArtifactLocation::file("/project.json"),
+            SlotEdit::remove(SlotPath::parse("nodes[clock]").unwrap()),
+        );
+        staged_overlay.set_artifact_body(
+            ArtifactLocation::file("/clock.json"),
+            lpc_model::AssetBodyOverlay::Delete,
+        );
+        let (mut project, mut client, sent) = authoring_project_with_scripted_client(vec![
+            remove_node_response(
+                1,
+                WireRemoveNodeResponse::Staged {
+                    overlay_revision: Revision::new(6),
+                    staged_deletes: vec![ArtifactLocation::file("/clock.json")],
+                    swept_pending_edits: false,
+                },
+            ),
+            overlay_read_response(2, staged_overlay, 6),
+            runtime_read_response(3, 11, 6),
+            authoring_inventory_read_response(4),
+        ]);
+
+        let run = block_on_ready(
+            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+        )
+        .unwrap();
+        // The scripted refresh carried no tree events, so the controllers
+        // were reconciled against an empty mirror; re-apply the fixture tree
+        // like a production read delta would deliver it.
+        project
+            .apply_project_view(&three_level_tree_view())
+            .unwrap();
+
+        let requests = sent_remove_node_requests(&sent);
+        assert_eq!(requests.len(), 1, "exactly one RemoveNode is sent");
+        assert_eq!(
+            requests[0].site,
+            lpc_model::NodeAttachSite::ProjectNodes {
+                key: "clock".to_string(),
+            }
+        );
+        assert!(
+            run.notices
+                .notices
+                .iter()
+                .any(|notice| notice.message.contains("Removed Clock")),
+            "the removal reports the node label"
+        );
+
+        // The save panel lists the NodeRemoved row (label = removed node,
+        // path = the site) plus the staged deletion as a "deleted" file row.
+        let edits = project.pending_edits();
+        let removed = edits
+            .iter()
+            .find(|edit| edit.kind == crate::UiPendingEditKind::NodeRemoved)
+            .expect("NodeRemoved row listed");
+        assert_eq!(removed.node_label, "Clock");
+        assert_eq!(removed.slot_path_display, "nodes[clock]");
+        assert!(removed.revert.is_some(), "the row offers a revert");
+        assert!(
+            edits.iter().any(|edit| {
+                matches!(&edit.kind, crate::UiPendingEditKind::AssetBody { detail } if detail == "deleted")
+                    && edit.slot_path_display == "/clock.json"
+            }),
+            "the staged file deletion renders as a deleted asset row: {edits:?}"
+        );
+    }
+
+    #[test]
+    fn node_removed_row_revert_composes_site_removal_and_artifact_clears() {
+        let mut staged_overlay = ProjectOverlay::new();
+        staged_overlay.put_slot_edit(
+            ArtifactLocation::file("/project.json"),
+            SlotEdit::remove(SlotPath::parse("nodes[clock]").unwrap()),
+        );
+        staged_overlay.set_artifact_body(
+            ArtifactLocation::file("/clock.json"),
+            lpc_model::AssetBodyOverlay::Delete,
+        );
+        let (mut project, mut client, sent) = authoring_project_with_scripted_client(vec![
+            remove_node_response(
+                1,
+                WireRemoveNodeResponse::Staged {
+                    overlay_revision: Revision::new(6),
+                    staged_deletes: vec![ArtifactLocation::file("/clock.json")],
+                    swept_pending_edits: false,
+                },
+            ),
+            overlay_read_response(2, staged_overlay, 6),
+            runtime_read_response(3, 11, 6),
+            authoring_inventory_read_response(4),
+            mutation_response(5, vec![accepted(1), accepted(2)], 7),
+        ]);
+        block_on_ready(
+            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+        )
+        .unwrap();
+        // Restore the controller tree (the scripted refresh carried no tree
+        // events) so the site address resolves its def artifact.
+        project
+            .apply_project_view(&three_level_tree_view())
+            .unwrap();
+
+        // Revert the NodeRemoved row exactly as the save panel would.
+        let site = crate::ProjectSlotAddress::new(
+            node_address("/demo.project"),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("nodes[clock]").unwrap(),
+        );
+        let run = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::Revert {
+                address: site.clone(),
+            },
+        ))
+        .unwrap();
+
+        // The composed inverse batch: RemoveSlotEdit at the site plus
+        // ClearArtifact per staged delete, in ONE round-trip.
+        let batches: Vec<MutationCmdBatch> = sent
+            .borrow()
+            .iter()
+            .filter_map(|message| match &message.msg {
+                ClientRequest::ProjectCommand {
+                    command: WireProjectCommand::MutateOverlay { request },
+                    ..
+                } => Some(request.batch.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(batches.len(), 1, "one mutation batch for the revert");
+        let mutations: Vec<&MutationOp> = batches[0]
+            .commands
+            .iter()
+            .map(|command| &command.mutation)
+            .collect();
+        assert!(matches!(
+            mutations[0],
+            MutationOp::RemoveSlotEdit { artifact, path }
+                if artifact.file_path().as_str() == "/project.json"
+                    && path.to_string() == "nodes[clock]"
+        ));
+        assert!(matches!(
+            mutations[1],
+            MutationOp::ClearArtifact { artifact }
+                if artifact.file_path().as_str() == "/clock.json"
+        ));
+        assert!(
+            run.notices
+                .notices
+                .iter()
+                .any(|notice| notice.message.contains("Restored Clock")),
+            "the revert reports the restoration"
+        );
+        assert!(
+            project.pending_edits().is_empty(),
+            "the staged removal's rows are gone after the acked revert"
+        );
+    }
+
+    #[test]
+    fn remove_rejection_toasts_and_leaves_state_clean() {
+        let (mut project, mut client, sent) =
+            authoring_project_with_scripted_client(vec![remove_node_response(
+                1,
+                WireRemoveNodeResponse::Rejected {
+                    rejection: MutationRejection::new(
+                        MutationRejectionReason::UnknownSlotPath,
+                        "project node key clock does not exist".to_string(),
+                    ),
+                },
+            )]);
+
+        let run = block_on_ready(
+            project.remove_node(&mut client, &node_address("/demo.project/clock.clock")),
+        )
+        .unwrap();
+
+        assert!(
+            run.notices.notices.iter().any(|notice| {
+                notice.level == UiNoticeLevel::Warning
+                    && notice.message.contains("Remove node rejected")
+            }),
+            "the rejection surfaces as a warning toast"
+        );
+        assert_eq!(sent.borrow().len(), 1, "no follow-up reads after rejection");
+        assert!(project.pending_edits().is_empty(), "state stays clean");
+    }
+
+    #[test]
+    fn remove_of_unresolvable_site_warns_without_sending() {
+        let (mut project, mut client, sent) = authoring_project_with_scripted_client(Vec::new());
+
+        // The playlist child's entries key cannot resolve (the fixture view
+        // carries no playlist slot mirror), so no wire op is sent.
+        let run = block_on_ready(project.remove_node(
+            &mut client,
+            &node_address("/demo.project/group.playlist/leaf.shader"),
+        ))
+        .unwrap();
+
+        assert!(
+            run.notices
+                .notices
+                .iter()
+                .any(|notice| notice.level == UiNoticeLevel::Warning),
+            "unresolvable sites warn"
+        );
+        assert!(sent.borrow().is_empty(), "nothing reaches the wire");
+    }
+
+    #[test]
+    fn header_actions_offer_add_always_and_delete_on_removable_nodes() {
+        let (project, _client, _sent) = authoring_project_with_scripted_client(Vec::new());
+
+        let view = project.editor_view("demo", 7, &ProjectInventorySummary::default());
+        // Clean project: no header actions — adding rides the tree row and
+        // the workspace button, both fed by the picker data on the view.
+        assert!(view.header_actions.is_empty());
+        let menu = view.add_node_menu.expect("picker data rides the editor");
+        assert_eq!(menu.entries.len(), 10);
+
+        // Root children carry the ungated delete action with confirmation.
+        let clock = view
+            .nodes
+            .iter()
+            .find(|node| node.node_id == "/demo.project/clock.clock")
+            .expect("clock card");
+        let delete = clock
+            .header_actions
+            .iter()
+            .find(|action| action.icon == "remove")
+            .expect("delete action present on a clean node");
+        assert!(
+            delete.action.meta().confirmation.is_some(),
+            "delete carries composed confirmation copy"
+        );
+        assert!(
+            delete.action.op_as::<crate::NodeRemoveOp>().is_some(),
+            "delete dispatches NodeRemoveOp"
+        );
     }
 
     fn config_slot<'a>(nodes: &'a [crate::UiNodeView], label: &str) -> &'a crate::UiConfigSlot {
@@ -8258,8 +10273,13 @@ mod tests {
         assert_eq!(brightness.state.dirty, UiNodeDirtyState::Error);
         // Flat-root: root-own dirt is on the project pane, not the tree.
         assert!(editor.tree.roots.is_empty());
-        assert!(
-            editor.header_actions.is_empty(),
+        assert_eq!(
+            editor
+                .header_actions
+                .iter()
+                .map(|action| action.icon.as_str())
+                .collect::<Vec<_>>(),
+            Vec::<&str>::new(),
             "failed edits alone do not surface Save/Revert"
         );
     }
@@ -8283,6 +10303,7 @@ mod tests {
         );
         // Flat-root: a childless root contributes no tree rows.
         assert!(editor.tree.roots.is_empty());
+        // No header actions on a clean project (adding rides the node list).
         assert!(editor.header_actions.is_empty());
     }
 
@@ -8296,7 +10317,7 @@ mod tests {
 
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
 
-        assert_eq!(editor.header_actions.len(), 2);
+        assert_eq!(editor.header_actions.len(), 2, "save + revert");
         let save = &editor.header_actions[0];
         assert_eq!(save.icon, "save");
         assert_eq!(save.label(), "Save");
@@ -8316,6 +10337,11 @@ mod tests {
             Some(&ProjectOp::RevertAllEdits)
         );
         assert!(revert.action.is_for_node(ProjectController::NODE_ID));
+        assert_eq!(
+            editor.header_actions.len(),
+            2,
+            "no standing add action rides the header (adding lives in the tree/workspace)"
+        );
     }
 
     #[test]
@@ -8334,8 +10360,13 @@ mod tests {
                 failed: 0,
             }
         );
-        assert!(
-            editor.header_actions.is_empty(),
+        assert_eq!(
+            editor
+                .header_actions
+                .iter()
+                .map(|action| action.icon.as_str())
+                .collect::<Vec<_>>(),
+            Vec::<&str>::new(),
             "live-only edits do not surface Save/Revert"
         );
     }

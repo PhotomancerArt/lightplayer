@@ -433,30 +433,54 @@ CI on `feature/*` branches runs `just check build-ci test` (see
 locally before every push:
 
 ```bash
-rustup update nightly        # CI installs fresh nightly each run; do the same
 just check                   # fmt-check + clippy-host + clippy-rv32  (the usual blocker)
 just build-ci                # host + rv32 builtins + emu-guest
-just test                    # cargo test + glsl filetests
+just test                    # cargo test (+ studio-web view tests) + glsl filetests
 ```
 
 Or, in one go: `just ci` (which is the parallel composition above).
 
-### Why nightly matters
+### Why the nightly date is pinned
 
-The workspace pins `nightly` (latest, via `rust-toolchain.toml`) — *not*
-a specific date. CI runs `rustup install nightly` fresh each run, so it
-sees the freshest lints (e.g. `float_literal_f32_fallback`,
-`question_mark`, `manual_clamp`, `clone_on_copy`,
-`allow_attributes_without_reason`). A stale local nightly will silently
-miss new lints that gate CI. `rustup update nightly` before `just check`
-is cheap and avoids the most common CI surprise.
+The workspace pins a **specific dated nightly** in `rust-toolchain.toml`
+(`channel = "nightly-2026-04-27"`), and every job in `pre-merge.yml`
+hardcodes that same date via `dtolnay/rust-toolchain`. Do **not** run
+`rustup update nightly` — this is a build-std project, and the
+`unwinding` crate is bound to a specific nightly
+`core::intrinsics::catch_unwind` ABI (0.2.8 = integer return; 0.2.9
+switched to the bool return introduced in a later nightly). An unpinned
+or locally-updated nightly drifts off the pinned toolchain and breaks
+the build.
+
+Because the toolchain is pinned, lints don't drift underneath you:
+local `just check` and CI see the same clippy set, so a green local run
+is a real signal.
+
+To bump the toolchain, do it deliberately as its own change:
+
+1. Update `channel` in `rust-toolchain.toml`.
+2. Update the matching `unwinding` version in the crates that depend on
+   it (`fw-esp32`, `fw-emu`, `lpc-engine`, `lp-riscv-emu-guest`) — the
+   nightly date and the `unwinding` version move together.
+3. Update the hardcoded `toolchain:` value in every job in
+   `.github/workflows/pre-merge.yml` (the workflow carries a
+   "keep this in sync" comment at each site).
+4. Run the full gate (`just check build-ci test`) before pushing, and
+   expect new-lint fallout in the same change.
 
 ### Architecture coverage
 
-CI currently runs only the **ARM** validate job
-(`ubuntu-24.04-arm`). The x86_64 job is intentionally disabled in
-`pre-merge.yml`. The production target is RV32 (`lpvm-native`); the
-host-side path now runs through `lpvm-wasm` (wasmtime) per M4b. The
-x86_64 validate job has not yet been re-enabled — that re-enable is
-a separate change so this plan didn't churn the CI matrix at the
-same time as the backend swap.
+The main validate job runs on **x64** (`Validate (x64)`,
+`ubuntu-24.04`). It ran on ARM from 2026-06 while x86_64 was disabled
+over host-JIT failures in `lpvm-cranelift`; that JIT was removed
+2026-07-11, and PR #121 consolidated back onto x64 on 2026-07-27 (the
+`validate-arm` job is gone). x64 is the better-supported runner image
+and every browser-dependent job is x64-only anyway — Chrome ships no
+linux-arm64 build.
+
+Remaining ARM coverage is `Validate GFX (ARM)`
+(`validate-gfx`, `ubuntu-24.04-arm`), kept on ARM deliberately: it
+needs no browser and keeps a second architecture compiling the tree.
+
+The production target is RV32 (`lpvm-native`); the host-side path runs
+through `lpvm-wasm` (wasmtime) per M4b.

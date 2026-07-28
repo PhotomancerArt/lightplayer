@@ -45,6 +45,7 @@ web-sys = { version = "0.3", features = [
     "BlobPropertyBag",
     "BroadcastChannel",
     "CanvasRenderingContext2d",
+    "Clipboard",
     "Crypto",
     "Document",
     "Element",

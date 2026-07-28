@@ -53,6 +53,20 @@ const browserRestartEvery = parsePositiveIntegerEnv("STUDIO_STORY_BROWSER_RESTAR
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
+// HARNESS SEAM — second half of the contract documented at
+// `component_overview_id` in src/stories/story_book.rs: the story book
+// synthesizes one `<family>/[<category>/]<component>/overview` page per
+// component that stacks every story of that component, and no `#[story]`
+// function can claim that id (pinned by a unit test there).
+// Declared with the other module constants, ABOVE the top-level await that
+// drives the run — a `const` further down the file is in its temporal dead
+// zone by the time `discoverStoryIds()` reads it, which `node --check` cannot
+// see because it only parses.
+const OVERVIEW_COMPOSITE_SUFFIX = "/overview";
+// Written beside `.check-complete` by a complete `check`: the baseline files
+// that actually need replacing/removing. See the write site for why consumers
+// must not just swap the whole set.
+const REFRESH_MANIFEST_FILE = ".refresh-manifest.json";
 // Captures of the same build still differ in a few pixels from anti-aliasing and
 // sub-pixel text layout jitter (high per-channel delta, but only along glyph edges).
 // So `check` counts pixels whose per-channel delta exceeds a significance threshold
@@ -60,6 +74,10 @@ const CAPTURE_BUILD_FILE = ".capture-build";
 // pixelmatch-style — rather than gating on the single worst pixel. This has a noise
 // floor: changes below the ratio don't fail the check (reviewers still see the
 // baseline image diff in the PR).
+// Ceiling for the grow-to-fit viewport (see `fitViewportToStory`). Tall enough
+// for every current story sheet, low enough that a runaway one can't ask Chrome
+// for an enormous surface.
+const storyViewportMaxHeight = parsePositiveIntegerEnv("STUDIO_STORY_MAX_VIEWPORT_HEIGHT", 8000);
 const significanceDelta = parsePositiveIntegerEnv("STUDIO_STORY_MAX_CHANNEL_DELTA", 64);
 const maxSignificantPixelRatio = parseRatioEnv("STUDIO_STORY_MAX_DIFF_PIXEL_RATIO", 0.0005);
 const baseUrl = `http://127.0.0.1:${port}/`;
@@ -72,6 +90,11 @@ const STORY_VIEWPORTS = [
   { id: "md", width: 720, height: 760 },
   { id: "lg", width: 1080, height: 760 },
 ];
+// Stories marked `#[story(screenshot)]` are published images (README heroes,
+// docs figures), not the three-size design record: they capture at one size
+// only, so the unused sizes cannot churn baselines. Populated by discovery.
+const SCREENSHOT_VIEWPORT_ID = "lg";
+const SCREENSHOT_STORY_IDS = new Set();
 
 class CdpConnection {
   static async open(url) {
@@ -221,13 +244,31 @@ try {
     await replaceBaselineImages(captureDir, outputDir);
     console.log(`Story baselines: ${path.relative(repoRoot, outputDir)}`);
   } else if (mode === "check") {
-    const ok = await compareBaselines(storyIds, baselineDir, outputDir);
+    const comparison = await compareBaselines(storyIds, baselineDir, outputDir);
+    const ok = comparison.ok;
     // Sentinel: the comparison ran over a COMPLETE capture. Consumers of the
     // fresh-capture set (the CI artifact and `story-pull`) require this so a
     // crashed partial capture can't masquerade as story drift — staging a
     // partial set would delete every baseline it didn't reach.
     if (storyFilters.length === 0) {
       await writeFile(path.join(outputDir, ".check-complete"), `${new Date().toISOString()}\n`);
+      // Refresh manifest: exactly which baselines the comparison judged stale.
+      // Consumers must replace only these instead of swapping the whole set —
+      // a wholesale copy also drags in the files this comparison deliberately
+      // TOLERATED (sub-threshold AA noise), which is how run-to-run raster
+      // jitter became committed baseline churn.
+      await writeFile(
+        path.join(outputDir, REFRESH_MANIFEST_FILE),
+        `${JSON.stringify(
+          {
+            replace: comparison.replace,
+            remove: comparison.remove,
+            tolerated: comparison.tolerated,
+          },
+          null,
+          2,
+        )}\n`,
+      );
     }
     if (!ok) {
       console.error("\nStory baselines differ. Run `just studio-story-baselines` to update them.");
@@ -462,10 +503,31 @@ async function discoverStoryIds() {
     "--dump-dom",
     `${baseUrl}?story-discovery=${Date.now()}#/stories`,
   ]);
-  return Array.from(html.matchAll(/href="#\/stories\/([^"]+)"/g))
-    .map((match) => decodeURIComponent(match[1]))
-    .map((storyId) => storyId.split(/[?#]/, 1)[0])
+  const storyIds = [];
+  for (const anchor of html.matchAll(/<a\b[^>]*href="#\/stories\/([^"]+)"[^>]*>/g)) {
+    const storyId = decodeURIComponent(anchor[1]).split(/[?#]/, 1)[0];
+    // `#[story(screenshot)]` rides the discovery link (see story_book.rs).
+    if (/data-story-screenshot="1"/.test(anchor[0])) {
+      SCREENSHOT_STORY_IDS.add(storyId);
+    }
+    storyIds.push(storyId);
+  }
+  return storyIds
     .filter((value, index, values) => values.indexOf(value) === index)
+    // Generated `overview` composites are NOT pixel baselines. They stack a
+    // whole component's stories on one page — 10k-25k px tall against a 760px
+    // viewport, where every non-composite story fits in 3400 — and
+    // `captureBeyondViewport` does not reliably paint composited effects that
+    // far below the fold: in the flip that filed
+    // docs/defects/2026-07-28-overview-composite-capture-races.md, the device
+    // card's `backdrop-filter` overlays kept their blur but lost their own
+    // background and children, at every overlay story in the page and nowhere
+    // above y=5658. Both terminals survive the stable pair, so each capture
+    // committed a coin flip and every auto-refresh commit retriggered CI.
+    // They also carried no coverage the per-story captures don't: every state
+    // in a composite is captured on its own page too. Browse them in the story
+    // book; do not baseline them.
+    .filter((storyId) => !storyId.endsWith(OVERVIEW_COMPOSITE_SUFFIX))
     .sort();
 }
 
@@ -514,7 +576,7 @@ async function captureStories(storyIds, directory) {
 
   const concurrency = Math.min(requestedCaptureConcurrency, pending.length);
   console.log(
-    `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
+    `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories, up to ${STORY_VIEWPORTS.length} sizes each) with ${concurrency} Chrome pages...`,
   );
 
   // Defense in depth: capture in chunks with a fresh browser per chunk
@@ -716,6 +778,7 @@ async function createCapturePage(cdp) {
         })()
       `,
       );
+      await fitViewportToStory(cdp, sessionId, viewport, storyId);
       await settleFocus(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
@@ -875,6 +938,103 @@ async function settleFocus(cdp, sessionId, storyId) {
   );
 }
 
+// Grow the viewport so the whole story box is ON SCREEN before capturing.
+//
+// `captureBeyondViewport` photographs content that was never actually in view,
+// and widgets that only measure themselves once they become visible get frozen
+// in a pre-measurement state by that. CodeMirror is the case that forced this:
+// `ViewState.measure()` consumes its "re-measure the content" flags and then
+// returns early while the editor is outside the window, so an editor below the
+// fold never measures and keeps the library default 14px line height while its
+// content lays out at 18px — the line-number gutter then advances 14px against
+// 18px lines and the numbers walk out of alignment with the code they label.
+// Coming into view is the only thing that recovers it, and a story page does
+// not scroll, so without this the state is permanent. Whether a given editor
+// straddled the fold moved with a few pixels of layout, which is what flipped
+// the baseline run to run.
+//
+// Widening the viewport instead of scrolling is what actually works here: the
+// story page is not a scroll container, so `window.scrollTo` moves nothing.
+// Width is never touched — sm/md/lg mean width, and the responsive layout must
+// not change. The viewport is restored to its normal height before the capture
+// (see below), so the grown height is a measurement window, not the height any
+// story is photographed at.
+// See docs/defects/2026-07-27-code-editor-gutter-misaligned.md
+async function fitViewportToStory(cdp, sessionId, viewport, storyId) {
+  const needed = await evaluate(
+    cdp,
+    sessionId,
+    `
+    (() => {
+      const el = document.querySelector('[data-story-capture="1"]');
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const doc = document.documentElement;
+      // Everything the capture could photograph: the story box in page
+      // coordinates, plus whatever else the document reports.
+      return Math.ceil(Math.max(
+        rect.bottom + window.scrollY,
+        doc.scrollHeight,
+        document.body ? document.body.scrollHeight : 0,
+      ));
+    })()
+  `,
+  );
+  if (!needed) {
+    return;
+  }
+  // Cap it: a runaway story must not turn into a gigantic surface allocation.
+  // Anything past the cap keeps the old below-the-fold behaviour rather than
+  // failing the capture.
+  const height = Math.min(Math.max(needed, viewport.height), storyViewportMaxHeight);
+  if (height <= viewport.height) {
+    return;
+  }
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: viewport.width, height, deviceScaleFactor: 1, mobile: false },
+    sessionId,
+  );
+  // Measurement runs on requestAnimationFrame and a headless page stops
+  // producing frames on its own, so force one and let the story settle at the
+  // new height before anything reads geometry again.
+  await forceFrame(cdp, sessionId);
+  await waitForStoryReady(cdp, sessionId, storyId);
+  // Then put the viewport back. The point of growing it was to let widgets take
+  // a measurement they refuse to take off screen, and those measurements stick
+  // — CodeMirror's height oracle keeps the corrected line height once it has
+  // one. Capturing at the grown height would instead bake the taller viewport
+  // into every tall story: layout that keys on viewport height (a pane sized to
+  // fill the window) expands, and the story box grows by that much empty space.
+  // Measured on studio-shell/simulator-ready at sm, the grown capture was 91px
+  // taller with pixel-identical content — a baseline change that carries no
+  // information. Restoring first keeps the fix and leaves those baselines alone.
+  await cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    {
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    },
+    sessionId,
+  );
+  await forceFrame(cdp, sessionId);
+  await waitForStoryReady(cdp, sessionId, storyId);
+}
+
+// A discarded 1x1 screenshot forces a BeginFrame, so rAF-driven work (layout
+// measurement, popover positioning) can make progress in a headless page.
+async function forceFrame(cdp, sessionId) {
+  await cdp
+    .send(
+      "Page.captureScreenshot",
+      { format: "png", fromSurface: true, clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 } },
+      sessionId,
+    )
+    .catch(() => {});
+}
+
 async function waitForStoryReady(cdp, sessionId, storyId) {
   const expression = `
     (() => {
@@ -905,6 +1065,18 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
         if (document.fonts.status !== 'loaded') {
           return false;
         }
+      }
+      // Preview canvases paint via putImageData from an async task after
+      // mount, so "mounted but not yet painted" is a real page state. Both
+      // painted and unpainted survive a stable pair, so without this gate a
+      // baseline could freeze either one — bistable run-to-run. The app
+      // stamps data-preview-painted on each canvas after its first blit;
+      // demand it on every preview canvas in the story.
+      const unpainted = el.querySelectorAll(
+        'canvas.ux-produced-product-pixel-canvas:not([data-preview-painted])',
+      );
+      if (unpainted.length > 0) {
+        return false;
       }
       return !document.querySelector('[data-story-wait="1"]');
     })()
@@ -1001,6 +1173,8 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   const missing = [];
   const changed = [];
   const tolerated = [];
+  // File names (not the annotated display strings) for the refresh manifest.
+  const replace = [];
   let identical = 0;
 
   for (const target of targets) {
@@ -1012,14 +1186,18 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
 
     if (!expected) {
       missing.push(fileName);
+      replace.push(fileName);
     } else if (expected.equals(actual)) {
       identical += 1;
     } else {
       const diff = comparePngPixels(expected, actual);
       if (diff.withinTolerance) {
-        tolerated.push(`${fileName} (${diff.summary})`);
+        // Deliberately NOT added to `replace`: the committed bytes stay put,
+        // so sub-threshold jitter can never ping-pong the baseline.
+        tolerated.push({ fileName, diff });
       } else {
         changed.push(`${fileName} (${diff.summary})`);
+        replace.push(fileName);
       }
     }
   }
@@ -1027,16 +1205,54 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   printComparison("changed", changed);
   printComparison("new", missing);
   printComparison("removed", unexpected);
-  printComparison("within tolerance (informational)", tolerated);
+  printComparison(
+    "within tolerance (informational)",
+    tolerated.map(({ fileName, diff }) => `${fileName} (${diff.summary})`),
+  );
 
+  // Amplitude heuristic (warn-only): every benign raster-churner class ever
+  // observed on this pipeline (compositor layer promotion, border AA — the
+  // version-badge/shader-face family) diffs at 0 significant pixels; a
+  // tolerated file with significant pixels squeaked UNDER the ratio limit
+  // while containing per-channel deltas the significance test itself calls
+  // real. That is the fingerprint of a bistable render or a content change
+  // hiding under the count-only gate — see
+  // docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md.
+  // Warn loudly; do not fail (single-story calibration so far — promote to a
+  // gate once a few real runs have confirmed where the boundary sits).
+  const suspects = tolerated.filter(({ diff }) => diff.significantPixels > 0);
+  if (suspects.length > 0) {
+    console.warn(
+      `\nWARNING: ${suspects.length} tolerated file(s) contain significant pixels ` +
+        `(Δ>${significanceDelta}) — under the ratio limit but NOT raster jitter, ` +
+        "which always diffs at 0 significant pixels. Suspected bistable render " +
+        "or under-the-ratio content change:",
+    );
+    for (const { fileName, diff } of suspects) {
+      console.warn(`  ${fileName} (max Δ${diff.maxDelta}, ${diff.significantPixels} significant)`);
+    }
+    console.warn(
+      "  Fresh + baseline pixels are retained as the story-images-tolerated CI artifact.\n" +
+        "  See docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md.",
+    );
+  }
+
+  const manifest = {
+    replace,
+    remove: unexpected,
+    // Names only (consumers replace/remove by name; tolerated is evidence
+    // retention, applied by the workflow's artifact step, never by
+    // story-apply-refresh).
+    tolerated: tolerated.map(({ fileName }) => fileName),
+  };
   if (changed.length === 0 && missing.length === 0 && unexpected.length === 0) {
     console.log(
       `Story baselines match (${identical} byte-identical, ${tolerated.length} within tolerance).`,
     );
-    return true;
+    return { ok: true, ...manifest };
   }
   console.log(`Fresh PNGs: ${path.relative(repoRoot, actualDir)}`);
-  return false;
+  return { ok: false, ...manifest };
 }
 
 function comparePngPixels(expected, actual) {
@@ -1090,6 +1306,8 @@ function comparePngPixels(expected, actual) {
   const significantRatio = significantPixels / totalPixels;
   return {
     withinTolerance: significantRatio <= maxSignificantPixelRatio,
+    significantPixels,
+    maxDelta,
     summary:
       `${significantPixels}/${totalPixels} px (${(significantRatio * 100).toFixed(3)}%)` +
       ` exceed Δ${significanceDelta} [${diffPixels} any-diff, max Δ${maxDelta}]`,
@@ -1365,7 +1583,16 @@ function printComparison(label, files) {
 
 function storyTargets(storyIds) {
   return storyIds.flatMap((storyId) =>
-    STORY_VIEWPORTS.map((viewport) => ({ storyId, viewport })),
+    viewportsFor(storyId).map((viewport) => ({ storyId, viewport })),
+  );
+}
+
+function viewportsFor(storyId) {
+  if (!SCREENSHOT_STORY_IDS.has(storyId)) {
+    return STORY_VIEWPORTS;
+  }
+  return STORY_VIEWPORTS.filter(
+    (viewport) => viewport.id === SCREENSHOT_VIEWPORT_ID,
   );
 }
 

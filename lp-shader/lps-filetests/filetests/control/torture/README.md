@@ -51,9 +51,26 @@ the lowering was fixed. Ternary conditions and arms also evaluate lazily
 | `brk_*`       | break at depth 1 (then/else guard) and depth 2 (inner loop only, nested guard) per loop kind |
 | `cont_*`      | continue, same enumeration; while/do-while variants exercise the continue-to-condition edge |
 | `brkcont_*`   | break and continue mixed across nesting levels / in one body      |
+| `brknest_*`   | nested loop pairs, all outer-kind x inner-kind combinations: inner body with both continue and break, outer break / outer continue placed after the inner loop, plus depth-3 chains (`brknest_triple`) |
 | `ret_*`       | early returns from nested ifs, from each loop kind, from inner loops of nested pairs, from loops inside branches |
 | `sc_*`        | short-circuit `&&`/`||` whose right operand calls a global-mutating function: bare ops, precedence chains, nested groups, and as if/while/ternary conditions |
 | `terncond_*`  | ternaries nested in branch conditions: if conditions, loop bounds, nested ternaries, side-effecting arms |
+| `intrin_*`    | one builtin per file, called inside an `if` inside a `for`, with the result stored to an array, stored through a swizzle, discarded, or negated in the other arm |
+
+## Builtin calls in fall-through branches (`intrin_*`)
+
+Added after the 2026-07-27 `emit_q32_fabs` bug: the WASM Q32 lowering of `abs`
+left one operand on the stack. WASM validation goes polymorphic after `return`,
+so in a straight-line function the implicit `end` is unreachable and the leak is
+never checked — it only surfaced where the enclosing block **falls through**,
+i.e. a builtin call in an `if` inside a loop. Every shape in this axis puts the
+call in exactly that position, so a non-stack-neutral emitter fails to compile
+outright.
+
+The load-bearing assertion here is therefore "it compiles on every backend"; the
+`// run:` values are a second net. Per-builtin numeric accuracy belongs to
+`filetests/builtins/`, not to this axis — inputs are chosen to be exactly
+representable in both Q16.16 and f32 (and never a `.5` tie for `round`).
 
 Each file holds one enumerated shape with `// run:` directives covering every
 (reachable) combination of the branch-selecting parameters, so file names are

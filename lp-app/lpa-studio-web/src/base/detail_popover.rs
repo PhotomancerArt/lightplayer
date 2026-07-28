@@ -49,6 +49,10 @@ pub fn DetailPopover(
     /// Anchored mode pass-through (see `PopoverButton`).
     #[props(default = None)]
     anchor_visual: Option<Element>,
+    /// Custom-trigger pass-through (see `PopoverButton`): the trigger holds
+    /// icon plus label, so its top-layer copy keeps the trigger's own box.
+    #[props(default = false)]
+    layer_keeps_layout: bool,
     children: Element,
 ) -> Element {
     if let Some(trigger) = trigger {
@@ -65,6 +69,7 @@ pub fn DetailPopover(
                 initially_open,
                 anchor_id,
                 anchor_visual,
+                layer_keeps_layout,
                 {children}
             }
         };

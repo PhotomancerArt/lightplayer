@@ -25,6 +25,15 @@ use crate::provider::sse_parser::{SseEvent, SseParser};
 pub const DEFAULT_MODEL: &str = "claude-sonnet-5";
 /// Default API origin (overridable for tests).
 pub const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
+/// The `anthropic-version` header value (shared with model discovery).
+pub const ANTHROPIC_VERSION: &str = "2023-06-01";
+/// Per-turn output-token ceiling (`max_tokens`). Current Claude models
+/// support ≥64k output tokens; 32k gives a long shader landing inside an
+/// `iterate` input JSON — plus adaptive thinking, which spends from the
+/// same output budget — generous headroom while still bounding a runaway
+/// turn. The old 8k budget truncated tool calls mid-JSON on big shaders,
+/// ending runs silently with `stop_reason: max_tokens`.
+pub const ANTHROPIC_MAX_OUTPUT_TOKENS: u32 = 32_000;
 /// Backoff before the single retry.
 const RETRY_BACKOFF_MS: u32 = 500;
 /// Cap on how much of a non-2xx response body is read for the error message.
@@ -62,20 +71,21 @@ impl<T: HttpSseTransport> AnthropicProvider<T> {
     }
 
     fn build_request(&self, req: &TurnRequest) -> HttpRequest {
-        let body = serde_json::to_string(&MessagesRequest {
+        let body = MessagesRequest {
             model: &self.config.model,
-            max_tokens: req.max_tokens,
+            max_tokens: ANTHROPIC_MAX_OUTPUT_TOKENS,
             stream: true,
             system: &req.system,
             messages: &req.messages,
             tools: &req.tools,
-        })
-        .expect("request serialization is infallible");
+        }
+        .body()
+        .to_string();
         HttpRequest {
             url: format!("{}/v1/messages", self.config.base_url.trim_end_matches('/')),
             headers: vec![
                 ("x-api-key".into(), self.config.api_key.clone()),
-                ("anthropic-version".into(), "2023-06-01".into()),
+                ("anthropic-version".into(), ANTHROPIC_VERSION.into()),
                 ("content-type".into(), "application/json".into()),
                 // Required for CORS from the browser; harmless on host.
                 (
@@ -242,6 +252,8 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
             SsePayload::MessageStart { message } => {
                 if let Some(u) = message.usage {
                     self.usage.input_tokens = u.input_tokens;
+                    self.usage.cache_write_tokens = u.cache_creation_input_tokens;
+                    self.usage.cache_read_tokens = u.cache_read_input_tokens;
                 }
             }
             SsePayload::ContentBlockStart {
@@ -257,6 +269,14 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
                     self.tool_ids.insert(index, id.clone());
                     self.pending.push_back(TurnEvent::ToolUseStart { id, name });
                 }
+                WireContentBlockStart::Thinking { thinking } => {
+                    if !thinking.is_empty() {
+                        self.pending.push_back(TurnEvent::ThinkingDelta(thinking));
+                    }
+                }
+                WireContentBlockStart::RedactedThinking { data } => {
+                    self.pending.push_back(TurnEvent::RedactedThinking(data));
+                }
                 WireContentBlockStart::Unknown => {}
             },
             SsePayload::ContentBlockDelta { index, delta } => match delta {
@@ -271,6 +291,13 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
                         });
                     }
                 }
+                WireBlockDelta::ThinkingDelta { thinking } => {
+                    self.pending.push_back(TurnEvent::ThinkingDelta(thinking));
+                }
+                WireBlockDelta::SignatureDelta { signature } => {
+                    self.pending
+                        .push_back(TurnEvent::ThinkingSignature(signature));
+                }
                 WireBlockDelta::Unknown => {}
             },
             SsePayload::ContentBlockStop { .. } | SsePayload::Ping | SsePayload::Unknown => {}
@@ -279,8 +306,19 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
                     self.stop_reason = Some(map_stop_reason(&s));
                 }
                 if let Some(u) = usage {
-                    // Cumulative output tokens for the turn.
+                    // Cumulative output tokens for the turn; input-side
+                    // fields override `message_start` values when the
+                    // final delta repeats them.
                     self.usage.output_tokens = u.output_tokens;
+                    if let Some(input) = u.input_tokens {
+                        self.usage.input_tokens = input;
+                    }
+                    if let Some(write) = u.cache_creation_input_tokens {
+                        self.usage.cache_write_tokens = write;
+                    }
+                    if let Some(read) = u.cache_read_input_tokens {
+                        self.usage.cache_read_tokens = read;
+                    }
                 }
             }
             SsePayload::MessageStop => {
@@ -346,7 +384,8 @@ mod tests {
                     stop_reason: StopReason::EndTurn,
                     usage: TokenUsage {
                         input_tokens: 25,
-                        output_tokens: 12
+                        output_tokens: 12,
+                        ..TokenUsage::default()
                     }
                 }
             ]
@@ -391,10 +430,128 @@ mod tests {
                     stop_reason: StopReason::ToolUse,
                     usage: TokenUsage {
                         input_tokens: 40,
-                        output_tokens: 30
+                        output_tokens: 30,
+                        ..TokenUsage::default()
                     }
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn thinking_turn_streams_thinking_then_signature_then_text() {
+        // Chunks split mid-event to exercise incremental parsing end-to-end.
+        let bytes = THINKING_TURN.as_bytes();
+        let mid = bytes.len() / 2;
+        let transport =
+            FakeTransport::respond_once(200, vec![bytes[..mid].to_vec(), bytes[mid..].to_vec()]);
+        let events = run(&transport);
+        assert_eq!(
+            events,
+            vec![
+                TurnEvent::ThinkingDelta("Let me consider ".into()),
+                TurnEvent::ThinkingDelta("the palette.".into()),
+                TurnEvent::ThinkingSignature("EqQBsig".into()),
+                TurnEvent::RedactedThinking("EmwKopaque".into()),
+                TurnEvent::TextDelta("Warmer it is.".into()),
+                TurnEvent::TurnDone {
+                    stop_reason: StopReason::EndTurn,
+                    usage: TokenUsage {
+                        input_tokens: 30,
+                        output_tokens: 90,
+                        ..TokenUsage::default()
+                    }
+                }
+            ]
+        );
+        // The request opted into adaptive thinking with summarized display.
+        let reqs = transport.requests.borrow();
+        let body: serde_json::Value = serde_json::from_str(&reqs[0].body).expect("json body");
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({"type": "adaptive", "display": "summarized"})
+        );
+    }
+
+    #[test]
+    fn cache_usage_from_message_start_lands_in_turn_usage() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{",
+            "\"input_tokens\":21,\"cache_creation_input_tokens\":2100,",
+            "\"cache_read_input_tokens\":18000,\"output_tokens\":1}}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":9}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        );
+        let transport = FakeTransport::respond_once(200, vec![sse.as_bytes().to_vec()]);
+        let events = run(&transport);
+        assert_eq!(
+            events,
+            vec![TurnEvent::TurnDone {
+                stop_reason: StopReason::EndTurn,
+                usage: TokenUsage {
+                    input_tokens: 21,
+                    output_tokens: 9,
+                    cache_write_tokens: 2100,
+                    cache_read_tokens: 18000,
+                }
+            }]
+        );
+    }
+
+    #[test]
+    fn message_delta_usage_overrides_input_side_fields_when_present() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},",
+            "\"usage\":{\"output_tokens\":9,\"input_tokens\":21,",
+            "\"cache_creation_input_tokens\":2100,\"cache_read_input_tokens\":18000}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        );
+        let transport = FakeTransport::respond_once(200, vec![sse.as_bytes().to_vec()]);
+        let events = run(&transport);
+        assert_eq!(
+            events,
+            vec![TurnEvent::TurnDone {
+                stop_reason: StopReason::EndTurn,
+                usage: TokenUsage {
+                    input_tokens: 21,
+                    output_tokens: 9,
+                    cache_write_tokens: 2100,
+                    cache_read_tokens: 18000,
+                }
+            }]
+        );
+    }
+
+    #[test]
+    fn request_body_carries_cache_breakpoints() {
+        let transport = FakeTransport::respond_once(200, vec![TEXT_TURN.as_bytes().to_vec()]);
+        let _ = run(&transport);
+        let reqs = transport.requests.borrow();
+        let body: serde_json::Value = serde_json::from_str(&reqs[0].body).expect("json body");
+        // System prompt is the block form with a cache marker...
+        assert_eq!(
+            body["system"],
+            serde_json::json!([{
+                "type": "text", "text": "sys",
+                "cache_control": {"type": "ephemeral"},
+            }])
+        );
+        // ...and the last content block of the last message carries the
+        // rolling marker.
+        let last_block = body["messages"]
+            .as_array()
+            .and_then(|m| m.last())
+            .and_then(|m| m["content"].as_array())
+            .and_then(|c| c.last())
+            .expect("last block");
+        assert_eq!(
+            last_block["cache_control"],
+            serde_json::json!({"type": "ephemeral"})
         );
     }
 
@@ -516,6 +673,33 @@ mod tests {
         "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
     );
 
+    const THINKING_TURN: &str = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":30,\"output_tokens\":1}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me consider \"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"the palette.\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"EqQBsig\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"redacted_thinking\",\"data\":\"EmwKopaque\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"text_delta\",\"text\":\"Warmer it is.\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
+        "event: message_delta\n",
+        // Thinking tokens are OUTPUT tokens: the cumulative figure covers
+        // thinking + text together, so the existing bucket already adds up.
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":90}}\n\n",
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    );
+
     const TOOL_TURN: &str = concat!(
         "event: message_start\n",
         "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":40,\"output_tokens\":1}}}\n\n",
@@ -542,7 +726,6 @@ mod tests {
             system: "sys".into(),
             messages: vec![ChatMessage::user_text("hi")],
             tools: vec![],
-            max_tokens: 1024,
         };
         futures_executor::block_on(StreamExt::collect::<Vec<_>>(provider.run_turn(req)))
     }
