@@ -5624,6 +5624,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-mapping"
+version = "40.0.0"
+dependencies = [
+ "libm",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpc-model"
 version = "40.0.0"
 dependencies = [
