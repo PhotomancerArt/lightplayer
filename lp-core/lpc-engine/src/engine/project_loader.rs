@@ -593,7 +593,12 @@ impl ProjectLoader {
             match resolve_fixture_mapping(fs, registry, node, &config) {
                 Ok((mapping, map2d_source)) => {
                     let mut fixture =
-                        FixtureNode::new(node.id, mapping, *config.sampling.value(), frame);
+                        FixtureNode::new(node.id, mapping, *config.sampling.value(), frame)
+                            .with_render_defaults(
+                                config.render_width(),
+                                config.render_height(),
+                                *config.color_order.value(),
+                            );
                     if let Some(source) = map2d_source {
                         fixture = fixture.with_map2d_source(source);
                     }

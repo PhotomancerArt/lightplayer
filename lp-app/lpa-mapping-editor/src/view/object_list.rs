@@ -1,8 +1,9 @@
-//! The object rail: wiring order as a collapsible left overlay — swatch,
-//! name, lamp range, ▲▼ reorder (chain order IS the wiring order).
+//! The object rail: wiring order as a docked right-side pane — swatch,
+//! name, lamp range, ▲▼ reorder (chain order IS the wiring order). The
+//! host owns the open state and mounts this beside the canvas; docked, it
+//! shrinks the view instead of covering it.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::List;
 use lpc_mapping::resolve;
 
 use crate::editor_core::editor_session::MapEditorSession;
@@ -34,7 +35,6 @@ pub fn universe_range_label(start: u32, count: u32) -> String {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ObjectList(session: Signal<MapEditorSession>, on_committed: EventHandler<()>) -> Element {
-    let mut open = use_signal(|| true);
     let session_read = session.read();
     let doc = session_read.doc();
     let spans = resolve(doc)
@@ -57,17 +57,10 @@ pub fn ObjectList(session: Signal<MapEditorSession>, on_committed: EventHandler<
     drop(session_read);
 
     rsx! {
-        div { class: "lpme-rail",
-            button {
-                class: if open() { "lpme-btn lpme-btn-on lpme-rail-toggle" } else { "lpme-btn lpme-rail-toggle" },
-                title: "wiring order",
-                onclick: move |_| {
-                    let now = *open.peek();
-                    open.set(!now);
-                },
-                List { size: 13 }
-            }
-            if open() && object_count > 0 {
+        div { class: "lpme-rail-pane",
+            if object_count == 0 {
+                div { class: "lpme-rail-empty", "no objects yet" }
+            } else {
                 div { class: "lpme-rail-list",
                     for (index, name, span, selected) in rows {
                         div {

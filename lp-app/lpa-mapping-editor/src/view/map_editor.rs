@@ -8,6 +8,7 @@
 //! face won't).
 
 use dioxus::prelude::*;
+use dioxus_icons::lucide::List;
 use lpc_mapping::{Map2dDoc, bounds_of_points, resolve};
 
 use crate::editor_core::camera::Camera;
@@ -77,6 +78,11 @@ pub fn MapEditor(
     /// (the fixture face's control preview). Empty = no live feed.
     #[props(default)]
     live_colors: Vec<[u8; 3]>,
+    /// Bump to request a zoom-to-fit without re-seeding the doc (the face
+    /// bumps it on full-page expand/collapse — the viewport changes size
+    /// and the user expects a re-fit).
+    #[props(default)]
+    refit_epoch: u64,
 ) -> Element {
     let mut session = use_signal(|| {
         let mut session = MapEditorSession::new(doc.clone());
@@ -103,12 +109,27 @@ pub fn MapEditor(
     let viewport = use_signal(|| None::<[f32; 2]>);
     let mut fit_pending = use_signal(|| initial_camera.is_none());
     let drag = use_signal(|| None::<CanvasDrag>);
+    // The wiring-order rail: closed by default (it hides the canvas), and
+    // docked as a right-side pane that shrinks the view rather than
+    // floating over it (M5 gate direction).
+    let mut rail_open = use_signal(|| false);
 
     // Re-seed when the host bumps the epoch (render-time guarded write).
     let mut seen_epoch = use_signal(|| doc_epoch);
     if *seen_epoch.peek() != doc_epoch {
         seen_epoch.set(doc_epoch);
         session.write().set_doc(doc.clone());
+        fit_pending.set(true);
+    }
+
+    // Host-requested re-fit (expand/collapse): the canvas box is about to
+    // change size, so drop the stale measurement — the fit effect waits
+    // for the fresh one instead of fitting against the old box.
+    let mut seen_refit = use_signal(|| refit_epoch);
+    if *seen_refit.peek() != refit_epoch {
+        seen_refit.set(refit_epoch);
+        let mut viewport = viewport;
+        viewport.set(None);
         fit_pending.set(true);
     }
 
@@ -187,20 +208,35 @@ pub fn MapEditor(
                 scene_menu,
                 on_doc_change,
             }
-            div { class: "lpme-canvas-wrap",
-                EditorCanvas {
-                    session,
-                    camera,
-                    view_opts,
-                    viewport,
-                    drag,
-                    live_colors,
-                    on_committed,
+            div { class: "lpme-body",
+                div { class: "lpme-canvas-wrap",
+                    EditorCanvas {
+                        session,
+                        camera,
+                        view_opts,
+                        viewport,
+                        drag,
+                        live_colors,
+                        on_committed,
+                    }
+                    PropertiesPopover { session, camera, viewport, drag, on_committed }
+                    div { class: "lpme-hint", "{tool_hint}" }
+                    ZoomFloat { camera, viewport, fit_pending }
+                    div { class: "lpme-rail-float",
+                        button {
+                            class: if rail_open() { "lpme-btn lpme-btn-on" } else { "lpme-btn" },
+                            title: "wiring order",
+                            onclick: move |_| {
+                                let now = *rail_open.peek();
+                                rail_open.set(!now);
+                            },
+                            List { size: 13 }
+                        }
+                    }
                 }
-                ObjectList { session, on_committed }
-                PropertiesPopover { session, camera, viewport, drag, on_committed }
-                div { class: "lpme-hint", "{tool_hint}" }
-                ZoomFloat { camera, viewport, fit_pending }
+                if rail_open() {
+                    ObjectList { session, on_committed }
+                }
             }
         }
     }
