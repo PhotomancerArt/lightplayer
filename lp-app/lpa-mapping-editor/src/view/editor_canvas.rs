@@ -1,16 +1,23 @@
-//! The editor canvas: doc-space SVG rendering with camera pan/zoom.
+//! The editor canvas: doc-space SVG rendering with camera pan/zoom and the
+//! full editing grammar (P3).
 //!
 //! Layers (bottom → top): dot-grid background, the authored canvas rect,
-//! the fit-preview overlay (how the doc aspect-fits into a render target),
-//! wiring arrows, lamps, wiring numbers. The canvas renders **doc space**
-//! — the camera maps doc units to CSS pixels; nothing here is the
-//! aspect-fitted texture view.
+//! the fit-preview overlay, wiring arrows, lamps, wiring numbers, the
+//! selection outline + corner resize handles, path vertex handles, the
+//! path-draft preview, and the marquee. The canvas renders **doc space**;
+//! the camera maps doc units to CSS pixels.
+//!
+//! Every mutation flows through `MapEditorSession` ops: drags run
+//! `begin_gesture` → `*_from_gesture` (totals, no drift) → `commit_gesture`
+//! at pointer-up, so one drag is one undo step; `on_committed` fires after
+//! every committed change so the host can persist.
 
 use dioxus::prelude::*;
-use lpc_mapping::{Bounds2d, ResolvedMap2d, bounds_of_points, resolve};
+use lpc_mapping::{Bounds2d, Map2dShape, ResolvedMap2d, bounds_of_points, resolve};
 
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::MapEditorSession;
+use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::view_geometry::{ArrowInput, universe_rgb, wiring_arrows};
 use crate::view::map_editor::EditorViewOptions;
 
@@ -18,6 +25,10 @@ use crate::view::map_editor::EditorViewOptions;
 const OBJECT_COLORS: &[&str] = &[
     "#5aa9e6", "#3fd68e", "#e4c065", "#c792ea", "#f0913b", "#64d8cb",
 ];
+
+/// Selection accent (provisional spike blue; violet is reserved for
+/// bound-state semantics elsewhere in Studio).
+const SELECTION_COLOR: &str = "#4c9ffe";
 
 #[must_use]
 pub fn object_color(object_index: usize) -> &'static str {
@@ -45,13 +56,12 @@ pub fn lamp_display_radius(resolved: &ResolvedMap2d) -> f32 {
         return 7.0;
     }
     gaps.sort_by(|a, b| a.partial_cmp(b).expect("finite gaps"));
-    (gaps[gaps.len() / 2] * 0.34).clamp(1.5, 24.0)
+    (gaps[gaps.len() / 2] * 0.30).clamp(1.5, 22.0)
 }
 
 /// The doc-space region a `target_aspect` render texture covers after
 /// aspect-fit: the smallest rect with the target aspect that contains
-/// `frame`, centered — the visual answer to "how does my doc map into
-/// shader coordinates".
+/// `frame`, centered.
 #[must_use]
 pub fn fit_region(frame: Bounds2d, target_aspect: f32) -> Bounds2d {
     let frame_aspect = frame.width / frame.height.max(1e-6);
@@ -68,6 +78,37 @@ pub fn fit_region(frame: Bounds2d, target_aspect: f32) -> Bounds2d {
     }
 }
 
+/// An in-flight canvas drag.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CanvasDrag {
+    Pan {
+        last: [f32; 2],
+    },
+    /// Group move: totals from the gesture-start doc point.
+    Move {
+        start: [f32; 2],
+        moved: bool,
+        /// Collapse multi-selection to this object on a no-move click.
+        collapse: Option<usize>,
+    },
+    /// Path vertex drag.
+    Vertex {
+        index: usize,
+        moved: bool,
+    },
+    /// Corner resize about the fixed opposite corner.
+    Resize {
+        anchor: [f32; 2],
+        start: [f32; 2],
+        moved: bool,
+    },
+    Marquee {
+        start: [f32; 2],
+        current: [f32; 2],
+        additive: bool,
+    },
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn EditorCanvas(
@@ -75,18 +116,38 @@ pub fn EditorCanvas(
     camera: Signal<Camera>,
     view_opts: Signal<EditorViewOptions>,
     viewport: Signal<[f32; 2]>,
+    drag: Signal<Option<CanvasDrag>>,
+    /// Fired after any committed (undoable) change.
+    on_committed: EventHandler<()>,
 ) -> Element {
-    let mut pan_last = use_signal(|| None::<[f32; 2]>);
-
     let cam = camera();
     let opts = view_opts();
     let session_read = session.read();
     let doc = session_read.doc();
+    let tool_is_select = matches!(session_read.tool, MapTool::Select);
+    let tool = session_read.tool.clone();
+    let selection = session_read.selection.clone();
+    let path_objects: Vec<(usize, Vec<[f32; 2]>)> = doc
+        .objects
+        .iter()
+        .enumerate()
+        .filter_map(|(index, object)| match &object.shape {
+            Map2dShape::Path(path) => Some((index, path.points.clone())),
+            _ => None,
+        })
+        .collect();
     let resolved = resolve(doc).unwrap_or(ResolvedMap2d {
         lamps: Vec::new(),
         spans: Vec::new(),
     });
-    let radius = lamp_display_radius(&resolved);
+    // Lamp screen size is CAPPED: proportional at fit zoom, but circles stop
+    // growing past ~11px screen radius as you zoom in — near-coincident
+    // lamps (out-and-back wiring runs) separate visually instead of staying
+    // stacked at every zoom. A floor keeps dots visible when zoomed far out.
+    let radius = {
+        let base = lamp_display_radius(&resolved);
+        (base * cam.scale).clamp(3.5, 11.0) / cam.scale
+    };
     let canvas_rect = doc.canvas_bounds();
     let fit_rect = opts.fit_preview.then(|| {
         let frame = canvas_rect
@@ -97,7 +158,7 @@ pub fn EditorCanvas(
                 width: 100.0,
                 height: 100.0,
             });
-        fit_region(frame, 1.0) // 16×16 default target: square
+        fit_region(frame, 1.0)
     });
     let spans: Vec<(u32, u32)> = resolved
         .spans
@@ -109,32 +170,216 @@ pub fn EditorCanvas(
         wiring_arrows(&ArrowInput {
             positions: &positions,
             spans: &spans,
-            view_width: 0.0, // unused by the renderer below (doc space)
+            view_width: 0.0,
             view_height: 0.0,
             end_gap: radius * 1.05,
             min_len: radius * 2.3,
         })
     });
     let show_numbers = opts.numbers && cam.scale * radius >= 5.0;
+
+    // Selection visuals: bbox of the selected objects' lamps.
+    let selection_bounds = (!selection.objects.is_empty())
+        .then(|| {
+            let sel_positions: Vec<[f32; 2]> = resolved
+                .lamps
+                .iter()
+                .filter(|lamp| selection.objects.contains(&(lamp.object as usize)))
+                .map(|lamp| lamp.pos)
+                .collect();
+            bounds_of_points(&sel_positions)
+        })
+        .flatten();
+    let handle_half = 5.0 / cam.scale;
+    let selection_margin = radius + 8.0 / cam.scale;
+
+    // Vertex handles for a single selected path.
+    let vertex_points: Vec<[f32; 2]> = selection
+        .single()
+        .and_then(|index| doc.objects.get(index))
+        .and_then(|object| match &object.shape {
+            Map2dShape::Path(path) if tool_is_select => Some(path.points.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let selected_vertex = selection.vertex;
+
+    // Path draft preview: draft vertices + resolved ghost lamps + the chain
+    // link from the previous object's last lamp.
+    let draft_points: Vec<[f32; 2]> = match &tool {
+        MapTool::Path { draft } => draft.clone(),
+        _ => Vec::new(),
+    };
+    let draft_ghosts: Vec<[f32; 2]> = if draft_points.len() >= 2 {
+        let length: f32 = draft_points
+            .windows(2)
+            .map(|pair| {
+                ((pair[1][0] - pair[0][0]).powi(2) + (pair[1][1] - pair[0][1]).powi(2)).sqrt()
+            })
+            .sum();
+        let count = ((length / 26.0).round() as u32).max(2);
+        let ghost_doc = lpc_mapping::Map2dDoc {
+            objects: vec![lpc_mapping::Map2dObject {
+                name: String::new(),
+                shape: Map2dShape::Path(lpc_mapping::PathShape {
+                    points: draft_points.clone(),
+                    count,
+                    reversed: false,
+                }),
+            }],
+            ..lpc_mapping::Map2dDoc::new()
+        };
+        resolve(&ghost_doc)
+            .map(|resolved| resolved.positions())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let chain_from = (!draft_points.is_empty())
+        .then(|| positions.last().copied())
+        .flatten();
+
+    let marquee_rect = match drag() {
+        Some(CanvasDrag::Marquee { start, current, .. }) => {
+            let min = [start[0].min(current[0]), start[1].min(current[1])];
+            let max = [start[0].max(current[0]), start[1].max(current[1])];
+            Some((min, [max[0] - min[0], max[1] - min[1]]))
+        }
+        _ => None,
+    };
     drop(session_read);
+
+    let commit_drag = move |mut session: Signal<MapEditorSession>| {
+        session.write().commit_gesture();
+        on_committed.call(());
+    };
 
     rsx! {
         svg {
-            class: "lpme-canvas",
+            class: if tool_is_select { "lpme-canvas" } else { "lpme-canvas lpme-canvas-tool" },
             onpointerdown: move |evt| {
-                let point = evt.data().client_coordinates();
-                pan_last.set(Some([point.x as f32, point.y as f32]));
-            },
-            onpointermove: move |evt| {
-                if let Some(last) = pan_last() {
-                    let point = evt.data().client_coordinates();
-                    let next = [point.x as f32, point.y as f32];
-                    camera.write().pan(next[0] - last[0], next[1] - last[1]);
-                    pan_last.set(Some(next));
+                capture_pointer(&evt);
+                let doc_point = event_doc_point(&camera, &evt);
+                let shift = evt.data().modifiers().shift();
+                let tool_now = session.read().tool.clone();
+                match tool_now {
+                    MapTool::Select => {
+                        if !shift {
+                            session.write().selection.clear();
+                        }
+                        drag.set(Some(CanvasDrag::Marquee {
+                            start: doc_point,
+                            current: doc_point,
+                            additive: shift,
+                        }));
+                    }
+                    MapTool::Grid => {
+                        session.write().create_default_grid(doc_point);
+                        on_committed.call(());
+                    }
+                    MapTool::Ring => {
+                        session.write().create_default_ring(doc_point);
+                        on_committed.call(());
+                    }
+                    MapTool::Path { .. } => {
+                        session.write().path_add_point(doc_point);
+                    }
                 }
             },
-            onpointerup: move |_| pan_last.set(None),
-            onpointerleave: move |_| pan_last.set(None),
+            onpointermove: move |evt| {
+                let Some(current_drag) = drag() else {
+                    return;
+                };
+                let doc_point = event_doc_point(&camera, &evt);
+                match current_drag {
+                    CanvasDrag::Pan { last } => {
+                        let view_point = event_view_point(&evt);
+                        camera.write().pan(view_point[0] - last[0], view_point[1] - last[1]);
+                        drag.set(Some(CanvasDrag::Pan { last: view_point }));
+                    }
+                    CanvasDrag::Move { start, collapse, .. } => {
+                        session
+                            .write()
+                            .move_selected_from_gesture(doc_point[0] - start[0], doc_point[1] - start[1]);
+                        drag.set(Some(CanvasDrag::Move { start, moved: true, collapse }));
+                    }
+                    CanvasDrag::Vertex { index, .. } => {
+                        session.write().move_vertex_from_gesture(index, doc_point);
+                        drag.set(Some(CanvasDrag::Vertex { index, moved: true }));
+                    }
+                    CanvasDrag::Resize { anchor, start, .. } => {
+                        let start_dist =
+                            ((start[0] - anchor[0]).powi(2) + (start[1] - anchor[1]).powi(2)).sqrt();
+                        if start_dist > 1e-3 {
+                            let now_dist = ((doc_point[0] - anchor[0]).powi(2)
+                                + (doc_point[1] - anchor[1]).powi(2))
+                            .sqrt();
+                            session
+                                .write()
+                                .scale_selected_from_gesture(anchor, now_dist / start_dist);
+                        }
+                        drag.set(Some(CanvasDrag::Resize { anchor, start, moved: true }));
+                    }
+                    CanvasDrag::Marquee { start, additive, .. } => {
+                        drag.set(Some(CanvasDrag::Marquee {
+                            start,
+                            current: doc_point,
+                            additive,
+                        }));
+                    }
+                }
+            },
+            onpointerup: move |_| {
+                let Some(current_drag) = drag() else {
+                    return;
+                };
+                drag.set(None);
+                match current_drag {
+                    CanvasDrag::Pan { .. } => {}
+                    CanvasDrag::Move { moved, collapse, .. } => {
+                        if moved {
+                            commit_drag(session);
+                        } else {
+                            let mut s = session.write();
+                            s.commit_gesture();
+                            if let Some(index) = collapse {
+                                s.selection.select_only(index);
+                            }
+                        }
+                    }
+                    CanvasDrag::Vertex { moved, .. } | CanvasDrag::Resize { moved, .. } => {
+                        if moved {
+                            commit_drag(session);
+                        } else {
+                            session.write().commit_gesture();
+                        }
+                    }
+                    CanvasDrag::Marquee { start, current, additive } => {
+                        let min = [start[0].min(current[0]), start[1].min(current[1])];
+                        let max = [start[0].max(current[0]), start[1].max(current[1])];
+                        let scale = camera().scale;
+                        if (max[0] - min[0]) * scale > 4.0 || (max[1] - min[1]) * scale > 4.0 {
+                            session.write().marquee_select(min, max, additive);
+                        }
+                    }
+                }
+            },
+            onpointerleave: move |_| {
+                if matches!(
+                    drag(),
+                    Some(CanvasDrag::Pan { .. }) | Some(CanvasDrag::Marquee { .. })
+                ) {
+                    drag.set(None);
+                }
+            },
+            onpointercancel: move |_| drag.set(None),
+            ondoubleclick: move |_| {
+                if matches!(session.read().tool, MapTool::Path { .. })
+                    && session.write().path_finish().is_some()
+                {
+                    on_committed.call(());
+                }
+            },
             onwheel: move |evt| {
                 evt.prevent_default();
                 let delta = evt.data().delta();
@@ -149,9 +394,9 @@ pub fn EditorCanvas(
                 };
                 let modifiers = evt.data().modifiers();
                 if modifiers.ctrl() || modifiers.meta() {
-                    let point = evt.data().client_coordinates();
                     let factor = (1.004f32).powf(-dy);
-                    camera.write().zoom_at([point.x as f32, point.y as f32], factor);
+                    let view_point = event_view_point_wheel(&evt);
+                    camera.write().zoom_at(view_point, factor);
                 } else {
                     camera.write().pan(-dx, -dy);
                 }
@@ -169,8 +414,8 @@ pub fn EditorCanvas(
                     view_box: "0 0 8 8",
                     ref_x: "7",
                     ref_y: "4",
-                    marker_width: "3.5",
-                    marker_height: "3.5",
+                    marker_width: "4",
+                    marker_height: "4",
                     orient: "auto-start-reverse",
                     // Opaque fill: the translucent line ends under the head,
                     // and alpha-stacking there reads as a glitch.
@@ -181,8 +426,8 @@ pub fn EditorCanvas(
                     view_box: "0 0 8 8",
                     ref_x: "7",
                     ref_y: "4",
-                    marker_width: "3.5",
-                    marker_height: "3.5",
+                    marker_width: "4",
+                    marker_height: "4",
                     orient: "auto-start-reverse",
                     path { d: "M0,0.8 L7.4,4 L0,7.2 z", fill: "#e4c065" }
                 }
@@ -260,36 +505,79 @@ pub fn EditorCanvas(
                             y1: "{seg.y1}",
                             x2: "{seg.x2}",
                             y2: "{seg.y2}",
-                            stroke_width: "{(radius * 0.11).clamp(0.35, 1.2)}",
+                            stroke_width: "{(radius * 0.14).clamp(0.4, 1.5)}",
                             marker_end: if seg.chain { "url(#lpme-arrow-head-chain)" } else { "url(#lpme-arrow-head)" },
                         }
                     }
                 }
-                for lamp in &resolved.lamps {
-                    circle {
-                        key: "l{lamp.index}",
-                        cx: "{lamp.pos[0]}",
-                        cy: "{lamp.pos[1]}",
-                        r: "{radius}",
-                        fill: if opts.universes {
-                            {
-                                let [r, g, b] = universe_rgb(lamp.index);
-                                format!("rgb({r} {g} {b})")
+                // Wide invisible hit lines make skinny paths clickable.
+                if tool_is_select {
+                    for (object_index, points) in path_objects.iter() {
+                        {
+                            let object_index = *object_index;
+                            rsx! {
+                                polyline {
+                                    key: "hit{object_index}",
+                                    class: "lpme-hitline",
+                                    points: points.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" "),
+                                    stroke_width: "{14.0 / cam.scale}",
+                                    onpointerdown: move |evt| {
+                                        evt.stop_propagation();
+                                        select_and_start_move(session, drag, camera, object_index, &evt);
+                                    },
+                                }
                             }
-                        } else {
-                            object_color(lamp.object as usize).to_string()
-                        },
-                        stroke: "#000",
-                        stroke_width: "{(radius * 0.12).clamp(0.2, 1.5)}",
+                        }
+                    }
+                }
+                for lamp in resolved
+                    .lamps
+                    .iter()
+                    .filter(|lamp| !selection.objects.contains(&(lamp.object as usize)))
+                    .chain(
+                        resolved
+                            .lamps
+                            .iter()
+                            .filter(|lamp| selection.objects.contains(&(lamp.object as usize))),
+                    )
+                {
+                    {
+                        let object_index = lamp.object as usize;
+                        let selected = selection.objects.contains(&object_index);
+                        rsx! {
+                            circle {
+                                key: "l{lamp.index}",
+                                cx: "{lamp.pos[0]}",
+                                cy: "{lamp.pos[1]}",
+                                r: "{radius}",
+                                fill: if opts.universes {
+                                    {
+                                        let [r, g, b] = universe_rgb(lamp.index);
+                                        format!("rgb({r} {g} {b})")
+                                    }
+                                } else {
+                                    object_color(object_index).to_string()
+                                },
+                                stroke: if selected { SELECTION_COLOR } else { "#000" },
+                                stroke_width: if selected {
+                                    "{(radius * 0.28).clamp(0.6, 2.4)}"
+                                } else {
+                                    "{(radius * 0.12).clamp(0.2, 1.5)}"
+                                },
+                                cursor: if tool_is_select { "move" } else { "crosshair" },
+                                onpointerdown: move |evt| {
+                                    if matches!(session.read().tool, MapTool::Select) {
+                                        evt.stop_propagation();
+                                        select_and_start_move(session, drag, camera, object_index, &evt);
+                                    }
+                                },
+                            }
+                        }
                     }
                 }
                 if show_numbers {
                     for lamp in &resolved.lamps {
                         {
-                            // Fit the glyphs inside the lamp: 3-digit numbers
-                            // shrink. Stroke scales WITH the font — a fixed
-                            // stroke is doc-units under the camera transform
-                            // and swallows the glyphs when zoomed in.
                             let font = if lamp.index + 1 >= 100 {
                                 radius * 0.62
                             } else {
@@ -310,9 +598,219 @@ pub fn EditorCanvas(
                         }
                     }
                 }
+                if let Some(bounds) = selection_bounds {
+                    rect {
+                        class: "lpme-sel-outline",
+                        x: "{bounds.min_x - selection_margin}",
+                        y: "{bounds.min_y - selection_margin}",
+                        width: "{bounds.width + 2.0 * selection_margin}",
+                        height: "{bounds.height + 2.0 * selection_margin}",
+                        rx: "{6.0 / cam.scale}",
+                        stroke_width: "{1.5 / cam.scale}",
+                    }
+                    for (name, corner_x, corner_y, anchor_x, anchor_y) in [
+                        (
+                            "tl",
+                            bounds.min_x - selection_margin,
+                            bounds.min_y - selection_margin,
+                            bounds.min_x + bounds.width + selection_margin,
+                            bounds.min_y + bounds.height + selection_margin,
+                        ),
+                        (
+                            "tr",
+                            bounds.min_x + bounds.width + selection_margin,
+                            bounds.min_y - selection_margin,
+                            bounds.min_x - selection_margin,
+                            bounds.min_y + bounds.height + selection_margin,
+                        ),
+                        (
+                            "bl",
+                            bounds.min_x - selection_margin,
+                            bounds.min_y + bounds.height + selection_margin,
+                            bounds.min_x + bounds.width + selection_margin,
+                            bounds.min_y - selection_margin,
+                        ),
+                        (
+                            "br",
+                            bounds.min_x + bounds.width + selection_margin,
+                            bounds.min_y + bounds.height + selection_margin,
+                            bounds.min_x - selection_margin,
+                            bounds.min_y - selection_margin,
+                        ),
+                    ] {
+                        rect {
+                            key: "h{name}",
+                            class: "lpme-handle",
+                            x: "{corner_x - handle_half}",
+                            y: "{corner_y - handle_half}",
+                            width: "{2.0 * handle_half}",
+                            height: "{2.0 * handle_half}",
+                            stroke_width: "{1.4 / cam.scale}",
+                            onpointerdown: move |evt| {
+                                evt.stop_propagation();
+                                capture_pointer(&evt);
+                                let doc_point = event_doc_point(&camera, &evt);
+                                session.write().begin_gesture();
+                                drag.set(Some(CanvasDrag::Resize {
+                                    anchor: [anchor_x, anchor_y],
+                                    start: doc_point,
+                                    moved: false,
+                                }));
+                            },
+                        }
+                    }
+                }
+                for (vertex_index, point) in vertex_points.iter().enumerate() {
+                    {
+                        let hot = selected_vertex == Some(vertex_index);
+                        let half = 4.5 / cam.scale;
+                        rsx! {
+                            rect {
+                                key: "v{vertex_index}",
+                                class: if hot { "lpme-vertex lpme-vertex-hot" } else { "lpme-vertex" },
+                                x: "{point[0] - half}",
+                                y: "{point[1] - half}",
+                                width: "{2.0 * half}",
+                                height: "{2.0 * half}",
+                                stroke_width: "{1.4 / cam.scale}",
+                                onpointerdown: move |evt| {
+                                    evt.stop_propagation();
+                                    capture_pointer(&evt);
+                                    {
+                                        let mut s = session.write();
+                                        s.selection.vertex = Some(vertex_index);
+                                        s.begin_gesture();
+                                    }
+                                    drag.set(Some(CanvasDrag::Vertex {
+                                        index: vertex_index,
+                                        moved: false,
+                                    }));
+                                },
+                            }
+                        }
+                    }
+                }
+                if let (Some(from), Some(first)) = (chain_from, draft_points.first()) {
+                    line {
+                        class: "lpme-arrow-chain",
+                        x1: "{from[0]}",
+                        y1: "{from[1]}",
+                        x2: "{first[0]}",
+                        y2: "{first[1]}",
+                        stroke_width: "{(radius * 0.14).clamp(0.4, 1.5)}",
+                    }
+                }
+                if draft_points.len() >= 2 {
+                    polyline {
+                        class: "lpme-draft",
+                        points: draft_points.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" "),
+                        stroke_width: "{1.5 / cam.scale}",
+                    }
+                }
+                for (index, ghost) in draft_ghosts.iter().enumerate() {
+                    circle {
+                        key: "g{index}",
+                        cx: "{ghost[0]}",
+                        cy: "{ghost[1]}",
+                        r: "{radius}",
+                        fill: SELECTION_COLOR,
+                        opacity: "0.35",
+                    }
+                }
+                for (index, point) in draft_points.iter().enumerate() {
+                    circle {
+                        key: "dp{index}",
+                        cx: "{point[0]}",
+                        cy: "{point[1]}",
+                        r: "{3.5 / cam.scale}",
+                        fill: SELECTION_COLOR,
+                    }
+                }
+                if let Some((origin, size)) = marquee_rect {
+                    rect {
+                        class: "lpme-marquee",
+                        x: "{origin[0]}",
+                        y: "{origin[1]}",
+                        width: "{size[0]}",
+                        height: "{size[1]}",
+                        stroke_width: "{1.2 / cam.scale}",
+                    }
+                }
             }
         }
     }
+}
+
+/// Select `object_index` (respecting shift-toggle) and arm a move drag.
+fn select_and_start_move(
+    mut session: Signal<MapEditorSession>,
+    mut drag: Signal<Option<CanvasDrag>>,
+    camera: Signal<Camera>,
+    object_index: usize,
+    evt: &Event<PointerData>,
+) {
+    capture_pointer(evt);
+    let doc_point = event_doc_point(&camera, evt);
+    let shift = evt.data().modifiers().shift();
+    let mut s = session.write();
+    if shift {
+        s.selection.toggle(object_index);
+        return;
+    }
+    let mut collapse = None;
+    if !s.selection.objects.contains(&object_index) {
+        s.selection.select_only(object_index);
+    } else if s.selection.objects.len() > 1 {
+        collapse = Some(object_index);
+    }
+    s.selection.vertex = None;
+    s.begin_gesture();
+    drop(s);
+    drag.set(Some(CanvasDrag::Move {
+        start: doc_point,
+        moved: false,
+        collapse,
+    }));
+}
+
+/// The header height folded into pointer math (the canvas svg starts below
+/// it; client coordinates are viewport-relative). A measured rect can
+/// replace this if drift shows up at other viewport widths.
+const HEADER_OFFSET: f32 = 49.0;
+
+/// Route the rest of this pointer stream to the pressed element even when
+/// the cursor crosses overlays (rail, popover) or leaves the window — drags
+/// must not die at the first overlay edge.
+fn capture_pointer(evt: &Event<PointerData>) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        if let Some(web_event) = evt.data().downcast::<web_sys::PointerEvent>()
+            && let Some(target) = web_event.target()
+            && let Ok(element) = target.dyn_into::<web_sys::Element>()
+        {
+            let _ = element.set_pointer_capture(web_event.pointer_id());
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = evt;
+    }
+}
+
+fn event_view_point(evt: &Event<PointerData>) -> [f32; 2] {
+    let point = evt.data().client_coordinates();
+    [point.x as f32, point.y as f32 - HEADER_OFFSET]
+}
+
+fn event_doc_point(camera: &Signal<Camera>, evt: &Event<PointerData>) -> [f32; 2] {
+    let view = event_view_point(evt);
+    camera.peek().view_to_doc(view)
+}
+
+fn event_view_point_wheel(evt: &Event<WheelData>) -> [f32; 2] {
+    let point = evt.data().client_coordinates();
+    [point.x as f32, point.y as f32 - HEADER_OFFSET]
 }
 
 #[cfg(test)]
@@ -327,12 +825,10 @@ mod tests {
             width: 200.0,
             height: 50.0,
         };
-        // Wide frame into a square target: height pads to 200, centered.
         let region = fit_region(frame, 1.0);
         assert!((region.width - 200.0).abs() < 1e-3);
         assert!((region.height - 200.0).abs() < 1e-3);
         assert!((region.min_y - (-75.0)).abs() < 1e-3);
-        // Tall frame into a wide target: width pads.
         let tall = Bounds2d {
             min_x: 10.0,
             min_y: 0.0,
@@ -349,7 +845,6 @@ mod tests {
         let doc = lpc_mapping::corpus::panel_16x16();
         let resolved = resolve(&doc).unwrap();
         let radius = lamp_display_radius(&resolved);
-        // Panel pitch is 26 → radius ≈ 26 * 0.34.
-        assert!((radius - 26.0 * 0.34).abs() < 0.5, "radius {radius}");
+        assert!((radius - 26.0 * 0.30).abs() < 0.5, "radius {radius}");
     }
 }

@@ -130,6 +130,16 @@ impl MapEditorSession {
         }
     }
 
+    /// Gesture-scoped mutation WITHOUT an undo push: pairs with
+    /// `begin_gesture`/`commit_gesture` so live typing in a property field
+    /// previews immediately but lands as one undo step on commit.
+    pub fn edit_uncommitted(&mut self, apply: impl FnOnce(&mut Map2dDoc)) {
+        self.begin_gesture();
+        apply(&mut self.doc);
+        sanitize_doc(&mut self.doc);
+        self.invalidate();
+    }
+
     /// One-step discrete edit (property change, create, delete, reorder).
     pub fn edit(&mut self, apply: impl FnOnce(&mut Map2dDoc)) {
         let before = self.doc.to_json();

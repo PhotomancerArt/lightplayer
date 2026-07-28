@@ -3,11 +3,14 @@
 
 use base64::Engine as _;
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{Hash, Layers, Route, Scan};
+use dioxus_icons::lucide::{
+    CircleDashed, Grid3x3, Hash, Layers, MousePointer, Route, Scan, Spline,
+};
 use lpc_mapping::{Map2dDoc, corpus, resolve};
 
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::MapEditorSession;
+use crate::editor_core::map_tool::MapTool;
 use crate::view::map_editor::{EditorFileOps, EditorViewOptions};
 
 #[component]
@@ -61,6 +64,31 @@ pub fn EditorHeader(
                 if dirty {
                     span { class: "lpme-dirty", title: "unsaved changes", " ●" }
                 }
+            }
+            span { class: "lpme-sep" }
+            button {
+                class: toggle_class(matches!(session.read().tool, MapTool::Select)),
+                title: "select (V)",
+                onclick: move |_| session.write().tool = MapTool::Select,
+                MousePointer { size: 13 }
+            }
+            button {
+                class: toggle_class(matches!(session.read().tool, MapTool::Grid)),
+                title: "grid tool (G): click to drop a default grid",
+                onclick: move |_| session.write().tool = MapTool::Grid,
+                Grid3x3 { size: 13 }
+            }
+            button {
+                class: toggle_class(matches!(session.read().tool, MapTool::Ring)),
+                title: "ring tool (R): click to drop a default ring",
+                onclick: move |_| session.write().tool = MapTool::Ring,
+                CircleDashed { size: 13 }
+            }
+            button {
+                class: toggle_class(matches!(session.read().tool, MapTool::Path { .. })),
+                title: "path tool (P): click vertices, Enter finishes",
+                onclick: move |_| session.write().tool = MapTool::path(),
+                Spline { size: 13 }
             }
             div { class: "lpme-spacer" }
             if scene_menu {
