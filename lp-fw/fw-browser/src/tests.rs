@@ -24,16 +24,24 @@ fn runtime_serves_protocol_messages_after_tick() {
     fw_browser_init_exports(wasm_bindgen::exports());
 
     let runtime_id = create_cpu_runtime("wasm-bindgen-test");
-    let client = ClientMessage {
-        id: 7,
-        msg: ClientRequest::ListAvailableProjects,
+    let protocol_in = |id: u64| {
+        let client = ClientMessage {
+            id,
+            msg: ClientRequest::ListAvailableProjects,
+        };
+        let frame = json::to_string(&client).expect("client frame");
+        serde_json::to_string(&BrowserInputEnvelopeForTest::ProtocolIn { frame })
+            .expect("input envelope")
     };
-    let frame = json::to_string(&client).expect("client frame");
-    let input = serde_json::to_string(&BrowserInputEnvelopeForTest::ProtocolIn { frame })
-        .expect("input envelope");
 
-    let initial = handle_envelope_json(runtime_id, &input).expect("handle protocol_in");
-    assert!(initial.contains("queued protocol_in frame"));
+    let initial = handle_envelope_json(runtime_id, &protocol_in(7)).expect("handle protocol_in");
+    // The per-frame queue ack is a `debug` line, and envelope emission rides
+    // the process-global `log::max_level()` gate (seeded to `Info`), so at the
+    // default level it must NOT cross the postMessage boundary.
+    assert!(
+        !initial.contains("queued protocol_in frame"),
+        "debug envelope escaped the default-level gate: {initial}"
+    );
     // The boot hello (unsolicited id 0) rides the FIRST output drain —
     // `handle_envelope_json` drains queued envelopes, so the hello flushes
     // here, ahead of any correlated response.
@@ -42,6 +50,19 @@ fn runtime_serves_protocol_messages_after_tick() {
         "hello missing: {initial}"
     );
     assert!(initial.contains("\\\"proto\\\":1"));
+
+    // Raising the global level opens the gate: the same input now carries the
+    // debug envelope, proving the line is gated rather than gone. Restore
+    // before asserting — `log::max_level()` is process-global and every other
+    // wasm-bindgen test shares this instance.
+    let previous_level = log::max_level();
+    log::set_max_level(log::LevelFilter::Debug);
+    let verbose = handle_envelope_json(runtime_id, &protocol_in(8)).expect("handle protocol_in");
+    log::set_max_level(previous_level);
+    assert!(
+        verbose.contains("queued protocol_in frame"),
+        "debug envelope missing at debug level: {verbose}"
+    );
 
     let output = tick_runtime(runtime_id, 16).expect("tick runtime");
     assert!(output.contains("protocol_out"));
