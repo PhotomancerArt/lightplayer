@@ -658,10 +658,20 @@ impl StudioController {
     /// The LENS session's card (D43): the grown control panel the editor
     /// docks as its right-side pane. The same construction the gallery
     /// roster uses — one derivation, both scales.
+    ///
+    /// TOTAL over a live lens session: whenever the pool has a lens the
+    /// editor gets a card. The shell has no other device surface, so a
+    /// `None` here is a hole in the right column — which is exactly how
+    /// the retired step-stack pane stayed reachable (defect
+    /// `docs/defects/2026-07-28-retired-device-pane-still-reachable.md`).
+    /// Unplugging therefore FADES the card ("Seen …/Reconnect") instead of
+    /// removing it; the lens and the project are left alone, so a flaky
+    /// cable never yanks anyone out of their editor.
     fn lens_device_card(&self) -> Option<crate::UiDeviceCard> {
         let session = self.pool.lens_session()?;
         let evidence = self.home_pool_evidence();
         let card = if session.is_sim() {
+            // the sim's evidence exists exactly while its session does
             evidence
                 .sim
                 .as_ref()
@@ -670,9 +680,43 @@ impl StudioController {
             evidence
                 .devices
                 .first()
-                .and_then(crate::app::home::home_view_builder::live_device_card)
+                .map(crate::app::home::home_view_builder::device_card_from_live_evidence)
+                .map(|card| self.with_remembered_sighting(card))
         };
         card.map(|card| self.overlay_card_ui(card))
+    }
+
+    /// Live evidence carries no registry entry, so an Offline derivation
+    /// from it has no sighting ("Not seen yet" — wrong for a board that
+    /// answered a second ago). Borrow the remembered card's `last_seen_at`
+    /// so the unplugged lens reads "Seen …", the same words the gallery
+    /// uses for the same device.
+    fn with_remembered_sighting(&self, mut card: crate::UiDeviceCard) -> crate::UiDeviceCard {
+        let crate::RosterCardState::Offline {
+            last_seen_at: None, ..
+        } = &card.state
+        else {
+            return card;
+        };
+        let Some(uid) = card.uid.clone() else {
+            return card;
+        };
+        let seen = self.home_inputs.as_ref().and_then(|inputs| {
+            inputs
+                .devices
+                .iter()
+                .find(|remembered| remembered.uid.as_deref() == Some(uid.as_str()))
+                .and_then(|remembered| match remembered.state {
+                    crate::RosterCardState::Offline { last_seen_at } => last_seen_at,
+                    _ => None,
+                })
+        });
+        if seen.is_some() {
+            card.state = crate::RosterCardState::Offline {
+                last_seen_at: seen,
+            };
+        }
+        card
     }
 
     /// The lens's runtime binding for the view (SDI: the URL is the
@@ -2182,11 +2226,11 @@ impl StudioController {
     ) -> UiResult {
         match outcome {
             Ok(DeviceOpenOutcome::Opened) => {
-                self.pool.remove_kind(kind);
+                self.clear_connect_slot(kind);
                 Ok(UiNotices::new())
             }
             Ok(DeviceOpenOutcome::Cancelled { message }) => {
-                self.pool.remove_kind(kind);
+                self.clear_connect_slot(kind);
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             Ok(DeviceOpenOutcome::Connected { payload, logs }) => {
@@ -2198,15 +2242,37 @@ impl StudioController {
                 // M6: the ladder's honest ending lives on the CARD
                 // (PortHeld/Unresponsive flow states → card evidence);
                 // nothing toasts, nothing errors.
-                self.pool.remove_kind(kind);
+                self.clear_connect_slot(kind);
                 self.mark_dirty();
                 Ok(UiNotices::new())
             }
             Err(error) => {
-                self.pool.remove_kind(kind);
+                self.clear_connect_slot(kind);
                 Err(error)
             }
         }
+    }
+
+    /// Clear a kind's pool slot after a connect ended without a session.
+    ///
+    /// `remove_kind` alone drops the lens ID with the session but leaves
+    /// the MIRROR dressed — `project.state` stays `Ready`, so the shell
+    /// keeps rendering panes for an editor with nothing behind it and no
+    /// lens card. Quiescing first is the pairing every other teardown
+    /// path uses (`teardown_crashed_sim`, `detach_lens`,
+    /// `open_provider_link_only`); it returns the user to the gallery,
+    /// which is the honest reading of "the connect ended with no
+    /// session". Defect
+    /// `docs/defects/2026-07-28-retired-device-pane-still-reachable.md`.
+    fn clear_connect_slot(&mut self, kind: crate::RuntimeKind) {
+        if self
+            .pool
+            .lens_session()
+            .is_some_and(|session| session.kind() == kind)
+        {
+            self.quiesce_lens();
+        }
+        self.pool.remove_kind(kind);
     }
 
     /// Install a connected payload into the pool under the capacity
@@ -5478,6 +5544,122 @@ mod tests {
                 ..
             }] if *actual_target == target
         ));
+    }
+
+    // -----------------------------------------------------------------
+    // The lens-card invariant (D43)
+    //
+    // The editor layout has exactly ONE device surface. Nothing pinned
+    // that before, which is how a device-gone hole stayed invisible long
+    // enough for the shell to keep falling back to the retired
+    // step-stack pane — defect
+    // docs/defects/2026-07-28-retired-device-pane-still-reachable.md.
+    // -----------------------------------------------------------------
+
+    /// Panes render ⇒ the editor is open ⇒ a lens card exists. Held
+    /// across every state the lens can reach while the pane layout is up.
+    #[test]
+    fn panes_never_render_without_a_lens_card() {
+        use lpa_link::DeviceState;
+
+        fn assert_invariant(studio: &StudioController, what: &str) {
+            let view = studio.view();
+            if view.panes.is_empty() {
+                return;
+            }
+            assert!(
+                view.lens_card.is_some(),
+                "{what}: panes render with no lens card — the editor's right column has no \
+                 device surface"
+            );
+        }
+
+        let mut studio = connected_studio();
+        assert_invariant(&studio, "live device lens");
+
+        for state in [
+            DeviceState::Booting,
+            DeviceState::BlankFlash,
+            DeviceState::Bootloader,
+            DeviceState::ForeignFirmware,
+            DeviceState::Gone,
+        ] {
+            studio.set_stub_device_for_test(state.clone());
+            assert_invariant(&studio, &format!("device lens, link {state:?}"));
+        }
+
+        let mut studio = connected_studio();
+        studio.set_stub_sim_for_test();
+        assert_invariant(&studio, "sim lens");
+    }
+
+    /// Unplugging mid-project FADES the card; it never removes it, and it
+    /// never touches the editor. Yona 2026-07-28: a flaky cable must not
+    /// yank anyone out of their work, so the lens and the project stay.
+    #[test]
+    fn an_unplugged_lens_fades_to_an_offline_card_and_keeps_the_editor() {
+        use lpa_link::DeviceState;
+
+        let mut studio = connected_studio();
+        studio.set_stub_device_for_test(DeviceState::Gone);
+
+        let view = studio.view();
+        assert!(view.home.is_none(), "the editor stays open");
+        assert!(!view.panes.is_empty(), "the pane layout stays up");
+        let card = view.lens_card.expect("the unplugged lens keeps its card");
+        assert!(
+            matches!(card.state, crate::RosterCardState::Offline { .. }),
+            "the card reads offline, not gone: {:?}",
+            card.state
+        );
+        assert_eq!(
+            card.state.affordance(),
+            Some(crate::RosterAffordance::Reconnect),
+            "the way back is on the card"
+        );
+        assert!(
+            studio.pool.lens_session().is_some(),
+            "the lens is untouched — the session is still the editor's"
+        );
+    }
+
+    /// A connect that ends WITHOUT a session must not leave the mirror
+    /// dressed: when the ladder's soft ending clears the slot the lens
+    /// sits on, the project quiesces and the gallery comes back. The old
+    /// `remove_kind`-only teardown left `project.state` Ready with no
+    /// lens, which is the second path into the retired pane.
+    #[test]
+    fn a_soft_connect_ending_on_the_lens_kind_returns_to_the_gallery() {
+        let mut studio = StudioController::with_link_registry_for_test(
+            || 0.0,
+            registry_with_fake_connect_error("Failed to open serial port."),
+        );
+        studio.set_stub_device_for_test(
+            crate::app::runtime_pool::runtime_session::ready_state_for_test(),
+        );
+        studio
+            .project
+            .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        assert!(!studio.view().panes.is_empty(), "the editor is open");
+
+        let action = UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ConnectEndpoint {
+                provider_id: LinkProviderKind::Fake,
+                endpoint_id: LinkEndpointId::new("fake-runtime"),
+            },
+        );
+        drive(studio.dispatch_with_updates(action, UxUpdateSink::noop())).expect("soft ending");
+
+        let view = studio.view();
+        assert!(
+            studio.pool.lens_session().is_none(),
+            "the lens went with its session"
+        );
+        assert!(
+            view.panes.is_empty() && view.home.is_some(),
+            "the mirror quiesced with the session — the gallery shows"
+        );
     }
 
     fn connected_studio() -> StudioController {

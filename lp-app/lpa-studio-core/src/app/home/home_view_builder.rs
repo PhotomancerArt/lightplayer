@@ -337,14 +337,33 @@ pub(crate) fn sim_card(sim: &HomeSimEvidence) -> UiDeviceCard {
     }
 }
 
-/// The live session's card, derived from evidence. `None` when there is
+/// The live session's card for the GALLERY roster. `None` when there is
 /// no live evidence at all, and also when the evidence derives *Offline*
-/// (a `Gone` link or stale sync) — the registry card is the
-/// better-informed offline view (it knows the last sighting).
+/// (a `Gone` link or stale sync) — there the registry card is the
+/// better-informed offline view (it knows the last sighting), so the live
+/// row yields to it rather than showing a duplicate.
 pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard> {
     if live.sync.is_none() && live.link.is_none() && live.connect == ConnectEvidence::Idle {
         return None;
     }
+    let card = device_card_from_live_evidence(live);
+    if matches!(card.state, RosterCardState::Offline { .. }) {
+        return None;
+    }
+    Some(card)
+}
+
+/// The same derivation WITHOUT the roster's Offline filter, and total
+/// over every evidence combination (empty evidence derives Offline).
+///
+/// The editor's LENS card (D43) is the shell's only device surface, so it
+/// must survive an unplug: a `Gone` link has to leave a faded
+/// "Seen …/Reconnect" card standing, not a hole. Filtering Offline here
+/// is what let the retired step-stack pane back on screen — defect
+/// `docs/defects/2026-07-28-retired-device-pane-still-reachable.md`.
+/// There is no registry entry to fall back on at this scale, so the
+/// caller fills the sighting (see `StudioController::lens_device_card`).
+pub(crate) fn device_card_from_live_evidence(live: &HomeDeviceEvidence) -> UiDeviceCard {
     let state = derive_roster_card_state(&RosterEvidence {
         link: live.link.as_ref(),
         content: live.sync.as_ref().map(|sync| &sync.content),
@@ -359,9 +378,6 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         registry: None,
         connect: live.connect.clone(),
     });
-    if matches!(state, RosterCardState::Offline { .. }) {
-        return None;
-    }
     let identity = live.sync.as_ref().and_then(|sync| sync.identity.as_ref());
     let project = live.sync.as_ref().and_then(|sync| match &sync.content {
         DeviceContent::Known {
@@ -381,7 +397,7 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         Some(DeviceState::Ready { hello }) => Some(hello.fw.clone()),
         _ => None,
     };
-    Some(UiDeviceCard {
+    UiDeviceCard {
         uid: identity.map(|identity| identity.uid.clone()),
         name: identity
             .map(|identity| identity.name.clone())
@@ -393,7 +409,7 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         sim: false,
         console_tail: live.console_tail.clone(),
         ui: CardUiState::default(),
-    })
+    }
 }
 
 /// Last-seen ordering key: live cards lead, sighted cards follow newest
