@@ -6,7 +6,6 @@ pub mod exploration;
 mod library_host_opfs;
 mod local_model_probe;
 mod local_store;
-mod model_catalog;
 mod openrouter_oauth;
 mod router;
 mod settings_io;
