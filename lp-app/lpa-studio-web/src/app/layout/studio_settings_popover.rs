@@ -563,6 +563,9 @@ fn ModelPicker(
     // query typed against a long list survives a refresh onto a short one
     // and hides everything with no visible way to clear it.
     let filterable = total > FILTERABLE_MODEL_COUNT;
+    // Whether this provider published the scores the order is built on (only
+    // OpenRouter does today) — the legend would be a lie otherwise.
+    let ranked = models.is_some_and(|models| models.iter().any(|m| m.coding_score.is_some()));
     let matches = models
         .map(|models| {
             if filterable {
@@ -620,6 +623,9 @@ fn ModelPicker(
                         if total == 0 { "This provider listed no models." } else { "Nothing matches that filter." }
                     }
                 } else {
+                    if ranked {
+                        span { class: HINT_CLASS, "best for code first, by the provider's own score" }
+                    }
                     div { class: "tw:grid tw:max-h-52 tw:min-w-0 tw:gap-0.5 tw:overflow-y-auto",
                         for model in matches.iter().take(MAX_PICKER_ROWS) {
                             button {
@@ -638,6 +644,13 @@ fn ModelPicker(
                                     }
                                 },
                                 span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[11px]", "{model.id}" }
+                                // The score is why this row sits where it
+                                // does; showing it keeps the order legible.
+                                if let Some(score) = model.coding_score {
+                                    span { class: "tw:shrink-0 tw:text-[10px] tw:text-status-good-foreground",
+                                        "{score:.0}"
+                                    }
+                                }
                                 if let Some(price) = model.price {
                                     span { class: "tw:shrink-0 tw:text-[10px] tw:text-subtle-foreground", "{price.summary()}" }
                                 }
@@ -654,7 +667,7 @@ fn ModelPicker(
             div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
                 if let Some(hidden) = catalog.catalog.as_ref().filter(|_| !stale).map(|c| c.hidden).filter(|h| *h > 0) {
                     span { class: HINT_CLASS,
-                        "{hidden} non-chat {plural(hidden, \"model\")} hidden"
+                        "{hidden} {plural(hidden, \"model\")} hidden — no tool calling, or not chat"
                     }
                 }
                 if catalog.catalog.is_some() && !stale && !catalog.loading {
@@ -712,11 +725,7 @@ fn ProbeFindingCard(finding: ProbeFinding, on_settings: EventHandler<SettingsCom
                                 // A local server publishes no rates, so this
                                 // also clears any carried over from a priced
                                 // model (see `adopt_model_commands`).
-                                let model = CatalogModel {
-                                    id: model.clone(),
-                                    label: None,
-                                    price: None,
-                                };
+                                let model = CatalogModel::new(model.clone());
                                 move |_| {
                                     on_settings.call(SettingsCommand::SetAgentCustomBaseUrl(Some(url.clone())));
                                     for command in adopt_model_commands(&model) {

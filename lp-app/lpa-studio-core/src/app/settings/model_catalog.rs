@@ -42,6 +42,32 @@ pub struct CatalogModel {
     pub label: Option<String>,
     /// Published rates, when the provider lists them (OpenRouter).
     pub price: Option<CatalogPrice>,
+    /// The provider's own published score for coding work, when it has one
+    /// (OpenRouter carries Artificial Analysis' indices). This is what puts
+    /// the models worth choosing at the top of a 300-row list.
+    pub coding_score: Option<f64>,
+    /// Publication time (epoch seconds), when the provider gives one. The
+    /// tiebreak below the score: newest first beats alphabetical, since a
+    /// provider's newest models are the ones a user is looking for.
+    pub created: Option<i64>,
+    /// Whether the provider says the model can call tools. `None` means it
+    /// does not say — only an explicit `false` hides a model.
+    pub supports_tools: Option<bool>,
+}
+
+impl CatalogModel {
+    /// A model known only by its id — what a bare OpenAI-style list gives,
+    /// and the starting point for fixtures.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: None,
+            price: None,
+            coding_score: None,
+            created: None,
+            supports_tools: None,
+        }
+    }
 }
 
 /// Published rates for a model, $ per million tokens.
@@ -178,20 +204,50 @@ pub fn catalog_fingerprint(provider: AgentProvider, base_url: Option<&str>) -> S
 }
 
 /// Read a model-list body into offerable candidates: parsed, filtered to
-/// what this agent can drive, and sorted by id.
+/// what this agent can drive, and ordered best-first.
+///
+/// Ordering is the difference between a usable picker and a 300-row wall.
+/// OpenRouter alone lists ~340 models; alphabetical buries every model worth
+/// choosing under `ai21/…` and `aion-labs/…`. There is no popularity field
+/// in any provider's API, but OpenRouter publishes quality scores per model,
+/// so the ranking comes from the provider's own payload rather than a list
+/// we would have to maintain:
+///
+/// 1. published coding score, best first (the models that can do this work);
+/// 2. then newest first (a provider's latest is usually what is wanted);
+/// 3. then by id, so the tail is stable and searchable.
 pub fn parse_catalog(body: &str) -> Result<ModelCatalog, String> {
     let all = parse_catalog_entries(body)?;
     let total = all.len();
-    let mut models: Vec<CatalogModel> = all
-        .into_iter()
-        .filter(|model| is_usable_model_id(&model.id))
-        .collect();
-    models.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut models: Vec<CatalogModel> = all.into_iter().filter(is_offerable).collect();
+    models.sort_by(|a, b| {
+        descending(a.coding_score, b.coding_score)
+            .then_with(|| descending(a.created, b.created))
+            .then_with(|| a.id.cmp(&b.id))
+    });
     models.dedup_by(|a, b| a.id == b.id);
     Ok(ModelCatalog {
         hidden: total - models.len(),
         models,
     })
+}
+
+/// Whether a candidate belongs in the picker at all: the agent drives one
+/// tool in a loop, so a model the provider marks as tool-incapable cannot
+/// run it — same reasoning as the embedding/speech id filter. Silence about
+/// tool support is not a no (only OpenRouter reports it).
+fn is_offerable(model: &CatalogModel) -> bool {
+    is_usable_model_id(&model.id) && model.supports_tools != Some(false)
+}
+
+/// Descending order for an optional key, with absent values last.
+fn descending<T: PartialOrd>(a: Option<T>, b: Option<T>) -> core::cmp::Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => b.partial_cmp(&a).unwrap_or(core::cmp::Ordering::Equal),
+        (Some(_), None) => core::cmp::Ordering::Less,
+        (None, Some(_)) => core::cmp::Ordering::Greater,
+        (None, None) => core::cmp::Ordering::Equal,
+    }
 }
 
 /// Read the `{"data":[…]}` envelope every provider answers with, keeping
@@ -226,6 +282,9 @@ pub fn parse_catalog_entries(body: &str) -> Result<Vec<CatalogModel>, String> {
                     .filter(|label| *label != id)
                     .map(str::to_string),
                 price: parse_price(entry.get("pricing")),
+                coding_score: parse_coding_score(entry.get("benchmarks")),
+                created: entry.get("created").and_then(Value::as_i64),
+                supports_tools: parse_tool_support(entry.get("supported_parameters")),
             })
         })
         .collect())
@@ -281,6 +340,32 @@ impl CatalogPrice {
             format_rate(self.output_per_mtok)
         )
     }
+}
+
+/// The provider's published score for the work this agent does, preferring
+/// the coding index and falling back to the agentic and general ones.
+///
+/// `benchmarks` mixes shapes — `artificial_analysis` is an object of scalar
+/// indices, `design_arena` an array of per-arena entries — so this reads the
+/// one object it understands and ignores the rest rather than assuming.
+fn parse_coding_score(benchmarks: Option<&Value>) -> Option<f64> {
+    let analysis = benchmarks?.get("artificial_analysis")?;
+    ["coding_index", "agentic_index", "intelligence_index"]
+        .iter()
+        .find_map(|field| analysis.get(field).and_then(Value::as_f64))
+        .filter(|score| score.is_finite())
+}
+
+/// Tool-calling support from `supported_parameters`. Absent list ⇒ `None`
+/// (the provider did not say), never a false negative.
+fn parse_tool_support(parameters: Option<&Value>) -> Option<bool> {
+    let parameters = parameters?.as_array()?;
+    Some(
+        parameters
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|parameter| parameter == "tools"),
+    )
 }
 
 /// OpenRouter prices are per-token decimal strings; the UI speaks $/MTok.
@@ -408,7 +493,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(catalog.models.len(), 2);
-        // Sorted by id: haiku before sonnet.
+        // No scores and no timestamps in Anthropic's list, so id order.
         assert_eq!(catalog.models[0].id, "claude-haiku-4-5");
         assert_eq!(catalog.models[0].label.as_deref(), Some("Claude Haiku 4.5"));
         assert_eq!(catalog.hidden, 0);
@@ -449,6 +534,98 @@ mod tests {
             output_per_mtok: 0.6,
         };
         assert_eq!(price.summary(), "$0.15/$0.60");
+    }
+
+    #[test]
+    fn the_best_models_lead_the_list_not_the_alphabet() {
+        // The complaint this fixes: ~340 OpenRouter models sorted by id put
+        // `ai21/…` and `aion-labs/…` on top and buried every flagship.
+        let catalog = parse_catalog(
+            r#"{"data":[
+                {"id":"aion-labs/aion-2.0","created":100,
+                 "supported_parameters":["tools"]},
+                {"id":"anthropic/claude-opus-5","created":200,
+                 "supported_parameters":["tools"],
+                 "benchmarks":{
+                   "design_arena":[{"arena":"models","category":"3d","elo":1387}],
+                   "artificial_analysis":{"intelligence_index":60.7,"coding_index":78,"agentic_index":55.3}}},
+                {"id":"openai/gpt-5.6-sol","created":150,
+                 "supported_parameters":["tools"],
+                 "benchmarks":{"artificial_analysis":{"coding_index":77.4}}},
+                {"id":"zz/newer-unscored","created":300,
+                 "supported_parameters":["tools"]}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            catalog
+                .models
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                // scored, best first…
+                "anthropic/claude-opus-5",
+                "openai/gpt-5.6-sol",
+                // …then unscored by recency, alphabet last
+                "zz/newer-unscored",
+                "aion-labs/aion-2.0",
+            ]
+        );
+        // The score survives for the row badge, read past the sibling
+        // `design_arena` array (a different shape in the same object).
+        assert_eq!(catalog.models[0].coding_score, Some(78.0));
+    }
+
+    #[test]
+    fn a_model_that_cannot_call_tools_is_not_offered() {
+        // The agent is a single-tool loop: a tool-less model fails on turn
+        // one, so it is noise in the picker, exactly like an embedding model.
+        let catalog = parse_catalog(
+            r#"{"data":[
+                {"id":"chat-only","supported_parameters":["max_tokens","temperature"]},
+                {"id":"tool-capable","supported_parameters":["tools","max_tokens"]},
+                {"id":"unknown-support"}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            catalog
+                .models
+                .iter()
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            // Silence is not a no — only providers that publish the field
+            // (OpenRouter) can hide anything this way.
+            vec!["tool-capable", "unknown-support"]
+        );
+        assert_eq!(catalog.hidden, 1);
+        assert_eq!(catalog.models[0].supports_tools, Some(true));
+        assert_eq!(catalog.models[1].supports_tools, None);
+    }
+
+    #[test]
+    fn the_score_falls_back_through_the_published_indices() {
+        let catalog = parse_catalog(
+            r#"{"data":[
+                {"id":"a","benchmarks":{"artificial_analysis":{"agentic_index":50,"intelligence_index":40}}},
+                {"id":"b","benchmarks":{"artificial_analysis":{"intelligence_index":45}}},
+                {"id":"c","benchmarks":{"design_arena":[{"arena":"models","elo":1300}]}}
+            ]}"#,
+        )
+        .unwrap();
+        let score = |id: &str| {
+            catalog
+                .models
+                .iter()
+                .find(|m| m.id == id)
+                .expect("model")
+                .coding_score
+        };
+        assert_eq!(score("a"), Some(50.0));
+        assert_eq!(score("b"), Some(45.0));
+        // design_arena alone is per-arena elo, not a comparable index.
+        assert_eq!(score("c"), None);
     }
 
     #[test]
@@ -516,15 +693,10 @@ mod tests {
     fn the_filter_matches_ids_and_labels_case_insensitively() {
         let models = vec![
             CatalogModel {
-                id: "anthropic/claude-sonnet-5".to_string(),
                 label: Some("Anthropic: Claude Sonnet 5".to_string()),
-                price: None,
+                ..CatalogModel::new("anthropic/claude-sonnet-5")
             },
-            CatalogModel {
-                id: "qwen/qwen3-coder-30b".to_string(),
-                label: None,
-                price: None,
-            },
+            CatalogModel::new("qwen/qwen3-coder-30b"),
         ];
         assert_eq!(filter_models(&models, "").len(), 2);
         assert_eq!(filter_models(&models, "SONNET").len(), 1);
@@ -539,12 +711,11 @@ mod tests {
     #[test]
     fn adopting_a_priced_model_carries_its_rates() {
         let commands = adopt_model_commands(&CatalogModel {
-            id: "anthropic/claude-sonnet-5".to_string(),
-            label: None,
             price: Some(CatalogPrice {
                 input_per_mtok: 3.0,
                 output_per_mtok: 15.0,
             }),
+            ..CatalogModel::new("anthropic/claude-sonnet-5")
         });
         assert!(matches!(
             &commands[0],
@@ -564,11 +735,7 @@ mod tests {
     fn adopting_an_unpriced_model_clears_the_previous_models_rates() {
         // The failure this prevents: pick a $15/MTok model, then pick a
         // local one, and keep estimating the local run at $15/MTok.
-        let commands = adopt_model_commands(&CatalogModel {
-            id: "qwen3-coder:30b".to_string(),
-            label: None,
-            price: None,
-        });
+        let commands = adopt_model_commands(&CatalogModel::new("qwen3-coder:30b"));
         assert!(matches!(
             commands[1],
             SettingsCommand::SetAgentPriceInputPerMtok(None)
@@ -582,12 +749,11 @@ mod tests {
     #[test]
     fn sub_dollar_rates_survive_the_round_trip_through_the_field() {
         let commands = adopt_model_commands(&CatalogModel {
-            id: "qwen/qwen3-coder-30b".to_string(),
-            label: None,
             price: Some(CatalogPrice {
                 input_per_mtok: 0.07,
                 output_per_mtok: 0.28,
             }),
+            ..CatalogModel::new("qwen/qwen3-coder-30b")
         });
         let SettingsCommand::SetAgentPriceInputPerMtok(Some(input)) = &commands[1] else {
             panic!("expected an input rate");
