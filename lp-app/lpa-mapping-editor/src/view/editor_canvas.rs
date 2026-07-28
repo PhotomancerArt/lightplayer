@@ -115,11 +115,27 @@ pub fn EditorCanvas(
     session: Signal<MapEditorSession>,
     camera: Signal<Camera>,
     view_opts: Signal<EditorViewOptions>,
-    viewport: Signal<[f32; 2]>,
+    viewport: Signal<Option<[f32; 2]>>,
     drag: Signal<Option<CanvasDrag>>,
     /// Fired after any committed (undoable) change.
     on_committed: EventHandler<()>,
 ) -> Element {
+    // Pointer/wheel math anchors to the mounted svg's live rect, and the
+    // measured size feeds the host's viewport signal (fit needs real
+    // dimensions — the embed is nothing like a full window).
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        allow(unused_mut, reason = "only the wasm mount handler writes it")
+    )]
+    let mut anchor = use_signal(CanvasAnchor::default);
+    let mut viewport = viewport;
+    let mut measure = move || {
+        if let Some(size) = anchor.peek().size()
+            && viewport.peek().as_ref() != Some(&size)
+        {
+            viewport.set(Some(size));
+        }
+    };
     let cam = camera();
     let opts = view_opts();
     let session_read = session.read();
@@ -257,9 +273,21 @@ pub fn EditorCanvas(
     rsx! {
         svg {
             class: if tool_is_select { "lpme-canvas" } else { "lpme-canvas lpme-canvas-tool" },
+            onmounted: move |evt| {
+                #[cfg(target_arch = "wasm32")]
+                if let Some(element) = evt.data().downcast::<web_sys::Element>() {
+                    anchor.set(CanvasAnchor {
+                        element: Some(element.clone()),
+                    });
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                let _ = &evt;
+                measure();
+            },
+            onresize: move |_| measure(),
             onpointerdown: move |evt| {
                 capture_pointer(&evt);
-                let doc_point = event_doc_point(&camera, &evt);
+                let doc_point = event_doc_point(&anchor, &camera, &evt);
                 let shift = evt.data().modifiers().shift();
                 let tool_now = session.read().tool.clone();
                 match tool_now {
@@ -290,10 +318,10 @@ pub fn EditorCanvas(
                 let Some(current_drag) = drag() else {
                     return;
                 };
-                let doc_point = event_doc_point(&camera, &evt);
+                let doc_point = event_doc_point(&anchor, &camera, &evt);
                 match current_drag {
                     CanvasDrag::Pan { last } => {
-                        let view_point = event_view_point(&evt);
+                        let view_point = event_view_point(&anchor, &evt);
                         camera.write().pan(view_point[0] - last[0], view_point[1] - last[1]);
                         drag.set(Some(CanvasDrag::Pan { last: view_point }));
                     }
@@ -395,7 +423,7 @@ pub fn EditorCanvas(
                 let modifiers = evt.data().modifiers();
                 if modifiers.ctrl() || modifiers.meta() {
                     let factor = (1.004f32).powf(-dy);
-                    let view_point = event_view_point_wheel(&evt);
+                    let view_point = event_view_point_wheel(&anchor, &evt);
                     camera.write().zoom_at(view_point, factor);
                 } else {
                     camera.write().pan(-dx, -dy);
@@ -523,7 +551,7 @@ pub fn EditorCanvas(
                                     stroke_width: "{14.0 / cam.scale}",
                                     onpointerdown: move |evt| {
                                         evt.stop_propagation();
-                                        select_and_start_move(session, drag, camera, object_index, &evt);
+                                        select_and_start_move(session, drag, anchor, camera, object_index, &evt);
                                     },
                                 }
                             }
@@ -568,7 +596,7 @@ pub fn EditorCanvas(
                                 onpointerdown: move |evt| {
                                     if matches!(session.read().tool, MapTool::Select) {
                                         evt.stop_propagation();
-                                        select_and_start_move(session, drag, camera, object_index, &evt);
+                                        select_and_start_move(session, drag, anchor, camera, object_index, &evt);
                                     }
                                 },
                             }
@@ -649,7 +677,7 @@ pub fn EditorCanvas(
                             onpointerdown: move |evt| {
                                 evt.stop_propagation();
                                 capture_pointer(&evt);
-                                let doc_point = event_doc_point(&camera, &evt);
+                                let doc_point = event_doc_point(&anchor, &camera, &evt);
                                 session.write().begin_gesture();
                                 drag.set(Some(CanvasDrag::Resize {
                                     anchor: [anchor_x, anchor_y],
@@ -745,12 +773,13 @@ pub fn EditorCanvas(
 fn select_and_start_move(
     mut session: Signal<MapEditorSession>,
     mut drag: Signal<Option<CanvasDrag>>,
+    anchor: Signal<CanvasAnchor>,
     camera: Signal<Camera>,
     object_index: usize,
     evt: &Event<PointerData>,
 ) {
     capture_pointer(evt);
-    let doc_point = event_doc_point(&camera, evt);
+    let doc_point = event_doc_point(&anchor, &camera, evt);
     let shift = evt.data().modifiers().shift();
     let mut s = session.write();
     if shift {
@@ -773,10 +802,46 @@ fn select_and_start_move(
     }));
 }
 
-/// The header height folded into pointer math (the canvas svg starts below
-/// it; client coordinates are viewport-relative). A measured rect can
-/// replace this if drift shows up at other viewport widths.
+/// Host-side fallback offset for pointer math when no mounted element is
+/// available (tests, SSR): the standalone page's header height. In the
+/// browser the mounted svg's live bounding rect anchors coordinates instead
+/// — the editor can sit anywhere in a scrolling page (the fixture-face
+/// embed), so a fixed offset cannot work there.
 const HEADER_OFFSET: f32 = 49.0;
+
+/// Handle to the mounted canvas svg. Pointer and wheel coordinates anchor to
+/// its live bounding rect (queried per event — scroll-proof), and the host
+/// viewport size is measured from the same rect.
+#[derive(Clone, Default, PartialEq)]
+pub struct CanvasAnchor {
+    #[cfg(target_arch = "wasm32")]
+    element: Option<web_sys::Element>,
+}
+
+impl CanvasAnchor {
+    /// Top-left of the canvas in client coordinates.
+    fn origin(&self) -> [f32; 2] {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(element) = &self.element {
+            let rect = element.get_bounding_client_rect();
+            return [rect.left() as f32, rect.top() as f32];
+        }
+        [0.0, HEADER_OFFSET]
+    }
+
+    /// Measured canvas size in CSS pixels, when mounted.
+    fn size(&self) -> Option<[f32; 2]> {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(element) = &self.element {
+            let rect = element.get_bounding_client_rect();
+            let size = [rect.width() as f32, rect.height() as f32];
+            if size[0] > 0.0 && size[1] > 0.0 {
+                return Some(size);
+            }
+        }
+        None
+    }
+}
 
 /// Route the rest of this pointer stream to the pressed element even when
 /// the cursor crosses overlays (rail, popover) or leaves the window — drags
@@ -798,19 +863,25 @@ fn capture_pointer(evt: &Event<PointerData>) {
     }
 }
 
-fn event_view_point(evt: &Event<PointerData>) -> [f32; 2] {
+fn event_view_point(anchor: &Signal<CanvasAnchor>, evt: &Event<PointerData>) -> [f32; 2] {
     let point = evt.data().client_coordinates();
-    [point.x as f32, point.y as f32 - HEADER_OFFSET]
+    let origin = anchor.peek().origin();
+    [point.x as f32 - origin[0], point.y as f32 - origin[1]]
 }
 
-fn event_doc_point(camera: &Signal<Camera>, evt: &Event<PointerData>) -> [f32; 2] {
-    let view = event_view_point(evt);
+fn event_doc_point(
+    anchor: &Signal<CanvasAnchor>,
+    camera: &Signal<Camera>,
+    evt: &Event<PointerData>,
+) -> [f32; 2] {
+    let view = event_view_point(anchor, evt);
     camera.peek().view_to_doc(view)
 }
 
-fn event_view_point_wheel(evt: &Event<WheelData>) -> [f32; 2] {
+fn event_view_point_wheel(anchor: &Signal<CanvasAnchor>, evt: &Event<WheelData>) -> [f32; 2] {
     let point = evt.data().client_coordinates();
-    [point.x as f32, point.y as f32 - HEADER_OFFSET]
+    let origin = anchor.peek().origin();
+    [point.x as f32 - origin[0], point.y as f32 - origin[1]]
 }
 
 #[cfg(test)]

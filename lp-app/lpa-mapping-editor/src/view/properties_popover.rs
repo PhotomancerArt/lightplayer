@@ -23,7 +23,7 @@ const POPOVER_WIDTH: f32 = 236.0;
 pub fn PropertiesPopover(
     session: Signal<MapEditorSession>,
     camera: Signal<Camera>,
-    viewport: Signal<[f32; 2]>,
+    viewport: Signal<Option<[f32; 2]>>,
     drag: Signal<Option<CanvasDrag>>,
     on_committed: EventHandler<()>,
 ) -> Element {
@@ -51,7 +51,7 @@ pub fn PropertiesPopover(
 
     // Anchor right of the bbox; flip left / clamp inside the viewport.
     let cam = camera();
-    let [viewport_width, viewport_height] = viewport();
+    let [viewport_width, viewport_height] = viewport().unwrap_or([1200.0, 800.0]);
     let right = cam.doc_to_view([bounds.min_x + bounds.width, bounds.min_y]);
     let left = cam.doc_to_view([bounds.min_x, bounds.min_y]);
     let mut x = right[0] + 22.0;

@@ -321,6 +321,7 @@ pub(crate) fn shader_node_view(speed_bound: bool, agent_status: UiAgentStatus) -
 pub(crate) fn fixture_face() -> UiFixtureFace {
     UiFixtureFace {
         preview: control_preview_product("output"),
+        mapping_editor: None,
         brightness: fader_control(
             184.0,
             UiSlotFieldState::editable(),
@@ -345,6 +346,7 @@ pub(crate) fn fyeah_presentable_doc() -> lpc_mapping::Map2dDoc {
 pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
     UiFixtureFace {
         preview: map2d_control_preview_product("output", doc, (16, 16)),
+        mapping_editor: None,
         brightness: fader_control(
             184.0,
             UiSlotFieldState::editable(),
@@ -497,4 +499,26 @@ pub(crate) fn empty_playlist_node_view() -> UiNodeView {
         active: None,
     }));
     view
+}
+
+/// The M5 face-editor fixture: the mapping asset's inline-editor plumbing
+/// with the document body pre-resolved (no fetch round-trip in stories).
+pub(crate) fn map2d_fixture_face_editing(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
+    let mut face = map2d_fixture_face(doc);
+    face.mapping_editor = Some(UiAssetEditor {
+        artifact: ArtifactLocation::file("/fyeah.map2d.json"),
+        kind: UiAssetEditorKind::Map2d,
+        source: "fyeah.map2d.json".to_string(),
+        content: Some(UiAssetContent::from_bytes(
+            doc.to_json().as_bytes(),
+            false,
+            104,
+        )),
+        in_flight: false,
+        failure: None,
+        shader_error: None,
+        uniforms: Vec::new(),
+        agent: None,
+    });
+    face
 }

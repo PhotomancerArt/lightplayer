@@ -67,6 +67,10 @@ pub fn demo_project_files() -> &'static [DemoProjectFile] {
             relative_path: "fyeah-mapping.svg",
             bytes: include_bytes!("../../../../../examples/fyeah-sign/fyeah-mapping.svg"),
         },
+        DemoProjectFile {
+            relative_path: "fyeah.map2d.json",
+            bytes: include_bytes!("../../../../../examples/fyeah-sign/fyeah.map2d.json"),
+        },
     ]
 }
 
@@ -104,6 +108,15 @@ mod tests {
                 .unwrap()
                 .bytes,
             include_bytes!("../../../../../examples/fyeah-sign/project.json")
+        );
+        // The fixture's mapping document must deploy with the project — its
+        // absence fails the fixture at load (found the hard way when the M2
+        // migration updated fixture.json but not this compiled-in list).
+        assert!(
+            files
+                .iter()
+                .any(|file| file.relative_path == "fyeah.map2d.json"),
+            "fyeah-sign demo must include the mapping document"
         );
     }
 }
