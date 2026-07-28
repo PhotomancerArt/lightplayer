@@ -1,34 +1,70 @@
 # LightPlayer
 
-LightPlayer is a work-in-progress application for controlling visual effects on the esp32c6
-microcontroller using GLSL shaders.
+LightPlayer is an open platform for LED art: author effects as GLSL shaders in a browser studio,
+preview them in a built-in simulator, and run them on real hardware — where they are JIT-compiled
+to native RISC-V code on the device itself.
 
-GLSL shaders are used to define the visual effects, which are just-in-time (JIT) compiled to native
-RISC-V code on the target device.
+**Try it now at [lightplayer.app](https://lightplayer.app)** — the Studio runs entirely in your
+browser, and the built-in simulator means you don't need any hardware to start playing.
 
-The architecture is client-server, designed for headless operation on unattended devices,
-controlled from a web UI, native app, or by api.
+![LightPlayer Studio — editing a show with live node previews, shader knobs, and the built-in simulator](lp-app/lpa-studio-web/story-images/studio__readme__studio-hero__lg.png)
+
+![Studio home — the simulator and devices running projects, your library, and examples](lp-app/lpa-studio-web/story-images/studio__readme__home-gallery__lg.png)
+
+*Screenshots are CI-maintained UI captures from the story test suite — they update automatically
+as the app changes.*
+
+**What makes it different:**
+
+- **GLSL, compiled on the device.** A full compiler stack (GLSL → LPIR → native RV32) runs on the
+  microcontroller, executing shaders in Q16.16 fixed point — no floating-point unit required.
+- **Studio in your browser.** Live previews, node-based project editing, and AI-assisted shader
+  authoring (bring your own API key). The built-in simulator runs the real firmware as a WASM
+  worker — no hardware needed to try everything.
+- **Plug it in.** USB-first: connect a device and go. No WiFi provisioning dance.
+- **Self-contained, open projects.** A project is a folder of JSON and GLSL files. Open format,
+  AGPL-licensed platform.
+
+![Node cards — playlist, shader, and fixture with live previews](lp-app/lpa-studio-web/story-images/studio__readme__node-cards__lg.png)
+
+# Status: alpha
+
+LightPlayer is in **alpha**. A determined tester can get real value today: author GLSL effects in
+the browser studio, run them in the simulator without hardware, and drive WS2812-class strips from
+an ESP32-C6 over USB. Expect rough edges and breaking changes — there are no project-format or
+protocol compatibility promises yet. The Studio requires a Chromium-based browser (it uses
+WebSerial and OPFS). Issue reports are welcome.
 
 # Quick Start
 
-To run the demo project:
+The fastest path is the hosted Studio at **[lightplayer.app](https://lightplayer.app)**
+(deployed from `main`; no install, no hardware — open it in a Chromium-based browser).
+
+To run everything from source:
 
 ```bash
 # Clone the repo
-git clone https://github.com/Yona-Appletree/lp2025.git
-cd lp2025
+git clone https://github.com/light-player/lightplayer.git
+cd lightplayer
 
 # Initialize your development environment
 scripts/dev-init.sh
 
-# Run the demo
-just demo
-
-# Run other examples
-just demo -- <example-name>
+# Run the browser Studio (with built-in simulator — no hardware needed)
+just studio-dev
 ```
 
-# On-device demo (ESP32-C6)
+Then open the Studio in a Chromium-based browser, open an example project, and connect it to the
+browser simulator.
+
+For a headless engine demo without the Studio:
+
+```bash
+just demo
+just demo -- <example-name>   # run other examples
+```
+
+# Run on hardware (ESP32-C6)
 
 To flash firmware, push the `examples/basic` project over USB serial, and run it on real hardware:
 
@@ -36,15 +72,19 @@ To flash firmware, push the `examples/basic` project over USB serial, and run it
 just demo-esp32c6-host
 ```
 
-You need an ESP32-C6 board connected by USB, the RISC-V target installed (the recipe runs `install-rv32-target`), and [`espflash`](https://github.com/esp-rs/espflash) on your `PATH` for flashing.
+You need an ESP32-C6 board connected by USB, the RISC-V target installed (the recipe runs
+`install-rv32-target`), and [`espflash`](https://github.com/esp-rs/espflash) on your `PATH` for
+flashing.
 
-**Wiring (GPIO is hardcoded today):** connect a WS2812-class addressable strip (or other device driven the same way) to **GPIO 18** as the data line—**not** the `pin` field in `examples/basic/src/strip.output/node.json`, which the firmware does not use yet. The firmware initializes a buffer for **256** LEDs; the basic demo mapping uses **241** pixels, which fits in that limit.
+**Wiring (GPIO is hardcoded today):** connect a WS2812-class addressable strip (or other device
+driven the same way) to **GPIO 18** as the data line—**not** the `pin` field in
+`examples/basic/src/strip.output/node.json`, which the firmware does not use yet. The firmware
+initializes a buffer for **256** LEDs; the basic demo mapping uses **241** pixels, which fits in
+that limit.
 
 For an empty flash and firmware only (no project push), use `just demo-esp32c6-standalone`.
 
 # Development
-
-To get started with development:
 
 1. **Initialize the development environment:**
 
@@ -69,122 +109,43 @@ To get started with development:
    - `just fci-app` - Fix, check, build, and test the application.
    - `just fci-glsl` - Fix, check, build, and test the GLSL compiler.
 
-See `just --list` for all available commands.
-
-4. **Machine-level Studio dev settings** (shader-agent API keys, model
-   overrides) live in `~/.lightplayer/settings.json`; `just studio-dev` syncs
-   them into the served app. See "Dev settings" in
-   [`lp-app/lpa-studio-web/README.md`](lp-app/lpa-studio-web/README.md).
+See `just --list` for all available commands, and [`docs/development.md`](docs/development.md) for
+deeper workflows: hardware manifests, schema generation, GPIO calibration, and on-hardware
+firmware tests.
 
 # Repository Structure
 
-## CLI (`lp-cli/`)
-
-Developer-facing command-line tools for creating projects, running the dev server, inspecting
-compiler/runtime behavior, and managing checked-in hardware manifests. `lp-cli` is intended to run
-from a LightPlayer source checkout and may assume repository paths such as
-`lp-core/lpc-shared/boards`; it is not currently a deployable end-user command-line product.
-
-Hardware manifests can be browsed and edited with:
-
-```bash
-cargo run -p lp-cli -- hardware manifest
-```
-
-The checked-in `schemas/` tree (JSON Schemas for authored `project.json` / node artifacts /
-`hardware.json`, plus slot shape dumps) is generated from the model registry with:
-
-```bash
-just schema-gen     # rewrite schemas/ (removes stale generated files)
-just schema-check   # verify schemas/ matches, nonzero exit on drift (part of `just check`)
-```
-
-See [`schemas/README.md`](schemas/README.md) for the format-version bump procedure
-(`just format-bump`) and editor schema-mapping setup.
-
-GPIO label calibration is host-driven. Flash the simple calibration firmware, attach a scope to the
-board label you want to identify, then run the CLI loop:
-
-```bash
-just fwtest-gpio-calibrate-esp32c6
-cargo run -p lp-cli -- hardware calibrate esp32c6 --board seeed/xiao-esp32-c6 --port serial:auto
-```
-
-During calibration, Enter means no/next, `y` records the visible board label for the active HAL
-GPIO, `p` goes back one candidate, and `q` quits with resume state under `target/hardware-calibration`.
-
-## Firmware (`lp-fw/`)
-
-- **`fw-core`** Core firmware abstractions (serial I/O, transport, logging infrastructure)
-- **`fw-emu`** Firmware that runs in the RISC-V32 emulator for testing without hardware
-- **`fw-tests`** Integration tests for firmware (emulator-based testing and USB serial tests)
-- **`fw-esp32`** ESP32 firmware
-
-### Running Firmware Tests
-
-USB serial integration tests verify firmware behavior with real hardware:
-
-```bash
-# Run USB serial tests (requires connected ESP32)
-cargo test --package fw-tests --features test_usb -- --ignored
-
-# Run with debug output
-DEBUG=1 cargo test --package fw-tests --features test_usb -- --ignored
-```
-
-See [`lp-fw/fw-tests/README.md`](lp-fw/fw-tests/README.md) for more details.
-
-## Application Core (`lp-core/`)
-
-- **`lp-engine`** Core rendering engine that executes shaders and manages nodes (fixtures,
-  textures, outputs)
-- **`lp-engine-client`** Client for `lp-engine`, handling state sync and local project view
-- **`lp-server`** Server that manages projects and handles client connections
-- **`lp-client`** Async client library for communicating with `lp-server`. Manages filesystem sync
-  and project management.
-- **`lp-model`** Data models and API definitions for projects, nodes, and server communication
-- **`lp-shared`** Shared utilities for filesystem, logging, time, and transport
-
-## GLSL Compiler (`lp-shader/`)
-
-Full layout and commands: [`lp-shader/README.md`](lp-shader/README.md).
-
-- **`lps-frontend`** GLSL → LPIR (via naga)
-- **`lpir`** LightPlayer IR definitions
-- **`lpvm-native`** LPIR → custom RV32 machine code (default on-device JIT)
-- **`lpvm-cranelift`** LPIR → Cranelift → RISC-V machine code (reference backend)
-- **`lpvm-wasm`** LPIR → WASM (browser / `wasm.q32` filetests)
-- **`lps-q32`** Fixed-point Q16.16 types: `Q32` scalar, `Vec2Q32`–`Vec4Q32`, `Mat2Q32`–`Mat4Q32`,
-  component-wise math helpers, constant encoding for compiler
-- **`lps-shared`** Shared type and function-signature shapes for tests / exec helpers
-- **`lps-diagnostics`** Error codes, spans, `GlslError`
-- **`lpvm`** Runtime values and literal parsing (uses `glsl` parser fork where needed)
-- **`lps-builtin-ids`** Generated enum of builtin function IDs
-- **`lps-builtins`** Rust functions used by the generated code: fixed-point math, glsl builtins,
-  lygia-inspired library of native glsl functions
-- **`lps-builtins-emu-app`** RISC-V guest for running tests linked against builtins
-- **`lps-builtins-gen-app`** Code generator for builtin function boilerplate
-- **`lps-filetests`** Collection of tests for GLSL spec compliance and correctness
-- **`lps-filetests-gen-app`** Generator for repetitive filetests (vector, matrices)
-- **`lps-filetests-app`** Filetest runner binary
-- **`lpfn-impl-macro`** Macros for builtin function implementations
-
-## RISC-V Tooling (`lp-riscv/`)
-
-- **`lp-riscv-emu`** RISC-V 32-bit emulator used for testing and development
-- **`lp-riscv-emu-shared`** Shared types between emulator host and guest
-- **`lp-riscv-emu-guest`** Guest-side runtime for emulated environment
-- **`lp-riscv-emu-guest-test-app`** Test application for emulator guest
-- **`lp-riscv-inst`** RISC-V instruction encoding/decoding utilities (no_std)
-- **`lp-riscv-elf`** ELF file loading and linking utilities (std required)
-
-## Other Directories
-
+- **`lp-app/`** Browser Studio (Dioxus + WASM): studio UI, server/client, device link, OPFS
+  filesystem, browser firmware host
+- **`lp-core/`** Platform core (`lpc-*` crates): rendering engine, data model, wire protocol,
+  registry, hardware manifests
+- **`lp-shader/`** GLSL compiler: frontend (via naga), LightPlayer IR, backends (native RV32 JIT,
+  Cranelift, WASM), Q16.16 fixed-point math, and the filetest suite — see
+  [`lp-shader/README.md`](lp-shader/README.md)
+- **`lp-fw/`** Firmware: ESP32-C6 (`fw-esp32`), emulator firmware (`fw-emu`), browser worker
+  (`fw-browser`), integration tests (`fw-tests`)
+- **`lp-gfx/`** GPU rendering layer (wgpu) used for Studio previews
+- **`lp-riscv/`** RISC-V 32-bit emulator, instruction encoding/decoding, and ELF tooling
+- **`lp-cli/`** Developer CLI (projects, dev server, hardware manifests, GPIO calibration); runs
+  from a source checkout
+- **`lp-base/`** Foundation crates: collections, filesystem, performance, recovery
 - **`examples/`** Example LightPlayer projects
-- **`docs/`** Documentation, plans, and design notes
+- **`schemas/`** Generated JSON Schemas for project/node/hardware files
+- **`docs/`** Documentation, ADRs, and design notes
 - **`scripts/`** Build scripts and development utilities
+- **`third_party/`** Vendored forks (naga, and friends)
 
 # Acknowledgments
+
+LightPlayer follows in the footsteps of the LED-art projects that shaped this space:
+
+- **[Pixelblaze](https://electromage.com/)** by Ben Hencke — the pioneer of live-coded LED
+  shaders on a microcontroller, and proof that pattern authoring could be joyful. Ben has
+  also been generous with ideas in conversation, including embedded trig techniques that
+  found their way into LightPlayer. If you want polished ready-to-go hardware with a
+  brilliant integrated editor, buy a Pixelblaze.
+- **[WLED](https://kno.wled.ge/)** — the project that brought addressable LEDs to
+  everyone; its community and effect vocabulary informed many of LightPlayer's goals.
 
 LightPlayer would not be possible without the amazing work of these projects:
 
