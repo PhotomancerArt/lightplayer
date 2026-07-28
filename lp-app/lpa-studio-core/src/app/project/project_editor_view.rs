@@ -1,6 +1,6 @@
 use crate::{
-    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAffordance, UiConfigSlot, UiMetric,
-    UiNodeView, UiPaneAction, UiPendingEdit, UiStatusKind,
+    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAddNodeMenu, UiAffordance,
+    UiConfigSlot, UiMetric, UiNodeView, UiPaneAction, UiPendingEdit, UiStatusKind,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -35,9 +35,15 @@ pub struct ProjectEditorView {
     /// Stable order: by node address, then slot path (stale artifact-labeled
     /// entries appended last).
     pub pending_edits: Vec<UiPendingEdit>,
-    /// Contextual project-header actions (Save / Revert to saved) produced
-    /// controller-side; empty unless persisted edits are pending.
+    /// Contextual project-header actions produced controller-side: the
+    /// always-present add-node action, plus Save / Revert to saved while
+    /// persisted edits are pending.
     pub header_actions: Vec<UiPaneAction>,
+    /// The add-node picker for the project pane (attach = project root):
+    /// every instantiable kind in stable order, `None` until the controller
+    /// attaches it. Playlist cards carry their own copy on
+    /// [`UiNodeView::add_node_menu`].
+    pub add_node_menu: Option<UiAddNodeMenu>,
     /// Buffered edits still awaiting a server acknowledgement
     /// (`Pending`/`InFlight` phases). Non-zero only in mid-op progressive
     /// snapshots; drives the project header's "in progress" state.
@@ -67,6 +73,7 @@ impl ProjectEditorView {
             dirty: DirtySummary::clean(),
             pending_edits: Vec::new(),
             header_actions: Vec::new(),
+            add_node_menu: None,
             edits_in_flight: 0,
         }
     }
@@ -105,6 +112,12 @@ impl ProjectEditorView {
     /// Attach the contextual project-header actions.
     pub fn with_header_actions(mut self, header_actions: Vec<UiPaneAction>) -> Self {
         self.header_actions = header_actions;
+        self
+    }
+
+    /// Attach the project pane's add-node picker.
+    pub fn with_add_node_menu(mut self, menu: UiAddNodeMenu) -> Self {
+        self.add_node_menu = Some(menu);
         self
     }
 

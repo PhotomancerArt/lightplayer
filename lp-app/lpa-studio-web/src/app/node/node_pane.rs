@@ -77,6 +77,7 @@ pub fn NodePane(
     // today); every other kind keeps the classic sections fallback.
     let face = view.face.clone();
     let face_sections = main_tab_sections(&view);
+    let add_node_menu = view.add_node_menu.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
@@ -141,6 +142,7 @@ pub fn NodePane(
                                 advanced_drawer_open: face_advanced_drawer_open,
                                 detail_open_control: face_detail_open_control.clone(),
                                 platform: face_platform,
+                                add_node_menu: add_node_menu.clone(),
                                 pending_edits: pending_edits.clone(),
                                 dirty_tint,
                                 on_action,

@@ -258,8 +258,15 @@ pub enum MutationRejectionReason {
     /// enum, unit) instead of a value leaf.
     NotAValueLeaf,
     /// Mutation would move or create an entry at a target that already
-    /// exists in the effective definition (occupied map key).
+    /// exists in the effective definition (occupied map key), or a node
+    /// operation targeted a file path or attach site that is already taken.
     TargetOccupied,
+    /// Command carried a definition body that does not parse as an authored
+    /// node artifact, or a kind the operation cannot create (`Project`).
+    InvalidBody,
+    /// Command referenced a file path that is empty, not project-relative,
+    /// or escapes the project root.
+    InvalidPath,
     /// Mutation was well-formed but edit application failed.
     EditFailed,
     /// Mutation is not supported by the current registry implementation.

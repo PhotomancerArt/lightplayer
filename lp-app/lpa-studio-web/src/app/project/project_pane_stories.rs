@@ -3,10 +3,11 @@
 //! node-tree body).
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::project::node::add_node_menu;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
+    UiAttachTarget, UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -14,7 +15,7 @@ use crate::app::project::ProjectPane;
 use crate::app::story_fixtures::project_editor_fixture;
 
 #[story(
-    description = "Clean project: the project name as title, 'Project' kind label, no chips and no action icons, quiet 'i' detail trigger (the status word lives in the popup); the node tree is the whole pane body — no 'Node tree' heading and no Refresh/Disconnect strip (P6 sidebar tidy)."
+    description = "Clean project: the project name as title, 'Project' kind label, no chips, no header actions (adding lives in the node list's dashed 'Add node…' row), quiet 'i' detail trigger (the status word lives in the popup); the node tree is the whole pane body — no 'Node tree' heading and no Refresh/Disconnect strip (P6 sidebar tidy)."
 )]
 pub(crate) fn unchanged() -> Element {
     rsx! {
@@ -44,7 +45,7 @@ pub(crate) fn uncommitted() -> Element {
 }
 
 #[story(
-    description = "Only live (transient) edits: blue header wash; no persisted edits, so no action icons and a quiet 'i' trigger."
+    description = "Only live (transient) edits: blue header wash; no persisted edits, so no Save/Revert icons and a quiet 'i' trigger."
 )]
 pub(crate) fn live_only() -> Element {
     rsx! {
@@ -207,6 +208,73 @@ pub(crate) fn change_list_overflow() -> Element {
     }
 }
 
+#[story(
+    description = "The add-node kind picker pinned open on the node tree's 'Add node…' row: one flat popover (no submenu — the future source dimension grows here), one row per instantiable kind with its glyph; a row click dispatches the ready-made create at the project root and closes the picker. No name field — nodes auto-name."
+)]
+pub(crate) fn add_node_picker() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[520px]",
+            StoryPane {
+                dirty: DirtySummary::default(),
+                edits_in_flight: 0,
+                actions: false,
+                add_picker_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A freshly created (or emptied) project's pane: the synced-empty state is not a waiting message but the dashed 'Add node…' row — the add affordance lives in the node list, where nodes live (no title-bar '+')."
+)]
+pub(crate) fn empty_project() -> Element {
+    let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
+    view.tree.roots = Vec::new();
+    view.nodes = Vec::new();
+    view.header_actions = Vec::new();
+    view.add_node_menu = Some(add_node_menu(&UiAttachTarget::ProjectRoot));
+
+    rsx! {
+        div { class: "tw:max-w-[320px]",
+            ProjectPane {
+                view,
+                status: UiStatus::good("Ready"),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A staged node removal in the save panel: the NodeRemoved row (removed node's name, its attachment site, 'Restore' revert) plus the staged file deletions as 'file deleted on save' rows with their own reverts — all in the unsaved bucket until save."
+)]
+pub(crate) fn staged_node_removal() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[640px]",
+            StoryPane {
+                dirty: DirtySummary {
+                    persisted: 3,
+                    transient: 0,
+                    failed: 0,
+                },
+                edits_in_flight: 0,
+                actions: true,
+                initially_open: true,
+                pending_edits: vec![
+                    pending_edit(
+                        "Orbit shader",
+                        "nodes[orbit]",
+                        UiPendingEditKind::NodeRemoved,
+                        UiPendingEditPhase::Persisted,
+                    ),
+                    file_deletion_edit("Orbit shader", "/orbit.json"),
+                    file_deletion_edit("Orbit shader", "/orbit.glsl"),
+                ],
+            }
+        }
+    }
+}
+
 /// One project pane at sidebar width over the shared synced-project fixture.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -215,6 +283,7 @@ fn StoryPane(
     edits_in_flight: usize,
     actions: bool,
     #[props(default = false)] initially_open: bool,
+    #[props(default = false)] add_picker_open: bool,
     #[props(default = Vec::new())] pending_edits: Vec<UiPendingEdit>,
 ) -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
@@ -226,6 +295,9 @@ fn StoryPane(
     } else {
         Vec::new()
     };
+    // Mirror the controller (review round): no header add action — the
+    // picker data rides the view and renders as the tree's add row.
+    view.add_node_menu = Some(add_node_menu(&UiAttachTarget::ProjectRoot));
 
     rsx! {
         div { class: "tw:max-w-[320px]",
@@ -234,6 +306,7 @@ fn StoryPane(
                 status: UiStatus::good("Ready"),
                 on_action: move |_| {},
                 initially_open,
+                add_picker_initially_open: add_picker_open,
             }
         }
     }
@@ -281,6 +354,23 @@ fn pending_edit(
             SlotEditOp::Revert { address },
         )),
     }
+}
+
+/// One staged file-deletion row, as a node removal stages it: an
+/// `AssetBody`-kind file row (path display = the artifact path) whose detail
+/// reads "deleted"; its revert cancels the staged deletion.
+fn file_deletion_edit(node_label: &str, file_path: &str) -> UiPendingEdit {
+    let mut edit = pending_edit(
+        node_label,
+        "nodes[orbit]",
+        UiPendingEditKind::AssetBody {
+            detail: "deleted".to_string(),
+        },
+        UiPendingEditPhase::Persisted,
+    );
+    // File rows carry the artifact path where slot rows carry the slot path.
+    edit.slot_path_display = file_path.to_string();
+    edit
 }
 
 /// Attach the saved (base) value an entry replaces, as the mirror's

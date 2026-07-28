@@ -19,7 +19,6 @@ pub mod project_manager;
 mod project_read_source;
 pub mod recovery_report;
 pub mod server;
-pub mod template;
 
 pub use device_identity::{DEVICE_IDENTITY_PATH, read_device_uid};
 pub use error::ServerError;

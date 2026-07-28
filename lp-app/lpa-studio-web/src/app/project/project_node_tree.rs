@@ -11,22 +11,40 @@
 //! background instead of flatly overriding the edited treatment.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{DirtySummary, ProjectNodeStatusView, ProjectNodeTreeItem, UiAction};
+use lpa_studio_core::{
+    DirtySummary, ProjectNodeStatusView, ProjectNodeTreeItem, UiAction, UiAddNodeMenu,
+};
 
 use crate::app::affordance::{affordance_indicator_class, affordance_trigger_style};
-use crate::base::{StudioIcon, node_kind_icon};
+use crate::app::node::AddNodePicker;
+use crate::base::{PopoverPlacement, StudioIcon, StudioIconName, node_kind_icon};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectNodeTree(
     roots: Vec<ProjectNodeTreeItem>,
     running: bool,
+    /// Picker data for the trailing "Add node…" row (project-root attach).
+    /// `None` (read-only surfaces, older fixtures) renders no add row.
+    #[props(default = None)]
+    add_node_menu: Option<UiAddNodeMenu>,
+    /// True while the first project sync is still in flight — the only case
+    /// where an empty list means "unknown" rather than "no nodes yet".
+    #[props(default = false)]
+    syncing: bool,
+    /// Open the add row's kind picker immediately (stories only).
+    #[props(default = false)]
+    add_picker_initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let empty = roots.is_empty();
     rsx! {
-        if roots.is_empty() {
-            p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "Project sync has not returned nodes yet." }
-        } else {
+        if empty && syncing {
+            p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "Syncing project…" }
+        } else if empty && add_node_menu.is_none() {
+            p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No nodes yet." }
+        }
+        if !empty {
             ol { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:p-0",
                 for item in roots {
                     ProjectNodeTreeItemView {
@@ -39,6 +57,39 @@ pub fn ProjectNodeTree(
                 }
             }
         }
+        // The add row lives where the nodes live: same row grammar, quiet
+        // dashed treatment, opening the shared kind picker (project-root
+        // attach). On an empty synced project it doubles as the empty state.
+        if !syncing && let Some(menu) = add_node_menu {
+            AddNodePicker {
+                menu,
+                trigger: rsx! {
+                    span { class: "tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center", aria_hidden: "true",
+                        StudioIcon { name: StudioIconName::Add, size: 14 }
+                    }
+                    span { class: "tw:text-sm", "Add node…" }
+                },
+                trigger_class: tree_add_row_class(false),
+                trigger_open_class: tree_add_row_class(true),
+                label: "Add a node to this project".to_string(),
+                placement: PopoverPlacement::BottomStart,
+                initially_open: add_picker_initially_open,
+                on_action,
+            }
+        }
+    }
+}
+
+/// The add row's trigger class: the tree row grid and hover treatment in the
+/// subtle foreground, with a dashed border so it reads as an invitation, not
+/// a node. The explicit `bg-transparent` matters: without it the user-agent
+/// button face paints a gray pill under the dashed border.
+fn tree_add_row_class(open: bool) -> String {
+    const BASE: &str = "tw:grid tw:w-full tw:cursor-pointer tw:appearance-none tw:grid-cols-[18px_minmax(0,1fr)] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
+    if open {
+        format!("{BASE} tw:bg-card-muted tw:text-soft-foreground")
+    } else {
+        BASE.to_string()
     }
 }
 

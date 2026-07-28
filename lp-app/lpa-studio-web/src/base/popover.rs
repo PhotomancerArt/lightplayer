@@ -23,6 +23,22 @@ const TRIGGER_INFLATE_PX: f64 = 3.0;
 /// Panel content starts fading in after this fraction of the open timeline.
 const CONTENT_FADE_DELAY: f64 = 0.10;
 
+/// Context handle letting popover CONTENT close its enclosing popover —
+/// menu-style consumers (the add-node picker) close on selection. Provided
+/// by [`PopoverButton`] to its panel subtree; content that may render
+/// outside a popover consumes it with `try_consume_context`.
+#[derive(Clone, Copy)]
+pub struct PopoverCloseHandle {
+    open: Signal<bool>,
+}
+
+impl PopoverCloseHandle {
+    /// Close the enclosing popover (the normal close animation runs).
+    pub fn close(&mut self) {
+        self.open.set(false);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PopoverPlacement {
     TopStart,
@@ -86,9 +102,16 @@ pub fn PopoverButton(
     /// open — a live copy of the anchored element's content.
     #[props(default = None)]
     anchor_visual: Option<Element>,
+    /// The trigger's content has real internal layout (icon **plus** label,
+    /// not a lone glyph): the top-layer copy then keeps the trigger's own
+    /// box — padding, display, and track sizes — instead of the default
+    /// centered-glyph treatment, so nothing shifts when the popover opens.
+    #[props(default = false)]
+    layer_keeps_layout: bool,
     children: Element,
 ) -> Element {
     let mut open = use_signal(|| initially_open);
+    use_context_provider(|| PopoverCloseHandle { open });
     let trigger_id = use_hook(|| {
         let id = NEXT_POPOVER_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-popover-trigger-{id}")
@@ -141,6 +164,11 @@ pub fn PopoverButton(
     let content_style = panel_content_style(t);
     let (grad_stop_near, grad_stop_far) = gradient_stops(current_position.side);
     let trigger_visual_style = open_trigger_style(trigger_rect());
+    let layer_layout_class = if layer_keeps_layout {
+        "ux-popover-open-trigger-boxed"
+    } else {
+        ""
+    };
     // The visual re-parented into the top layer while open: the anchored
     // element's live copy in anchored mode, the trigger's clone otherwise.
     let trigger_for_layer = anchor_visual.unwrap_or_else(|| trigger.clone());
@@ -384,7 +412,7 @@ pub fn PopoverButton(
                         }
                     } else if attached {
                         div {
-                            class: "ux-popover-open-trigger {open_class}",
+                            class: "ux-popover-open-trigger {layer_layout_class} {open_class}",
                             style: "{trigger_visual_style}",
                             aria_hidden: "true",
                             onclick: move |event| {
