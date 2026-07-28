@@ -55,8 +55,20 @@ pub(crate) fn emit_fceil(builder: &mut FunctionBuilder, v: Value) -> Value {
 }
 
 pub(crate) fn emit_ftrunc(builder: &mut FunctionBuilder, v: Value) -> Value {
+    // Toward zero: masking the fraction bits alone floors (toward -inf), so
+    // negative values with a fraction need +1.0 back. Matches the wasm
+    // backend's `emit_q32_ftrunc` and the interp/native semantics.
     let int_mask = builder.ins().iconst(types::I32, i64::from(!Q32_FRAC));
-    builder.ins().band(v, int_mask)
+    let truncated = builder.ins().band(v, int_mask);
+    let frac_mask = builder.ins().iconst(types::I32, i64::from(Q32_FRAC));
+    let frac = builder.ins().band(v, frac_mask);
+    let zero = builder.ins().iconst(types::I32, 0);
+    let has_frac = builder.ins().icmp(IntCC::NotEqual, frac, zero);
+    let is_neg = builder.ins().icmp(IntCC::SignedLessThan, v, zero);
+    let needs_adjust = builder.ins().band(has_frac, is_neg);
+    let one = builder.ins().iconst(types::I32, 1 << Q32_SHIFT);
+    let adjusted = builder.ins().iadd(truncated, one);
+    builder.ins().select(needs_adjust, adjusted, truncated)
 }
 
 /// Q16.16 → signed integer (truncate toward zero, like C cast)

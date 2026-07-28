@@ -417,21 +417,29 @@ class TestFile:
     notes: list  # extra comment lines
     globals: list = field(default_factory=list)  # (type, name, init_int)
     helpers: list = field(default_factory=list)  # FuncDef
-    tests: list = field(default_factory=list)  # (FuncDef, [args tuples])
+    # (FuncDef, [args tuples]) or (FuncDef, [args tuples], {args: [comment
+    # lines emitted immediately before that run directive]}) — used for
+    # per-target annotations like `@unsupported(wgpu.f32)`.
+    tests: list = field(default_factory=list)
 
     def render(self) -> str:
         funcs = {f.name: f for f in self.helpers}
-        for fn, _runs in self.tests:
+        for entry in self.tests:
+            fn = entry[0]
             funcs[fn.name] = fn
         interp = Interp(funcs, self.globals)
 
         test_lines = []
-        for fn, runs in self.tests:
+        for entry in self.tests:
+            fn, runs = entry[0], entry[1]
+            annots = entry[2] if len(entry) > 2 else {}
             test_lines.append(emit_func(fn))
             test_lines.append("")
             for args in runs:
                 expected = interp.run(fn.name, args)
                 arg_str = ", ".join(str(a) for a in args)
+                for line in annots.get(args, ()):
+                    test_lines.append(f"// {line}")
                 test_lines.append(f"// run: {fn.name}({arg_str}) == {expected}")
             test_lines.append("")
 
@@ -755,6 +763,16 @@ def ifnest_files() -> list:
 # ---------------------------------------------------------------------------
 
 LOOP_KINDS = ["for", "while", "dowhile"]
+
+# wgpu.f32 per-directive annotations (the GPU tier runs the same generated
+# corpus; these mark known-divergent directives so the generator's output
+# matches the annotated files on disk byte-for-byte).
+WGPU_UNSUPPORTED = "@unsupported(wgpu.f32)"
+WGPU_DIVERGES = "wgpu.f32: f32 GPU result diverges (undefined/edge-domain semantics)"
+WGPU_NO_TERMINATE = (
+    "wgpu.f32: shader does not terminate on the GPU tier"
+    " (no fuel; CPU targets rely on fuel-exhaustion traps)"
+)
 
 
 def make_loop(kind: str, var: str, bound, body_stmts: tuple):
@@ -1262,6 +1280,17 @@ def cont_file(kind: str) -> TestFile:
     )
     files_tests.append((fn_d2, [(p,) for p in range(4)]))
 
+    if kind == "dowhile":
+        # Every directive in this file is wgpu-unsupported; the d2_inner p=3
+        # case additionally documents why (the GPU tier has no fuel).
+        annotated = []
+        for fn, runs in files_tests:
+            annots = {args: [WGPU_UNSUPPORTED] for args in runs}
+            if fn.name == "test_cont_dowhile_d2_inner":
+                annots[(3,)] = [WGPU_NO_TERMINATE, WGPU_UNSUPPORTED]
+            annotated.append((fn, runs, annots))
+        files_tests = annotated
+
     return TestFile(
         name=f"cont_{kind}.glsl",
         title=f"continue in {kind} loops",
@@ -1414,6 +1443,242 @@ def brkcont_files() -> list:
 
 
 # ---------------------------------------------------------------------------
+# Axis 3b: break/continue across nested loop pairs, all kind combinations
+# (brknest_*). Motivated by the 2026-07-27 live shader-agent session that
+# blamed "break/continue in nested loops" for a wasm-backend rejection (the
+# actual trigger was the Q32 fabs stack leak, but the corpus had no
+# outer-kind x inner-kind enumeration to rule the control flow out with).
+# ---------------------------------------------------------------------------
+
+
+def make_loop_cont_safe(kind: str, var: str, bound, body_stmts: tuple):
+    """A loop whose body may `continue`: the induction increment precedes the
+    body for while/do-while (the continue-to-condition edge), matching
+    `cont_file`. `for` loops increment in the loop header as usual."""
+    if kind == "for":
+        return make_loop("for", var, bound, body_stmts)
+    inner = (Asn(var, B("+", V(var), L(1))),) + body_stmts
+    if kind == "while":
+        return (Decl(var, L(0)), While(B("<", V(var), bound), inner))
+    if kind == "dowhile":
+        return (Decl(var, L(0)), DoWhile(inner, B("<", V(var), bound)))
+    raise AssertionError(kind)
+
+
+def brknest_file(outer: str, inner: str) -> TestFile:
+    o, i = outer, inner
+
+    # Inner loop carries both continue (j == p) and break (j == q); each must
+    # bind to the inner loop only, across every outer-kind pairing. Site
+    # budget note (applies file-wide): the i32 trace accumulator holds at
+    # most 9 executed sites per run, so bodies keep loop bounds at 2 and
+    # sites sparse; binding mistakes still shift which sites repeat.
+    sa = SiteAlloc()
+    s_in1, s_in2 = sa.site(), sa.site()
+    fn_inner_both = FuncDef(
+        "int",
+        f"test_brknest_{o}_{i}_inner_both",
+        (("int", "p"), ("int", "q")),
+        body(
+            Decl("t", L(0)),
+            *make_loop(
+                o,
+                "i",
+                L(2),
+                body(
+                    *make_loop_cont_safe(
+                        i,
+                        "j",
+                        L(2),
+                        body(
+                            If(B("==", V("j"), V("p")), body(Continue())),
+                            s_in1,
+                            If(B("==", V("j"), V("q")), body(Break())),
+                            s_in2,
+                        ),
+                    ),
+                ),
+            ),
+            sa.site(),
+            Return(V("t")),
+        ),
+    )
+
+    # Outer break placed after an inner loop that continues: the break must
+    # exit the outer loop even though an inner loop body sits between the two.
+    sa2 = SiteAlloc()
+    s2_pre, s2_in, s2_post = sa2.site(), sa2.site(), sa2.site()
+    fn_outer_brk = FuncDef(
+        "int",
+        f"test_brknest_{o}_{i}_outer_brk",
+        (("int", "p"), ("int", "q")),
+        body(
+            Decl("t", L(0)),
+            *make_loop_cont_safe(
+                o,
+                "i",
+                L(2),
+                body(
+                    s2_pre,
+                    *make_loop_cont_safe(
+                        i,
+                        "j",
+                        L(2),
+                        body(If(B("==", V("j"), V("q")), body(Continue())), s2_in),
+                    ),
+                    If(B("==", V("i"), V("p")), body(Break())),
+                    s2_post,
+                ),
+            ),
+            sa2.site(),
+            Return(V("t")),
+        ),
+    )
+
+    # Outer continue placed after an inner loop that breaks: the continue must
+    # re-test the outer condition (increment-first for while/do-while outers).
+    sa3 = SiteAlloc()
+    s3_pre, s3_in, s3_post = sa3.site(), sa3.site(), sa3.site()
+    fn_outer_cont = FuncDef(
+        "int",
+        f"test_brknest_{o}_{i}_outer_cont",
+        (("int", "p"), ("int", "q")),
+        body(
+            Decl("t", L(0)),
+            *make_loop_cont_safe(
+                o,
+                "i",
+                L(2),
+                body(
+                    s3_pre,
+                    *make_loop(
+                        i,
+                        "j",
+                        L(2),
+                        body(If(B("==", V("j"), V("q")), body(Break())), s3_in),
+                    ),
+                    If(B("==", V("i"), V("p")), body(Continue())),
+                    s3_post,
+                ),
+            ),
+            sa3.site(),
+            Return(V("t")),
+        ),
+    )
+
+    return TestFile(
+        name=f"brknest_{o}_{i}.glsl",
+        title=f"break/continue across a {o} loop nesting a {i} loop",
+        notes=[
+            "inner body carries both continue and break (must bind inner);",
+            "outer break and outer continue placed after the inner loop (must",
+            "bind outer). while/do-while induction increments precede the body",
+            "wherever that body can continue.",
+        ],
+        tests=[
+            (fn_inner_both, [(p, q) for p in (0, 1, 3) for q in (0, 2, 3)]),
+            (fn_outer_brk, [(p, q) for p in (0, 1, 3) for q in (0, 1, 2)]),
+            (fn_outer_cont, [(p, q) for p in (0, 1, 3) for q in (0, 1, 2)]),
+        ],
+    )
+
+
+def brknest_files() -> list:
+    files = [brknest_file(o, i) for o in LOOP_KINDS for i in LOOP_KINDS]
+
+    # Depth 3: break innermost, continue middle, break outer — one homogeneous
+    # for-chain and one mixed-kind chain. Sites sit in the innermost body (its
+    # repeat pattern shifts under any wrong binding at any depth); the trailing
+    # site proves the function-level fallthrough is reached.
+    sa = SiteAlloc()
+    s3_site = sa.site()
+    fn_triple = FuncDef(
+        "int",
+        "test_brknest_triple_for",
+        (("int", "p"), ("int", "q"), ("int", "r")),
+        body(
+            Decl("t", L(0)),
+            For(
+                "i",
+                0,
+                B("<", V("i"), L(2)),
+                body(
+                    For(
+                        "j",
+                        0,
+                        B("<", V("j"), L(2)),
+                        body(
+                            If(B("==", V("j"), V("q")), body(Continue())),
+                            For(
+                                "k",
+                                0,
+                                B("<", V("k"), L(2)),
+                                body(If(B("==", V("k"), V("p")), body(Break())), s3_site),
+                            ),
+                        ),
+                    ),
+                    If(B("==", V("i"), V("r")), body(Break())),
+                ),
+            ),
+            sa.site(),
+            Return(V("t")),
+        ),
+    )
+    sa2 = SiteAlloc()
+    s2_site = sa2.site()
+    fn_triple_mixed = FuncDef(
+        "int",
+        "test_brknest_triple_mixed",
+        (("int", "p"), ("int", "q")),
+        body(
+            Decl("t", L(0)),
+            *make_loop_cont_safe(
+                "while",
+                "i",
+                L(2),
+                body(
+                    *make_loop(
+                        "for",
+                        "j",
+                        L(2),
+                        body(
+                            *make_loop_cont_safe(
+                                "dowhile",
+                                "k",
+                                L(2),
+                                body(
+                                    If(B("==", V("k"), V("p")), body(Continue())),
+                                    s2_site,
+                                    If(B("==", V("k"), V("q")), body(Break())),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            sa2.site(),
+            Return(V("t")),
+        ),
+    )
+    files.append(
+        TestFile(
+            name="brknest_triple.glsl",
+            title="break/continue at three nesting depths",
+            notes=[
+                "for/for/for: innermost break, middle continue, outer break;",
+                "while/for/do-while: innermost continue then break. Each must",
+                "bind to its own loop.",
+            ],
+            tests=[
+                (fn_triple, [(p, q, r) for p in (0, 1, 2) for q in (0, 1, 2) for r in (0, 2)]),
+                (fn_triple_mixed, [(p, q) for p in (1, 2, 3) for q in (1, 2, 3)]),
+            ],
+        )
+    )
+    return files
+
+
+# ---------------------------------------------------------------------------
 # Axis 4: early returns from nested blocks (ret_*)
 # ---------------------------------------------------------------------------
 
@@ -1527,7 +1792,13 @@ def ret_files() -> list:
                     "the post-loop site must not run on returning paths.",
                 ],
                 tests=[
-                    (fn, [(p,) for p in range(4)]),
+                    (
+                        fn,
+                        [(p,) for p in range(4)],
+                        {(1,): [WGPU_UNSUPPORTED], (2,): [WGPU_DIVERGES, WGPU_UNSUPPORTED]}
+                        if kind in ("for", "while")
+                        else {},
+                    ),
                     (fn_else, [(p,) for p in range(4)]),
                 ],
             )
@@ -1571,7 +1842,16 @@ def ret_files() -> list:
             name="ret_nested_loop.glsl",
             title="early return from the inner loop of a nested pair",
             notes=["Return fires when (i, j) == (p, q); both loops unwind at once."],
-            tests=[(fn_nested, [(p, q) for p in (0, 1, 2, 3) for q in (0, 1)])],
+            tests=[
+                (
+                    fn_nested,
+                    [(p, q) for p in (0, 1, 2, 3) for q in (0, 1)],
+                    {
+                        (1, 0): [WGPU_UNSUPPORTED],
+                        (2, 0): [WGPU_DIVERGES, WGPU_UNSUPPORTED],
+                    },
+                )
+            ],
         )
     )
 
@@ -2117,6 +2397,7 @@ def build_corpus() -> list:
     files += ifloop_files()
     files += mix_files()
     files += brkcont_files()
+    files += brknest_files()
     files += ret_files()
     files += sc_files()
     files += terncond_files()
@@ -2178,6 +2459,7 @@ the lowering was fixed. Ternary conditions and arms also evaluate lazily
 | `brk_*`       | break at depth 1 (then/else guard) and depth 2 (inner loop only, nested guard) per loop kind |
 | `cont_*`      | continue, same enumeration; while/do-while variants exercise the continue-to-condition edge |
 | `brkcont_*`   | break and continue mixed across nesting levels / in one body      |
+| `brknest_*`   | nested loop pairs, all outer-kind x inner-kind combinations: inner body with both continue and break, outer break / outer continue placed after the inner loop, plus depth-3 chains (`brknest_triple`) |
 | `ret_*`       | early returns from nested ifs, from each loop kind, from inner loops of nested pairs, from loops inside branches |
 | `sc_*`        | short-circuit `&&`/`||` whose right operand calls a global-mutating function: bare ops, precedence chains, nested groups, and as if/while/ternary conditions |
 | `terncond_*`  | ternaries nested in branch conditions: if conditions, loop bounds, nested ternaries, side-effecting arms |
