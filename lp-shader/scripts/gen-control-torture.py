@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 from dataclasses import dataclass, field
@@ -410,6 +411,62 @@ class Interp:
 # ---------------------------------------------------------------------------
 
 
+# Per-directive `@unsupported(wgpu.f32)` markers.
+#
+# The GPU tier is not in DEFAULT_TARGETS and its divergences are a property of
+# the directive, not of the enumerated shape — so they live here as data rather
+# than being hand-edited into the generated files afterwards (which silently
+# lost them the next time anyone ran `--write`).
+#
+# Keyed by file name → list of (function, args, note). `note` renders as a
+# `// wgpu.f32: <note>` line above the marker; None emits just the marker.
+WGPU_UNSUPPORTED = {
+    "cont_dowhile.glsl": [
+        ("test_cont_dowhile_d1", (0,), None),
+        ("test_cont_dowhile_d1", (1,), None),
+        ("test_cont_dowhile_d1", (2,), None),
+        ("test_cont_dowhile_d1", (3,), None),
+        ("test_cont_dowhile_d1_else", (0,), None),
+        ("test_cont_dowhile_d1_else", (1,), None),
+        ("test_cont_dowhile_d1_else", (2,), None),
+        ("test_cont_dowhile_d1_else", (3,), None),
+        ("test_cont_dowhile_d2_inner", (0,), None),
+        ("test_cont_dowhile_d2_inner", (1,), None),
+        ("test_cont_dowhile_d2_inner", (2,), None),
+        (
+            "test_cont_dowhile_d2_inner",
+            (3,),
+            "shader does not terminate on the GPU tier "
+            "(no fuel; CPU targets rely on fuel-exhaustion traps)",
+        ),
+    ],
+    "ret_for.glsl": [
+        ("test_ret_for", (1,), None),
+        (
+            "test_ret_for",
+            (2,),
+            "f32 GPU result diverges (undefined/edge-domain semantics)",
+        ),
+    ],
+    "ret_nested_loop.glsl": [
+        ("test_ret_nested_loop", (1, 0), None),
+        (
+            "test_ret_nested_loop",
+            (2, 0),
+            "f32 GPU result diverges (undefined/edge-domain semantics)",
+        ),
+    ],
+    "ret_while.glsl": [
+        ("test_ret_while", (1,), None),
+        (
+            "test_ret_while",
+            (2,),
+            "f32 GPU result diverges (undefined/edge-domain semantics)",
+        ),
+    ],
+}
+
+
 @dataclass
 class TestFile:
     name: str  # e.g. "ifnest_d2_t.glsl"
@@ -418,6 +475,13 @@ class TestFile:
     globals: list = field(default_factory=list)  # (type, name, init_int)
     helpers: list = field(default_factory=list)  # FuncDef
     tests: list = field(default_factory=list)  # (FuncDef, [args tuples])
+
+    def _wgpu_marker(self, fn_name: str, args: tuple):
+        """`(note, True)` when this directive is `@unsupported(wgpu.f32)`."""
+        for name, margs, note in WGPU_UNSUPPORTED.get(self.name, ()):
+            if name == fn_name and margs == tuple(args):
+                return note, True
+        return None, False
 
     def render(self) -> str:
         funcs = {f.name: f for f in self.helpers}
@@ -432,6 +496,11 @@ class TestFile:
             for args in runs:
                 expected = interp.run(fn.name, args)
                 arg_str = ", ".join(str(a) for a in args)
+                note, unsupported = self._wgpu_marker(fn.name, args)
+                if note:
+                    test_lines.append(f"// wgpu.f32: {note}")
+                if unsupported:
+                    test_lines.append("// @unsupported(wgpu.f32)")
                 test_lines.append(f"// run: {fn.name}({arg_str}) == {expected}")
             test_lines.append("")
 
@@ -2106,6 +2175,297 @@ def terncond_files() -> list:
 
 
 # ---------------------------------------------------------------------------
+# Axis 9: builtin calls inside loop branches (intrin_*)
+#
+# Motivated by the 2026-07-27 `emit_q32_fabs` bug: the WASM Q32 lowering of
+# `abs` left one operand on the stack. A trailing `return` hides that (WASM
+# validation goes polymorphic after `return`, so the implicit function `end` is
+# unreachable and never checked), so the leak only surfaced where the enclosing
+# block *falls through* — a builtin call in an `if` inside a `for`.
+#
+# These shapes therefore put each builtin in exactly that position, and consume
+# the result through an array store, a swizzle store, or not at all. Any
+# emitter that is not stack-neutral fails WASM validation outright, so the
+# assertion that matters here is "it compiles"; the values are a second net.
+# Numeric accuracy per builtin is `filetests/builtins/`, not this axis.
+# ---------------------------------------------------------------------------
+
+
+def _gl(x: float) -> str:
+    """GLSL float literal (always with a decimal point)."""
+    s = f"{x:.6f}".rstrip("0")
+    if s.endswith("."):
+        s += "0"
+    return s
+
+
+def _fract(x: float) -> float:
+    return x - math.floor(x)
+
+
+def _mod(x: float, y: float) -> float:
+    return x - y * math.floor(x / y)
+
+
+def _round(x: float) -> float:
+    # GLSL leaves .5 ties implementation-defined; this axis never generates one.
+    return float(math.floor(x + 0.5))
+
+
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def _smoothstep(e0: float, e1: float, x: float) -> float:
+    t = _clamp((x - e0) / (e1 - e0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+@dataclass(frozen=True)
+class Intrin:
+    """One builtin under test.
+
+    `expr` is GLSL over the loop-local `v` (and `i`); `fn` is the same function
+    in Python over `(v, i)`. `v = voff + vstep * i`, chosen per builtin so every
+    input is exactly representable in both Q16.16 and f32 (and, for `round`,
+    never lands on a .5 tie).
+    """
+
+    name: str
+    expr: str
+    fn: object
+    voff: float = -1.0
+    vstep: float = 0.3125
+    # Targets whose frontend does not implement this builtin yet.
+    unimplemented: tuple = ()
+
+    def v(self, i: int) -> float:
+        return self.voff + self.vstep * i
+
+    def vexpr(self) -> str:
+        sign = "-" if self.voff < 0 else "+"
+        return f"float(i) * {_gl(self.vstep)} {sign} {_gl(abs(self.voff))}"
+
+
+INTRINS = [
+    Intrin("abs", "abs(v)", lambda v, i: abs(v)),
+    Intrin("sign", "sign(v)", lambda v, i: float((v > 0) - (v < 0))),
+    Intrin("floor", "floor(v)", lambda v, i: float(math.floor(v))),
+    Intrin("ceil", "ceil(v)", lambda v, i: float(math.ceil(v))),
+    Intrin("trunc", "trunc(v)", lambda v, i: float(math.trunc(v))),
+    Intrin("round", "round(v)", lambda v, i: _round(v)),
+    Intrin("fract", "fract(v)", lambda v, i: _fract(v)),
+    Intrin("mod", "mod(v, 0.75)", lambda v, i: _mod(v, 0.75)),
+    Intrin("min", "min(v, 0.25)", lambda v, i: min(v, 0.25)),
+    Intrin("max", "max(v, 0.25)", lambda v, i: max(v, 0.25)),
+    Intrin("clamp", "clamp(v, -0.5, 0.5)", lambda v, i: _clamp(v, -0.5, 0.5)),
+    Intrin("mix", "mix(v, 1.0, 0.25)", lambda v, i: v + (1.0 - v) * 0.25),
+    # `step` is missing from the lps-glsl builtin inventory (`smoothstep` is
+    # there); the naga-frontend targets compile it fine.
+    Intrin(
+        "step",
+        "step(0.0, v)",
+        lambda v, i: 0.0 if v < 0.0 else 1.0,
+        unimplemented=("rv32lpn.q32",),
+    ),
+    Intrin(
+        "smoothstep",
+        "smoothstep(0.0, 1.0, v)",
+        lambda v, i: _smoothstep(0.0, 1.0, v),
+    ),
+    # sqrt lowers to an imported builtin call on Q32 — covers the call path.
+    Intrin("sqrt", "sqrt(v)", lambda v, i: math.sqrt(v), voff=0.25, vstep=0.5),
+    Intrin("length", "length(vec2(v, 0.0))", lambda v, i: abs(v)),
+    Intrin(
+        "dot",
+        "dot(vec2(v, 2.0), vec2(0.5, v))",
+        lambda v, i: 0.5 * v + 2.0 * v,
+    ),
+    # Divide by a literal (FdivConstF32) vs by a runtime value (Fdiv).
+    Intrin("div_const", "v / 0.5", lambda v, i: v / 0.5),
+    Intrin(
+        "div_var",
+        "v / (float(i) * 0.25 + 0.5)",
+        lambda v, i: v / (0.25 * i + 0.5),
+    ),
+    # Float→int→float round trip (FtoiSatS / ItofS).
+    Intrin(
+        "cast",
+        "float(int(v * 4.0)) * 0.25",
+        lambda v, i: float(math.trunc(v * 4.0)) * 0.25,
+    ),
+]
+
+
+class IntrinFile:
+    """Renders one `intrin_<name>.glsl`.
+
+    Deliberately templated text rather than the int AST above: this axis needs
+    float locals, arrays, swizzles and builtin calls, none of which the trace
+    interpreter models. Expected values come from `Intrin.fn` directly.
+    """
+
+    N = 8  # loop trip count / array length for the scalar shapes
+    NV = 4  # ditto for the vec2 swizzle shape
+    COUNTS = (0, 1, 3, 8)
+
+    def __init__(self, intr: Intrin):
+        self.intr = intr
+        self.name = f"intrin_{intr.name}.glsl"
+
+    def _e(self, i: int) -> float:
+        return self.intr.fn(self.intr.v(i), i)
+
+    # -- shape A: array store in the taken branch -----------------------------
+    def _store(self) -> tuple:
+        src = f"""float test_intrin_{self.intr.name}_store(int count) {{
+    float a[{self.N}];
+    for (int i = 0; i < {self.N}; i++) {{
+        if (i < count) {{
+            float v = {self.intr.vexpr()};
+            a[i] = {self.intr.expr};
+        }} else {{
+            a[i] = 0.0;
+        }}
+    }}
+    float s = 0.0;
+    for (int j = 0; j < {self.N}; j++) {{
+        s = s + a[j];
+    }}
+    return s;
+}}"""
+        runs = [(c, sum(self._e(i) for i in range(min(c, self.N)))) for c in self.COUNTS]
+        return src, runs
+
+    # -- shape B: result never reaches the return value -----------------------
+    def _unused(self) -> tuple:
+        src = f"""float test_intrin_{self.intr.name}_unused(int count) {{
+    float a[{self.N}];
+    for (int i = 0; i < {self.N}; i++) {{
+        a[i] = 0.0;
+        if (i < count) {{
+            float v = {self.intr.vexpr()};
+            float dead = {self.intr.expr};
+            a[i] = v + 0.0 * dead;
+        }}
+    }}
+    float s = 0.0;
+    for (int j = 0; j < {self.N}; j++) {{
+        s = s + a[j];
+    }}
+    return s;
+}}"""
+        runs = [
+            (c, sum(self.intr.v(i) for i in range(min(c, self.N)))) for c in self.COUNTS
+        ]
+        return src, runs
+
+    # -- shape C: swizzle store beside an array store -------------------------
+    # The swizzle assignment goes through a local `vec2` rather than
+    # `p[i].yx = ...`: storing through an indexed-array swizzle is rejected by
+    # the naga frontend ("store to non-local pointer"), which is a frontend
+    # limitation and not what this axis is testing.
+    def _swizzle(self) -> tuple:
+        src = f"""float test_intrin_{self.intr.name}_swizzle(int count) {{
+    vec2 p[{self.NV}];
+    float a[{self.NV}];
+    for (int i = 0; i < {self.NV}; i++) {{
+        p[i] = vec2(0.0, 0.0);
+        a[i] = 0.0;
+        if (i < count) {{
+            float v = {self.intr.vexpr()};
+            float r = {self.intr.expr};
+            vec2 q = p[i];
+            q.yx = vec2(r, 0.0 - r);
+            p[i] = q;
+            a[i] = p[i].y + p[i].x + r;
+        }}
+    }}
+    return a[0] + a[1] + a[2] + a[3];
+}}"""
+        runs = [
+            (c, sum(self._e(i) for i in range(min(c, self.NV)))) for c in self.COUNTS
+        ]
+        return src, runs
+
+    # -- shape D: call in both arms of a nested if ----------------------------
+    def _nested(self) -> tuple:
+        src = f"""float test_intrin_{self.intr.name}_nested(int count) {{
+    float a[{self.N}];
+    for (int i = 0; i < {self.N}; i++) {{
+        a[i] = 0.0;
+        if (i < count) {{
+            float v = {self.intr.vexpr()};
+            if ((i / 2) * 2 == i) {{
+                a[i] = {self.intr.expr};
+            }} else {{
+                a[i] = 0.0 - ({self.intr.expr});
+            }}
+            a[i] = a[i] + 1.0;
+        }}
+    }}
+    float s = 0.0;
+    for (int j = 0; j < {self.N}; j++) {{
+        s = s + a[j];
+    }}
+    return s;
+}}"""
+
+        def total(c: int) -> float:
+            acc = 0.0
+            for i in range(min(c, self.N)):
+                e = self._e(i)
+                acc += (e if i % 2 == 0 else -e) + 1.0
+            return acc
+
+        runs = [(c, total(c)) for c in self.COUNTS]
+        return src, runs
+
+    def render(self) -> str:
+        lines = ["// test run", ""]
+        lines.append("// " + "=" * 76)
+        lines.append(
+            f"// Control-flow torture: `{self.intr.expr}` inside loop branches"
+        )
+        lines.append("//")
+        lines.append(
+            "// A builtin call in a branch that FALLS THROUGH (no trailing return),"
+        )
+        lines.append(
+            "// with the result stored to an array, to a swizzle, or discarded."
+        )
+        lines.append(
+            "// An emitter that leaves operands on the WASM stack fails to compile here"
+        )
+        lines.append("// even though the same call in a returning function validates.")
+        lines.append("//")
+        lines.append("// GENERATED FILE - do not edit by hand.")
+        lines.append(f"// Regenerate: {REGEN_CMD}")
+        lines.append("// " + "=" * 76)
+        lines.append("")
+        for src, runs in (
+            self._store(),
+            self._unused(),
+            self._swizzle(),
+            self._nested(),
+        ):
+            fname = src.split("(", 1)[0].split()[-1]
+            lines.append(src)
+            lines.append("")
+            for count, expected in runs:
+                # Annotations bind to the next `// run:` only, so repeat them.
+                for target in self.intr.unimplemented:
+                    lines.append(f"// @unimplemented({target})")
+                lines.append(f"// run: {fname}({count}) ~= {expected:.6f}")
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+
+def intrin_files() -> list:
+    return [IntrinFile(i) for i in INTRINS]
+
+
+# ---------------------------------------------------------------------------
 # Corpus assembly + README
 # ---------------------------------------------------------------------------
 
@@ -2120,6 +2480,7 @@ def build_corpus() -> list:
     files += ret_files()
     files += sc_files()
     files += terncond_files()
+    files += intrin_files()
     names = [f.name for f in files]
     assert len(names) == len(set(names)), "duplicate file names in corpus"
     return files
@@ -2181,6 +2542,22 @@ the lowering was fixed. Ternary conditions and arms also evaluate lazily
 | `ret_*`       | early returns from nested ifs, from each loop kind, from inner loops of nested pairs, from loops inside branches |
 | `sc_*`        | short-circuit `&&`/`||` whose right operand calls a global-mutating function: bare ops, precedence chains, nested groups, and as if/while/ternary conditions |
 | `terncond_*`  | ternaries nested in branch conditions: if conditions, loop bounds, nested ternaries, side-effecting arms |
+| `intrin_*`    | one builtin per file, called inside an `if` inside a `for`, with the result stored to an array, stored through a swizzle, discarded, or negated in the other arm |
+
+## Builtin calls in fall-through branches (`intrin_*`)
+
+Added after the 2026-07-27 `emit_q32_fabs` bug: the WASM Q32 lowering of `abs`
+left one operand on the stack. WASM validation goes polymorphic after `return`,
+so in a straight-line function the implicit `end` is unreachable and the leak is
+never checked — it only surfaced where the enclosing block **falls through**,
+i.e. a builtin call in an `if` inside a loop. Every shape in this axis puts the
+call in exactly that position, so a non-stack-neutral emitter fails to compile
+outright.
+
+The load-bearing assertion here is therefore "it compiles on every backend"; the
+`// run:` values are a second net. Per-builtin numeric accuracy belongs to
+`filetests/builtins/`, not to this axis — inputs are chosen to be exactly
+representable in both Q16.16 and f32 (and never a `.5` tie for `round`).
 
 Each file holds one enumerated shape with `// run:` directives covering every
 (reachable) combination of the branch-selecting parameters, so file names are
