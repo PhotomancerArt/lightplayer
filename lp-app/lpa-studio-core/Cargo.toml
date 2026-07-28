@@ -76,7 +76,21 @@ default = []
 # production dependency edge — only the runner's `runner` feature turns it
 # on. Everything it unlocks is the exact test fixture surface, so the
 # public API growth is dev-tooling, not product API.
-harness = ["dep:lp-gfx-lpvm", "dep:lpa-server", "dep:lpc-shared", "lpfs/std"]
+# `lpa-server/naga` is REQUIRED, not optional polish: the harness world
+# offers `ShaderFrontend::Naga` (the runner's browser-parity default), and
+# without the feature the engine fails every naga compile at runtime with
+# "naga frontend was not built into this binary" while the run header
+# claims parity (found by the first real-provider smoke). Package-scoped
+# builds (`cargo run/test -p lpa-agent-harness --features runner`) get no
+# feature unification from the rest of the workspace, so the frontend must
+# ride this feature explicitly.
+harness = [
+    "dep:lp-gfx-lpvm",
+    "dep:lpa-server",
+    "dep:lpc-shared",
+    "lpa-server/naga",
+    "lpfs/std",
+]
 browser-worker = [
     "lpa-link/browser-worker",
     "dep:async-trait",

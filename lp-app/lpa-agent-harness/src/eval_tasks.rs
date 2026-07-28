@@ -56,6 +56,7 @@ vec4 render(vec2 pos) {
 /// `ANTHROPIC_API_KEY` picks Anthropic; neither set means skip. The caller
 /// turns the resolved config into a live provider (the transport is
 /// feature-gated in `lpa-agent`, so construction stays with the caller).
+#[derive(Clone)]
 pub enum ProviderCfg {
     Anthropic {
         api_key: String,

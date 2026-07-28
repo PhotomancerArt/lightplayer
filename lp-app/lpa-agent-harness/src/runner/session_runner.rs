@@ -71,8 +71,22 @@ async fn drive_session(args: &RunnerArgs, mode: RunMode) -> Result<RunSummary, S
         RunMode::Scripted(path) => format!("scripted ({})", path.display()),
         RunMode::Real(cfg) => format!("real ({})", cfg.label()),
     };
-    let mut world = AgentWorld::new(args.frontend);
     let frontend_name = frontend_name(args.frontend);
+    // Over-claim guard (found by the first real-provider smoke): the run
+    // header must never announce a parity path the binary cannot compile.
+    // `built_in()` reflects the ACTUAL feature graph of this build — if the
+    // requested frontend is missing, every engine verdict would be the
+    // useless "frontend was not built into this binary" error, so fail the
+    // run up front instead of fuzzing a broken engine path.
+    if !args.frontend.built_in() {
+        return Err(format!(
+            "--frontend {frontend_name} is not compiled into this binary — feature-wiring \
+             regression: lpa-studio-core's `harness` feature must enable `lpa-server/naga` \
+             (see lpa-studio-core/Cargo.toml). Refusing to run with a broken engine-verdict \
+             path."
+        ));
+    }
+    let mut world = AgentWorld::new(args.frontend);
     println!("agent-run: mode = {mode_label}");
     println!(
         "agent-run: frontend = {frontend_name} · vm runtime = {} (resolved host-side)",

@@ -728,6 +728,13 @@ test: test-rust test-filetests
 
 test-rust:
     cargo test
+    # The token-free scripted agent battery: the runner suites live behind
+    # lpa-agent-harness's non-default `runner` feature (kept off-default so
+    # the studio-core → harness dev-dep edge never cycles), so the bare
+    # `cargo test` above skips them — this package-scoped invocation is what
+    # puts them in `just test`/CI scope. Scripted providers only: no key,
+    # no gate, no network.
+    cargo test -p lpa-agent-harness --features runner
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
@@ -765,6 +772,17 @@ test-recovery-emu:
 # --scripted <script.json>, --max-turns <n>.
 agent-run prompt *flags:
     cargo run -p lpa-agent-harness --features runner --bin agent-run -- "{{ trim_start_match(prompt, 'prompt=') }}" {{ flags }}
+
+# Supervised prompt battery: loops ~10 bug-hunting prompts (battery.json in
+# lpa-agent-harness) through the headless runner, one run dir per prompt
+# plus a summary table. SPEND-GATED identically to agent-run: it needs
+# provider env AND LPA_SPEND_OK=1 in YOUR environment — this recipe only
+# passes the environment through and NEVER sets LPA_SPEND_OK (agents set it
+# only with Yona's explicit per-session permission). Flags: --battery
+# <file>, --frontend naga|lps-glsl, --out <dir>, --model <id>,
+# --max-turns <n>.
+agent-battery *flags:
+    cargo run -p lpa-agent-harness --features runner --bin agent-battery -- {{ flags }}
 
 # ============================================================================
 # Testing - lp-app only

@@ -1,0 +1,17 @@
+{
+  "runs": [
+    [
+      [
+        { "text": "Adding a sparkle layer." },
+        {
+          "tool_use_cut": {
+            "id": "tu_1",
+            "name": "iterate",
+            "input_fragment": "{\"source\": \"layout(binding = 0) uniform float time;\\n\\nvec4 render(vec2 pos) {\\n    return vec4("
+          }
+        },
+        { "done": { "stop_reason": "max_tokens", "input_tokens": 25, "output_tokens": 8192 } }
+      ]
+    ]
+  ]
+}

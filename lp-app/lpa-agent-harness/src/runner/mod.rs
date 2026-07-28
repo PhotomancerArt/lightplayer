@@ -11,7 +11,10 @@
 //! - [`run_script`] — scripted-mode script files over the P1 doubles.
 //! - [`session_runner`] — the actor/controller drive loop and artifacts.
 //! - [`run_artifacts`] — out-dir layout, timestamps, writes.
+//! - [`battery`] — the supervised prompt battery (file format, light
+//!   expectation checks, summary table; the `agent-battery` bin loops it).
 
+pub mod battery;
 pub mod cli_args;
 pub mod run_artifacts;
 pub mod run_script;
