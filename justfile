@@ -184,6 +184,9 @@ lpa-fs-opfs-test: install-wasm32-target
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
 
+# Serve the smoke page for a human to watch (render product, output ring, boot
+# checklist). This recipe never exits on its own: it cannot fail, it can only
+# serve a page that says "error". Use `fw-browser-smoke-check` for a verdict.
 fw-browser-smoke: fw-browser-build
     #!/usr/bin/env bash
     set -euo pipefail
@@ -192,6 +195,13 @@ fw-browser-smoke: fw-browser-build
     echo "Success: page shows ok and documentElement.dataset.smoke is 'ok'."
     cd lp-fw/fw-browser/www
     python3 -m http.server "${port}" --bind 127.0.0.1
+
+# Headless pass/fail run of the same smoke page: exits non-zero unless the page
+# reaches dataset.smoke === "ok". Run this after changing wasm emission or the
+# wire protocol, so a rotted page fails loudly instead of quietly serving
+# "error". Needs Chrome (set CHROME_BIN to override discovery).
+fw-browser-smoke-check: fw-browser-build
+    node lp-fw/fw-browser/scripts/fw-browser-smoke-check.mjs
 
 # ============================================================================
 # Studio web app
