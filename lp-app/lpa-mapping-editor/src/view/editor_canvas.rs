@@ -116,7 +116,6 @@ pub fn EditorCanvas(
         })
     });
     let show_numbers = opts.numbers && cam.scale * radius >= 5.0;
-    let number_font = (radius * 0.9).clamp(4.0, 16.0);
     drop(session_read);
 
     rsx! {
@@ -151,7 +150,7 @@ pub fn EditorCanvas(
                 let modifiers = evt.data().modifiers();
                 if modifiers.ctrl() || modifiers.meta() {
                     let point = evt.data().client_coordinates();
-                    let factor = (1.0015f32).powf(-dy);
+                    let factor = (1.004f32).powf(-dy);
                     camera.write().zoom_at([point.x as f32, point.y as f32], factor);
                 } else {
                     camera.write().pan(-dx, -dy);
@@ -170,8 +169,8 @@ pub fn EditorCanvas(
                     view_box: "0 0 8 8",
                     ref_x: "7",
                     ref_y: "4",
-                    marker_width: "5",
-                    marker_height: "5",
+                    marker_width: "4",
+                    marker_height: "4",
                     orient: "auto-start-reverse",
                     path { d: "M0,0.8 L7.4,4 L0,7.2 z", fill: "currentColor" }
                 }
@@ -207,9 +206,37 @@ pub fn EditorCanvas(
                     text {
                         class: "lpme-fit-label",
                         x: "{rect.min_x + 6.0 / cam.scale}",
-                        y: "{rect.min_y - 6.0 / cam.scale}",
+                        y: "{rect.min_y - 8.0 / cam.scale}",
                         font_size: "{12.0 / cam.scale}",
                         "texture frame (square target)"
+                    }
+                    text {
+                        class: "lpme-fit-label",
+                        x: "{rect.min_x + 6.0 / cam.scale}",
+                        y: "{rect.min_y + 16.0 / cam.scale}",
+                        font_size: "{11.0 / cam.scale}",
+                        "0,0"
+                    }
+                    text {
+                        class: "lpme-fit-label",
+                        x: "{rect.min_x + rect.width - 30.0 / cam.scale}",
+                        y: "{rect.min_y + 16.0 / cam.scale}",
+                        font_size: "{11.0 / cam.scale}",
+                        "1,0"
+                    }
+                    text {
+                        class: "lpme-fit-label",
+                        x: "{rect.min_x + 6.0 / cam.scale}",
+                        y: "{rect.min_y + rect.height - 8.0 / cam.scale}",
+                        font_size: "{11.0 / cam.scale}",
+                        "0,1"
+                    }
+                    text {
+                        class: "lpme-fit-label",
+                        x: "{rect.min_x + rect.width - 30.0 / cam.scale}",
+                        y: "{rect.min_y + rect.height - 8.0 / cam.scale}",
+                        font_size: "{11.0 / cam.scale}",
+                        "1,1"
                     }
                 }
                 if let Some(overlay) = arrows {
@@ -221,7 +248,7 @@ pub fn EditorCanvas(
                             y1: "{seg.y1}",
                             x2: "{seg.x2}",
                             y2: "{seg.y2}",
-                            stroke_width: "{(radius * 0.22).clamp(0.6, 3.0)}",
+                            stroke_width: "{(radius * 0.14).clamp(0.4, 1.6)}",
                             marker_end: "url(#lpme-arrow-head)",
                         }
                     }
@@ -246,14 +273,28 @@ pub fn EditorCanvas(
                 }
                 if show_numbers {
                     for lamp in &resolved.lamps {
-                        text {
-                            key: "n{lamp.index}",
-                            class: "lpme-lamp-num",
-                            x: "{lamp.pos[0]}",
-                            y: "{lamp.pos[1] + number_font * 0.34}",
-                            font_size: "{number_font}",
-                            text_anchor: "middle",
-                            "{lamp.index + 1}"
+                        {
+                            // Fit the glyphs inside the lamp: 3-digit numbers
+                            // shrink. Stroke scales WITH the font — a fixed
+                            // stroke is doc-units under the camera transform
+                            // and swallows the glyphs when zoomed in.
+                            let font = if lamp.index + 1 >= 100 {
+                                radius * 0.62
+                            } else {
+                                radius * 0.85
+                            };
+                            rsx! {
+                                text {
+                                    key: "n{lamp.index}",
+                                    class: "lpme-lamp-num",
+                                    x: "{lamp.pos[0]}",
+                                    y: "{lamp.pos[1] + font * 0.34}",
+                                    font_size: "{font}",
+                                    stroke_width: "{font * 0.16}",
+                                    text_anchor: "middle",
+                                    "{lamp.index + 1}"
+                                }
+                            }
                         }
                     }
                 }

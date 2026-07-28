@@ -1301,8 +1301,10 @@ label:has(> input:not(:disabled)) {
 .lpme-lamp-num {
     fill: #fff;
     stroke: #000;
-    stroke-width: 2px;
+    /* stroke-width is per-element: it must scale with the font under the
+       camera transform or the outline swallows the glyphs when zoomed. */
     paint-order: stroke;
+    stroke-linejoin: round;
     font-family: var(--studio-font-mono);
     font-weight: 600;
     pointer-events: none;

@@ -2,6 +2,7 @@
 //! localStorage autosave. This is the `#/mapping` route body; it knows
 //! browser persistence and nothing about projects.
 
+use dioxus::html::HasFileData as _;
 use dioxus::prelude::*;
 use lpc_mapping::Map2dDoc;
 
@@ -33,7 +34,19 @@ pub fn MapEditorPage() -> Element {
     };
 
     rsx! {
-        div { class: "lpme-page",
+        div {
+            class: "lpme-page",
+            // Drag a .map2d.json anywhere onto the editor to open it.
+            ondragover: move |evt| evt.prevent_default(),
+            ondrop: move |evt| {
+                evt.prevent_default();
+                let file = evt.data().files().first().cloned();
+                async move {
+                    if let Some(file) = file {
+                        apply_file(doc, doc_epoch, error, file).await;
+                    }
+                }
+            },
             if let Some(message) = error() {
                 div { class: "lpme-error",
                     "{message}"
@@ -57,30 +70,41 @@ pub fn MapEditorPage() -> Element {
                 r#type: "file",
                 accept: ".json,application/json",
                 onchange: move |evt| {
+                    let file = evt.files().first().cloned();
                     async move {
-                        let Some(file) = evt.files().first().cloned() else {
-                            return;
-                        };
-                        let name = file.name();
-                        match file.read_string().await {
-                            Ok(text) => match Map2dDoc::from_json(&text) {
-                                Ok(parsed) => {
-                                    autosave_store(&parsed.to_json());
-                                    doc.set(parsed);
-                                    doc_epoch += 1;
-                                    error.set(None);
-                                }
-                                Err(parse_error) => {
-                                    error.set(Some(format!("{name}: {parse_error}")));
-                                }
-                            },
-                            Err(read_error) => {
-                                error.set(Some(format!("could not read {name}: {read_error}")));
-                            }
+                        if let Some(file) = file {
+                            apply_file(doc, doc_epoch, error, file).await;
                         }
                     }
                 },
             }
+        }
+    }
+}
+
+/// Parse and adopt an opened/dropped file (shared by the picker and
+/// drag-and-drop paths).
+async fn apply_file(
+    mut doc: Signal<Map2dDoc>,
+    mut doc_epoch: Signal<u64>,
+    mut error: Signal<Option<String>>,
+    file: dioxus::html::FileData,
+) {
+    let name = file.name();
+    match file.read_string().await {
+        Ok(text) => match Map2dDoc::from_json(&text) {
+            Ok(parsed) => {
+                autosave_store(&parsed.to_json());
+                doc.set(parsed);
+                doc_epoch += 1;
+                error.set(None);
+            }
+            Err(parse_error) => {
+                error.set(Some(format!("{name}: {parse_error}")));
+            }
+        },
+        Err(read_error) => {
+            error.set(Some(format!("could not read {name}: {read_error}")));
         }
     }
 }
