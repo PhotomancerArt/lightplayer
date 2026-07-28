@@ -5,11 +5,12 @@ use core::time::Duration;
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
     ClientMessage, ClientRequest, FsRequest, ProjectReadEvent, ProjectReadRequest,
-    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
-    WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
-    WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
-    WireProjectInventoryReadRequest, WireProjectInventoryReadResponse, WireServerMessage,
-    WireServerMsgBody,
+    WireCreateNodeRequest, WireCreateNodeResponse, WireOverlayCommitRequest,
+    WireOverlayCommitResponse, WireOverlayMutationRequest, WireOverlayMutationResponse,
+    WireOverlayReadRequest, WireOverlayReadResponse, WireProjectCommand,
+    WireProjectCommandResponse, WireProjectHandle, WireProjectInventoryReadRequest,
+    WireProjectInventoryReadResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WireServerMessage, WireServerMsgBody,
     server::{AvailableProject, FsResponse, LoadedProject, api::LogLevel},
 };
 
@@ -394,6 +395,44 @@ where
         }
     }
 
+    pub async fn project_create_node(
+        &mut self,
+        handle: WireProjectHandle,
+        request: WireCreateNodeRequest,
+    ) -> ClientResult<ClientOutcome<WireCreateNodeResponse>> {
+        let response = self
+            .project_command(handle, WireProjectCommand::CreateNode { request })
+            .await?;
+        match response.value {
+            WireProjectCommandResponse::CreateNode { response: value } => {
+                Ok(ClientOutcome::new(value, response.events))
+            }
+            other => Err(ClientError::unexpected_response(
+                "project.create_node",
+                other,
+            )),
+        }
+    }
+
+    pub async fn project_remove_node(
+        &mut self,
+        handle: WireProjectHandle,
+        request: WireRemoveNodeRequest,
+    ) -> ClientResult<ClientOutcome<WireRemoveNodeResponse>> {
+        let response = self
+            .project_command(handle, WireProjectCommand::RemoveNode { request })
+            .await?;
+        match response.value {
+            WireProjectCommandResponse::RemoveNode { response: value } => {
+                Ok(ClientOutcome::new(value, response.events))
+            }
+            other => Err(ClientError::unexpected_response(
+                "project.remove_node",
+                other,
+            )),
+        }
+    }
+
     pub async fn project_inventory_read(
         &mut self,
         handle: WireProjectHandle,
@@ -412,6 +451,28 @@ where
             }
             other => Err(ClientError::unexpected_response(
                 "project.inventory_read",
+                other,
+            )),
+        }
+    }
+
+    /// Dispatch a runtime node command (playlist activate-entry, future sim
+    /// pokes) and return the server's accepted/rejected outcome.
+    pub async fn project_node_command(
+        &mut self,
+        handle: WireProjectHandle,
+        node: lpc_model::NodeId,
+        command: lpc_wire::WireNodeCommand,
+    ) -> ClientResult<ClientOutcome<lpc_wire::WireNodeCommandResponse>> {
+        let response = self
+            .project_command(handle, WireProjectCommand::NodeCommand { node, command })
+            .await?;
+        match response.value {
+            WireProjectCommandResponse::NodeCommand { response: value } => {
+                Ok(ClientOutcome::new(value, response.events))
+            }
+            other => Err(ClientError::unexpected_response(
+                "project.node_command",
                 other,
             )),
         }

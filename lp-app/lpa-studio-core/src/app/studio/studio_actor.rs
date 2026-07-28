@@ -121,8 +121,8 @@ pub struct StudioActor<MakeTimer> {
 
 impl<MakeTimer, Timer> StudioActor<MakeTimer>
 where
-    MakeTimer: FnMut(Duration) -> Timer + Clone,
-    Timer: Future<Output = ()>,
+    MakeTimer: FnMut(Duration) -> Timer + Clone + 'static,
+    Timer: Future<Output = ()> + 'static,
 {
     /// Create an actor plus the [`StudioHandle`] the UI keeps.
     ///
@@ -136,6 +136,11 @@ where
         // same command queue the UI feeds; hand the controller a sender
         // before it takes ownership.
         controller.set_agent_command_sender(tx.clone());
+        // The agent host bridge polls its engine-verdict cell on the SAME
+        // platform timer the pull deadlines use (boxed for the dyn seam).
+        let mut agent_timer = make_timer.clone();
+        controller
+            .set_agent_timer(move |delay| Box::pin(agent_timer(delay)) as crate::AgentTimerFuture);
         // Seed the shared delay from the controller's initial per-session
         // policy so the UI timer has a sane first interval before the
         // first batch runs.
@@ -268,10 +273,21 @@ where
                 }
                 UxUpdate::Log(draft) => {
                     if let Some(view) = live.borrow_mut().as_mut() {
+                        let entry = draft.clone().stamp(clock());
                         // `push_live` applies the view's carried filter state,
                         // keeping the live view consistent with the change-gated
                         // snapshot that will replace it.
-                        view.console.push_live(draft.clone().stamp(clock()));
+                        view.console.push_live(entry.clone());
+                        // A card mid-op also shows the work's own output in
+                        // its overlay (the technical-details region).
+                        view.push_card_op_console(entry);
+                        publisher.send(view.clone());
+                    }
+                }
+                UxUpdate::CardOp { uid, op } => {
+                    let mut live = live.borrow_mut();
+                    if let Some(view) = live.as_mut() {
+                        view.apply_card_op(uid.as_deref(), op);
                         publisher.send(view.clone());
                     }
                 }

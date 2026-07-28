@@ -23,12 +23,12 @@ use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeRevertOp, ProjectConnectResult, ProjectController,
-    ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload,
-    RuntimePool, ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot,
-    UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
-    UiNotice, UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent,
-    UxActivityTarget, UxUpdate, UxUpdateSink,
+    DeviceController, DeviceOp, NodeCreateOp, NodeRemoveOp, NodeRevertOp, PlaylistActivateOp,
+    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
+    ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot,
+    ServerState, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError,
+    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress, UiResult,
+    UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -237,6 +237,16 @@ impl StudioController {
         self.agent.set_provider_factory(factory);
     }
 
+    /// Install the agent's model-list fetcher (P8: the web shell wraps
+    /// `lpa_agent::list_*_models` over the browser fetch transport; tests
+    /// inject scripted fakes). Install before the actor takes ownership.
+    pub fn set_agent_models_fetcher(
+        &mut self,
+        fetcher: impl Fn(&crate::AgentProviderConfig) -> crate::AgentModelsFetchFuture + 'static,
+    ) {
+        self.agent.set_models_fetcher(fetcher);
+    }
+
     /// Hand the agent sub-controller the actor's command sender (called by
     /// `StudioActor::new`); run futures report progress through it.
     pub(crate) fn set_agent_command_sender(
@@ -244,6 +254,36 @@ impl StudioController {
         tx: crate::app::studio::studio_view_channel::CommandSender,
     ) {
         self.agent.set_command_sender(tx);
+    }
+
+    /// Install the platform timer factory the agent host bridge's
+    /// engine-verdict wait polls on (called by `StudioActor::new`, boxed
+    /// from its `make_timer`).
+    pub fn set_agent_timer(
+        &mut self,
+        timer: impl FnMut(core::time::Duration) -> crate::AgentTimerFuture + 'static,
+    ) {
+        self.agent.set_timer(timer);
+    }
+
+    /// Write every agent session's latest engine status and def-side param
+    /// records into its shared bridge cell (P2: the engine-verdict seam;
+    /// P3: the params-diff seam). Runs at the end of every processed batch
+    /// — cheap while no sessions exist — so a running agent's bounded
+    /// verdict wait observes the status Revision advancing as pulls land,
+    /// and its params diff sees acked def edits.
+    fn refresh_agent_engine_status(&mut self) {
+        let project = &self.project;
+        let history_changed = self.agent.refresh_engine_status(
+            |artifact| project.agent_engine_status(artifact),
+            |artifact| project.agent_param_defs(artifact),
+            |artifact| project.agent_visual_preview(artifact),
+        );
+        if history_changed {
+            // Thumbnail attaches and late verdict resolutions change the
+            // DTO without necessarily advancing the sync revision.
+            self.mark_dirty();
+        }
     }
 
     /// Fold one spawned-run feedback message into the agent state and mark
@@ -289,26 +329,32 @@ impl StudioController {
             SettingsCommand::SetAgentProvider(provider) => {
                 self.settings.set_agent_provider(provider);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentAnthropicApiKey(key) => {
                 self.settings.set_agent_anthropic_api_key(key);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentOpenAiApiKey(key) => {
                 self.settings.set_agent_openai_api_key(key);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentCustomBaseUrl(base_url) => {
                 self.settings.set_agent_custom_base_url(base_url);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentCustomApiKey(key) => {
                 self.settings.set_agent_custom_api_key(key);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentOpenRouterApiKey(key) => {
                 self.settings.set_agent_openrouter_api_key(key);
                 self.persist_user_settings();
+                self.request_agent_models(false);
             }
             SettingsCommand::SetAgentModel(model) => {
                 self.settings.set_agent_model(model);
@@ -322,8 +368,46 @@ impl StudioController {
                 self.settings.set_agent_price_output_per_mtok(value);
                 self.persist_user_settings();
             }
+            SettingsCommand::RequestModels { force } => self.request_agent_models(force),
+            SettingsCommand::ModelsLoaded {
+                provider,
+                fingerprint,
+                result,
+            } => {
+                let fetched_at = (self.now_secs)();
+                self.settings
+                    .agent_models_loaded(provider, &fingerprint, result, fetched_at);
+            }
         }
         self.mark_dirty();
+    }
+
+    /// Ensure the selected provider's model list is (being) fetched (P8).
+    /// Resolves the discovery credentials, debounces through the store's
+    /// fingerprint check, and spawns the platform fetch, which reports
+    /// back as [`SettingsCommand::ModelsLoaded`] on the command queue.
+    /// Without sufficient credentials — or without the platform seams
+    /// (host tests, story builds) — any stored state is dropped instead,
+    /// so the dropdown falls back to free text rather than spinning.
+    fn request_agent_models(&mut self, force: bool) {
+        let provider = self.settings.agent_provider();
+        let Some(config) = self.settings.agent_discovery_config() else {
+            self.settings.clear_agent_models(provider);
+            return;
+        };
+        let fingerprint = crate::app::settings::discovery_fingerprint(&config);
+        if !self
+            .settings
+            .request_agent_models(provider, fingerprint.clone(), force)
+        {
+            return;
+        }
+        if !self
+            .agent
+            .spawn_models_fetch(provider, fingerprint, &config)
+        {
+            self.settings.clear_agent_models(provider);
+        }
     }
 
     /// Push the current user layer through the persistence hook (no-op
@@ -640,10 +724,14 @@ impl StudioController {
 
     /// The settings-derived slice the agent view decoration needs:
     /// availability (Ready ⇔ the selected provider is sufficiently
-    /// configured), the provider's setup guidance while it is not, and the
-    /// cost rates for the usage estimate.
+    /// configured), the provider's setup guidance while it is not, the
+    /// cost rates for the usage estimate, and the model-chip slice
+    /// (effective model + P8 discovered options — lifted from the same
+    /// settings view the popover renders, so the chip and the popover can
+    /// never disagree).
     fn agent_view_context(&self) -> crate::AgentViewContext {
         let ready = self.settings.agent_ready();
+        let agent_settings = self.settings.ui_view().agent;
         crate::AgentViewContext {
             availability: if ready {
                 crate::UiAgentAvailability::Ready
@@ -652,6 +740,11 @@ impl StudioController {
             },
             setup: (!ready).then(|| crate::provider_guidance(self.settings.agent_provider())),
             cost_rates: self.settings.agent_cost_rates(),
+            model: crate::UiAgentModelView {
+                effective: agent_settings.model_effective,
+                options: agent_settings.model_options,
+                loading: agent_settings.models_loading,
+            },
         }
     }
 
@@ -889,6 +982,10 @@ impl StudioController {
     /// Calling this records the observed revision and clears the dirty flag, so
     /// the next quiet tick gates out.
     pub fn view_if_changed(&mut self) -> Option<UiStudioView> {
+        // Feed running agents their engine status first: the write targets
+        // a shared cell the spawned run polls, so it must happen whether or
+        // not the change gate emits a snapshot this batch.
+        self.refresh_agent_engine_status();
         let revision = self.current_revision();
         let advanced = revision != self.applied_revision;
         if !self.dirty && !advanced {
@@ -1884,6 +1981,18 @@ impl StudioController {
                 let op = action.into_op::<NodeRevertOp>()?;
                 return self.execute_node_revert_op(op).await;
             }
+            if action.op_as::<PlaylistActivateOp>().is_some() {
+                let op = action.into_op::<PlaylistActivateOp>()?;
+                return self.execute_playlist_activate_op(op).await;
+            }
+            if action.op_as::<NodeCreateOp>().is_some() {
+                let op = action.into_op::<NodeCreateOp>()?;
+                return self.execute_node_create_op(op).await;
+            }
+            if action.op_as::<NodeRemoveOp>().is_some() {
+                let op = action.into_op::<NodeRemoveOp>()?;
+                return self.execute_node_remove_op(op).await;
+            }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
         }
@@ -2250,6 +2359,24 @@ impl StudioController {
             HomeOp::OpenExample { id } => {
                 return self.open_from_home(PendingOpen::Example(id), updates).await;
             }
+            HomeOp::CreateProject => {
+                // Create-and-open (the D17 deviation, 2026-07-27): a pure
+                // blank one-file package lands in the library — "Project",
+                // slugged/dated/deduped by the store; rename lives on the
+                // card kebab — then opens like any card, so the user lands
+                // in the empty editor with the add-node picker.
+                let outcome = self
+                    .run_catalog_op(CatalogOp::Create {
+                        name: "Project".to_string(),
+                    })
+                    .await?;
+                let created = outcome.summary.ok_or_else(|| {
+                    UiError::MissingSession("create produced no package".to_string())
+                })?;
+                return self
+                    .open_from_home(PendingOpen::Package(created.uid.to_string()), updates)
+                    .await;
+            }
             HomeOp::RenamePackage { uid, name } => {
                 let name = name.trim();
                 if name.is_empty() {
@@ -2380,17 +2507,11 @@ impl StudioController {
         // narration. Targeting: the stamped uid when the managed device
         // had one; an identity-less blank board's op rides the live
         // (non-offline) hardware card.
-        if !card.sim
-            && let Some((target_uid, slot)) = self.device_card_op.as_ref()
+        if let Some((target_uid, slot)) = self.device_card_op.as_ref()
+            && card.takes_card_op(target_uid.as_deref())
         {
-            let matches_target = match target_uid {
-                Some(uid) => card.uid.as_deref() == Some(uid.as_str()),
-                None => !matches!(card.state, crate::RosterCardState::Offline { .. }),
-            };
-            if matches_target {
-                card.ui.op = Some(slot.borrow().clone());
-                return card;
-            }
+            card.ui.op = Some(slot.borrow().clone());
+            return card;
         }
         // the live op: the session whose card this is, mid-operation
         let op_label = if card.sim {
@@ -2755,6 +2876,94 @@ impl StudioController {
                 Ok(UiNotices::new())
             }
             crate::AgentOp::Send { artifact, text } => self.agent_send(artifact, text).await,
+            crate::AgentOp::RevertToTurn { artifact, turn } => {
+                self.agent_revert_to_turn(artifact, turn).await
+            }
+            crate::AgentOp::ExportDebug { artifact } => {
+                let config = self.settings.agent_provider_config();
+                self.agent
+                    .export_debug(self.pool.lens(), &artifact, config.as_ref())
+                    .map_err(UiError::UnsupportedAction)?;
+                self.mark_dirty();
+                Ok(UiNotices::new())
+            }
+            crate::AgentOp::UpsertParam {
+                artifact,
+                seq,
+                upsert,
+            } => self.agent_upsert_param(artifact, seq, upsert).await,
+        }
+    }
+
+    /// Execute one history revert: pull the recorded source, restage it
+    /// through the SAME `ApplyBody` overlay path a staged agent edit rides
+    /// (so dirty state, acks, verdict chasing, and the live sim follow),
+    /// then settle the session — bridge `source` mirror + the visible
+    /// "reverted to turn N" transcript notice. The next run's
+    /// `current_source` reflects the revert through the overlay anyway;
+    /// the mirror update keeps the intra-run snapshot coherent too.
+    async fn agent_revert_to_turn(
+        &mut self,
+        artifact: lpc_model::ArtifactLocation,
+        turn: u32,
+    ) -> UiResult {
+        let runtime = self.pool.lens();
+        let source = self
+            .agent
+            .revert_source(runtime, &artifact, turn)
+            .map_err(UiError::UnsupportedAction)?;
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .apply_asset_edit(
+                    server,
+                    crate::AssetEditOp::ApplyBody {
+                        artifact: artifact.clone(),
+                        bytes: source.as_bytes().to_vec(),
+                    },
+                )
+                .await
+        };
+        let notices = self.record_project_edit_run(run)?;
+        self.agent.record_revert(runtime, &artifact, turn, &source);
+        self.mark_dirty();
+        Ok(notices)
+    }
+
+    /// Execute one agent `upsert_param` dispatch: ONE `PutSlotEdit` batch
+    /// on the target node's def artifact through the project controller,
+    /// then record the outcome into the session's bridge cell — including
+    /// failures, so the awaiting run future reports an actionable host
+    /// error instead of timing out.
+    async fn agent_upsert_param(
+        &mut self,
+        artifact: lpc_model::ArtifactLocation,
+        seq: u64,
+        upsert: lpa_agent::ParamUpsert,
+    ) -> UiResult {
+        let outcome = match self
+            .pool
+            .lens_session_mut()
+            .and_then(|session| session.client_mut())
+        {
+            Ok(server) => {
+                self.project
+                    .upsert_shader_param(server, &artifact, &upsert)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        match outcome {
+            Ok((run, rejection)) => {
+                self.record_logs(run.logs);
+                self.agent.record_upsert_ack(&artifact, seq, rejection);
+                Ok(run.notices)
+            }
+            Err(error) => {
+                self.agent
+                    .record_upsert_ack(&artifact, seq, Some(error.to_string()));
+                Err(error)
+            }
         }
     }
 
@@ -2875,6 +3084,34 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.revert_node_edits(server, &op.node).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Playlist entry-strip click: dispatch the activate-entry runtime
+    /// command (the non-overlay command channel). Quiet on acceptance —
+    /// the ACTIVE placard follows via the tightened refresh ticks; a
+    /// rejection comes back as a warning notice.
+    async fn execute_playlist_activate_op(&mut self, op: PlaylistActivateOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.activate_playlist_entry(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_node_create_op(&mut self, op: NodeCreateOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.create_node(server, op.kind, &op.attach).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_node_remove_op(&mut self, op: NodeRemoveOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.remove_node(server, &op.node).await
         };
         self.record_project_edit_run(run)
     }
@@ -3853,6 +4090,7 @@ impl StudioController {
             format!("{}…", spec.progress_label),
             None,
         )));
+        let managed_uid_for_events = managed_uid.clone();
         self.device_card_op = Some((managed_uid, Rc::clone(&card_op)));
         if let Some(session) = self.pool.session_mut(device_id) {
             session.disconnect_server();
@@ -3868,6 +4106,15 @@ impl StudioController {
             UiActivityView::new(spec.progress_label)
                 .with_progress(UiProgress::indeterminate(spec.progress_label)),
         ));
+        // MOUNT THE OVERLAY BEFORE THE WORK STARTS. The op slot went in
+        // just above, and only a full view build carries it onto a card
+        // (`overlay_card_ui`) — but everything below holds `&mut self`
+        // until the operation ends, so this is the last chance to build
+        // one. Without it the first view wearing the op is the one
+        // `attach_runtime` emits AFTER the flash, which is what made a
+        // minute-long install look like a dead button.
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
         updates.emit(UxUpdate::Activity {
             target: target.clone(),
             status: UiStatus::working("Managing"),
@@ -3879,6 +4126,7 @@ impl StudioController {
             Rc::clone(&activity),
             Rc::clone(&captured_logs),
             Rc::clone(&card_op),
+            managed_uid_for_events.clone(),
             spec.reconnect_detail,
         );
         let manage_result = {
@@ -3931,8 +4179,15 @@ impl StudioController {
             spec.reconnect_detail,
         );
         // The reattach half is the op's AwaitingDevice phase (I2) — the
-        // overlay stays up, narrating the expected gap.
+        // overlay stays up, narrating the expected gap. It is a LONG
+        // phase (the board reboots and re-enumerates), so the delta goes
+        // out too: the dispatch has not returned, and only a full
+        // snapshot would otherwise carry the phase change.
         *card_op.borrow_mut() = crate::CardOp::awaiting(spec.reconnect_detail);
+        updates.emit(UxUpdate::CardOp {
+            uid: managed_uid_for_events,
+            op: card_op.borrow().clone(),
+        });
         self.mark_dirty();
         // The link was already rebuilt inside `manage`; what remains is the
         // server reattach + post-attach sequence on the managed session.
@@ -4503,6 +4758,138 @@ mod tests {
     }
 
     #[test]
+    fn credential_changes_spawn_one_model_fetch_and_results_reach_the_view() {
+        use crate::app::studio::studio_actor::poll_now;
+        use crate::app::studio::studio_view_channel::command_channel;
+        use crate::{AgentTaskFuture, SettingsCommand, StudioCommand};
+        use lpa_agent::ModelInfo;
+
+        let mut studio = StudioController::new(|| 7.0);
+        let tasks: Rc<RefCell<Vec<AgentTaskFuture>>> = Rc::new(RefCell::new(Vec::new()));
+        studio.set_agent_spawner({
+            let tasks = Rc::clone(&tasks);
+            move |future| tasks.borrow_mut().push(future)
+        });
+        studio.set_agent_models_fetcher(|_config| {
+            Box::pin(async {
+                Ok(vec![ModelInfo {
+                    id: "claude-sonnet-5".to_string(),
+                    display_name: Some("Claude Sonnet 5".to_string()),
+                }])
+            })
+        });
+        let (tx, rx) = command_channel();
+        studio.set_agent_command_sender(tx);
+
+        // A key change triggers exactly one spawned fetch; the view flags
+        // the load.
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk-a".to_string(),
+        )));
+        assert_eq!(tasks.borrow().len(), 1);
+        assert!(studio.view().settings.agent.models_loading);
+        // A settings-surface open debounces against the in-flight fetch.
+        studio.apply_settings_command(SettingsCommand::RequestModels { force: false });
+        assert_eq!(tasks.borrow().len(), 1);
+
+        // Drive the fetch: it reports ModelsLoaded through the command
+        // queue; applying it lands the options with the clock's stamp.
+        let task = tasks.borrow_mut().remove(0);
+        poll_now(task).expect("scripted fetch resolves in one poll");
+        let mut loaded = 0;
+        for command in rx.try_recv_all_for_test() {
+            let StudioCommand::Settings(command) = command else {
+                panic!("unexpected command class");
+            };
+            assert!(matches!(command, SettingsCommand::ModelsLoaded { .. }));
+            studio.apply_settings_command(command);
+            loaded += 1;
+        }
+        assert_eq!(loaded, 1);
+        let agent = studio.view().settings.agent;
+        assert!(!agent.models_loading);
+        assert_eq!(agent.model_options.len(), 1);
+        assert_eq!(agent.model_options[0].id, "claude-sonnet-5");
+
+        // Repeat opens stay debounced; a credential change refetches.
+        studio.apply_settings_command(SettingsCommand::RequestModels { force: false });
+        assert!(tasks.borrow().is_empty());
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk-b".to_string(),
+        )));
+        assert_eq!(tasks.borrow().len(), 1);
+    }
+
+    #[test]
+    fn model_requests_without_platform_seams_leave_no_loading_marker() {
+        use crate::{AgentProvider, SettingsCommand};
+
+        // No fetcher/spawner/sender installed (host tests, story builds):
+        // the request must not wedge the view in a perpetual load.
+        let mut studio = StudioController::new(|| 0.0);
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk".to_string(),
+        )));
+        studio.apply_settings_command(SettingsCommand::RequestModels { force: true });
+        let agent = studio.view().settings.agent;
+        assert!(!agent.models_loading);
+        assert!(agent.model_options.is_empty());
+        assert!(
+            studio
+                .settings()
+                .agent_models(AgentProvider::Anthropic)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn agent_view_context_carries_the_model_slice() {
+        use crate::app::studio::studio_actor::poll_now;
+        use crate::app::studio::studio_view_channel::command_channel;
+        use crate::{AgentTaskFuture, SettingsCommand, StudioCommand};
+        use lpa_agent::ModelInfo;
+
+        let mut studio = StudioController::new(|| 0.0);
+        let tasks: Rc<RefCell<Vec<AgentTaskFuture>>> = Rc::new(RefCell::new(Vec::new()));
+        studio.set_agent_spawner({
+            let tasks = Rc::clone(&tasks);
+            move |future| tasks.borrow_mut().push(future)
+        });
+        studio.set_agent_models_fetcher(|_config| {
+            Box::pin(async {
+                Ok(vec![ModelInfo {
+                    id: "claude-haiku-4".to_string(),
+                    display_name: Some("Claude Haiku 4".to_string()),
+                }])
+            })
+        });
+        let (tx, rx) = command_channel();
+        studio.set_agent_command_sender(tx);
+
+        studio.apply_settings_command(SettingsCommand::SetAgentModel(Some(
+            "claude-sonnet-5".to_string(),
+        )));
+        studio.apply_settings_command(SettingsCommand::SetAgentAnthropicApiKey(Some(
+            "sk-a".to_string(),
+        )));
+        assert!(studio.agent_view_context().model.loading);
+        let task = tasks.borrow_mut().remove(0);
+        poll_now(task).expect("scripted fetch resolves in one poll");
+        for command in rx.try_recv_all_for_test() {
+            let StudioCommand::Settings(command) = command else {
+                panic!("unexpected command class");
+            };
+            studio.apply_settings_command(command);
+        }
+
+        let model = studio.agent_view_context().model;
+        assert_eq!(model.effective.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(model.options.len(), 1);
+        assert_eq!(model.options[0].id, "claude-haiku-4");
+        assert!(!model.loading);
+    }
+
+    #[test]
     fn push_log_stamps_drafts_with_the_injected_clock() {
         use std::cell::Cell;
 
@@ -4716,8 +5103,8 @@ mod tests {
         )));
         let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
 
-        // seed one package (creation happens via examples in the UI — the
-        // gallery has no create op; see D17)
+        // seed one package directly (the gallery's own create op has its
+        // own test below)
         let seeded = store
             .install_package("Seeded", &[], PackageProvenance::Created, 42.0)
             .unwrap();
@@ -4779,6 +5166,73 @@ mod tests {
         // re-stamped from the imported manifest's label; the deleted copy
         // freed the plain stamp+label slot
         assert_eq!(imported.slug, "2026-07-09-1421-porch");
+    }
+
+    #[test]
+    fn home_create_project_mints_blank_packages_with_deduped_slugs() {
+        use crate::app::library::{LibraryStore, MemoryLibraryHost};
+        use crate::{HOME_NODE_ID, HomeOp};
+        use lpc_history::EventKind;
+        use lpfs::LpFsMemory;
+
+        let mut studio = StudioController::new(|| 42.0);
+        let counter = Rc::new(RefCell::new(0u8));
+        let store = LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(move || {
+                *counter.borrow_mut() += 1;
+                [*counter.borrow(); 16]
+            }),
+            Rc::new(|| "2026-07-27-0900".to_string()),
+        );
+        studio.attach_library(Rc::new(MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 42.0),
+        )));
+        let home_action = |op: HomeOp| UiAction::from_op(ControllerId::new(HOME_NODE_ID), op);
+
+        // Two creates in a row. Creation lands FIRST; the follow-on open
+        // then refuses on host (this build has no browser-worker sim), so
+        // the dispatch errs — the successful create-and-open round-trip is
+        // the edit-e2e test's. The packages stick either way.
+        for _ in 0..2 {
+            block_on_ready(studio.dispatch(home_action(HomeOp::CreateProject)))
+                .expect_err("host test builds have no sim runtime to open into");
+        }
+        studio.request_library_refresh();
+        block_on_ready(studio.settle_library());
+
+        let home = studio.view().home.expect("home with library");
+        assert_eq!(home.projects.len(), 2, "both creates landed");
+        let slug_of = |slug: &str| {
+            home.projects
+                .iter()
+                .find(|card| card.slug == slug)
+                .unwrap_or_else(|| panic!("{slug} listed, got {:?}", home.projects))
+        };
+        // dated + slugified from the default "Project" label; the second
+        // create dedups with the `-2` suffix and mints its own uid
+        let first = slug_of("2026-07-27-0900-project");
+        let second = slug_of("2026-07-27-0900-project-2");
+        assert_ne!(first.uid, second.uid, "each create mints a fresh uid");
+        assert!(
+            first.provenance.is_none() && second.provenance.is_none(),
+            "Created packages carry no provenance line"
+        );
+
+        // history: the Created origin plus the initial-save snapshot
+        let handle = store
+            .open(first.uid.parse().expect("card carries the minted uid"))
+            .expect("created package opens");
+        assert_eq!(handle.history.events()[0].kind, EventKind::Created);
+        assert!(
+            handle
+                .history
+                .events()
+                .iter()
+                .any(|event| matches!(event.kind, EventKind::Saved { .. })),
+            "the initial save snapshot is recorded"
+        );
     }
 
     #[test]

@@ -174,6 +174,7 @@ fw-browser-test: install-wasm32-target
 
 # Local project store tests: real browser + real OPFS. Needs a chromedriver
 # matching the local Chrome major version; set CHROMEDRIVER to override.
+# CI runs this (and fw-browser-test) in the path-gated validate-browser job.
 lpa-fs-opfs-test: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -184,6 +185,9 @@ lpa-fs-opfs-test: install-wasm32-target
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
 
+# Serve the smoke page for a human to watch (render product, output ring, boot
+# checklist). This recipe never exits on its own: it cannot fail, it can only
+# serve a page that says "error". Use `fw-browser-smoke-check` for a verdict.
 fw-browser-smoke: fw-browser-build
     #!/usr/bin/env bash
     set -euo pipefail
@@ -192,6 +196,13 @@ fw-browser-smoke: fw-browser-build
     echo "Success: page shows ok and documentElement.dataset.smoke is 'ok'."
     cd lp-fw/fw-browser/www
     python3 -m http.server "${port}" --bind 127.0.0.1
+
+# Headless pass/fail run of the same smoke page: exits non-zero unless the page
+# reaches dataset.smoke === "ok". Run this after changing wasm emission or the
+# wire protocol, so a rotted page fails loudly instead of quietly serving
+# "error". Needs Chrome (set CHROME_BIN to override discovery).
+fw-browser-smoke-check: fw-browser-build
+    node lp-fw/fw-browser/scripts/fw-browser-smoke-check.mjs
 
 # ============================================================================
 # Studio web app
@@ -728,6 +739,13 @@ test: test-rust test-filetests
 
 test-rust:
     cargo test
+    # Studio web view layer is outside default-members (Dioxus web dep tree);
+    # its unit tests are pure host-runnable view helpers. Separate invocation
+    # per the no-workspace-wide-cargo rule (feature unification).
+    # `stories` is on because the story book carries host-testable invariants of
+    # the capture harness seam (see `overview_ids_are_reserved_for_generated_composites`);
+    # without it that module is not compiled and its tests silently do not run.
+    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
@@ -777,12 +795,18 @@ test-glsl-filetests:
 # ============================================================================
 
 [parallel]
-check: fmt-check clippy lint-serde-content lint-schemars-fw schema-check
+check: fmt-check clippy lint-serde-content lint-schemars-fw schema-check lint-torture-corpus
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
 lint-serde-content:
     ./scripts/check-serde-content.sh
+
+# The control-flow torture corpus is generated; without this gate, hand edits to
+# those files are silently reverted by the next `--write` (that is how the
+# per-directive @unsupported(wgpu.f32) markers were nearly lost).
+lint-torture-corpus:
+    python3 lp-shader/scripts/gen-control-torture.py --check
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:

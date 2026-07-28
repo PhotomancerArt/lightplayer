@@ -8,16 +8,21 @@
 //! replaced by the "ACTIVE" placard (live-blue family — Yona Q5: "ACTIVE",
 //! matching `PlaylistState.active_entry` naming). Entries carry per-entry
 //! duration chips and a cue tag (⚑) when trigger-driven.
+//!
+//! The strip's tail carries the add chip (authoring P5): an ADDITIVE product
+//! affordance, so it may live on the face per the faces ADR (destructive
+//! actions stay on the pane header). It opens the shared kind picker with
+//! the playlist's own `UiAddNodeMenu` (attach = this playlist's entries).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAction, UiPlaylistEntry, UiPlaylistFace as UiPlaylistFaceData, UiProductKind,
+    UiAction, UiAddNodeMenu, UiPlaylistEntry, UiPlaylistFace as UiPlaylistFaceData, UiProductKind,
     UiProductPreviewFrame, UiProductTrackingState,
 };
 
-use crate::app::node::NodeCardSection;
 use crate::app::node::produced_product_view::ProductPreview;
-use crate::base::{StudioIcon, StudioIconName};
+use crate::app::node::{AddNodePicker, NodeCardSection};
+use crate::base::{PopoverPlacement, StudioIcon, StudioIconName};
 
 /// Thumbnail aspect frame for strip entries (wide, like the spike's
 /// 108 × 60 thumbs).
@@ -27,13 +32,28 @@ const STRIP_THUMB_FRAME: UiProductPreviewFrame = UiProductPreviewFrame::new(9, 5
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PlaylistFace(
     face: UiPlaylistFaceData,
+    /// The playlist's add-node picker data (attach = this playlist's
+    /// entries); with a dispatcher present, the strip's tail renders the add
+    /// chip.
+    #[props(default = None)]
+    add_node_menu: Option<UiAddNodeMenu>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let add_chip = match (add_node_menu, on_action) {
+        (Some(menu), Some(handler)) => Some((menu, handler)),
+        _ => None,
+    };
+
     if face.entries.is_empty() {
         return rsx! {
             NodeCardSection { label: "entries", first: true,
-                p { class: "tw:m-0 tw:px-4 tw:py-3 tw:text-center tw:text-sm tw:text-subtle-foreground",
-                    "No playlist entries yet."
+                div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-center tw:gap-3 tw:px-4 tw:py-3",
+                    p { class: "tw:m-0 tw:text-center tw:text-sm tw:text-subtle-foreground",
+                        "No playlist entries yet."
+                    }
+                    if let Some((menu, handler)) = add_chip {
+                        PlaylistAddChip { menu, on_action: handler }
+                    }
                 }
             }
         };
@@ -50,7 +70,35 @@ pub fn PlaylistFace(
                         on_action,
                     }
                 }
+                if let Some((menu, handler)) = add_chip {
+                    PlaylistAddChip { menu, on_action: handler }
+                }
             }
+        }
+    }
+}
+
+/// The strip's add chip: a card-shaped trigger at the end of the entry row,
+/// opening the shared kind picker with this playlist's menu. Same footprint
+/// family as the entry chips (flex-none, rounded, bordered); the dashed
+/// border marks it as the not-yet-an-entry slot.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PlaylistAddChip(menu: UiAddNodeMenu, on_action: EventHandler<UiAction>) -> Element {
+    const CHIP_CLASS: &str = "tw:grid tw:w-14 tw:flex-none tw:cursor-pointer tw:appearance-none tw:content-center tw:justify-items-center tw:gap-1 tw:rounded-sm tw:border tw:border-dashed tw:border-border tw:bg-transparent tw:px-1 tw:py-2 tw:text-subtle-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground";
+
+    rsx! {
+        AddNodePicker {
+            menu,
+            trigger: rsx! {
+                StudioIcon { name: StudioIconName::Add, size: 16 }
+                span { class: "tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-[0.08em]", "Add" }
+            },
+            trigger_class: CHIP_CLASS.to_string(),
+            trigger_open_class: format!("{CHIP_CLASS} tw:border-solid tw:border-border-strong tw:text-strong-foreground"),
+            label: "Add playlist entry",
+            placement: PopoverPlacement::BottomStart,
+            on_action,
         }
     }
 }

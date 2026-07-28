@@ -130,6 +130,17 @@ fn handle_project_command(
                 response: project.read_inventory(),
             })
         }
+        WireProjectCommand::CreateNode { request } => Ok(WireProjectCommandResponse::CreateNode {
+            response: project.create_node(request)?,
+        }),
+        WireProjectCommand::RemoveNode { request } => Ok(WireProjectCommandResponse::RemoveNode {
+            response: project.remove_node(request)?,
+        }),
+        WireProjectCommand::NodeCommand { node, command } => {
+            Ok(WireProjectCommandResponse::NodeCommand {
+                response: project.node_command(node, &command),
+            })
+        }
     }
 }
 

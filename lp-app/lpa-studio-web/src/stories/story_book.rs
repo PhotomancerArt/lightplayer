@@ -9,6 +9,9 @@ use crate::stories::story_registry::{
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StoryBook() -> Element {
+    // Stories render thumbs statically: no PreviewHost boot, no live
+    // badges racing capture (see `StaticThumbPreviews`).
+    use_context_provider(|| crate::app::home::gallery_preview::StaticThumbPreviews);
     let initial_route = selected_story_route_from_hash();
     let mut selected_story_id = use_signal(move || initial_route.story_id);
     let mut viewport = use_signal(move || initial_route.viewport);
@@ -63,10 +66,14 @@ pub fn StoryBook() -> Element {
                                 for story in component.stories.iter() {
                                     {
                                         let story_href = story_hash(story.id, selected_viewport);
+                                        // The capture script scrapes these links to
+                                        // discover stories; the flag rides along so it
+                                        // can capture screenshot stories at lg only.
                                         rsx! {
                                             a {
                                                 href: "{story_href}",
                                                 tabindex: "-1",
+                                                "data-story-screenshot": if story.screenshot { "1" } else { "0" },
                                                 "{story.label}"
                                             }
                                         }
@@ -385,6 +392,17 @@ fn component_source_path(stories: &[StoryDescriptor]) -> String {
     "multiple story files".to_string()
 }
 
+/// HARNESS SEAM — frozen contract with `scripts/studio-story-pngs.mjs`:
+/// a story id ending in [`OVERVIEW_ID_SUFFIX`] is a *generated composite*,
+/// never an authored story. The capture script drops those ids from the
+/// baseline set, because a composite stacks a whole component's stories into a
+/// 10k-25k px page and `captureBeyondViewport` renders composited effects that
+/// far below the fold nondeterministically (see
+/// `docs/defects/2026-07-28-overview-composite-capture-races.md`). Changing
+/// this suffix silently puts the composites back in the pixel pipeline, so
+/// `overview_ids_are_reserved_for_generated_composites` pins it.
+const OVERVIEW_ID_SUFFIX: &str = "/overview";
+
 fn component_overview_id(story: &StoryDescriptor) -> String {
     let mut id = story.family.to_string();
     id.push('/');
@@ -393,7 +411,7 @@ fn component_overview_id(story: &StoryDescriptor) -> String {
         id.push('/');
     }
     id.push_str(story.component);
-    id.push_str("/overview");
+    id.push_str(OVERVIEW_ID_SUFFIX);
     id
 }
 
@@ -443,9 +461,30 @@ pub fn should_show_story_book() -> bool {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn StoryCanvas(story_id: &'static str, viewport: StoryViewport) -> Element {
+fn StoryCanvas(
+    story_id: &'static str,
+    viewport: StoryViewport,
+    /// `#[story(screenshot)]`: render the story bare, so the capture is
+    /// the app itself — no frame, size label, or checkerboard to crop out
+    /// of a README or docs page.
+    #[props(default = false)]
+    screenshot: bool,
+) -> Element {
     let frame_style = viewport.frame_style();
     let canvas_label = viewport.canvas_label();
+
+    if screenshot {
+        return rsx! {
+            div {
+                class: "tw:inline-grid tw:w-max tw:overflow-visible",
+                "data-story-capture": "1",
+                "data-story-id": "{story_id}",
+                div { class: "tw:flow-root tw:min-w-0 tw:overflow-hidden", style: "{frame_style}",
+                    {render_story(story_id)}
+                }
+            }
+        };
+    }
 
     rsx! {
         div {
@@ -495,6 +534,7 @@ fn render_story_selection(selection: &StorySelection, viewport: StoryViewport) -
                 key: "{story.id}",
                 story_id: story.id,
                 viewport,
+                screenshot: story.screenshot,
             }
         },
         StorySelection::ComponentOverview { id, stories, .. } => rsx! {
@@ -766,4 +806,40 @@ fn location_hash() -> Option<String> {
     web_sys::window()
         .map(|window| window.location())
         .and_then(|location| location.hash().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The capture script (`scripts/studio-story-pngs.mjs`) tells generated
+    /// composites apart from authored stories by the `/overview` id suffix and
+    /// keeps the composites out of the committed baseline set. That only holds
+    /// while the suffix is exclusively ours: a `#[story] fn overview()` would
+    /// both collide with its own component's composite in the nav and quietly
+    /// lose its pixel baseline.
+    #[test]
+    fn overview_ids_are_reserved_for_generated_composites() {
+        let stories = all_stories();
+        assert!(!stories.is_empty(), "story registry is empty");
+
+        let authored: Vec<&str> = stories
+            .iter()
+            .map(|story| story.id)
+            .filter(|id| id.ends_with(OVERVIEW_ID_SUFFIX))
+            .collect();
+        assert!(
+            authored.is_empty(),
+            "authored stories may not end in `{OVERVIEW_ID_SUFFIX}` — that suffix marks the \
+             generated composites the capture script excludes from baselines: {authored:?}",
+        );
+
+        for story in &stories {
+            let overview_id = component_overview_id(story);
+            assert!(
+                overview_id.ends_with(OVERVIEW_ID_SUFFIX),
+                "generated overview id `{overview_id}` must end in `{OVERVIEW_ID_SUFFIX}`",
+            );
+        }
+    }
 }

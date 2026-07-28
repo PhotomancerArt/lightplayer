@@ -34,12 +34,6 @@ pub fn NodePane(
     #[props(default)]
     pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
-    /// Open the face's code drawer on first render (stories).
-    #[props(default = false)]
-    face_code_drawer_open: bool,
-    /// Open the face's advanced drawer on first render (stories).
-    #[props(default = false)]
-    face_advanced_drawer_open: bool,
     /// Pin this face control's label-trigger detail popover open on first render
     /// (stories).
     #[props(default = None)]
@@ -77,6 +71,12 @@ pub fn NodePane(
     // today); every other kind keeps the classic sections fallback.
     let face = view.face.clone();
     let face_sections = main_tab_sections(&view);
+    // Disclosure state is core-owned (`NodeCardUiState`), keyed by the
+    // node's address path — the header path carries it for panes and
+    // nested child cards alike.
+    let face_node = view.header.path.clone();
+    let face_card_ui = view.card_ui.clone();
+    let add_node_menu = view.add_node_menu.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
@@ -136,11 +136,12 @@ pub fn NodePane(
                         if let Some(face) = face.clone() {
                             NodeFaceBody {
                                 face,
+                                node: face_node.clone(),
+                                card_ui: face_card_ui.clone(),
                                 sections: face_sections.clone(),
-                                code_drawer_open: face_code_drawer_open,
-                                advanced_drawer_open: face_advanced_drawer_open,
                                 detail_open_control: face_detail_open_control.clone(),
                                 platform: face_platform,
+                                add_node_menu: add_node_menu.clone(),
                                 pending_edits: pending_edits.clone(),
                                 dirty_tint,
                                 on_action,

@@ -18,5 +18,6 @@ pub use runtime_pool::{
     DEVICE_SESSION_CAPACITY, InstallRefusal, RuntimePool, SIM_SESSION_CAPACITY,
 };
 pub use runtime_session::{
-    DeviceHandle, RuntimeKind, RuntimePayload, RuntimeSession, SimAttachment, SimLoadedProject,
+    CONSOLE_TAIL_LEN, DeviceHandle, RuntimeKind, RuntimePayload, RuntimeSession, SimAttachment,
+    SimLoadedProject,
 };

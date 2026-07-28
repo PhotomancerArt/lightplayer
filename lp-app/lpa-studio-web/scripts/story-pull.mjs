@@ -12,7 +12,8 @@
 // committed baseline set with it, and stages the result — the branch owner
 // reviews the diff and commits. This helper never commits.
 
-import { mkdtemp, readdir, rm, unlink, copyFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { applyRefresh } from "./story-apply-refresh.mjs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -140,17 +141,11 @@ try {
     fail(`Artifact contains unexpected non-PNG files: ${nonPng.slice(0, 5).join(", ")}`);
   }
 
-  // Full replace, mirroring `replaceBaselineImages` in studio-story-pngs.mjs:
-  // deleting first propagates story removals. Only top-level PNGs — the
-  // gitignored .new/ and .scratch/ working dirs are left alone.
-  for (const name of await readdir(baselineDir)) {
-    if (name.endsWith(".png")) {
-      await unlink(path.join(baselineDir, name));
-    }
-  }
-  for (const name of downloaded) {
-    await copyFile(path.join(downloadDir, name), path.join(baselineDir, name));
-  }
+  // Manifest-driven (same helper CI uses): replace only the baselines the
+  // check judged stale. A wholesale swap would also stage the files the check
+  // deliberately tolerated as sub-threshold raster jitter, which is how that
+  // noise became committed baseline churn.
+  await applyRefresh(downloadDir, baselineDir);
 } finally {
   await rm(downloadDir, { recursive: true, force: true });
 }

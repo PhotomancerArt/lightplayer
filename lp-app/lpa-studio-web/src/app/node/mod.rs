@@ -1,6 +1,8 @@
 //! Studio node UI components and colocated node UI stories.
 
+mod add_node_picker;
 mod agent_chat;
+pub(crate) mod agent_chat_export;
 #[cfg(feature = "stories")]
 pub(crate) mod agent_chat_stories;
 mod asset_editor;
@@ -75,6 +77,7 @@ mod slot_vector_fields;
 pub(crate) mod toggle_field_stories;
 pub(crate) mod value_display;
 
+pub use add_node_picker::{AddNodePicker, WorkspaceAddNodeButton};
 pub use agent_chat::AgentChatPane;
 pub use asset_editor::AssetEditor;
 pub(crate) use binding_authoring_section::BindingAuthoringSection;
@@ -88,6 +91,7 @@ pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class}
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
 pub use panel::{HFaderField, KnobField, PanelControl, ToggleField};
 pub use produced_product_view::ProducedProductView;
+pub(crate) use produced_product_view::ProductPreviewCanvas;
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;

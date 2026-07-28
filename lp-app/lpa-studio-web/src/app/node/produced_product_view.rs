@@ -243,9 +243,17 @@ static NEXT_PREVIEW_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
 /// One visual preview = one `<canvas>` painted with `putImageData`. Replaces
 /// the per-pixel `<span>` grid, whose 1024 keyed DOM nodes were re-diffed on
 /// every view snapshot (the dominant UI-thread cost with live sim previews).
+/// `pub(crate)` so the agent history filmstrip renders its thumbnails through
+/// the exact preview path (same doctrine as [`ProductPreview`]'s reuse by
+/// faces and playlist strips).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProductPreviewCanvas(width: u32, height: u32, revision: i64, bytes: Rc<[u8]>) -> Element {
+pub(crate) fn ProductPreviewCanvas(
+    width: u32,
+    height: u32,
+    revision: i64,
+    bytes: Rc<[u8]>,
+) -> Element {
     let canvas_id = use_hook(|| {
         let id = NEXT_PREVIEW_CANVAS_ID.fetch_add(1, Ordering::Relaxed);
         format!("product-preview-canvas-{id}")
@@ -333,6 +341,13 @@ fn paint_preview_canvas(
     context
         .put_image_data(&image, 0.0, 0.0)
         .map_err(|error| format!("putImageData: {error:?}"))?;
+    // Paint runs async after mount, so an unpainted canvas is a possible
+    // page state; the story-capture ready-wait polls this marker so a
+    // baseline can never freeze that state (set imperatively — Dioxus never
+    // writes this attribute, so the vdom won't clear it on re-render).
+    canvas
+        .set_attribute("data-preview-painted", "1")
+        .map_err(|error| format!("mark painted: {error:?}"))?;
     Ok(())
 }
 

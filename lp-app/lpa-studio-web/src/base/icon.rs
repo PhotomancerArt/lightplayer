@@ -207,24 +207,66 @@ pub enum NodeKindIcon {
     Generic,
 }
 
-/// Resolve a node's kind label (e.g. "Clock", "Fixture", "Compute") to its
-/// type glyph. Matches the labels produced by `node_kind_label` in
+/// Resolve a node's kind label (e.g. "Clock", "Fixture", "Compute") or kind
+/// slug (e.g. "clock", "compute_shader" — the icon tokens the add-node
+/// picker entries carry, `node_kind_slug` in `lpa-studio-core`) to its type
+/// glyph. Matches the labels produced by `node_kind_label` in
 /// `lpa-studio-core`; anything unrecognized reads as `Generic` (the cube).
 pub fn node_kind_icon(kind_label: &str) -> StudioIconName {
     let kind = match kind_label {
-        "Clock" => NodeKindIcon::Clock,
-        "Fixture" => NodeKindIcon::Fixture,
-        "Shader" => NodeKindIcon::Shader,
-        "Compute" => NodeKindIcon::Compute,
-        "Output" => NodeKindIcon::Output,
-        "Playlist" => NodeKindIcon::Playlist,
-        "Project" => NodeKindIcon::Project,
-        "Texture" => NodeKindIcon::Texture,
-        "Control Radio" | "Radio" => NodeKindIcon::Radio,
-        "Button" => NodeKindIcon::Button,
-        "Fluid" => NodeKindIcon::Fluid,
+        "Clock" | "clock" => NodeKindIcon::Clock,
+        "Fixture" | "fixture" => NodeKindIcon::Fixture,
+        "Shader" | "shader" => NodeKindIcon::Shader,
+        "Compute" | "Compute shader" | "compute_shader" => NodeKindIcon::Compute,
+        "Output" | "output" => NodeKindIcon::Output,
+        "Playlist" | "playlist" => NodeKindIcon::Playlist,
+        "Project" | "project" => NodeKindIcon::Project,
+        "Texture" | "texture" => NodeKindIcon::Texture,
+        "Control Radio" | "Radio" | "radio" => NodeKindIcon::Radio,
+        "Button" | "button" => NodeKindIcon::Button,
+        "Fluid" | "fluid" => NodeKindIcon::Fluid,
         "Visual" => NodeKindIcon::Visual,
         _ => NodeKindIcon::Generic,
     };
     StudioIconName::NodeKind(kind)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_picker_kind_slug_resolves_to_a_specific_glyph() {
+        // The add-node picker's entry icons are kind slugs
+        // (`node_kind_slug`); none of them may fall through to the generic
+        // cube.
+        for slug in [
+            "shader",
+            "texture",
+            "playlist",
+            "clock",
+            "fixture",
+            "output",
+            "fluid",
+            "compute_shader",
+            "button",
+            "radio",
+        ] {
+            assert_ne!(
+                node_kind_icon(slug),
+                StudioIconName::NodeKind(NodeKindIcon::Generic),
+                "slug {slug} must map to its own kind glyph"
+            );
+        }
+    }
+
+    #[test]
+    fn labels_and_slugs_agree_on_the_glyph() {
+        assert_eq!(node_kind_icon("Shader"), node_kind_icon("shader"));
+        assert_eq!(
+            node_kind_icon("Compute shader"),
+            node_kind_icon("compute_shader")
+        );
+        assert_eq!(node_kind_icon("Radio"), node_kind_icon("radio"));
+    }
 }
