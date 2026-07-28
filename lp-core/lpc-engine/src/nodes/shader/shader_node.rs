@@ -222,11 +222,45 @@ impl ShaderNode {
         Ok(())
     }
 
+    /// Reconcile the runtime `consumed` KEY SET with the authored view: an
+    /// overlay `EnsurePresent` can add a record (a map-entry gesture, the
+    /// agent's `upsert_param`) and a `Remove` can drop one — both change
+    /// the generated uniform header, so either flips `needs_compile`. New
+    /// entries start as the default f32 record; the per-key field sync in
+    /// [`Self::update_consumed_slots_from_view`] brings the authored
+    /// values in on the same tick.
+    fn reconcile_consumed_keys(&mut self, ctx: &mut TickContext<'_>) -> bool {
+        let Some(authored) = try_read_authored_consumed_keys(ctx) else {
+            return false;
+        };
+        let mut changed = false;
+        for key in &authored {
+            if self.consumed_slots.entries.get(key).is_none() {
+                self.consumed_slots
+                    .entries
+                    .insert(key.clone(), ShaderSlotDef::default());
+                changed = true;
+            }
+        }
+        let stale: Vec<String> = self
+            .consumed_slots
+            .entries
+            .keys()
+            .filter(|key| !authored.contains(key))
+            .cloned()
+            .collect();
+        for key in stale {
+            self.consumed_slots.entries.remove(&key);
+            changed = true;
+        }
+        changed
+    }
+
     fn update_consumed_slots_from_view(
         &mut self,
         ctx: &mut TickContext<'_>,
     ) -> Result<(), NodeError> {
-        let mut compile_changed = false;
+        let mut compile_changed = self.reconcile_consumed_keys(ctx);
         let keys: Vec<String> = self.consumed_slots.entries.keys().cloned().collect();
         for key in keys {
             let Some(slot) = self.consumed_slots.entries.get_mut(&key) else {
@@ -440,6 +474,31 @@ pub(super) fn read_authored_value<T: lpc_model::FromLpValue>(
     ctx.resolve_consumed_slot_value(&SlotPath::parse(path).map_err(|e| {
         NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
     })?)
+}
+
+/// The authored `consumed` map's string key set, read through the same
+/// overlay-aware view as the per-field sync. `None` when the query does
+/// not resolve or the path is not a map (unit fakes without authored
+/// defs) — the runtime key set is then left as loaded.
+fn try_read_authored_consumed_keys(ctx: &mut TickContext<'_>) -> Option<Vec<String>> {
+    let production = ctx
+        .resolve(QueryKey::ConsumedSlot {
+            node: ctx.node_id(),
+            slot: SlotPath::parse("consumed").expect("static path"),
+        })
+        .ok()?;
+    let lpc_model::SlotData::Map(map) = production.data() else {
+        return None;
+    };
+    Some(
+        map.entries
+            .keys()
+            .filter_map(|key| match key {
+                lpc_model::SlotMapKey::String(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect(),
+    )
 }
 
 fn try_read_authored_value<T: lpc_model::FromLpValue>(
@@ -932,6 +991,74 @@ mod tests {
             other => panic!("expected visual product, got {other:?}"),
         };
         assert_eq!(got_id, rid);
+    }
+
+    #[test]
+    fn authored_consumed_entries_added_after_load_reach_the_uniform_supply() {
+        // The runtime node starts WITHOUT the `speed` record while the
+        // registry's effective def HAS it — the state an overlay
+        // `EnsurePresent consumed["speed"]` (the agent's `upsert_param`, a
+        // map-entry gesture) produces after load. The key-set reconcile
+        // must pick the record up from the authored view; without it the
+        // render fails with "missing uniform field `speed`".
+        let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
+        let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").expect("name"),
+                lpc_model::NodeName::parse("shader").expect("ty"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                NodeInvocation::new(ArtifactSpec::path("shader.toml")),
+                frame,
+            )
+            .expect("shader");
+
+        let mut full = shader_def_with_time();
+        full.consumed_slots.entries.insert(
+            String::from("speed"),
+            ShaderSlotDef::value_f32("Speed", "", 2.0, None),
+        );
+        engine
+            .load_test_node_defs(&mut registry, &[(sh_id, NodeDef::Shader(full))], frame)
+            .expect("load test defs");
+        // The runtime node's copy predates the `speed` record.
+        let sh = ShaderNode::new(
+            sh_id,
+            shader_def_with_time(),
+            shader_asset_text(source, frame),
+        );
+        engine
+            .attach_runtime_node(sh_id, Box::new(sh), frame)
+            .expect("attach shader");
+
+        engine.tick(&registry, 500).expect("tick");
+        let q = QueryKey::ProducedSlot {
+            node: sh_id,
+            slot: shader_output_path(),
+        };
+        resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off).expect("resolve");
+        engine
+            .render_texture_for_test(
+                &registry,
+                VisualProduct::new(sh_id, 0),
+                &crate::products::visual::RenderTextureRequest {
+                    width: 4,
+                    height: 4,
+                    format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.5,
+                },
+            )
+            .expect("render succeeds once the reconciled record supplies `speed`");
     }
 
     #[test]

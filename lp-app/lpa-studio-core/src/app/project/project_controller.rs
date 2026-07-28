@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
-use crate::app::project::agent_support::{AgentShaderBinding, AgentShaderTarget};
+use crate::app::project::agent_support::{
+    AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
+};
 use crate::app::project::format_lp_value;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -14,16 +16,16 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, ProgressState,
-    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
-    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
-    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
-    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
-    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
-    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
-    UiStatus, UiViewContent, UxUpdateSink,
+    NodeCardUiState, NodeUiOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
+    PlaylistActivateOp, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
+    ProjectSyncSummary, SlotEditOp, StudioOverlayMutation, StudioProjectReadOutcome,
+    StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError,
+    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction,
+    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
+    UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -36,7 +38,8 @@ use lpc_model::{
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
-    WireCreateNodeRequest, WireCreateNodeResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
+    WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 
 use super::node::node_naming::{file_stem, node_kind_slug, sanitize_node_name, unique_node_name};
@@ -106,6 +109,12 @@ pub struct ProjectController {
     slot_shapes: SlotShapeRegistry,
     /// `node.{id}.{root}` → root shape id from the last applied view.
     root_shape_ids: BTreeMap<String, SlotShapeId>,
+    /// Node-card UI view-state (drawer disclosure, agent collapse,
+    /// mirrored composer draft), keyed by node address path — the node arm
+    /// of the CardUiState re-home (2026-07-27). Mutated synchronously via
+    /// `ProjectEditorOp::NodeUi`, overlaid onto the editor DTOs at view
+    /// build, pruned with the loaded project.
+    node_card_ui: BTreeMap<String, NodeCardUiState>,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
     /// Staged node removals recorded from `RemoveNode` acks, keyed by the
@@ -189,6 +198,7 @@ impl ProjectController {
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
+            node_card_ui: BTreeMap::new(),
             next_mutation_cmd_id: 1,
             staged_removals: BTreeMap::new(),
             pending_focus: None,
@@ -566,6 +576,15 @@ impl ProjectController {
                 authored: (binding.origin == lpc_wire::WireBindingOrigin::Authored)
                     .then(|| endpoint.clone()),
             };
+            // The live bus reading rides the (display-only) endpoint AFTER
+            // the authoring surface is built, so Retarget/Unbind state never
+            // carries the churning value (P6 item 1).
+            if binding.direction == lpc_wire::WireBindingDirection::Consumes
+                && let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint
+                && let Some(live) = live_channel_value(graph, channel, binding.kind)
+            {
+                endpoint = endpoint.with_live_value(live);
+            }
             let mut row = crate::UiConfigSlot::empty(name, human_field_label(name))
                 .with_description("Runtime slot wired by binding; it has no authored value here.")
                 .with_state(crate::UiSlotFieldState::readonly())
@@ -696,6 +715,173 @@ impl ProjectController {
             }
         }
         None
+    }
+
+    /// The engine's latest status for the shader node behind `artifact`:
+    /// the retained status Revision plus the verdict classification
+    /// ([`crate::AgentEngineStatus`]). `None` when no shader node uses the
+    /// artifact. Written into the agent bridge cell on every pull so a
+    /// running agent's engine-verdict wait can observe status advances.
+    pub(crate) fn agent_engine_status(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<crate::AgentEngineStatus> {
+        let node = self.agent_shader_node(artifact)?;
+        Some(crate::AgentEngineStatus {
+            revision: node.status_frame(),
+            verdict: crate::app::project::agent_support::engine_verdict(node.status()),
+        })
+    }
+
+    /// The shader node whose resolved `source` asset is `artifact` (the
+    /// agent's per-artifact node lookup).
+    fn agent_shader_node(&self, artifact: &ArtifactLocation) -> Option<&NodeController> {
+        fn find<'a>(
+            controller: &'a ProjectController,
+            nodes: &'a [NodeController],
+            artifact: &ArtifactLocation,
+        ) -> Option<&'a NodeController> {
+            for node in nodes {
+                if node.kind().eq_ignore_ascii_case("shader")
+                    && let Some(source) = shader_source_path(node)
+                    && controller
+                        .resolve_node_asset_artifact(node, &source)
+                        .as_ref()
+                        == Some(artifact)
+                {
+                    return Some(node);
+                }
+                if let Some(found) = find(controller, node.children(), artifact) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        find(self, &self.root_nodes, artifact)
+    }
+
+    /// The cached visual-output preview of the shader node behind
+    /// `artifact` (output 0 — the render product every shader produces),
+    /// for the agent history's thumbnails. `None` when no shader node uses
+    /// the artifact or no probe preview has landed yet (previews are
+    /// reused, never re-plumbed — same doctrine as the playlist strip's
+    /// `child_visual_snapshot`).
+    pub(crate) fn agent_visual_preview(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<crate::UiProductPreview> {
+        let node = self.agent_shader_node(artifact)?;
+        let product = crate::UiProductRef::Visual {
+            node_id: node.target().node_id.0,
+            output: 0,
+        };
+        self.sync.as_ref()?.product_preview(&product).cloned()
+    }
+
+    /// The def-side param records of the shader node behind `artifact`
+    /// (its `consumed` map), for the agent's params diff. `None` when no
+    /// shader node uses the artifact. Written into the agent bridge cell
+    /// on every pull, like [`Self::agent_engine_status`].
+    pub(crate) fn agent_param_defs(
+        &self,
+        artifact: &ArtifactLocation,
+    ) -> Option<Vec<lpa_agent::ParamDefRecord>> {
+        let node = self.agent_shader_node(artifact)?;
+        let bound = self.bound_consumed_names(node.target().node_id);
+        Some(agent_param_def_records(node, &bound))
+    }
+
+    /// The consumed-slot names of `node_id` with a live binding in the
+    /// graph snapshot (bus-driven at runtime; the authored default is then
+    /// inert). Authored binds and materialized `default_bind`s both land in
+    /// the graph, so this covers every bound origin.
+    fn bound_consumed_names(&self, node_id: NodeId) -> BTreeSet<String> {
+        let Some(graph) = self.binding_graph() else {
+            return BTreeSet::new();
+        };
+        graph
+            .bindings
+            .iter()
+            .filter(|binding| {
+                binding.node == node_id
+                    && binding.direction == lpc_wire::WireBindingDirection::Consumes
+            })
+            .filter_map(|binding| binding.slot.as_ref())
+            .filter_map(|slot| match slot.segments().first() {
+                Some(SlotPathSegment::Field(name)) => Some(name.as_str().to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Dispatch one agent `upsert_param` as ONE `MutationCmdBatch` of
+    /// `PutSlotEdit`s on the def artifact of the shader node behind
+    /// `artifact` (batch shape and ack handling like
+    /// [`Self::apply_asset_body`]; the exact edit list is
+    /// [`param_upsert_edits`]). Returns the edit run plus the joined
+    /// rejection text when any command was refused; a clean ack arms the
+    /// verdict chase — the def change flips the node's needs-compile, so
+    /// the agent's engine-verdict wait observes the fresh outcome.
+    pub(crate) async fn upsert_shader_param(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+        upsert: &lpa_agent::ParamUpsert,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let def_artifact = {
+            let node = self.agent_shader_node(artifact).ok_or_else(|| {
+                UiError::UnsupportedAction(format!(
+                    "no shader node uses {}",
+                    artifact.file_path().as_str()
+                ))
+            })?;
+            self.def_artifacts
+                .get(&node.target().node_id)
+                .cloned()
+                .ok_or_else(|| {
+                    UiError::Project(format!(
+                        "no def artifact is known for the shader node of {}",
+                        artifact.file_path().as_str()
+                    ))
+                })?
+        };
+        let batch = MutationCmdBatch::new(
+            param_upsert_edits(upsert)
+                .into_iter()
+                .map(|edit| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: def_artifact.clone(),
+                        edit,
+                    },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        let rejection = (!rejections.is_empty()).then(|| {
+            rejections
+                .iter()
+                .map(rejection_text)
+                .collect::<Vec<_>>()
+                .join("; ")
+        });
+        if rejection.is_none() {
+            // The def change reached the engine; chase its recompile
+            // verdict with the tightened passive ticks (same liveness as
+            // an accepted asset apply).
+            self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+        }
+        Ok((
+            ProjectEditRun {
+                notices: rejection_notices(&rejections),
+                logs: mutation.logs,
+            },
+            rejection,
+        ))
     }
 
     /// Every fixture node with a known def artifact, as `(label, def
@@ -1131,6 +1317,49 @@ impl ProjectController {
             node.refresh_binding_facts(&overrides);
         }
         self.apply_default_binding_overlay();
+        self.apply_bound_live_values();
+    }
+
+    /// Decorate every bound slot's endpoint with the consumed channel's
+    /// current reading (P6 item 1) — the display-only `live_value` a bound
+    /// panel control renders in the violet family. Values come off the
+    /// binding-graph snapshot that already rides every pull; quantization
+    /// and the monotonic/time-kind exclusion live in
+    /// [`live_channel_value`], so this pass only dirties DTOs when a
+    /// displayed reading actually moves. Runs after the binding overlays,
+    /// which (re)build the endpoints it decorates.
+    fn apply_bound_live_values(&mut self) {
+        let Some(graph) = self.binding_graph() else {
+            return;
+        };
+        let mut updates: Vec<(NodeId, String, String)> = Vec::new();
+        for binding in &graph.bindings {
+            if binding.direction != lpc_wire::WireBindingDirection::Consumes {
+                continue;
+            }
+            let lpc_wire::WireBindingEndpoint::Bus { channel } = &binding.endpoint else {
+                continue;
+            };
+            let Some(slot) = binding.slot.as_ref() else {
+                continue;
+            };
+            let Some(lpc_model::SlotPathSegment::Field(name)) = slot.segments().first() else {
+                continue;
+            };
+            let Some(live) = live_channel_value(graph, channel, binding.kind) else {
+                continue;
+            };
+            updates.push((binding.node, name.as_str().to_string(), live));
+        }
+        for (node_id, slot, live) in updates {
+            if let Some(node) = self
+                .root_nodes
+                .iter_mut()
+                .find_map(|node| node.node_by_runtime_id_mut(node_id))
+            {
+                node.apply_bound_live_value(&slot, &live);
+            }
+        }
     }
 
     /// The pending `bindings[…]` edits fact derivation must read through:
@@ -1296,7 +1525,7 @@ impl ProjectController {
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         let subscribes = |node: &NodeController| self.node_subscribes_products(node);
-        let nodes = self
+        let mut nodes = self
             .root_nodes
             .iter()
             .flat_map(NodeController::children)
@@ -1312,6 +1541,12 @@ impl ProjectController {
                 )
             })
             .collect::<Vec<_>>();
+        // Card UI view-state rides the DTOs (drawer disclosure, agent
+        // collapse, mirrored composer draft), overlaid from the
+        // address-keyed store so it survives re-renders and remounts.
+        for node in &mut nodes {
+            self.overlay_node_card_ui(node);
+        }
         // Node dirty covers slot + node-mapped asset edits across the subtree;
         // asset edits whose artifact maps to no node (a shader's `.glsl`) are
         // added on top so they still count toward Save (see `dirty_summary`).
@@ -1775,6 +2010,43 @@ impl ProjectController {
                 self.active_editor_target = Some(target);
                 Ok(UiNotices::new())
             }
+            // Node-card UI view-state mutations are local and synchronous:
+            // the op carries its own node key, so the action's editor target
+            // is irrelevant here.
+            ProjectEditorOp::NodeUi(op) => {
+                self.apply_node_ui_op(op);
+                Ok(UiNotices::new())
+            }
+        }
+    }
+
+    /// Apply one node-card UI mutation to the address-keyed store (the
+    /// node arm of the CardUiState re-home; see
+    /// [`NodeCardUiState`]'s module doc for the draft-mirroring contract).
+    fn apply_node_ui_op(&mut self, op: NodeUiOp) {
+        self.node_card_ui
+            .entry(op.node().to_string())
+            .or_default()
+            .apply(&op);
+    }
+
+    /// Overlay the saved card UI view-state onto a built node DTO and its
+    /// nested children (keyed by address: `header.path` for panes,
+    /// `detail` for children) — the same pattern as the device roster's
+    /// `overlay_card_ui`.
+    fn overlay_node_card_ui(&self, node: &mut UiNodeView) {
+        if let Some(saved) = self.node_card_ui.get(&node.header.path) {
+            node.card_ui = saved.clone();
+        }
+        self.overlay_child_card_ui(&mut node.children);
+    }
+
+    fn overlay_child_card_ui(&self, children: &mut [crate::UiNodeChild]) {
+        for child in children {
+            if let Some(saved) = self.node_card_ui.get(&child.detail) {
+                child.card_ui = saved.clone();
+            }
+            self.overlay_child_card_ui(&mut child.children);
         }
     }
 
@@ -1919,6 +2191,23 @@ impl ProjectController {
             let mut node_products = Vec::new();
             node.collect_produced_product_refs(&mut node_products);
             products.extend(node_products);
+        }
+        // Entry-thumb warming (P6 item 6): the playlist card's strip face is
+        // a permanent surface whose chips reuse each child's CACHED visual
+        // preview, so the children's visual products stay tracked while the
+        // project is open — otherwise non-active entries render name-only
+        // until first focused. These are the 32×32 `RenderProduct` probe
+        // previews riding the regular pull, never GPU gallery lease slots.
+        if node.is_playlist_kind() {
+            for child in node.children() {
+                let mut child_products = Vec::new();
+                child.collect_produced_product_refs(&mut child_products);
+                products.extend(
+                    child_products
+                        .into_iter()
+                        .filter(|product| matches!(product, UiProductRef::Visual { .. })),
+                );
+            }
         }
         for child in node.children() {
             self.collect_subscribed_products(child, products);
@@ -2094,6 +2383,10 @@ impl ProjectController {
     fn clear_loaded_project_state(&mut self) {
         self.sync = None;
         self.root_nodes.clear();
+        // Card UI view-state follows the loaded project: a closed or
+        // failed project must not leak drawer/collapse state (or a
+        // mirrored composer draft) into the next one.
+        self.node_card_ui.clear();
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
@@ -2241,6 +2534,51 @@ impl ProjectController {
             }
             SlotEditOp::Revert { address } => self.apply_revert(server, handle_id, address).await,
         }
+    }
+
+    /// Execute a [`PlaylistActivateOp`]: dispatch the activate-entry runtime
+    /// command to the playlist's live runtime (the non-overlay command
+    /// channel — nothing staged, nothing in the Save panel).
+    ///
+    /// The op carries the stable authored address; the CURRENT runtime
+    /// `NodeId` is resolved here, at dispatch time, so a queued click never
+    /// addresses a stale runtime id across a reload. Acceptance is quiet —
+    /// the strip's ACTIVE placard following on the next refresh is the
+    /// outcome — but borrows the verdict-chase tightened ticks so the
+    /// switch is visible in UI-time, not device-cadence-time. Rejection
+    /// (stale entry key, dead runtime) surfaces as a warning notice.
+    pub async fn activate_playlist_entry(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: PlaylistActivateOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let node_id = self
+            .node(&op.node)
+            .map(|node| node.target().node_id)
+            .ok_or_else(|| {
+                UiError::Project(format!("no node at {} to activate an entry on", op.node))
+            })?;
+        let run = server
+            .node_command(
+                handle_id,
+                node_id,
+                WireNodeCommand::PlaylistActivateEntry { entry: op.entry },
+            )
+            .await?;
+        let notices = match run.response {
+            WireNodeCommandResponse::Accepted => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            WireNodeCommandResponse::Rejected { reason } => UiNotices::new().with_notice(
+                UiNotice::warning(format!("Couldn't activate entry {}: {reason}", op.entry)),
+            ),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
     }
 
     /// Commit the pending-edit overlay (persisted edits are written back to
@@ -3935,6 +4273,33 @@ fn count_nodes(node: &NodeController) -> usize {
     1 + node.children().iter().map(count_nodes).sum::<usize>()
 }
 
+/// The live reading for a consumed bus channel, prepared for display on a
+/// bound panel control (P6 item 1). `None` — no live display — for:
+///
+/// - **monotonic/time-kind channels** (`Kind::Instant`: `time`, `trigger`),
+///   excluded BY KIND so the per-tick clock advance never dirties node DTOs
+///   (the whole-DTO change gate would fire on every pull otherwise);
+/// - channels without a resolved scalar value ([`format_live_scalar`], which
+///   also quantizes floats to ≤2 decimals before DTO entry).
+fn live_channel_value(
+    graph: &lpc_wire::WireBindingGraph,
+    channel_name: &str,
+    binding_kind: lpc_model::Kind,
+) -> Option<String> {
+    if binding_kind == lpc_model::Kind::Instant {
+        return None;
+    }
+    let channel = graph
+        .channels
+        .iter()
+        .find(|channel| channel.name == channel_name)?;
+    if channel.kind == Some(lpc_model::Kind::Instant) {
+        return None;
+    }
+    let value = channel.value.as_ref()?.value.as_ref()?;
+    crate::app::project::format_live_scalar(value)
+}
+
 /// Collect `node` and every descendant controller (preorder) into `out`.
 fn collect_subtree_nodes<'a>(node: &'a NodeController, out: &mut Vec<&'a NodeController>) {
     out.push(node);
@@ -4278,6 +4643,88 @@ fn agent_shader_bindings(node: &NodeController) -> Vec<AgentShaderBinding> {
             }
         })
         .collect()
+}
+
+/// The def-side param records of a shader node, walked from the mirrored
+/// `consumed` map (the same authored data [`shader_uniforms`] keys on):
+/// label plus the optional f32/bool/string fields the params diff and the
+/// panel derivation read. `bound` marks bus-driven names (from the binding
+/// graph). Non-shader nodes yield an empty vec.
+fn agent_param_def_records(
+    node: &NodeController,
+    bound: &BTreeSet<String>,
+) -> Vec<lpa_agent::ParamDefRecord> {
+    fn last_field_is(slot: &SlotController, name: &str) -> bool {
+        matches!(
+            slot.address().path.segments().last(),
+            Some(SlotPathSegment::Field(field)) if field.as_str() == name
+        )
+    }
+
+    fn find_consumed_map(slot: &SlotController) -> Option<&SlotController> {
+        if slot.kind() == SlotKind::Map && last_field_is(slot, "consumed") {
+            return Some(slot);
+        }
+        slot.children().iter().find_map(find_consumed_map)
+    }
+
+    /// The field's effective value: options read through their `some`
+    /// child (absent option ⇒ `None`), value slots read directly.
+    fn field_value<'a>(entry: &'a SlotController, name: &str) -> Option<&'a lpc_model::LpValue> {
+        let field = entry
+            .children()
+            .iter()
+            .find(|child| last_field_is(child, name))?;
+        match field.kind() {
+            SlotKind::Option => field
+                .children()
+                .iter()
+                .find(|child| last_field_is(child, "some"))
+                .and_then(SlotController::value),
+            _ => field.value(),
+        }
+    }
+
+    fn f32_of(value: Option<&lpc_model::LpValue>) -> Option<f32> {
+        match value {
+            Some(lpc_model::LpValue::F32(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    let Some(consumed) = node.slots().iter().find_map(find_consumed_map) else {
+        return Vec::new();
+    };
+    let mut records = Vec::new();
+    for entry in consumed.children() {
+        let Some(SlotPathSegment::Key(SlotMapKey::String(name))) =
+            entry.address().path.segments().last()
+        else {
+            continue;
+        };
+        let label = match field_value(entry, "label") {
+            Some(lpc_model::LpValue::String(label)) => label.clone(),
+            _ => String::new(),
+        };
+        let unit = match field_value(entry, "unit") {
+            Some(lpc_model::LpValue::String(unit)) if !unit.is_empty() => Some(unit.clone()),
+            _ => None,
+        };
+        records.push(lpa_agent::ParamDefRecord {
+            name: name.clone(),
+            label,
+            default: f32_of(field_value(entry, "default")),
+            min: f32_of(field_value(entry, "min")),
+            max: f32_of(field_value(entry, "max")),
+            panel: matches!(
+                field_value(entry, "panel"),
+                Some(lpc_model::LpValue::Bool(true))
+            ),
+            unit,
+            bound: bound.contains(name),
+        });
+    }
+    records
 }
 
 fn default_focus_node_mut(nodes: &mut [NodeController]) -> Option<&mut NodeController> {
@@ -5009,6 +5456,160 @@ mod tests {
         let view = project.editor_view("studio-demo", 7, &inventory);
 
         assert_eq!(view.project_name, "studio-demo");
+    }
+
+    /// Dispatch a `NodeUi` mutation exactly as the web does: through the
+    /// action seam, targeted at the node-tree editor surface (the op
+    /// carries its own node key).
+    fn dispatch_node_ui(project: &mut ProjectController, op: NodeUiOp) {
+        let action = UiAction::from_op(
+            ProjectEditorTarget::node_tree().node_id(),
+            ProjectEditorOp::NodeUi(op),
+        );
+        block_on_ready(project.dispatch_editor_action(action, UxUpdateSink::noop()))
+            .expect("node-ui op applies");
+    }
+
+    #[test]
+    fn node_ui_ops_ride_the_action_seam_into_the_editor_view() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        let orbit = "/demo.project/orbit.shader".to_string();
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDrawer {
+                node: orbit.clone(),
+                drawer: crate::NodeCardDrawer::Code,
+                open: true,
+            },
+        );
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit.clone(),
+                collapsed: true,
+            },
+        );
+
+        let view = project.editor_view("studio-demo", 7, &inventory);
+        assert_eq!(
+            view.nodes[1].card_ui,
+            NodeCardUiState {
+                code_open: true,
+                agent_collapsed: true,
+                ..NodeCardUiState::default()
+            },
+            "the Orbit pane wears its saved card UI state"
+        );
+        assert_eq!(
+            view.nodes[0].card_ui,
+            NodeCardUiState::default(),
+            "state is keyed per node — the Clock pane stays fresh"
+        );
+    }
+
+    #[test]
+    fn agent_collapse_round_trip_preserves_the_mirrored_draft() {
+        // The web's collapse choreography: mirror the draft, collapse,
+        // expand. The mirrored draft must come back out of the DTO so a
+        // remounting composer can seed from it — the draft-survival
+        // contract.
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        let orbit = "/demo.project/orbit.shader".to_string();
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDraft {
+                node: orbit.clone(),
+                draft: "make it pulse slowly".to_string(),
+            },
+        );
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit.clone(),
+                collapsed: true,
+            },
+        );
+        let collapsed = project.editor_view("studio-demo", 7, &inventory);
+        assert!(collapsed.nodes[1].card_ui.agent_collapsed);
+        assert_eq!(
+            collapsed.nodes[1].card_ui.composer_draft,
+            "make it pulse slowly"
+        );
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetAgentCollapsed {
+                node: orbit,
+                collapsed: false,
+            },
+        );
+        let expanded = project.editor_view("studio-demo", 7, &inventory);
+        assert!(!expanded.nodes[1].card_ui.agent_collapsed);
+        assert_eq!(
+            expanded.nodes[1].card_ui.composer_draft, "make it pulse slowly",
+            "expanding never clears the mirrored draft"
+        );
+    }
+
+    #[test]
+    fn node_card_ui_is_pruned_when_the_loaded_project_closes() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetDraft {
+                node: "/demo.project/orbit.shader".to_string(),
+                draft: "stale draft".to_string(),
+            },
+        );
+
+        project.disconnect();
+        project.mark_ready("studio-demo", 8, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+
+        let view = project.editor_view("studio-demo", 8, &inventory);
+        assert_eq!(
+            view.nodes[1].card_ui,
+            NodeCardUiState::default(),
+            "card UI state follows the loaded project"
+        );
+    }
+
+    #[test]
+    fn nested_child_cards_wear_their_own_card_ui_overlay() {
+        let mut project = ProjectController::new();
+        project.apply_node_ui_op(NodeUiOp::SetDrawer {
+            node: "/demo.project/list.playlist/glow.shader".to_string(),
+            drawer: crate::NodeCardDrawer::Advanced,
+            open: true,
+        });
+
+        // A nested child DTO (keyed by `detail` = its address), one level
+        // down — the overlay walk must reach it.
+        let mut children = vec![crate::UiNodeChild::new(
+            "List",
+            "Playlist",
+            "/demo.project/list.playlist",
+        )];
+        children[0].children = vec![crate::UiNodeChild::new(
+            "Glow",
+            "Shader",
+            "/demo.project/list.playlist/glow.shader",
+        )];
+
+        project.overlay_child_card_ui(&mut children);
+        assert!(!children[0].card_ui.advanced_open);
+        assert!(children[0].children[0].card_ui.advanced_open);
     }
 
     #[test]
@@ -5838,6 +6439,152 @@ mod tests {
             panic!("expected wired row to be bound, got {:?}", wired.source);
         };
         assert_eq!(endpoint.label, "bus:visual.out");
+    }
+
+    #[test]
+    fn bound_rows_carry_quantized_live_values_and_skip_time_kind() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+
+        let node = lpc_model::NodeId::new(1);
+        let binding = |slot: &str,
+                       channel: &str,
+                       kind: lpc_model::Kind,
+                       origin: lpc_wire::WireBindingOrigin|
+         -> lpc_wire::WireEffectiveBinding {
+            lpc_wire::WireEffectiveBinding {
+                owner: node,
+                node,
+                slot: Some(SlotPath::parse(slot).unwrap()),
+                direction: lpc_wire::WireBindingDirection::Consumes,
+                endpoint: lpc_wire::WireBindingEndpoint::Bus {
+                    channel: channel.to_string(),
+                },
+                origin,
+                priority: 0,
+                kind,
+            }
+        };
+        let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
+            lpc_wire::WireBusChannel {
+                name: name.to_string(),
+                kind: Some(kind),
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                value: Some(lpc_wire::WireBusChannelValue {
+                    revision: Revision::new(2),
+                    value: Some(LpValue::F32(value)),
+                    error: None,
+                }),
+            }
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: vec![
+                    // Implicit runtime slots → binding-derived rows.
+                    binding(
+                        "wired_in",
+                        "wobble",
+                        lpc_model::Kind::Amplitude,
+                        lpc_wire::WireBindingOrigin::Authored,
+                    ),
+                    binding(
+                        "wired_time",
+                        "time",
+                        lpc_model::Kind::Instant,
+                        lpc_wire::WireBindingOrigin::Authored,
+                    ),
+                    // Backing def row → decorated by the live-value pass
+                    // after the default overlay wires it.
+                    binding(
+                        "brightness",
+                        "wobble",
+                        lpc_model::Kind::Amplitude,
+                        lpc_wire::WireBindingOrigin::Default,
+                    ),
+                ],
+                channels: vec![
+                    channel("wobble", lpc_model::Kind::Amplitude, 0.123_456),
+                    channel("time", lpc_model::Kind::Instant, 12_345.678),
+                ],
+            });
+        project.apply_default_binding_overlay();
+        project.apply_bound_live_values();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        let bound_endpoint = |label: &str| -> &crate::UiBindingEndpoint {
+            let row = config.iter().find(|slot| slot.label == label).unwrap();
+            let UiSlotSourceState::Bound(endpoint) = &row.source else {
+                panic!("expected {label} to be bound, got {:?}", row.source);
+            };
+            endpoint
+        };
+
+        // Binding-derived row: quantized (≤2 decimals) live reading.
+        assert_eq!(
+            bound_endpoint("Wired in").live_value.as_deref(),
+            Some("0.12")
+        );
+        // Time-kind channels are excluded so the per-tick clock advance
+        // never dirties the DTO change gate.
+        assert_eq!(bound_endpoint("Wired time").live_value, None);
+        // Def-root slot wired by the overlay: the live pass decorates it.
+        assert_eq!(
+            bound_endpoint("Brightness").live_value.as_deref(),
+            Some("0.12")
+        );
+    }
+
+    #[test]
+    fn playlist_children_visual_products_stay_tracked_for_entry_thumbs() {
+        let mut view = ProjectView::new();
+        let mut playlist = node_entry(
+            1,
+            "/demo.project/list.playlist",
+            None,
+            NodeRuntimeStatus::Ok,
+        );
+        playlist.children = vec![NodeId::new(2)];
+        view.tree.insert(playlist);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.project/list.playlist/glow.shader",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        install_ui_projection_slots(&mut view, 2, Revision::new(2));
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+
+        // The child picks up default focus (only shader in the tree) which
+        // would subscribe ALL its products; pin it unsubscribed so the
+        // assertion isolates the warming path.
+        let child = crate::ProjectNodeAddress::parse("/demo.project/list.playlist/glow.shader")
+            .expect("valid address");
+        project
+            .node_mut(&child)
+            .expect("child controller")
+            .state_mut()
+            .product_subscription_intent = ProjectProductSubscriptionIntent::Unsubscribed;
+
+        // An unsubscribed (unfocused) child would normally be untracked;
+        // the playlist strip face keeps its VISUAL product warm for the
+        // entry thumb (probe previews only — the control product stays
+        // out, and GPU gallery leases are a separate web-side concern).
+        assert_eq!(
+            project.subscribed_products(),
+            vec![UiProductRef::Visual {
+                node_id: 2,
+                output: 0
+            }]
+        );
     }
 
     #[test]

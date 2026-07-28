@@ -152,18 +152,25 @@ color.
 
 ### Playlist: one live surface
 
-> **Revised 2026-07-28.** The invariant below pinned the single rendered
-> child to the **active** entry. That made every non-playing entry
+> **Revised 2026-07-28.** The invariant below made every non-playing entry
 > uneditable: a strip click set focus correctly, and this same derivation
 > then filtered the focused child away
-> (`docs/defects/2026-07-28-playlist-entry-selection.md`). The rule now
-> reads **"exactly one entry child renders: the selected one, falling back
-> to the active one"** — selection being the shared project-wide node
-> focus. `UiPlaylistFace` gained `selected` beside `active`; the ACTIVE
-> placard still tracks the engine, and the two may name different entries.
-> One surface still renders, so the intent below is intact; only its
-> coupling to playback is gone. Activation-by-click remains unbuilt (see
-> Consequences).
+> (`docs/defects/2026-07-28-playlist-entry-selection.md`). The fix landed
+> as the **activate-by-click** op this ADR's Consequences list as missing
+> (`PlaylistActivateOp`): a non-active chip now activates its entry
+> through the runtime command channel, which makes it active, which
+> renders its card. The active chip keeps the child's select action, since
+> re-activating it would be a no-op.
+>
+> The single-rendered-child rule below is therefore **unchanged** — it
+> still follows `active_entry`. What changed is that the user can now move
+> `active_entry` from the strip.
+>
+> Residual gap: selecting a non-active playlist child from the **project
+> tree** still shows the active entry's card, because the rendered child
+> follows playback rather than selection. A selection-follows-focus
+> variant was built and dropped in favour of this one; see the defect
+> entry for why the two do not compose.
 
 The playlist face is the ENTRIES strip only — per-entry name, duration
 chip, cue tag (`trigger_ids` non-empty), and an **ACTIVE** placard

@@ -36,12 +36,14 @@ fn default() -> Element {
     description = "Advanced drawer open: mapping/input/driver/channel slot rows (bound input row included) under the face."
 )]
 fn advanced_open() -> Element {
+    // Disclosure is core-owned: seed the DTO's card UI state.
+    let mut view = fixture_node_view();
+    view.card_ui.advanced_open = true;
     rsx! {
         FixtureCardCanvas {
             NodePane {
-                view: fixture_node_view(),
+                view,
                 on_action: move |_| {},
-                face_advanced_drawer_open: true,
             }
         }
     }

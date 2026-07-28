@@ -278,6 +278,34 @@ impl Engine {
         Ok(())
     }
 
+    /// Dispatch a runtime node command (`WireProjectCommand::NodeCommand`)
+    /// to the addressed node's live runtime.
+    ///
+    /// The runtime command channel is the non-overlay client→engine write
+    /// path (`docs/adr/2026-07-27-runtime-node-command-channel.md`): the
+    /// command acts on live runtime state only — no staging, no
+    /// persistence, no revision bump here (effects surface through the
+    /// node's own runtime slots on the next produce). Unknown/not-alive
+    /// nodes and runtime-refused commands come back as errors for the
+    /// server to answer as a normal `Rejected` response.
+    pub fn handle_node_command(
+        &mut self,
+        node: NodeId,
+        command: &lpc_wire::WireNodeCommand,
+    ) -> Result<(), EngineError> {
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let entry = self
+            .tree
+            .get_mut(node)
+            .ok_or(EngineError::UnknownNode(node))?;
+        match entry.state.get_mut() {
+            NodeEntryState::Alive(runtime) => runtime
+                .handle_command(command, time_s)
+                .map_err(|e| EngineError::node(node, e)),
+            _ => Err(EngineError::NotAlive(node)),
+        }
+    }
+
     pub fn runtime_output_sink_buffer_id(&self, node_id: NodeId) -> Option<RuntimeBufferId> {
         let entry = self.tree.get(node_id)?;
         match entry.state.value() {
@@ -2198,5 +2226,73 @@ mod tests {
         ) -> Result<(), NodeError> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn node_command_dispatches_to_the_addressed_runtime() {
+        use crate::nodes::{PlaylistNode, PlaylistRuntimeEntry};
+        use lpc_wire::WireNodeCommand;
+
+        let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let root = eng.tree().root();
+        let node = eng
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("playlist").expect("name"),
+                lpc_model::NodeName::parse("playlist").expect("kind"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                test_placeholder_spine(),
+                Revision::new(1),
+            )
+            .expect("add node");
+        let entries = alloc::vec![PlaylistRuntimeEntry {
+            index: 1,
+            child: NodeId::new(99),
+            output_slot: SlotPath::parse("output").expect("path"),
+            duration: None,
+            fade_after: None,
+            trigger_ids: None,
+        }];
+        eng.attach_runtime_node(
+            node,
+            Box::new(PlaylistNode::new(node, 1, 0.0, entries)),
+            Revision::new(1),
+        )
+        .expect("attach node");
+
+        eng.handle_node_command(node, &WireNodeCommand::PlaylistActivateEntry { entry: 1 })
+            .expect("known entry accepted");
+
+        let err = eng
+            .handle_node_command(node, &WireNodeCommand::PlaylistActivateEntry { entry: 9 })
+            .expect_err("unknown entry rejected");
+        assert!(err.to_string().contains("no loaded entry 9"), "{err}");
+
+        let err = eng
+            .handle_node_command(
+                NodeId::new(4242),
+                &WireNodeCommand::PlaylistActivateEntry { entry: 1 },
+            )
+            .expect_err("unknown node rejected");
+        assert!(matches!(err, EngineError::UnknownNode(_)));
+    }
+
+    /// Nodes without a `handle_command` override reject every command —
+    /// the channel is opt-in per runtime.
+    #[test]
+    fn node_command_default_is_rejected() {
+        use lpc_wire::WireNodeCommand;
+
+        let mut node = FailingNode;
+        let err = NodeRuntime::handle_command(
+            &mut node,
+            &WireNodeCommand::PlaylistActivateEntry { entry: 0 },
+            0.0,
+        )
+        .expect_err("default rejects");
+        assert!(err.to_string().contains("accepts no runtime commands"));
     }
 }

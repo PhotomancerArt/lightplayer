@@ -20,7 +20,20 @@ use serde::{Deserialize, Serialize};
 /// old peer misread a new frame or vice versa. There is no negotiation and
 /// no compatibility shim (see AGENTS.md wire-compat policy): differing
 /// versions mean "assume nothing works; upgrade the firmware".
-pub const WIRE_PROTO_VERSION: u32 = 2;
+///
+/// # History
+///
+/// - 3: merge of the two independent "2" bumps below — one wire surface
+///   carrying BOTH the node authoring operations and the runtime node
+///   command channel.
+/// - 2 (node authoring, PR #154): `WireProjectCommand::CreateNode` /
+///   `RemoveNode` plus inventory node entries/origins
+///   (`docs/adr/2026-07-27-node-authoring-operations.md`).
+/// - 2 (runtime commands, PR #158): `WireProjectCommand::NodeCommand`
+///   runtime command channel (playlist activate-entry;
+///   `docs/adr/2026-07-27-runtime-node-command-channel.md`).
+/// - 1: hello handshake introduced.
+pub const WIRE_PROTO_VERSION: u32 = 3;
 
 /// Unsolicited/boot-time server identity and version report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

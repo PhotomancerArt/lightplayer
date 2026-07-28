@@ -26,9 +26,11 @@ pub use lpc_history::{ContentHash, SyncRelation};
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
 pub use app::agent::{
-    AgentController, AgentCostRates, AgentFeedback, AgentOp, AgentProviderConfig, AgentRunContext,
-    AgentSessionKey, AgentTaskFuture, AgentViewContext, UiAgentAvailability, UiAgentStatus,
-    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
+    AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
+    AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
+    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
+    UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
+    UiAgentTurn, UiAgentUsage, UiAgentView, instant_agent_timer,
 };
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
@@ -60,18 +62,19 @@ pub use app::preview_host::{
     PreviewTier,
 };
 pub use app::project::{
-    AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp,
-    NodeRevertOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
-    ProjectAssetContentRun, ProjectConnectResult, ProjectController, ProjectEditRun,
-    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
-    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
-    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent,
-    ProjectRefreshOutcome, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAddNodeMenu,
-    UiAddNodeMenuEntry, UiAffordance, UiAssetContent, UiAssetContentBody, UiAttachTarget,
-    UiNodeRemovePreflight, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiShaderError,
+    AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
+    MAX_ASSET_BODY_BYTES, NodeCardDrawer, NodeCardUiState, NodeController, NodeControllerState,
+    NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PendingAssetEdit,
+    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
+    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
+    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
+    SlotEditOp, SlotKind, UiAddNodeMenu, UiAddNodeMenuEntry, UiAffordance, UiAssetContent,
+    UiAssetContentBody, UiAttachTarget, UiNodeRemovePreflight, UiPendingEdit, UiPendingEditKind,
+    UiPendingEditPhase, UiShaderError,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
@@ -94,8 +97,8 @@ pub use app::server::{
 };
 pub use app::settings::{
     AgentProvider, AgentProviderGuidance, AgentSettings, DEFAULT_AGENT_MODEL, SettingsCommand,
-    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiSettingsView,
-    provider_guidance,
+    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiModelOption,
+    UiSettingsView, provider_guidance,
 };
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,

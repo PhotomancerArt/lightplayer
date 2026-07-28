@@ -53,6 +53,7 @@ pub(crate) fn knob_control(
             step: None,
         },
         value: slot_value,
+        live_value: None,
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
@@ -79,6 +80,7 @@ pub(crate) fn fader_control(
             step: Some(1.0),
         },
         value: slot_value,
+        live_value: None,
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
@@ -101,6 +103,7 @@ pub(crate) fn toggle_control(
         address: Some(story_slot_address(&format!("controls.{label}"))),
         widget: UiPanelWidget::Toggle,
         value: slot_value,
+        live_value: None,
         unit: None,
         state,
         aspects: aspect_slot.visible_aspects(),
@@ -112,23 +115,28 @@ pub(crate) fn bound_source() -> UiSlotSourceState {
     UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:master-tempo"))
 }
 
-/// The shader face's knob row: bound speed (violet), plain hue, live-edited
-/// scale, and the mirror toggle.
+/// The shader face's knob row: bound speed (violet, with the live bus
+/// reading leading its readout), plain hue, live-edited scale, and the
+/// mirror toggle.
 pub(crate) fn shader_controls(speed_bound: bool) -> Vec<UiPanelControl> {
     let speed_source = if speed_bound {
         bound_source()
     } else {
         UiSlotSourceState::Unset
     };
+    let mut speed = knob_control(
+        "speed",
+        1.6,
+        0.0,
+        4.0,
+        UiSlotFieldState::editable(),
+        speed_source,
+    );
+    // A bound knob carries the channel's quantized live reading
+    // (display-only; the authored 1.6 stays the edit target).
+    speed.live_value = speed_bound.then(|| "2.72".to_string());
     vec![
-        knob_control(
-            "speed",
-            1.6,
-            0.0,
-            4.0,
-            UiSlotFieldState::editable(),
-            speed_source,
-        ),
+        speed,
         knob_control(
             "hue",
             0.32,
@@ -246,8 +254,10 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
             UiAgentTurn::Tool(UiAgentToolRow {
                 id: "tu_1".to_string(),
                 note: Some("ease drift toward the rim".to_string()),
+                phase: None,
                 done: true,
                 staged: true,
+                edit_turn: None,
                 shader_ok: Some(true),
                 probes: 2,
                 warnings: 0,
@@ -270,8 +280,17 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
         usage: UiAgentUsage {
             input_tokens: 2841,
             output_tokens: 512,
+            ..UiAgentUsage::default()
         },
         estimated_cost: Some("~$0.0162".to_string()),
+        history: Vec::new(),
+        history_dropped: 0,
+        model: lpa_studio_core::UiAgentModelView {
+            effective: Some("claude-sonnet-5".to_string()),
+            options: Vec::new(),
+            loading: false,
+        },
+        debug: None,
     }
 }
 
@@ -398,34 +417,24 @@ fn entry_select_action(name: &str) -> UiAction {
         .with_label(format!("Select {name}"))
 }
 
-/// The playlist face with Aurora active and nothing selected — the
-/// load-time default, where the card below follows the active entry.
+/// The playlist face with Aurora active.
 pub(crate) fn playlist_face() -> UiPlaylistFace {
     UiPlaylistFace {
         entries: playlist_entries(),
         active: Some(1),
-        selected: None,
-    }
-}
-
-/// The playlist face with Aurora active but a DIFFERENT entry selected —
-/// the case the 2026-07-28 selection fix introduced, where the strip marks
-/// two entries for two different reasons and the card below follows the
-/// selected one.
-pub(crate) fn playlist_face_selected_not_active() -> UiPlaylistFace {
-    UiPlaylistFace {
-        entries: playlist_entries(),
-        active: Some(1),
-        selected: Some(3),
     }
 }
 
 /// The active child: Aurora's own shader card (face and all), rendered
-/// BELOW the playlist card as a sibling (P2c item 2).
+/// BELOW the playlist card as a sibling (P2c item 2). Like the production
+/// derivation, it does NOT wear the `active` flag — the web maps that onto
+/// the pane's *selection* look, and the strip's ACTIVE placard is the
+/// active-ness presentation (P6 item 7).
 pub(crate) fn playlist_active_child() -> UiNodeChild {
-    let mut child = UiNodeChild::new("Aurora", "Shader", "./aurora.json")
-        .active("playing, 1:12 remaining")
-        .with_sections(shader_sections());
+    let mut child =
+        UiNodeChild::new("Aurora", "Shader", "./aurora.json").with_sections(shader_sections());
+    child.status = UiStatus::good("Running");
+    child.summary = Some("playing, 1:12 remaining".to_string());
     child.face = Some(UiNodeFace::Shader(shader_face(true, UiAgentStatus::Idle)));
     child
 }
@@ -483,7 +492,6 @@ pub(crate) fn empty_playlist_node_view() -> UiNodeView {
     view.face = Some(UiNodeFace::Playlist(UiPlaylistFace {
         entries: Vec::new(),
         active: None,
-        selected: None,
     }));
     view
 }

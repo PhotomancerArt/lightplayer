@@ -51,6 +51,29 @@ pub fn format_lp_value(value: &LpValue) -> String {
     }
 }
 
+/// A scalar bus reading formatted for live display on a panel control
+/// (P6 item 1). Floats are QUANTIZED to at most 2 decimals BEFORE the
+/// string enters any DTO, so a slowly-drifting channel only dirties the
+/// whole-DTO change gate when the displayed reading actually moves.
+/// Non-scalar values (vectors, products, structs) have no panel-control
+/// presentation and return `None`.
+pub fn format_live_scalar(value: &LpValue) -> Option<String> {
+    match value {
+        LpValue::F32(value) if value.is_finite() => {
+            let rounded = (value * 100.0).round() / 100.0;
+            Some(if rounded.fract() == 0.0 {
+                format!("{rounded:.1}")
+            } else {
+                rounded.to_string()
+            })
+        }
+        LpValue::I32(value) => Some(value.to_string()),
+        LpValue::U32(value) => Some(value.to_string()),
+        LpValue::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
 pub fn format_slot_map_key(key: &SlotMapKey) -> String {
     match key {
         SlotMapKey::String(value) => value.clone(),
@@ -130,6 +153,25 @@ mod tests {
     use lpc_model::{ControlExtent, ControlProduct, LpValue, NodeId, ProductRef, VisualProduct};
 
     use super::*;
+
+    #[test]
+    fn live_scalar_quantizes_floats_and_skips_non_scalars() {
+        assert_eq!(
+            format_live_scalar(&LpValue::F32(2.71828)).as_deref(),
+            Some("2.72")
+        );
+        assert_eq!(
+            format_live_scalar(&LpValue::F32(3.0)).as_deref(),
+            Some("3.0")
+        );
+        assert_eq!(format_live_scalar(&LpValue::U32(7)).as_deref(), Some("7"));
+        assert_eq!(
+            format_live_scalar(&LpValue::Bool(true)).as_deref(),
+            Some("true")
+        );
+        assert_eq!(format_live_scalar(&LpValue::F32(f32::NAN)), None);
+        assert_eq!(format_live_scalar(&LpValue::Vec2([1.0, 2.0])), None);
+    }
 
     #[test]
     fn formats_scalars_vectors_and_products() {

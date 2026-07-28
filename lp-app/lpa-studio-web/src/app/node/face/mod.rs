@@ -5,6 +5,13 @@
 //! beneath it and growth is downward-only from a stable top. Nodes without
 //! a face keep today's generic section rendering ([`super::NodePane`]'s
 //! fallback branch).
+//!
+//! Disclosure state (drawer open, agent collapse, mirrored composer
+//! draft) is CORE-OWNED (`NodeCardUiState`, keyed by node address): the
+//! components here render `UiNodeView::card_ui` and dispatch
+//! [`node_ui_action`]s instead of holding `use_signal`s.
+
+use lpa_studio_core::{NodeUiOp, ProjectEditorOp, ProjectEditorTarget, UiAction};
 
 mod fixture_face;
 mod node_card_drawers;
@@ -19,3 +26,13 @@ pub use node_card_section::NodeCardSection;
 pub use node_face_body::NodeFaceBody;
 pub use playlist_face::PlaylistFace;
 pub use shader_face::ShaderFace;
+
+/// Wrap a node-card UI mutation in its dispatchable action (targeted at
+/// the project editor's node-tree surface; the op carries its own node
+/// key).
+pub(crate) fn node_ui_action(op: NodeUiOp) -> UiAction {
+    UiAction::from_op(
+        ProjectEditorTarget::node_tree().node_id(),
+        ProjectEditorOp::NodeUi(op),
+    )
+}

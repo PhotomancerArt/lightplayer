@@ -1,11 +1,11 @@
-//! Stories for the playlist card face (the ENTRIES strip; one entry's child
+//! Stories for the playlist card face (the ENTRIES strip; the active child
 //! renders below the card as a sibling — P2c item 2).
 //!
 //! Four entries with duration chips, one cue-tagged entry, and the
 //! "ACTIVE" placard replacing the playing entry's thumbnail (Yona Q5:
 //! ACTIVE, matching `PlaylistState.active_entry`). Coverage: the strip
-//! alone, the embedded child's card stacked below as its own card, the
-//! selected-but-not-active case (2026-07-28), and the empty playlist.
+//! alone, the active child's card stacked below as its own card, and the
+//! empty playlist.
 
 use dioxus::prelude::*;
 use lpa_studio_core::app::project::node::add_node_menu;
@@ -13,9 +13,7 @@ use lpa_studio_core::{ProjectNodeAddress, UiAttachTarget, UiNodeFace};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::NodePane;
-use crate::app::node::face_story_fixtures::{
-    empty_playlist_node_view, playlist_face_selected_not_active, playlist_node_face_view,
-};
+use crate::app::node::face_story_fixtures::{empty_playlist_node_view, playlist_node_face_view};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -72,21 +70,6 @@ fn active_child_below() -> Element {
                 view: playlist_node_face_view(),
                 on_action: move |_| {},
             }
-        }
-    }
-}
-
-#[story(
-    description = "Selection and playback on DIFFERENT entries (2026-07-28 fix): Aurora keeps the live-blue ACTIVE placard while Tide wears the neutral selection outline, and Tide's card is the one embedded below. Before this, clicking a non-active entry set focus on a card the face then filtered away, so only the active entry could be edited."
-)]
-fn selected_not_active() -> Element {
-    let mut view = playlist_node_face_view();
-    if let Some(face) = view.face.as_mut() {
-        *face = UiNodeFace::Playlist(playlist_face_selected_not_active());
-    }
-    rsx! {
-        PlaylistCardCanvas {
-            NodePane { view, on_action: move |_| {} }
         }
     }
 }
