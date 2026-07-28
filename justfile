@@ -742,7 +742,10 @@ test-rust:
     # Studio web view layer is outside default-members (Dioxus web dep tree);
     # its unit tests are pure host-runnable view helpers. Separate invocation
     # per the no-workspace-wide-cargo rule (feature unification).
-    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros
+    # `stories` is on because the story book carries host-testable invariants of
+    # the capture harness seam (see `overview_ids_are_reserved_for_generated_composites`);
+    # without it that module is not compiled and its tests silently do not run.
+    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the

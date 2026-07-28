@@ -49,11 +49,16 @@ a true content re-measure. The next attempt should find the supported CM6
 API for forcing a text-size re-measure after mount, or make the theme's
 styles apply before the first measurement can run.
 
-**Regression coverage** — none yet. The story baseline
-`base__code-editor__overview__*` is the de facto detector: it is what
-caught this. A fix should land with a check that gutter row advance
-equals content line advance, so the assertion does not depend on the
-capture pipeline noticing a flip.
+**Regression coverage** — **none, and the de facto detector is gone.**
+`base__code-editor__overview__*` is what caught this, by flipping — but
+generated `overview` composites stopped being pixel baselines on
+2026-07-28 (they were nondeterministic for an unrelated reason: see
+[overview-composite-capture-races](2026-07-28-overview-composite-capture-races.md)
+and its ADR). The per-story `base__code-editor__*` baselines each froze
+one of the two terminals and are stable, so they will not report a flip.
+Nothing detects this defect today. The check this entry already asked for
+— gutter row advance equals content line advance — is now the only route
+to coverage, not the nicer alternative to a flaky one.
 
 **Lesson** — Two things. First, a flaky visual baseline is evidence, not
 noise: this was written off as capture churn across two separate
