@@ -195,6 +195,39 @@ schemars = { version = "1.2.1", default-features = false, features = ["derive"] 
 serde_json = { version = "1.0.80", default-features = false, features = ["alloc", "raw_value"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 
+# The test suites are execution-bound, not codegen-bound: the filetests run
+# 31k GLSL cases through the RV32 emulator, the wasm interpreter, and the LPIR
+# interpreter, and fw-tests boots a firmware image on the emulator. At
+# opt-level 0 those interpreter loops dominate every timing we have — the
+# `control/` filetest directory takes 20.8s unoptimized and 2.3s with the
+# overrides below (9x wall, 8x CPU), and `fw-tests --test scene_render_emu`
+# goes 79s -> 33s.
+#
+# Only the execution engines are lifted, not the compiler frontend
+# (lps-glsl/lps-frontend/lpir stay at opt-level 0): the engines are rarely
+# edited, so the extra codegen is paid once and cached, while shader-frontend
+# work keeps its fast edit-build cycle. Lifting the frontend too was measured
+# and bought only 2.3s -> 2.0s, which does not pay for the rebuild cost.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.package.lp-riscv-emu]
+opt-level = 3
+[profile.dev.package.lp-riscv-emu-shared]
+opt-level = 3
+[profile.dev.package.lp-riscv-inst]
+opt-level = 3
+[profile.dev.package.lpvm]
+opt-level = 3
+[profile.dev.package.lpvm-wasm]
+opt-level = 3
+[profile.dev.package.lps-q32]
+opt-level = 3
+[profile.dev.package.lps-builtins]
+opt-level = 3
+[profile.dev.package.lp-gfx-lpvm]
+opt-level = 3
+
 [profile.release]
 # Link-time optimization for all release builds - saves ~100-300 KB
 lto = true
