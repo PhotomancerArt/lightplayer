@@ -70,6 +70,27 @@ impl UiDeviceCard {
     pub fn render_key(&self) -> &str {
         self.identity_key()
     }
+
+    /// Whether the CARD-OWNED op flow aimed at `target_uid` rides THIS
+    /// card (state-flow model §2). The managed device's stamped uid
+    /// addresses its card directly; an identity-less blank board (mid
+    /// first-provision, no uid yet) has its op ride the live —
+    /// non-offline — hardware card.
+    ///
+    /// The ONE rule, shared by the two places that must agree: the
+    /// controller's view build (`overlay_card_ui`) and the actor's
+    /// progressive patch ([`crate::UiStudioView::apply_card_op`]). They
+    /// drifted apart once already — a flash's progress reached neither
+    /// surface — so both call here.
+    pub fn takes_card_op(&self, target_uid: Option<&str>) -> bool {
+        if self.sim {
+            return false;
+        }
+        match target_uid {
+            Some(uid) => self.uid.as_deref() == Some(uid),
+            None => !matches!(self.state, RosterCardState::Offline { .. }),
+        }
+    }
 }
 
 /// The header chip naming the device's project: thumbnail seed + display
