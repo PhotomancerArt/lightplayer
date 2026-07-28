@@ -14,8 +14,9 @@ use lpc_model::{
     ProjectOverlay, Revision, SlotPath,
 };
 use lpc_wire::{
-    ProjectReadEvent, ProjectReadRequest, WireNodeCommand, WireNodeCommandResponse,
-    WireOverlayMutationRequest, WireProjectHandle, WireProjectInventoryReadResponse,
+    ProjectReadEvent, ProjectReadRequest, WireCreateNodeRequest, WireCreateNodeResponse,
+    WireNodeCommand, WireNodeCommandResponse, WireOverlayMutationRequest, WireProjectHandle,
+    WireProjectInventoryReadResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 
 use crate::app::project::demo_project::{
@@ -353,6 +354,19 @@ pub struct StudioOverlayMutation {
     pub logs: Vec<UiLogDraft>,
 }
 
+/// Result of a `CreateNode` command (accepted or rejected — rejections ride
+/// as data, not transport errors).
+pub struct StudioCreateNode {
+    pub response: WireCreateNodeResponse,
+    pub logs: Vec<UiLogDraft>,
+}
+
+/// Result of a `RemoveNode` command (staged or rejected).
+pub struct StudioRemoveNode {
+    pub response: WireRemoveNodeResponse,
+    pub logs: Vec<UiLogDraft>,
+}
+
 /// Outcome of a runtime node command dispatch.
 pub struct StudioNodeCommand {
     pub response: WireNodeCommandResponse,
@@ -523,6 +537,63 @@ impl StudioServerClient {
             data: read.value,
             logs,
         })
+    }
+
+    /// Create and attach one node (dedicated `CreateNode` op — the server
+    /// writes the files and live-applies the result immediately).
+    pub async fn project_create_node(
+        &mut self,
+        handle_id: u32,
+        request: WireCreateNodeRequest,
+    ) -> Result<StudioCreateNode, UiError> {
+        let outcome = self
+            .client
+            .project_create_node(WireProjectHandle::new(handle_id), request)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioCreateNode {
+            response: outcome.value,
+            logs,
+        })
+    }
+
+    /// Stage one node removal (dedicated `RemoveNode` op — staged in the
+    /// server overlay, revertible until commit).
+    pub async fn project_remove_node(
+        &mut self,
+        handle_id: u32,
+        request: WireRemoveNodeRequest,
+    ) -> Result<StudioRemoveNode, UiError> {
+        let outcome = self
+            .client
+            .project_remove_node(WireProjectHandle::new(handle_id), request)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioRemoveNode {
+            response: outcome.value,
+            logs,
+        })
+    }
+
+    /// Re-read the effective inventory's runtime-node-id → def-artifact map
+    /// (the same map connect installs). Node creation re-pulls this so the
+    /// new node's slot edits can resolve their artifact immediately.
+    pub async fn project_node_def_artifacts(
+        &mut self,
+        handle_id: u32,
+    ) -> Result<(BTreeMap<NodeId, ArtifactLocation>, Vec<UiLogDraft>), UiError> {
+        let inventory = self
+            .client
+            .project_inventory_read(WireProjectHandle::new(handle_id))
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(inventory.events);
+        logs.extend(self.take_pending_logs());
+        Ok((node_def_artifacts(&inventory.value), logs))
     }
 
     /// Commit the pending-edit overlay to artifact storage. Post-P2, transient

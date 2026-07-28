@@ -14,9 +14,10 @@ use lpc_shared::backtrace;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    WireNodeCommand, WireNodeCommandResponse, WireOverlayCommitRequest, WireOverlayCommitResponse,
-    WireOverlayMutationRequest, WireOverlayMutationResponse, WireOverlayReadResponse,
-    WireProjectInventoryReadResponse,
+    WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
+    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
+    WireOverlayMutationResponse, WireOverlayReadResponse, WireProjectInventoryReadResponse,
+    WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 use lpfs::{FsEvent, FsVersion, LpFs};
 
@@ -259,6 +260,91 @@ impl Project {
             result.commands,
             result.overlay_revision,
         ))
+    }
+
+    /// Create and attach a node (commit-immediate; never staged in the
+    /// overlay). An accepted create drives the same
+    /// [`Engine::apply_project_changes`] path `mutate_overlay` uses, so the
+    /// new node runs immediately; a rejection changes nothing and rides the
+    /// response as data.
+    pub fn create_node(
+        &mut self,
+        request: WireCreateNodeRequest,
+    ) -> Result<WireCreateNodeResponse, ServerError> {
+        let frame = current_revision();
+        let shapes = self.engine().slot_shapes().clone();
+        let ctx = ParseCtx { shapes: &shapes };
+        let result = {
+            let fs_ref = self.fs.borrow();
+            self.registry.create_node(
+                &*fs_ref,
+                request.file.as_path(),
+                &request.body,
+                &request.assets,
+                &request.attach,
+                frame,
+                &ctx,
+            )
+        };
+        match result {
+            Ok(outcome) => {
+                let written_fs_version = {
+                    let fs_ref = self.fs.borrow();
+                    self.runtime
+                        .as_mut()
+                        .expect("project runtime is only absent while reloading")
+                        .apply_project_changes(&*fs_ref, &mut self.registry, &outcome.changes)
+                        .map_err(|e| ServerError::Core(format!("apply project changes: {e}")))?;
+                    fs_ref.current_version()
+                };
+                // The registry already refreshed from its own writes; skip
+                // them in the fs-watcher refresh loop (same as commit).
+                self.last_fs_version = written_fs_version.next();
+                Ok(WireCreateNodeResponse::Created {
+                    artifact_changes: outcome.artifact_changes,
+                    revision: frame,
+                })
+            }
+            Err(rejection) => Ok(WireCreateNodeResponse::Rejected { rejection }),
+        }
+    }
+
+    /// Stage a node removal in the overlay (revertible until commit). An
+    /// accepted removal drives the same [`Engine::apply_project_changes`]
+    /// path `mutate_overlay` uses, so the node's runtime subtree tears down
+    /// immediately (`uses.removed`); the staged deletes materialize on the
+    /// next overlay commit. A rejection changes nothing and rides the
+    /// response as data.
+    pub fn remove_node(
+        &mut self,
+        request: WireRemoveNodeRequest,
+    ) -> Result<WireRemoveNodeResponse, ServerError> {
+        let frame = current_revision();
+        let shapes = self.engine().slot_shapes().clone();
+        let ctx = ParseCtx { shapes: &shapes };
+        let result = {
+            let fs_ref = self.fs.borrow();
+            self.registry
+                .remove_node(&*fs_ref, &request.site, frame, &ctx)
+        };
+        match result {
+            Ok(outcome) => {
+                {
+                    let fs_ref = self.fs.borrow();
+                    self.runtime
+                        .as_mut()
+                        .expect("project runtime is only absent while reloading")
+                        .apply_project_changes(&*fs_ref, &mut self.registry, &outcome.changes)
+                        .map_err(|e| ServerError::Core(format!("apply project changes: {e}")))?;
+                }
+                Ok(WireRemoveNodeResponse::Staged {
+                    overlay_revision: self.registry.overlay().changed_at(),
+                    staged_deletes: outcome.staged_deletes,
+                    swept_pending_edits: outcome.swept_pending_edits,
+                })
+            }
+            Err(rejection) => Ok(WireRemoveNodeResponse::Rejected { rejection }),
+        }
     }
 
     pub fn commit_overlay(

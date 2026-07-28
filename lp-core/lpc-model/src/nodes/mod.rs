@@ -8,6 +8,8 @@ pub mod playlist;
 pub mod project;
 pub mod radio;
 pub mod shader;
+pub mod starter;
+pub mod starter_project;
 pub mod texture;
 
 pub use button::{ButtonDef, ButtonDefView, ButtonState, ButtonStateView};
@@ -37,4 +39,9 @@ pub use shader::{
     ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef,
     generate_compute_shader_header, glsl_type_for_lp_type,
 };
+pub use starter::{
+    NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, starter_def_for_kind,
+    starter_for_kind,
+};
+pub use starter_project::starter_project_files;
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

@@ -5,6 +5,7 @@ pub mod action_strip;
 #[cfg(feature = "stories")]
 pub(crate) mod action_strip_stories;
 
+pub(crate) use action_button::confirmation_confirmed;
 pub use action_button::{
     ActionButton, ActionButtonVariant, menu_item_action_class, menu_item_destructive_action_class,
     quiet_action_class,

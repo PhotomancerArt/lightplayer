@@ -4,8 +4,11 @@
 //! Header: the project *name* as the title (never the literal word
 //! "project" — that is the kind label), a dirty/status tone wash, contextual
 //! Save / Revert-to-saved icon actions supplied by the controller
-//! (`ProjectEditorView.header_actions`), and a `DetailPopover` at the right
-//! edge whose trigger renders the pane's one core-computed `UiAffordance`
+//! (`ProjectEditorView.header_actions`), the always-present "+" whose press
+//! opens the add-node kind picker (`ProjectEditorView.add_node_menu`, P5 —
+//! intercepting the P4 add action's default create), and a `DetailPopover`
+//! at the right edge whose trigger renders the pane's one core-computed
+//! `UiAffordance`
 //! (P6 affordance model). No status chip and no count chips in the header:
 //! the status word ("Ready", "Syncing", …), the per-bucket dirty counts, and
 //! the project stats all live in the detail popup.
@@ -18,8 +21,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, ProjectEditorView, UiAction, UiAffordance, UiConfigSlot, UiMetric, UiPendingEdit,
-    UiSlotRecord, UiStatus,
+    DirtySummary, ProjectEditorView, ProjectSyncPhase, UiAction, UiAffordance, UiConfigSlot,
+    UiMetric, UiPendingEdit, UiSlotRecord, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
@@ -44,6 +47,9 @@ pub fn ProjectPane(
     /// Open the detail popup immediately (stories only).
     #[props(default = false)]
     initially_open: bool,
+    /// Open the add-node kind picker immediately (stories only).
+    #[props(default = false)]
+    add_picker_initially_open: bool,
 ) -> Element {
     let dirty = view.dirty;
     let edits_in_flight = view.edits_in_flight;
@@ -57,6 +63,11 @@ pub fn ProjectPane(
     let sync_issue = view.sync.issue.clone();
     let stats = view.stats.clone();
     let roots = view.tree.roots.clone();
+    let syncing = !matches!(view.sync.phase, ProjectSyncPhase::Ready);
+    let tree_add_menu = view.add_node_menu.clone();
+    // Adding does not ride the header: the tree's "Add node…" row (below)
+    // and the workspace button carry the picker. Header actions are the
+    // contextual Save / Revert pair on the generic `PaneActionButton` path.
     let header_actions = view.header_actions.clone();
     let project_name = view.project_name.clone();
     let pending_edits = view.pending_edits.clone();
@@ -94,7 +105,14 @@ pub fn ProjectPane(
                             }
                         }
                     }
-                    ProjectNodeTree { roots, running, on_action }
+                    ProjectNodeTree {
+                        roots,
+                        running,
+                        add_node_menu: tree_add_menu,
+                        syncing,
+                        add_picker_initially_open,
+                        on_action,
+                    }
                 }
             },
         }

@@ -1762,19 +1762,35 @@ label:has(> input:not(:disabled)) {
     box-shadow: none;
 }
 
-/* The trigger's visual in the top layer, painted above the outline fill. */
+/* The trigger's visual in the top layer, painted above the outline fill.
+   Chrome is always suppressed here — the merged outline path owns the
+   background, border, and shadow of the trigger+panel shape. */
 .ux-popover-layer .ux-popover-open-trigger {
     position: fixed;
     z-index: 96;
-    display: grid;
-    place-items: center;
     margin: 0;
-    padding: 0;
-    border: 0;
     background: transparent;
     box-shadow: none;
     color: var(--ux-popover-icon-color, var(--studio-color-text-strong));
     cursor: pointer;
+}
+
+/* Icon-shaped triggers (the default): the copy centers its single glyph in
+   the measured rect, dropping the button's own box entirely. */
+.ux-popover-layer .ux-popover-open-trigger:not(.ux-popover-open-trigger-boxed) {
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+}
+
+/* Triggers whose content has real internal layout (icon + label rows, e.g.
+   the add-node affordances) keep their own box: forcing the icon grid on
+   them re-centers each child and drops the padding, so the content visibly
+   jumps between the in-flow button and this copy. The border stays in the
+   layout (transparent) so the box metrics match the measured rect exactly. */
+.ux-popover-layer .ux-popover-open-trigger.ux-popover-open-trigger-boxed {
+    border-color: transparent;
 }
 
 /* The panel keeps its layout (incl. border width) but paints no chrome of
