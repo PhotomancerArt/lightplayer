@@ -20,7 +20,8 @@ pub struct MappingPoint {
 
 /// Generate mapping points from MappingConfig
 ///
-/// SvgPath mappings yield no sample points yet.
+/// SvgPath and Map2d are authored source references: the loader resolves them
+/// into `PathPoints` before this runs, so they yield no sample points here.
 pub fn generate_mapping_points(
     config: &MappingConfig,
     texture_width: u32,
@@ -28,7 +29,7 @@ pub fn generate_mapping_points(
 ) -> Vec<MappingPoint> {
     match config {
         MappingConfig::Unset => Vec::new(),
-        MappingConfig::SvgPath { .. } => Vec::new(),
+        MappingConfig::SvgPath { .. } | MappingConfig::Map2d { .. } => Vec::new(),
         MappingConfig::PathPoints {
             paths,
             sample_diameter,

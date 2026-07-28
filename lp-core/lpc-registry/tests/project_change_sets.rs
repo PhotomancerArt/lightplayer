@@ -190,16 +190,16 @@ fn changing_shader_def_kind_removes_its_referenced_source_asset() {
 }
 
 #[test]
-fn deleting_referenced_fixture_svg_reports_asset_entered_error() {
+fn deleting_referenced_fixture_mapping_doc_reports_asset_entered_error() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
-    let changes = scenario.delete_file_and_refresh("/fyeah-mapping.svg");
+    let changes = scenario.delete_file_and_refresh("/fyeah.map2d.json");
 
     assert!(changes.defs.is_empty());
     assert_eq!(
         changes.assets.changed,
         vec![AssetChange::new(
-            artifact_asset("/fyeah-mapping.svg"),
+            artifact_asset("/fyeah.map2d.json"),
             AssetChangeKind::EnteredError,
         )]
     );
