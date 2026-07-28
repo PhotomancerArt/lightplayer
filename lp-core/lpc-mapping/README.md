@@ -35,7 +35,11 @@ doc space into a fixture render target without stretching; an optional
 `canvas` field (e.g. an imported SVG viewBox) overrides the framed region.
 `import::svg_to_doc` converts the strict Illustrator-friendly SVG subset
 (`path:N,count:N` groups) into a document — import is a one-time conversion,
-not a runtime source of truth.
+not a runtime source of truth. CLI form:
+
+```sh
+cargo run -p lpc-mapping --example svg_to_map2d -- path/to/mapping.svg > fixture.map2d.json
+```
 
 ## Boundary
 

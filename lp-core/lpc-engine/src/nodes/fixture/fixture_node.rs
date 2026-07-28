@@ -311,7 +311,7 @@ fn sync_mapping_config_from_def(
 ) -> Result<(), NodeError> {
     match mapping {
         MappingConfig::Unset => {}
-        MappingConfig::SvgPath { .. } => {}
+        MappingConfig::SvgPath { .. } | MappingConfig::Map2d { .. } => {}
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
@@ -1192,7 +1192,7 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
 fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
     match config {
         MappingConfig::Unset => Vec::new(),
-        MappingConfig::SvgPath { .. } => Vec::new(),
+        MappingConfig::SvgPath { .. } | MappingConfig::Map2d { .. } => Vec::new(),
         MappingConfig::PathPoints { paths, .. } => {
             let mut spans = Vec::new();
             let mut next_lamp = 0u32;

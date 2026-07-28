@@ -380,6 +380,35 @@
                     "meta": {}
                   }
                 }
+              },
+              {
+                "name": "Map2d",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "source",
+                        "shape": {
+                          "custom": {
+                            "codec": 2355797192,
+                            "meta": {},
+                            "shape": {
+                              "value": {
+                                "shape": {
+                                  "editor": "plain",
+                                  "id": 177956922,
+                                  "meta": {},
+                                  "ty": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
               }
             ]
           }
