@@ -104,6 +104,9 @@ pub fn MapEditor(
             }
             div { class: "lpme-canvas-wrap",
                 EditorCanvas { session, camera, view_opts, viewport }
+                div { class: "lpme-hint",
+                    "drag to pan · scroll to pan · ⌘/ctrl-scroll or pinch to zoom"
+                }
             }
         }
     }
