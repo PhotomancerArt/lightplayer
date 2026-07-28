@@ -40,7 +40,7 @@ use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
 use crate::app::places::DeviceContent;
 use crate::{
     ControllerId, DeviceController, DeviceOp, ServerFailureKind, ServerState, StudioController,
-    UiAction, UiError, UiNotices,
+    UiAction, UiError, UiNotices, UxUpdate, UxUpdateSink,
 };
 
 /// Row 1 (happy path, part 1): a LightPlayer device holding a stamped
@@ -364,6 +364,81 @@ fn fresh_device_pulls_as_empty_not_unreadable() {
         sync.content,
         DeviceContent::Empty,
         "a fresh device is EMPTY, not unreadable"
+    );
+}
+
+/// A flash must NARRATE while it runs, not only when it lands
+/// (2026-07-28-flash-progress-never-reached-the-ui): the whole point of
+/// the card-owned op flow is that the user watches a minute-long
+/// operation happen. Two things have to leave the controller mid-op —
+/// a view carrying the op (so the overlay mounts at all) and the
+/// progress deltas (so its bar moves) — because the op holds
+/// `&mut controller` throughout and no other snapshot can escape.
+#[test]
+fn a_flash_narrates_its_progress_while_it_runs() {
+    let (_store, host) = library();
+    let script = FakeDeviceScript::new(FakeBootState::BlankFlash);
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("no-firmware connect resolves");
+
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let sink = UxUpdateSink::new({
+        let seen = Rc::clone(&seen);
+        move |update| seen.borrow_mut().push(update)
+    });
+    drive(studio.dispatch_with_updates(
+        device_action(DeviceOp::ProvisionFirmware { setup_name: None }),
+        sink,
+    ))
+    .unwrap();
+
+    let seen = seen.borrow();
+    let carries_op = |update: &UxUpdate| {
+        matches!(
+            update,
+            UxUpdate::View(view)
+                if view
+                    .home
+                    .as_ref()
+                    .is_some_and(|home| home.devices.iter().any(|card| card.ui.op.is_some()))
+        )
+    };
+    let mounted_at = seen.iter().position(carries_op);
+    let first_progress = seen
+        .iter()
+        .position(|update| matches!(update, UxUpdate::CardOp { .. }));
+    // The overlay must mount BEFORE the work starts reporting. A view
+    // carrying the op does eventually escape — during the post-flash
+    // reattach — which is exactly the bug: the user watched a minute of
+    // nothing and then saw the result. The dispatch-time seed cannot
+    // serve here either; it is built before the op slot is installed.
+    assert!(
+        mounted_at.is_some(),
+        "a flash must publish a view whose card wears the op, or the \
+         overlay never mounts"
+    );
+    assert!(
+        mounted_at < first_progress,
+        "the op overlay must mount before the first progress tick \
+         (mounted at {mounted_at:?}, first progress at {first_progress:?})"
+    );
+    // The fake provider scripts 50% then 100%; both must reach the card.
+    let percents: Vec<_> = seen
+        .iter()
+        .filter_map(|update| match update {
+            UxUpdate::CardOp { op, .. } => Some(op.percent),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        percents.contains(&Some(50)) && percents.contains(&Some(100)),
+        "progress must reach the card as it ticks, got {percents:?}"
+    );
+    // …and the work's own output streams too (the overlay's log tail).
+    assert!(
+        seen.iter().any(|update| matches!(update, UxUpdate::Log(_))),
+        "the flash's log lines are mirrored while it runs"
     );
 }
 
