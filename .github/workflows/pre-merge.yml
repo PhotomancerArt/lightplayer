@@ -103,10 +103,21 @@ jobs:
       # actions/cache config listed `target/` at the workspace root while the
       # repo checks out into `lp2025/`, so nothing was ever cached; rust-cache
       # keys on Cargo.lock + rustc version and prunes stale artifacts.)
+      #
+      # save-if main-only (all cache steps in this workflow): GitHub scopes
+      # cache RESTORE so a PR can only see its own ref's caches plus main's,
+      # and evicts LRU past the 10GB repo cap. When every PR saved ~4-5GB to
+      # its own merge ref, two active PRs flushed main's baseline and every
+      # new PR's first run went cache-cold (the observed 28-31m Validate runs
+      # logged "No cache found"; warm runs took 17-19m). Saving only on main
+      # keeps one shared warm baseline that every PR can restore, well under
+      # the cap. Trade-off: repeat pushes to a PR rebuild that PR's delta each
+      # time instead of resuming it — small next to the cold-start cost.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -209,11 +220,13 @@ jobs:
           components: rustfmt, clippy, rust-src
 
       # rust-cache keys on the job id, so this job's cache (wgpu tree) stays
-      # separate from validate-x64's and neither evicts the other.
+      # separate from validate-x64's and neither evicts the other. save-if
+      # main-only: see the validate-x64 cache step for the rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -257,11 +270,13 @@ jobs:
 
       # rust-cache keys on the job id, so this job's cache (wasm32 tree) stays
       # separate from the other validate jobs'. It also caches ~/.cargo/bin,
-      # which amortizes the wasm-bindgen-cli install below.
+      # which amortizes the wasm-bindgen-cli install below. save-if main-only:
+      # see the validate-x64 cache step for the rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -384,8 +399,11 @@ jobs:
       # Deploy-workflow-style cache (registry + git + bins + target) rather
       # than rust-cache: the cargo-installed tools live in ~/.cargo/bin and
       # must be cached with a key that includes their pinned versions.
-      - name: Cache cargo registry, tools, and build artifacts
-        uses: actions/cache@v4
+      # Restore/save are split so saving happens only on main — same repo-wide
+      # cache-eviction rationale as the validate-x64 cache step.
+      - name: Restore cargo registry, tools, and build artifacts
+        id: stories_cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -397,8 +415,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-stories-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-cargo-
 
-      - name: Cache Chrome for Testing
-        uses: actions/cache@v4
+      - name: Restore Chrome for Testing cache
+        id: chrome_cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/chrome
           key: chrome-for-testing-${{ env.CHROME_FOR_TESTING_VERSION }}
@@ -686,6 +705,32 @@ jobs:
                "crashed capture, or main-push drift). See the run summary;" \
                "'just studio-story-pull' is the manual fallback."
           exit 1
+
+      # Main-only saves (see the restore steps above). `always()` preserves
+      # the old actions/cache post-step behavior of saving even when a
+      # main-push drift failed the job — the build artifacts are still good.
+      - name: Save cargo registry, tools, and build artifacts (main only)
+        if: >-
+          always() && github.ref == 'refs/heads/main' &&
+          steps.stories_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            lp2025/target/
+          key: ${{ steps.stories_cache.outputs.cache-primary-key }}
+
+      - name: Save Chrome for Testing cache (main only)
+        if: >-
+          always() && github.ref == 'refs/heads/main' &&
+          steps.chrome_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/chrome
+          key: ${{ steps.chrome_cache.outputs.cache-primary-key }}
 
   # build-esp32-arm:
   #   name: Build ESP32 (ARM)
