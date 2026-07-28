@@ -35,8 +35,10 @@ pub enum UiAttachTarget {
 /// the new node.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodeCreateOp {
-    /// The node kind to create (every kind except `Project` is offered by
-    /// the picker — see [`crate::UiAddNodeMenu`]).
+    /// The node kind to create. `Project` is the picker's **Effect**
+    /// source: the controller expands it into the effect folder starter
+    /// (`effects/<name>/…`) instead of a flat starter file — see
+    /// [`crate::UiAddNodeMenu`].
     pub kind: NodeKind,
     /// Where the new node attaches.
     pub attach: UiAttachTarget,

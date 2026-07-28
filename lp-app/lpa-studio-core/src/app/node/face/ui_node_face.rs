@@ -1,6 +1,6 @@
 //! The kind-specific face variants a node card can render.
 
-use crate::{UiFixtureFace, UiPlaylistFace, UiShaderFace};
+use crate::{UiEffectFace, UiFixtureFace, UiPlaylistFace, UiShaderFace};
 
 /// Kind-specific permanent face for a node card.
 ///
@@ -16,4 +16,7 @@ pub enum UiNodeFace {
     /// Playlist card: entry strip; the active child's real card renders
     /// below via the existing [`crate::UiNodeChild`].
     Playlist(UiPlaylistFace),
+    /// Effect card (embedded project): mirror preview + promoted-control
+    /// knobs aliasing inner-child slots; children render as sibling cards.
+    Effect(UiEffectFace),
 }

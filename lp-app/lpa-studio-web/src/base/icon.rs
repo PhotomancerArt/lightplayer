@@ -208,7 +208,7 @@ pub fn node_kind_icon(kind_label: &str) -> StudioIconName {
         "Compute" | "Compute shader" | "compute_shader" => NodeKindIcon::Compute,
         "Output" | "output" => NodeKindIcon::Output,
         "Playlist" | "playlist" => NodeKindIcon::Playlist,
-        "Project" | "project" => NodeKindIcon::Project,
+        "Project" | "project" | "Effect" | "effect" => NodeKindIcon::Project,
         "Texture" | "texture" => NodeKindIcon::Texture,
         "Control Radio" | "Radio" | "radio" => NodeKindIcon::Radio,
         "Button" | "button" => NodeKindIcon::Button,

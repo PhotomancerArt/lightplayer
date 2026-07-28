@@ -2783,7 +2783,16 @@ impl ProjectController {
         attach: &UiAttachTarget,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
-        let name = self.unique_node_name_for(kind);
+        // `kind == Project` is the picker's Effect SOURCE (not a kind row):
+        // the created unit is a folder (`effects/<name>/…`) seeded from the
+        // effect starter, attached exactly like a flat node
+        // (effects-are-projects ADR).
+        let is_effect = kind == NodeKind::Project;
+        let name = if is_effect {
+            self.unique_effect_name()
+        } else {
+            self.unique_node_name_for(kind)
+        };
         let (site, parent, expected_name) = match attach {
             UiAttachTarget::ProjectRoot => {
                 let Some(root) = self.root_nodes.first() else {
@@ -2830,33 +2839,64 @@ impl ProjectController {
             }
         };
 
-        // Starter bytes: the kind's starter template (bare default when the
-        // table has no entry), stem-substituted, canonically serialized.
-        let starter = starter_for_kind(kind)
-            .unwrap_or_else(|| NodeStarter {
-                def: lpc_model::NodeDef::default_for_kind(kind),
-                assets: Vec::new(),
-            })
-            .for_stem(&name);
-        let body = starter.def.write_json(&self.slot_shapes).map_err(|err| {
-            UiError::Project(format!("cannot serialize the new node definition: {err}"))
-        })?;
-        let assets = starter
-            .assets
-            .into_iter()
-            .map(|(file, bytes)| {
-                (
-                    lpc_model::LpPathBuf::from(format!("./{file}").as_str()),
-                    bytes,
-                )
-            })
-            .collect::<Vec<_>>();
-        let request = WireCreateNodeRequest::new(
-            lpc_model::LpPathBuf::from(format!("./{name}.json").as_str()),
-            body.into_bytes(),
-            assets,
-            site,
-        );
+        let request = if is_effect {
+            // Effect folder: `effects/<name>/project.json` as the def file,
+            // every sibling starter file as an asset (the byte-oriented
+            // create seam carries multi-file payloads by design).
+            let mut files =
+                lpc_model::effect_starter_files(&name, &self.slot_shapes).map_err(|err| {
+                    UiError::Project(format!("cannot serialize the effect starter: {err}"))
+                })?;
+            let def_index = files
+                .iter()
+                .position(|(file, _)| file == "project.json")
+                .expect("the effect starter carries project.json");
+            let (_, body) = files.remove(def_index);
+            let assets = files
+                .into_iter()
+                .map(|(file, bytes)| {
+                    (
+                        lpc_model::LpPathBuf::from(format!("./effects/{name}/{file}").as_str()),
+                        bytes,
+                    )
+                })
+                .collect::<Vec<_>>();
+            WireCreateNodeRequest::new(
+                lpc_model::LpPathBuf::from(format!("./effects/{name}/project.json").as_str()),
+                body,
+                assets,
+                site,
+            )
+        } else {
+            // Starter bytes: the kind's starter template (bare default when
+            // the table has no entry), stem-substituted, canonically
+            // serialized.
+            let starter = starter_for_kind(kind)
+                .unwrap_or_else(|| NodeStarter {
+                    def: lpc_model::NodeDef::default_for_kind(kind),
+                    assets: Vec::new(),
+                })
+                .for_stem(&name);
+            let body = starter.def.write_json(&self.slot_shapes).map_err(|err| {
+                UiError::Project(format!("cannot serialize the new node definition: {err}"))
+            })?;
+            let assets = starter
+                .assets
+                .into_iter()
+                .map(|(file, bytes)| {
+                    (
+                        lpc_model::LpPathBuf::from(format!("./{file}").as_str()),
+                        bytes,
+                    )
+                })
+                .collect::<Vec<_>>();
+            WireCreateNodeRequest::new(
+                lpc_model::LpPathBuf::from(format!("./{name}.json").as_str()),
+                body.into_bytes(),
+                assets,
+                site,
+            )
+        };
 
         let outcome = server.project_create_node(handle_id, request).await?;
         let mut logs = outcome.logs;
@@ -3198,7 +3238,31 @@ impl ProjectController {
     /// file the client knows (def artifacts, overlay artifacts, cached
     /// bodies, resolved shader sources). The server's occupied-path checks
     /// remain authoritative; a race simply rejects and toasts.
+    /// Auto-name for a new effect folder: `effect`, `effect_2`, … deduped
+    /// against node keys, file stems, AND existing `effects/<name>/`
+    /// folders (whose def stems are all `project` and would never collide
+    /// via the stem set).
+    fn unique_effect_name(&self) -> String {
+        let mut taken = self.taken_node_names();
+        for artifact in self.def_artifacts.values() {
+            let path = artifact.file_path().as_str();
+            if let Some(rest) = path.strip_prefix("/effects/")
+                && let Some((folder, _)) = rest.split_once('/')
+            {
+                taken.insert(folder.to_string());
+            }
+        }
+        unique_node_name("effect", &taken)
+    }
+
     fn unique_node_name_for(&self, kind: NodeKind) -> String {
+        let taken = self.taken_node_names();
+        unique_node_name(node_kind_slug(kind), &taken)
+    }
+
+    /// Names already taken by tree children, def/asset file stems, and
+    /// staged overlay artifacts — the create auto-namer's dedup set.
+    fn taken_node_names(&self) -> BTreeSet<String> {
         let mut taken: BTreeSet<String> = BTreeSet::new();
         if let Some(root) = self.root_nodes.first() {
             for child in root.children() {
@@ -3238,7 +3302,7 @@ impl ProjectController {
                 taken.insert(file_stem(artifact.file_path().as_str()).to_string());
             }
         }
-        unique_node_name(node_kind_slug(kind), &taken)
+        taken
     }
 
     /// Focus a freshly created node once its tree entry lands: called at the
@@ -8072,7 +8136,7 @@ mod tests {
         // the workspace button, both fed by the picker data on the view.
         assert!(view.header_actions.is_empty());
         let menu = view.add_node_menu.expect("picker data rides the editor");
-        assert_eq!(menu.entries.len(), 10);
+        assert_eq!(menu.entries.len(), 11, "plain kinds plus the Effect source");
 
         // Root children carry the ungated delete action with confirmation.
         let clock = view

@@ -10,11 +10,11 @@ use lpa_studio_core::{
     ArtifactLocation, ControllerId, ProjectEditorOp, ProjectNodeAddress, ProjectSlotAddress,
     ProjectSlotRoot, SlotPath, UiAction, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
     UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor, UiAssetEditorKind,
-    UiBindingEndpoint, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPanelControl, UiPanelWidget,
+    UiBindingEndpoint, UiConfigSlot, UiEffectFace, UiFixtureFace, UiNodeChild, UiNodeDirtyState,
+    UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPanelControl, UiPanelWidget,
     UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview, UiProductPreviewFrame,
-    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotFieldState, UiSlotSourceState,
-    UiSlotUnit, UiSlotValue, UiStatus,
+    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
+    UiSlotAspectKind, UiSlotFieldState, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::node_story_fixtures::control_preview_product;
@@ -356,6 +356,81 @@ pub(crate) fn fixture_sections() -> Vec<UiNodeSection> {
         UiConfigSlot::value("driver", "Driver", UiSlotValue::string("auto")),
         UiConfigSlot::value("channel", "Channel", UiSlotValue::string("D10")),
     ])]
+}
+
+/// The effect card's face: mirror hero + promoted knobs (clean, bound,
+/// dirty, and one broken alias) + provenance line.
+pub(crate) fn effect_face() -> UiEffectFace {
+    let mut broken_state = UiSlotFieldState::readonly();
+    broken_state.invalid = Some("promoted control target does not resolve".to_string());
+    let broken = UiPanelControl {
+        label: "shimmer".to_string(),
+        address: None,
+        widget: UiPanelWidget::Knob {
+            min: 0.0,
+            max: 1.0,
+            step: None,
+        },
+        value: UiSlotValue::unset(),
+        live_value: None,
+        unit: None,
+        state: broken_state,
+        aspects: vec![
+            UiSlotAspect::new(UiSlotAspectKind::Validation, "Promoted control")
+                .with_affordance(UiSlotAffordance::Invalid),
+        ],
+    };
+    UiEffectFace {
+        preview: shader_hero_product(),
+        controls: vec![
+            knob_control(
+                "Speed",
+                1.4,
+                0.0,
+                4.0,
+                UiSlotFieldState::editable(),
+                UiSlotSourceState::Unset,
+            ),
+            knob_control(
+                "Scale",
+                0.6,
+                0.0,
+                1.0,
+                UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty),
+                UiSlotSourceState::Unset,
+            ),
+            knob_control(
+                "Energy",
+                0.8,
+                0.0,
+                1.0,
+                UiSlotFieldState::editable(),
+                UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:energy")),
+            ),
+            broken,
+        ],
+        provenance: Some("photomancer · v1 · CC0-1.0".to_string()),
+    }
+}
+
+/// Advanced-drawer sections for the effect card (the generic project rows).
+pub(crate) fn effect_sections() -> Vec<UiNodeSection> {
+    vec![UiNodeSection::ConfigSlots(vec![
+        UiConfigSlot::value("name", "Name", UiSlotValue::string("plasma")),
+        UiConfigSlot::value("author", "Author", UiSlotValue::string("photomancer")),
+        UiConfigSlot::value("license", "License", UiSlotValue::string("CC0-1.0")),
+    ])]
+}
+
+/// A full effect node card view with the face installed.
+pub(crate) fn effect_node_view() -> UiNodeView {
+    let header = UiNodeHeader::new("Plasma", "Effect", "/fyeah_sign.show/plasma.project")
+        .with_source("effects/plasma/project.json")
+        .with_status(UiStatus::good("Running"));
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(effect_sections())])
+        .with_node_id("effect-plasma");
+    view.face = Some(UiNodeFace::Effect(effect_face()));
+    view
 }
 
 /// A full fixture node card view with the face installed.

@@ -1157,12 +1157,6 @@
   .tw\:bg-card-subtle {
     background-color: var(--tw-color-card-subtle);
   }
-  .tw\:bg-card-subtle\/60 {
-    background-color: var(--tw-color-card-subtle);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--tw-color-card-subtle) 60%, transparent);
-    }
-  }
   .tw\:bg-dim-foreground {
     background-color: var(--tw-color-dim-foreground);
   }
@@ -1646,6 +1640,9 @@
   }
   .tw\:whitespace-pre-wrap {
     white-space: pre-wrap;
+  }
+  .tw\:text-\[var\(--studio-fg-muted\)\] {
+    color: var(--studio-fg-muted);
   }
   .tw\:text-\[var\(--studio-status-error-text\)\] {
     color: var(--studio-status-error-text);

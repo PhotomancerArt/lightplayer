@@ -45,31 +45,47 @@ pub struct UiAddNodeMenuEntry {
     pub action: UiAction,
 }
 
-/// Build the picker for one attach site: every kind except `Project`, in
-/// [`PICKER_KINDS`] order.
+/// Build the picker for one attach site: every plain kind in
+/// [`PICKER_KINDS`] order, then the **Effect** source — not a kind row but
+/// a folder starter: it dispatches the same [`NodeCreateOp`] with
+/// `NodeKind::Project`, which the controller expands into the effect
+/// folder starter (`effects/<name>/…`, effects-are-projects ADR).
 pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
-    UiAddNodeMenu {
-        entries: PICKER_KINDS
-            .iter()
-            .map(|kind| {
-                let label = node_kind_label(*kind);
-                UiAddNodeMenuEntry {
-                    kind: *kind,
-                    label: label.to_string(),
-                    icon: node_kind_slug(*kind).to_string(),
-                    action: UiAction::from_op(
-                        ControllerId::new(crate::ProjectController::NODE_ID),
-                        NodeCreateOp {
-                            kind: *kind,
-                            attach: attach.clone(),
-                        },
-                    )
-                    .with_label(format!("Add {label}"))
-                    .with_summary(format!("Create a new {} node.", label.to_lowercase())),
-                }
-            })
-            .collect(),
-    }
+    let mut entries: Vec<UiAddNodeMenuEntry> = PICKER_KINDS
+        .iter()
+        .map(|kind| {
+            let label = node_kind_label(*kind);
+            UiAddNodeMenuEntry {
+                kind: *kind,
+                label: label.to_string(),
+                icon: node_kind_slug(*kind).to_string(),
+                action: UiAction::from_op(
+                    ControllerId::new(crate::ProjectController::NODE_ID),
+                    NodeCreateOp {
+                        kind: *kind,
+                        attach: attach.clone(),
+                    },
+                )
+                .with_label(format!("Add {label}"))
+                .with_summary(format!("Create a new {} node.", label.to_lowercase())),
+            }
+        })
+        .collect();
+    entries.push(UiAddNodeMenuEntry {
+        kind: NodeKind::Project,
+        label: String::from("Effect"),
+        icon: String::from("effect"),
+        action: UiAction::from_op(
+            ControllerId::new(crate::ProjectController::NODE_ID),
+            NodeCreateOp {
+                kind: NodeKind::Project,
+                attach: attach.clone(),
+            },
+        )
+        .with_label("New Effect")
+        .with_summary("Create a new effect: a small embedded project with promoted controls."),
+    });
+    UiAddNodeMenu { entries }
 }
 
 #[cfg(test)]
@@ -77,14 +93,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn menu_offers_every_kind_except_project_in_stable_order() {
+    fn menu_offers_every_kind_plus_the_effect_source_in_stable_order() {
         let menu = add_node_menu(&UiAttachTarget::ProjectRoot);
 
-        assert_eq!(menu.entries.len(), 10, "all kinds except Project");
-        assert!(menu.entries.iter().all(|e| e.kind != NodeKind::Project));
+        assert_eq!(menu.entries.len(), 11, "all plain kinds plus Effect");
         assert_eq!(menu.entries[0].kind, NodeKind::Shader);
         assert_eq!(menu.entries[0].label, "Shader");
         assert_eq!(menu.entries[0].icon, "shader");
+        let effect = menu.entries.last().expect("effect entry");
+        assert_eq!(effect.kind, NodeKind::Project);
+        assert_eq!(effect.label, "Effect");
+        assert_eq!(effect.action.meta().label, "New Effect");
         // Rebuilding yields the identical menu (stable order, stable data).
         assert_eq!(menu, add_node_menu(&UiAttachTarget::ProjectRoot));
     }

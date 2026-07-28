@@ -15,6 +15,8 @@ mod binding_chip;
 mod config_slot_row;
 #[cfg(feature = "stories")]
 pub(crate) mod config_slot_row_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod effect_face_stories;
 mod face;
 #[cfg(feature = "stories")]
 pub(crate) mod face_story_fixtures;
