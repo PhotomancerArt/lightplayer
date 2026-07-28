@@ -200,24 +200,29 @@ fn ControlProductPreview(
     let lamps = control_lamp_render(&preview, map_view);
     rsx! {
         div { class: "ux-produced-product-control-layout",
-            for (index, lamp) in lamps.iter().enumerate() {
-                span {
-                    key: "{index}",
-                    class: "ux-produced-product-control-lamp",
-                    style: "{lamp.style}",
-                }
-            }
-            MapArrowsOverlay { overlay: arrows }
-            // Numbers are a separate layer: the lamp elements screen-blend
-            // against the black frame, which would wash dark glyphs out.
-            if map_view.numbers {
+            // Inset wrapper pulls the whole lamp field off the frame edges so
+            // edge-mapped lamps read fully instead of half-clipping (M3 gate:
+            // "zoom it out a bit"). Geometry inside stays texture-faithful.
+            div { class: "ux-map-inset",
                 for (index, lamp) in lamps.iter().enumerate() {
-                    if let Some(number) = lamp.number.as_ref() {
-                        span {
-                            key: "num-{index}",
-                            class: "ux-map-lamp-num",
-                            style: "{lamp.position_style}",
-                            "{number}"
+                    span {
+                        key: "{index}",
+                        class: "ux-produced-product-control-lamp",
+                        style: "{lamp.style}",
+                    }
+                }
+                MapArrowsOverlay { overlay: arrows }
+                // Numbers are a separate layer: the lamp elements screen-blend
+                // against the black frame, which would wash dark glyphs out.
+                if map_view.numbers {
+                    for (index, lamp) in lamps.iter().enumerate() {
+                        if let Some(number) = lamp.number.as_ref() {
+                            span {
+                                key: "num-{index}",
+                                class: "ux-map-lamp-num",
+                                style: "{lamp.position_style}",
+                                "{number}"
+                            }
                         }
                     }
                 }
