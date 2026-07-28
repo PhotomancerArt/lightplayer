@@ -53,7 +53,22 @@ pub struct LpServer {
     /// state itself); defaults to an `"unknown"` provenance with the
     /// compiled-in [`lpc_wire::WIRE_PROTO_VERSION`].
     hello: lpc_wire::ServerHello,
+    /// Consecutive per-project tick failures, so a PERSISTENT error states
+    /// itself instead of restating itself every frame.
+    ///
+    /// A tick error is usually not a one-frame event: an unsupported
+    /// builtin on the current tier, a node the graph cannot render, a
+    /// missing sampler — these fail identically on every frame until the
+    /// project or the tier changes. Logged per frame that is ~60 warnings
+    /// a second, each with a full stack trace in the browser, which buries
+    /// the very first occurrence that explains the cause.
+    tick_failures: HashMap<lpc_wire::WireProjectHandle, u32>,
 }
+
+/// After the first failure, restate a persistent tick error only every
+/// this many consecutive frames (~8s at 60fps) — enough to show it is
+/// still happening without drowning the console.
+const TICK_ERROR_RESTATE_EVERY: u32 = 512;
 
 impl LpServer {
     /// Create a new LpServer instance
@@ -160,6 +175,7 @@ impl LpServer {
                 },
                 device_uid: None,
             },
+            tick_failures: HashMap::new(),
         }
     }
 
@@ -256,6 +272,9 @@ impl LpServer {
         // Tick each project's runtime BEFORE processing incoming messages.
         // This ensures project read requests see the current frame's data.
         log::debug!("LpServer::tick: Ticking {} projects", project_info.len());
+        // Disjoint field borrows: the tick loop holds `project_manager`
+        // mutably while the failure ledger is read and written beside it.
+        let tick_failures = &mut self.tick_failures;
         for (handle, path) in &project_info {
             if let Some(project) = self.project_manager.get_project_mut(*handle) {
                 log::debug!(
@@ -264,18 +283,42 @@ impl LpServer {
                     path,
                     delta_ms
                 );
-                // Ignore errors and continue with other projects
-                // Errors will be visible when clients sync or query project state
+                // One project's failure never stops the others; clients
+                // see it when they sync or query project state.
+                //
+                // A tick error is normally PERSISTENT (it re-fails every
+                // frame until the project or the tier changes), so the
+                // log states it and then holds its tongue — see
+                // `tick_failures`.
                 match project.tick(delta_ms) {
                     Ok(()) => {
                         log::trace!("LpServer::tick: Project {} tick succeeded", project.name());
+                        if let Some(failures) = tick_failures.remove(handle) {
+                            log::info!(
+                                "LpServer::tick: Project {} recovered after {} failed frame(s)",
+                                project.name(),
+                                failures
+                            );
+                        }
                     }
                     Err(e) => {
-                        log::warn!(
-                            "LpServer::tick: Project {} tick error: {:?}",
-                            project.name(),
-                            e
-                        );
+                        let failures = tick_failures.entry(*handle).or_insert(0);
+                        *failures += 1;
+                        if *failures == 1 {
+                            log::warn!(
+                                "LpServer::tick: Project {} tick error: {:?}",
+                                project.name(),
+                                e
+                            );
+                        } else if *failures % TICK_ERROR_RESTATE_EVERY == 0 {
+                            log::warn!(
+                                "LpServer::tick: Project {} tick error persists \
+                                 ({} consecutive frames): {:?}",
+                                project.name(),
+                                failures,
+                                e
+                            );
+                        }
                     }
                 }
             } else {
@@ -284,6 +327,13 @@ impl LpServer {
                     handle.as_i32()
                 );
             }
+        }
+        // Handles are minted monotonically and never reused, so a project
+        // that was unloaded mid-failure would otherwise keep its ledger
+        // entry for the process's lifetime.
+        if !tick_failures.is_empty() {
+            tick_failures
+                .retain(|handle, _| project_info.iter().any(|(loaded, _)| loaded == handle));
         }
 
         // Log frame IDs after ticking (for debugging frame synchronization)

@@ -67,8 +67,25 @@ pub(crate) fn management_event_sink(
     activity: Rc<RefCell<UiActivityView>>,
     captured_logs: Rc<RefCell<Vec<UiLogDraft>>>,
     card_op: Rc<RefCell<crate::CardOp>>,
+    card_uid: Option<String>,
     awaiting_detail: &'static str,
 ) -> DeviceEventSink {
+    // Publishing the op slot is two steps that must not come apart: the
+    // controller's authoritative slot (what the next full view build
+    // reads) and the delta that carries the same value to the live view
+    // mid-flight. The op runs holding `&mut controller`, so the delta is
+    // the ONLY way the card moves before the op settles.
+    let publish_card_op = {
+        let updates = updates.clone();
+        let card_op = Rc::clone(&card_op);
+        move |op: crate::CardOp| {
+            *card_op.borrow_mut() = op.clone();
+            updates.emit(UxUpdate::CardOp {
+                uid: card_uid.clone(),
+                op,
+            });
+        }
+    };
     DeviceEventSink::new(move |event| match event {
         DeviceEvent::LogLine { line, origin } => {
             if line.trim().is_empty() {
@@ -86,7 +103,7 @@ pub(crate) fn management_event_sink(
                     None => UiProgress::indeterminate(&label),
                 });
             }
-            *card_op.borrow_mut() = crate::CardOp::new(format!("{label}…"), percent);
+            publish_card_op(crate::CardOp::new(format!("{label}…"), percent));
             updates.emit(UxUpdate::Activity {
                 target: target.clone(),
                 status: UiStatus::working("Managing"),
@@ -104,7 +121,7 @@ pub(crate) fn management_event_sink(
                 return;
             }
             if matches!(state, lpa_link::DeviceState::Booting) {
-                *card_op.borrow_mut() = crate::CardOp::awaiting(awaiting_detail);
+                publish_card_op(crate::CardOp::awaiting(awaiting_detail));
             }
         }
     })
@@ -148,6 +165,7 @@ mod tests {
             Rc::clone(&activity),
             Rc::clone(&captured),
             Rc::clone(&card_op),
+            Some("dev_abc".to_string()),
             "Waiting for firmware boot",
         );
 
@@ -171,12 +189,28 @@ mod tests {
         );
         let updates = updates.borrow();
         assert!(matches!(updates[0], UxUpdate::Log(_)));
-        assert!(matches!(updates[1], UxUpdate::Activity { .. }));
+        // The slot alone never reaches the screen mid-op: the op holds
+        // `&mut controller`, so the delta is what moves the card.
+        assert!(
+            matches!(
+                &updates[1],
+                UxUpdate::CardOp { uid, op }
+                    if uid.as_deref() == Some("dev_abc")
+                        && *op == crate::CardOp::new("Writing…", Some(42))
+            ),
+            "a progress tick publishes the card op, not just the slot: {:?}",
+            updates[1]
+        );
+        assert!(matches!(updates[2], UxUpdate::Activity { .. }));
     }
 
     #[test]
     fn a_mid_manage_reboot_flips_the_op_flow_to_awaiting_device() {
-        let updates = UxUpdateSink::new(|_| {});
+        let emitted = Rc::new(RefCell::new(Vec::new()));
+        let updates = UxUpdateSink::new({
+            let emitted = Rc::clone(&emitted);
+            move |update| emitted.borrow_mut().push(update)
+        });
         let card_op = Rc::new(RefCell::new(crate::CardOp::new("Wiping device…", None)));
         let sink = management_event_sink(
             updates,
@@ -184,6 +218,7 @@ mod tests {
             Rc::new(RefCell::new(UiActivityView::new("Wiping device"))),
             Rc::new(RefCell::new(Vec::new())),
             Rc::clone(&card_op),
+            None,
             "Checking for LightPlayer firmware",
         );
 
@@ -195,6 +230,14 @@ mod tests {
             *card_op.borrow(),
             crate::CardOp::awaiting("Checking for LightPlayer firmware"),
             "the expected disconnect is the AwaitingDevice phase (I2)"
+        );
+        assert!(
+            matches!(
+                emitted.borrow().first(),
+                Some(UxUpdate::CardOp { uid: None, op })
+                    if *op == crate::CardOp::awaiting("Checking for LightPlayer firmware")
+            ),
+            "the phase change reaches the live card, not just the slot"
         );
     }
 }
