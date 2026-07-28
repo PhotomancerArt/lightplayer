@@ -273,10 +273,21 @@ where
                 }
                 UxUpdate::Log(draft) => {
                     if let Some(view) = live.borrow_mut().as_mut() {
+                        let entry = draft.clone().stamp(clock());
                         // `push_live` applies the view's carried filter state,
                         // keeping the live view consistent with the change-gated
                         // snapshot that will replace it.
-                        view.console.push_live(draft.clone().stamp(clock()));
+                        view.console.push_live(entry.clone());
+                        // A card mid-op also shows the work's own output in
+                        // its overlay (the technical-details region).
+                        view.push_card_op_console(entry);
+                        publisher.send(view.clone());
+                    }
+                }
+                UxUpdate::CardOp { uid, op } => {
+                    let mut live = live.borrow_mut();
+                    if let Some(view) = live.as_mut() {
+                        view.apply_card_op(uid.as_deref(), op);
                         publisher.send(view.clone());
                     }
                 }

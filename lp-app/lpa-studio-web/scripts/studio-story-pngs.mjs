@@ -53,6 +53,16 @@ const browserRestartEvery = parsePositiveIntegerEnv("STUDIO_STORY_BROWSER_RESTAR
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
+// HARNESS SEAM — second half of the contract documented at
+// `component_overview_id` in src/stories/story_book.rs: the story book
+// synthesizes one `<family>/[<category>/]<component>/overview` page per
+// component that stacks every story of that component, and no `#[story]`
+// function can claim that id (pinned by a unit test there).
+// Declared with the other module constants, ABOVE the top-level await that
+// drives the run — a `const` further down the file is in its temporal dead
+// zone by the time `discoverStoryIds()` reads it, which `node --check` cannot
+// see because it only parses.
+const OVERVIEW_COMPOSITE_SUFFIX = "/overview";
 // Written beside `.check-complete` by a complete `check`: the baseline files
 // that actually need replacing/removing. See the write site for why consumers
 // must not just swap the whole set.
@@ -76,6 +86,11 @@ const STORY_VIEWPORTS = [
   { id: "md", width: 720, height: 760 },
   { id: "lg", width: 1080, height: 760 },
 ];
+// Stories marked `#[story(screenshot)]` are published images (README heroes,
+// docs figures), not the three-size design record: they capture at one size
+// only, so the unused sizes cannot churn baselines. Populated by discovery.
+const SCREENSHOT_VIEWPORT_ID = "lg";
+const SCREENSHOT_STORY_IDS = new Set();
 
 class CdpConnection {
   static async open(url) {
@@ -484,10 +499,31 @@ async function discoverStoryIds() {
     "--dump-dom",
     `${baseUrl}?story-discovery=${Date.now()}#/stories`,
   ]);
-  return Array.from(html.matchAll(/href="#\/stories\/([^"]+)"/g))
-    .map((match) => decodeURIComponent(match[1]))
-    .map((storyId) => storyId.split(/[?#]/, 1)[0])
+  const storyIds = [];
+  for (const anchor of html.matchAll(/<a\b[^>]*href="#\/stories\/([^"]+)"[^>]*>/g)) {
+    const storyId = decodeURIComponent(anchor[1]).split(/[?#]/, 1)[0];
+    // `#[story(screenshot)]` rides the discovery link (see story_book.rs).
+    if (/data-story-screenshot="1"/.test(anchor[0])) {
+      SCREENSHOT_STORY_IDS.add(storyId);
+    }
+    storyIds.push(storyId);
+  }
+  return storyIds
     .filter((value, index, values) => values.indexOf(value) === index)
+    // Generated `overview` composites are NOT pixel baselines. They stack a
+    // whole component's stories on one page — 10k-25k px tall against a 760px
+    // viewport, where every non-composite story fits in 3400 — and
+    // `captureBeyondViewport` does not reliably paint composited effects that
+    // far below the fold: in the flip that filed
+    // docs/defects/2026-07-28-overview-composite-capture-races.md, the device
+    // card's `backdrop-filter` overlays kept their blur but lost their own
+    // background and children, at every overlay story in the page and nowhere
+    // above y=5658. Both terminals survive the stable pair, so each capture
+    // committed a coin flip and every auto-refresh commit retriggered CI.
+    // They also carried no coverage the per-story captures don't: every state
+    // in a composite is captured on its own page too. Browse them in the story
+    // book; do not baseline them.
+    .filter((storyId) => !storyId.endsWith(OVERVIEW_COMPOSITE_SUFFIX))
     .sort();
 }
 
@@ -536,7 +572,7 @@ async function captureStories(storyIds, directory) {
 
   const concurrency = Math.min(requestedCaptureConcurrency, pending.length);
   console.log(
-    `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
+    `Capturing ${pending.length}/${targets.length} story viewports (${storyIds.length} stories, up to ${STORY_VIEWPORTS.length} sizes each) with ${concurrency} Chrome pages...`,
   );
 
   // Defense in depth: capture in chunks with a fresh browser per chunk
@@ -1445,7 +1481,16 @@ function printComparison(label, files) {
 
 function storyTargets(storyIds) {
   return storyIds.flatMap((storyId) =>
-    STORY_VIEWPORTS.map((viewport) => ({ storyId, viewport })),
+    viewportsFor(storyId).map((viewport) => ({ storyId, viewport })),
+  );
+}
+
+function viewportsFor(storyId) {
+  if (!SCREENSHOT_STORY_IDS.has(storyId)) {
+    return STORY_VIEWPORTS;
+  }
+  return STORY_VIEWPORTS.filter(
+    (viewport) => viewport.id === SCREENSHOT_VIEWPORT_ID,
   );
 }
 
