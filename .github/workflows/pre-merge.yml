@@ -135,6 +135,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       gfx: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.gfx }}
+      browser: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.browser }}
     steps:
       - name: Filter changed paths
         id: filter
@@ -155,6 +156,24 @@ jobs:
               - 'lp-app/lpa-studio-core/**'
               - 'lp-app/lpa-fs-opfs/**'
               - 'spikes/naga-wasm-poc/**'
+              - 'third_party/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+            # Dependency closure (by directory) of the two real-browser wasm
+            # suites: lpa-fs-opfs (real OPFS + Web Locks) and fw-browser
+            # (runtime protocol over wasm). Same conservative-gate philosophy
+            # as `gfx` above: misses surface on the next main push.
+            browser:
+              - 'lp-app/lpa-fs-opfs/**'
+              - 'lp-fw/**'
+              - 'lp-base/**'
+              - 'lp-core/**'
+              - 'lp-shader/**'
+              - 'lp-gfx/**'
+              - 'lp-riscv/**'
               - 'third_party/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -201,6 +220,75 @@ jobs:
 
       - name: Validate GFX
         run: cd lp2025 && just validate-gfx
+
+  # Real-browser wasm suites: lpa-fs-opfs (real OPFS ops, Web Locks, store
+  # round-trip — the Safari-OPFS-corruption defect class) and fw-browser
+  # (runtime protocol tests). Both run `cargo test --target
+  # wasm32-unknown-unknown` through wasm-bindgen-test-runner against headless
+  # Chrome. Runs on x64 because Google Chrome has no linux-arm64 build; GitHub
+  # x64 images preinstall Chrome and a matching chromedriver, and host arch is
+  # irrelevant for wasm tests.
+  validate-browser:
+    name: Validate Browser (x64)
+    runs-on: ubuntu-24.04
+    needs: detect-gfx-changes
+    if: needs.detect-gfx-changes.outputs.browser == 'true'
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rustfmt, clippy, rust-src
+
+      # rust-cache keys on the job id, so this job's cache (wasm32 tree) stays
+      # separate from the other validate jobs'. It also caches ~/.cargo/bin,
+      # which amortizes the wasm-bindgen-cli install below.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match the workspace wasm-bindgen dep; the just recipes
+      # refuse to run with a missing runner and print this exact version.
+      - name: Install wasm-bindgen-cli
+        run: command -v wasm-bindgen-test-runner >/dev/null || cargo install wasm-bindgen-cli --version 0.2.114
+
+      # The smoke check drives Chrome over a raw CDP WebSocket; pin node so
+      # the global WebSocket client is guaranteed (same rationale as the
+      # stories job).
+      - name: Install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # End-to-end smoke: builds the fw-browser wasm bundle, loads smoke.html
+      # in headless Chrome (preinstalled on the x64 image), and fails unless
+      # the page reaches dataset.smoke === "ok" — the gate that catches page
+      # rot and wasm-emission regressions the unit suites can't see. Runs
+      # before the unit suites so a suite failure can't mask smoke signal.
+      - name: fw-browser smoke check
+        run: cd lp2025 && just fw-browser-smoke-check
+
+      - name: Browser wasm tests
+        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test
 
   # Story baselines are CI-canonical: this job captures every story with a
   # pinned browser and compares against the committed PNGs (pixel tolerance,
@@ -374,17 +462,78 @@ jobs:
       # Only a COMPLETE comparison may publish an artifact: a crashed partial
       # capture staged via story-pull would delete every baseline it didn't
       # reach. The capture script writes .check-complete only after comparing
-      # a full capture set.
+      # a full capture set. Runs on the success path too (not just failure):
+      # the tolerated-evidence step below needs the completeness verdict and
+      # the manifest's tolerated count even when the check passed.
       - name: Detect completed comparison
         id: check_complete
-        if: steps.story_check.outcome == 'failure'
         shell: bash
         run: |
-          if [ -f lp2025/lp-app/lpa-studio-web/story-images/.new/.check-complete ]; then
+          new_dir=lp2025/lp-app/lpa-studio-web/story-images/.new
+          if [ -f "$new_dir/.check-complete" ]; then
             echo "complete=true" >> "$GITHUB_OUTPUT"
           else
             echo "complete=false" >> "$GITHUB_OUTPUT"
           fi
+          count=0
+          if [ -f "$new_dir/.refresh-manifest.json" ]; then
+            count=$(jq '.tolerated | length' "$new_dir/.refresh-manifest.json" 2>/dev/null || echo 0)
+          fi
+          echo "tolerated_count=$count" >> "$GITHUB_OUTPUT"
+
+      # Evidence retention for tolerated diffs. The check tolerates
+      # sub-ratio pixel diffs and (before this step) THREW THE PIXELS AWAY —
+      # `story-images-fresh` uploads only on failure, so a tolerated diff
+      # left one log line of counts and nothing to diff. That is how the
+      # Δ199 `opening-a-project` flip became undiagnosable (see
+      # docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md).
+      # Uploads BOTH variants (fresh + committed baseline) of just the
+      # tolerated files — a few hundred KB, never the whole set. Runs on
+      # pass and fail alike: the auto-commit path also drops tolerated
+      # pixels (the bot commit contains only manifest-listed files).
+      # Deliberately a different artifact name from story-images-fresh:
+      # story-pull selects runs by that artifact's presence, and a passing
+      # run must never shadow a real drift capture.
+      - name: Preserve tolerated-diff evidence (story-images-tolerated)
+        if: >-
+          steps.check_complete.outputs.complete == 'true' &&
+          steps.check_complete.outputs.tolerated_count != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lp2025
+          new_dir=lp-app/lpa-studio-web/story-images/.new
+          baseline_dir=lp-app/lpa-studio-web/story-images
+          dest="$RUNNER_TEMP/story-tolerated"
+          mkdir -p "$dest/fresh" "$dest/baseline"
+          cp "$new_dir/.refresh-manifest.json" "$dest/"
+          while IFS= read -r name; do
+            cp "$new_dir/$name" "$dest/fresh/$name"
+            cp "$baseline_dir/$name" "$dest/baseline/$name"
+          done < <(jq -r '.tolerated[]?' "$new_dir/.refresh-manifest.json")
+          {
+            echo "## Tolerated story diffs (evidence retained)"
+            echo
+            echo 'The check tolerated pixel diffs on these stories. Both variants are'
+            echo 'in the `story-images-tolerated` artifact — if the log above flags any'
+            echo 'as suspected bistable (significant pixels > 0), diff them from there.'
+            echo
+            echo '```'
+            jq -r '.tolerated[]' "$new_dir/.refresh-manifest.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload tolerated-diff evidence
+        if: >-
+          steps.check_complete.outputs.complete == 'true' &&
+          steps.check_complete.outputs.tolerated_count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-images-tolerated
+          path: ${{ runner.temp }}/story-tolerated/
+          retention-days: 14
+          if-no-files-found: error
+          include-hidden-files: true
 
       # Same-repo PRs only: fork PRs get a read-only token and fall through to
       # the artifact path below. Never --force, never rebase — a push race

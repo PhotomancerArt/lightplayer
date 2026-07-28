@@ -277,6 +277,19 @@ committed-as-well-as-working-tree UI changes; (4) failures are loud
     [story-check-tolerance-ignores-amplitude](../defects/2026-07-27-story-check-tolerance-ignores-amplitude.md)
     — fix the retention before the next one of these, or the next
     investigation dead-ends in the same place.
+- 2026-07-27 — **retention fixed + warn-only amplitude line** (the defect
+  above, mitigated same day): every complete check with a non-empty
+  tolerated set now uploads `story-images-tolerated` (fresh + baseline
+  variants of just those files, 14-day retention, pass or fail — the
+  auto-commit path also dropped tolerated pixels), and a tolerated file
+  with significant pixels prints a loud WARNING instead of one silent
+  log line. The condition is `significantPixels > 0`, not a new
+  threshold: every benign churner ever measured diffs at 0 significant
+  pixels (first post-#153 healthy run: 1036 byte-identical, 5 tolerated,
+  all Δ≤6). Gate promotion deferred until a few real runs confirm the
+  boundary; the retained artifacts are the calibration data. When the
+  `opening-a-project` flip next fires, the pixels will be in the
+  artifact — diff them, do not re-run the reproduction.
 
 - 2026-07-27 — **churner recurrence, second consecutive PR** (#154, node
   authoring). The auto-commit refreshed 103 baselines; 99 were the
