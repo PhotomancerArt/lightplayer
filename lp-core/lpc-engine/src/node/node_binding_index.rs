@@ -3,20 +3,21 @@
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
-use lpc_model::{ChannelName, Kind, NodeId, SlotPath};
+use lpc_model::{Kind, NodeId, SlotPath};
 
 use crate::dataflow::binding::{
     BindingEntry, BindingError, BindingRef, BindingSource, BindingTarget, channels_touched,
 };
+use crate::dataflow::bus::ScopedChannel;
 
 use super::RuntimeNodeEntry;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct NodeBindingIndex {
     consumed_targets: VecMap<(NodeId, SlotPath), Vec<BindingRef>>,
-    bus_targets: VecMap<ChannelName, Vec<BindingRef>>,
-    bus_sources: VecMap<ChannelName, Vec<BindingRef>>,
-    channel_kinds: VecMap<ChannelName, Kind>,
+    bus_targets: VecMap<ScopedChannel, Vec<BindingRef>>,
+    bus_sources: VecMap<ScopedChannel, Vec<BindingRef>>,
+    channel_kinds: VecMap<ScopedChannel, Kind>,
 }
 
 impl NodeBindingIndex {
@@ -89,17 +90,17 @@ impl NodeBindingIndex {
             .map_or(&[], Vec::as_slice)
     }
 
-    pub(super) fn bus_targets(&self, channel: &ChannelName) -> &[BindingRef] {
+    pub(super) fn bus_targets(&self, channel: &ScopedChannel) -> &[BindingRef] {
         self.bus_targets.get(channel).map_or(&[], Vec::as_slice)
     }
 
-    pub(super) fn bus_sources(&self, channel: &ChannelName) -> &[BindingRef] {
+    pub(super) fn bus_sources(&self, channel: &ScopedChannel) -> &[BindingRef] {
         self.bus_sources.get(channel).map_or(&[], Vec::as_slice)
     }
 
     /// Every channel referenced by at least one binding, with its established
     /// kind.
-    pub(super) fn channels(&self) -> impl Iterator<Item = (&ChannelName, Kind)> {
+    pub(super) fn channels(&self) -> impl Iterator<Item = (&ScopedChannel, Kind)> {
         self.channel_kinds.iter().map(|(name, kind)| (name, *kind))
     }
 }

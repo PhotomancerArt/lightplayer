@@ -1,11 +1,12 @@
 //! Project probe helpers.
 
 use alloc::format;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use lp_collection::VecMap;
-use lpc_model::{ChannelName, Kind};
+use lpc_model::Kind;
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
@@ -18,6 +19,7 @@ use lps_shared::TextureStorageFormat;
 use crate::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
+use crate::dataflow::bus::{ScopeId, ScopedChannel};
 use crate::products::control::{ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::RenderTextureRequest;
 
@@ -93,10 +95,10 @@ impl Engine {
         let mut wire_index: VecMap<BindingRef, u32> = VecMap::new();
         for (binding_ref, entry) in self.tree().bindings_with_refs() {
             wire_index.insert(binding_ref, bindings.len() as u32);
-            bindings.push(wire_effective_binding(entry));
+            bindings.push(wire_effective_binding(self, entry));
         }
 
-        let channel_names: Vec<(ChannelName, Kind)> = self
+        let channel_names: Vec<(ScopedChannel, Kind)> = self
             .tree()
             .bus_channels()
             .map(|(name, kind)| (name.clone(), kind))
@@ -136,7 +138,7 @@ impl Engine {
             });
 
             channels.push(WireBusChannel {
-                name: name.0.clone(),
+                name: scoped_channel_wire_name(self, &name),
                 kind: Some(kind),
                 providers,
                 consumers,
@@ -227,27 +229,58 @@ fn linear_unorm16_to_srgb8(value: u16) -> u8 {
     super::srgb8_lut::LINEAR16_TO_SRGB8[(value >> 4) as usize]
 }
 
+/// Format a [`ScopedChannel`] for the wire.
+///
+/// Root-scope channels keep the bare channel name (today's output exactly).
+/// Channels in a nested scope render as `<path>\u{203a}<channel>` where the
+/// path is the scope node's tree name path relative to root, joined with
+/// `/`. Unresolvable scope nodes fall back to the [`ScopedChannel`] Display
+/// form.
+fn scoped_channel_wire_name(engine: &Engine, scoped: &ScopedChannel) -> String {
+    use alloc::string::ToString;
+
+    let root = engine.tree().root();
+    if scoped.scope == ScopeId::Project(root) {
+        return scoped.channel.0.clone();
+    }
+    let scope_node = match scoped.scope {
+        ScopeId::Project(node) | ScopeId::Entry(node) => node,
+    };
+    let (Some(entry), Some(root_entry)) = (engine.tree().get(scope_node), engine.tree().get(root))
+    else {
+        return scoped.to_string();
+    };
+    let relative: Vec<&str> = entry
+        .path
+        .0
+        .iter()
+        .skip(root_entry.path.0.len())
+        .map(|segment| segment.name.as_str())
+        .collect();
+    format!("{}\u{203a}{}", relative.join("/"), scoped.channel)
+}
+
 /// Project one runtime binding entry onto the wire.
 ///
 /// The anchor is the binding's local slot: the consumed target when one
 /// exists, otherwise the produced source feeding a bus channel. A binding
 /// with no local slot (literal or bus-to-bus bridge publishing to a
 /// channel) anchors to its owner with no slot path.
-fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
+fn wire_effective_binding(engine: &Engine, entry: &BindingEntry) -> WireEffectiveBinding {
     let origin = wire_binding_origin(entry.priority);
     let (node, slot, direction, endpoint) = match (&entry.source, &entry.target) {
         (source, BindingTarget::ConsumedSlot { node, slot }) => (
             *node,
             Some(slot.clone()),
             WireBindingDirection::Consumes,
-            wire_endpoint_from_source(source),
+            wire_endpoint_from_source(engine, source),
         ),
         (BindingSource::ProducedSlot { node, slot }, BindingTarget::BusChannel(channel)) => (
             *node,
             Some(slot.clone()),
             WireBindingDirection::Publishes,
             WireBindingEndpoint::Bus {
-                channel: channel.0.clone(),
+                channel: scoped_channel_wire_name(engine, channel),
             },
         ),
         (
@@ -258,7 +291,7 @@ fn wire_effective_binding(entry: &BindingEntry) -> WireEffectiveBinding {
             None,
             WireBindingDirection::Publishes,
             WireBindingEndpoint::Bus {
-                channel: channel.0.clone(),
+                channel: scoped_channel_wire_name(engine, channel),
             },
         ),
     };
@@ -284,7 +317,7 @@ fn wire_binding_origin(priority: BindingPriority) -> WireBindingOrigin {
     }
 }
 
-fn wire_endpoint_from_source(source: &BindingSource) -> WireBindingEndpoint {
+fn wire_endpoint_from_source(engine: &Engine, source: &BindingSource) -> WireBindingEndpoint {
     match source {
         BindingSource::Literal(value) => WireBindingEndpoint::Literal {
             value: value.clone(),
@@ -294,7 +327,7 @@ fn wire_endpoint_from_source(source: &BindingSource) -> WireBindingEndpoint {
             slot: slot.clone(),
         },
         BindingSource::BusChannel(channel) => WireBindingEndpoint::Bus {
-            channel: channel.0.clone(),
+            channel: scoped_channel_wire_name(engine, channel),
         },
     }
 }

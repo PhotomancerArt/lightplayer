@@ -4,12 +4,11 @@
 
 use alloc::vec::Vec;
 use lp_collection::VecMap;
-use lpc_model::{
-    ChannelName, NodeId, NodeInvocation, NodeName, NodePathSegment, Revision, SlotPath, TreePath,
-};
+use lpc_model::{NodeId, NodeInvocation, NodeName, NodePathSegment, Revision, SlotPath, TreePath};
 use lpc_wire::WireChildKind;
 
 use crate::dataflow::binding::{BindingDraft, BindingEntry, BindingError, BindingRef};
+use crate::dataflow::bus::ScopedChannel;
 
 use crate::node::node_binding_index::{NodeBindingIndex, binding_by_ref};
 use crate::node::{RuntimeNodeEntry, TreeError};
@@ -289,7 +288,7 @@ impl<N> RuntimeNodeTree<N> {
 
     /// Resolve all consumers of a bus channel (bindings whose source is the
     /// channel).
-    pub fn consumers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, &BindingEntry)> {
+    pub fn consumers_for_bus(&self, channel: &ScopedChannel) -> Vec<(BindingRef, &BindingEntry)> {
         self.binding_index
             .bus_sources(channel)
             .iter()
@@ -302,7 +301,7 @@ impl<N> RuntimeNodeTree<N> {
 
     /// Every bus channel referenced by at least one binding, with its
     /// established kind.
-    pub fn bus_channels(&self) -> impl Iterator<Item = (&ChannelName, lpc_model::Kind)> {
+    pub fn bus_channels(&self) -> impl Iterator<Item = (&ScopedChannel, lpc_model::Kind)> {
         self.binding_index.channels()
     }
 
@@ -356,7 +355,7 @@ impl<N> RuntimeNodeTree<N> {
     }
 
     /// Resolve all providers for a bus channel.
-    pub fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, &BindingEntry)> {
+    pub fn providers_for_bus(&self, channel: &ScopedChannel) -> Vec<(BindingRef, &BindingEntry)> {
         self.binding_index
             .bus_targets(channel)
             .iter()
@@ -392,12 +391,20 @@ impl<N> RuntimeNodeTree<N> {
 mod tests {
     use super::RuntimeNodeTree;
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::dataflow::bus::{ScopeId, ScopedChannel};
     use crate::node::test_placeholder_spine;
     use alloc::string::String;
     use alloc::vec::Vec;
     use lpc_model::{ArtifactSpec, NodeInvocation};
     use lpc_model::{ChannelName, Kind, LpValue, NodeId, NodeName, Revision, SlotPath, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
+
+    fn scoped(name: &str) -> ScopedChannel {
+        ScopedChannel::new(
+            ScopeId::Project(NodeId::new(0)),
+            ChannelName(String::from(name)),
+        )
+    }
 
     fn make_tree() -> RuntimeNodeTree<()> {
         RuntimeNodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
@@ -509,7 +516,7 @@ mod tests {
         let mut tree = make_tree();
         let shader = add_test_child(&mut tree, "shader");
         let fixture = add_test_child(&mut tree, "fixture");
-        let channel = ChannelName(String::from("visual"));
+        let channel = scoped("visual");
         let out = SlotPath::parse("output").unwrap();
         let input = SlotPath::parse("input").unwrap();
 
@@ -556,7 +563,7 @@ mod tests {
         let mut tree = make_tree();
         let a = add_test_child(&mut tree, "a");
         let b = add_test_child(&mut tree, "b");
-        let channel = ChannelName(String::from("visual"));
+        let channel = scoped("visual");
 
         let draft = |owner| BindingDraft {
             source: BindingSource::Literal(LpValue::F32(1.0)),

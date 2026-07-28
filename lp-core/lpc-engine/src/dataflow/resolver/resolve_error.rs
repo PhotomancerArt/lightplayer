@@ -6,9 +6,9 @@
 use alloc::format;
 use alloc::string::String;
 
-use lpc_model::ChannelName;
 use lpc_model::NodeId;
 
+use crate::dataflow::bus::ScopedChannel;
 use crate::shader_abi::LpsValueToModelConversionError;
 
 use super::query_key::QueryKey;
@@ -21,10 +21,10 @@ pub enum SessionResolveError {
         query: QueryKey,
     },
     NoBusProvider {
-        channel: ChannelName,
+        channel: ScopedChannel,
     },
     AmbiguousBusBinding {
-        channel: ChannelName,
+        channel: ScopedChannel,
     },
     UnresolvedConsumedSlot {
         node: NodeId,

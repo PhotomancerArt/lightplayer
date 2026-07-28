@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use lpc_engine::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
+use lpc_engine::dataflow::bus::{ScopeId, ScopedChannel};
 use lpc_engine::dataflow::resolver::{
     Production, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession, ResolveTrace, Resolver,
     SessionHostResolver, SessionResolveError, TickResolver,
@@ -26,9 +27,16 @@ use lps_shared::LpsValueF32;
 
 // --- Tests (concise scenarios; helpers below) ---
 
+fn scoped(name: &str) -> ScopedChannel {
+    ScopedChannel::new(
+        ScopeId::Project(NodeId::new(0)),
+        ChannelName(String::from(name)),
+    )
+}
+
 #[test]
 fn runtime_spine_tick_context_resolve_bus_query() {
-    let channel = ChannelName(String::from("live"));
+    let channel = scoped("live");
     let frame = Revision::new(99);
     let binding = BindingEntry {
         source: BindingSource::Literal(LpValue::F32(2.0)),
@@ -47,7 +55,7 @@ fn runtime_spine_tick_context_resolve_bus_query() {
     );
 
     struct NoProduceHost {
-        channel: ChannelName,
+        channel: ScopedChannel,
         binding: BindingEntry,
     }
 
@@ -60,7 +68,7 @@ fn runtime_spine_tick_context_resolve_bus_query() {
             Err(SessionResolveError::other("unexpected produce"))
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(&self, channel: &ScopedChannel) -> Vec<(BindingRef, BindingEntry)> {
             if channel == &self.channel {
                 Vec::from([(BindingRef::new(self.binding.owner, 0), self.binding.clone())])
             } else {
@@ -488,7 +496,7 @@ fn published_channels(engine: &lpc_engine::Engine) -> Vec<(String, bool)> {
         .bindings()
         .filter_map(|binding| match &binding.target {
             BindingTarget::BusChannel(channel) => Some((
-                channel.0.clone(),
+                channel.channel.0.clone(),
                 binding.priority == BindingPriority::authored(),
             )),
             _ => None,

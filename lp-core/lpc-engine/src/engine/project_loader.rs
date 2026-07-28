@@ -9,9 +9,9 @@ use lp_collection::VecSet;
 use lpc_model::{ArtifactSpec, NodeInvocation, NodeKind};
 use lpc_model::{AssetContentType, AssetLocation, NodeDefLocation, NodeDefState};
 use lpc_model::{
-    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, Kind, LpValue,
-    MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin, ProjectNodePlacement,
-    Revision, SlotPath,
+    BindingDefs, BindingRef as AuthoredBindingRef, FixtureDef, Kind, LpValue, MappingConfig,
+    NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin, ProjectNodePlacement, Revision,
+    SlotPath,
 };
 use lpc_model::{SlotDirection, SlotPathSegment, SlotShape, StaticSlotShape, well_known_channel};
 use lpc_registry::{AssetText, ParseCtx, ProjectRegistry};
@@ -23,11 +23,11 @@ use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, Bin
 use crate::node::{NodeEntryState, TreeError};
 use crate::nodes::fixture::mapping::resolve_svg_path_mapping;
 use crate::nodes::{
-    ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
-    FluidNode, OutputNode, PlaylistNode, PlaylistRuntimeEntry, ShaderNode, TextureNode,
-    playlist_output_path,
+    ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, FixtureNode, FluidNode, OutputNode,
+    PlaylistNode, PlaylistRuntimeEntry, ProjectNode, ShaderNode, TextureNode, playlist_output_path,
 };
 
+use super::bus_scopes::BusScopes;
 use super::{Engine, EngineServices, LoadedProjectRuntime};
 
 /// Errors loading an authored project into [`Engine`].
@@ -76,12 +76,6 @@ pub(super) enum ProjectedNodeOwnership {
     Root,
     ProjectChild,
     PlaylistEntry { playlist: NodeId, entry: u32 },
-}
-
-impl ProjectedNodeOwnership {
-    fn suppress_visual_default_output(self) -> bool {
-        matches!(self, Self::PlaylistEntry { .. })
-    }
 }
 
 /// Loads the authored project artifact tree into a core engine-backed runtime.
@@ -168,11 +162,7 @@ impl ProjectLoader {
             }
         }
         runtime
-            .attach_runtime_node(
-                root,
-                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
-                frame,
-            )
+            .attach_runtime_node(root, Box::new(ProjectNode::new(root)), frame)
             .map_err(|e| ProjectLoadError::InvalidProjectReference {
                 path: artifact_specifier_label(&project_specifier),
                 reason: format!("attach project runtime: {e}"),
@@ -356,6 +346,28 @@ impl ProjectLoader {
         targets: Option<&VecSet<lpc_model::NodeUseLocation>>,
         frame: Revision,
     ) -> Result<(), ProjectLoadError> {
+        // Non-root project nodes get the mirror runtime (scoped-buses ADR
+        // rule 5); the root's mirror attaches in `build_runtime_spine` /
+        // incremental root reattach. Error-state defs project with the
+        // `Project` fallback kind and stay runtime-less as before.
+        for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
+            if node.kind != NodeKind::Project || node.ownership == ProjectedNodeOwnership::Root {
+                continue;
+            }
+            let Ok(NodeDef::Project(_)) = projected_node_config(registry, node) else {
+                continue;
+            };
+            runtime
+                .attach_runtime_node(node.id, Box::new(ProjectNode::new(node.id)), frame)
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("attach project runtime: {e}"),
+                })?;
+        }
+
         for node in projected_nodes {
             if !should_attach_projected_node(node, targets) {
                 continue;
@@ -629,8 +641,12 @@ impl ProjectLoader {
         projected_nodes: &[ProjectedNode],
         frame: Revision,
     ) -> Result<(), ProjectLoadError> {
+        // Pass 1 (scoped-buses ADR): scope assignment over the spine plus
+        // the per-(scope, channel) writer set; pass 2 below registers
+        // bindings with consumes resolved against it.
+        let scopes = BusScopes::compute(registry, projected_nodes, runtime.tree().root());
         for node in projected_nodes {
-            register_node_bindings(registry, runtime, projected_nodes, node, frame)?;
+            register_node_bindings(registry, runtime, projected_nodes, node, frame, &scopes)?;
         }
         Ok(())
     }
@@ -1030,7 +1046,10 @@ fn binding_source<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<AuthoredB
     binding.source_ref().map(AuthoredBindingSource::Ref)
 }
 
-fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a AuthoredBindingRef> {
+pub(super) fn binding_target<'a>(
+    bindings: &'a BindingDefs,
+    slot: &str,
+) -> Option<&'a AuthoredBindingRef> {
     bindings.entries().get(slot)?.target_ref()
 }
 
@@ -1112,6 +1131,7 @@ fn register_node_bindings(
     projected_nodes: &[ProjectedNode],
     node: &ProjectedNode,
     frame: Revision,
+    scopes: &BusScopes,
 ) -> Result<(), ProjectLoadError> {
     // Unloaded/errored defs project with the `Project` fallback kind and
     // register nothing — same tolerance the attach arms' kind filters gave
@@ -1128,6 +1148,7 @@ fn register_node_bindings(
                 "seconds",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
             register_target_binding(
                 runtime,
@@ -1136,8 +1157,16 @@ fn register_node_bindings(
                 "delta_seconds",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+            register_declared_defaults(
+                runtime,
+                projected_nodes,
+                node,
+                &config.bindings,
+                frame,
+                scopes,
+            )?;
         }
         NodeDef::Button(config) => {
             for slot in ["down", "held", "up"] {
@@ -1148,6 +1177,7 @@ fn register_node_bindings(
                     slot,
                     &config.bindings,
                     frame,
+                    scopes,
                 )?;
             }
         }
@@ -1159,6 +1189,7 @@ fn register_node_bindings(
                 "input",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
             register_target_binding(
                 runtime,
@@ -1167,6 +1198,7 @@ fn register_node_bindings(
                 "output",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
         }
         NodeDef::Output(config) => {
@@ -1195,8 +1227,16 @@ fn register_node_bindings(
                 "input",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+            register_declared_defaults(
+                runtime,
+                projected_nodes,
+                node,
+                &config.bindings,
+                frame,
+                scopes,
+            )?;
         }
         NodeDef::Shader(config) => {
             register_target_binding(
@@ -1206,6 +1246,7 @@ fn register_node_bindings(
                 "output",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
             for name in config.consumed_slots.entries.keys() {
                 register_optional_source_binding(
@@ -1215,6 +1256,7 @@ fn register_node_bindings(
                     name.as_str(),
                     &config.bindings,
                     frame,
+                    scopes,
                 )?;
             }
             for (name, slot) in config.consumed_slots.entries.iter() {
@@ -1230,9 +1272,17 @@ fn register_node_bindings(
                     name,
                     SlotDirection::Consumed,
                     &endpoint.value().to_string(),
+                    scopes,
                 )?;
             }
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+            register_declared_defaults(
+                runtime,
+                projected_nodes,
+                node,
+                &config.bindings,
+                frame,
+                scopes,
+            )?;
         }
         NodeDef::ComputeShader(config) => {
             for name in config.consumed_slots.entries.keys() {
@@ -1243,6 +1293,7 @@ fn register_node_bindings(
                     name.as_str(),
                     &config.bindings,
                     frame,
+                    scopes,
                 )?;
             }
             for name in config.produced_slots.entries.keys() {
@@ -1253,6 +1304,7 @@ fn register_node_bindings(
                     name.as_str(),
                     &config.bindings,
                     frame,
+                    scopes,
                 )?;
             }
         }
@@ -1264,6 +1316,7 @@ fn register_node_bindings(
                 "time",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
             register_optional_source_binding(
                 runtime,
@@ -1272,6 +1325,7 @@ fn register_node_bindings(
                 "emitters",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
             register_target_binding(
                 runtime,
@@ -1280,12 +1334,20 @@ fn register_node_bindings(
                 "output",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+            register_declared_defaults(
+                runtime,
+                projected_nodes,
+                node,
+                &config.bindings,
+                frame,
+                scopes,
+            )?;
         }
         NodeDef::Playlist(config) => {
             if let Some(source) = binding_source(&config.bindings, "time")
-                .map(|source| binding_source_endpoint(projected_nodes, node, source))
+                .map(|source| binding_source_endpoint(projected_nodes, node, source, scopes))
                 .transpose()?
             {
                 register_source_binding_at_path(
@@ -1299,7 +1361,7 @@ fn register_node_bindings(
                 )?;
             }
             if let Some(source) = binding_source(&config.bindings, "trigger")
-                .map(|source| binding_source_endpoint(projected_nodes, node, source))
+                .map(|source| binding_source_endpoint(projected_nodes, node, source, scopes))
                 .transpose()?
             {
                 register_source_binding_at_path(
@@ -1313,7 +1375,7 @@ fn register_node_bindings(
                 )?;
             }
             if let Some(target) = binding_target(&config.bindings, "output")
-                .map(|target| binding_target_endpoint(projected_nodes, node, target))
+                .map(|target| binding_target_endpoint(projected_nodes, node, target, scopes))
                 .transpose()?
             {
                 let source = BindingSource::ProducedSlot {
@@ -1336,7 +1398,14 @@ fn register_node_bindings(
                         reason: format!("register output target binding: {e}"),
                     })?;
             }
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+            register_declared_defaults(
+                runtime,
+                projected_nodes,
+                node,
+                &config.bindings,
+                frame,
+                scopes,
+            )?;
         }
         NodeDef::Fixture(config) => {
             register_optional_source_binding(
@@ -1346,6 +1415,7 @@ fn register_node_bindings(
                 "input",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
             register_target_binding(
                 runtime,
@@ -1354,8 +1424,16 @@ fn register_node_bindings(
                 "output",
                 &config.bindings,
                 frame,
+                scopes,
             )?;
-            register_declared_defaults(runtime, projected_nodes, node, &config.bindings, frame)?;
+            register_declared_defaults(
+                runtime,
+                projected_nodes,
+                node,
+                &config.bindings,
+                frame,
+                scopes,
+            )?;
         }
         NodeDef::Project(_) | NodeDef::Texture(_) => {}
     }
@@ -1364,7 +1442,7 @@ fn register_node_bindings(
 
 /// Slot-declared default bindings for a node kind: (slot name, declared
 /// direction, `bus:` endpoint) triples from the def and state shapes.
-fn declared_default_binds(kind: NodeKind) -> Vec<(String, SlotDirection, String)> {
+pub(super) fn declared_default_binds(kind: NodeKind) -> Vec<(String, SlotDirection, String)> {
     let mut out = Vec::new();
     let mut collect = |shape: Option<SlotShape>| {
         if let Some(SlotShape::Record { fields, .. }) = shape {
@@ -1397,6 +1475,7 @@ fn register_declared_defaults(
     current: &ProjectedNode,
     bindings: &BindingDefs,
     frame: Revision,
+    scopes: &BusScopes,
 ) -> Result<(), ProjectLoadError> {
     for (name, direction, endpoint) in declared_default_binds(current.kind) {
         register_default_bind(
@@ -1408,6 +1487,7 @@ fn register_declared_defaults(
             &name,
             direction,
             &endpoint,
+            scopes,
         )?;
     }
     Ok(())
@@ -1425,6 +1505,7 @@ fn register_default_bind(
     name: &str,
     direction: SlotDirection,
     endpoint: &str,
+    scopes: &BusScopes,
 ) -> Result<(), ProjectLoadError> {
     let channel = match lpc_model::BindingRef::parse(endpoint) {
         Ok(lpc_model::BindingRef::Bus(bus)) => bus.channel().clone(),
@@ -1440,16 +1521,18 @@ fn register_default_bind(
         reason: format!("invalid default_bind slot `{name}`: {e}"),
     })?;
     let draft = if direction == SlotDirection::Produced {
-        if current.ownership.suppress_visual_default_output()
-            || binding_target(bindings, name).is_some()
-        {
+        if binding_target(bindings, name).is_some() {
             return Ok(());
         }
         let source = BindingSource::ProducedSlot {
             node: current.id,
             slot,
         };
-        let target = BindingTarget::BusChannel(channel);
+        // Rule 4: produced defaults write the producer's own scope. For a
+        // playlist-entry child that scope is its anonymous entry scope —
+        // which is the general rule the old suppress-entry-visual-defaults
+        // special case collapsed into.
+        let target = BindingTarget::BusChannel(scopes.write_channel(current.id, &channel));
         BindingDraft {
             kind: binding_kind(&source, &target, name),
             source,
@@ -1461,7 +1544,9 @@ fn register_default_bind(
         if binding_source(bindings, name).is_some() {
             return Ok(());
         }
-        let source = BindingSource::BusChannel(channel);
+        // Rule 3: consumed defaults resolve to the nearest enclosing scope
+        // with a writer, else the root scope.
+        let source = BindingSource::BusChannel(scopes.read_channel(current.id, &channel));
         let target = BindingTarget::ConsumedSlot {
             node: current.id,
             slot,
@@ -1535,6 +1620,7 @@ fn register_source_binding(
     slot_name: &str,
     bindings: &BindingDefs,
     frame: Revision,
+    scopes: &BusScopes,
 ) -> Result<(), ProjectLoadError> {
     let source = binding_source(bindings, slot_name).ok_or_else(|| {
         ProjectLoadError::InvalidProjectReference {
@@ -1542,7 +1628,7 @@ fn register_source_binding(
             reason: format!("{slot_name} source binding is missing"),
         }
     })?;
-    let source = binding_source_endpoint(projected_nodes, current, source)?;
+    let source = binding_source_endpoint(projected_nodes, current, source, scopes)?;
     let target_slot =
         SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
@@ -1596,11 +1682,20 @@ fn register_optional_source_binding(
     slot_name: &str,
     bindings: &BindingDefs,
     frame: Revision,
+    scopes: &BusScopes,
 ) -> Result<(), ProjectLoadError> {
     if binding_source(bindings, slot_name).is_none() {
         return Ok(());
     }
-    register_source_binding(engine, projected_nodes, current, slot_name, bindings, frame)
+    register_source_binding(
+        engine,
+        projected_nodes,
+        current,
+        slot_name,
+        bindings,
+        frame,
+        scopes,
+    )
 }
 
 fn register_target_binding(
@@ -1610,11 +1705,12 @@ fn register_target_binding(
     slot_name: &str,
     bindings: &BindingDefs,
     frame: Revision,
+    scopes: &BusScopes,
 ) -> Result<(), ProjectLoadError> {
     let Some(target) = binding_target(bindings, slot_name) else {
         return Ok(());
     };
-    let target = binding_target_endpoint(projected_nodes, current, target)?;
+    let target = binding_target_endpoint(projected_nodes, current, target, scopes)?;
     let source_slot =
         SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
@@ -1654,7 +1750,7 @@ fn binding_kind(source: &BindingSource, target: &BindingTarget, slot_name: &str)
         (_, BindingTarget::BusChannel(channel)) => Some(channel),
         _ => None,
     };
-    if let Some(known) = channel.and_then(|channel| well_known_channel(&channel.0)) {
+    if let Some(known) = channel.and_then(|channel| well_known_channel(&channel.channel.0)) {
         return known.kind;
     }
     match slot_name {
@@ -1667,11 +1763,12 @@ fn binding_source_endpoint(
     projected_nodes: &[ProjectedNode],
     current: &ProjectedNode,
     endpoint: AuthoredBindingSource<'_>,
+    scopes: &BusScopes,
 ) -> Result<BindingSource, ProjectLoadError> {
     match endpoint {
         AuthoredBindingSource::Value(value) => Ok(BindingSource::Literal(value.clone())),
         AuthoredBindingSource::Ref(binding_ref) => {
-            binding_ref_source(projected_nodes, current, binding_ref)
+            binding_ref_source(projected_nodes, current, binding_ref, scopes)
         }
     }
 }
@@ -1680,15 +1777,18 @@ fn binding_ref_source(
     projected_nodes: &[ProjectedNode],
     current: &ProjectedNode,
     binding_ref: &AuthoredBindingRef,
+    scopes: &BusScopes,
 ) -> Result<BindingSource, ProjectLoadError> {
     match binding_ref {
         AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: String::from("binding source cannot be unset"),
         }),
-        AuthoredBindingRef::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
-            bus.channel().0.clone(),
-        ))),
+        // Rule 3: an authored bus source is a consume — nearest enclosing
+        // scope with a writer, else root.
+        AuthoredBindingRef::Bus(bus) => Ok(BindingSource::BusChannel(
+            scopes.read_channel(current.id, bus.channel()),
+        )),
         AuthoredBindingRef::Node(node_slot) => {
             let node =
                 resolve_node_loc(projected_nodes, current, node_slot.node(), "binding source")?;
@@ -1704,15 +1804,18 @@ fn binding_target_endpoint(
     projected_nodes: &[ProjectedNode],
     current: &ProjectedNode,
     endpoint: &AuthoredBindingRef,
+    scopes: &BusScopes,
 ) -> Result<BindingTarget, ProjectLoadError> {
     match endpoint {
         AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: String::from("binding target cannot be unset"),
         }),
-        AuthoredBindingRef::Bus(bus) => Ok(BindingTarget::BusChannel(ChannelName(
-            bus.channel().0.clone(),
-        ))),
+        // Rule 4: an authored bus target is a produce — always the
+        // producer's own scope.
+        AuthoredBindingRef::Bus(bus) => Ok(BindingTarget::BusChannel(
+            scopes.write_channel(current.id, bus.channel()),
+        )),
         AuthoredBindingRef::Node(node_slot) => {
             let node =
                 resolve_node_loc(projected_nodes, current, node_slot.node(), "binding target")?;
@@ -1730,6 +1833,11 @@ mod binding_kind_tests {
 
     use super::binding_kind;
     use crate::dataflow::binding::{BindingSource, BindingTarget};
+    use crate::dataflow::bus::{ScopeId, ScopedChannel};
+
+    fn scoped(name: &str) -> ScopedChannel {
+        ScopedChannel::new(ScopeId::Project(NodeId::new(0)), ChannelName(name.into()))
+    }
 
     fn consumed(slot: &str) -> BindingTarget {
         BindingTarget::ConsumedSlot {
@@ -1749,12 +1857,12 @@ mod binding_kind_tests {
     fn well_known_channel_kind_beats_the_slot_name_guess() {
         // `trigger` is Instant in the registry; the old slot-name guess
         // stamped it Color (only the time-family names were listed).
-        let source = BindingSource::BusChannel(ChannelName("trigger".into()));
+        let source = BindingSource::BusChannel(scoped("trigger"));
         assert_eq!(
             binding_kind(&source, &consumed("trigger"), "trigger"),
             Kind::Instant
         );
-        let target = BindingTarget::BusChannel(ChannelName("visual.out".into()));
+        let target = BindingTarget::BusChannel(scoped("visual.out"));
         assert_eq!(
             binding_kind(&produced("output"), &target, "output"),
             Kind::Color
@@ -1763,7 +1871,7 @@ mod binding_kind_tests {
 
     #[test]
     fn unregistered_channels_fall_back_to_the_slot_name_guess() {
-        let target = BindingTarget::BusChannel(ChannelName("wobble".into()));
+        let target = BindingTarget::BusChannel(scoped("wobble"));
         assert_eq!(
             binding_kind(&produced("seconds"), &target, "seconds"),
             Kind::Instant
@@ -1801,10 +1909,12 @@ mod tests {
 
     use super::*;
     use crate::dataflow::binding::{BindingPriority, BindingSource, BindingTarget};
+    use crate::dataflow::bus::{ScopeId, ScopedChannel};
     use crate::dataflow::resolver::{Production, QueryKey, ResolveLogLevel};
     use crate::engine::test_support::{read_into_view, read_probe_results};
     use crate::engine::{ButtonService, RadioService};
     use crate::products::visual::RenderTextureRequest;
+    use lpc_model::FromLpValue;
 
     fn node_for_def_path(rt: &Engine, path: &str) -> Option<NodeId> {
         let location = NodeDefLocation::artifact_root(ArtifactLocation::file(path));
@@ -2286,7 +2396,7 @@ mod tests {
         rt.tick(1000).expect("first tick");
         let first = rt
             .resolve_with_engine_host(
-                QueryKey::Bus(ChannelName(String::from("time"))),
+                QueryKey::Bus(crate::engine::test_support::scoped_channel("time")),
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
@@ -2313,7 +2423,7 @@ mod tests {
         rt.tick(1000).expect("second tick");
         let second = rt
             .resolve_with_engine_host(
-                QueryKey::Bus(ChannelName(String::from("time"))),
+                QueryKey::Bus(crate::engine::test_support::scoped_channel("time")),
                 ResolveLogLevel::Off,
             )
             .expect("resolve time bus")
@@ -2415,7 +2525,7 @@ mod tests {
                     BindingTarget::BusChannel(channel),
                 ) if *node == shader
                     && slot == &SlotPath::parse("output").expect("output")
-                    && channel.0 == "visual.out"
+                    && channel.channel.0 == "visual.out"
                     && binding.priority == BindingPriority::default_fallback()
             )
         }));
@@ -2503,7 +2613,12 @@ mod tests {
     }
 
     #[test]
-    fn playlist_entry_children_do_not_get_default_visual_output_binding() {
+    fn playlist_entry_children_write_visual_out_into_their_anonymous_scope() {
+        // Scoped-buses ADR: the old rule suppressed entry children's
+        // produced visual defaults outright; the general model registers
+        // them into a per-entry anonymous scope instead. The root-visible
+        // behavior is identical — the root `visual.out` channel never sees
+        // an entry child's writer.
         let fs = playlist_project_fs();
         let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
@@ -2517,18 +2632,33 @@ mod tests {
             .lookup_sibling(playlist, NodeName::parse("active").unwrap())
             .expect("active");
 
-        assert!(!rt.tree().bindings().any(|binding| {
-            matches!(
-                (&binding.source, &binding.target),
+        let entry_visual_targets: Vec<ScopedChannel> = rt
+            .tree()
+            .bindings()
+            .filter_map(|binding| match (&binding.source, &binding.target) {
                 (
                     BindingSource::ProducedSlot { node, slot },
                     BindingTarget::BusChannel(channel),
                 ) if *node == active
                     && slot == &SlotPath::parse("output").expect("output")
-                    && channel.0 == "visual.out"
-                    && binding.priority == BindingPriority::default_fallback()
-            )
-        }));
+                    && channel.channel.0 == "visual.out"
+                    && binding.priority == BindingPriority::default_fallback() =>
+                {
+                    Some(channel.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
+        // The default registers exactly once, into the entry child's
+        // anonymous scope — never the root scope.
+        assert_eq!(
+            entry_visual_targets,
+            alloc::vec![ScopedChannel::new(
+                ScopeId::Entry(active),
+                lpc_model::ChannelName(String::from("visual.out"))
+            )]
+        );
     }
 
     #[test]
@@ -2561,7 +2691,7 @@ mod tests {
                 (
                     BindingSource::BusChannel(source),
                     BindingTarget::ConsumedSlot { node, slot },
-                ) if source.0 == "trigger"
+                ) if source.channel.0 == "trigger"
                     && *node == playlist
                     && slot == &SlotPath::parse("trigger").expect("trigger")
                     && binding.priority == BindingPriority::authored()
@@ -3319,7 +3449,7 @@ mod tests {
                 (
                     BindingSource::BusChannel(source),
                     BindingTarget::ConsumedSlot { node, slot },
-                ) if source.0 == "trigger"
+                ) if source.channel.0 == "trigger"
                     && *node == radio
                     && slot == &SlotPath::parse("input").expect("input")
             )
@@ -3332,7 +3462,7 @@ mod tests {
                     BindingTarget::BusChannel(target),
                 ) if *node == radio
                     && slot == &SlotPath::parse("output").expect("output")
-                    && target.0 == "trigger"
+                    && target.channel.0 == "trigger"
             )
         }));
     }
@@ -3990,7 +4120,7 @@ mod tests {
                     (
                         BindingSource::ProducedSlot { node: n, slot: s },
                         BindingTarget::BusChannel(c),
-                    ) if *n == node && s == &SlotPath::parse(slot).expect("slot") && c.0 == channel
+                    ) if *n == node && s == &SlotPath::parse(slot).expect("slot") && c.channel.0 == channel
                 )
         })
     }
@@ -4003,7 +4133,7 @@ mod tests {
                     (
                         BindingSource::BusChannel(c),
                         BindingTarget::ConsumedSlot { node: n, slot: s },
-                    ) if *n == node && s == &SlotPath::parse(slot).expect("slot") && c.0 == channel
+                    ) if *n == node && s == &SlotPath::parse(slot).expect("slot") && c.channel.0 == channel
                 )
         })
     }
@@ -4089,7 +4219,7 @@ mod tests {
                     (
                         BindingSource::ProducedSlot { node, .. },
                         BindingTarget::BusChannel(c),
-                    ) if *node == clock && c.0 == "custom"
+                    ) if *node == clock && c.channel.0 == "custom"
                 )
         }));
     }
@@ -4188,7 +4318,8 @@ mod tests {
         let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/fyeah.show").expect("path"));
         let rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign");
-        let default_publishers = rt
+        let root_scope = ScopeId::Project(rt.tree().root());
+        let root_default_publishers = rt
             .tree()
             .bindings()
             .filter(|binding| {
@@ -4198,14 +4329,487 @@ mod tests {
                         (
                             BindingSource::ProducedSlot { .. },
                             BindingTarget::BusChannel(c),
-                        ) if c.0 == "visual.out"
+                        ) if c.channel.0 == "visual.out" && c.scope == root_scope
                     )
             })
             .count();
         assert_eq!(
-            default_publishers, 1,
-            "only the playlist itself default-publishes visual.out; entry \
-             children are ownership-suppressed"
+            root_default_publishers, 1,
+            "only the playlist itself default-publishes the root visual.out; \
+             entry children write their own anonymous entry scopes \
+             (scoped-buses ADR)"
         );
+    }
+
+    /// Memory-fs fixture for the scoped-buses nested-project tests: a host
+    /// project with a clock and a visual shader, plus an embedded project
+    /// `fx` (a hand-authored effect — the authoring guard lifts in the
+    /// composite-effects M2 slice, but the load path is generic already).
+    fn nested_project_fs(inner_clock: bool) -> LpFsMemory {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "host": { "ref": "./host.json" },
+    "fx": { "ref": "./fx/project.json" }
+  }
+}
+"#,
+        )
+        .expect("project.json");
+        fs.write_file("/clock.json".as_path(), br#"{ "kind": "Clock" }"#)
+            .expect("clock.json");
+        fs.write_file(
+            "/host.json".as_path(),
+            br#"
+{
+  "kind": "Shader",
+  "source": { "path": "host.glsl" },
+  "consumed": {
+    "time": { "kind": "value", "value": "f32", "default": 0.0, "default_bind": "bus:time" }
+  }
+}
+"#,
+        )
+        .expect("host.json");
+        fs.write_file(
+            "/host.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(time, pos, 1.0); }",
+        )
+        .expect("host.glsl");
+        let fx_nodes: &[u8] = if inner_clock {
+            br#"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "shader": { "ref": "./shader.json" }
+  }
+}
+"#
+        } else {
+            br#"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": { "ref": "./shader.json" }
+  }
+}
+"#
+        };
+        fs.write_file("/fx/project.json".as_path(), fx_nodes)
+            .expect("fx/project.json");
+        if inner_clock {
+            fs.write_file("/fx/clock.json".as_path(), br#"{ "kind": "Clock" }"#)
+                .expect("fx/clock.json");
+        }
+        fs.write_file(
+            "/fx/shader.json".as_path(),
+            br#"
+{
+  "kind": "Shader",
+  "source": { "path": "shader.glsl" },
+  "consumed": {
+    "time": { "kind": "value", "value": "f32", "default": 0.0, "default_bind": "bus:time" }
+  }
+}
+"#,
+        )
+        .expect("fx/shader.json");
+        fs.write_file(
+            "/fx/shader.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(pos, time, 1.0); }",
+        )
+        .expect("fx/shader.glsl");
+        fs
+    }
+
+    fn produced_bus_target(rt: &Engine, node: NodeId, slot: &str) -> Option<ScopedChannel> {
+        rt.tree()
+            .bindings()
+            .find_map(|binding| match (&binding.source, &binding.target) {
+                (
+                    BindingSource::ProducedSlot {
+                        node: source,
+                        slot: source_slot,
+                    },
+                    BindingTarget::BusChannel(channel),
+                ) if *source == node && source_slot == &SlotPath::parse(slot).expect("slot") => {
+                    Some(channel.clone())
+                }
+                _ => None,
+            })
+    }
+
+    fn consumed_bus_source(rt: &Engine, node: NodeId, slot: &str) -> Option<ScopedChannel> {
+        rt.tree()
+            .bindings()
+            .find_map(|binding| match (&binding.source, &binding.target) {
+                (
+                    BindingSource::BusChannel(channel),
+                    BindingTarget::ConsumedSlot {
+                        node: target,
+                        slot: target_slot,
+                    },
+                ) if *target == node && target_slot == &SlotPath::parse(slot).expect("slot") => {
+                    Some(channel.clone())
+                }
+                _ => None,
+            })
+    }
+
+    fn scoped_at(scope: ScopeId, name: &str) -> ScopedChannel {
+        ScopedChannel::new(scope, lpc_model::ChannelName(String::from(name)))
+    }
+
+    #[test]
+    fn nested_project_scopes_isolate_visual_and_inherit_time() {
+        let fs = nested_project_fs(false);
+        let services = EngineServices::new(TreePath::parse("/nested.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load nested project");
+        let root = rt.tree().root();
+        let host = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("host").unwrap())
+            .expect("host shader");
+        let fx = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fx").unwrap())
+            .expect("fx project node");
+        let fx_shader = rt
+            .tree()
+            .lookup_sibling(fx, NodeName::parse("shader").unwrap())
+            .expect("fx shader");
+
+        // Rule 4: each shader's produced visual default writes its own scope.
+        assert_eq!(
+            produced_bus_target(&rt, host, "output"),
+            Some(scoped_at(ScopeId::Project(root), "visual.out")),
+            "host visual stays in the root scope"
+        );
+        assert_eq!(
+            produced_bus_target(&rt, fx_shader, "output"),
+            Some(scoped_at(ScopeId::Project(fx), "visual.out")),
+            "embedded shader's visual lands in the fx scope, not the host's"
+        );
+
+        // Rule 3: with no inner writer, the embedded shader's time consume
+        // inherits the host clock's root-scope channel.
+        assert_eq!(
+            consumed_bus_source(&rt, fx_shader, "time"),
+            Some(scoped_at(ScopeId::Project(root), "time")),
+            "embedded shader inherits host time"
+        );
+
+        // Rule 5: the fx project node mirrors its scope's visual as a
+        // produced `output`. The row carries fx's own renderable handle
+        // (playlist parity); render dispatch forwards to the inner shader.
+        rt.tick(16).expect("tick");
+        let mirrored = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fx,
+                    slot: SlotPath::parse("output").expect("output"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve fx mirror")
+            .0;
+        let product = lpc_model::VisualProduct::from_lp_value(
+            mirrored.value_leaf().expect("mirror value").value(),
+        )
+        .expect("mirror carries a visual product");
+        assert_eq!(
+            product.node(),
+            fx,
+            "the mirror's row carries the project node's own handle"
+        );
+        let _ = fx_shader;
+
+        // The host's root visual channel resolves to the host shader —
+        // never clobbered by the embedded project.
+        let root_visual = rt
+            .resolve_with_engine_host(
+                QueryKey::Bus(scoped_at(ScopeId::Project(root), "visual.out")),
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve root visual")
+            .0;
+        let root_product = lpc_model::VisualProduct::from_lp_value(
+            root_visual.value_leaf().expect("root visual value").value(),
+        )
+        .expect("root visual is a product");
+        assert_eq!(root_product.node(), host, "host visual.out untouched");
+    }
+
+    #[test]
+    fn nested_project_clock_shadows_time_for_inner_subtree_only() {
+        let fs = nested_project_fs(true);
+        let services = EngineServices::new(TreePath::parse("/nested.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load nested project");
+        let root = rt.tree().root();
+        let host = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("host").unwrap())
+            .expect("host shader");
+        let fx = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fx").unwrap())
+            .expect("fx project node");
+        let fx_shader = rt
+            .tree()
+            .lookup_sibling(fx, NodeName::parse("shader").unwrap())
+            .expect("fx shader");
+
+        assert_eq!(
+            consumed_bus_source(&rt, fx_shader, "time"),
+            Some(scoped_at(ScopeId::Project(fx), "time")),
+            "an inner clock shadows time for the fx subtree"
+        );
+        assert_eq!(
+            consumed_bus_source(&rt, host, "time"),
+            Some(scoped_at(ScopeId::Project(root), "time")),
+            "the host keeps reading root time"
+        );
+    }
+
+    #[test]
+    fn nested_project_without_visual_writer_renders_cleared() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "fx": { "ref": "./fx/project.json" }
+  }
+}
+"#,
+        )
+        .expect("project.json");
+        fs.write_file(
+            "/fx/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": { "ref": "./clock.json" }
+  }
+}
+"#,
+        )
+        .expect("fx/project.json");
+        fs.write_file("/fx/clock.json".as_path(), br#"{ "kind": "Clock" }"#)
+            .expect("fx/clock.json");
+
+        let services = EngineServices::new(TreePath::parse("/nested.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        let root = rt.tree().root();
+        let fx = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fx").unwrap())
+            .expect("fx project node");
+
+        rt.tick(16).expect("tick");
+        // No visual writer in the fx scope: the mirror still presents its
+        // own renderable handle and renders cleared when drawn — a project
+        // without a visual is a legitimate shape, not an error.
+        let production = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fx,
+                    slot: SlotPath::parse("output").expect("output"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("mirror without a writer still resolves")
+            .0;
+        let product = lpc_model::VisualProduct::from_lp_value(
+            production.value_leaf().expect("mirror value").value(),
+        )
+        .expect("mirror carries a visual product");
+        assert_eq!(product.node(), fx);
+    }
+
+    #[test]
+    fn playlist_plays_an_embedded_project_through_its_mirror() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "playlist": { "ref": "./playlist.json" }
+  }
+}
+"#,
+        )
+        .expect("project.json");
+        fs.write_file("/clock.json".as_path(), br#"{ "kind": "Clock" }"#)
+            .expect("clock.json");
+        fs.write_file(
+            "/playlist.json".as_path(),
+            br#"
+{
+  "kind": "Playlist",
+  "default_fade": 0.0,
+  "bindings": {
+    "time": { "source": "bus:time" }
+  },
+  "entries": {
+    "1": {
+      "name": "fx",
+      "node": { "ref": "./fx/project.json" }
+    }
+  }
+}
+"#,
+        )
+        .expect("playlist.json");
+        fs.write_file(
+            "/fx/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": { "ref": "./shader.json" }
+  }
+}
+"#,
+        )
+        .expect("fx/project.json");
+        fs.write_file(
+            "/fx/shader.json".as_path(),
+            br#"
+{
+  "kind": "Shader",
+  "source": { "path": "shader.glsl" },
+  "consumed": {
+    "time": { "kind": "value", "value": "f32", "default": 0.0, "default_bind": "bus:time" }
+  }
+}
+"#,
+        )
+        .expect("fx/shader.json");
+        fs.write_file(
+            "/fx/shader.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(pos, time, 1.0); }",
+        )
+        .expect("fx/shader.glsl");
+
+        let services = EngineServices::new(TreePath::parse("/nested.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        let root = rt.tree().root();
+        let playlist = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("playlist").unwrap())
+            .expect("playlist");
+        let fx = rt
+            .tree()
+            .lookup_sibling(playlist, NodeName::parse("fx").unwrap())
+            .expect("fx entry child");
+        let fx_shader = rt
+            .tree()
+            .lookup_sibling(fx, NodeName::parse("shader").unwrap())
+            .expect("fx shader");
+
+        // The entry-owned project sits in an anonymous entry scope; its own
+        // named scope nests inside it, and its shader's time consume walks
+        // out past both to the host clock.
+        assert_eq!(
+            consumed_bus_source(&rt, fx_shader, "time"),
+            Some(scoped_at(ScopeId::Project(root), "time")),
+            "entry effect inherits host time through the anonymous scope"
+        );
+        assert_eq!(
+            produced_bus_target(&rt, fx_shader, "output"),
+            Some(scoped_at(ScopeId::Project(fx), "visual.out")),
+            "entry effect's visual stays in its own named scope"
+        );
+
+        // The playlist's blend path reads the entry child's produced
+        // `output` — for a project child that is the mirror. Resolving the
+        // playlist's own output proves the whole chain.
+        rt.tick(16).expect("tick");
+        let playlist_output = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: playlist,
+                    slot: SlotPath::parse("output").expect("output"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("playlist output resolves through the effect mirror")
+            .0;
+        assert!(playlist_output.value_leaf().is_some());
+    }
+
+    /// Scope postconditions over the shipped examples: every consumed bus
+    /// endpoint either reads a channel some binding writes at exactly that
+    /// scope, or falls back to the root scope (rule 3's contract); flat
+    /// projects only ever see the root scope and playlist-entry anonymous
+    /// scopes.
+    #[test]
+    fn example_projects_resolve_bus_endpoints_to_written_or_root_scopes() {
+        let examples: [(&str, &dyn Fn() -> LpFsStd); 4] = [
+            ("fyeah-sign", &examples_fyeah_sign_fs),
+            ("button-playlist", &examples_button_playlist_fs),
+            ("events", &examples_events_fs),
+            ("fluid", &examples_fluid_fs),
+        ];
+        for (name, fs) in examples {
+            let fs = fs();
+            let services = EngineServices::new(TreePath::parse("/check.show").expect("path"));
+            let rt = ProjectLoader::load_from_root(&fs, services)
+                .unwrap_or_else(|e| panic!("load {name}: {e}"));
+            let root_scope = ScopeId::Project(rt.tree().root());
+
+            let written: alloc::collections::BTreeSet<ScopedChannel> = rt
+                .tree()
+                .bindings()
+                .filter_map(|binding| match &binding.target {
+                    BindingTarget::BusChannel(channel) => Some(channel.clone()),
+                    _ => None,
+                })
+                .collect();
+
+            for binding in rt.tree().bindings() {
+                if let BindingSource::BusChannel(channel) = &binding.source {
+                    assert!(
+                        written.contains(channel) || channel.scope == root_scope,
+                        "{name}: consumed endpoint {channel} reads a scope \
+                         nobody writes and is not the root fallback"
+                    );
+                }
+            }
+
+            // Flat examples: every bus endpoint's scope is the root scope or
+            // a playlist-entry anonymous scope. (Nesting cannot occur in the
+            // shipped flat examples, so this pins single-root-scope parity.)
+            for binding in rt.tree().bindings() {
+                let mut check = |channel: &ScopedChannel| {
+                    assert!(
+                        channel.scope == root_scope || matches!(channel.scope, ScopeId::Entry(_)),
+                        "{name}: unexpected scope on {channel}"
+                    );
+                };
+                if let BindingSource::BusChannel(channel) = &binding.source {
+                    check(channel);
+                }
+                if let BindingTarget::BusChannel(channel) = &binding.target {
+                    check(channel);
+                }
+            }
+        }
     }
 }

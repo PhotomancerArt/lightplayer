@@ -68,6 +68,7 @@ impl ResolverCache {
 mod tests {
     use super::{Production, QueryKey, ResolverCache};
     use crate::dataflow::binding::BindingRef;
+    use crate::dataflow::bus::{ScopeId, ScopedChannel};
     use crate::dataflow::resolver::production::ProductionSource;
     use crate::dataflow::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
     use lpc_model::ChannelName;
@@ -78,7 +79,10 @@ mod tests {
     use lps_shared::LpsValueF32;
 
     fn sample_bus_key(name: &str) -> QueryKey {
-        QueryKey::Bus(ChannelName(alloc::string::String::from(name)))
+        QueryKey::Bus(ScopedChannel::new(
+            ScopeId::Project(NodeId::new(0)),
+            ChannelName(alloc::string::String::from(name)),
+        ))
     }
 
     fn make_produced(frame: i64, source: ProductionSource) -> Production {

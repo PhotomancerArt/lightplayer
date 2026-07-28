@@ -6,7 +6,9 @@
 pub mod bus;
 pub mod bus_error;
 pub mod channel_entry;
+pub mod scope;
 
 pub use bus::Bus;
 pub use bus_error::BusError;
 pub use channel_entry::ChannelEntry;
+pub use scope::{ScopeId, ScopedChannel};

@@ -199,6 +199,15 @@ impl<'r> TickContext<'r> {
         self.resolver.resolve(query)
     }
 
+    /// Resolve a bus channel this frame; `None` when the channel has no
+    /// writer (the project-node mirror's absent case).
+    pub fn resolve_bus(
+        &mut self,
+        channel: crate::dataflow::bus::ScopedChannel,
+    ) -> Result<Option<Production>, ResolveError> {
+        self.resolver.resolve_bus(channel)
+    }
+
     pub fn publish_runtime_slot(
         &mut self,
         state_root: &dyn SlotAccess,
@@ -675,6 +684,13 @@ mod tests {
         pub value: ValueSlot<f32>,
     }
 
+    fn scoped(name: &str) -> crate::dataflow::bus::ScopedChannel {
+        crate::dataflow::bus::ScopedChannel::new(
+            crate::dataflow::bus::ScopeId::Project(NodeId::new(0)),
+            ChannelName(String::from(name)),
+        )
+    }
+
     #[derive(Default)]
     struct TestBindings {
         entries: Vec<(BindingRef, BindingEntry)>,
@@ -712,7 +728,7 @@ mod tests {
 
         fn providers_for_bus(
             &self,
-            channel: &lpc_model::ChannelName,
+            channel: &crate::dataflow::bus::ScopedChannel,
         ) -> Vec<(BindingRef, BindingEntry)> {
             self.entries
                 .iter()
@@ -750,7 +766,7 @@ mod tests {
 
         fn providers_for_bus(
             &self,
-            channel: &lpc_model::ChannelName,
+            channel: &crate::dataflow::bus::ScopedChannel,
         ) -> Vec<(BindingRef, BindingEntry)> {
             self.bindings.providers_for_bus(channel)
         }
@@ -787,7 +803,7 @@ mod tests {
     fn tick_context_resolve_bus_query() {
         let mut bindings = TestBindings::default();
         let frame = Revision::new(10);
-        let channel = lpc_model::ChannelName(String::from("level_bus"));
+        let channel = scoped("level_bus");
         bindings.add(
             BindingDraft {
                 source: BindingSource::Literal(lpc_model::LpValue::F32(7.8)),
@@ -967,7 +983,7 @@ mod tests {
     fn dummy_node_can_resolve_bus_query_from_produce() {
         let mut bindings = TestBindings::default();
         let frame = Revision::new(10);
-        let channel = lpc_model::ChannelName(String::from("in"));
+        let channel = scoped("in");
         bindings.add(
             BindingDraft {
                 source: BindingSource::Literal(lpc_model::LpValue::F32(8.8)),
