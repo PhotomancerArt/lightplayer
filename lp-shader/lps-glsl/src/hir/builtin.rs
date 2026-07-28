@@ -58,6 +58,7 @@ pub(crate) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "sign" => BuiltinKind::Sign,
         "smoothstep" => BuiltinKind::Smoothstep,
         "sqrt" => BuiltinKind::Sqrt,
+        "step" => BuiltinKind::Step,
         "transpose" => BuiltinKind::Transpose,
         "trunc" => BuiltinKind::Trunc,
         "uaddCarry" => BuiltinKind::UaddCarry,
@@ -229,6 +230,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::LessThanEqual
         | BuiltinKind::NotEqual => type_relational_builtin(arena, span, args),
         BuiltinKind::Clamp | BuiltinKind::Smoothstep => type_clamp_or_smoothstep(arena, span, args),
+        BuiltinKind::Step => type_step_builtin(arena, span, args),
         BuiltinKind::Fma => type_fma_builtin(arena, span, args),
         BuiltinKind::Mix => type_mix_builtin(arena, span, args),
         BuiltinKind::ImulExtended
@@ -284,7 +286,8 @@ pub(crate) fn check_builtin_arity(
         | BuiltinKind::Min
         | BuiltinKind::Mod
         | BuiltinKind::NotEqual
-        | BuiltinKind::OuterProduct => 2,
+        | BuiltinKind::OuterProduct
+        | BuiltinKind::Step => 2,
         BuiltinKind::BitfieldExtract
         | BuiltinKind::Clamp
         | BuiltinKind::Fma
@@ -617,6 +620,25 @@ fn type_clamp_or_smoothstep(
     let b = coerce_expr(arena, b, &ty)?;
     let c = coerce_expr(arena, c, &ty)?;
     Ok((arena.push_expr_list([a, b, c]), ty))
+}
+
+fn type_step_builtin(
+    arena: &mut HirArena,
+    span: Span,
+    args: ExprList,
+) -> Result<(ExprList, LpsType), Diagnostic> {
+    // GLSL declares `step(genType edge, genType x)` and `step(float edge,
+    // genType x)`; the pair coercion broadcasts a scalar edge over the
+    // vector `x` and covers the second overload.
+    let (edge, x) = two_args(arena, span, args)?;
+    let (edge, x, ty) = coerce_arithmetic_pair(arena, span, edge, x)?;
+    if ty.is_matrix() || scalar_base_type(&ty) != Some(LpsType::Float) {
+        return Err(Diagnostic::error(
+            span,
+            "step expects float scalar/vector lanes",
+        ));
+    }
+    Ok((arena.push_expr_list([edge, x]), ty))
 }
 
 fn type_fma_builtin(
