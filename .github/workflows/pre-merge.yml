@@ -27,9 +27,51 @@ jobs:
   # anyway (Google Chrome ships no linux-arm64 build), and x64 runner images
   # are the better-supported default. validate-gfx stays on ARM deliberately —
   # it needs no browser and keeps a second architecture compiling the tree.
+  # The GLSL filetest suite (31k cases x 5 targets) is the longest single unit
+  # of work in `just test`. It only exercises the shader/exec stack, so PRs
+  # that cannot reach that stack run `just test-rust` and skip it.
+  #
+  # The list is the *dependency closure* of the two binaries the suite builds,
+  # by directory, not a guess at what "looks shader-y":
+  #   - lps-filetests-app  -> lp-shader, lp-riscv, lp-gfx, lp-base, third_party
+  #   - lps-builtins-emu-app (the guest ELF, built by scripts/build-builtins.sh)
+  #     additionally pulls in lp-core
+  # Cargo.lock is included deliberately (unlike detect-studio-web-changes): a
+  # naga or wasmtime bump changes shader results, and the suite is cheap enough
+  # after the profile.dev overrides in Cargo.toml that the insurance is free.
+  #
+  # Pushes to main always run it, so anything a filter miss lets through
+  # surfaces on the very next merge.
+  detect-shader-changes:
+    name: Detect shader-relevant changes
+    runs-on: ubuntu-24.04
+    outputs:
+      shader: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.shader }}
+    steps:
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shader:
+              - 'lp-shader/**'
+              - 'lp-riscv/**'
+              - 'lp-gfx/**'
+              - 'lp-base/**'
+              - 'lp-core/**'
+              - 'third_party/**'
+              - 'scripts/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+
   validate-x64:
     name: Validate (x64)
     runs-on: ubuntu-24.04
+    needs: detect-shader-changes
     # x64: full check + build + test
     steps:
       - name: Install system deps (libudev for serialport)
@@ -69,8 +111,12 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
+      # `just test` = test-rust + test-filetests (parallel). When the shader
+      # gate misses, only test-rust runs.
       - name: Validate
-        run: cd lp2025 && just check build-ci test
+        env:
+          TEST_RECIPE: ${{ needs.detect-shader-changes.outputs.shader == 'true' && 'test' || 'test-rust' }}
+        run: cd lp2025 && just check build-ci "$TEST_RECIPE"
 
   # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser, naga-wasm-poc)
   # are validated in a separate job below. Building `-p lp-gfx-wgpu` unifies
