@@ -230,6 +230,54 @@ committed-as-well-as-working-tree UI changes; (4) failures are loud
   churner is a signal to diagnose, not merely noise to suppress — this one
   was load-bearing.
 
+- 2026-07-27 — **`home-gallery/opening-a-project` high-amplitude tolerated
+  diff: UNRESOLVED, and the evidence is gone.** Run 30309630982 reported
+  md 166/840 px max Δ199 and lg 190/894 px max Δ191 as within tolerance;
+  run 30311541469, 32 minutes later on the same branch (only a docs file
+  changed between the two commits — app code and capture script
+  byte-identical), reproduced both baselines byte-identically. So this is
+  a genuine run-to-run flip, not a stale baseline: a stale baseline
+  reports the *same* numbers every run, the way
+  `studio__layout__studio-shell__overview` has reported 623/895/Δ144 on
+  eight-plus consecutive runs across different branches. Neither run
+  emitted an `unstable render` warning, so both terminals survived the
+  stable pair. It is a singleton across 46 recent CI runs, and `sm` never
+  drifted.
+  - **Do not re-run the reproduction.** 38 attempts produced
+    byte-identical output every time: 20 on macOS (concurrency 1 and 6),
+    18 in a Linux container (12 normal, 6 starved at `--cpus=0.8` with 4
+    concurrent pages). Worth keeping: a `node:22-bookworm-slim` +
+    `chromium` container reproduces CI's **exact** story-box dimensions
+    (720×618 / 1080×618 / 390×1080) where macOS does not, so it is the
+    right place to test layout questions locally.
+  - **Ruled out by measurement**, not by argument (numbers in the defect
+    entry's calibration table): compositor layer promotion / raster mode
+    (max Δ2 — this IS the version-badge and shader-face churner class, an
+    order of magnitude too small); post-ready reflow (story box stable at
+    720×618 from t=0 to t=1200ms); preview canvases (home-gallery stories
+    mount none); and the CSS transition storm below.
+  - **Real but not the culprit:** at the instant the ready-gate fires,
+    5 loads in 6 have **48 mid-flight CSS colour transitions** running —
+    every `transition-colors` element animating from UA/initial colours
+    (white text, black borders) to the theme's over 150ms, i.e. the
+    themed-stylesheet swap. Captured mid-flight that is 46 645 px at max
+    Δ35 — wide, faint, wrong shape — and it is gone by t=50ms, well
+    inside the stable pair. Left alone, but it is a latent hazard: a
+    slower runner could freeze a page further up that ramp.
+  - **What correlates:** the drifting capture happened in a degraded
+    pass. Pass 1/4 died with `ENOTEMPTY: directory not empty, rmdir
+    '/tmp/lp-studio-story-chrome-vjE3AC/Default'`, and the story was
+    captured ~18 captures into the retry pass on a fresh Chrome,
+    immediately after `home-gallery/first-run (sm)` timed out and was
+    retried on a fresh page. The clean run captured it mid-stream in an
+    uneventful chunk. That is a lead, not a mechanism.
+  - **Why it stopped here:** the check only uploads fresh PNGs when it
+    FAILS, so a tolerated diff leaves one line of log text and no pixels.
+    Filed as
+    [story-check-tolerance-ignores-amplitude](../defects/2026-07-27-story-check-tolerance-ignores-amplitude.md)
+    — fix the retention before the next one of these, or the next
+    investigation dead-ends in the same place.
+
 **Exit-criteria status after the 2026-07-26 paydown** — (1) isolated
 pinned CI runner ✓; (2) clean ephemeral runners make restart cheap and
 the in-script retry/resume is retained ✓; (3) CI check always compares
@@ -260,7 +308,14 @@ fixes.
   0.037%/0.028% but with **max Δ199/Δ191** — under the ratio limit, yet far
   too high-amplitude to be anti-aliasing. Given the code-editor precedent
   below, treat that as a suspected bistable render, not noise (chip
-  task_4c540503).
+  task_4c540503). **Investigated the same day — see the
+  `opening-a-project` entry above.** The suspicion holds (it is a genuine
+  run-to-run flip, and Δ199 is thirty times the known raster-churner
+  class) but the mechanism is unidentified and unreproducible in 38
+  attempts, because this run's fresh PNGs were never retained: the
+  artifact upload is keyed to check FAILURE, so a tolerated diff leaves
+  counts and no pixels. That retention gap is now its own defect,
+  [story-check-tolerance-ignores-amplitude](../defects/2026-07-27-story-check-tolerance-ignores-amplitude.md).
 
 **Re-activated 2026-07-27 — narrowed exit criteria.** Criteria (1)–(4)
 remain met and are not revisited; only (5) failed, and the 2026-07-27
