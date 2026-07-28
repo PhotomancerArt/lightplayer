@@ -60,6 +60,20 @@ its operands derive from loop variables instead of constants.
   depth-3 chains, so the next misattribution of this class can be ruled
   out in one corpus run.
 
+**Follow-on coverage (added after this landed)**
+- `lpvm-wasm` unit test `emit::q32::tests::q32_helpers_are_stack_neutral` —
+  emits every Q32 helper into a function body whose implicit `end` is
+  *reachable* (no trailing `return`) and validates it with `wasmparser`,
+  pinning the invariant per helper instead of relying on a shader to
+  exercise it. Verified to fail on the pre-fix `emit_q32_fabs`.
+- `control/torture/intrin_*` (20 generated files) — one builtin per file
+  called inside an `if` inside a `for`, with the result stored to an
+  array, stored through a swizzle, discarded, or negated in the other
+  arm.
+- That axis immediately found that the `emit_ftrunc` fallout above had two
+  siblings: `emit_ffloor` and `emit_fceil` were wrong the same way. See
+  [cranelift-q32-floor-ceil](2026-07-27-cranelift-q32-floor-ceil.md).
+
 **Lesson** — When a backend rejects control flow that the frontend
 accepted, suspect a stack-balance leak in an *expression* op before
 believing the control flow is at fault: wasm only checks stack balance
