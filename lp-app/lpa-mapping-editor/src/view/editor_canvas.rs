@@ -111,8 +111,8 @@ pub fn EditorCanvas(
             spans: &spans,
             view_width: 0.0, // unused by the renderer below (doc space)
             view_height: 0.0,
-            end_gap: radius * 1.5,
-            min_len: radius * 3.4,
+            end_gap: radius * 1.05,
+            min_len: radius * 2.3,
         })
     });
     let show_numbers = opts.numbers && cam.scale * radius >= 5.0;
@@ -169,8 +169,8 @@ pub fn EditorCanvas(
                     view_box: "0 0 8 8",
                     ref_x: "7",
                     ref_y: "4",
-                    marker_width: "4",
-                    marker_height: "4",
+                    marker_width: "3.5",
+                    marker_height: "3.5",
                     orient: "auto-start-reverse",
                     // Opaque fill: the translucent line ends under the head,
                     // and alpha-stacking there reads as a glitch.
@@ -181,8 +181,8 @@ pub fn EditorCanvas(
                     view_box: "0 0 8 8",
                     ref_x: "7",
                     ref_y: "4",
-                    marker_width: "4",
-                    marker_height: "4",
+                    marker_width: "3.5",
+                    marker_height: "3.5",
                     orient: "auto-start-reverse",
                     path { d: "M0,0.8 L7.4,4 L0,7.2 z", fill: "#e4c065" }
                 }
@@ -260,7 +260,7 @@ pub fn EditorCanvas(
                             y1: "{seg.y1}",
                             x2: "{seg.x2}",
                             y2: "{seg.y2}",
-                            stroke_width: "{(radius * 0.14).clamp(0.4, 1.6)}",
+                            stroke_width: "{(radius * 0.11).clamp(0.35, 1.2)}",
                             marker_end: if seg.chain { "url(#lpme-arrow-head-chain)" } else { "url(#lpme-arrow-head)" },
                         }
                     }
