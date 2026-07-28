@@ -53,6 +53,16 @@ const browserRestartEvery = parsePositiveIntegerEnv("STUDIO_STORY_BROWSER_RESTAR
 // Marker file (inside the capture dir) recording the build a partial capture
 // belongs to, so a re-run can resume it only when the build is unchanged.
 const CAPTURE_BUILD_FILE = ".capture-build";
+// HARNESS SEAM — second half of the contract documented at
+// `component_overview_id` in src/stories/story_book.rs: the story book
+// synthesizes one `<family>/[<category>/]<component>/overview` page per
+// component that stacks every story of that component, and no `#[story]`
+// function can claim that id (pinned by a unit test there).
+// Declared with the other module constants, ABOVE the top-level await that
+// drives the run — a `const` further down the file is in its temporal dead
+// zone by the time `discoverStoryIds()` reads it, which `node --check` cannot
+// see because it only parses.
+const OVERVIEW_COMPOSITE_SUFFIX = "/overview";
 // Written beside `.check-complete` by a complete `check`: the baseline files
 // that actually need replacing/removing. See the write site for why consumers
 // must not just swap the whole set.
@@ -473,13 +483,6 @@ function parsePositiveIntegerEnv(name, defaultValue) {
   }
   return parsed;
 }
-
-// HARNESS SEAM — second half of the contract documented at
-// `component_overview_id` in src/stories/story_book.rs: the story book
-// synthesizes one `<family>/[<category>/]<component>/overview` page per
-// component that stacks every story of that component, and no `#[story]`
-// function can claim that id (pinned by a unit test there).
-const OVERVIEW_COMPOSITE_SUFFIX = "/overview";
 
 async function discoverStoryIds() {
   const html = await runChrome([
