@@ -777,12 +777,18 @@ test-glsl-filetests:
 # ============================================================================
 
 [parallel]
-check: fmt-check clippy lint-serde-content lint-schemars-fw schema-check
+check: fmt-check clippy lint-serde-content lint-schemars-fw schema-check lint-torture-corpus
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
 lint-serde-content:
     ./scripts/check-serde-content.sh
+
+# The control-flow torture corpus is generated; without this gate, hand edits to
+# those files are silently reverted by the next `--write` (that is how the
+# per-directive @unsupported(wgpu.f32) markers were nearly lost).
+lint-torture-corpus:
+    python3 lp-shader/scripts/gen-control-torture.py --check
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:

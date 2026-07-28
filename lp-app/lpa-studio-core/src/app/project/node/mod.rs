@@ -6,15 +6,24 @@
 //! need to talk back to the server.
 
 pub mod node_controller;
+pub mod node_create_op;
 pub(in crate::app::project) mod node_face_builder;
+pub mod node_naming;
+pub mod node_remove_op;
+pub mod node_remove_preflight;
 pub mod node_revert_op;
 pub mod playlist_activate_op;
 pub mod project_node_address;
 pub mod project_node_target;
+pub mod ui_add_node_menu;
 
 pub(in crate::app::project) use node_controller::root_slot_key;
 pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
+pub use node_create_op::{NodeCreateOp, UiAttachTarget};
+pub use node_remove_op::NodeRemoveOp;
+pub use node_remove_preflight::UiNodeRemovePreflight;
 pub use node_revert_op::NodeRevertOp;
 pub use playlist_activate_op::PlaylistActivateOp;
 pub use project_node_address::ProjectNodeAddress;
 pub use project_node_target::ProjectNodeTarget;
+pub use ui_add_node_menu::{UiAddNodeMenu, UiAddNodeMenuEntry, add_node_menu};

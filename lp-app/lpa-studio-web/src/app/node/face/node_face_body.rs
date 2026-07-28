@@ -15,7 +15,9 @@
 //! address path the toggle ops carry back).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{NodeCardUiState, UiAction, UiNodeFace, UiNodeSection, UiPendingEdit};
+use lpa_studio_core::{
+    NodeCardUiState, UiAction, UiAddNodeMenu, UiNodeFace, UiNodeSection, UiPendingEdit,
+};
 
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
@@ -41,6 +43,10 @@ pub fn NodeFaceBody(
     /// Platform for code-editor shortcut hints; stories pin it.
     #[props(default = None)]
     platform: Option<Platform>,
+    /// The node's add-node picker data (playlists only) — the playlist
+    /// face's strip renders its add chip from this.
+    #[props(default = None)]
+    add_node_menu: Option<UiAddNodeMenu>,
     #[props(default)] pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
@@ -88,7 +94,7 @@ pub fn NodeFaceBody(
                     }
                 },
                 UiNodeFace::Playlist(playlist) => rsx! {
-                    PlaylistFace { face: playlist, on_action }
+                    PlaylistFace { face: playlist, add_node_menu, on_action }
                     NodeCardDrawers {
                         node,
                         sections,

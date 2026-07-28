@@ -1,5 +1,6 @@
 //! Studio node UI components and colocated node UI stories.
 
+mod add_node_picker;
 mod agent_chat;
 pub(crate) mod agent_chat_export;
 #[cfg(feature = "stories")]
@@ -74,6 +75,7 @@ mod slot_vector_fields;
 pub(crate) mod toggle_field_stories;
 pub(crate) mod value_display;
 
+pub use add_node_picker::{AddNodePicker, WorkspaceAddNodeButton};
 pub use agent_chat::AgentChatPane;
 pub use asset_editor::AssetEditor;
 pub(crate) use binding_authoring_section::BindingAuthoringSection;

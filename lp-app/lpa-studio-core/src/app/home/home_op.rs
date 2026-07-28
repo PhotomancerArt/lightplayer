@@ -32,11 +32,20 @@ pub enum HomeOp {
         key: String,
     },
     /// Open an example: seed it into the library once, then open the copy.
-    /// Also the ONE way to start a project (D17: "new project" is the
-    /// examples place; the empty library points here).
+    /// Was the ONE way to start a project (D17: "new project" is the
+    /// examples place) until 2026-07-27, when [`Self::CreateProject`]
+    /// deviated from D17 (`docs/adr/2026-07-27-node-authoring-operations.md`).
     OpenExample {
         id: String,
     },
+    /// Create a pure-blank one-file project and OPEN it — create-and-open
+    /// is the gesture: the user lands in the empty editor with the
+    /// add-node picker. Deviates from D17 (the examples place is unbuilt
+    /// and node authoring makes an empty project genuinely useful; see
+    /// `docs/adr/2026-07-27-node-authoring-operations.md`). No name
+    /// prompt: the default "Project" label is slugged/dated/deduped by
+    /// the library, and rename lives on the card kebab.
+    CreateProject,
     RenamePackage {
         uid: String,
         name: String,
@@ -90,6 +99,12 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Primary,
             )
             .with_icon("play"),
+            Self::CreateProject => ActionMeta::new(
+                "New",
+                "Create a blank project and open it.",
+                ActionPriority::Secondary,
+            )
+            .with_icon("add"),
             Self::RenamePackage { .. } => {
                 ActionMeta::new("Rename", "Rename this project.", ActionPriority::Secondary)
                     .with_icon("edit")
@@ -143,10 +158,13 @@ impl ControllerOp for HomeOp {
     fn action_class(&self) -> ActionClass {
         match self {
             // Opens push files to the runtime and load the project — the
-            // demo-load quiet-gap budget fits.
-            Self::OpenPackage { .. } | Self::OpenExample { .. } => ActionClass::Foreground {
-                deadline: PROJECT_LOAD_DEADLINE,
-            },
+            // demo-load quiet-gap budget fits. Create-and-open ends in the
+            // same open, so it shares the budget.
+            Self::OpenPackage { .. } | Self::OpenExample { .. } | Self::CreateProject => {
+                ActionClass::Foreground {
+                    deadline: PROJECT_LOAD_DEADLINE,
+                }
+            }
             // Library/registry CRUD is local store work (a device rename's
             // live write-back is one small wire write); the standard budget
             // bounds it.
@@ -198,6 +216,7 @@ mod tests {
             HomeOp::OpenExample {
                 id: "examples/basic".to_string(),
             },
+            HomeOp::CreateProject,
         ] {
             assert_eq!(
                 op.action_class(),
