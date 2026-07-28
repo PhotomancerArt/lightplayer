@@ -8,6 +8,8 @@
 //! empty playlist.
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::project::node::add_node_menu;
+use lpa_studio_core::{ProjectNodeAddress, UiAttachTarget, UiNodeFace};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::NodePane;
@@ -27,6 +29,30 @@ fn PlaylistCardCanvas(children: Element) -> Element {
 fn strip() -> Element {
     let mut view = playlist_node_face_view();
     view.children = Vec::new();
+    rsx! {
+        PlaylistCardCanvas {
+            NodePane { view, on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
+    description = "The strip with the add chip at the end of the card row (authoring P5): a dashed card-family chip opening the SAME kind picker as the project header's '+', attaching into THIS playlist's entries. Additive-only per the faces ADR — delete stays on the pane header; one-active-child and chip-click-selects behavior unchanged."
+)]
+fn strip_with_add_chip() -> Element {
+    let mut view = playlist_node_face_view();
+    view.children = Vec::new();
+    // Two entries so the strip's tail — where the chip lives — sits inside
+    // the card frame instead of past the horizontal scroll edge.
+    if let Some(UiNodeFace::Playlist(face)) = view.face.as_mut() {
+        face.entries.truncate(2);
+    }
+    // The controller supplies the playlist's own picker (attach = this
+    // playlist) on its node view (P4).
+    view.add_node_menu = Some(add_node_menu(&UiAttachTarget::Playlist {
+        node: ProjectNodeAddress::parse("/fyeah_sign.show/evening.playlist")
+            .expect("valid story node address"),
+    }));
     rsx! {
         PlaylistCardCanvas {
             NodePane { view, on_action: move |_| {} }

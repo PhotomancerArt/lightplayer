@@ -4,4 +4,5 @@ mod project_inventory_read;
 
 pub use project_inventory_read::{
     WireProjectInventoryReadRequest, WireProjectInventoryReadResponse,
+    WireProjectNodeInventoryEntry, WireProjectNodeOrigin,
 };

@@ -1266,7 +1266,7 @@ impl ProjectRegistry {
     /// anyway, so one targeted parse per normalized command is in the noise.
     /// Absent authored fields default from the shape on parse, so "authored
     /// default" and "unauthored default" compare identically.
-    fn parse_base_def(
+    pub(crate) fn parse_base_def(
         &mut self,
         fs: &dyn LpFs,
         artifact: &ArtifactLocation,
@@ -1291,7 +1291,7 @@ impl ProjectRegistry {
             })
     }
 
-    fn loaded_def_for_mutation(
+    pub(crate) fn loaded_def_for_mutation(
         &self,
         artifact: &ArtifactLocation,
     ) -> Result<&NodeDef, MutationRejection> {
@@ -1339,7 +1339,7 @@ impl NormalizedEdit {
 /// against the artifact wrapper shape so edits that switch the variant
 /// validate against the target variant's shape. Bare paths resolve against
 /// the effective definition's own shape.
-fn resolve_edit_policy(
+pub(crate) fn resolve_edit_policy(
     def: &NodeDef,
     path: &SlotPath,
     ctx: &ParseCtx<'_>,
@@ -1442,7 +1442,7 @@ fn ensure_effective_scope(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>) ->
 /// projections, resolving enum variant segments against any declared
 /// variant), returning the shape view instead of a policy. `None` when the
 /// path does not resolve in the shape.
-fn shape_at_path<'s>(
+pub(crate) fn shape_at_path<'s>(
     shape: SlotShapeView<'s>,
     ctx: &ParseCtx<'s>,
     segments: &[SlotPathSegment],
@@ -1500,7 +1500,7 @@ fn split_map_entry_path(path: &SlotPath) -> Option<(SlotPath, &SlotMapKey)> {
 /// Whether the map at `map_path` in the **effective** definition contains
 /// `key`. `Err` carries a message when the path does not resolve to a map
 /// (including a root-variant prefix that names an inactive variant).
-fn effective_map_entry_presence(
+pub(crate) fn effective_map_entry_presence(
     def: &NodeDef,
     ctx: &ParseCtx<'_>,
     map_path: &SlotPath,

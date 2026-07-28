@@ -166,6 +166,7 @@ impl NodeController {
             &SlotEditJoin::empty(),
             &|_| Vec::new(),
             &|_, _| None,
+            &|_| None,
             None,
             // No project context: focus is the whole Default-intent policy.
             &|node| node.state().focused,
@@ -184,12 +185,18 @@ impl NodeController {
     /// buffer, content caches). It runs for every asset slot the node
     /// produces — nested ones included — so an editor appears wherever an
     /// editable asset does.
+    ///
+    /// `remove_action` resolves a node address into its delete-node header
+    /// action (confirmation pre-composed from the removal pre-flight); it
+    /// closes over project state exactly like `asset_editor`, and `None`
+    /// keeps the header without a delete affordance (unresolvable site).
     pub(in crate::app::project) fn ui_node_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
+        remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
         always_live: Option<&UiProductRef>,
         subscribes: &impl Fn(&NodeController) -> bool,
     ) -> UiNodeView {
@@ -198,6 +205,7 @@ impl NodeController {
             edits,
             extra_config,
             asset_editor,
+            remove_action,
             always_live,
             subscribes,
         );
@@ -239,14 +247,31 @@ impl NodeController {
         let face = self.kind_face(&sections, &mut children);
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
-            .with_header_actions(node_header_actions(&self.address, &dirty))
+            .with_header_actions(node_header_actions(
+                &self.address,
+                &dirty,
+                remove_action(&self.address),
+            ))
             .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
         view.collapsed = self.state.collapsed;
         view.issues = self.issues.clone();
         view.face = face;
+        view.add_node_menu = self.add_node_menu();
         view
+    }
+
+    /// The add-node picker for container nodes: playlists offer the picker
+    /// with THIS node as the attach site (the create lands as a new
+    /// `entries[k]` child). Every other kind carries none.
+    fn add_node_menu(&self) -> Option<crate::UiAddNodeMenu> {
+        use lpc_model::PlaylistDef;
+        (self.node_ty() == Some(PlaylistDef::KIND)).then(|| {
+            super::ui_add_node_menu::add_node_menu(&super::UiAttachTarget::Playlist {
+                node: self.address.clone(),
+            })
+        })
     }
 
     /// Raw tree `ty` discriminant for this node (matches `ShaderDef::KIND`,
@@ -545,6 +570,7 @@ impl NodeController {
         edits: &SlotEditJoin<'_>,
         extra_config: &impl Fn(NodeId) -> Vec<UiConfigSlot>,
         asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditor>,
+        remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
         always_live: Option<&UiProductRef>,
         subscribes: &impl Fn(&NodeController) -> bool,
     ) -> Vec<UiNodeChild> {
@@ -573,6 +599,7 @@ impl NodeController {
                     edits,
                     extra_config,
                     asset_editor,
+                    remove_action,
                     always_live,
                     subscribes,
                 );
@@ -586,7 +613,8 @@ impl NodeController {
                         .map(|nested| nested.dirty)
                         .sum::<DirtySummary>();
                 view.face = child.kind_face(&view.sections, &mut view.children);
-                view.header_actions = node_header_actions(&child.address, &view.dirty);
+                view.header_actions =
+                    node_header_actions(&child.address, &view.dirty, remove_action(&child.address));
                 view
             })
             .collect()
@@ -686,18 +714,29 @@ fn embed_asset_editors_in_slots(
 /// Contextual node-header actions (pane grammar actions slot, M3 UX gate
 /// feedback): the subtree batch revert ([`NodeRevertOp`]) with the same
 /// "revert" icon token as the project header's Revert-to-saved, present only
-/// while the header's subtree [`DirtySummary`] announces pending edits.
-fn node_header_actions(node: &ProjectNodeAddress, dirty: &DirtySummary) -> Vec<UiPaneAction> {
-    if dirty.is_clean() {
-        return Vec::new();
+/// while the header's subtree [`DirtySummary`] announces pending edits, plus
+/// the UNGATED delete-node action when the caller resolved one (its
+/// confirmation copy rides the action's `ActionMeta`, like
+/// `HomeOp::DeletePackage`).
+fn node_header_actions(
+    node: &ProjectNodeAddress,
+    dirty: &DirtySummary,
+    remove: Option<UiAction>,
+) -> Vec<UiPaneAction> {
+    let mut actions = Vec::new();
+    if !dirty.is_clean() {
+        actions.push(UiPaneAction::new(
+            "revert",
+            UiAction::from_op(
+                ControllerId::new(ProjectController::NODE_ID),
+                NodeRevertOp { node: node.clone() },
+            ),
+        ));
     }
-    vec![UiPaneAction::new(
-        "revert",
-        UiAction::from_op(
-            ControllerId::new(ProjectController::NODE_ID),
-            NodeRevertOp { node: node.clone() },
-        ),
-    )]
+    if let Some(remove) = remove {
+        actions.push(UiPaneAction::new("remove", remove));
+    }
+    actions
 }
 
 fn node_focus_action(node: &NodeController) -> UiAction {

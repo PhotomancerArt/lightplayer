@@ -3,11 +3,11 @@
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
     ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ControllerId, DirtySummary,
-    NodeRevertOp, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, Revision, SlotEditOp,
-    SlotPath, UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot,
+    NodeRemoveOp, NodeRevertOp, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, Revision,
+    SlotEditOp, SlotPath, UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot,
     UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPaneAction, UiPendingEdit,
-    UiPendingEditKind, UiPendingEditPhase, UiProducedBinding, UiProducedBindings,
+    UiNodeRemovePreflight, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPaneAction,
+    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProducedBinding, UiProducedBindings,
     UiProducedProduct, UiProducedValue, UiProductPreview, UiProductTrackingState, UiSlotAsset,
     UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
     UiSlotUnit, UiSlotValue, UiStatus,
@@ -92,6 +92,31 @@ pub(crate) fn node_revert_pane_action() -> UiPaneAction {
                     .expect("valid story node address"),
             },
         ),
+    )
+}
+
+/// The always-available delete-node pane action (authoring P4/P5): the
+/// `NodeRemoveOp` wearing the confirmation the controller composes from the
+/// removal pre-flight (dependents, swept pending edits, staged file
+/// deletions). Renders as the Trash2 icon through the generic pane-action
+/// path; the press runs the composed warning before dispatch.
+pub(crate) fn node_delete_pane_action() -> UiPaneAction {
+    let preflight = UiNodeRemovePreflight {
+        node_label: "Playlist".to_string(),
+        dependent_count: 1,
+        pending_edit_count: 2,
+        staged_files: vec!["/playlist.json".to_string()],
+    };
+    UiPaneAction::new(
+        "remove",
+        UiAction::from_op(
+            ControllerId::new("story.project"),
+            NodeRemoveOp {
+                node: ProjectNodeAddress::parse("/fyeah_sign.show/playlist.playlist")
+                    .expect("valid story node address"),
+            },
+        )
+        .with_confirmation(preflight.confirmation()),
     )
 }
 
