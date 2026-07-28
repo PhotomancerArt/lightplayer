@@ -329,6 +329,17 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
     }
 }
 
+/// The fyeah corpus doc trimmed to the letters fit for a storybook: the
+/// full sign spells something saltier than baseline PNGs should. Keeps the
+/// real import framing (canvas) and multi-path chain; the engineering
+/// corpus itself stays complete.
+pub(crate) fn fyeah_presentable_doc() -> lpc_mapping::Map2dDoc {
+    let mut doc = lpc_mapping::corpus::fyeah();
+    doc.objects
+        .retain(|object| !matches!(object.name.as_str(), "p2" | "p3" | "p4"));
+    doc
+}
+
 /// A fixture face whose lamp layout comes from a shared mapping-corpus
 /// document (16×16 fixture render target, like the real fyeah fixture).
 pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {

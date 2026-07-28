@@ -38,22 +38,20 @@ pub fn FixtureFace(
 
     rsx! {
         NodeCardSection { label: "output", first: true,
-            div { class: "ux-map-preview-wrap",
-                ProductPreview {
-                    kind: preview.kind,
-                    preview: preview.preview.clone(),
-                    tracking: preview.tracking,
-                    frame: preview.frame,
-                    focus_action: None,
-                    on_action,
-                    map_view: map_view(),
+            if show_toggles {
+                MapViewToggles {
+                    value: map_view(),
+                    on_change: move |next| map_view.set(next),
                 }
-                if show_toggles {
-                    MapViewToggles {
-                        value: map_view(),
-                        on_change: move |next| map_view.set(next),
-                    }
-                }
+            }
+            ProductPreview {
+                kind: preview.kind,
+                preview: preview.preview.clone(),
+                tracking: preview.tracking,
+                frame: preview.frame,
+                focus_action: None,
+                on_action,
+                map_view: map_view(),
             }
         }
         NodeCardSection { label: "controls",

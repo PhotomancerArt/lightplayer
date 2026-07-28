@@ -7,7 +7,9 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::face_story_fixtures::{fixture_node_view, map2d_fixture_face};
+use crate::app::node::face_story_fixtures::{
+    fixture_node_view, fyeah_presentable_doc, map2d_fixture_face,
+};
 use crate::app::node::map_view::MapViewOptions;
 use crate::app::node::{FixtureFace, NodePane};
 
@@ -69,18 +71,38 @@ fn panel_wiring_view() -> Element {
 }
 
 #[story(
-    description = "Universe colors on the fyeah sign (219 lamps → 2 universes, boundary mid-letter) with the inter-path chain arrows."
+    description = "Universe colors on the 16×16 panel: 256 lamps flow across the 170-lamp boundary mid-panel (U1 blue → U2 gold)."
 )]
-fn fyeah_universes_view() -> Element {
+fn panel_universes_view() -> Element {
     rsx! {
         FixtureCardCanvas {
             FixtureFace {
-                face: map2d_fixture_face(&lpc_mapping::corpus::fyeah()),
+                face: map2d_fixture_face(&lpc_mapping::corpus::panel_16x16()),
+                initial_map_view: MapViewOptions {
+                    numbers: false,
+                    arrows: false,
+                    universes: true,
+                    live: false,
+                },
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The real sign import (SVG-derived paths + canvas framing) with inter-path chain arrows over live colors."
+)]
+fn sign_chain_view() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            FixtureFace {
+                face: map2d_fixture_face(&fyeah_presentable_doc()),
                 initial_map_view: MapViewOptions {
                     numbers: false,
                     arrows: true,
-                    universes: true,
-                    live: false,
+                    universes: false,
+                    live: true,
                 },
                 on_action: move |_| {},
             }

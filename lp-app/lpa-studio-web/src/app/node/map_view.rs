@@ -13,6 +13,8 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{ControlLayout2d, ControlPathSpan2d};
 
+use crate::base::icon::{StudioIcon, StudioIconName};
+
 /// RGB lamps per DMX universe (mirrors `lpc_mapping::LAMPS_PER_UNIVERSE`).
 pub const LAMPS_PER_UNIVERSE: u32 = 170;
 
@@ -197,7 +199,8 @@ pub fn MapArrowsOverlay(overlay: MapArrowOverlay) -> Element {
     }
 }
 
-/// Compact toggle pills for the map view options.
+/// Pinned icon-toggle bar for the map view options (sits above the lamp
+/// display in the output section — pinned, not floating, per the M3 gate).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn MapViewToggles(value: MapViewOptions, on_change: EventHandler<MapViewOptions>) -> Element {
@@ -205,31 +208,38 @@ pub fn MapViewToggles(value: MapViewOptions, on_change: EventHandler<MapViewOpti
         let next = apply(value);
         move |_| on_change.call(next)
     };
+    let class_for = |on: bool| {
+        if on {
+            "ux-map-toggle ux-map-toggle-on"
+        } else {
+            "ux-map-toggle"
+        }
+    };
     rsx! {
-        div { class: "ux-map-toggle-row",
+        div { class: "ux-map-toggle-bar",
             button {
-                class: if value.numbers { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
+                class: class_for(value.numbers),
                 title: "wiring numbers",
                 onclick: toggle(|mut v| { v.numbers = !v.numbers; v }),
-                "123"
+                StudioIcon { name: StudioIconName::MapNumbers, size: 13 }
             }
             button {
-                class: if value.arrows { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
+                class: class_for(value.arrows),
                 title: "wiring arrows",
                 onclick: toggle(|mut v| { v.arrows = !v.arrows; v }),
-                "→"
+                StudioIcon { name: StudioIconName::MapArrows, size: 13 }
             }
             button {
-                class: if value.universes { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
+                class: class_for(value.universes),
                 title: "universe colors (170 lamps each)",
                 onclick: toggle(|mut v| { v.universes = !v.universes; v }),
-                "uni"
+                StudioIcon { name: StudioIconName::MapUniverses, size: 13 }
             }
             button {
-                class: if value.live { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
+                class: class_for(value.live),
                 title: "live output colors",
                 onclick: toggle(|mut v| { v.live = !v.live; v }),
-                "live"
+                StudioIcon { name: StudioIconName::MapLive, size: 13 }
             }
         }
     }
