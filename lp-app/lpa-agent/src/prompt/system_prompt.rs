@@ -41,6 +41,12 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          (keep-last-good); nothing breaks, but your edit is not live until it \
          compiles.\n\n",
     );
+    // Scope note on the swizzle-store landmine (2026-07-27): it is the NAGA
+    // FRONTEND's limitation ("store to non-local pointer"), not dialect-wide
+    // — rv32lpn.q32 (lps-glsl frontend) compiles the same store fine. The
+    // advice is accurate for today's agent because the agent path is naga
+    // glsl-in; revisit if the shader path ever moves to the lps-glsl
+    // frontend.
 
     // 3. Injected context.
     p.push_str("## Current context\n\n");
