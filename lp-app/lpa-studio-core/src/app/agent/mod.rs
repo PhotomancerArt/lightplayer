@@ -7,6 +7,7 @@
 //! action queue as [`AgentOp`]s; a spawned run reports progress back through
 //! [`AgentFeedback`] commands.
 
+pub mod agent_chat_markdown;
 pub mod agent_chat_session;
 pub mod agent_controller;
 pub mod agent_debug_export;
@@ -18,6 +19,7 @@ pub mod agent_provider_config;
 pub mod agent_session_key;
 pub mod ui_agent_view;
 
+pub use agent_chat_markdown::chat_markdown;
 pub use agent_chat_session::{AgentEditRecord, MAX_EDIT_RECORDS};
 pub use agent_controller::{
     AgentController, AgentModelsFetchFuture, AgentRunContext, AgentTaskFuture, AgentTimerFactory,

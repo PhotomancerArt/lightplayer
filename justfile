@@ -753,6 +753,19 @@ test-filetests:
 test-recovery-emu:
     cargo test -p fw-tests --test recovery_emu -- --include-ignored
 
+# One headless shader-agent session against the real in-process studio
+# stack (lpa-agent-harness runner). Scripted mode is token-free:
+#   just agent-run prompt="make it green" --scripted lp-app/lpa-agent-harness/scripts/green-demo.json
+# (the prompt= prefix is optional; trailing flags pass through).
+# Real-provider mode is SPEND-GATED: it needs provider env (ANTHROPIC_API_KEY,
+# or LPA_EVAL_BASE_URL + LPA_EVAL_MODEL) AND LPA_SPEND_OK=1 in YOUR
+# environment — this recipe only passes the environment through and never
+# sets LPA_SPEND_OK (agents set it only with Yona's explicit per-session
+# permission). Flags: --frontend naga|lps-glsl, --out <dir>, --model <id>,
+# --scripted <script.json>, --max-turns <n>.
+agent-run prompt *flags:
+    cargo run -p lpa-agent-harness --features runner --bin agent-run -- "{{ trim_start_match(prompt, 'prompt=') }}" {{ flags }}
+
 # ============================================================================
 # Testing - lp-app only
 # ============================================================================

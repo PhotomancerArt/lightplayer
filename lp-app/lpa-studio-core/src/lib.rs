@@ -30,7 +30,7 @@ pub use app::agent::{
     AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
     AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
     UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, instant_agent_timer,
+    UiAgentTurn, UiAgentUsage, UiAgentView, chat_markdown, instant_agent_timer,
 };
 pub use app::bus::{UiBusChannelView, UiBusSiteView, UiBusView};
 pub use app::device::{
@@ -98,6 +98,10 @@ pub use app::settings::{
     SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiModelOption,
     UiSettingsView, provider_guidance,
 };
+/// The in-process studio world for headless agent runs (dev tooling; see
+/// the `harness` feature).
+#[cfg(any(test, feature = "harness"))]
+pub use app::studio::studio_harness as harness;
 pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
     LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,

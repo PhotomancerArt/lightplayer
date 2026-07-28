@@ -5424,9 +5424,11 @@ name = "lpa-agent-harness"
 version = "40.0.0"
 dependencies = [
  "lpa-agent",
+ "lpa-studio-core",
  "lps-probe",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

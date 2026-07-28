@@ -15,6 +15,11 @@
 //!   entrypoint over this module.
 //! - [`parse_dump`]: a typed parser over the agent debug-export JSON
 //!   (format 1) for asserting on stop reasons, edits, and cache buckets.
+//! - [`triage`]: known compiler-bug-class signature matching over a dump
+//!   (the runner's `triage.txt`; P3 grows the rule table).
+//! - [`runner`] (feature `runner`): the headless session runner behind the
+//!   `agent-run` bin — one full agent session against the real in-process
+//!   studio stack, scripted or real-provider (spend-gated).
 //!
 //! Spend policy: nothing in this crate bills tokens on its own — the
 //! scripted doubles are token-free, and the eval harness only resolves a
@@ -35,6 +40,9 @@
 
 pub mod dump;
 pub mod eval_tasks;
+#[cfg(feature = "runner")]
+pub mod runner;
+pub mod triage;
 
 pub use dump::{Dump, DumpEdit, DumpTurn, parse_dump};
 pub use eval_tasks::{

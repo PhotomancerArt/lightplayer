@@ -4185,20 +4185,13 @@ impl StudioController {
     }
 }
 
-/// Cross-module test builders. The actor tests live in a sibling module and
-/// cannot reach the private `device`/`pool`/`project` fields, so these
-/// `pub(crate)` helpers assemble a connected controller for them.
-#[cfg(test)]
+/// Stub-connection builders shared by the in-crate tests AND the
+/// `studio_harness` module (the headless agent runner's world, `harness`
+/// feature). Same fixture either way: a stub sim session with an injected
+/// wire client. Kept `pub(crate)` — external consumers go through
+/// [`crate::app::studio::studio_harness`].
+#[cfg(any(test, feature = "harness"))]
 impl StudioController {
-    /// Attach stubbed hardware in the given device state (view/derivation
-    /// tests that must not script a whole fake device). Replaces the
-    /// session PAYLOAD in place when a session exists — the retired
-    /// attachment and server slots were independently settable, so an
-    /// injected client survives.
-    pub(crate) fn set_stub_device_for_test(&mut self, state: lpa_link::DeviceState) {
-        self.set_stub_payload_for_test(crate::RuntimePayload::stub_device_for_test(state));
-    }
-
     /// Attach a stubbed SIMULATOR payload and mark the flow `Connected` —
     /// the "connected but not hardware" fixture.
     pub(crate) fn set_stub_sim_for_test(&mut self) {
@@ -4215,6 +4208,52 @@ impl StudioController {
             }
         }
         self.device.set_stub_connected_flow_for_test();
+    }
+
+    /// Install an injected wire client on the lens session (the retired
+    /// `ServerController::set_client_for_test` seam).
+    pub(crate) fn set_server_client_for_test(&mut self, client: crate::StudioServerClient) {
+        self.pool
+            .lens_session_mut()
+            .expect("a stub session is installed")
+            .set_client_for_test(client);
+    }
+
+    /// A connected controller over an injected client with a REAL clock —
+    /// the headless runner's builder ([`connected_with_client_for_test`]
+    /// is the test twin, differing only in its injected test clock).
+    pub(crate) fn connected_with_client_for_harness(client: crate::StudioServerClient) -> Self {
+        let start = std::time::Instant::now();
+        let mut studio = Self::new(move || start.elapsed().as_secs_f64());
+        studio.set_stub_sim_for_test();
+        studio.set_server_client_for_test(client);
+        studio.project.mark_ready(
+            "loaded-project",
+            7,
+            crate::ProjectInventorySummary::default(),
+        );
+        studio
+    }
+
+    /// Override the agent session loop's per-run turn cap (the runner's
+    /// `--max-turns`); pass-through to [`crate::AgentController`].
+    pub fn set_agent_max_turns(&mut self, turns: u32) {
+        self.agent.set_max_turns(turns);
+    }
+}
+
+/// Cross-module test builders. The actor tests live in a sibling module and
+/// cannot reach the private `device`/`pool`/`project` fields, so these
+/// `pub(crate)` helpers assemble a connected controller for them.
+#[cfg(test)]
+impl StudioController {
+    /// Attach stubbed hardware in the given device state (view/derivation
+    /// tests that must not script a whole fake device). Replaces the
+    /// session PAYLOAD in place when a session exists — the retired
+    /// attachment and server slots were independently settable, so an
+    /// injected client survives.
+    pub(crate) fn set_stub_device_for_test(&mut self, state: lpa_link::DeviceState) {
+        self.set_stub_payload_for_test(crate::RuntimePayload::stub_device_for_test(state));
     }
 
     /// Install a stubbed SIM session ALONGSIDE whatever is attached (the
@@ -4270,15 +4309,6 @@ impl StudioController {
             .lens_session_mut()
             .expect("a stub session is installed")
             .set_server_state_for_test(state);
-    }
-
-    /// Install an injected wire client on the lens session (the retired
-    /// `ServerController::set_client_for_test` seam).
-    pub(crate) fn set_server_client_for_test(&mut self, client: crate::StudioServerClient) {
-        self.pool
-            .lens_session_mut()
-            .expect("a stub session is installed")
-            .set_client_for_test(client);
     }
 
     /// A fresh controller whose device flow uses the given provider

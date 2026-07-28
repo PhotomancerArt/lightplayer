@@ -9,24 +9,24 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::future::Future;
-use std::pin::{Pin, pin};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::task::{Context, Poll, Wake, Waker};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lpa_client::ClientIo;
 use lpa_server::{LpGraphics, LpServer};
 use lpc_model::{AsLpPath, LpValue, SlotPath};
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_shared::transport::ServerTransport;
-use lpc_wire::{
-    ClientMessage, ClientRequest, TransportError, WireMessage, WireProjectCommand,
-    WireServerMessage,
-};
+use lpc_wire::{ClientMessage, ClientRequest, WireProjectCommand};
 use lpfs::LpFsMemory;
 
+// The in-process world (server fixture, io adapter, drive loop, DTO
+// walkers) lives in `studio_harness` — shared with the headless agent
+// runner. Re-exported `pub(crate)` so the sibling e2e suites keep
+// importing from this module.
+pub(crate) use crate::app::studio::studio_harness::{
+    ASSET_SHADER_V1, InProcessServerIo, PROJECT_DIR, asset_e2e_server, drive, find_asset_editor,
+    project_action,
+};
 use crate::{
     ControllerId, ProjectController, ProjectOp, SlotEditOp, StudioActor, StudioCommand,
     StudioController, StudioServerClient, UiAction, UiConfigSlot, UiConfigSlotBody,
@@ -1959,147 +1959,8 @@ fn successive_shader_applies_each_reach_the_engine() {
     );
 }
 
-pub(crate) const ASSET_SHADER_V1: &str =
-    "uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
 const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
 const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
-
-/// Find the shader node's inline asset editor anywhere in the editor DTO
-/// tree: it rides `UiSlotAsset::inline_editor` on the node's (or a child
-/// node's) asset slot sections.
-pub(crate) fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
-    let editor = view
-        .panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane");
-
-    fn in_slots(slots: &[crate::UiConfigSlot]) -> Option<crate::UiAssetEditor> {
-        slots.iter().find_map(|slot| match &slot.body {
-            crate::UiConfigSlotBody::Asset(asset) => asset.inline_editor.clone(),
-            crate::UiConfigSlotBody::Record(record) => in_slots(&record.fields),
-            _ => None,
-        })
-    }
-    fn in_sections(sections: &[UiNodeSection]) -> Option<crate::UiAssetEditor> {
-        sections.iter().find_map(|section| match section {
-            UiNodeSection::AssetSlots(slots) | UiNodeSection::ConfigSlots(slots) => in_slots(slots),
-            _ => None,
-        })
-    }
-    fn in_children(children: &[crate::UiNodeChild]) -> Option<crate::UiAssetEditor> {
-        children
-            .iter()
-            .find_map(|child| in_sections(&child.sections).or_else(|| in_children(&child.children)))
-    }
-
-    editor
-        .nodes
-        .iter()
-        .find_map(|node| {
-            node.tabs
-                .iter()
-                .find_map(|tab| match &tab.body {
-                    UiNodeTabBody::Sections(sections) => in_sections(sections),
-                    _ => None,
-                })
-                .or_else(|| in_children(&node.children))
-        })
-        .expect("shader node exposes an inline asset editor")
-}
-
-pub(crate) fn asset_e2e_server() -> LpServer {
-    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
-    let mut server = LpServer::new(
-        output_provider,
-        Box::new(LpFsMemory::new()),
-        "projects".as_path(),
-        None,
-        None,
-        graphics,
-    );
-
-    // The shader publishes to the visual bus and a fixture consumes it —
-    // without a consumer the shader never renders, so it would never
-    // (re)compile and compile errors would never surface.
-    let shader_json = r#"{
-  "kind": "Shader",
-  "source": "shader.glsl",
-  "bindings": {
-    "output": { "target": "bus:visual.out" }
-  },
-  "consumed": {
-    "time": {
-      "kind": "value",
-      "value": "f32",
-      "default": 0,
-      "label": "Time",
-      "description": "Project clock time in seconds"
-    }
-  }
-}"#;
-    let fixture_json = r#"{
-  "kind": "Fixture",
-  "render_size": { "width": 4, "height": 4 },
-  "bindings": {
-    "input": { "source": "bus:visual.out" },
-    "output": { "target": "bus:control.out" }
-  }
-}"#;
-    // The output node drives the demand chain (output pulls control →
-    // fixture pulls visual → shader renders/compiles); the memory output
-    // provider accepts any authored endpoint.
-    let output_json = r#"{
-  "kind": "Output",
-  "endpoint": "ws281x:rmt:D10",
-  "bindings": {
-    "input": { "source": "bus:control.out" }
-  }
-}"#;
-    let project_json = r#"{
-  "kind": "Project",
-  "format": 1,
-  "nodes": {
-    "clock": { "ref": "./clock.json" },
-    "shader": { "ref": "./shader.json" },
-    "pixels": { "ref": "./fixture.json" },
-    "output": { "ref": "./output.json" }
-  }
-}"#;
-    let clock_json = r#"{
-  "kind": "Clock",
-  "controls": {
-    "running": true,
-    "rate": 1.0
-  }
-}"#;
-    let files: &[(&str, &str)] = &[
-        ("project.json", project_json),
-        ("clock.json", clock_json),
-        ("shader.json", shader_json),
-        ("fixture.json", fixture_json),
-        ("output.json", output_json),
-        ("shader.glsl", ASSET_SHADER_V1),
-    ];
-    for (name, body) in files {
-        server
-            .base_fs_mut()
-            .write_file(format!("{PROJECT_DIR}/{name}").as_path(), body.as_bytes())
-            .expect("write project file");
-    }
-    server
-        .load_project(PROJECT_DIR.as_path())
-        .expect("load asset-e2e project");
-    server.advance_frame(16).expect("tick");
-    server
-}
-
-const PROJECT_DIR: &str = "/projects/edit-e2e";
 
 /// A real server with a loaded clock + fixture project (no shader, so the
 /// simulator session runs entirely host-side).
@@ -2186,13 +2047,6 @@ fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect()
-}
-
-pub(crate) fn project_action(op: ProjectOp) -> StudioCommand {
-    StudioCommand::Action(UiAction::from_op(
-        ControllerId::new(ProjectController::NODE_ID),
-        op,
-    ))
 }
 
 fn set_value_action(address: crate::ProjectSlotAddress, value: LpValue) -> StudioCommand {
@@ -2350,107 +2204,4 @@ fn slot_editor_hint(slot: &UiConfigSlot) -> &UiSlotEditorHint {
         panic!("expected a value body for {}", slot.label);
     };
     &value.editor
-}
-
-/// `ClientIo` that pumps each client message through the in-process server's
-/// `tick_and_send` and queues the produced frames for `receive`.
-pub(crate) struct InProcessServerIo {
-    pub(crate) server: Rc<RefCell<LpServer>>,
-    pub(crate) inbox: Rc<RefCell<VecDeque<WireServerMessage>>>,
-    pub(crate) sent: Rc<RefCell<Vec<ClientMessage>>>,
-}
-
-impl ClientIo for InProcessServerIo {
-    fn send<'life0, 'async_trait>(
-        &'life0 mut self,
-        msg: ClientMessage,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
-    where
-        'life0: 'async_trait,
-        Self: 'async_trait,
-    {
-        self.sent.borrow_mut().push(msg.clone());
-        let server = Rc::clone(&self.server);
-        let inbox = Rc::clone(&self.inbox);
-        Box::pin(async move {
-            let mut transport = CollectTransport::default();
-            server
-                .borrow_mut()
-                .tick_and_send(16, vec![WireMessage::Client(msg)], &mut transport)
-                .await
-                .map_err(|error| TransportError::Other(format!("server error: {error}")))?;
-            inbox.borrow_mut().extend(transport.sent);
-            Ok(())
-        })
-    }
-
-    fn receive<'life0, 'async_trait>(
-        &'life0 mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<WireServerMessage, TransportError>> + 'async_trait>>
-    where
-        'life0: 'async_trait,
-        Self: 'async_trait,
-    {
-        let response = self
-            .inbox
-            .borrow_mut()
-            .pop_front()
-            .ok_or_else(|| TransportError::Other("in-process server inbox empty".to_string()));
-        Box::pin(async move { response })
-    }
-
-    fn close<'life0, 'async_trait>(
-        &'life0 mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
-    where
-        'life0: 'async_trait,
-        Self: 'async_trait,
-    {
-        Box::pin(async { Ok(()) })
-    }
-}
-
-/// In-memory server transport that records every sent frame.
-#[derive(Default)]
-struct CollectTransport {
-    sent: Vec<WireServerMessage>,
-}
-
-impl ServerTransport for CollectTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
-        self.sent.push(msg);
-        Ok(())
-    }
-
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
-        Ok(None)
-    }
-
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
-        Ok(Vec::new())
-    }
-
-    async fn close(&mut self) -> Result<(), TransportError> {
-        Ok(())
-    }
-}
-
-/// Drive a future to completion with a self-waking waker (bounded, so a hung
-/// future fails the test instead of the suite).
-pub(crate) fn drive<F: Future>(future: F) -> F::Output {
-    struct NoopWake;
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
-
-    let waker = Waker::from(Arc::new(NoopWake));
-    let mut context = Context::from_waker(&waker);
-    let mut future = pin!(future);
-    for _ in 0..100_000 {
-        match future.as_mut().poll(&mut context) {
-            Poll::Ready(output) => return output,
-            Poll::Pending => {}
-        }
-    }
-    panic!("e2e future did not complete");
 }

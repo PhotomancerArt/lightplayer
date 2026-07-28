@@ -21,6 +21,14 @@ lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lps-probe = { path = "../../lp-shader/lps-probe" }
+# Optional, `harness`-feature only (see [features]): the headless agent
+# runner's in-process server world. Host-only; the same crates are already
+# dev-dependencies for the e2e tests.
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", optional = true }
+lpa-server = { path = "../lpa-server", optional = true }
+lpc-shared = { path = "../../lp-core/lpc-shared", features = [
+    "std",
+], optional = true }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -62,6 +70,13 @@ lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 
 [features]
 default = []
+# Expose the in-process studio world the e2e tests run against
+# (`studio_harness` module) to the OUT-OF-CRATE headless agent runner
+# (`lpa-agent-harness`, P2). Host-only, dev-shaped: never enabled by a
+# production dependency edge — only the runner's `runner` feature turns it
+# on. Everything it unlocks is the exact test fixture surface, so the
+# public API growth is dev-tooling, not product API.
+harness = ["dep:lp-gfx-lpvm", "dep:lpa-server", "dep:lpc-shared", "lpfs/std"]
 browser-worker = [
     "lpa-link/browser-worker",
     "dep:async-trait",

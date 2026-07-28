@@ -810,11 +810,10 @@ impl DeviceController {
     }
 }
 
-/// Test seams: stubbed connect-flow state for view/derivation tests that
-/// must not script a whole fake device (the stub PAYLOADS live on
-/// [`RuntimePayload`]'s test constructors; `StudioController` installs
-/// them into the pool).
-#[cfg(test)]
+/// Stub connect-flow seam shared by the in-crate tests and the `harness`
+/// feature's studio world (the stub PAYLOADS live on [`RuntimePayload`]'s
+/// stub constructors; `StudioController` installs them into the pool).
+#[cfg(any(test, feature = "harness"))]
 impl DeviceController {
     /// Mark the flow `Connected` (Fake provider vocabulary, matching the
     /// old `set_state(Connected) + set_active_connection` seam).
@@ -828,7 +827,10 @@ impl DeviceController {
             ),
         };
     }
+}
 
+#[cfg(test)]
+impl DeviceController {
     /// Poll timers for host tests: each sleep completes when its wall-clock
     /// deadline passes, checked per poll (works under noop-waker harnesses
     /// that re-poll on a cadence).
