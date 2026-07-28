@@ -325,6 +325,7 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         } => Some(uid),
         CatalogOp::Create { .. }
         | CatalogOp::ImportZip { .. }
+        | CatalogOp::ImportJson { .. }
         | CatalogOp::EnsureExampleSeeded { .. }
         | CatalogOp::UpsertRegisteredDevice(_)
         | CatalogOp::RenameRegisteredDevice { .. }
