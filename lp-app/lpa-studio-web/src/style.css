@@ -1604,6 +1604,8 @@ label:has(> input:not(:disabled)) {
     position: absolute;
     bottom: 10px;
     left: 12px;
+    /* Keep clear of the zoom float in narrow embeds. */
+    max-width: calc(100% - 150px);
     pointer-events: none;
     font-family: var(--studio-font-mono);
     font-size: 11px;
