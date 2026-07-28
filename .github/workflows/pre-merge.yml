@@ -27,9 +27,51 @@ jobs:
   # anyway (Google Chrome ships no linux-arm64 build), and x64 runner images
   # are the better-supported default. validate-gfx stays on ARM deliberately —
   # it needs no browser and keeps a second architecture compiling the tree.
+  # The GLSL filetest suite (31k cases x 5 targets) is the longest single unit
+  # of work in `just test`. It only exercises the shader/exec stack, so PRs
+  # that cannot reach that stack run `just test-rust` and skip it.
+  #
+  # The list is the *dependency closure* of the two binaries the suite builds,
+  # by directory, not a guess at what "looks shader-y":
+  #   - lps-filetests-app  -> lp-shader, lp-riscv, lp-gfx, lp-base, third_party
+  #   - lps-builtins-emu-app (the guest ELF, built by scripts/build-builtins.sh)
+  #     additionally pulls in lp-core
+  # Cargo.lock is included deliberately (unlike detect-studio-web-changes): a
+  # naga or wasmtime bump changes shader results, and the suite is cheap enough
+  # after the profile.dev overrides in Cargo.toml that the insurance is free.
+  #
+  # Pushes to main always run it, so anything a filter miss lets through
+  # surfaces on the very next merge.
+  detect-shader-changes:
+    name: Detect shader-relevant changes
+    runs-on: ubuntu-24.04
+    outputs:
+      shader: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.shader }}
+    steps:
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shader:
+              - 'lp-shader/**'
+              - 'lp-riscv/**'
+              - 'lp-gfx/**'
+              - 'lp-base/**'
+              - 'lp-core/**'
+              - 'third_party/**'
+              - 'scripts/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+
   validate-x64:
     name: Validate (x64)
     runs-on: ubuntu-24.04
+    needs: detect-shader-changes
     # x64: full check + build + test
     steps:
       - name: Install system deps (libudev for serialport)
@@ -61,16 +103,31 @@ jobs:
       # actions/cache config listed `target/` at the workspace root while the
       # repo checks out into `lp2025/`, so nothing was ever cached; rust-cache
       # keys on Cargo.lock + rustc version and prunes stale artifacts.)
+      #
+      # save-if main-only (all cache steps in this workflow): GitHub scopes
+      # cache RESTORE so a PR can only see its own ref's caches plus main's,
+      # and evicts LRU past the 10GB repo cap. When every PR saved ~4-5GB to
+      # its own merge ref, two active PRs flushed main's baseline and every
+      # new PR's first run went cache-cold (the observed 28-31m Validate runs
+      # logged "No cache found"; warm runs took 17-19m). Saving only on main
+      # keeps one shared warm baseline that every PR can restore, well under
+      # the cap. Trade-off: repeat pushes to a PR rebuild that PR's delta each
+      # time instead of resuming it — small next to the cold-start cost.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
+      # `just test` = test-rust + test-filetests (parallel). When the shader
+      # gate misses, only test-rust runs.
       - name: Validate
-        run: cd lp2025 && just check build-ci test
+        env:
+          TEST_RECIPE: ${{ needs.detect-shader-changes.outputs.shader == 'true' && 'test' || 'test-rust' }}
+        run: cd lp2025 && just check build-ci "$TEST_RECIPE"
 
   # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser, naga-wasm-poc)
   # are validated in a separate job below. Building `-p lp-gfx-wgpu` unifies
@@ -89,6 +146,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       gfx: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.gfx }}
+      browser: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.browser }}
     steps:
       - name: Filter changed paths
         id: filter
@@ -109,6 +167,24 @@ jobs:
               - 'lp-app/lpa-studio-core/**'
               - 'lp-app/lpa-fs-opfs/**'
               - 'spikes/naga-wasm-poc/**'
+              - 'third_party/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+            # Dependency closure (by directory) of the two real-browser wasm
+            # suites: lpa-fs-opfs (real OPFS + Web Locks) and fw-browser
+            # (runtime protocol over wasm). Same conservative-gate philosophy
+            # as `gfx` above: misses surface on the next main push.
+            browser:
+              - 'lp-app/lpa-fs-opfs/**'
+              - 'lp-fw/**'
+              - 'lp-base/**'
+              - 'lp-core/**'
+              - 'lp-shader/**'
+              - 'lp-gfx/**'
+              - 'lp-riscv/**'
               - 'third_party/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -144,17 +220,90 @@ jobs:
           components: rustfmt, clippy, rust-src
 
       # rust-cache keys on the job id, so this job's cache (wgpu tree) stays
-      # separate from validate-x64's and neither evicts the other.
+      # separate from validate-x64's and neither evicts the other. save-if
+      # main-only: see the validate-x64 cache step for the rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
       - name: Validate GFX
         run: cd lp2025 && just validate-gfx
+
+  # Real-browser wasm suites: lpa-fs-opfs (real OPFS ops, Web Locks, store
+  # round-trip — the Safari-OPFS-corruption defect class) and fw-browser
+  # (runtime protocol tests). Both run `cargo test --target
+  # wasm32-unknown-unknown` through wasm-bindgen-test-runner against headless
+  # Chrome. Runs on x64 because Google Chrome has no linux-arm64 build; GitHub
+  # x64 images preinstall Chrome and a matching chromedriver, and host arch is
+  # irrelevant for wasm tests.
+  validate-browser:
+    name: Validate Browser (x64)
+    runs-on: ubuntu-24.04
+    needs: detect-gfx-changes
+    if: needs.detect-gfx-changes.outputs.browser == 'true'
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rustfmt, clippy, rust-src
+
+      # rust-cache keys on the job id, so this job's cache (wasm32 tree) stays
+      # separate from the other validate jobs'. It also caches ~/.cargo/bin,
+      # which amortizes the wasm-bindgen-cli install below. save-if main-only:
+      # see the validate-x64 cache step for the rationale.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match the workspace wasm-bindgen dep; the just recipes
+      # refuse to run with a missing runner and print this exact version.
+      - name: Install wasm-bindgen-cli
+        run: command -v wasm-bindgen-test-runner >/dev/null || cargo install wasm-bindgen-cli --version 0.2.114
+
+      # The smoke check drives Chrome over a raw CDP WebSocket; pin node so
+      # the global WebSocket client is guaranteed (same rationale as the
+      # stories job).
+      - name: Install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # End-to-end smoke: builds the fw-browser wasm bundle, loads smoke.html
+      # in headless Chrome (preinstalled on the x64 image), and fails unless
+      # the page reaches dataset.smoke === "ok" — the gate that catches page
+      # rot and wasm-emission regressions the unit suites can't see. Runs
+      # before the unit suites so a suite failure can't mask smoke signal.
+      - name: fw-browser smoke check
+        run: cd lp2025 && just fw-browser-smoke-check
+
+      - name: Browser wasm tests
+        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test
 
   # Story baselines are CI-canonical: this job captures every story with a
   # pinned browser and compares against the committed PNGs (pixel tolerance,
@@ -250,8 +399,11 @@ jobs:
       # Deploy-workflow-style cache (registry + git + bins + target) rather
       # than rust-cache: the cargo-installed tools live in ~/.cargo/bin and
       # must be cached with a key that includes their pinned versions.
-      - name: Cache cargo registry, tools, and build artifacts
-        uses: actions/cache@v4
+      # Restore/save are split so saving happens only on main — same repo-wide
+      # cache-eviction rationale as the validate-x64 cache step.
+      - name: Restore cargo registry, tools, and build artifacts
+        id: stories_cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -263,8 +415,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-stories-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-cargo-
 
-      - name: Cache Chrome for Testing
-        uses: actions/cache@v4
+      - name: Restore Chrome for Testing cache
+        id: chrome_cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/chrome
           key: chrome-for-testing-${{ env.CHROME_FOR_TESTING_VERSION }}
@@ -552,6 +705,32 @@ jobs:
                "crashed capture, or main-push drift). See the run summary;" \
                "'just studio-story-pull' is the manual fallback."
           exit 1
+
+      # Main-only saves (see the restore steps above). `always()` preserves
+      # the old actions/cache post-step behavior of saving even when a
+      # main-push drift failed the job — the build artifacts are still good.
+      - name: Save cargo registry, tools, and build artifacts (main only)
+        if: >-
+          always() && github.ref == 'refs/heads/main' &&
+          steps.stories_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            lp2025/target/
+          key: ${{ steps.stories_cache.outputs.cache-primary-key }}
+
+      - name: Save Chrome for Testing cache (main only)
+        if: >-
+          always() && github.ref == 'refs/heads/main' &&
+          steps.chrome_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/chrome
+          key: ${{ steps.chrome_cache.outputs.cache-primary-key }}
 
   # build-esp32-arm:
   #   name: Build ESP32 (ARM)
