@@ -1,0 +1,60 @@
+{
+  "comment": "Supervised prompt battery — the classes that found compiler bugs live (2026-07-27): physics/state-in-loops, array-heavy, builtin-heavy, branchy, param-declaring, free-creative. Expectations are LIGHT (this is a fuzzer, not a quality eval): compiles, engine ok, params clean, non-black. Run via `just agent-battery` (spend-gated: provider env + LPA_SPEND_OK=1).",
+  "prompts": [
+    {
+      "id": "bouncing-balls",
+      "class": "physics-state-in-loops",
+      "prompt": "Make 6 bouncing balls: they fall under gravity, bounce off the bottom edge with a little energy loss, and each ball has its own color. Keep the motion smooth."
+    },
+    {
+      "id": "pendulum-wave",
+      "class": "physics-state-in-loops",
+      "prompt": "Create a pendulum wave: 8 pendulums of slightly different lengths swinging side by side, drifting in and out of phase over time."
+    },
+    {
+      "id": "particle-burst",
+      "class": "array-heavy",
+      "prompt": "A particle system: 16 particles bursting outward from the center in a loop, each with its own velocity, fading as they age, then respawning."
+    },
+    {
+      "id": "comet-trails",
+      "class": "array-heavy",
+      "prompt": "Several comets orbiting the center, each leaving a fading trail behind it. Store per-comet state in arrays and update it every frame."
+    },
+    {
+      "id": "step-waves",
+      "class": "builtin-heavy",
+      "prompt": "Layered horizontal waves built from step, smoothstep, clamp and mix: hard bands underneath, soft glowing crests on top, slowly scrolling."
+    },
+    {
+      "id": "radial-rainbow",
+      "class": "builtin-heavy",
+      "prompt": "A radial rainbow swirl using atan, length, fract, pow and mix — hue by angle, brightness falling off with radius, slowly rotating."
+    },
+    {
+      "id": "cellular-blink",
+      "class": "branchy",
+      "prompt": "A cellular-automaton-style grid: cells turn on and off based on if/else neighbor rules derived from their position and time. Make it feel alive, not random noise."
+    },
+    {
+      "id": "speed-param",
+      "class": "param-declaring",
+      "prompt": "Add a speed control the user can adjust: declare a speed uniform, create its param record with a sensible range, and use it to drive the animation rate."
+    },
+    {
+      "id": "glow-params",
+      "class": "param-declaring",
+      "prompt": "Give this shader two user knobs: brightness and hue shift. Declare the uniforms, create their param records with ranges, and wire them into the output color."
+    },
+    {
+      "id": "free-aurora",
+      "class": "free-creative",
+      "prompt": "Aurora borealis over dark water: shimmering green-purple curtains of light with a faint reflection below."
+    },
+    {
+      "id": "free-surprise",
+      "class": "free-creative",
+      "prompt": "Surprise me with something beautiful and animated. Anything you like — show off."
+    }
+  ]
+}

@@ -35,6 +35,16 @@ pub enum ScriptEvent {
         name: String,
         input: serde_json::Value,
     },
+    /// A tool call whose input stream was CUT mid-JSON (what a real
+    /// `max_tokens` stop looks like on the wire): the raw fragment is
+    /// delivered verbatim, deliberately not valid JSON. Pair it with a
+    /// `done` carrying `max_tokens`.
+    #[serde(rename = "tool_use_cut")]
+    ToolUseCut {
+        id: String,
+        name: String,
+        input_fragment: String,
+    },
     /// End of turn. `stop_reason` is `end_turn` / `tool_use` /
     /// `max_tokens` / anything else verbatim (mapped to `Other`).
     #[serde(rename = "done")]
@@ -64,6 +74,20 @@ impl ScriptEvent {
                 TurnEvent::ToolInputDelta {
                     id: id.clone(),
                     json_fragment: input.to_string(),
+                },
+            ],
+            Self::ToolUseCut {
+                id,
+                name,
+                input_fragment,
+            } => vec![
+                TurnEvent::ToolUseStart {
+                    id: id.clone(),
+                    name: name.clone(),
+                },
+                TurnEvent::ToolInputDelta {
+                    id: id.clone(),
+                    json_fragment: input_fragment.clone(),
                 },
             ],
             Self::Done {
@@ -170,6 +194,35 @@ mod tests {
                 stop_reason: StopReason::EndTurn,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn tool_use_cut_delivers_the_raw_fragment_verbatim() {
+        let script = RunScript::parse(
+            r#"{"runs": [[[
+                {"tool_use_cut": {"id": "tu_9", "name": "iterate",
+                                  "input_fragment": "{\"source\":\"vec4 ren"}},
+                {"done": {"stop_reason": "max_tokens"}}
+            ]]]}"#,
+        )
+        .expect("parses");
+        let turn = &script.to_run_scripts()[0][0];
+        assert!(matches!(&turn[0], TurnEvent::ToolUseStart { id, .. } if id == "tu_9"));
+        let TurnEvent::ToolInputDelta { json_fragment, .. } = &turn[1] else {
+            panic!("expected input delta, got {:?}", turn[1]);
+        };
+        assert_eq!(json_fragment, "{\"source\":\"vec4 ren");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(json_fragment).is_err(),
+            "the fragment must be a genuine mid-JSON cut"
+        );
+        assert!(matches!(
+            &turn[2],
+            TurnEvent::TurnDone {
+                stop_reason: StopReason::MaxTokens,
+                ..
+            }
         ));
     }
 

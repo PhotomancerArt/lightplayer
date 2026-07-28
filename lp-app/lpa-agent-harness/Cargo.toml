@@ -35,5 +35,10 @@ name = "agent-run"
 path = "src/bin/agent_run.rs"
 required-features = ["runner"]
 
+[[bin]]
+name = "agent-battery"
+path = "src/bin/agent_battery.rs"
+required-features = ["runner"]
+
 [lints]
 workspace = true

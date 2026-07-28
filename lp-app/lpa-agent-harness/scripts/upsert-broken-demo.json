@@ -1,0 +1,56 @@
+{
+  "runs": [
+    [
+      [
+        { "text": "Declaring the speed uniform first; the body is still broken." },
+        {
+          "tool_use": {
+            "id": "tu_1",
+            "name": "iterate",
+            "input": {
+              "source": "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return oops;\n}\n",
+              "note": "declare speed (broken body)"
+            }
+          }
+        },
+        { "done": { "stop_reason": "tool_use", "input_tokens": 20, "output_tokens": 30 } }
+      ],
+      [
+        { "text": "Creating the param record while the compile is still broken." },
+        {
+          "tool_use": {
+            "id": "tu_2",
+            "name": "upsert_param",
+            "input": {
+              "name": "speed",
+              "label": "Speed",
+              "default": 1.0,
+              "min": 0.0,
+              "max": 4.0,
+              "panel": true
+            }
+          }
+        },
+        { "done": { "stop_reason": "tool_use", "input_tokens": 20, "output_tokens": 20 } }
+      ],
+      [
+        { "text": "Repairing the body." },
+        {
+          "tool_use": {
+            "id": "tu_3",
+            "name": "iterate",
+            "input": {
+              "source": "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(fract(time * speed), 0.5, 0.5, 1.0);\n}\n",
+              "note": "repair the body"
+            }
+          }
+        },
+        { "done": { "stop_reason": "tool_use", "input_tokens": 20, "output_tokens": 30 } }
+      ],
+      [
+        { "text": "Speed control ready." },
+        { "done": { "stop_reason": "end_turn", "input_tokens": 20, "output_tokens": 10 } }
+      ]
+    ]
+  ]
+}
