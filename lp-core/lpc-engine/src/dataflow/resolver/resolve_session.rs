@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use lp_collection::VecMap;
 
 use crate::dataflow::binding::{BindingEntry, BindingRef, BindingSource};
+use crate::dataflow::bus::ScopedChannel;
 use crate::dataflow::resolver::production::{Production, ProductionSource};
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::SessionResolveError;
@@ -12,7 +13,7 @@ use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_trace::ResolveTrace;
 use crate::dataflow::resolver::resolver::Resolver;
 use crate::dataflow::resolver::resolver::materialize_literal_product;
-use lpc_model::{ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMerge, SlotPath};
+use lpc_model::{NodeId, Revision, SlotData, SlotMapDyn, SlotMerge, SlotPath};
 
 /// Active engine session for one frame (or nested test scope).
 ///
@@ -110,7 +111,7 @@ impl<'a> EngineSession<'a> {
     fn resolve_bus(
         &mut self,
         host: &mut (impl ResolveHost + ?Sized),
-        channel: &ChannelName,
+        channel: &ScopedChannel,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
         let candidates = host.providers_for_bus(channel);
@@ -307,7 +308,7 @@ fn merge_maps_by_key(
 }
 
 fn select_highest_priority_bus_provider(
-    channel: &ChannelName,
+    channel: &ScopedChannel,
     candidates: &[(BindingRef, BindingEntry)],
 ) -> Result<(BindingRef, BindingEntry), SessionResolveError> {
     if candidates.is_empty() {
@@ -338,6 +339,7 @@ mod tests {
     use crate::dataflow::binding::BindingDraft;
     use crate::dataflow::binding::BindingPriority;
     use crate::dataflow::binding::BindingTarget;
+    use crate::dataflow::bus::ScopeId;
     use crate::dataflow::resolver::resolve_trace::ResolveLogLevel;
     use crate::dataflow::resolver::resolve_trace::ResolveTraceEvent;
     use alloc::string::String;
@@ -346,8 +348,11 @@ mod tests {
     use lpc_model::{ChannelName, LpValue, SlotMapKey, WithRevision};
     use lps_shared::LpsValueF32;
 
-    fn ch(s: &str) -> ChannelName {
-        ChannelName(String::from(s))
+    fn ch(s: &str) -> ScopedChannel {
+        ScopedChannel::new(
+            ScopeId::Project(NodeId::new(0)),
+            ChannelName(String::from(s)),
+        )
     }
 
     fn path(s: &str) -> SlotPath {
@@ -429,7 +434,7 @@ mod tests {
                 .collect()
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(&self, channel: &ScopedChannel) -> Vec<(BindingRef, BindingEntry)> {
             self.entries
                 .iter()
                 .filter_map(|(binding_ref, entry)| {
@@ -479,7 +484,7 @@ mod tests {
             self.bindings.bindings_for_consumed_slot(node, slot)
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(&self, channel: &ScopedChannel) -> Vec<(BindingRef, BindingEntry)> {
             self.bindings.providers_for_bus(channel)
         }
     }
@@ -646,7 +651,7 @@ mod tests {
             ))
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(&self, channel: &ScopedChannel) -> Vec<(BindingRef, BindingEntry)> {
             self.bindings.providers_for_bus(channel)
         }
     }
@@ -746,7 +751,7 @@ mod tests {
             self.bindings.binding_for_consumed_slot(node, slot)
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(&self, channel: &ScopedChannel) -> Vec<(BindingRef, BindingEntry)> {
             self.bindings.providers_for_bus(channel)
         }
 
@@ -929,7 +934,7 @@ mod tests {
             }
         }
 
-        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+        fn providers_for_bus(&self, channel: &ScopedChannel) -> Vec<(BindingRef, BindingEntry)> {
             self.bindings.providers_for_bus(channel)
         }
     }
@@ -967,7 +972,7 @@ mod tests {
 
         let evs = session.trace().events();
         assert!(evs.iter().any(|e| {
-            matches!(e, ResolveTraceEvent::BeginQuery(QueryKey::Bus(b)) if b.0 == "out")
+            matches!(e, ResolveTraceEvent::BeginQuery(QueryKey::Bus(b)) if b.channel.0 == "out")
         }));
         assert!(
             evs.iter()
@@ -983,7 +988,7 @@ mod tests {
         )));
         assert!(evs.iter().any(|e| matches!(
             e,
-            ResolveTraceEvent::CacheHit(QueryKey::Bus(b)) if b.0 == "out"
+            ResolveTraceEvent::CacheHit(QueryKey::Bus(b)) if b.channel.0 == "out"
         )));
     }
 }

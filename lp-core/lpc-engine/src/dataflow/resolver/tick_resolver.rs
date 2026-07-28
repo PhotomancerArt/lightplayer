@@ -16,6 +16,19 @@ use lpc_model::{NodeId, Revision, SlotPath};
 pub trait TickResolver {
     fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError>;
 
+    /// Resolve a bus channel, mapping "no writer" to `Ok(None)` instead of
+    /// an error — the project-node mirror reads a scope channel that may
+    /// legitimately have no writer.
+    fn resolve_bus(
+        &mut self,
+        channel: crate::dataflow::bus::ScopedChannel,
+    ) -> Result<Option<Production>, ResolveError> {
+        let _ = channel;
+        Err(ResolveError::new(
+            "resolve_bus unsupported by this resolver",
+        ))
+    }
+
     fn publish_produced_slot(
         &mut self,
         node: NodeId,
@@ -58,6 +71,17 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         self.session
             .resolve(self.host, query)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn resolve_bus(
+        &mut self,
+        channel: crate::dataflow::bus::ScopedChannel,
+    ) -> Result<Option<Production>, ResolveError> {
+        match self.session.resolve(self.host, QueryKey::Bus(channel)) {
+            Ok(production) => Ok(Some(production)),
+            Err(SessionResolveError::NoBusProvider { .. }) => Ok(None),
+            Err(e) => Err(ResolveError::new(alloc::format!("{e}"))),
+        }
     }
 
     fn publish_produced_slot(

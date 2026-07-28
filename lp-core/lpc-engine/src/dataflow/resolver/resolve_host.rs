@@ -11,9 +11,10 @@ use crate::products::control::{
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 use alloc::vec::Vec;
-use lpc_model::{ChannelName, NodeId, Revision, SlotMerge, SlotPath};
+use lpc_model::{NodeId, Revision, SlotMerge, SlotPath};
 
 use crate::dataflow::binding::{BindingEntry, BindingRef};
+use crate::dataflow::bus::ScopedChannel;
 
 /// Engine or test fake that can satisfy demand for uncached queries.
 pub trait ResolveHost {
@@ -45,7 +46,7 @@ pub trait ResolveHost {
         SlotMerge::Latest
     }
 
-    fn providers_for_bus(&self, _channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+    fn providers_for_bus(&self, _channel: &ScopedChannel) -> Vec<(BindingRef, BindingEntry)> {
         Vec::new()
     }
 

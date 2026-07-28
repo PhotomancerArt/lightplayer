@@ -3,12 +3,14 @@
 //! Produced and consumed endpoints use [`lpc_model::SlotPath`] because they
 //! address slot identity, not projection inside a leaf value.
 
-use lpc_model::{ChannelName, NodeId, SlotAccessor, SlotPath};
+use lpc_model::{NodeId, SlotAccessor, SlotPath};
+
+use crate::dataflow::bus::ScopedChannel;
 
 /// Demand/cache key for one resolved value in the engine resolver.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QueryKey {
-    Bus(ChannelName),
+    Bus(ScopedChannel),
     ProducedSlot {
         node: NodeId,
         slot: SlotPath,
@@ -36,6 +38,7 @@ impl QueryKey {
 #[cfg(test)]
 mod tests {
     use super::QueryKey;
+    use crate::dataflow::bus::{ScopeId, ScopedChannel};
     use alloc::string::String;
     use alloc::vec::Vec;
     use lp_collection::VecMap;
@@ -43,11 +46,18 @@ mod tests {
     use lpc_model::NodeId;
     use lpc_model::SlotPath;
 
+    fn scoped(name: &str) -> ScopedChannel {
+        ScopedChannel::new(
+            ScopeId::Project(NodeId::new(0)),
+            ChannelName(String::from(name)),
+        )
+    }
+
     #[test]
     fn query_key_works_as_btree_map_key() {
         let mut m = VecMap::new();
-        let k1 = QueryKey::Bus(ChannelName(String::from("a")));
-        let k2 = QueryKey::Bus(ChannelName(String::from("b")));
+        let k1 = QueryKey::Bus(scoped("a"));
+        let k2 = QueryKey::Bus(scoped("b"));
         m.insert(k1.clone(), 1u32);
         m.insert(
             QueryKey::ProducedSlot {

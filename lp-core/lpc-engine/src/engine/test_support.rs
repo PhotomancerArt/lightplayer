@@ -16,6 +16,7 @@ use lps_shared::LpsValueF32;
 use crate::dataflow::binding::{
     BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget,
 };
+use crate::dataflow::bus::{ScopeId, ScopedChannel};
 use crate::dataflow::resolver::{
     Production, QueryKey, ResolveLogLevel, ResolveTrace, ResolveTraceEvent, SessionResolveError,
 };
@@ -111,11 +112,12 @@ impl EngineTestBuilder {
         source: TestBindingSource,
         priority: i32,
     ) -> Result<Self, BindingError> {
+        let root_scope = ScopeId::Project(self.engine.tree().root());
         let owner = source.owner(&self.labels);
-        let source = source.into_binding_source(&self.labels);
+        let source = source.into_binding_source(&self.labels, root_scope);
         self.register_binding(
             source,
-            BindingTarget::BusChannel(channel_name(channel)),
+            BindingTarget::BusChannel(ScopedChannel::new(root_scope, channel_name(channel))),
             priority,
             owner,
         )?;
@@ -134,8 +136,9 @@ impl EngineTestBuilder {
         source: TestBindingSource,
         priority: i32,
     ) -> Result<Self, BindingError> {
+        let root_scope = ScopeId::Project(self.engine.tree().root());
         let node = self.node_id(label);
-        let source = source.into_binding_source(&self.labels);
+        let source = source.into_binding_source(&self.labels, root_scope);
         self.register_binding(
             source,
             BindingTarget::ConsumedSlot {
@@ -252,7 +255,11 @@ impl EngineTestHarness {
     }
 
     pub(crate) fn resolve_bus(&mut self, channel: &str) -> Result<Production, SessionResolveError> {
-        self.resolve(QueryKey::Bus(channel_name(channel)))
+        let root_scope = ScopeId::Project(self.engine.tree().root());
+        self.resolve(QueryKey::Bus(ScopedChannel::new(
+            root_scope,
+            channel_name(channel),
+        )))
     }
 
     pub(crate) fn resolve(&mut self, query: QueryKey) -> Result<Production, SessionResolveError> {
@@ -292,7 +299,11 @@ impl OutputSpec {
 }
 
 impl TestBindingSource {
-    fn into_binding_source(self, labels: &VecMap<String, NodeId>) -> BindingSource {
+    fn into_binding_source(
+        self,
+        labels: &VecMap<String, NodeId>,
+        root_scope: ScopeId,
+    ) -> BindingSource {
         match self {
             Self::Literal(value) => {
                 BindingSource::Literal(lpc_model::LpValue::F32(f32_value(value)))
@@ -301,7 +312,9 @@ impl TestBindingSource {
                 node: *labels.get(&label).expect("produced slot label"),
                 slot,
             },
-            Self::Bus(channel) => BindingSource::BusChannel(channel),
+            Self::Bus(channel) => {
+                BindingSource::BusChannel(ScopedChannel::new(root_scope, channel))
+            }
         }
     }
 
@@ -363,7 +376,7 @@ pub(crate) fn trace_has_value_origin_path(
     shader: NodeId,
     output_path: &SlotPath,
 ) -> bool {
-    let bus_query = QueryKey::Bus(channel_name(bus_name));
+    let bus_query = QueryKey::Bus(scoped_channel(bus_name));
     let output_query = QueryKey::ProducedSlot {
         node: shader,
         slot: output_path.clone(),
@@ -515,6 +528,12 @@ impl NodeRuntime for DummyOutputNode {
 
 fn channel_name(name: &str) -> ChannelName {
     ChannelName(String::from(name))
+}
+
+/// A [`ScopedChannel`] in the test builders' root scope (the tree root is
+/// always `NodeId(0)`).
+pub(crate) fn scoped_channel(name: &str) -> ScopedChannel {
+    ScopedChannel::new(ScopeId::Project(NodeId::new(0)), channel_name(name))
 }
 
 // ---- Project-read streaming test helpers ----

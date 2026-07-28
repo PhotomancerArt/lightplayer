@@ -15,6 +15,16 @@ store, frame state, slot shape registry, runtime buffers, and demand roots.
 runtime vocabulary for labeled channels, but resolved values are cached by the
 engine resolver rather than by a bus object.
 
+**Bus scopes:** channels are keyed by `(scope, name)`
+(`dataflow::bus::ScopedChannel`). Every project node introduces a named scope
+around its children (the root project is the outermost scope) and playlist
+entries wrap each owned child in an anonymous scope; the loader resolves
+consumed endpoints to the nearest enclosing scope with a writer (else the
+root scope) and produced endpoints to the producer's own scope. Every project
+node's runtime (`nodes::project::ProjectNode`) mirrors its scope's
+`visual.out` as a produced `output`. See
+`docs/adr/2026-07-28-scoped-buses.md`.
+
 `resolver::Resolver` owns same-frame query cache state. `ResolveSession` is the
 active per-frame/per-demand object that resolves `QueryKey`s through the
 active `ResolveHost`, calls that host on cache misses, and carries a

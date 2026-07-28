@@ -8,17 +8,17 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use lp_collection::VecSet;
 use lpc_model::{
-    ChannelName, ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision,
-    SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment,
-    SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision,
-    advance_revision, current_revision, lookup_slot_data_and_shape,
+    ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision, SlotAccess,
+    SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment, SlotSemantics,
+    SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision, advance_revision,
+    current_revision, lookup_slot_data_and_shape,
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, NodeRuntimeStatus};
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
-use crate::dataflow::bus::Bus;
+use crate::dataflow::bus::{Bus, ScopeId, ScopedChannel};
 use crate::dataflow::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
@@ -495,7 +495,10 @@ impl Engine {
         registry: &ProjectRegistry,
         channel: &str,
     ) -> Result<VisualProduct, SessionResolveError> {
-        let key = QueryKey::Bus(lpc_model::ChannelName(channel.to_string()));
+        let key = QueryKey::Bus(ScopedChannel::new(
+            ScopeId::Project(self.tree().root()),
+            lpc_model::ChannelName(channel.to_string()),
+        ));
         let fid = self.revision;
         let mut resolver_tmp = core::mem::replace(&mut self.resolver, Resolver::new());
         resolver_tmp.clear_frame_cache();
@@ -583,7 +586,7 @@ impl Engine {
     pub(crate) fn resolve_bus_channel_value(
         &mut self,
         registry: &ProjectRegistry,
-        channel: &ChannelName,
+        channel: &ScopedChannel,
     ) -> Result<Production, SessionResolveError> {
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
         let mut session = EngineSession::new(
@@ -881,7 +884,7 @@ impl ResolveHost for EngineResolveHost<'_> {
 
     fn providers_for_bus(
         &self,
-        channel: &lpc_model::ChannelName,
+        channel: &ScopedChannel,
     ) -> Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> {
         self.tree
             .providers_for_bus(channel)
@@ -1910,11 +1913,11 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::String;
     use lps_shared::LpsValueF32;
 
     use crate::engine::test_support::{
-        EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
+        EngineTestBuilder, bus, literal, output, path, produced_slot, scoped_channel,
+        trace_has_value_origin_path,
     };
     use crate::node::test_placeholder_spine;
     use crate::products::visual::VisualProduct;
@@ -2160,7 +2163,7 @@ mod tests {
         let out = path("outputs[0]");
 
         let (_, trace) = h
-            .resolve_with_trace(QueryKey::Bus(lpc_model::ChannelName(String::from("video"))))
+            .resolve_with_trace(QueryKey::Bus(scoped_channel("video")))
             .expect("resolve with trace");
 
         assert!(trace_has_value_origin_path(

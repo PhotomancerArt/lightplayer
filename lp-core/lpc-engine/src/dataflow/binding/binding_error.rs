@@ -2,6 +2,8 @@ use core::fmt;
 
 use lpc_model::{ChannelName, Kind, NodeId};
 
+use crate::dataflow::bus::ScopedChannel;
+
 use super::BindingPriority;
 
 /// Errors from validating node-owned runtime bindings.
@@ -11,7 +13,7 @@ pub enum BindingError {
     UnknownOwner { owner: NodeId },
     /// Another binding on the same channel already uses a different [`Kind`].
     KindMismatch {
-        channel: ChannelName,
+        channel: ScopedChannel,
         established: Kind,
         attempted: Kind,
     },

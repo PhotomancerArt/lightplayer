@@ -1,4 +1,6 @@
-use lpc_model::{ChannelName, Kind, LpValue, NodeId, Revision, SlotPath};
+use lpc_model::{Kind, LpValue, NodeId, Revision, SlotPath};
+
+use crate::dataflow::bus::ScopedChannel;
 
 /// Stable address of a binding owned by a node entry.
 ///
@@ -42,14 +44,14 @@ pub struct BindingDraft {
 pub enum BindingSource {
     Literal(LpValue),
     ProducedSlot { node: NodeId, slot: SlotPath },
-    BusChannel(ChannelName),
+    BusChannel(ScopedChannel),
 }
 
 /// Where a binding writes to.
 #[derive(Clone, Debug)]
 pub enum BindingTarget {
     ConsumedSlot { node: NodeId, slot: SlotPath },
-    BusChannel(ChannelName),
+    BusChannel(ScopedChannel),
 }
 
 /// Writer priority for the same bus channel; higher wins at resolution time.
@@ -99,12 +101,12 @@ pub(crate) fn channels_touched<'a>(
 }
 
 pub(crate) struct ChannelsTouched<'a> {
-    source: Option<&'a ChannelName>,
-    target: Option<&'a ChannelName>,
+    source: Option<&'a ScopedChannel>,
+    target: Option<&'a ScopedChannel>,
 }
 
 impl<'a> Iterator for ChannelsTouched<'a> {
-    type Item = &'a ChannelName;
+    type Item = &'a ScopedChannel;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.source.take().or_else(|| self.target.take())
