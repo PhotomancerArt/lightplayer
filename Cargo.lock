@@ -6043,6 +6043,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
+ "lp-xt-elf",
  "lp-xt-emu",
  "lp-xt-inst",
  "lpir",
