@@ -563,6 +563,37 @@ build-rv32-release: build-rv32
 build-fw-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6
 
+# Fail when the esp32c6 app image gets too close to its 3 MB partition.
+# The image overran the partition twice in 2026 and both times it surfaced as a
+# red post-merge deploy, because nothing pre-merge built the firmware. This
+# always prints the headroom, so size is a trended number and not a cliff.
+# See docs/adr/2026-07-28-esp32c6-flash-budget.md.
+fw-esp32c6-size-check margin="65536": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v espflash >/dev/null 2>&1; then
+        echo "espflash not found. Install it before running the firmware size check."
+        exit 1
+    fi
+    # Keep in sync with the `factory` app partition in lp-fw/fw-esp32c6/partitions.csv.
+    partition=3145728
+    (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
+    img="$(mktemp)"
+    trap 'rm -f "${img}"' EXIT
+    # No --partition-table here on purpose: espflash errors out when the image
+    # overruns the real table, and we want to report *how far* over it is.
+    espflash save-image --chip esp32c6 {{ fw_esp32c6_elf }} "${img}" >/dev/null
+    size="$(wc -c < "${img}" | tr -d ' ')"
+    headroom=$(( partition - size ))
+    echo "fw-esp32c6 image ${size} B / ${partition} B — headroom ${headroom} B (margin {{ margin }} B)"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        echo "esp32c6 image \`${size}\` B of \`${partition}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    if [ "${headroom}" -lt "{{ margin }}" ]; then
+        echo "::error::esp32c6 image headroom ${headroom} B is under the {{ margin }} B margin. See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+        exit 1
+    fi
+
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
 # but rustc still emits the object containing .stack_sizes before that point.
