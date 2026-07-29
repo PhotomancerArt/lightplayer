@@ -24,6 +24,8 @@ pub(crate) mod fixture_face_stories;
 pub(crate) mod h_fader_field_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod knob_field_stories;
+pub(crate) mod map_view;
+pub(crate) mod mapping_asset_editor;
 mod node_children;
 mod node_detail_popover;
 mod node_pane;

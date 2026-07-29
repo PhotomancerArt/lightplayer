@@ -109,6 +109,8 @@ holds the full context.
 | Display-driven per-surface probe sizing, capped by the runtime tier | `2026-07-27-completion-based-refresh-pacing` | Multi-node probing has soaked and card-size feedback plumbing is worth the plumbing |
 | Probe revision-gating on the wire (skip unchanged probe bytes; display-layout's `IfChanged` read is the precedent) | `2026-07-27-completion-based-refresh-pacing` | Steady-state probe bytes dominate tick cost on a real link |
 | Sim "non-collapsed" probe scope becomes real (collapse is view-local today, so sim probes ALL nodes) | `2026-07-27-completion-based-refresh-pacing` | The ui-state-audit plan moves live collapse state into core |
+| Packed base64 geometry encoding (`points_packed`-style additive field) | `2026-07-27-map2d-document-architecture` | An imported mapping document approaches the 10 KiB asset body budget |
+| Legacy `MappingConfig` variant retirement (`PathPoints`/`RingArray`/`PointList`/`SvgPath`) | `2026-07-27-map2d-document-architecture` | M5 one-home mapping editing lands and shipped projects are migrated |
 
 ## Relationship To Shared Planning
 

@@ -9,24 +9,25 @@ use lpc_model::nodes::fixture::{
     ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec, RingOrder,
 };
 use lpc_model::{
-    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct, Dim2u,
-    FixtureDefView, FixtureState, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
-    SlotShapeRegistryError,
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
+    ControlProduct, Dim2u, FixtureDefView, FixtureState, Revision, SlotAccess, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lps_q32::q32::{Q32, ToQ32};
 
 use crate::nodes::fixture::gamma::apply_gamma;
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
-    initialize_channel_accumulators,
+    initialize_channel_accumulators, mapping_from_map2d_doc,
 };
 use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureData, TextureHandle};
 use lpc_model::nodes::texture::TextureFormat;
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
-    ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
-    PressureLevel, ProduceResult, RuntimeStateShape, TickContext, err_ctx,
+    AssetRefreshContext, AssetRefreshResult, ControlNode, ControlRenderContext, DestroyCtx,
+    MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, RuntimeStateShape,
+    TickContext, err_ctx,
 };
 use crate::products::control::{
     ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
@@ -37,6 +38,20 @@ use crate::products::visual::{
     VisualProduct, VisualSample, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
     texel_center_to_uv_q16,
 };
+use lpc_model::NodeRuntimeStatus;
+
+/// The map2d document a fixture's mapping was resolved from, kept so the
+/// node can re-resolve when the asset body changes (the in-place mapping
+/// editor's apply path — the whole-body `SetArtifactBody` flow).
+#[derive(Clone, Debug)]
+pub struct FixtureMap2dSource {
+    pub location: lpc_model::AssetLocation,
+    /// Asset revision the current mapping was resolved from.
+    pub revision: Revision,
+    /// Render-texture extent the doc was resolved against (from the def).
+    pub render_width: u32,
+    pub render_height: u32,
+}
 
 /// Fixture node: resolves a shader visual product and exposes a control product for outputs.
 pub struct FixtureNode {
@@ -44,6 +59,14 @@ pub struct FixtureNode {
     mapping: MappingConfig,
     sampling: FixtureSamplingConfig,
     mapping_version: Revision,
+    /// Present when the mapping came from a `.map2d.json` document.
+    map2d_source: Option<FixtureMap2dSource>,
+    /// Keep-last-good: a failed map2d refresh keeps the old mapping
+    /// rendering and surfaces the failure as the node's runtime status.
+    mapping_error: Option<alloc::string::String>,
+    /// The input didn't resolve (fresh fixture, nothing bound yet): lamps
+    /// render unlit and the cause surfaces as runtime status.
+    input_error: Option<alloc::string::String>,
     def_view: Option<FixtureDefView>,
     last_visual_product: Option<VisualProduct>,
     last_settings: Option<FixtureRenderSettings>,
@@ -69,6 +92,9 @@ impl FixtureNode {
             mapping,
             sampling,
             mapping_version,
+            map2d_source: None,
+            mapping_error: None,
+            input_error: None,
             def_view: None,
             last_visual_product: None,
             last_settings: None,
@@ -79,6 +105,37 @@ impl FixtureNode {
             direct_points: None,
             display_layout_revision: None,
         }
+    }
+
+    /// Attach the map2d document source this mapping was resolved from,
+    /// enabling live re-resolution on asset refresh.
+    #[must_use]
+    pub fn with_map2d_source(mut self, source: FixtureMap2dSource) -> Self {
+        self.map2d_source = Some(source);
+        self
+    }
+
+    /// Seed render settings from the def at load, so control probes work
+    /// before the first tick — a freshly created fixture that nothing
+    /// consumes yet still shows its (unlit) lamp layout instead of
+    /// "missing cached settings". The first real tick refreshes these
+    /// from live slot values.
+    #[must_use]
+    pub fn with_render_defaults(
+        mut self,
+        width: u32,
+        height: u32,
+        color_order: ColorOrder,
+    ) -> Self {
+        self.last_settings = Some(FixtureRenderSettings {
+            width,
+            height,
+            diagnostic_mode: FixtureDiagnosticMode::Off,
+            color_order,
+            brightness: lpc_model::Brightness::DEFAULT.as_u8(),
+            gamma_correction: true,
+        });
+        self
     }
 
     fn def_view(&mut self, ctx: &TickContext<'_>) -> Result<&FixtureDefView, NodeError> {
@@ -216,30 +273,52 @@ impl NodeRuntime for FixtureNode {
         let ver = ctx.revision();
         let mapping_ver = self.mapping_version;
         if diagnostic_mode == FixtureDiagnosticMode::Off {
-            let prod = ctx
-                .resolve(QueryKey::ConsumedSlot {
-                    node: ctx.node_id(),
-                    slot: fixture_input_path(),
-                })
-                .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
+            // A fixture whose input does not RESOLVE (fresh node, nothing
+            // bound yet) still produces: lamps render unlit and the mapping
+            // stays viewable/editable, with the cause surfaced as runtime
+            // status. A resolved input carrying the wrong shape keeps
+            // failing loudly — that is authored misconfiguration.
+            match ctx.resolve(QueryKey::ConsumedSlot {
+                node: ctx.node_id(),
+                slot: fixture_input_path(),
+            }) {
+                Ok(prod) => {
+                    let visual_product = match prod
+                        .value_leaf()
+                        .ok_or_else(|| {
+                            NodeError::msg(
+                                "fixture input resolved to aggregate data, expected visual product",
+                            )
+                        })?
+                        .get()
+                    {
+                        lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => {
+                            *product
+                        }
+                        _ => {
+                            return Err(NodeError::msg(
+                                "fixture expected visual product from input",
+                            ));
+                        }
+                    };
+                    self.last_visual_product = Some(visual_product);
+                    self.input_error = None;
+                }
+                Err(e) => {
+                    self.last_visual_product = None;
+                    self.input_error = Some(format!("fixture input not resolved: {}", e.message));
+                }
+            }
 
-            let visual_product = match prod
-                .value_leaf()
-                .ok_or_else(|| {
-                    NodeError::msg(
-                        "fixture input resolved to aggregate data, expected visual product",
-                    )
-                })?
-                .get()
+            // The unlit fallback renders through the texture-area
+            // accumulator path, so ensure those entries whenever there is
+            // no visual product — even in Direct sampling mode.
+            if self.sampling == FixtureSamplingConfig::TextureArea
+                || self.last_visual_product.is_none()
             {
-                lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
-                _ => return Err(NodeError::msg("fixture expected visual product from input")),
-            };
-            self.last_visual_product = Some(visual_product);
-
-            if self.sampling == FixtureSamplingConfig::TextureArea {
                 self.ensure_texture_area_mapping(width, height, mapping_ver, ver);
-            } else {
+            }
+            if self.sampling == FixtureSamplingConfig::Direct {
                 self.ensure_direct_points(mapping_ver);
             }
         } else {
@@ -279,6 +358,62 @@ impl NodeRuntime for FixtureNode {
         Ok(())
     }
 
+    /// Re-resolve the mapping when the backing map2d document changes —
+    /// the in-place editor's apply path. Mirrors `sync_mapping_from_def`'s
+    /// invalidation so the control product, sample points, and display
+    /// layout all re-derive from the new mapping.
+    fn refresh_asset(
+        &mut self,
+        location: &lpc_model::AssetLocation,
+        ctx: &mut AssetRefreshContext<'_>,
+    ) -> Result<AssetRefreshResult, NodeError> {
+        let Some(source) = &self.map2d_source else {
+            return Ok(AssetRefreshResult::Unused);
+        };
+        if location != &source.location {
+            return Ok(AssetRefreshResult::Unused);
+        }
+
+        let text = match ctx.read_asset_text_if_changed(location, source.revision) {
+            Ok(Some(text)) => text,
+            Ok(None) => return Ok(AssetRefreshResult::Unchanged),
+            Err(err) => {
+                // Keep-last-good: no new document to resolve.
+                self.mapping_error = Some(format!("read fixture map2d document: {err:?}"));
+                return Ok(AssetRefreshResult::Refreshed);
+            }
+        };
+        let asset_revision = text.revision;
+        let resolved = lpc_mapping::Map2dDoc::from_json(&text.text)
+            .map_err(|e| format!("parse fixture map2d document: {e}"))
+            .and_then(|doc| {
+                mapping_from_map2d_doc(&doc, source.render_width, source.render_height)
+                    .map_err(|e| format!("resolve fixture map2d document: {e}"))
+            });
+        match resolved {
+            Ok(mapping) => {
+                self.mapping = mapping;
+                self.mapping_version = ctx.revision();
+                if let Some(source) = &mut self.map2d_source {
+                    source.revision = asset_revision;
+                }
+                self.precomputed = None;
+                self.direct_points = None;
+                self.display_layout_revision = None;
+                self.mapping_error = None;
+            }
+            Err(message) => self.mapping_error = Some(message),
+        }
+        Ok(AssetRefreshResult::Refreshed)
+    }
+
+    fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
+        self.mapping_error
+            .as_ref()
+            .or(self.input_error.as_ref())
+            .map(|error| NodeRuntimeStatus::Error(error.clone()))
+    }
+
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
         Some(&self.state)
     }
@@ -311,7 +446,7 @@ fn sync_mapping_config_from_def(
 ) -> Result<(), NodeError> {
     match mapping {
         MappingConfig::Unset => {}
-        MappingConfig::SvgPath { .. } => {}
+        MappingConfig::SvgPath { .. } | MappingConfig::Map2d { .. } => {}
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
@@ -485,9 +620,31 @@ impl ControlNode for FixtureNode {
             );
         }
 
-        let visual_product = self
-            .last_visual_product
-            .ok_or_else(|| NodeError::msg("fixture control render requested before tick"))?;
+        let Some(visual_product) = self.last_visual_product else {
+            // Unlit render: no resolvable visual input (fresh fixture,
+            // nothing bound, possibly never ticked). Zeroed accumulators
+            // through the normal target path — black lamps, real layout.
+            self.ensure_texture_area_mapping(
+                settings.width,
+                settings.height,
+                self.mapping_version,
+                self.mapping_version,
+            );
+            let entries = &self
+                .precomputed
+                .as_ref()
+                .ok_or_else(|| NodeError::msg("fixture control render missing cached mapping"))?
+                .3;
+            let accumulators = initialize_channel_accumulators(entries);
+            return render_fixture_control_target(
+                request,
+                target,
+                &accumulators,
+                settings.color_order,
+                settings.brightness,
+                settings.gamma_correction,
+            );
+        };
         if self.sampling == FixtureSamplingConfig::Direct {
             return render_direct_fixture_control(
                 &mut self.sample_points,
@@ -563,12 +720,17 @@ impl ControlNode for FixtureNode {
             })
             .collect();
 
-        Ok(Some(ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-            revision,
-            settings.width,
-            settings.height,
-            lamps,
-        ))))
+        let paths = fixture_path_spans(&self.mapping)
+            .into_iter()
+            .map(|span| ControlPathSpan2d {
+                first_lamp: span.first_lamp,
+                lamp_count: span.lamp_count,
+            })
+            .collect();
+        Ok(Some(ControlDisplayLayout::Layout2d(
+            ControlLayout2d::new(revision, settings.width, settings.height, lamps)
+                .with_paths(paths),
+        )))
     }
 }
 
@@ -1192,7 +1354,7 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
 fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
     match config {
         MappingConfig::Unset => Vec::new(),
-        MappingConfig::SvgPath { .. } => Vec::new(),
+        MappingConfig::SvgPath { .. } | MappingConfig::Map2d { .. } => Vec::new(),
         MappingConfig::PathPoints { paths, .. } => {
             let mut spans = Vec::new();
             let mut next_lamp = 0u32;

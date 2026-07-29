@@ -5194,6 +5194,7 @@ dependencies = [
  "lpa-server",
  "lpc-engine",
  "lpc-hardware",
+ "lpc-mapping",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -5481,6 +5482,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-mapping-editor"
+version = "40.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "dioxus",
+ "dioxus-icons",
+ "lpc-mapping",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "lpa-server"
 version = "40.0.0"
 dependencies = [
@@ -5547,8 +5561,10 @@ dependencies = [
  "lpa-client",
  "lpa-fs-opfs",
  "lpa-link",
+ "lpa-mapping-editor",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
+ "lpc-mapping",
  "lpc-wire",
  "lpfs",
  "lps-builtin-completions",
@@ -5587,6 +5603,7 @@ dependencies = [
  "lp-recovery",
  "lp-shader",
  "lpc-hardware",
+ "lpc-mapping",
  "lpc-model",
  "lpc-registry",
  "lpc-shared",
@@ -5622,6 +5639,15 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "lpc-mapping"
+version = "40.0.0"
+dependencies = [
+ "libm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

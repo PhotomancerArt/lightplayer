@@ -1,24 +1,29 @@
+//! Straight-line SVG geometry parsing (`polyline points` and `path d`).
+//!
+//! Supports `M/m`, `L/l`, `H/h`, `V/v`, `Z/z`; curve commands are rejected —
+//! the import subset is straight lines only.
+
 use alloc::vec::Vec;
 
-use super::svg_path_error::{SvgPathError, invalid_number};
-use super::svg_path_group::SvgPathGeometry;
+use super::svg_error::{SvgImportError, invalid_number};
+use super::svg_group::SvgPathGeometry;
 
-pub fn parse_polyline(points: &str) -> Result<SvgPathGeometry, SvgPathError> {
+pub fn parse_polyline(points: &str) -> Result<SvgPathGeometry, SvgImportError> {
     let numbers = parse_number_list(points)?;
     if numbers.len() < 4 || numbers.len() % 2 != 0 {
-        return Err(SvgPathError::InvalidPolyline);
+        return Err(SvgImportError::InvalidPolyline);
     }
     Ok(SvgPathGeometry::Polyline(
         numbers.chunks(2).map(|pair| [pair[0], pair[1]]).collect(),
     ))
 }
 
-pub fn parse_path_data(data: &str) -> Result<SvgPathGeometry, SvgPathError> {
+pub fn parse_path_data(data: &str) -> Result<SvgPathGeometry, SvgImportError> {
     let mut parser = PathDataParser::new(data);
     parser.parse()
 }
 
-fn parse_number_list(input: &str) -> Result<Vec<f32>, SvgPathError> {
+fn parse_number_list(input: &str) -> Result<Vec<f32>, SvgImportError> {
     let mut numbers = Vec::new();
     for value in input
         .split(|c: char| c.is_ascii_whitespace() || c == ',')
@@ -50,7 +55,7 @@ impl<'a> PathDataParser<'a> {
         }
     }
 
-    fn parse(&mut self) -> Result<SvgPathGeometry, SvgPathError> {
+    fn parse(&mut self) -> Result<SvgPathGeometry, SvgImportError> {
         while self.skip_separators() {
             if let Some(command) = self.peek_char().filter(|c| c.is_ascii_alphabetic()) {
                 self.index += command.len_utf8();
@@ -62,7 +67,7 @@ impl<'a> PathDataParser<'a> {
             }
 
             let Some(command) = self.command else {
-                return Err(SvgPathError::InvalidAttribute { name: "d" });
+                return Err(SvgImportError::InvalidAttribute { name: "d" });
             };
 
             match command {
@@ -71,17 +76,17 @@ impl<'a> PathDataParser<'a> {
                 'H' | 'h' => self.parse_horizontal(command == 'h')?,
                 'V' | 'v' => self.parse_vertical(command == 'v')?,
                 'Z' | 'z' => {}
-                other => return Err(SvgPathError::UnsupportedCommand(other)),
+                other => return Err(SvgImportError::UnsupportedCommand(other)),
             }
         }
 
         if self.points.len() < 2 {
-            return Err(SvgPathError::InvalidAttribute { name: "d" });
+            return Err(SvgImportError::InvalidAttribute { name: "d" });
         }
         Ok(SvgPathGeometry::Polyline(self.points.clone()))
     }
 
-    fn parse_move(&mut self, relative: bool) -> Result<(), SvgPathError> {
+    fn parse_move(&mut self, relative: bool) -> Result<(), SvgImportError> {
         let first = self.parse_point(relative)?;
         self.current = first;
         self.subpath_start = first;
@@ -95,7 +100,7 @@ impl<'a> PathDataParser<'a> {
         Ok(())
     }
 
-    fn parse_line(&mut self, relative: bool) -> Result<(), SvgPathError> {
+    fn parse_line(&mut self, relative: bool) -> Result<(), SvgImportError> {
         while self.has_number_ahead() {
             let point = self.parse_point(relative)?;
             self.line_to(point);
@@ -103,7 +108,7 @@ impl<'a> PathDataParser<'a> {
         Ok(())
     }
 
-    fn parse_horizontal(&mut self, relative: bool) -> Result<(), SvgPathError> {
+    fn parse_horizontal(&mut self, relative: bool) -> Result<(), SvgImportError> {
         while self.has_number_ahead() {
             let x = self.parse_number()?;
             let next_x = if relative { self.current[0] + x } else { x };
@@ -112,7 +117,7 @@ impl<'a> PathDataParser<'a> {
         Ok(())
     }
 
-    fn parse_vertical(&mut self, relative: bool) -> Result<(), SvgPathError> {
+    fn parse_vertical(&mut self, relative: bool) -> Result<(), SvgImportError> {
         while self.has_number_ahead() {
             let y = self.parse_number()?;
             let next_y = if relative { self.current[1] + y } else { y };
@@ -121,7 +126,7 @@ impl<'a> PathDataParser<'a> {
         Ok(())
     }
 
-    fn parse_point(&mut self, relative: bool) -> Result<[f32; 2], SvgPathError> {
+    fn parse_point(&mut self, relative: bool) -> Result<[f32; 2], SvgImportError> {
         let x = self.parse_number()?;
         let y = self.parse_number()?;
         if relative {
@@ -145,7 +150,7 @@ impl<'a> PathDataParser<'a> {
                 .is_some_and(|c| c == '-' || c == '+' || c == '.' || c.is_ascii_digit())
     }
 
-    fn parse_number(&mut self) -> Result<f32, SvgPathError> {
+    fn parse_number(&mut self) -> Result<f32, SvgImportError> {
         self.skip_separators();
         let start = self.index;
         let mut seen_digit = false;
@@ -178,7 +183,7 @@ impl<'a> PathDataParser<'a> {
             }
         }
         if !seen_digit {
-            return Err(SvgPathError::InvalidAttribute { name: "number" });
+            return Err(SvgImportError::InvalidAttribute { name: "number" });
         }
         parse_f32(&self.input[start..self.index])
     }
@@ -198,7 +203,7 @@ impl<'a> PathDataParser<'a> {
     }
 }
 
-fn parse_f32(value: &str) -> Result<f32, SvgPathError> {
+fn parse_f32(value: &str) -> Result<f32, SvgImportError> {
     value.parse().map_err(|_| invalid_number(value))
 }
 
@@ -229,7 +234,7 @@ mod tests {
     fn rejects_curves() {
         assert!(matches!(
             parse_path_data("M0,0 C1,1 2,2 3,3"),
-            Err(SvgPathError::UnsupportedCommand('C'))
+            Err(SvgImportError::UnsupportedCommand('C'))
         ));
     }
 }

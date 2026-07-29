@@ -435,10 +435,15 @@ fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
-    let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
-        return Ok(Vec::new());
-    };
-    assets_for_slot(source, containing_file, AssetContentType::FixtureSvg)
+    match fixture.mapping.value() {
+        MappingConfig::SvgPath { source, .. } => {
+            assets_for_slot(source, containing_file, AssetContentType::FixtureSvg)
+        }
+        MappingConfig::Map2d { source } => {
+            assets_for_slot(source, containing_file, AssetContentType::FixtureMap2d)
+        }
+        _ => Ok(Vec::new()),
+    }
 }
 
 fn assets_for_slot(

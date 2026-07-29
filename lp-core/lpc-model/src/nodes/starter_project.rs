@@ -74,13 +74,19 @@ pub fn starter_project_files(
     }
     files.push((String::from("output.json"), node_json(&output, registry)?));
 
-    let mut fixture = starter_def_for_kind(NodeKind::Fixture);
+    // The fixture starter carries a sibling mapping document; substitute
+    // the real stem and ship both files.
+    let fixture_starter = crate::nodes::starter::starter_for_kind(NodeKind::Fixture)
+        .expect("fixture kind has a starter")
+        .for_stem("fixture");
+    let mut fixture = fixture_starter.def;
     if let NodeDef::Fixture(fixture) = &mut fixture {
         fixture.bindings = fixture_binding_defs();
         fixture.sampling = ValueSlot::new(FixtureSamplingConfig::TextureArea);
         fixture.color_order = ValueSlot::new(ColorOrder::Rgb);
     }
     files.push((String::from("fixture.json"), node_json(&fixture, registry)?));
+    files.extend(fixture_starter.assets);
 
     Ok(files)
 }
@@ -223,11 +229,14 @@ mod tests {
                 "shader.glsl",
                 "output.json",
                 "fixture.json",
+                "fixture.map2d.json",
             ]
         );
 
         for (name, bytes) in &files {
-            if !name.ends_with(".json") {
+            // Only node-definition artifacts parse as NodeDef; the mapping
+            // document is an opaque asset (D1).
+            if !name.ends_with(".json") || name.ends_with(".map2d.json") {
                 continue;
             }
             let text = core::str::from_utf8(bytes).expect("utf-8");
@@ -280,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn starter_project_fixture_has_ring_mapping() {
+    fn starter_project_fixture_has_map2d_mapping_and_ships_the_doc() {
         let registry = SlotShapeRegistry::default();
         let files = starter_project_files("demo", &registry).expect("compose");
         let (_, bytes) = files
@@ -291,9 +300,16 @@ mod tests {
         let NodeDef::Fixture(fixture) = def else {
             panic!("expected fixture");
         };
-        assert!(matches!(
-            fixture.mapping.value(),
-            MappingConfig::PathPoints { .. }
-        ));
+        let MappingConfig::Map2d { source } = fixture.mapping.value() else {
+            panic!("expected Map2d mapping");
+        };
+        assert_eq!(
+            source.artifact_value().unwrap().to_string(),
+            "fixture.map2d.json"
+        );
+        assert!(
+            files.iter().any(|(name, _)| name == "fixture.map2d.json"),
+            "the mapping document ships with the project"
+        );
     }
 }

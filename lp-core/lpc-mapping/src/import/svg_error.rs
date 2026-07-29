@@ -1,10 +1,11 @@
+//! Errors for the strict SVG-subset importer.
+
 use alloc::format;
 use alloc::string::String;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SvgPathError {
+pub enum SvgImportError {
     DuplicatePathIndex(u32),
-    EmptyPath { path_index: u32 },
     InvalidAttribute { name: &'static str },
     InvalidNumber(String),
     InvalidPathLabel(String),
@@ -20,11 +21,10 @@ pub enum SvgPathError {
     ZeroCount { path_index: u32 },
 }
 
-impl core::fmt::Display for SvgPathError {
+impl core::fmt::Display for SvgImportError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::DuplicatePathIndex(index) => write!(f, "duplicate svg mapping path:{index}"),
-            Self::EmptyPath { path_index } => write!(f, "svg mapping path:{path_index} is empty"),
             Self::InvalidAttribute { name } => write!(f, "invalid or missing SVG attribute {name}"),
             Self::InvalidNumber(value) => write!(f, "invalid SVG number {value:?}"),
             Self::InvalidPathLabel(label) => write!(f, "invalid SVG mapping text {label:?}"),
@@ -55,12 +55,12 @@ impl core::fmt::Display for SvgPathError {
     }
 }
 
-impl core::error::Error for SvgPathError {}
+impl core::error::Error for SvgImportError {}
 
-pub fn invalid_number(value: &str) -> SvgPathError {
-    SvgPathError::InvalidNumber(String::from(value))
+pub fn invalid_number(value: &str) -> SvgImportError {
+    SvgImportError::InvalidNumber(String::from(value))
 }
 
-pub fn invalid_label(value: &str) -> SvgPathError {
-    SvgPathError::InvalidPathLabel(format!("{value}"))
+pub fn invalid_label(value: &str) -> SvgImportError {
+    SvgImportError::InvalidPathLabel(format!("{value}"))
 }

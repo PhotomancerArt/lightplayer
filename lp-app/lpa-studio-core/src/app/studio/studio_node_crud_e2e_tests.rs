@@ -98,6 +98,18 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
         shader_def.contains("shader.glsl"),
         "shader def references its scaffold: {shader_def}"
     );
+    // The fixture starter is a two-file create too: a default mapping
+    // document beside the def, referenced as a Map2d mapping — a new
+    // fixture is immediately viewable and editable in place.
+    assert!(
+        file_exists(&server, "fixture_2.map2d.json"),
+        "fixture mapping document exists"
+    );
+    let fixture_def = read_file(&server, "fixture_2.json");
+    assert!(
+        fixture_def.contains("Map2d") && fixture_def.contains("fixture_2.map2d.json"),
+        "fixture def references its mapping document: {fixture_def}"
+    );
     // Project root gained every key (the collision case as `clock_2`).
     let manifest = read_file(&server, "project.json");
     for (_, name, _) in cases {
