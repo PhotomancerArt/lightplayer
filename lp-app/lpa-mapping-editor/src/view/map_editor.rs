@@ -229,13 +229,119 @@ pub fn MapEditor(
                             onclick: move |_| {
                                 let now = *rail_open.peek();
                                 rail_open.set(!now);
+                                // The dock resizes the canvas: drop the
+                                // stale measurement and re-fit so the
+                                // content stays in view (same dance as
+                                // full-page expand).
+                                let mut viewport = viewport;
+                                viewport.set(None);
+                                fit_pending.set(true);
                             },
                             List { size: 13 }
                         }
                     }
+                    HelpFloat {}
                 }
                 if rail_open() {
-                    ObjectList { session, on_committed }
+                    ObjectList {
+                        session,
+                        on_committed,
+                        on_focus: move |index: usize| {
+                            focus_object_in_view(session, camera, viewport, index);
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Center the camera on one object's lamps (rail row click).
+fn focus_object_in_view(
+    session: Signal<MapEditorSession>,
+    mut camera: Signal<Camera>,
+    viewport: Signal<Option<[f32; 2]>>,
+    object_index: usize,
+) {
+    let Some([width, height]) = *viewport.peek() else {
+        return;
+    };
+    let bounds = {
+        let session_read = session.read();
+        let doc = session_read.doc();
+        resolve(doc).ok().and_then(|resolved| {
+            let points: Vec<[f32; 2]> = resolved
+                .lamps
+                .iter()
+                .filter(|lamp| lamp.object as usize == object_index)
+                .map(|lamp| lamp.pos)
+                .collect();
+            bounds_of_points(&points)
+        })
+    };
+    if let Some(bounds) = bounds {
+        camera.set(focus_camera(bounds, width, height));
+    }
+}
+
+/// The camera that frames `bounds` for a rail-row focus: generous 20%
+/// padding, capped well below max zoom so a small object doesn't slam the
+/// view to 8× — capped focus stays centered on the object.
+fn focus_camera(bounds: lpc_mapping::Bounds2d, width: f32, height: f32) -> Camera {
+    const FOCUS_MAX_SCALE: f32 = 3.0;
+    let mut cam = Camera::new();
+    cam.fit(bounds, width, height, 0.20 * width.min(height));
+    if cam.scale > FOCUS_MAX_SCALE {
+        let center = [
+            bounds.min_x + bounds.width / 2.0,
+            bounds.min_y + bounds.height / 2.0,
+        ];
+        cam.scale = FOCUS_MAX_SCALE;
+        cam.x = width / 2.0 - center[0] * FOCUS_MAX_SCALE;
+        cam.y = height / 2.0 - center[1] * FOCUS_MAX_SCALE;
+    }
+    cam
+}
+
+/// Floating "?" toggling a compact keyboard-shortcut reference, next to
+/// the zoom float (the M5 round-3 ask: every tool has a key, and the keys
+/// deserve a home).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn HelpFloat() -> Element {
+    let mut open = use_signal(|| false);
+    rsx! {
+        div { class: "lpme-help-float",
+            button {
+                class: if open() { "lpme-btn lpme-btn-on" } else { "lpme-btn" },
+                title: "keyboard shortcuts",
+                onclick: move |_| {
+                    let now = *open.peek();
+                    open.set(!now);
+                },
+                "?"
+            }
+        }
+        if open() {
+            div { class: "lpme-help-panel",
+                div { class: "lpme-help-title", "keyboard" }
+                for (keys, what) in [
+                    ("V / G / R / P", "select · grid · ring · path tool"),
+                    ("N / A / U / L", "numbers · arrows · universes · live"),
+                    ("F", "texture-frame preview"),
+                    ("0", "zoom to fit"),
+                    ("⌘ + scroll", "zoom at cursor"),
+                    ("right-drag / scroll", "pan"),
+                    ("⌘Z / ⇧⌘Z", "undo · redo"),
+                    ("⌘A", "select all"),
+                    ("⌫", "delete selection"),
+                    ("⏎", "finish path"),
+                    ("esc", "back out · clear · select tool"),
+                ] {
+                    div { class: "lpme-help-row",
+                        span { class: "lpme-help-keys", "{keys}" }
+                        span { class: "lpme-help-what", "{what}" }
+                    }
                 }
             }
         }
@@ -374,5 +480,47 @@ fn handle_key(
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpc_mapping::Bounds2d;
+
+    #[test]
+    fn focus_camera_frames_large_bounds_with_padding() {
+        let bounds = Bounds2d {
+            min_x: 100.0,
+            min_y: 100.0,
+            width: 800.0,
+            height: 200.0,
+        };
+        let cam = focus_camera(bounds, 600.0, 400.0);
+        // Width-limited: usable 600 - 2*80 padding = 440 over 800 wide.
+        assert!(
+            (cam.scale - 440.0 / 800.0).abs() < 1e-3,
+            "scale {}",
+            cam.scale
+        );
+        // Bounds center lands on the viewport center.
+        let center = cam.doc_to_view([500.0, 200.0]);
+        assert!((center[0] - 300.0).abs() < 1e-2);
+        assert!((center[1] - 200.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn focus_camera_caps_zoom_on_tiny_objects_and_stays_centered() {
+        let bounds = Bounds2d {
+            min_x: 40.0,
+            min_y: 40.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        let cam = focus_camera(bounds, 600.0, 400.0);
+        assert!((cam.scale - 3.0).abs() < 1e-6, "capped, got {}", cam.scale);
+        let center = cam.doc_to_view([45.0, 45.0]);
+        assert!((center[0] - 300.0).abs() < 1e-2);
+        assert!((center[1] - 200.0).abs() < 1e-2);
     }
 }

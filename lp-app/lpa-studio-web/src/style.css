@@ -1528,9 +1528,72 @@ label:has(> input:not(:disabled)) {
     padding: 5px;
 }
 
+.lpme-rail-head {
+    padding: 6px 8px 4px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--studio-color-text-muted);
+    border-bottom: 1px solid var(--studio-color-border);
+    margin-bottom: 4px;
+}
+
 .lpme-rail-empty {
     padding: 10px 8px;
     font-size: 11px;
+    color: var(--studio-color-text-muted);
+}
+
+/* Floating "?" (left of the rail toggle) and its shortcut reference. */
+.lpme-help-float {
+    position: absolute;
+    top: 10px;
+    right: 56px;
+    z-index: 6;
+    display: flex;
+    padding: 3px;
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+}
+
+.lpme-help-panel {
+    position: absolute;
+    top: 52px;
+    right: 12px;
+    z-index: 7;
+    min-width: 250px;
+    padding: 8px 10px;
+    background: rgba(16, 18, 22, 0.95);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 9px;
+}
+
+.lpme-help-title {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--studio-color-text-muted);
+    margin-bottom: 6px;
+}
+
+.lpme-help-row {
+    display: flex;
+    gap: 10px;
+    padding: 2px 0;
+    font-size: 11px;
+}
+
+.lpme-help-keys {
+    font-family: var(--studio-font-mono);
+    color: var(--studio-color-text-strong);
+    min-width: 110px;
+    flex: none;
+}
+
+.lpme-help-what {
     color: var(--studio-color-text-muted);
 }
 
