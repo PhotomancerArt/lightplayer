@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::fixture::{
-    ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec, RingOrder,
+    ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec,
 };
 use lpc_model::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
@@ -435,18 +435,13 @@ impl NodeRuntime for FixtureNode {
 /// snake_case — see `SlotEnumAccess::variant` and the shape variant names.
 const MAPPING_SAMPLE_DIAMETER_DEF_PATH: &str = "mapping.PathPoints.sample_diameter";
 
-/// Def path prefix for one authored `RingArray` path spec.
-fn ring_array_def_prefix(path_key: u32) -> alloc::string::String {
-    alloc::format!("mapping.PathPoints.paths[{path_key}].RingArray")
-}
-
 fn sync_mapping_config_from_def(
     mapping: &mut MappingConfig,
     ctx: &mut TickContext<'_>,
 ) -> Result<(), NodeError> {
     match mapping {
         MappingConfig::Unset => {}
-        MappingConfig::SvgPath { .. } | MappingConfig::Map2d { .. } => {}
+        MappingConfig::Map2d { .. } => {}
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
@@ -458,85 +453,12 @@ fn sync_mapping_config_from_def(
                 return Ok(());
             };
             sample_diameter.set(next_sample_diameter);
-            let path_keys: Vec<u32> = paths.entries.keys().copied().collect();
-            for path_key in path_keys {
-                let Some(path) = paths.entries.get_mut(&path_key) else {
-                    continue;
-                };
-                sync_path_spec_from_def(path_key, path.value_mut(), ctx)?;
-            }
+            // PointList paths carry no def-synced parameters (positions are
+            // resolved data); only the sample diameter tracks the def.
+            let _ = paths;
         }
     }
     Ok(())
-}
-
-fn sync_path_spec_from_def(
-    path_key: u32,
-    path: &mut PathSpec,
-    ctx: &mut TickContext<'_>,
-) -> Result<(), NodeError> {
-    match path {
-        PathSpec::RingArray {
-            center,
-            diameter,
-            start_ring_inclusive,
-            end_ring_exclusive,
-            ring_lamp_counts,
-            offset_angle,
-            order,
-            ..
-        } => {
-            let prefix = ring_array_def_prefix(path_key);
-            let Some(next_center) = try_read_def_value(ctx, &alloc::format!("{prefix}.center"))?
-            else {
-                return Ok(());
-            };
-            center.set(next_center);
-            let Some(next_diameter) =
-                try_read_def_value(ctx, &alloc::format!("{prefix}.diameter"))?
-            else {
-                return Ok(());
-            };
-            diameter.set(next_diameter);
-            start_ring_inclusive.set(read_def_value(
-                ctx,
-                &alloc::format!("{prefix}.start_ring_inclusive"),
-            )?);
-            end_ring_exclusive.set(read_def_value(
-                ctx,
-                &alloc::format!("{prefix}.end_ring_exclusive"),
-            )?);
-            let count_keys: Vec<u32> = ring_lamp_counts.entries.keys().copied().collect();
-            for count_key in count_keys {
-                let Some(count) = ring_lamp_counts.entries.get_mut(&count_key) else {
-                    continue;
-                };
-                count.set(read_def_value(
-                    ctx,
-                    &alloc::format!("{prefix}.ring_lamp_counts[{count_key}]"),
-                )?);
-            }
-            offset_angle.set(read_def_value(
-                ctx,
-                &alloc::format!("{prefix}.offset_angle"),
-            )?);
-            order.set(read_def_value(ctx, &alloc::format!("{prefix}.order"))?);
-        }
-        PathSpec::PointList { .. } => {}
-    }
-    Ok(())
-}
-
-fn read_def_value<T: lpc_model::FromLpValue>(
-    ctx: &mut TickContext<'_>,
-    path: &str,
-) -> Result<T, NodeError> {
-    let Some(value) = try_read_def_value(ctx, path)? else {
-        return Err(NodeError::msg(alloc::format!(
-            "authored fixture path {path:?} is unavailable"
-        )));
-    };
-    Ok(value)
 }
 
 fn try_read_def_value<T: lpc_model::FromLpValue>(
@@ -1354,44 +1276,17 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
 fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
     match config {
         MappingConfig::Unset => Vec::new(),
-        MappingConfig::SvgPath { .. } | MappingConfig::Map2d { .. } => Vec::new(),
+        MappingConfig::Map2d { .. } => Vec::new(),
         MappingConfig::PathPoints { paths, .. } => {
             let mut spans = Vec::new();
-            let mut next_lamp = 0u32;
             for path in paths.entries.values() {
-                let (first_lamp, lamp_count) = match path.value() {
-                    PathSpec::RingArray {
-                        start_ring_inclusive,
-                        end_ring_exclusive,
-                        ring_lamp_counts,
-                        order,
-                        ..
-                    } => {
-                        let start_ring = *start_ring_inclusive.value();
-                        let end_ring = *end_ring_exclusive.value();
-                        let ring_indices: Vec<u32> = match order.value() {
-                            RingOrder::InnerFirst => (start_ring..end_ring).collect(),
-                            RingOrder::OuterFirst => (start_ring..end_ring).rev().collect(),
-                        };
-
-                        let mut lamp_count = 0u32;
-                        for ring_index in ring_indices {
-                            lamp_count = lamp_count.saturating_add(
-                                ring_lamp_counts
-                                    .entries
-                                    .get(&ring_index)
-                                    .map(|count| *count.value())
-                                    .unwrap_or(0),
-                            );
-                        }
-                        (next_lamp, lamp_count)
-                    }
-                    PathSpec::PointList {
-                        first_channel,
-                        points,
-                        ..
-                    } => (*first_channel.value(), points.entries.len() as u32),
-                };
+                let PathSpec::PointList {
+                    first_channel,
+                    points,
+                    ..
+                } = path.value();
+                let (first_lamp, lamp_count) =
+                    (*first_channel.value(), points.entries.len() as u32);
                 if lamp_count > 0 {
                     spans.push(FixturePathSpan {
                         palette_index: spans.len() as u32,
@@ -1399,7 +1294,6 @@ fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
                         lamp_count,
                     });
                 }
-                next_lamp = first_lamp.saturating_add(lamp_count);
             }
             spans
         }
@@ -1414,7 +1308,7 @@ mod tests {
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
 
-    use lpc_model::nodes::fixture::{PathSpec, RingOrder};
+    use lpc_model::nodes::fixture::PathSpec;
     use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
     use lpc_registry::ProjectRegistry;
     use lpc_wire::{
@@ -1694,15 +1588,7 @@ mod tests {
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
         let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[12],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
+            vec![PathSpec::point_list(0, vec![[0.5, 0.5]; 12])],
             2.0,
         );
 
@@ -1866,15 +1752,7 @@ mod tests {
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
         let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[30],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
+            vec![PathSpec::point_list(0, vec![[0.5, 0.5]; 30])],
             2.0,
         );
 
@@ -1996,18 +1874,8 @@ mod tests {
             )
             .unwrap();
 
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[1],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
-            2.0,
-        );
+        let mapping =
+            MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
         let fix_id = engine
             .tree_mut()
@@ -2133,18 +2001,8 @@ mod tests {
             )
             .unwrap();
 
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[1],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
-            2.0,
-        );
+        let mapping =
+            MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
         let fix_id = engine
             .tree_mut()
@@ -2268,18 +2126,8 @@ mod tests {
             )
             .unwrap();
 
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[1],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
-            2.0,
-        );
+        let mapping =
+            MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
 
         let fix_id = engine
             .tree_mut()
@@ -2455,16 +2303,10 @@ mod tests {
             )
             .unwrap();
 
+        // Two lamps: center + right edge (the retired 2-ring construction's
+        // exact resolved positions).
         let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                2,
-                &[1, 1],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
+            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
             2.0,
         );
 
@@ -2575,17 +2417,9 @@ mod tests {
     /// so a path added to the sync code without coverage here still fails the
     /// shape check at runtime.
     fn fixture_sync_def_paths() -> Vec<alloc::string::String> {
-        let prefix = ring_array_def_prefix(0);
         vec![
             alloc::string::String::from("diagnostic_mode"),
             alloc::string::String::from(MAPPING_SAMPLE_DIAMETER_DEF_PATH),
-            format!("{prefix}.center"),
-            format!("{prefix}.diameter"),
-            format!("{prefix}.start_ring_inclusive"),
-            format!("{prefix}.end_ring_exclusive"),
-            format!("{prefix}.ring_lamp_counts[0]"),
-            format!("{prefix}.offset_angle"),
-            format!("{prefix}.order"),
         ]
     }
 
@@ -2601,15 +2435,7 @@ mod tests {
 
         let def = FixtureDef {
             mapping: EnumSlot::new(MappingConfig::path_points_vec(
-                vec![PathSpec::ring_array_counts(
-                    [0.5, 0.5],
-                    1.0,
-                    0,
-                    1,
-                    &[12],
-                    0.0,
-                    RingOrder::InnerFirst,
-                )],
+                vec![PathSpec::point_list(0, vec![[0.5, 0.5]; 12])],
                 2.0,
             )),
             ..FixtureDef::default()
@@ -2628,149 +2454,5 @@ mod tests {
         // the shape check instead of silently reading as "absent".
         let wrong = SlotPath::parse("mapping.path_points.sample_diameter").unwrap();
         assert!(ensure_path_exists_in_fixture_def_shape(&shapes, &wrong).is_err());
-    }
-
-    /// Authored mapping values must actually reach the runtime mapping: the
-    /// constructor mapping has 2 lamps, the def slots say 12, so a synced
-    /// fixture renders all 12 diagnostic lamps. Before the variant-segment
-    /// paths were fixed the def reads silently returned `None` and this
-    /// rendered only 2 lamps.
-    #[test]
-    fn fixture_sync_reads_path_points_mapping_from_def_slots() {
-        use lpc_model::{PositiveF32, Xy};
-
-        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
-        let registry = ProjectRegistry::new();
-        let frame = Revision::new(1);
-        let root = engine.tree().root();
-        let spine = test_placeholder_spine();
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::ring_array_counts(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                &[2],
-                0.0,
-                RingOrder::InnerFirst,
-            )],
-            2.0,
-        );
-
-        let fix_id = engine
-            .tree_mut()
-            .add_child(
-                root,
-                lpc_model::NodeName::parse("fx").unwrap(),
-                lpc_model::NodeName::parse("fixture").unwrap(),
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                spine,
-                frame,
-            )
-            .unwrap();
-
-        engine
-            .attach_runtime_node(
-                fix_id,
-                Box::new(FixtureNode::new(
-                    fix_id,
-                    mapping,
-                    FixtureSamplingConfig::TextureArea,
-                    frame,
-                )),
-                frame,
-            )
-            .unwrap();
-        bind_fixture_def_defaults(&mut engine, fix_id, frame);
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            "diagnostic_mode",
-            FixtureDiagnosticMode::LedIndex.to_lp_value(),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            MAPPING_SAMPLE_DIAMETER_DEF_PATH,
-            PositiveF32(2.0).to_lp_value(),
-        );
-        let prefix = ring_array_def_prefix(0);
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.center"),
-            Xy([0.5, 0.5]).to_lp_value(),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.diameter"),
-            PositiveF32(1.0).to_lp_value(),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.start_ring_inclusive"),
-            LpValue::U32(0),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.end_ring_exclusive"),
-            LpValue::U32(1),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.ring_lamp_counts[0]"),
-            LpValue::U32(12),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.offset_angle"),
-            LpValue::F32(0.0),
-        );
-        bind_fixture_def_slot(
-            &mut engine,
-            fix_id,
-            frame,
-            &format!("{prefix}.order"),
-            RingOrder::InnerFirst.to_lp_value(),
-        );
-
-        engine.add_demand_root(fix_id);
-        engine.tick(&registry, 10).unwrap();
-
-        let extent = ControlExtent::new(1, 36);
-        let request = ControlRenderRequest::unorm16(extent);
-        let mut samples = vec![0u16; extent.sample_count() as usize];
-        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
-        let layout = engine
-            .render_control_for_test(
-                &registry,
-                ControlProduct::new(fix_id, 0, extent),
-                &request,
-                target,
-            )
-            .expect("control render");
-
-        // All 12 def-authored lamps render, not just the 2 constructor lamps.
-        assert_eq!(layout.spans.len(), 1);
-        assert_eq!(layout.spans[0].len, 36);
-        assert!(
-            samples[6..36].iter().any(|sample| *sample != 0),
-            "lamps beyond the constructor mapping should be lit: {samples:?}"
-        );
     }
 }
