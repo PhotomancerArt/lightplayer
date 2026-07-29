@@ -56,7 +56,7 @@ pub struct ServerHello {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FwProvenance {
-    /// Crate/package that embeds the server (`fw-esp32`, `fw-host`, …).
+    /// Crate/package that embeds the server (`fw-esp32c6`, `fw-host`, …).
     pub package: String,
     /// Short git commit the binary was built from, or `"unknown"`.
     pub commit: String,
@@ -76,7 +76,7 @@ mod tests {
         let hello = ServerHello {
             proto: WIRE_PROTO_VERSION,
             fw: FwProvenance {
-                package: "fw-esp32".to_string(),
+                package: "fw-esp32c6".to_string(),
                 commit: "abc123456789".to_string(),
                 dirty: true,
                 profile: "release-esp32".to_string(),

@@ -9,7 +9,7 @@
 # adjacent tagging, or a hand-written streaming Visitor (see AssetSlotValue).
 #
 # Intentional uses live in the allowlist below with a justification. Adding
-# an entry for a crate in the fw-esp32 dependency graph needs a measured
+# an entry for a crate in the fw-esp32c6 dependency graph needs a measured
 # size justification.
 set -euo pipefail
 cd "$(dirname "$0")/.."
