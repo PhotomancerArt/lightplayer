@@ -5,7 +5,7 @@ use core::cell::RefCell;
 use lp_collection::VecMap;
 use lpc_model::GlslOpts;
 use lpc_model::nodes::clock::ClockDef;
-use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
+use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
@@ -494,21 +494,9 @@ fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {
 }
 
 fn default_mapping() -> MappingConfig {
-    let mut ring_lamp_counts = VecMap::new();
-    ring_lamp_counts.insert(0, ValueSlot::new(1));
-
-    MappingConfig::path_points_vec(
-        vec![PathSpec::ring_array(
-            [0.5, 0.5],
-            1.0,
-            0,
-            1,
-            MapSlot::new(ring_lamp_counts),
-            0.0,
-            RingOrder::InnerFirst,
-        )],
-        2.0,
-    )
+    // One center lamp: the smallest resolved mapping (the legacy single-lamp
+    // ring retired with the parametric ring variants).
+    MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0)
 }
 
 fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
