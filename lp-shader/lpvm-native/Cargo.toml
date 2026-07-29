@@ -70,6 +70,11 @@ rstest = "0.25"
 lp-shader = { path = "../lp-shader" }
 # Emulator oracle for the isa/xt emitter tests (windowed execution).
 lp-xt-emu = { path = "../../lp-xt/lp-xt-emu" }
+# Loader + host-side oracle for the Xtensa builtins-image test: the ELF is
+# cross-compiled from the SAME lps-builtins source this links natively, so the
+# host build is the reference answer.
+lp-xt-elf = { path = "../../lp-xt/lp-xt-elf" }
+lps-builtins = { path = "../lps-builtins", default-features = false }
 
 [target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
 lps-builtins = { path = "../lps-builtins", default-features = false }
