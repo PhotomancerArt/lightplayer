@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use lp_riscv_emu::profile::{CpuCollector, PcSymbolizer, StackFrameSample};
+use lp_emu_core::profile::{CpuCollector, PcSymbolizer, StackFrameSample};
 use serde_json::{Value, json};
 
 fn pc_key(pc: u32) -> String {
@@ -212,7 +212,7 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
 mod tests {
     use super::*;
     use lp_emu_core::InstClass;
-    use lp_riscv_emu::profile::{Collector, GateAction, TraceSymbol};
+    use lp_emu_core::profile::{Collector, GateAction, TraceSymbol};
 
     use crate::commands::profile::symbolize::Symbolizer;
 

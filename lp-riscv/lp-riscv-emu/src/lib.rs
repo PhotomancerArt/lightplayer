@@ -9,6 +9,10 @@
 
 #![no_std]
 
+// With `std` enabled, `alloc` resolves via the extern prelude and a root
+// `extern crate alloc` would trip `unused_extern_crates`; without `std` it
+// is required for the crate's `alloc::` imports.
+#[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
@@ -19,10 +23,6 @@ pub use lp_riscv_inst::{Gpr, Inst, decode_instruction, format_instruction};
 // Emulator modules
 pub mod emu;
 
-#[cfg(feature = "std")]
-pub mod profile;
-#[cfg(feature = "std")]
-pub use profile::{CpuCollector, PcSymbolizer};
 #[cfg(feature = "std")]
 pub mod test_util;
 

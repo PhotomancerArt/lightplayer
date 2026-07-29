@@ -8,6 +8,8 @@
 //! - Emulator time control (real vs simulated)
 //! - The guest memory model ([`Memory`])
 //! - The run-loop result contract ([`StepResult`]) and trap codes ([`TrapCode`])
+//! - Host-side profiling (collectors, sessions, trace layout) behind the `std`
+//!   feature; arch-specific bits (stack unwinding, RAM start) are injected
 
 #![no_std]
 
@@ -21,6 +23,8 @@ pub mod config;
 pub mod cycle_model;
 pub mod log_level;
 pub mod memory;
+#[cfg(feature = "std")]
+pub mod profile;
 pub mod serial;
 pub mod step_result;
 pub mod time;
