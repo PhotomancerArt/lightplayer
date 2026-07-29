@@ -170,25 +170,25 @@ pub fn MapViewToggles(
     let buttons = rsx! {
             button {
                 class: class_for(value.numbers),
-                title: "wiring numbers",
+                title: "wiring numbers (N)",
                 onclick: toggle(|mut v| { v.numbers = !v.numbers; v }),
                 StudioIcon { name: StudioIconName::MapNumbers, size: 13 }
             }
             button {
                 class: class_for(value.arrows),
-                title: "wiring arrows",
+                title: "wiring arrows (A)",
                 onclick: toggle(|mut v| { v.arrows = !v.arrows; v }),
                 StudioIcon { name: StudioIconName::MapArrows, size: 13 }
             }
             button {
                 class: class_for(value.universes),
-                title: "universe colors (170 lamps each)",
+                title: "universe colors, 170 lamps each (U)",
                 onclick: toggle(|mut v| { v.universes = !v.universes; v }),
                 StudioIcon { name: StudioIconName::MapUniverses, size: 13 }
             }
             button {
                 class: class_for(value.live),
-                title: "live output colors",
+                title: "live output colors (L)",
                 onclick: toggle(|mut v| { v.live = !v.live; v }),
                 StudioIcon { name: StudioIconName::MapLive, size: 13 }
             }

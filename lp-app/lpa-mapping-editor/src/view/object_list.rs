@@ -34,7 +34,14 @@ pub fn universe_range_label(start: u32, count: u32) -> String {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ObjectList(session: Signal<MapEditorSession>, on_committed: EventHandler<()>) -> Element {
+pub fn ObjectList(
+    session: Signal<MapEditorSession>,
+    on_committed: EventHandler<()>,
+    /// Fired with the object index when a row is clicked, after selection —
+    /// the host brings the object into view.
+    #[props(default)]
+    on_focus: Option<EventHandler<usize>>,
+) -> Element {
     let session_read = session.read();
     let doc = session_read.doc();
     let spans = resolve(doc)
@@ -58,6 +65,7 @@ pub fn ObjectList(session: Signal<MapEditorSession>, on_committed: EventHandler<
 
     rsx! {
         div { class: "lpme-rail-pane",
+            div { class: "lpme-rail-head", "wiring order" }
             if object_count == 0 {
                 div { class: "lpme-rail-empty", "no objects yet" }
             } else {
@@ -67,11 +75,21 @@ pub fn ObjectList(session: Signal<MapEditorSession>, on_committed: EventHandler<
                             key: "{index}",
                             class: if selected { "lpme-rail-row lpme-rail-row-sel" } else { "lpme-rail-row" },
                             onclick: move |evt| {
-                                let mut s = session.write();
-                                if evt.data().modifiers().shift() {
-                                    s.selection.toggle(index);
-                                } else {
-                                    s.selection.select_only(index);
+                                {
+                                    let mut s = session.write();
+                                    if evt.data().modifiers().shift() {
+                                        s.selection.toggle(index);
+                                    } else {
+                                        s.selection.select_only(index);
+                                    }
+                                }
+                                // Plain click also brings the object into
+                                // view; additive shift-clicks don't yank
+                                // the camera mid-multi-select.
+                                if !evt.data().modifiers().shift()
+                                    && let Some(focus) = &on_focus
+                                {
+                                    focus.call(index);
                                 }
                             },
                             span {

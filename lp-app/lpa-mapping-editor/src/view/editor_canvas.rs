@@ -151,6 +151,22 @@ pub fn EditorCanvas(
     #[cfg(target_arch = "wasm32")]
     let resize_observer =
         use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<CanvasResizeObserver>)));
+    // Keep-last-good live colors: an apply round-trip (undo, upload, any
+    // committed edit) makes the engine re-resolve, and the host's color
+    // feed goes empty for a frame or two — falling back to the object
+    // palette there reads as the display "dropping out of live mode".
+    // Bridge the gap with the last non-empty feed; the live toggle itself
+    // still gates rendering, so switching live off stays immediate.
+    let live_cache = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(Vec::<[u8; 3]>::new())));
+    if !live_colors.is_empty() {
+        *live_cache.borrow_mut() = live_colors.clone();
+    }
+    let live_colors = if live_colors.is_empty() {
+        live_cache.borrow().clone()
+    } else {
+        live_colors
+    };
+
     let cam = camera();
     let opts = view_opts();
     let session_read = session.read();

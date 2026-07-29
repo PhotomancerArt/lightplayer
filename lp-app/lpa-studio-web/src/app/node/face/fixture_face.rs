@@ -95,7 +95,7 @@ pub fn FixtureFace(
                         if edit_open {
                             button {
                                 class: if view().fit_preview { "ux-map-toggle ux-map-toggle-on" } else { "ux-map-toggle" },
-                                title: "texture-frame preview (how the doc fits shader space)",
+                                title: "texture-frame preview — how the doc fits shader space (F)",
                                 onclick: move |_| {
                                     let now = view.peek().fit_preview;
                                     view.write().fit_preview = !now;

@@ -139,25 +139,25 @@ pub fn EditorHeader(
                 span { class: "lpme-sep" }
                 button {
                     class: toggle_class(opts.numbers),
-                    title: "wiring numbers",
+                    title: "wiring numbers (N)",
                     onclick: move |_| view_opts.write().numbers = !opts.numbers,
                     Hash { size: 13 }
                 }
                 button {
                     class: toggle_class(opts.arrows),
-                    title: "wiring arrows",
+                    title: "wiring arrows (A)",
                     onclick: move |_| view_opts.write().arrows = !opts.arrows,
                     Route { size: 13 }
                 }
                 button {
                     class: toggle_class(opts.universes),
-                    title: "universe colors (170 lamps each)",
+                    title: "universe colors, 170 lamps each (U)",
                     onclick: move |_| view_opts.write().universes = !opts.universes,
                     Layers { size: 13 }
                 }
                 button {
                     class: toggle_class(opts.fit_preview),
-                    title: "texture-frame preview (how the doc fits shader space)",
+                    title: "texture-frame preview — how the doc fits shader space (F)",
                     onclick: move |_| view_opts.write().fit_preview = !opts.fit_preview,
                     Scan { size: 13 }
                 }
