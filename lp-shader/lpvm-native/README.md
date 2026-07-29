@@ -51,7 +51,7 @@ LPIR (LightPlayer IR)
     ▼
 ┌─────────────────┐
 │  Emission       │  VInst + allocation edits → machine code
-│  (rv32/emit.rs) │  Direct machine code emission
+│ (isa/rv32/emit) │  Direct machine code emission (via `IsaTarget`)
 └─────────────────┘
     │
     ▼
@@ -89,16 +89,71 @@ The intermediate representation between LPIR and machine code:
 
 ### Module Structure
 
-| Module                         | Purpose                                  |
-| ------------------------------ | ---------------------------------------- |
-| [`regalloc/`](src/regalloc/)   | Register allocator                       |
-| [`rv32/`](src/rv32/)           | RISC-V instruction encoding and emission |
-| [`abi/`](src/abi/)             | Calling convention and frame layout      |
-| [`lower.rs`](src/lower.rs)     | LPIR → VInst lowering                    |
-| [`emit.rs`](src/emit.rs)       | Emission orchestration                   |
-| [`compile.rs`](src/compile.rs) | Module-level compilation                 |
-| [`rt_jit/`](src/rt_jit/)       | JIT runtime for RISC-V targets           |
-| [`rt_emu/`](src/rt_emu/)       | Emulation runtime for host testing       |
+| Module                              | Purpose                                  |
+| ----------------------------------- | ---------------------------------------- |
+| [`regalloc/`](src/regalloc/)        | Register allocator                       |
+| [`isa/`](src/isa/)                  | Per-ISA backends behind `IsaTarget`      |
+| [`isa/rv32/`](src/isa/rv32/)        | RISC-V instruction encoding and emission |
+| [`abi/`](src/abi/)                  | Calling convention and frame layout      |
+| [`lower.rs`](src/lower.rs)          | LPIR → VInst lowering                    |
+| [`emit.rs`](src/emit.rs)            | Emission orchestration                   |
+| [`compile.rs`](src/compile.rs)      | Module-level compilation                 |
+| [`rt_jit/`](src/rt_jit/)            | JIT runtime for RISC-V targets           |
+| [`rt_emu/`](src/rt_emu/)            | Emulation runtime for host testing       |
+
+### Multi-ISA seam
+
+RV32 is the only ISA today, but the crate is shaped for a second one (Xtensa /
+ESP32-S3, arriving from the ESP32-S3 experiment repo — see its `BACKPORT.md`
+for the full seam description). Two mechanisms carry that:
+
+**1. `IsaTarget` is the single dispatch point.** Nothing outside `isa/` names an
+ISA-specific module. Each backend-varying decision is a method on `IsaTarget`
+whose body is a `match` with one arm per ISA, so adding a backend is adding
+arms, not rerouting call sites. The methods added for the seam:
+
+| Method                      | What varies                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `frame_top_reserved_bytes`  | Bytes the ABI reserves at the frame **top** (0 on RV32; Xtensa's window-overflow handlers write `16 * u`) |
+| `alu_imm_fits(op, val)`     | Per-opcode immediate legality (uniform imm12 on RV32; per-op tables and `NoImmForm` on Xtensa)            |
+| `call_reloc_type`           | Direct-call relocation type (`R_RISCV_CALL_PLT` on RV32)                                                  |
+| `emit_function`             | The backend emitter itself                                                                                |
+| `format_instruction`        | One-word disassembly text                                                                                 |
+| `disassemble_function`      | Annotated listing, including line-table construction                                                      |
+| `native()`                  | The ISA of the CPU this crate is compiled *for* (JIT hosts only)                                           |
+
+`frame_top_reserved_bytes` is the one that changes frame arithmetic rather than
+just selecting a table — BACKPORT.md calls it the single structural change the
+compiler core needs, because getting it wrong corrupts ancestor frames silently.
+It is pinned on the RV32 side by `abi::frame::tests::rv32_reserves_nothing_at_frame_top`.
+
+**2. Two `cfg` spellings with different meanings.** See the crate docs in
+`src/lib.rs`. `any(target_arch = "riscv32")` marks a **capability** gate ("this
+target can JIT and run its own code") and gains `, target_arch = "xtensa"` at
+backport time — a mechanical insertion found by:
+
+```bash
+rg 'any\(target_arch = "riscv32"\)'
+```
+
+A bare `target_arch = "riscv32"` means the code is RV32-**specific** (inline
+assembly in `rt_jit::call`, `IsaTarget::native`'s answer); the backport adds a
+sibling `#[cfg(target_arch = "xtensa")]` arm next to it instead. The same two
+spellings are used in `lp-gfx-lpvm::target_backend` and `lpc-shared::backtrace`.
+
+> **Backport note — the grep does not cover Cargo manifests.** Target-cfg
+> dependency tables are `cfg(...)` strings in TOML, invisible to the source
+> sweep above, and they are written in the bare form. Three must be updated by
+> hand when Xtensa lands:
+>
+> - `lp-gfx/lp-gfx-lpvm/Cargo.toml:26` — `[target.'cfg(target_arch = "riscv32")'.dependencies]`
+> - `lp-gfx/lp-gfx-lpvm/Cargo.toml:32` — `[target.'cfg(not(target_arch = "riscv32"))'.dependencies]`
+> - `lp-shader/lpvm-native/Cargo.toml:58` — `[target.'cfg(target_arch = "riscv32")'.dependencies]`
+
+`isa/xt/` arrives from the experiment repo alongside the `lp-xt-*` crates.
+Those crates contain material derived from LLVM under
+Apache-2.0-WITH-LLVM-exception and carry per-file provenance headers — see
+`docs/adr/2026-07-29-license-provenance-discipline.md` before touching them.
 
 ### Fuel Metering
 

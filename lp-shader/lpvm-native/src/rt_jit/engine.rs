@@ -45,13 +45,13 @@ impl LpvmEngine for NativeJitEngine {
     type Error = NativeError;
 
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        let entry_info = build_entry_info(ir, meta, IsaTarget::Rv32imac)?;
+        let entry_info = build_entry_info(ir, meta, IsaTarget::native())?;
         let (buffer, entry_offsets) = compile_module_jit(
             ir,
             meta,
             &self.builtin_table,
             &self.options,
-            IsaTarget::Rv32imac,
+            IsaTarget::native(),
         )?;
         Ok(NativeJitModule {
             inner: Arc::new(NativeJitModuleInner {
@@ -72,9 +72,9 @@ impl LpvmEngine for NativeJitEngine {
     ) -> Result<Self::Module, Self::Error> {
         let mut opts = self.options.clone();
         opts.config = config.clone();
-        let entry_info = build_entry_info(ir, meta, IsaTarget::Rv32imac)?;
+        let entry_info = build_entry_info(ir, meta, IsaTarget::native())?;
         let (buffer, entry_offsets) =
-            compile_module_jit(ir, meta, &self.builtin_table, &opts, IsaTarget::Rv32imac)?;
+            compile_module_jit(ir, meta, &self.builtin_table, &opts, IsaTarget::native())?;
         Ok(NativeJitModule {
             inner: Arc::new(NativeJitModuleInner {
                 meta: meta.clone(),
@@ -98,7 +98,7 @@ impl LpvmEngine for NativeJitEngine {
             Arc::clone(&self.builtin_table),
             self.options.clone(),
             config,
-            IsaTarget::Rv32imac,
+            IsaTarget::native(),
         )))
     }
 

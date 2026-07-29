@@ -192,6 +192,17 @@ pub fn capture_frames(buf: &mut [u32]) -> usize {
     capture_frames_arch(buf)
 }
 
+/// RISC-V (ESP32-C6) frame-pointer walk.
+///
+/// The `s0` chain and the C6 DRAM window below are both RV32-specific, so this
+/// gate is a bare `target_arch = "riscv32"`: the Xtensa (ESP32-S3) backport
+/// adds a **sibling** `#[cfg(target_arch = "xtensa")] fn capture_frames_arch`
+/// next to this one — its windowed ABI walks differently and its DRAM window
+/// starts at `0x3FC8_0000` — rather than widening this arm. The only gate that
+/// takes a mechanical `, target_arch = "xtensa"` is the
+/// `any(target_arch = "riscv32")` inside the fallback's exclusion set below
+/// (the JIT-capable-target spelling documented in `lpvm_native`'s crate docs),
+/// which is what stops the new arm from colliding with the 0-frame default.
 #[cfg(target_arch = "riscv32")]
 fn capture_frames_arch(buf: &mut [u32]) -> usize {
     const ESP32C6_DRAM_START: u32 = 0x4080_0000;
@@ -238,7 +249,8 @@ fn capture_frames_arch(_buf: &mut [u32]) -> usize {
     0
 }
 
-#[cfg(not(any(target_arch = "riscv32", target_arch = "wasm32")))]
+/// No frame walker for this target: report zero frames.
+#[cfg(not(any(any(target_arch = "riscv32"), target_arch = "wasm32")))]
 fn capture_frames_arch(_buf: &mut [u32]) -> usize {
     0
 }

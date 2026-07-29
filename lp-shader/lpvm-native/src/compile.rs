@@ -28,7 +28,7 @@ pub struct NativeReloc {
     pub offset: usize,
     /// Symbol name to resolve (builtin or function).
     pub symbol: String,
-    /// ELF / JIT relocation type (e.g. [`crate::isa::rv32::link::R_RISCV_CALL_PLT`]).
+    /// ELF / JIT relocation type (see [`crate::isa::IsaTarget::call_reloc_type`]).
     pub r_type: u32,
 }
 
@@ -137,13 +137,14 @@ pub(crate) fn compile_function_lower_stage(
 pub(crate) fn compile_function_peephole(
     state: &mut function_job::FunctionCompileState,
 ) -> Result<(), NativeError> {
+    let isa = state.func_abi.isa();
     let Some(lowered) = state.lowered.as_mut() else {
         return Err(NativeError::Internal(format!(
             "peephole stage missing lowered function for {}",
             state.name
         )));
     };
-    crate::opt::fold_immediates(lowered);
+    crate::opt::fold_immediates(lowered, isa);
     Ok(())
 }
 
