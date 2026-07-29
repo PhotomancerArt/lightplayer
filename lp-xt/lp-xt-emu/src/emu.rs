@@ -197,6 +197,32 @@ impl Emulator {
         self.run_traced(code, entry_offset, arg, &mut t)
     }
 
+    /// As [`run`](Self::run) with up to six register arguments: `args[i]` is
+    /// staged in the caller's `a{10+i}`, arriving in the callee's `a{2+i}`
+    /// after its ENTRY — the CALL8 convention's full register-argument bank.
+    /// (Stack-passed arguments beyond six are the caller's outgoing-area
+    /// business and not synthesized here.) Added at monorepo landing for the
+    /// isa/xt emitter pipeline tests, which call multi-parameter functions.
+    ///
+    /// # Panics
+    /// If `args.len() > 6`.
+    pub fn run_with_args(&mut self, code: &[u8], entry_offset: u32, args: &[u32]) -> RunOutcome {
+        assert!(
+            args.len() <= 6,
+            "run_with_args stages register args only (max 6, got {})",
+            args.len()
+        );
+        let ibus_base = self.profile.code_ibus_base();
+        self.mem.load_bytes(ibus_base, code);
+        let entry = ibus_base.wrapping_add(entry_offset);
+        self.stage_windowed_entry(entry, args.first().copied().unwrap_or(0));
+        for (i, &a) in args.iter().enumerate().skip(1) {
+            self.cpu.set_a(10 + i as u8, a);
+        }
+        let mut t = crate::trace::NoopTracer;
+        self.run_loop(&mut t, None)
+    }
+
     /// As [`run`](Self::run), emitting [`TraceEvent`]s to `tracer`.
     pub fn run_traced(
         &mut self,

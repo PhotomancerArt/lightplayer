@@ -57,6 +57,7 @@ impl FuncAbi {
     pub fn arg_regs(&self) -> &[PReg] {
         match self.isa {
             IsaTarget::Rv32imac => &crate::isa::rv32::abi::ARG_REGS,
+            IsaTarget::Xtensa => &crate::isa::xt::abi::ARG_REGS,
         }
     }
 
@@ -156,6 +157,7 @@ impl ModuleAbi {
                     Some(f) => func_abi_rv32(fn_sig, Some(f)),
                     None => func_abi_rv32(fn_sig, None),
                 },
+                IsaTarget::Xtensa => crate::isa::xt::abi::func_abi_xt(fn_sig, ir_func),
             };
             if let Some(w) = fa.sret_word_count() {
                 max_sret_bytes = max_sret_bytes.max(w * 4);
