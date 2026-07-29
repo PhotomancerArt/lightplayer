@@ -41,13 +41,34 @@ and the correct solution was always to fix the dependency.
 
 ## How to Handle Binary Size Issues
 
-If the firmware binary exceeds available flash:
+The ESP32-C6 app image must fit a 3 MB partition, and the budget is tight —
+read `docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
+records what has already been spent (a ~200 KB diagnostics-for-flash flag
+stack, the deliberately-kept 500 KB WiFi blob), what is reserved (the lpfs
+partition, held for the future radio/WiFi decision), and what has been measured
+and *rejected* so you don't re-run dead ends.
+
+Check where you stand at any time:
+
+```bash
+just fw-esp32c6-size-check
+```
+
+This prints the image size and headroom, and pre-merge CI fails any PR that
+drops headroom below 64 KB.
+
+If the binary exceeds available flash:
 
 1. Disable optional compiler features (e.g. `cranelift-optimizer`, `cranelift-verifier`)
 2. Use LTO (`lto = true` in release profile)
 3. Use `opt-level = "z"` (size optimization)
 4. Strip debug info
 5. Audit for unnecessary dependencies
+6. Look for duplicate monomorphizations before looking for code to delete —
+   the same generic instantiated over two sinks/backends has twice been the
+   single biggest win (serde tagging, 2026-06; serializer sink erasure,
+   2026-07). `rust-nm --demangle --print-size --size-sort` on the ELF shows
+   them.
 
 Do NOT disable the compiler. The compiler is the product.
 
