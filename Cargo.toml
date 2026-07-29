@@ -61,7 +61,7 @@ members = [
     "lp-shader/lpir",
     "lp-shader/lps-filetests",
     "lp-emu/lp-emu-core",
-    "lp-riscv/lp-riscv-emu-shared",
+    "lp-emu/lp-emu-abi",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
@@ -121,7 +121,7 @@ default-members = [
     "lp-shader/lpir",
     "lp-shader/lps-filetests",
     "lp-emu/lp-emu-core",
-    "lp-riscv/lp-riscv-emu-shared",
+    "lp-emu/lp-emu-abi",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
@@ -217,7 +217,7 @@ opt-level = 2
 opt-level = 3
 [profile.dev.package.lp-riscv-emu]
 opt-level = 3
-[profile.dev.package.lp-riscv-emu-shared]
+[profile.dev.package.lp-emu-abi]
 opt-level = 3
 [profile.dev.package.lp-riscv-inst]
 opt-level = 3

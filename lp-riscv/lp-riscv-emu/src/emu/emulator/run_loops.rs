@@ -8,15 +8,15 @@ use super::super::{
 };
 use super::state::Riscv32Emulator;
 use alloc::{format, string::String, vec, vec::Vec};
-use lp_emu_core::LogLevel;
-use lp_emu_core::Memory;
-use lp_emu_core::{PanicInfo, StepResult, SyscallInfo};
-use lp_riscv_emu_shared::{
+use lp_emu_abi::{
     SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_JIT_MAP_LOAD,
     SYSCALL_JIT_MAP_UNLOAD, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_PERF_EVENT,
     SYSCALL_SERIAL_HAS_DATA, SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS,
     SYSCALL_WRITE, SYSCALL_YIELD, syscall_to_level,
 };
+use lp_emu_core::LogLevel;
+use lp_emu_core::Memory;
+use lp_emu_core::{PanicInfo, StepResult, SyscallInfo};
 use lp_riscv_inst::Gpr;
 
 /// Default fuel for run() function

@@ -440,8 +440,8 @@ impl Riscv32Emulator {
     /// [`FrameOutcome::Yielded`] so the caller can re-tick clocks or adjust budgets.
     #[cfg(feature = "std")]
     pub fn run_until_yield_or_stop(&mut self, max_steps: u64) -> FrameOutcome {
+        use lp_emu_abi::SYSCALL_YIELD;
         use lp_emu_core::StepResult;
-        use lp_riscv_emu_shared::SYSCALL_YIELD;
 
         let mut steps = 0u64;
         loop {

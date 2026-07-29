@@ -3799,13 +3799,13 @@ dependencies = [
  "fw-core",
  "hashbrown 0.15.5",
  "log",
+ "lp-emu-abi",
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
- "lp-riscv-emu-shared",
  "lpa-client",
  "lpa-server",
  "lpc-engine",
@@ -3892,11 +3892,11 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-cli",
+ "lp-emu-abi",
  "lp-emu-core",
  "lp-recovery",
  "lp-riscv-elf",
  "lp-riscv-emu",
- "lp-riscv-emu-shared",
  "lp-riscv-inst",
  "lpa-client",
  "lpc-model",
@@ -5239,11 +5239,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-abi"
+version = "40.0.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "lp-emu-core"
 version = "40.0.0"
 dependencies = [
  "log",
- "lp-riscv-emu-shared",
+ "lp-emu-abi",
  "rustc-demangle",
  "serde",
  "serde_json",
@@ -5317,7 +5324,7 @@ name = "lp-perf"
 version = "40.0.0"
 dependencies = [
  "log",
- "lp-riscv-emu-shared",
+ "lp-emu-abi",
 ]
 
 [[package]]
@@ -5357,9 +5364,10 @@ dependencies = [
  "hashbrown 0.15.5",
  "libc",
  "log",
+ "lp-emu-abi",
  "lp-emu-core",
  "lp-riscv-elf",
- "lp-riscv-emu-shared",
+ "lp-riscv-emu",
  "lp-riscv-inst",
  "tempfile",
 ]
@@ -5371,8 +5379,8 @@ dependencies = [
  "critical-section",
  "linked_list_allocator",
  "log",
+ "lp-emu-abi",
  "lp-recovery",
- "lp-riscv-emu-shared",
  "lpc-shared",
  "unwinding",
 ]
@@ -5382,13 +5390,6 @@ name = "lp-riscv-emu-guest-test-app"
 version = "40.0.0"
 dependencies = [
  "lp-riscv-emu-guest",
-]
-
-[[package]]
-name = "lp-riscv-emu-shared"
-version = "40.0.0"
-dependencies = [
- "log",
 ]
 
 [[package]]

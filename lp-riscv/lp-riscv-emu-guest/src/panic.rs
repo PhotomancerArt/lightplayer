@@ -42,7 +42,7 @@ fn panic_syscall(
 /// sentinel panic message, preserves the guest's recovery region, and
 /// reboots the guest with a software-reset cause.
 pub fn reset_request_exit() -> ! {
-    let sentinel = lp_riscv_emu_shared::recovery_handshake::RESET_REQUEST_SENTINEL;
+    let sentinel = lp_emu_abi::recovery_handshake::RESET_REQUEST_SENTINEL;
     panic_syscall(sentinel.as_ptr(), sentinel.len(), null(), 0, 0)
 }
 
