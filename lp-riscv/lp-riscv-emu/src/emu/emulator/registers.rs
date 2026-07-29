@@ -1,7 +1,7 @@
 //! Register, PC, and memory accessor methods.
 
-use super::super::memory::Memory;
 use super::state::Riscv32Emulator;
+use lp_emu_core::Memory;
 use lp_riscv_inst::Gpr;
 
 impl Riscv32Emulator {

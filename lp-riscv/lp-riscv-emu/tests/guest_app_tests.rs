@@ -7,8 +7,9 @@
 //! - Communicate via serial buffers
 
 mod tests {
+    use lp_emu_core::LogLevel;
     use lp_riscv_elf::load_elf;
-    use lp_riscv_emu::{LogLevel, Riscv32Emulator, test_util::BinaryBuildConfig};
+    use lp_riscv_emu::{Riscv32Emulator, test_util::BinaryBuildConfig};
 
     #[test]
     fn test_serial_echo() {
@@ -18,7 +19,7 @@ mod tests {
             println!("{}", emu.dump_state());
             println!("\n=== Instruction Log ===");
             println!("{}", emu.format_logs());
-            panic!("Emulator error: {:?}", e);
+            panic!("Emulator error: {e:?}");
         });
 
         let output = emu.serial_read_line();
@@ -33,7 +34,7 @@ mod tests {
             println!("{}", emu.dump_state());
             println!("\n=== Instruction Log ===");
             println!("{}", emu.format_logs());
-            panic!("Emulator error: {:?}", e);
+            panic!("Emulator error: {e:?}");
         });
 
         let output = emu.serial_read_line();
@@ -51,8 +52,7 @@ mod tests {
         // Initial time should be 0 or very small (within first few milliseconds)
         assert!(
             time_ms < 100,
-            "Initial time should be small, got {} ms",
-            time_ms
+            "Initial time should be small, got {time_ms} ms"
         );
     }
 
@@ -64,7 +64,7 @@ mod tests {
         emu.serial_write(b"time\n");
         emu.run_until_yield(1_000_000).unwrap_or_else(|e| {
             println!("{}", emu.dump_state());
-            panic!("Emulator error: {:?}", e);
+            panic!("Emulator error: {e:?}");
         });
         let output1 = emu.serial_read_line();
         let time_str1 = output1
@@ -81,7 +81,7 @@ mod tests {
         emu.serial_write(b"time\n");
         emu.run_until_yield(1_000_000).unwrap_or_else(|e| {
             println!("{}", emu.dump_state());
-            panic!("Emulator error: {:?}", e);
+            panic!("Emulator error: {e:?}");
         });
         let output2 = emu.serial_read_line();
         let time_str2 = output2
@@ -96,17 +96,13 @@ mod tests {
         // Second time should be greater than first
         assert!(
             time_ms2 > time_ms1,
-            "Time should increase: {} -> {}",
-            time_ms1,
-            time_ms2
+            "Time should increase: {time_ms1} -> {time_ms2}"
         );
 
         // Should have increased by at least 40ms (allowing some margin for test overhead)
         assert!(
             time_ms2 >= time_ms1 + 40,
-            "Time should have increased by at least 40ms: {} -> {}",
-            time_ms1,
-            time_ms2
+            "Time should have increased by at least 40ms: {time_ms1} -> {time_ms2}"
         );
     }
 
@@ -120,7 +116,7 @@ mod tests {
             emu.serial_write(b"time\n");
             emu.run_until_yield(1_000_000).unwrap_or_else(|e| {
                 println!("{}", emu.dump_state());
-                panic!("Emulator error: {:?}", e);
+                panic!("Emulator error: {e:?}");
             });
             let output = emu.serial_read_line();
             let time_str = output
@@ -177,8 +173,7 @@ mod tests {
             let first_two_bytes = (elf_info.code[0] as u16) | ((elf_info.code[1] as u16) << 8);
             let is_compressed = (first_two_bytes & 0x3) != 0x3;
             println!(
-                "First instruction (little-endian): 0x{:04x}, compressed: {}",
-                first_two_bytes, is_compressed
+                "First instruction (little-endian): 0x{first_two_bytes:04x}, compressed: {is_compressed}"
             );
         }
 

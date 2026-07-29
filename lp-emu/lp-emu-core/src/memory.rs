@@ -1,8 +1,60 @@
-//! Memory model for the RISC-V 32 emu.
+//! Guest memory model with separate code, optional shared, and RAM regions.
+//!
+//! Arch-neutral: all accessors are little-endian word/halfword/byte operations
+//! over 32-bit guest addresses. Errors are reported as [`MemoryError`] without
+//! pc/register context — the emulator that owns the program counter attaches
+//! that context at its own error boundary.
+
+extern crate alloc;
 
 use alloc::vec::Vec;
 
-use super::error::{EmulatorError, MemoryAccessKind};
+/// Kind of memory access that failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryAccessKind {
+    Read,
+    Write,
+    InstructionFetch,
+}
+
+/// Errors produced by [`Memory`] accessors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryError {
+    /// Invalid memory access (out of bounds, or a write to a read-only region).
+    InvalidAccess {
+        address: u32,
+        size: usize,
+        kind: MemoryAccessKind,
+    },
+    /// Unaligned memory access.
+    Unaligned { address: u32, alignment: usize },
+}
+
+impl core::fmt::Display for MemoryError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            MemoryError::InvalidAccess {
+                address,
+                size,
+                kind,
+            } => {
+                let kind_str = match kind {
+                    MemoryAccessKind::Read => "read",
+                    MemoryAccessKind::Write => "write",
+                    MemoryAccessKind::InstructionFetch => "instruction fetch",
+                };
+                write!(
+                    f,
+                    "Invalid memory {kind_str} at address 0x{address:08x} (size: {size} bytes)"
+                )
+            }
+            MemoryError::Unaligned { address, alignment } => write!(
+                f,
+                "Unaligned memory access at address 0x{address:08x} (requires {alignment} byte alignment)"
+            ),
+        }
+    }
+}
 
 /// Default RAM start address (0x80000000, matching embive's RAM_OFFSET).
 pub const DEFAULT_RAM_START: u32 = 0x80000000;
@@ -118,13 +170,11 @@ impl Memory {
     ///
     /// When allow_unaligned_access is enabled, supports unaligned addresses to match
     /// embedded targets like ESP32. Otherwise returns UnalignedAccess for misaligned addresses.
-    pub fn read_word(&self, address: u32) -> Result<i32, EmulatorError> {
+    pub fn read_word(&self, address: u32) -> Result<i32, MemoryError> {
         if address % 4 != 0 && !self.allow_unaligned_access {
-            return Err(EmulatorError::UnalignedAccess {
+            return Err(MemoryError::Unaligned {
                 address,
                 alignment: 4,
-                pc: 0,
-                regs: [0; 32],
             });
         }
         if address % 4 == 0 {
@@ -138,16 +188,14 @@ impl Memory {
     }
 
     /// Read a 32-bit word from memory (aligned addresses only).
-    fn read_word_aligned(&self, address: u32) -> Result<i32, EmulatorError> {
+    fn read_word_aligned(&self, address: u32) -> Result<i32, MemoryError> {
         if self.in_ram(address) {
             let offset = (address - self.ram_start) as usize;
             if offset + 4 > self.ram.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 4,
                     kind: MemoryAccessKind::Read,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             let bytes = [
@@ -164,12 +212,10 @@ impl Memory {
             let v = arc.lock().unwrap();
             let offset = (address - self.shared_start) as usize;
             if offset + 4 > v.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 4,
                     kind: MemoryAccessKind::Read,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             let bytes = [v[offset], v[offset + 1], v[offset + 2], v[offset + 3]];
@@ -178,12 +224,10 @@ impl Memory {
         // Code region
         let offset = (address - self.code_start) as usize;
         if offset + 4 > self.code.len() {
-            return Err(EmulatorError::InvalidMemoryAccess {
+            return Err(MemoryError::InvalidAccess {
                 address,
                 size: 4,
                 kind: MemoryAccessKind::Read,
-                pc: 0,
-                regs: [0; 32],
             });
         }
         let bytes = [
@@ -198,13 +242,11 @@ impl Memory {
     /// Write a 32-bit word to memory.
     ///
     /// When allow_unaligned_access is enabled, supports unaligned addresses.
-    pub fn write_word(&mut self, address: u32, value: i32) -> Result<(), EmulatorError> {
+    pub fn write_word(&mut self, address: u32, value: i32) -> Result<(), MemoryError> {
         if address % 4 != 0 && !self.allow_unaligned_access {
-            return Err(EmulatorError::UnalignedAccess {
+            return Err(MemoryError::Unaligned {
                 address,
                 alignment: 4,
-                pc: 0,
-                regs: [0; 32],
             });
         }
         if address % 4 == 0 {
@@ -219,26 +261,22 @@ impl Memory {
     }
 
     /// Write a 32-bit word to memory (aligned addresses only).
-    fn write_word_aligned(&mut self, address: u32, value: i32) -> Result<(), EmulatorError> {
+    fn write_word_aligned(&mut self, address: u32, value: i32) -> Result<(), MemoryError> {
         if address == 0 {
-            return Err(EmulatorError::InvalidMemoryAccess {
+            return Err(MemoryError::InvalidAccess {
                 address,
                 size: 4,
                 kind: MemoryAccessKind::Write,
-                pc: 0,
-                regs: [0; 32],
             });
         }
 
         if self.in_ram(address) {
             let offset = (address - self.ram_start) as usize;
             if offset + 4 > self.ram.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 4,
                     kind: MemoryAccessKind::Write,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             let bytes = value.to_le_bytes();
@@ -255,12 +293,10 @@ impl Memory {
             let mut v = arc.lock().unwrap();
             let offset = (address - self.shared_start) as usize;
             if offset + 4 > v.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 4,
                     kind: MemoryAccessKind::Write,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             let bytes = value.to_le_bytes();
@@ -271,28 +307,24 @@ impl Memory {
             return Ok(());
         }
 
-        Err(EmulatorError::InvalidMemoryAccess {
+        Err(MemoryError::InvalidAccess {
             address,
             size: 4,
             kind: MemoryAccessKind::Write,
-            pc: 0,
-            regs: [0; 32],
         })
     }
 
     /// Read a byte from memory.
-    pub fn read_byte(&self, address: u32) -> Result<i8, EmulatorError> {
+    pub fn read_byte(&self, address: u32) -> Result<i8, MemoryError> {
         Ok(self.read_u8(address)? as i8)
     }
 
     /// Read a halfword (16-bit) from memory.
-    pub fn read_halfword(&self, address: u32) -> Result<i16, EmulatorError> {
+    pub fn read_halfword(&self, address: u32) -> Result<i16, MemoryError> {
         if address % 2 != 0 && !self.allow_unaligned_access {
-            return Err(EmulatorError::UnalignedAccess {
+            return Err(MemoryError::Unaligned {
                 address,
                 alignment: 2,
-                pc: 0,
-                regs: [0; 32],
             });
         }
         if address % 2 == 0 {
@@ -304,16 +336,14 @@ impl Memory {
     }
 
     /// Read a halfword from memory (aligned addresses only).
-    fn read_halfword_aligned(&self, address: u32) -> Result<i16, EmulatorError> {
+    fn read_halfword_aligned(&self, address: u32) -> Result<i16, MemoryError> {
         if self.in_ram(address) {
             let offset = (address - self.ram_start) as usize;
             if offset + 2 > self.ram.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 2,
                     kind: MemoryAccessKind::Read,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             let bytes = [self.ram[offset], self.ram[offset + 1]];
@@ -325,12 +355,10 @@ impl Memory {
             let v = arc.lock().unwrap();
             let offset = (address - self.shared_start) as usize;
             if offset + 2 > v.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 2,
                     kind: MemoryAccessKind::Read,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             let bytes = [v[offset], v[offset + 1]];
@@ -338,12 +366,10 @@ impl Memory {
         }
         let offset = (address - self.code_start) as usize;
         if offset + 2 > self.code.len() {
-            return Err(EmulatorError::InvalidMemoryAccess {
+            return Err(MemoryError::InvalidAccess {
                 address,
                 size: 2,
                 kind: MemoryAccessKind::Read,
-                pc: 0,
-                regs: [0; 32],
             });
         }
         let bytes = [self.code[offset], self.code[offset + 1]];
@@ -351,26 +377,22 @@ impl Memory {
     }
 
     /// Write a byte to memory.
-    pub fn write_byte(&mut self, address: u32, value: i8) -> Result<(), EmulatorError> {
+    pub fn write_byte(&mut self, address: u32, value: i8) -> Result<(), MemoryError> {
         if address == 0 {
-            return Err(EmulatorError::InvalidMemoryAccess {
+            return Err(MemoryError::InvalidAccess {
                 address,
                 size: 1,
                 kind: MemoryAccessKind::Write,
-                pc: 0,
-                regs: [0; 32],
             });
         }
 
         if self.in_ram(address) {
             let offset = (address - self.ram_start) as usize;
             if offset >= self.ram.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 1,
                     kind: MemoryAccessKind::Write,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             self.ram[offset] = value as u8;
@@ -383,35 +405,29 @@ impl Memory {
             let mut v = arc.lock().unwrap();
             let offset = (address - self.shared_start) as usize;
             if offset >= v.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 1,
                     kind: MemoryAccessKind::Write,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             v[offset] = value as u8;
             return Ok(());
         }
 
-        Err(EmulatorError::InvalidMemoryAccess {
+        Err(MemoryError::InvalidAccess {
             address,
             size: 1,
             kind: MemoryAccessKind::Write,
-            pc: 0,
-            regs: [0; 32],
         })
     }
 
     /// Write a halfword (16-bit) to memory.
-    pub fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), EmulatorError> {
+    pub fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), MemoryError> {
         if address % 2 != 0 && !self.allow_unaligned_access {
-            return Err(EmulatorError::UnalignedAccess {
+            return Err(MemoryError::Unaligned {
                 address,
                 alignment: 2,
-                pc: 0,
-                regs: [0; 32],
             });
         }
         if address % 2 == 0 {
@@ -424,26 +440,22 @@ impl Memory {
     }
 
     /// Write a halfword to memory (aligned addresses only).
-    fn write_halfword_aligned(&mut self, address: u32, value: i16) -> Result<(), EmulatorError> {
+    fn write_halfword_aligned(&mut self, address: u32, value: i16) -> Result<(), MemoryError> {
         if address == 0 {
-            return Err(EmulatorError::InvalidMemoryAccess {
+            return Err(MemoryError::InvalidAccess {
                 address,
                 size: 2,
                 kind: MemoryAccessKind::Write,
-                pc: 0,
-                regs: [0; 32],
             });
         }
 
         if self.in_ram(address) {
             let offset = (address - self.ram_start) as usize;
             if offset + 2 > self.ram.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 2,
                     kind: MemoryAccessKind::Write,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             let bytes = value.to_le_bytes();
@@ -458,12 +470,10 @@ impl Memory {
             let mut v = arc.lock().unwrap();
             let offset = (address - self.shared_start) as usize;
             if offset + 2 > v.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 2,
                     kind: MemoryAccessKind::Write,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             let bytes = value.to_le_bytes();
@@ -472,12 +482,10 @@ impl Memory {
             return Ok(());
         }
 
-        Err(EmulatorError::InvalidMemoryAccess {
+        Err(MemoryError::InvalidAccess {
             address,
             size: 2,
             kind: MemoryAccessKind::Write,
-            pc: 0,
-            regs: [0; 32],
         })
     }
 
@@ -485,47 +493,39 @@ impl Memory {
     ///
     /// For compressed instructions (RVC), this may return a 16-bit value in the lower 16 bits.
     /// Returns an error if the address is out of bounds or not 2-byte aligned.
-    pub fn fetch_instruction(&self, address: u32) -> Result<u32, EmulatorError> {
+    pub fn fetch_instruction(&self, address: u32) -> Result<u32, MemoryError> {
         if address % 2 != 0 {
-            return Err(EmulatorError::UnalignedAccess {
+            return Err(MemoryError::Unaligned {
                 address,
                 alignment: 2,
-                pc: 0,
-                regs: [0; 32],
             });
         }
 
         if self.in_shared(address) {
-            return Err(EmulatorError::InvalidMemoryAccess {
+            return Err(MemoryError::InvalidAccess {
                 address,
                 size: 2,
                 kind: MemoryAccessKind::InstructionFetch,
-                pc: 0,
-                regs: [0; 32],
             });
         }
 
         let (data, offset) = if self.in_ram(address) {
             let offset = (address - self.ram_start) as usize;
             if offset + 2 > self.ram.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 2,
                     kind: MemoryAccessKind::InstructionFetch,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             (&self.ram, offset)
         } else {
             let offset = (address - self.code_start) as usize;
             if offset + 2 > self.code.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 2,
                     kind: MemoryAccessKind::InstructionFetch,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             (&self.code, offset)
@@ -537,12 +537,10 @@ impl Memory {
             Ok(first_half as u32)
         } else {
             if offset + 4 > data.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 4,
                     kind: MemoryAccessKind::InstructionFetch,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
 
@@ -557,16 +555,14 @@ impl Memory {
     }
 
     /// Read a single byte from memory.
-    pub fn read_u8(&self, address: u32) -> Result<u8, EmulatorError> {
+    pub fn read_u8(&self, address: u32) -> Result<u8, MemoryError> {
         if self.in_ram(address) {
             let offset = (address - self.ram_start) as usize;
             if offset >= self.ram.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 1,
                     kind: MemoryAccessKind::Read,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             return Ok(self.ram[offset]);
@@ -577,24 +573,20 @@ impl Memory {
             let v = arc.lock().unwrap();
             let offset = (address - self.shared_start) as usize;
             if offset >= v.len() {
-                return Err(EmulatorError::InvalidMemoryAccess {
+                return Err(MemoryError::InvalidAccess {
                     address,
                     size: 1,
                     kind: MemoryAccessKind::Read,
-                    pc: 0,
-                    regs: [0; 32],
                 });
             }
             return Ok(v[offset]);
         }
         let offset = (address - self.code_start) as usize;
         if offset >= self.code.len() {
-            return Err(EmulatorError::InvalidMemoryAccess {
+            return Err(MemoryError::InvalidAccess {
                 address,
                 size: 1,
                 kind: MemoryAccessKind::Read,
-                pc: 0,
-                regs: [0; 32],
             });
         }
         Ok(self.code[offset])

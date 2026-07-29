@@ -1,6 +1,6 @@
 //! Performance column selection for filetest summaries (`--perf`).
 
-use lp_riscv_emu::CycleModel;
+use lp_emu_core::CycleModel;
 
 /// Display / accounting mode for the guest RV32 cost column in filetest tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
