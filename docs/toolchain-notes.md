@@ -82,3 +82,9 @@ etc.) would isolate nightly to firmware builds. This was rejected because:
   file to take effect
 - The maintenance cost of split toolchains exceeds the risk of nightly regressions on
   host builds
+
+This rejection stands for the rv32 crates. Future Xtensa firmware crates
+(`fw-esp32s3`) are the one exception: they require the Espressif rustc fork
+(`channel = "esp"`) because no upstream Xtensa target exists, and carry their own
+per-crate `rust-toolchain.toml`. See
+[ADR 2026-07-29-per-chip-fw-toolchains](adr/2026-07-29-per-chip-fw-toolchains.md).
