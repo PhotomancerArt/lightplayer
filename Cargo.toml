@@ -27,6 +27,7 @@ members = [
     "lp-fw/fw-checks",
     "lp-cli",
     "lp-fw/fw-esp32c6",
+    "lp-fw/fw-esp32s3",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lpc-mapping",
