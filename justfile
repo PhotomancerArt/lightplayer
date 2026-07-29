@@ -716,11 +716,36 @@ clippy-host:
 clippy-gfx:
     cargo clippy -p lp-gfx-wgpu -p fw-browser -p naga-wasm-poc -- --no-deps -D warnings
 
-clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-rv32-emu-guest-test-app
+clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-fw-esp32c6-harnesses clippy-rv32-emu-guest-test-app
 
 # riscv32: fw-esp32c6 clippy
 clippy-fw-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6 -- --no-deps -D warnings
+
+# riscv32: every fw-esp32c6 hardware-harness feature (one build per harness).
+#
+# The harnesses replace `main` with their own entrypoint, so nothing else in
+# the repo compiles them: `build-fw-esp32c6` and `clippy-fw-esp32c6` only cover
+# the default app build. Without this gate they rot invisibly, and three of
+# them (test_gpio, test_json, test_usb) had already broken against esp-hal 1.1
+# and a wire-type change before it existed. Each invocation mirrors how the
+# matching `fwtest-*-esp32c6` recipe builds that harness.
+clippy-fw-esp32c6-harnesses: install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd lp-fw/fw-esp32c6
+    for feature in test_rmt test_dither test_gpio test_gpio_calibrate test_button \
+                   test_usb test_json test_oom test_msafluid test_fluid_demo \
+                   test_jit_math_perf test_shader_compile_incremental; do
+        echo "==> fw-esp32c6 harness: $feature"
+        cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --features "$feature,esp32c6" -- --no-deps -D warnings
+    done
+    # test_espnow is the one harness built without default features: it wants
+    # the radio capability alone, not the server stack.
+    echo "==> fw-esp32c6 harness: test_espnow (--no-default-features)"
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --no-default-features --features test_espnow,esp32c6 -- --no-deps -D warnings
 
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
@@ -978,6 +1003,18 @@ fwtest-rmt-esp32c6: install-rv32-target
 # Run firmware on ESP32-C6 device using the test_dither feature
 fwtest-dithering-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware on ESP32-C6 device using the test_gpio feature (cycles every configured pin)
+fwtest-gpio-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo run --features test_gpio,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware on ESP32-C6 device using the test_button feature (root-owned GPIO button input)
+fwtest-button-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo run --features test_button,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware on ESP32-C6 device using the test_usb feature (MessageRouter echo + heartbeat)
+fwtest-usb-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo run --features test_usb,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run host-driven GPIO calibration firmware on ESP32-C6
 fwtest-gpio-calibrate-esp32c6: install-rv32-target
