@@ -37,15 +37,16 @@ pub fn build_debug_sections(
 
         let mut disasm = String::new();
         let mut off = 0usize;
-        while off + 4 <= code.len() {
-            let w = u32::from_le_bytes(code[off..off + 4].try_into().expect("4 bytes"));
-            disasm.push_str(&alloc::format!(
-                "{:04x}\t{:08x}\t{}\n",
-                off,
-                w,
-                lp_riscv_inst::format_instruction(w)
-            ));
-            off += 4;
+        // Advance by the decoded instruction length, not a fixed stride: RV32 is
+        // uniformly 4 bytes but Xtensa mixes 24-bit and narrow 16-bit encodings.
+        while let Some((text, len)) = func_abi.isa().format_instruction_at(&code[off..]) {
+            // Encoded bytes as a little-endian word, sized by `len` so a narrow
+            // (sub-4-byte) encoding never reads past its own instruction.
+            let mut bytes = [0u8; 4];
+            bytes[..len].copy_from_slice(&code[off..off + len]);
+            let w = u32::from_le_bytes(bytes);
+            disasm.push_str(&alloc::format!("{off:04x}\t{w:08x}\t{text}\n"));
+            off += len;
         }
         sections.insert("disasm".into(), disasm);
 

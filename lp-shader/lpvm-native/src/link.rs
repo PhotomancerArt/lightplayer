@@ -81,7 +81,7 @@ where
             let absolute_offset = func_base + reloc.offset;
             match isa {
                 IsaTarget::Rv32imac => {
-                    if reloc.r_type == crate::isa::rv32::link::R_RISCV_CALL_PLT {
+                    if reloc.r_type == isa.call_reloc_type() {
                         let abs_reloc = NativeReloc {
                             offset: absolute_offset,
                             symbol: String::new(),
@@ -180,7 +180,7 @@ pub fn link_elf(module: &CompiledModule, isa: IsaTarget) -> Result<Vec<u8>, Nati
                 id
             };
 
-            // Add R_RISCV_CALL_PLT relocation at the auipc instruction
+            // Add the target's direct-call relocation at the call instruction
             // The offset is relative to the function's start in the section
             // Use ELF-specific flags since lp-riscv-elf only understands those
             obj.add_relocation(
@@ -189,7 +189,7 @@ pub fn link_elf(module: &CompiledModule, isa: IsaTarget) -> Result<Vec<u8>, Nati
                     offset: func_off + reloc.offset as u64,
                     symbol: target_sym_id,
                     flags: object::RelocationFlags::Elf {
-                        r_type: crate::isa::rv32::link::R_RISCV_CALL_PLT,
+                        r_type: isa.call_reloc_type(),
                     },
                     addend: 0,
                 },

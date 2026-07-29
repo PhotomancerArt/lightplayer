@@ -4,6 +4,28 @@
 //!
 //! Enable feature **`emu`** for host-side linking with builtins and emulation via
 //! `lp-riscv-emu` (requires `std`).
+//!
+//! # `any(target_arch = "riscv32")` — the JIT-capable target set
+//!
+//! Everything that exists only because the crate can JIT and run code *on the
+//! CPU it was compiled for* is gated on the literal, single-element form
+//! `any(target_arch = "riscv32")` rather than a bare `target_arch = "riscv32"`.
+//! The `any(...)` is redundant today and semantically identical; it exists so
+//! the set has one grep-able spelling:
+//!
+//! ```text
+//! rg 'any\(target_arch = "riscv32"\)'
+//! ```
+//!
+//! Every hit is a **capability** gate that gains `, target_arch = "xtensa"`
+//! when the ESP32-S3 backport lands — a mechanical insertion, no
+//! restructuring. Gates written as a bare `target_arch = "riscv32"` mean the
+//! opposite: the code is RV32-**specific** (inline assembly in
+//! `rt_jit::call`, [`isa::IsaTarget::native`]'s RV32 answer), and the backport
+//! adds a sibling `#[cfg(target_arch = "xtensa")]` arm next to it instead.
+//!
+//! The same two spellings, with the same meanings, are used in
+//! `lp-gfx-lpvm::target_backend` and `lpc-shared::backtrace`.
 
 #![cfg_attr(not(feature = "emu"), no_std)]
 
@@ -20,8 +42,7 @@ pub mod debug;
 pub mod debug_asm;
 pub mod emit;
 pub mod error;
-pub mod imm;
-#[cfg(any(test, target_arch = "riscv32"))]
+#[cfg(any(test, any(target_arch = "riscv32")))]
 mod jit_symbol_sizes;
 pub mod link;
 pub mod lower;
@@ -38,7 +59,7 @@ pub mod vinst;
 pub mod rt_emu;
 
 pub mod isa;
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32"))]
 pub mod rt_jit;
 
 pub use abi::ModuleAbi;
@@ -63,7 +84,7 @@ pub use vinst::{
 #[cfg(feature = "emu")]
 pub use rt_emu::{NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
 
-#[cfg(target_arch = "riscv32")]
+#[cfg(any(target_arch = "riscv32"))]
 pub use rt_jit::{
     BuiltinTable, NativeJitDirectCall, NativeJitEngine, NativeJitInstance, NativeJitModule,
 };

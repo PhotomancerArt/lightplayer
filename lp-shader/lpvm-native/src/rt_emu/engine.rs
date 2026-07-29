@@ -36,7 +36,9 @@ impl LpvmEngine for NativeEmuEngine {
     type Error = NativeError;
 
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        // 1. Compile module
+        // 1. Compile module.
+        // Explicit, not `IsaTarget::native()`: rt_emu is the rv32 reference
+        // target regardless of the host architecture it runs on.
         let mut opts = self.options.clone();
         opts.debug_info = true;
         let compiled = compile_module(ir, meta, opts.float_mode, opts, IsaTarget::Rv32imac)?;
