@@ -43,6 +43,13 @@ pub struct FrameLayout {
     sret_slot_base_from_sp: i32,
     /// Bytes at `[SP, SP + caller_arg_stack_size)` reserved for outgoing stack arguments (16-byte aligned).
     pub caller_arg_stack_size: u32,
+    /// Bytes reserved at the very top of the frame for the target ABI's own use
+    /// (see [`crate::isa::IsaTarget::frame_top_reserved_bytes`]); 0 on RV32.
+    ///
+    /// The region occupies `[total_size - frame_top_reserved_bytes, total_size)`
+    /// — strictly above the saved RA/FP/callee-save area, and therefore above
+    /// every spill slot and LPIR slot.
+    pub frame_top_reserved_bytes: u32,
 }
 
 impl FrameLayout {
@@ -99,7 +106,23 @@ impl FrameLayout {
             .saturating_add(if save_fp { 4 } else { 0 })
             .saturating_add(callee_list.len() as u32 * 4);
 
-        let raw_total = body_bytes.saturating_add(link_bytes);
+        // Bytes the target ABI reserves at the frame *top* for something other
+        // than this function to write into. RV32 reserves 0, so every RV32
+        // layout below is bit-identical to the unreserved arithmetic.
+        //
+        // BACKPORT.md (Xtensa/ESP32-S3): the register-window overflow handlers
+        // store the caller's registers into `16 * u` bytes at the top of the
+        // callee's frame without the callee asking (u = CALL increment units;
+        // CALL8 → 32 bytes). The reserved region must never overlap spill slots
+        // or LPIR slots — "get this wrong and ancestor frames corrupt
+        // silently". Reserving here (rather than at the bottom) keeps it above
+        // the saved RA/FP/callee-save area, which the save cursor below then
+        // starts underneath.
+        let frame_top_reserved_bytes = func_abi.isa().frame_top_reserved_bytes();
+
+        let raw_total = body_bytes
+            .saturating_add(link_bytes)
+            .saturating_add(frame_top_reserved_bytes);
         let total_size = align_up(raw_total, alignment);
 
         let mut lpir_slot_offsets = Vec::with_capacity(lpir_slot_sizes.len());
@@ -109,7 +132,8 @@ impl FrameLayout {
             pos += sz as i32;
         }
 
-        let mut cursor = total_size as i32;
+        // Saves start immediately *below* the reserved top region.
+        let mut cursor = (total_size - frame_top_reserved_bytes) as i32;
         let mut ra_offset_from_sp = None;
         let mut fp_offset_from_sp = None;
 
@@ -142,6 +166,7 @@ impl FrameLayout {
             sret_slot_size,
             sret_slot_base_from_sp,
             caller_arg_stack_size,
+            frame_top_reserved_bytes,
         }
     }
 
@@ -324,6 +349,68 @@ mod tests {
         assert!(frame64.total_size >= frame0.total_size.saturating_add(64));
         let off = frame64.sret_slot_offset_from_fp().expect("sret");
         assert!(off < 0);
+    }
+
+    /// rv32 reserves nothing at the frame top, so introducing the
+    /// `frame_top_reserved_bytes` hook must leave every rv32 offset exactly
+    /// where it was. Pinned with literal values (not recomputed from the same
+    /// arithmetic under test) for a frame exercising every region at once:
+    /// outgoing stack args + spills + LPIR slots + caller sret + callee-saved
+    /// registers + saved RA/FP.
+    #[test]
+    fn rv32_reserves_nothing_at_frame_top() {
+        let sig = LpsFnSig {
+            name: "f".into(),
+            return_type: LpsType::Float,
+            // Mat4 is stack-passed, so this frame also has incoming stack args.
+            parameters: vec![lps_shared::FnParam {
+                name: "v".into(),
+                ty: LpsType::Mat4,
+                qualifier: lps_shared::ParamQualifier::In,
+            }],
+            kind: LpsFnKind::UserDefined,
+        };
+        let abi = rv32::func_abi_rv32(&sig, None);
+        let used = PregSet::singleton(rv32::S2).union(PregSet::singleton(rv32::S3));
+        let frame = FrameLayout::compute(&abi, 3, used, &[(0, 16), (1, 8)], false, 64, 12);
+
+        assert_eq!(
+            frame.frame_top_reserved_bytes, 0,
+            "rv32 must not reserve frame-top bytes"
+        );
+
+        // caller_arg_stack_size = align_up(12, 16) = 16
+        // spills = 3 * 4 = 12; lpir = 16 + 8 = 24; sret = align_up(64, 16) = 64
+        // body = 16 + 12 + 24 + 64 = 116
+        // link = ra(4) + fp(4) + 2 callee-saved(8) = 16
+        // total = align_up(116 + 16 + 0, 16) = 144
+        assert_eq!(frame.caller_arg_stack_size, 16);
+        assert_eq!(frame.sret_slot_size, 64);
+        assert_eq!(frame.total_size, 144);
+
+        // Body regions, low to high, all below the save area.
+        assert_eq!(frame.spill_offset_from_sp(0), Some(16));
+        assert_eq!(frame.spill_offset_from_sp(1), Some(20));
+        assert_eq!(frame.spill_offset_from_sp(2), Some(24));
+        assert_eq!(frame.spill_offset_from_sp(3), None);
+        assert_eq!(frame.lpir_offset_from_sp(0), Some(28));
+        assert_eq!(frame.lpir_offset_from_sp(1), Some(44));
+        assert_eq!(frame.sret_slot_offset_from_fp(), Some(52 - 144));
+
+        // Save area occupies the top of the frame: RA at total_size - 4.
+        assert_eq!(frame.ra_offset_from_sp, Some(140));
+        assert_eq!(frame.fp_offset_from_sp, Some(136));
+        assert_eq!(
+            frame.callee_save_offsets,
+            vec![(rv32::S3, 128), (rv32::S2, 132)]
+        );
+
+        // The reserved region is empty, so nothing sits above the saved RA.
+        let highest_used = frame.ra_offset_from_sp.unwrap() + 4;
+        assert_eq!(
+            highest_used,
+            (frame.total_size - frame.frame_top_reserved_bytes) as i32
+        );
     }
 
     #[test]
