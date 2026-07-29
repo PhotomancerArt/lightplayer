@@ -2,10 +2,11 @@
 
 extern crate alloc;
 
-use super::super::logging::{InstLog, LogLevel, SystemKind};
+use super::super::logging::{InstLog, SystemKind};
 use super::state::Riscv32Emulator;
 use alloc::{format, string::String, vec::Vec};
 use core::fmt::Write;
+use lp_emu_core::LogLevel;
 use lp_riscv_inst::Gpr;
 
 impl Riscv32Emulator {
@@ -82,7 +83,7 @@ impl Riscv32Emulator {
             }
             LogLevel::Instructions => {
                 // Implement rolling buffer: if buffer reaches max, remove oldest
-                if self.log_buffer.len() >= crate::config::INSTRUCTION_LOG_BUFFER_SIZE {
+                if self.log_buffer.len() >= lp_emu_core::config::INSTRUCTION_LOG_BUFFER_SIZE {
                     self.log_buffer.remove(0);
                 }
                 self.log_buffer.push(log);

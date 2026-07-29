@@ -265,7 +265,7 @@ fn firmware_dir() -> Result<String, Box<dyn std::error::Error>> {
             if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
                 if content.contains("[workspace]") {
                     // Found workspace root
-                    let fw_dir = current.join("lp-fw/fw-esp32");
+                    let fw_dir = current.join("lp-fw/fw-esp32c6");
                     if fw_dir.exists() {
                         return Ok(fw_dir.to_string_lossy().to_string());
                     }
@@ -282,19 +282,19 @@ fn firmware_dir() -> Result<String, Box<dyn std::error::Error>> {
     }
 
     // Fallback: try relative to current directory
-    let fw_dir = std::path::Path::new("lp-fw/fw-esp32");
+    let fw_dir = std::path::Path::new("lp-fw/fw-esp32c6");
     if fw_dir.exists() {
         return Ok(fw_dir.to_string_lossy().to_string());
     }
 
     // Try absolute path from current dir
     let current = std::env::current_dir()?;
-    let fw_dir = current.join("lp-fw/fw-esp32");
+    let fw_dir = current.join("lp-fw/fw-esp32c6");
     if fw_dir.exists() {
         return Ok(fw_dir.to_string_lossy().to_string());
     }
 
-    Err("Could not find firmware directory (lp-fw/fw-esp32). Make sure you're running from workspace root.".into())
+    Err("Could not find firmware directory (lp-fw/fw-esp32c6). Make sure you're running from workspace root.".into())
 }
 
 /// Mutex to serialize firmware flashing operations
@@ -323,7 +323,7 @@ pub fn flash_firmware() -> Result<(), Box<dyn std::error::Error>> {
                 "espflash",
                 "flash",
                 "--package",
-                "fw-esp32",
+                "fw-esp32c6",
                 "--features",
                 "test_usb,esp32c6",
                 "--target",

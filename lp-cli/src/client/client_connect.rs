@@ -5,10 +5,12 @@
 
 use anyhow::{Context, Result};
 #[cfg(feature = "serial")]
+use lp_emu_core::{LogLevel, TimeMode};
+#[cfg(feature = "serial")]
 use lp_riscv_elf::load_elf;
 #[cfg(feature = "serial")]
 use lp_riscv_emu::{
-    LogLevel, Riscv32Emulator, TimeMode,
+    Riscv32Emulator,
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 #[cfg(feature = "serial")]

@@ -1144,7 +1144,9 @@ label:has(> input:not(:disabled)) {
 
 .ux-produced-product-control-lamp {
     position: absolute;
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     pointer-events: none;
     transform: translate(-50%, -50%);
     border-radius: 50%;
@@ -1156,6 +1158,693 @@ label:has(> input:not(:disabled)) {
     );
     filter: saturate(1.08);
     mix-blend-mode: screen;
+}
+
+/* ---- the standalone mapping editor (#/mapping, lpa-mapping-editor) ----- */
+
+.lpme-page {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--studio-color-app);
+    color: var(--studio-color-text);
+}
+
+.lpme-editor {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+.lpme-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--studio-color-border-strong);
+    background: var(--studio-color-surface);
+    flex-wrap: wrap;
+}
+
+.lpme-title {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-muted);
+    font-weight: 600;
+}
+
+.lpme-status {
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    color: var(--studio-color-text-muted);
+}
+
+.lpme-dirty {
+    color: #e4c065;
+}
+
+.lpme-spacer {
+    flex: 1;
+}
+
+.lpme-sep {
+    width: 1px;
+    align-self: stretch;
+    background: var(--studio-color-border);
+    margin: 2px 4px;
+}
+
+.lpme-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 1px solid var(--studio-color-border-strong);
+    background: none;
+    cursor: pointer;
+    padding: 3px 9px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+    text-decoration: none;
+}
+
+.lpme-btn:hover {
+    color: var(--studio-color-text-strong);
+}
+
+.lpme-btn-on {
+    color: var(--studio-color-good, #3fd68e);
+    background: rgba(63, 214, 142, 0.1);
+    border-color: rgba(63, 214, 142, 0.4);
+}
+
+.lpme-select {
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border-strong);
+    color: var(--studio-color-text);
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+
+.lpme-canvas-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: var(--studio-color-terminal, #0b0c0e);
+    /* Drags must never turn into text selection. */
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.lpme-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+}
+
+.lpme-hitline {
+    fill: none;
+    stroke: transparent;
+    cursor: move;
+}
+
+/* Invisible enlarged pointer target over sparse (small-radius) lamps. */
+.lpme-lamp-hit {
+    fill: transparent;
+    stroke: none;
+}
+
+.lpme-canvas-rect {
+    fill: rgba(255, 255, 255, 0.02);
+    stroke: rgba(154, 151, 143, 0.55);
+    stroke-dasharray: 6 5;
+}
+
+.lpme-fit-rect {
+    fill: rgba(90, 169, 230, 0.05);
+    stroke: rgba(90, 169, 230, 0.75);
+}
+
+.lpme-fit-label {
+    fill: rgba(90, 169, 230, 0.9);
+    font-family: var(--studio-font-mono);
+}
+
+.lpme-arrow-wire {
+    stroke: rgba(198, 203, 212, 0.6);
+    color: rgba(198, 203, 212, 0.6);
+}
+
+.lpme-arrow-chain {
+    stroke: rgba(228, 192, 101, 0.9);
+    color: rgba(228, 192, 101, 0.9);
+    stroke-dasharray: 8 6;
+}
+
+.lpme-lamp-num {
+    fill: #fff;
+    stroke: #000;
+    /* stroke-width is per-element: it must scale with the font under the
+       camera transform or the outline swallows the glyphs when zoomed. */
+    paint-order: stroke;
+    stroke-linejoin: round;
+    font-family: var(--studio-font-mono);
+    font-weight: 600;
+    pointer-events: none;
+}
+
+.lpme-error {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    background: rgba(239, 83, 80, 0.12);
+    border-bottom: 1px solid rgba(239, 83, 80, 0.5);
+    color: var(--studio-color-text);
+    font-size: 12px;
+}
+
+.lpme-hidden-input {
+    display: none;
+}
+
+.lpme-canvas-tool {
+    cursor: crosshair;
+}
+
+.lpme-sel-outline {
+    fill: none;
+    stroke: #4c9ffe;
+    stroke-dasharray: 5 4;
+    opacity: 0.9;
+}
+
+.lpme-handle {
+    fill: var(--studio-color-surface);
+    stroke: #4c9ffe;
+    cursor: nwse-resize;
+}
+
+.lpme-vertex {
+    fill: var(--studio-color-surface);
+    stroke: #4c9ffe;
+    cursor: move;
+}
+
+.lpme-vertex-hot {
+    fill: #4c9ffe;
+}
+
+.lpme-draft {
+    fill: none;
+    stroke: #4c9ffe;
+    stroke-dasharray: 5 4;
+}
+
+.lpme-marquee {
+    fill: rgba(76, 159, 254, 0.08);
+    stroke: #4c9ffe;
+    stroke-dasharray: 4 3;
+}
+
+.lpme-popover {
+    position: absolute;
+    z-index: 6;
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    padding: 10px 12px 12px;
+}
+
+.lpme-pop-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: -10px -12px 10px;
+    padding: 9px 12px 8px;
+    border-bottom: 1px solid var(--studio-color-border);
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 10px 10px 0 0;
+}
+
+.lpme-pop-name {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    border-bottom: 1px solid transparent;
+    color: var(--studio-color-text-strong);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.lpme-pop-name:focus {
+    outline: none;
+    border-bottom-color: #4c9ffe;
+}
+
+.lpme-pop-name-static {
+    flex: 1;
+    color: var(--studio-color-text-strong);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.lpme-pop-kind {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    color: var(--studio-color-text-muted);
+}
+
+.lpme-field {
+    display: grid;
+    grid-template-columns: 86px 1fr;
+    gap: 7px 10px;
+    align-items: center;
+    margin-bottom: 7px;
+}
+
+.lpme-field label {
+    color: var(--studio-color-text-muted);
+    font-size: 11px;
+}
+
+.lpme-field input {
+    width: 100%;
+    background: var(--studio-color-app);
+    border: 1px solid var(--studio-color-border-strong);
+    color: var(--studio-color-text-strong);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-family: var(--studio-font-mono);
+    font-size: 12px;
+}
+
+.lpme-field input:focus {
+    outline: none;
+    border-color: #4c9ffe;
+}
+
+.lpme-seg {
+    display: flex;
+    background: var(--studio-color-app);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.lpme-seg button {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--studio-color-text-muted);
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    padding: 4px 0;
+    cursor: pointer;
+}
+
+.lpme-seg button + button {
+    border-left: 1px solid var(--studio-color-border);
+}
+
+.lpme-seg .lpme-seg-on {
+    background: rgba(76, 159, 254, 0.14);
+    color: #4c9ffe;
+}
+
+.lpme-pop-meta {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    color: var(--studio-color-text-muted);
+    margin-top: 8px;
+}
+
+.lpme-pop-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.lpme-btn-danger:hover {
+    color: #ef5350;
+    border-color: #ef5350;
+}
+
+/* Canvas + optional docked rail, side by side. */
+.lpme-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+/* The rail toggle floats top-right of the canvas (like the zoom float). */
+.lpme-rail-float {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    z-index: 6;
+    display: flex;
+    padding: 3px;
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+}
+
+/* Docked wiring-order pane: shrinks the canvas instead of covering it. */
+.lpme-rail-pane {
+    flex: none;
+    width: 212px;
+    overflow-y: auto;
+    border-left: 1px solid var(--studio-color-border-strong);
+    background: var(--studio-color-surface);
+    padding: 5px;
+}
+
+.lpme-rail-head {
+    padding: 6px 8px 4px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--studio-color-text-muted);
+    border-bottom: 1px solid var(--studio-color-border);
+    margin-bottom: 4px;
+}
+
+.lpme-rail-empty {
+    padding: 10px 8px;
+    font-size: 11px;
+    color: var(--studio-color-text-muted);
+}
+
+/* Floating "?" (left of the rail toggle) and its shortcut reference. */
+.lpme-help-float {
+    position: absolute;
+    top: 10px;
+    right: 56px;
+    z-index: 6;
+    display: flex;
+    padding: 3px;
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+}
+
+.lpme-help-panel {
+    position: absolute;
+    top: 52px;
+    right: 12px;
+    z-index: 7;
+    min-width: 250px;
+    padding: 8px 10px;
+    background: rgba(16, 18, 22, 0.95);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 9px;
+}
+
+.lpme-help-title {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--studio-color-text-muted);
+    margin-bottom: 6px;
+}
+
+.lpme-help-row {
+    display: flex;
+    gap: 10px;
+    padding: 2px 0;
+    font-size: 11px;
+}
+
+.lpme-help-keys {
+    font-family: var(--studio-font-mono);
+    color: var(--studio-color-text-strong);
+    min-width: 110px;
+    flex: none;
+}
+
+.lpme-help-what {
+    color: var(--studio-color-text-muted);
+}
+
+.lpme-rail-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.lpme-rail-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.lpme-rail-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.lpme-rail-row-sel {
+    background: rgba(76, 159, 254, 0.12);
+}
+
+.lpme-rail-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex: none;
+}
+
+.lpme-rail-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--studio-color-text);
+}
+
+.lpme-rail-range {
+    font-family: var(--studio-font-mono);
+    font-size: 10px;
+    color: var(--studio-color-text-muted);
+    flex: none;
+}
+
+.lpme-rail-move {
+    display: none;
+    flex: none;
+}
+
+.lpme-rail-row:hover .lpme-rail-move {
+    display: flex;
+}
+
+.lpme-rail-move button {
+    background: none;
+    border: none;
+    color: var(--studio-color-text-muted);
+    cursor: pointer;
+    padding: 0 3px;
+    font-size: 10px;
+}
+
+.lpme-rail-move button:hover {
+    color: var(--studio-color-text-strong);
+}
+
+.lpme-rail-move button:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+/* Floating zoom control: canvas furniture, not toolbar chrome (M5 gate). */
+.lpme-zoom-float {
+    position: absolute;
+    bottom: 10px;
+    right: 12px;
+    z-index: 6;
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+}
+
+.lpme-zoom-pct {
+    font-family: var(--studio-font-mono);
+    min-width: 48px;
+}
+
+.lpme-hint {
+    position: absolute;
+    bottom: 10px;
+    left: 12px;
+    /* Keep clear of the zoom float in narrow embeds. */
+    max-width: calc(100% - 150px);
+    pointer-events: none;
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    color: var(--studio-color-text-muted);
+    background: rgba(11, 12, 14, 0.7);
+    border: 1px solid var(--studio-color-border);
+    border-radius: 7px;
+    padding: 4px 10px;
+}
+
+/* The output section's one home: transparent wrapper around the toggle bar
+   + display/editor so edit mode can go full-page in place (same DOM spot,
+   fixed positioning only). */
+.ux-map-home {
+    display: contents;
+}
+
+.ux-map-home-full {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 16px;
+    z-index: 90;
+    background: var(--studio-color-surface);
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+
+.ux-map-home-full .lpme-face-editor {
+    height: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+/* The face-embedded mapping editor (one-home edit mode). */
+.lpme-face-editor {
+    display: flex;
+    flex-direction: column;
+    height: 460px;
+}
+
+.lpme-face-editor .lpme-editor {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.lpme-face-editor-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border-top: 1px solid var(--studio-color-border);
+}
+
+.lpme-face-editor-failure {
+    font-size: 11px;
+    color: #ef5350;
+}
+
+.lpme-face-editor-loading {
+    padding: 18px;
+    font-size: 12px;
+    color: var(--studio-color-text-muted);
+}
+
+/* ---- mapping view layers (wiring numbers / arrows / toggles) ---------- */
+
+/* Pulls the lamp field off the frame edges so edge-mapped lamps stay whole. */
+.ux-map-inset {
+    position: absolute;
+    inset: 5.5%;
+}
+
+.ux-map-lamp-num {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    font-family: var(--studio-font-mono, ui-monospace, monospace);
+    font-size: 8px;
+    font-weight: 600;
+    line-height: 1;
+    /* White fill + 8-direction black outline: readable over any lamp color,
+       lit or unlit (the lp2014 outline treatment). */
+    color: #fff;
+    text-shadow:
+        1px 0 0 #000,
+        -1px 0 0 #000,
+        0 1px 0 #000,
+        0 -1px 0 #000,
+        1px 1px 0 #000,
+        -1px 1px 0 #000,
+        1px -1px 0 #000,
+        -1px -1px 0 #000;
+}
+
+.ux-map-arrows {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.ux-map-arrow-wire {
+    stroke: rgba(198, 203, 212, 0.65);
+    stroke-width: 2.5;
+    color: rgba(198, 203, 212, 0.65);
+}
+
+.ux-map-arrow-chain {
+    stroke: rgba(228, 192, 101, 0.9);
+    stroke-width: 3;
+    stroke-dasharray: 10 8;
+    color: rgba(228, 192, 101, 0.9);
+}
+
+/* Pinned above the lamp display inside the output section (not floating). */
+.ux-map-toggle-bar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 2px;
+    padding: 3px 8px;
+    border-bottom: 1px solid var(--studio-color-border);
+}
+
+.ux-map-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 3px 7px;
+    border-radius: 5px;
+    color: var(--studio-color-text-muted);
+}
+
+.ux-map-toggle:hover {
+    color: var(--studio-color-text-strong);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.ux-map-toggle-on {
+    color: var(--studio-color-good, #3fd68e);
+    background: rgba(63, 214, 142, 0.1);
 }
 
 .ux-produced-product-skeleton {

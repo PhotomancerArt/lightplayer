@@ -46,7 +46,7 @@ fn can_create_fyeah_sign_project_from_empty_fs_with_artifact_body_mutations() {
         scenario.registry(),
         &[
             ("/blast.glsl", AssetContentType::ShaderSource),
-            ("/fyeah-mapping.svg", AssetContentType::FixtureSvg),
+            ("/fyeah.map2d.json", AssetContentType::FixtureMap2d),
             ("/idle.glsl", AssetContentType::ShaderSource),
         ],
     );

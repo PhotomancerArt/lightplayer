@@ -9,38 +9,30 @@
 
 #![no_std]
 
+// With `std` enabled, `alloc` resolves via the extern prelude and a root
+// `extern crate alloc` would trip `unused_extern_crates`; without `std` it
+// is required for the crate's `alloc::` imports.
+#[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
-
-// Compile-time configuration
-pub mod config;
 
 // Re-export instruction utilities for convenience
 pub use lp_riscv_inst::{Gpr, Inst, decode_instruction, format_instruction};
 
 // Emulator modules
 pub mod emu;
-pub mod serial;
-pub mod time;
 
-#[cfg(feature = "std")]
-pub mod profile;
-#[cfg(feature = "std")]
-pub use profile::{CpuCollector, PcSymbolizer};
 #[cfg(feature = "std")]
 pub mod test_util;
 
 // Re-exports for convenience
 #[cfg(feature = "std")]
 pub use emu::FrameOutcome;
-pub use emu::memory::{DEFAULT_RAM_START, Memory};
 pub use emu::{
-    CycleModel, DEFAULT_CALL_INSTRUCTION_LIMIT, DEFAULT_SHARED_START, EmulatorError, InstClass,
-    InstLog, LogLevel, MemoryAccessKind, OomInfo, PanicInfo, Riscv32Emulator, StepResult,
-    SyscallInfo, trap_code_to_string,
+    DEFAULT_CALL_INSTRUCTION_LIMIT, EmulatorError, InstLog, Riscv32Emulator,
+    trap_code_from_cranelift,
 };
-pub use time::TimeMode;
 
 #[cfg(feature = "std")]
 pub use test_util::{BinaryBuildConfig, ensure_binary_built, find_workspace_root};

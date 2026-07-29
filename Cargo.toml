@@ -15,18 +15,21 @@ members = [
     "lp-app/lpa-server",
     "lp-app/lpa-client",
     "lp-app/lpa-link",
+    "lp-app/lpa-mapping-editor",
     "lp-app/lpa-studio-core",
     "lp-app/lpa-studio-web",
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-fw/fw-browser",
+    "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
     "lp-fw/fw-checks",
     "lp-cli",
-    "lp-fw/fw-esp32",
+    "lp-fw/fw-esp32c6",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
+    "lp-core/lpc-mapping",
     "lp-core/lpc-model",
     "lp-core/lpc-slot-codegen",
     "lp-core/lpc-slot-macros",
@@ -60,7 +63,8 @@ members = [
     "lp-shader/lpvm-emu",
     "lp-shader/lpir",
     "lp-shader/lps-filetests",
-    "lp-riscv/lp-riscv-emu-shared",
+    "lp-emu/lp-emu-core",
+    "lp-emu/lp-emu-abi",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
@@ -75,9 +79,9 @@ members = [
 ]
 resolver = "2"
 
-# Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32 from default workspace builds (cross-target only)
+# Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)
 # They're still in workspace members so they can use workspace dependencies
-# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
+# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32c6
 default-members = [
     # lp-base workspace members
     "lp-base/lp-recovery",
@@ -92,12 +96,15 @@ default-members = [
     "lp-app/lpa-server",
     "lp-app/lpa-client",
     "lp-app/lpa-link",
+    "lp-app/lpa-mapping-editor",
     "lp-app/lpa-studio-core",
+    "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
     "lp-fw/fw-checks",
     "lp-fw/fw-tests",
     "lp-cli",
+    "lp-core/lpc-mapping",
     "lp-core/lpc-model",
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
@@ -119,7 +126,8 @@ default-members = [
     "lp-shader/lps-probe",
     "lp-shader/lpir",
     "lp-shader/lps-filetests",
-    "lp-riscv/lp-riscv-emu-shared",
+    "lp-emu/lp-emu-core",
+    "lp-emu/lp-emu-abi",
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
@@ -211,9 +219,11 @@ base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 [profile.dev.package."*"]
 opt-level = 2
 
+[profile.dev.package.lp-emu-core]
+opt-level = 3
 [profile.dev.package.lp-riscv-emu]
 opt-level = 3
-[profile.dev.package.lp-riscv-emu-shared]
+[profile.dev.package.lp-emu-abi]
 opt-level = 3
 [profile.dev.package.lp-riscv-inst]
 opt-level = 3
@@ -244,7 +254,7 @@ debug = 1
 inherits = "release"
 panic = "unwind"
 
-[profile.release-esp32.package.fw-esp32]
+[profile.release-esp32.package.fw-esp32c6]
 debug = 1
 strip = "none"
 

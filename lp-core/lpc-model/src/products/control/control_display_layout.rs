@@ -39,6 +39,12 @@ pub struct ControlLayout2d {
     pub height_hint: u32,
     #[serde(rename = "l")]
     pub lamps: Vec<ControlLamp2d>,
+    /// Contiguous per-path lamp spans in wiring order, when the producer
+    /// knows them (fixtures do). Consumers use spans to draw wiring-order
+    /// visualizations (arrows stay within a path; the chain hops between
+    /// consecutive spans). Optional on the wire; absent means unknown.
+    #[serde(rename = "p", default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<ControlPathSpan2d>,
 }
 
 impl ControlLayout2d {
@@ -54,8 +60,22 @@ impl ControlLayout2d {
             width_hint,
             height_hint,
             lamps,
+            paths: Vec::new(),
         }
     }
+
+    #[must_use]
+    pub fn with_paths(mut self, paths: Vec<ControlPathSpan2d>) -> Self {
+        self.paths = paths;
+        self
+    }
+}
+
+/// One path's contiguous lamp span within a 2D display layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ControlPathSpan2d {
+    pub first_lamp: u32,
+    pub lamp_count: u32,
 }
 
 /// One logical lamp in a two-dimensional display layout.
@@ -86,6 +106,51 @@ impl schemars::JsonSchema for ControlLamp2d {
             "Compact lamp tuple: [lamp_index, sample_start, center_x, center_y, radius].".into(),
         );
         schema
+    }
+}
+
+// `ControlPathSpan2d` serializes as a fixed 2-element tuple
+// `[first_lamp, lamp_count]`, mirroring the compact lamp tuple convention.
+#[cfg(feature = "schema-gen")]
+impl schemars::JsonSchema for ControlPathSpan2d {
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        "ControlPathSpan2d".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut schema = <(u32, u32) as schemars::JsonSchema>::json_schema(generator);
+        schema.insert(
+            "description".into(),
+            "Compact path span tuple: [first_lamp, lamp_count].".into(),
+        );
+        schema
+    }
+}
+
+impl serde::Serialize for ControlPathSpan2d {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeTuple;
+
+        let mut tuple = serializer.serialize_tuple(2)?;
+        tuple.serialize_element(&self.first_lamp)?;
+        tuple.serialize_element(&self.lamp_count)?;
+        tuple.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ControlPathSpan2d {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let (first_lamp, lamp_count) = <(u32, u32)>::deserialize(deserializer)?;
+        Ok(Self {
+            first_lamp,
+            lamp_count,
+        })
     }
 }
 

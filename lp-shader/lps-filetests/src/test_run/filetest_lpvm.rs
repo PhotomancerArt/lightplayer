@@ -1,7 +1,7 @@
 //! LPVM-backed filetest compilation: one module per `.glsl` file, fresh instance per `// run:`.
 
 use lp_collection::VecMap;
-use lp_riscv_emu::{CycleModel, LogLevel};
+use lp_emu_core::{CycleModel, LogLevel};
 use lpir::{CompilerConfig, FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig, TextureBindingSpec};
 use lpvm::{

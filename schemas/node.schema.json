@@ -907,58 +907,6 @@
                       {
                         "additionalProperties": false,
                         "properties": {
-                          "center": {
-                            "description": "2D XY coordinate as [x, y].",
-                            "items": {
-                              "type": "number"
-                            },
-                            "maxItems": 2,
-                            "minItems": 2,
-                            "type": "array"
-                          },
-                          "diameter": {
-                            "description": "Intended non-negative float (not enforced on read).",
-                            "type": "number"
-                          },
-                          "end_ring_exclusive": {
-                            "maximum": 4294967295,
-                            "minimum": 0,
-                            "type": "integer"
-                          },
-                          "kind": {
-                            "const": "RingArray"
-                          },
-                          "offset_angle": {
-                            "type": "number"
-                          },
-                          "order": {
-                            "type": "string"
-                          },
-                          "ring_lamp_counts": {
-                            "additionalProperties": {
-                              "maximum": 4294967295,
-                              "minimum": 0,
-                              "type": "integer"
-                            },
-                            "propertyNames": {
-                              "pattern": "^\\+?[0-9]+$"
-                            },
-                            "type": "object"
-                          },
-                          "start_ring_inclusive": {
-                            "maximum": 4294967295,
-                            "minimum": 0,
-                            "type": "integer"
-                          }
-                        },
-                        "required": [
-                          "kind"
-                        ],
-                        "type": "object"
-                      },
-                      {
-                        "additionalProperties": false,
-                        "properties": {
                           "first_channel": {
                             "maximum": 4294967295,
                             "minimum": 0,
@@ -1009,11 +957,7 @@
               "additionalProperties": false,
               "properties": {
                 "kind": {
-                  "const": "SvgPath"
-                },
-                "sample_diameter": {
-                  "description": "Intended non-negative float (not enforced on read).",
-                  "type": "number"
+                  "const": "Map2d"
                 },
                 "source": {
                   "anyOf": [

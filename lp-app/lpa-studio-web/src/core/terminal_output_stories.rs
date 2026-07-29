@@ -19,7 +19,7 @@ pub(crate) fn wrapped_output() -> Element {
     rsx! {
         TerminalOutput {
             lines: vec![
-                UiTerminalLine::new("[fw-esp32] ESP-ROM:esp32c6-20220919"),
+                UiTerminalLine::new("[fw-esp32c6] ESP-ROM:esp32c6-20220919"),
                 UiTerminalLine::new("[lp-server] project shape response contained node /demo/shaders/orbit with 6 slots and 2 runtime bindings"),
                 UiTerminalLine::new("[studio] overlay has 2 pending changes"),
             ],

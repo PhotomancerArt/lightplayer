@@ -1,4 +1,4 @@
-use lp_riscv_emu::profile::{Gate, GateAction, PerfEvent};
+use lp_emu_core::profile::{Gate, GateAction, PerfEvent};
 
 #[derive(Default)]
 pub struct AllGate;
@@ -11,7 +11,7 @@ impl AllGate {
 
 impl Gate for AllGate {
     fn on_event(&mut self, evt: &PerfEvent) -> GateAction {
-        if evt.name == lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START {
+        if evt.name == lp_emu_core::profile::perf_event::EVENT_PROFILE_START {
             return GateAction::Enable;
         }
         GateAction::NoChange
@@ -25,8 +25,8 @@ impl Gate for AllGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lp_emu_core::profile::{PerfEvent, PerfEventKind};
     use lp_perf::{EVENT_FRAME, EVENT_SHADER_COMPILE, EVENT_SHADER_LINK};
-    use lp_riscv_emu::profile::{PerfEvent, PerfEventKind};
 
     #[test]
     fn no_change_for_various_events() {
@@ -63,7 +63,7 @@ mod tests {
         let mut g = AllGate::new();
         let evt = PerfEvent {
             cycle: 0,
-            name: lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START,
+            name: lp_emu_core::profile::perf_event::EVENT_PROFILE_START,
             kind: PerfEventKind::Instant,
         };
         assert_eq!(g.on_event(&evt), GateAction::Enable);

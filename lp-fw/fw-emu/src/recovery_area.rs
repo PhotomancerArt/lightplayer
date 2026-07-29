@@ -3,10 +3,10 @@
 //! `LP_RECOVERY_AREA` is exported (no_mangle) so the host test harness can
 //! locate it via the ELF symbol map and read/write it in guest RAM between
 //! runs — the emulator analog of RTC fast RAM + the reset-reason register.
-//! Layout matches `lp_riscv_emu_shared::recovery_handshake` offsets.
+//! Layout matches `lp_emu_abi::recovery_handshake` offsets.
 
+use lp_emu_abi::recovery_handshake as hs;
 use lp_recovery::{RecoveryBackend, RecoveryRegion, ResetCause};
-use lp_riscv_emu_shared::recovery_handshake as hs;
 
 #[repr(C, align(8))]
 pub struct EmuRecoveryArea {

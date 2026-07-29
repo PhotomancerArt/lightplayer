@@ -17,7 +17,7 @@ pub enum UiLogOrigin {
     /// The LightPlayer server protocol: `lp-server` events, heartbeats, and
     /// protocol diagnostics.
     Server,
-    /// The device runtime: firmware serial output (`fw-esp32`) and simulator
+    /// The device runtime: firmware serial output (`fw-esp32c6`) and simulator
     /// worker logs (`fw-browser` / worker targets).
     Device,
 }
