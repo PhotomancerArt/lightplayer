@@ -5,11 +5,11 @@
 //! Enable feature **`emu`** for host-side linking with builtins and emulation via
 //! `lp-riscv-emu` (requires `std`).
 //!
-//! # `any(target_arch = "riscv32")` — the JIT-capable target set
+//! # `any(target_arch = "riscv32", target_arch = "xtensa")` — the JIT-capable target set
 //!
 //! Everything that exists only because the crate can JIT and run code *on the
 //! CPU it was compiled for* is gated on the literal, single-element form
-//! `any(target_arch = "riscv32")` rather than a bare `target_arch = "riscv32"`.
+//! `any(target_arch = "riscv32", target_arch = "xtensa")` rather than a bare `target_arch = "riscv32"`.
 //! The `any(...)` is redundant today and semantically identical; it exists so
 //! the set has one grep-able spelling:
 //!
@@ -42,7 +42,7 @@ pub mod debug;
 pub mod debug_asm;
 pub mod emit;
 pub mod error;
-#[cfg(any(test, any(target_arch = "riscv32")))]
+#[cfg(any(test, any(target_arch = "riscv32", target_arch = "xtensa")))]
 mod jit_symbol_sizes;
 pub mod link;
 pub mod lower;
@@ -59,7 +59,7 @@ pub mod vinst;
 pub mod rt_emu;
 
 pub mod isa;
-#[cfg(any(target_arch = "riscv32"))]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub mod rt_jit;
 
 pub use abi::ModuleAbi;
@@ -84,7 +84,7 @@ pub use vinst::{
 #[cfg(feature = "emu")]
 pub use rt_emu::{NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
 
-#[cfg(any(target_arch = "riscv32"))]
+#[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
 pub use rt_jit::{
     BuiltinTable, NativeJitDirectCall, NativeJitEngine, NativeJitInstance, NativeJitModule,
 };

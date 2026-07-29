@@ -1,0 +1,10 @@
+[package]
+name = "lp-xt-emu-guest"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+# Member of the fixtures device-target workspace (esp toolchain), NOT the
+# host workspace — cargo's ancestor walk finds the root workspace, so point
+# at the right one explicitly.
+workspace = "../fixtures"
+description = "no_std guest runtime (entry/print/exit/panic/allocator) for programs running inside lp-xt-emu."

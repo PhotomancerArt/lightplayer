@@ -1,4 +1,5 @@
 pub mod rv32;
+pub mod xt;
 
 use alloc::string::String;
 
@@ -31,6 +32,10 @@ pub(crate) type IsaEmitOutput = rv32::emit::Rv32EmitOutput;
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IsaTarget {
     Rv32imac,
+    /// Xtensa windowed-ABI target (ESP32-S3 / LX7 and classic ESP32 / LX6 —
+    /// the two are ISA-identical for the emitted integer subset; only the JIT
+    /// buffer placement differs per chip, and that lives in `rt_jit`).
+    Xtensa,
 }
 
 impl IsaTarget {
@@ -38,6 +43,7 @@ impl IsaTarget {
     pub fn allocatable_pool_order(self) -> &'static [u8] {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::ALLOC_POOL,
+            IsaTarget::Xtensa => crate::isa::xt::gpr::ALLOC_POOL,
         }
     }
 
@@ -45,6 +51,7 @@ impl IsaTarget {
     pub fn is_in_allocatable_pool(self, p: u8) -> bool {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::pool_contains(p),
+            IsaTarget::Xtensa => crate::isa::xt::gpr::pool_contains(p),
         }
     }
 
@@ -52,6 +59,7 @@ impl IsaTarget {
     pub fn reg_name(self, p: u8) -> &'static str {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::reg_name(p),
+            IsaTarget::Xtensa => crate::isa::xt::gpr::reg_name(p),
         }
     }
 
@@ -62,6 +70,9 @@ impl IsaTarget {
             IsaTarget::Rv32imac => {
                 (scalar_count as usize) > crate::isa::rv32::abi::SRET_SCALAR_THRESHOLD
             }
+            IsaTarget::Xtensa => {
+                (scalar_count as usize) > crate::isa::xt::abi::SRET_SCALAR_THRESHOLD
+            }
         }
     }
 
@@ -69,6 +80,7 @@ impl IsaTarget {
     pub fn stack_alignment(self) -> u32 {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::abi::STACK_ALIGNMENT,
+            IsaTarget::Xtensa => crate::isa::xt::abi::STACK_ALIGNMENT,
         }
     }
 
@@ -92,6 +104,7 @@ impl IsaTarget {
     pub fn frame_top_reserved_bytes(self) -> u32 {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::abi::FRAME_TOP_RESERVED_BYTES,
+            IsaTarget::Xtensa => crate::isa::xt::abi::FRAME_TOP_RESERVED_BYTES,
         }
     }
 
@@ -129,6 +142,23 @@ impl IsaTarget {
                 let _ = op;
                 crate::isa::rv32::abi::fits_imm12(val)
             }
+            IsaTarget::Xtensa => {
+                use crate::isa::xt::imm::{ImmOp, is_legal};
+                match op {
+                    AluImmOp::Addi => is_legal(ImmOp::Addi, val),
+                    // The key Xtensa fact: no andi/ori/xori exist — every
+                    // bitwise constant materializes (NoImmForm ⇒ false).
+                    AluImmOp::Andi => is_legal(ImmOp::AndImm, val),
+                    AluImmOp::Ori => is_legal(ImmOp::OrImm, val),
+                    AluImmOp::Xori => is_legal(ImmOp::XorImm, val),
+                    AluImmOp::Slli => is_legal(ImmOp::SlliSa, val),
+                    AluImmOp::SrliU => is_legal(ImmOp::SrliSa, val),
+                    AluImmOp::SraiS => is_legal(ImmOp::SraiSa, val),
+                    // No compare-immediate forms on Xtensa either: lowering
+                    // materializes and compares register-register.
+                    AluImmOp::Slti | AluImmOp::SltiU => false,
+                }
+            }
         }
     }
 
@@ -136,6 +166,7 @@ impl IsaTarget {
     pub fn elf_architecture(self) -> Architecture {
         match self {
             IsaTarget::Rv32imac => Architecture::Riscv32,
+            IsaTarget::Xtensa => Architecture::Xtensa,
         }
     }
 
@@ -143,6 +174,7 @@ impl IsaTarget {
     pub fn elf_e_flags(self) -> u32 {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::link::EF_RISCV_FLOAT_ABI_SOFT,
+            IsaTarget::Xtensa => crate::isa::xt::link::EF_XTENSA_NONE,
         }
     }
 
@@ -150,6 +182,7 @@ impl IsaTarget {
     pub fn caller_saved_pool_hw(self) -> &'static [u8] {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::CALLER_SAVED_POOL,
+            IsaTarget::Xtensa => crate::isa::xt::gpr::CALLER_SAVED_POOL,
         }
     }
 
@@ -157,6 +190,11 @@ impl IsaTarget {
     pub fn direct_ret_reg_hw(self, idx: usize) -> Option<u8> {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.get(idx).copied(),
+            // CALLER view: this hook names where a call's result lands
+            // (regalloc/walk.rs allocates call-def vregs here). Under the
+            // CALL8 rotation that is a10/a11, NOT the callee-view a2/a3 —
+            // the classic two-views trap; see isa/xt/gpr.rs.
+            IsaTarget::Xtensa => crate::isa::xt::gpr::CALL_RET_REGS.get(idx).copied(),
         }
     }
 
@@ -164,6 +202,7 @@ impl IsaTarget {
     pub fn direct_ret_reg_count(self) -> usize {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.len(),
+            IsaTarget::Xtensa => crate::isa::xt::gpr::CALL_RET_REGS.len(),
         }
     }
 
@@ -171,6 +210,8 @@ impl IsaTarget {
     pub fn call_arg_reg_hw(self, idx: usize) -> Option<u8> {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.get(idx).copied(),
+            // CALLEE view (incoming parameters precolor here).
+            IsaTarget::Xtensa => crate::isa::xt::gpr::ARG_REGS.get(idx).copied(),
         }
     }
 
@@ -178,6 +219,7 @@ impl IsaTarget {
     pub fn call_arg_reg_count(self) -> usize {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.len(),
+            IsaTarget::Xtensa => crate::isa::xt::gpr::ARG_REGS.len(),
         }
     }
 
@@ -198,6 +240,15 @@ impl IsaTarget {
                     crate::isa::rv32::abi::ARG_REGS.len() - 1
                 } else {
                     crate::isa::rv32::abi::ARG_REGS.len()
+                }
+            }
+            // rv32's exact formula over 6 argument registers (BACKPORT.md:
+            // the rotation is invisible to slot mapping).
+            IsaTarget::Xtensa => {
+                if callee_uses_sret && !caller_passes_sret_ptr {
+                    crate::isa::xt::abi::ARG_REGS.len() - 1
+                } else {
+                    crate::isa::xt::abi::ARG_REGS.len()
                 }
             }
         }
@@ -232,6 +283,30 @@ impl IsaTarget {
                 };
                 crate::isa::rv32::abi::ARG_REGS.get(slot).map(|p| p.hw)
             }
+            IsaTarget::Xtensa => {
+                // Same slot computation as rv32; the target registers are the
+                // CALLER-view staging bank a10..a15 (the callee's ENTRY
+                // rotates them into its a2..a7). A parameter that arrived in
+                // callee-view a2..a7 can never "pass through" to a call arg —
+                // the rotation physically moves values — and the passthrough
+                // check in regalloc/walk.rs correctly never matches.
+                let slot = if !callee_uses_sret {
+                    arg_index
+                } else if !caller_passes_sret_ptr {
+                    1usize.saturating_add(arg_index)
+                } else if caller_sret_vm_abi_swap {
+                    // Shader / `needs_vmctx` path: [vmctx, sret, …] →
+                    // [a11, a10, a12, …] (the rotation image of rv32's a1/a0).
+                    match arg_index {
+                        0 => 1,
+                        1 => 0,
+                        i => i,
+                    }
+                } else {
+                    arg_index
+                };
+                crate::isa::xt::gpr::OUT_ARG_REGS.get(slot).copied()
+            }
         }
     }
 
@@ -245,10 +320,17 @@ impl IsaTarget {
         IsaTarget::Rv32imac
     }
 
+    /// See the sibling arm above — one `fn native` per JIT-capable CPU.
+    #[cfg(target_arch = "xtensa")]
+    pub fn native() -> IsaTarget {
+        IsaTarget::Xtensa
+    }
+
     /// ELF / JIT relocation type for a direct call to a named symbol.
     pub fn call_reloc_type(self) -> u32 {
         match self {
             IsaTarget::Rv32imac => crate::isa::rv32::link::R_RISCV_CALL_PLT,
+            IsaTarget::Xtensa => crate::isa::xt::link::R_XTENSA_32,
         }
     }
 
@@ -273,6 +355,15 @@ impl IsaTarget {
                 is_sret,
                 collect_debug_lines,
             ),
+            IsaTarget::Xtensa => crate::isa::xt::emit::emit_function(
+                vinsts,
+                vreg_pool,
+                output,
+                frame,
+                symbols,
+                is_sret,
+                collect_debug_lines,
+            ),
         }
     }
 
@@ -280,6 +371,13 @@ impl IsaTarget {
     pub fn format_instruction(self, word: u32) -> String {
         match self {
             IsaTarget::Rv32imac => lp_riscv_inst::format_instruction(word),
+            // Xtensa instructions are 2 or 3 bytes; render the word's low
+            // three little-endian bytes at pc 0 (callers with real buffers
+            // use `format_instruction_at`).
+            IsaTarget::Xtensa => {
+                let bytes = word.to_le_bytes();
+                lp_xt_inst::disasm::format_instruction(&bytes[..3], 0)
+            }
         }
     }
 
@@ -296,6 +394,22 @@ impl IsaTarget {
             IsaTarget::Rv32imac => {
                 let word = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?);
                 Some((lp_riscv_inst::format_instruction(word), 4))
+            }
+            IsaTarget::Xtensa => {
+                // Variable-width: the density rule on the first byte decides
+                // 2 vs 3 bytes, known only after decoding.
+                let len = match lp_xt_inst::decode(bytes) {
+                    Ok((_, len)) => len,
+                    Err(lp_xt_inst::DecodeError::Unsupported { len, .. }) => len,
+                    Err(_) => return None,
+                };
+                if bytes.len() < len {
+                    return None;
+                }
+                Some((
+                    lp_xt_inst::disasm::format_instruction(&bytes[..len], 0),
+                    len,
+                ))
             }
         }
     }
@@ -314,6 +428,34 @@ impl IsaTarget {
             IsaTarget::Rv32imac => {
                 let table = crate::isa::rv32::debug::LineTable::from_debug_lines(debug_lines);
                 crate::isa::rv32::debug::disasm::disassemble_function(code, &table, func, opts)
+            }
+            IsaTarget::Xtensa => {
+                // Plain variable-width listing; the annotated rv32-style
+                // interleave arrives with the xt debug pass when a consumer
+                // needs it (filetest asm snapshots use format_instruction_at).
+                let _ = (func, opts);
+                let mut out = String::new();
+                let mut off = 0usize;
+                while off < code.len() {
+                    let Some((text, len)) = self.format_instruction_at(&code[off..]) else {
+                        break;
+                    };
+                    let src = debug_lines
+                        .iter()
+                        .find(|(o, _)| *o as usize == off)
+                        .and_then(|(_, s)| *s);
+                    use core::fmt::Write as _;
+                    match src {
+                        Some(s) => {
+                            let _ = writeln!(out, "{off:6x}:  {text}    ; op{s}");
+                        }
+                        None => {
+                            let _ = writeln!(out, "{off:6x}:  {text}");
+                        }
+                    }
+                    off += len;
+                }
+                out
             }
         }
     }

@@ -5437,6 +5437,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-xt-elf"
+version = "40.0.0"
+dependencies = [
+ "lp-xt-emu",
+ "lp-xt-inst",
+ "object 0.36.7",
+]
+
+[[package]]
+name = "lp-xt-emu"
+version = "40.0.0"
+dependencies = [
+ "lp-emu-core",
+ "lp-xt-inst",
+]
+
+[[package]]
 name = "lp-xt-inst"
 version = "40.0.0"
 dependencies = [
@@ -6026,6 +6043,8 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
+ "lp-xt-emu",
+ "lp-xt-inst",
  "lpir",
  "lps-builtin-ids",
  "lps-builtins",
