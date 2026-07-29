@@ -4954,6 +4954,28 @@ mod tests {
                     .any(|px| px[..6].iter().any(|byte| *byte != 0)),
                 "{dir}: the effect's forwarded visual should contain nonzero RGB"
             );
+
+            // Nonzero pixels alone do not prove the nodes are healthy, so
+            // assert runtime status directly. NOTE this does NOT gate
+            // shader-lowering support: this test runs the HOST backend,
+            // which accepts constructs other targets reject (verified
+            // 2026-07-29 — a shader that failed on 4 of 5 targets still
+            // passed here, status included). Cross-target example coverage
+            // is tracked in docs/debt/example-shaders-not-compile-gated.md.
+            let bad: Vec<String> = rt
+                .tree()
+                .entries()
+                .filter_map(|entry| match entry.status.value() {
+                    NodeRuntimeStatus::Error(message) => {
+                        Some(alloc::format!("{:?}: {message}", entry.path))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                bad.is_empty(),
+                "{dir}: nodes reported runtime errors after render: {bad:#?}"
+            );
         }
     }
 
