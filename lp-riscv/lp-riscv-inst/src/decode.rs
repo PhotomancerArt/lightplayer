@@ -573,7 +573,7 @@ mod tests {
                     imm, imm as u32, decoded_imm, decoded_imm as u32
                 );
             }
-            _ => panic!("Expected AUIPC instruction, got {:?}", decoded),
+            _ => panic!("Expected AUIPC instruction, got {decoded:?}"),
         }
     }
 
@@ -629,7 +629,7 @@ mod tests {
                 assert_eq!(rd, Gpr::T0);
                 assert_eq!(imm, 0x00000);
             }
-            _ => panic!("Expected AUIPC, got {:?}", inst),
+            _ => panic!("Expected AUIPC, got {inst:?}"),
         }
 
         // auipc t0, 0xff000 (upper 20 bits)
@@ -640,7 +640,7 @@ mod tests {
                 assert_eq!(rd, Gpr::T0);
                 assert_eq!(imm, 0xff000000u32 as i32);
             }
-            _ => panic!("Expected AUIPC, got {:?}", inst),
+            _ => panic!("Expected AUIPC, got {inst:?}"),
         }
 
         // auipc t0, 0xfffff (upper 20 bits)
@@ -651,7 +651,7 @@ mod tests {
                 assert_eq!(rd, Gpr::T0);
                 assert_eq!(imm, 0xfffff000u32 as i32);
             }
-            _ => panic!("Expected AUIPC, got {:?}", inst),
+            _ => panic!("Expected AUIPC, got {inst:?}"),
         }
     }
 
@@ -687,7 +687,7 @@ mod tests {
         let inst = decode_instruction(0x0010100f).expect("Failed to decode");
         match inst {
             Inst::FenceI => {}
-            _ => panic!("Expected FenceI, got {:?}", inst),
+            _ => panic!("Expected FenceI, got {inst:?}"),
         }
     }
 
@@ -702,7 +702,7 @@ mod tests {
         let decoded = decode_instruction(encoded).expect("Failed to decode");
         match decoded {
             Inst::FenceI => {}
-            _ => panic!("Expected FenceI, got {:?}", decoded),
+            _ => panic!("Expected FenceI, got {decoded:?}"),
         }
     }
 
@@ -726,7 +726,7 @@ mod tests {
                         "shift amount mismatch: expected {shamt}, got {imm}"
                     );
                 }
-                _ => panic!("Expected SRLI, got {:?} for shamt={}", decoded, shamt),
+                _ => panic!("Expected SRLI, got {decoded:?} for shamt={shamt}"),
             }
         }
     }
@@ -751,7 +751,7 @@ mod tests {
                         "shift amount mismatch: expected {shamt}, got {imm}"
                     );
                 }
-                _ => panic!("Expected SRAI, got {:?} for shamt={}", decoded, shamt),
+                _ => panic!("Expected SRAI, got {decoded:?} for shamt={shamt}"),
             }
         }
     }
@@ -771,7 +771,7 @@ mod tests {
                 assert_eq!(rs1, Gpr::A1);
                 assert_eq!(imm, 0, "Expected shift amount 0, got {imm}");
             }
-            _ => panic!("Expected SRLI, got {:?}", inst),
+            _ => panic!("Expected SRLI, got {inst:?}"),
         }
 
         // SRLI a0, a1, 24
@@ -784,7 +784,7 @@ mod tests {
                 assert_eq!(rs1, Gpr::A1);
                 assert_eq!(imm, 24, "Expected shift amount 24, got {imm}");
             }
-            _ => panic!("Expected SRLI, got {:?}", inst),
+            _ => panic!("Expected SRLI, got {inst:?}"),
         }
 
         // SRAI a0, a1, 0
@@ -797,7 +797,7 @@ mod tests {
                 assert_eq!(rs1, Gpr::A1);
                 assert_eq!(imm, 0, "Expected shift amount 0, got {imm}");
             }
-            _ => panic!("Expected SRAI, got {:?}", inst),
+            _ => panic!("Expected SRAI, got {inst:?}"),
         }
 
         // SRAI a0, a1, 24
@@ -810,7 +810,7 @@ mod tests {
                 assert_eq!(rs1, Gpr::A1);
                 assert_eq!(imm, 24, "Expected shift amount 24, got {imm}");
             }
-            _ => panic!("Expected SRAI, got {:?}", inst),
+            _ => panic!("Expected SRAI, got {inst:?}"),
         }
 
         // SRAI a0, a1, 31
@@ -823,7 +823,7 @@ mod tests {
                 assert_eq!(rs1, Gpr::A1);
                 assert_eq!(imm, 31, "Expected shift amount 31, got {imm}");
             }
-            _ => panic!("Expected SRAI, got {:?}", inst),
+            _ => panic!("Expected SRAI, got {inst:?}"),
         }
     }
 
@@ -875,7 +875,7 @@ mod tests {
                         "shift amount mismatch: expected {shamt}, got {imm}"
                     );
                 }
-                _ => panic!("Expected SRLI, got {:?} for shamt={}", decoded, shamt),
+                _ => panic!("Expected SRLI, got {decoded:?} for shamt={shamt}"),
             }
         }
     }
@@ -902,7 +902,7 @@ mod tests {
                         "shift amount mismatch: expected {shamt}, got {imm}"
                     );
                 }
-                _ => panic!("Expected SRAI, got {:?} for shamt={}", decoded, shamt),
+                _ => panic!("Expected SRAI, got {decoded:?} for shamt={shamt}"),
             }
         }
     }

@@ -73,6 +73,17 @@ fn patch_file(path: &std::path::Path, contents: &str) {
 fn main() {
     emit_build_provenance();
 
+    // Harness builds: any test_* feature except test_oom selects a hardware
+    // harness entrypoint instead of the app (test_oom runs the full app plus
+    // an OOM/panic exercise). Collapsed to one cfg so app-only code carries a
+    // single gate instead of a 12-feature wall at every site.
+    println!("cargo::rustc-check-cfg=cfg(fw_harness)");
+    let harness = std::env::vars()
+        .any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_") && k != "CARGO_FEATURE_TEST_OOM");
+    if harness {
+        println!("cargo::rustc-cfg=fw_harness");
+    }
+
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
     // Patch esp-hal's linker scripts to retain .eh_frame inside .text.

@@ -1,11 +1,11 @@
-//! Engine shared region: bump allocator with guest addresses in [`lp_riscv_emu::DEFAULT_SHARED_START`].
+//! Engine shared region: bump allocator with guest addresses in [`lp_emu_core::DEFAULT_SHARED_START`].
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lp_riscv_emu::DEFAULT_SHARED_START;
+use lp_emu_core::DEFAULT_SHARED_START;
 use lpvm::{AllocError, LpvmBuffer, LpvmMemory};
 
 fn round_up(value: usize, align: usize) -> usize {
@@ -38,7 +38,7 @@ impl EmuSharedArena {
         }
     }
 
-    /// Bump allocator over an existing backing store (same `Arc` as [`lp_riscv_emu::Memory::new_with_shared`]).
+    /// Bump allocator over an existing backing store (same `Arc` as [`lp_emu_core::Memory::new_with_shared`]).
     /// `bump_start` is the first byte offset available for allocation (leave room for vmctx / headers).
     pub(crate) fn attach_shared_backing(
         storage: Arc<std::sync::Mutex<Vec<u8>>>,
@@ -51,7 +51,7 @@ impl EmuSharedArena {
         }
     }
 
-    /// Same backing storage as [`LpvmMemory`] allocations (for [`lp_riscv_emu::Memory::new_with_shared`]).
+    /// Same backing storage as [`LpvmMemory`] allocations (for [`lp_emu_core::Memory::new_with_shared`]).
     pub fn storage_arc(&self) -> Arc<std::sync::Mutex<Vec<u8>>> {
         self.storage.clone()
     }

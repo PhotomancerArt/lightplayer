@@ -11,8 +11,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use lp_riscv_emu::profile::cpu::{CallEdge, ROOT_PC};
-use lp_riscv_emu::profile::{CpuCollector, PcSymbolizer};
+use lp_emu_core::profile::cpu::{CallEdge, ROOT_PC};
+use lp_emu_core::profile::{CpuCollector, PcSymbolizer};
 use serde_json::{Value, json};
 
 pub fn write(
@@ -252,9 +252,9 @@ pub fn build(cpu: &CpuCollector, sym: &dyn PcSymbolizer, workload: &str, mode: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_riscv_emu::emu::cycle_model::InstClass;
-    use lp_riscv_emu::profile::cpu::ROOT_PC;
-    use lp_riscv_emu::profile::{Collector, GateAction, TraceSymbol};
+    use lp_emu_core::InstClass;
+    use lp_emu_core::profile::cpu::ROOT_PC;
+    use lp_emu_core::profile::{Collector, GateAction, TraceSymbol};
 
     use crate::commands::profile::symbolize::Symbolizer;
 

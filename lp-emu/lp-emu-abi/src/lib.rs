@@ -1,4 +1,4 @@
-//! Shared code between RISC-V emulator host and guest.
+//! Shared ABI between emulator host and guest.
 //!
 //! This crate provides common definitions and types shared between the emulator runtime
 //! and code running inside the emulator, including syscall constants and serial communication types.
@@ -10,7 +10,6 @@ extern crate alloc;
 pub mod guest_serial;
 pub mod jit_symbol_entry;
 pub mod recovery_handshake;
-mod simple_elf;
 mod syscall;
 
 pub use jit_symbol_entry::JitSymbolEntry;

@@ -219,35 +219,11 @@ fn on_alloc_error(layout: Layout) -> ! {
 }
 
 mod board;
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "test_espnow",
-)))]
+#[cfg(not(fw_harness))]
 mod boot;
 #[cfg(any(
-    not(any(
-        feature = "test_rmt",
-        feature = "test_dither",
-        feature = "test_gpio",
-        feature = "test_gpio_calibrate",
-        feature = "test_button",
-        feature = "test_usb",
-        feature = "test_json",
-        feature = "test_msafluid",
-        feature = "test_fluid_demo",
-        feature = "test_jit_math_perf",
-        feature = "test_espnow",
-    )),
+    not(fw_harness),
+    feature = "test_shader_compile_incremental",
     feature = "test_button",
     feature = "test_espnow",
 ))]
@@ -255,20 +231,7 @@ mod hardware;
 mod jit_fns;
 mod logger;
 #[cfg(any(
-    not(any(
-        feature = "test_rmt",
-        feature = "test_dither",
-        feature = "test_gpio",
-        feature = "test_gpio_calibrate",
-        feature = "test_button",
-        feature = "test_usb",
-        feature = "test_json",
-        feature = "test_msafluid",
-        feature = "test_fluid_demo",
-        feature = "test_jit_math_perf",
-        feature = "test_shader_compile_incremental",
-        feature = "test_espnow",
-    )),
+    not(fw_harness),
     feature = "test_rmt",
     feature = "test_dither",
     feature = "test_gpio",
@@ -279,138 +242,26 @@ mod logger;
 mod output;
 mod recovery;
 mod serial;
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "test_espnow",
-)))]
+#[cfg(not(fw_harness))]
 mod server_loop;
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "test_espnow",
-)))]
+#[cfg(not(fw_harness))]
 mod time;
-#[cfg(all(
-    feature = "server",
-    not(any(
-        feature = "test_rmt",
-        feature = "test_dither",
-        feature = "test_gpio",
-        feature = "test_gpio_calibrate",
-        feature = "test_button",
-        feature = "test_usb",
-        feature = "test_json",
-        feature = "test_msafluid",
-        feature = "test_fluid_demo",
-        feature = "test_jit_math_perf",
-        feature = "test_shader_compile_incremental",
-        feature = "test_espnow",
-    )),
-))]
+#[cfg(all(feature = "server", not(fw_harness),))]
 mod transport;
 
-#[cfg(all(
-    not(feature = "memory_fs"),
-    not(any(
-        feature = "test_rmt",
-        feature = "test_dither",
-        feature = "test_gpio",
-        feature = "test_gpio_calibrate",
-        feature = "test_button",
-        feature = "test_usb",
-        feature = "test_json",
-        feature = "test_msafluid",
-        feature = "test_fluid_demo",
-        feature = "test_jit_math_perf",
-        feature = "test_shader_compile_incremental",
-        feature = "test_espnow",
-    )),
-))]
+#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod flash_storage;
-#[cfg(all(
-    not(feature = "memory_fs"),
-    not(any(
-        feature = "test_rmt",
-        feature = "test_dither",
-        feature = "test_gpio",
-        feature = "test_gpio_calibrate",
-        feature = "test_button",
-        feature = "test_usb",
-        feature = "test_json",
-        feature = "test_msafluid",
-        feature = "test_fluid_demo",
-        feature = "test_jit_math_perf",
-        feature = "test_shader_compile_incremental",
-        feature = "test_espnow",
-    )),
-))]
+#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod lp_fs_flash;
 
 #[cfg(all(
     feature = "radio",
-    not(any(
-        feature = "test_rmt",
-        feature = "test_dither",
-        feature = "test_gpio",
-        feature = "test_gpio_calibrate",
-        feature = "test_button",
-        feature = "test_usb",
-        feature = "test_json",
-        feature = "test_msafluid",
-        feature = "test_fluid_demo",
-        feature = "test_jit_math_perf",
-        feature = "test_espnow",
-    )),
+    any(not(fw_harness), feature = "test_shader_compile_incremental"),
 ))]
 use hardware::espnow_radio_driver::Esp32EspNowRadioDriver;
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "test_espnow",
-)))]
+#[cfg(not(fw_harness))]
 use lpfs::lp_path::AsLpPath;
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "test_espnow",
-)))]
+#[cfg(not(fw_harness))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32c6::init::{init_board, start_runtime},
@@ -428,84 +279,39 @@ use {
     time::Esp32TimeProvider,
 };
 
-#[cfg(feature = "test_rmt")]
+#[cfg(fw_harness)]
 mod tests {
-    pub mod test_rmt;
-}
-
-#[cfg(feature = "test_dither")]
-mod tests {
-    pub mod test_dither;
-}
-
-#[cfg(feature = "test_gpio")]
-mod tests {
-    pub mod test_gpio;
-}
-
-#[cfg(feature = "test_gpio_calibrate")]
-mod tests {
-    pub mod test_gpio_calibrate;
-}
-
-#[cfg(feature = "test_button")]
-mod tests {
-    pub mod test_button;
-}
-
-#[cfg(feature = "test_usb")]
-mod tests {
-    pub mod test_usb;
-}
-
-#[cfg(feature = "test_json")]
-mod tests {
-    pub mod test_json;
-}
-
-#[cfg(feature = "test_msafluid")]
-mod tests {
-    pub mod msafluid_solver;
-    pub mod test_msafluid;
-}
-
-#[cfg(feature = "test_fluid_demo")]
-mod tests {
+    #[cfg(feature = "test_fluid_demo")]
     pub mod fluid_demo;
-    pub mod msafluid_solver;
-}
-
-#[cfg(feature = "test_jit_math_perf")]
-mod tests {
-    pub mod jit_math_perf;
-}
-
-#[cfg(feature = "test_shader_compile_incremental")]
-mod tests {
+    #[cfg(feature = "test_shader_compile_incremental")]
     pub mod incremental_shader_compile;
-}
-
-#[cfg(feature = "test_espnow")]
-mod tests {
+    #[cfg(feature = "test_jit_math_perf")]
+    pub mod jit_math_perf;
+    #[cfg(any(feature = "test_msafluid", feature = "test_fluid_demo"))]
+    pub mod msafluid_solver;
+    #[cfg(feature = "test_button")]
+    pub mod test_button;
+    #[cfg(feature = "test_dither")]
+    pub mod test_dither;
+    #[cfg(feature = "test_espnow")]
     pub mod test_espnow;
+    #[cfg(feature = "test_gpio")]
+    pub mod test_gpio;
+    #[cfg(feature = "test_gpio_calibrate")]
+    pub mod test_gpio_calibrate;
+    #[cfg(feature = "test_json")]
+    pub mod test_json;
+    #[cfg(feature = "test_msafluid")]
+    pub mod test_msafluid;
+    #[cfg(feature = "test_rmt")]
+    pub mod test_rmt;
+    #[cfg(feature = "test_usb")]
+    pub mod test_usb;
 }
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "test_espnow",
-)))]
+#[cfg(not(fw_harness))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
         esp_alloc::HEAP.free().min(u32::MAX as usize) as u32,
@@ -513,20 +319,7 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "test_espnow",
-)))]
+#[cfg(not(fw_harness))]
 struct FirmwareApp {
     server: LpServer,
     transport: transport::StreamingMessageRouterTransport,
@@ -534,20 +327,7 @@ struct FirmwareApp {
     watchdog: recovery::watchdog::WatchdogFeeder,
 }
 
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental",
-    feature = "test_espnow",
-)))]
+#[cfg(not(fw_harness))]
 #[inline(never)]
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing
@@ -846,20 +626,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_espnow_test(spawner).await;
     }
 
-    #[cfg(not(any(
-        feature = "test_rmt",
-        feature = "test_dither",
-        feature = "test_gpio",
-        feature = "test_gpio_calibrate",
-        feature = "test_button",
-        feature = "test_usb",
-        feature = "test_json",
-        feature = "test_msafluid",
-        feature = "test_fluid_demo",
-        feature = "test_jit_math_perf",
-        feature = "test_shader_compile_incremental",
-        feature = "test_espnow",
-    )))]
+    #[cfg(not(fw_harness))]
     {
         let app = boot_firmware(spawner);
         // Keep the marker substring "fw-esp32 initialized, starting server

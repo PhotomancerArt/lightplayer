@@ -16,7 +16,6 @@ use lpc_model::HwEndpointSpec;
 
 const DRIVER_ID: &str = "esp32-gpio-button";
 const DISPLAY_LABEL: &str = "ESP32 GPIO Button";
-const MAX_ESP32C6_GPIO: u8 = 30;
 
 pub struct Esp32GpioButtonDriver {
     registry: Rc<HwRegistry>,
@@ -177,7 +176,7 @@ fn gpio_number(address: &HwAddress) -> Result<u8, HardwareEndpointError> {
         .map_err(|_| HardwareEndpointError::UnsupportedConfig {
             reason: format!("invalid ESP32 GPIO address: {address}"),
         })?;
-    if gpio > MAX_ESP32C6_GPIO {
+    if gpio > crate::board::esp32c6::constants::MAX_GPIO {
         return Err(HardwareEndpointError::UnsupportedConfig {
             reason: format!("ESP32-C6 GPIO {gpio} is outside the supported range"),
         });

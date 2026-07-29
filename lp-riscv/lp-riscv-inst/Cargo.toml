@@ -16,4 +16,5 @@ workspace = true
 std = []  # For debug macro (std::env::var, std::eprintln)
 
 [dev-dependencies]
+lp-emu-core = { path = "../../lp-emu/lp-emu-core", features = ["std"] }
 lp-riscv-emu = { path = "../lp-riscv-emu" }

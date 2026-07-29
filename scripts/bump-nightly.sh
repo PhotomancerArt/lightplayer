@@ -57,6 +57,10 @@ echo "Pinning toolchain: ${CURRENT_PIN:-<unpinned>} -> $CHANNEL (unwinding curre
 #    lp-fw/fw-esp32 which the recipes `cd` into). They must all match or build-std
 #    crates resolve a different, possibly unpinned, toolchain.
 while IFS= read -r tc; do
+    if grep -q '^channel = "esp"' "$tc"; then
+        echo "  skipped (esp channel) $tc"
+        continue
+    fi
     sedi -E "s/^channel = \"nightly(-[0-9]{4}-[0-9]{2}-[0-9]{2})?\"/channel = \"$CHANNEL\"/" "$tc"
     grep -q "channel = \"$CHANNEL\"" "$tc" \
         || { echo "error: failed to update channel in $tc" >&2; exit 1; }
