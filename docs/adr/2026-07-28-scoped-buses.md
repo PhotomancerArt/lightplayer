@@ -81,6 +81,25 @@ at load time from the projected node spine:
    bus-independent). A scope with no visual writer renders cleared —
    a project without a visual is a legitimate shape, not an error.
 
+   A **non-root** project node's mirror additionally carries a produced
+   *default* onto `visual.out` at fallback priority. Per rule 4 that
+   lands in the project node's OWN nearest scope — the parent's — because
+   the node itself sits there; only its children are inside the scope it
+   introduces. So an embedded effect contributes its visual to its host
+   by default and is genuinely drop-in, while its interior stays
+   isolated. Root is excluded (its containing scope is the scope its
+   mirror reads, so a default there would be self-referential).
+
+   Accepted consequence (2026-07-29): embedding an effect in a project
+   that already drives `visual.out` leaves two equal-priority writers,
+   which resolves as **ambiguous** until the author picks one. This was
+   chosen over staying explicit (which left effects inert on arrival)
+   and over auto-publishing only when unclaimed (order-dependent, and
+   hard to explain when a later shader silently displaces the effect).
+   `ProjectDef` carries no `bindings` map yet, so that pick cannot
+   currently be authored on the project node — a gap to close when
+   contention shows up in practice.
+
 The consume/produce asymmetry is deliberate: reads inherit (that is the
 "just works" magic — lexical-style shadowing means an effect without a
 clock inherits host time, and an effect *with* a clock shadows time for
@@ -111,8 +130,9 @@ writes stay local (that is the encapsulation guarantee).
   handle, the published row carries the project node's *own* handle
   (product rows always name their owning node — playlist parity), and
   `RenderNode` dispatch forwards one hop to the remembered producer
-  (cleared when there is none). No bindings are registered for the
-  mirror, so the binding graph and bus pane of existing projects are
+  (cleared when there is none). The only binding the mirror registers is
+  the non-root produced default from rule 5; existing flat projects have
+  no non-root project nodes, so their binding graph and bus pane are
   unchanged. Its state root is engine-side (not part of the model's
   static shape catalog): no schema surface.
 - `bus:time`'s default writer is the clock node's produced
