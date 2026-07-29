@@ -34,7 +34,7 @@ fn fyeah_sign_discovers_referenced_node_defs_and_assets() {
         registry,
         &[
             ("/blast.glsl", AssetContentType::ShaderSource),
-            ("/fyeah-mapping.svg", AssetContentType::FixtureSvg),
+            ("/fyeah.map2d.json", AssetContentType::FixtureMap2d),
             ("/idle.glsl", AssetContentType::ShaderSource),
         ],
     );

@@ -336,7 +336,7 @@ pub(crate) fn device_project_empty_view() -> UiPaneView {
             ),
         ],
         vec![
-            "[fw-esp32] LightPlayer protocol ready",
+            "[fw-esp32c6] LightPlayer protocol ready",
             "[lp-server] loaded projects: 0",
         ],
     )
@@ -371,7 +371,7 @@ pub(crate) fn device_project_selection_view() -> UiPaneView {
             ),
         ],
         vec![
-            "[fw-esp32] LightPlayer protocol ready",
+            "[fw-esp32c6] LightPlayer protocol ready",
             "[lp-server] loaded projects: 2",
         ],
     )

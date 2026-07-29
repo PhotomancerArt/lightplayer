@@ -1,13 +1,14 @@
 //! `lp-cli profile` — run a workload under the emulator with unified profiling.
 
 use anyhow::{Context, Result, bail};
+use lp_emu_core::profile::{
+    Collector, HaltReason, PcSymbolizer, TraceSymbol, alloc::AllocCollector, cpu::CpuCollector,
+    events::EventsCollector,
+};
+use lp_emu_core::{LogLevel, TimeMode};
 use lp_riscv_elf::load_elf;
 use lp_riscv_emu::{
-    LogLevel, Riscv32Emulator, TimeMode,
-    profile::alloc::AllocCollector,
-    profile::cpu::CpuCollector,
-    profile::events::EventsCollector,
-    profile::{Collector, HaltReason, PcSymbolizer, TraceSymbol},
+    Riscv32Emulator,
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
@@ -115,7 +116,10 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
                 &trace_dir, heap_start, heap_size,
             )?)),
             "events" => collectors.push(Box::new(EventsCollector::new(&trace_dir)?)),
-            "cpu" => collectors.push(Box::new(CpuCollector::new(args.cycle_model.label()))),
+            "cpu" => collectors.push(Box::new(CpuCollector::new_with_ram_start(
+                args.cycle_model.label(),
+                lp_emu_core::DEFAULT_RAM_START,
+            ))),
             other => bail!("unknown collector '{other}'; supported: alloc, events, cpu"),
         }
     }

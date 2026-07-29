@@ -11,6 +11,8 @@ pub enum UiAssetEditorKind {
     Glsl,
     /// SVG document or fixture map.
     Svg,
+    /// 2D mapping document (`*.map2d.json`) — opens the mapping editor.
+    Map2d,
     /// Binary or opaque asset.
     Binary,
 }
@@ -71,11 +73,11 @@ impl UiSlotAsset {
 }
 
 impl UiAssetEditorKind {
-    /// Whether Studio offers an inline editor for assets of this kind. This
-    /// is the data-driven gate: GLSL only today; `Svg` joins in M3 by
-    /// extending this match (nothing else keys on the kind).
+    /// Whether Studio offers an inline editor for assets of this kind: the
+    /// data-driven gate. GLSL opens the code editor; Map2d opens the mapping
+    /// editor (the fixture face routes it). Nothing else keys on the kind.
     pub fn supports_editor(self) -> bool {
-        matches!(self, Self::Glsl)
+        matches!(self, Self::Glsl | Self::Map2d)
     }
 
     /// Compact editor label shared by slot detail popups and the editor.
@@ -84,6 +86,7 @@ impl UiAssetEditorKind {
             Self::Text => "Text asset",
             Self::Glsl => "GLSL asset",
             Self::Svg => "SVG asset",
+            Self::Map2d => "Mapping asset",
             Self::Binary => "Binary asset",
         }
     }

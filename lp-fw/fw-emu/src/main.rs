@@ -132,7 +132,7 @@ pub extern "C" fn _lp_main() -> ! {
     let time_provider_rc = Rc::new(SyscallTimeProvider::new());
     // GLSL frontend: the emulator matches the device product constant
     // (LpsGlsl); the crate's own `naga` feature is an explicit builder
-    // opt-in mirroring fw-esp32's.
+    // opt-in mirroring fw-esp32c6's.
     let shader_frontend = if cfg!(feature = "naga") {
         lpa_server::ShaderFrontend::Naga
     } else {

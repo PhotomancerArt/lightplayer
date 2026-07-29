@@ -4,12 +4,12 @@
 
 rv32_target := "riscv32imac-unknown-none-elf"
 rv32_packages := "lps-builtins-emu-app"
-rv32_firmware_packages := "fw-esp32"
+rv32_firmware_packages := "fw-esp32c6"
 
-# fw-esp32 uses release-esp32 (panic=unwind, nightly) for panic recovery
+# fw-esp32c6 uses release-esp32 (panic=unwind, nightly) for panic recovery
 
-fw_esp32_profile := "release-esp32"
-fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
+fw_esp32c6_profile := "release-esp32"
+fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp32c6"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -411,7 +411,7 @@ studio-firmware-package-esp32c6: install-rv32-target
     manifest_file="${out_dir}/manifest.json"
 
     echo "Building ${display_name}..."
-    (cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features "${features}")
+    (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features "${features}")
 
     mkdir -p "${out_dir}"
     rm -f "${out_dir}"/*.bin "${manifest_file}"
@@ -419,10 +419,10 @@ studio-firmware-package-esp32c6: install-rv32-target
     echo "Generating browser-flashable merged ESP32-C6 image..."
     espflash save-image \
         --chip esp32c6 \
-        --partition-table lp-fw/fw-esp32/partitions.csv \
+        --partition-table lp-fw/fw-esp32c6/partitions.csv \
         --merge \
         --skip-padding \
-        {{ fw_esp32_elf }} \
+        {{ fw_esp32c6_elf }} \
         "${image_file}"
 
     size_bytes="$(wc -c < "${image_file}" | tr -d ' ')"
@@ -444,7 +444,7 @@ studio-firmware-package-esp32c6: install-rv32-target
     MANIFEST_FIRMWARE_ID="${firmware_id}" \
     MANIFEST_DISPLAY_NAME="${display_name}" \
     MANIFEST_TARGET="{{ rv32_target }}" \
-    MANIFEST_PROFILE="{{ fw_esp32_profile }}" \
+    MANIFEST_PROFILE="{{ fw_esp32c6_profile }}" \
     MANIFEST_SOURCE_COMMIT="${source_commit}" \
     MANIFEST_SOURCE_DIRTY="${source_dirty}" \
     MANIFEST_WIRE_PROTO="${wire_proto}" \
@@ -555,13 +555,13 @@ build-host:
 build-host-release:
     cargo build --release
 
-build-rv32: install-rv32-target build-rv32-builtins build-fw-esp32 build-rv32-emu-guest-test-app
+build-rv32: install-rv32-target build-rv32-builtins build-fw-esp32c6 build-rv32-emu-guest-test-app
 
 build-rv32-release: build-rv32
 
-# riscv32: fw-esp32 (uses release-esp32 profile: nightly + panic=unwind for OOM recovery)
-build-fw-esp32: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6
+# riscv32: fw-esp32c6 (uses release-esp32 profile: nightly + panic=unwind for OOM recovery)
+build-fw-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6
 
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
@@ -579,9 +579,9 @@ esp-stack-sizes pattern="": install-rv32-target
 
     set +e
     RUSTFLAGS='-Z emit-stack-sizes' cargo build \
-        -p fw-esp32 \
+        -p fw-esp32c6 \
         --target {{ rv32_target }} \
-        --profile {{ fw_esp32_profile }} \
+        --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,server
     build_status=$?
     set -e
@@ -589,15 +589,15 @@ esp-stack-sizes pattern="": install-rv32-target
         echo "cargo build exited with $build_status; continuing if the .stack_sizes object was emitted"
     fi
 
-    deps_dir="target/{{ rv32_target }}/{{ fw_esp32_profile }}/deps"
-    obj="$(find "$deps_dir" -type f -name 'fw_esp32-*.rcgu.o' -print | xargs ls -t 2>/dev/null | head -n 1 || true)"
+    deps_dir="target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/deps"
+    obj="$(find "$deps_dir" -type f -name 'fw_esp32c6-*.rcgu.o' -print | xargs ls -t 2>/dev/null | head -n 1 || true)"
     if [ -z "$obj" ]; then
-        echo "No fw_esp32 rcgu object found under $deps_dir"
+        echo "No fw_esp32c6 rcgu object found under $deps_dir"
         exit 1
     fi
 
     out_dir="target/stack-sizes"
-    out="$out_dir/fw-esp32.stack-sizes.txt"
+    out="$out_dir/fw-esp32c6.stack-sizes.txt"
     mkdir -p "$out_dir"
     rust-readobj --stack-sizes "$obj" > "$out"
     echo "Stack-size report: $out"
@@ -615,11 +615,19 @@ build-rv32-emu-guest-test-app: install-rv32-target
 build-fw-emu: install-rv32-target
     cargo build --target {{ rv32_target }} -p fw-emu --release
 
-# CI build: host + rv32 builtins + emu-guest. Skips fw-esp32
+# CI build: host + rv32 builtins + emu-guest. Skips fw-esp32c6
 
 # (needs ESP32 linker symbols / toolchain not always available on generic runners)
 [parallel]
 build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
+
+# What CI actually builds before running tests: just the cross-target
+# prerequisites host tests embed/spawn (the builtins ELF and the emu guest
+# app). Everything else is built by `cargo test` itself — a separate
+# build-host pass only duplicated that work (~12 min/run when CI ran
+# `build-ci` as its own phase).
+[parallel]
+ci-prereqs: build-rv32-builtins build-rv32-emu-guest-test-app
 
 # riscv32: builtins only (for filetests; no ESP32 firmware)
 build-rv32-builtins: install-rv32-target
@@ -646,10 +654,10 @@ build-app-release:
 # ============================================================================
 
 build-glsl:
-    cargo build --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
+    cargo build --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 build-glsl-release:
-    cargo build --release --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
+    cargo build --release --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 # ============================================================================
 # Formatting
@@ -671,17 +679,17 @@ fmt-check:
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
     cargo clippy -p lp-gfx-wgpu -p fw-browser -p naga-wasm-poc -- --no-deps -D warnings
 
-clippy-rv32: install-rv32-target clippy-fw-esp32 clippy-rv32-emu-guest-test-app
+clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-rv32-emu-guest-test-app
 
-# riscv32: fw-esp32 clippy
-clippy-fw-esp32: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6 -- --no-deps -D warnings
+# riscv32: fw-esp32c6 clippy
+clippy-fw-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6 -- --no-deps -D warnings
 
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
@@ -725,10 +733,10 @@ clippy-app-fix:
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm -- --no-deps -D warnings
+    cargo clippy --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
+    cargo clippy --fix --allow-dirty --allow-staged --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -737,15 +745,22 @@ clippy-glsl-fix:
 [parallel]
 test: test-rust test-filetests
 
-test-rust:
+test-rust-core:
     cargo test
-    # Studio web view layer is outside default-members (Dioxus web dep tree);
-    # its unit tests are pure host-runnable view helpers. Separate invocation
-    # per the no-workspace-wide-cargo rule (feature unification).
-    # `stories` is on because the story book carries host-testable invariants of
-    # the capture harness seam (see `overview_ids_are_reserved_for_generated_composites`);
-    # without it that module is not compiled and its tests silently do not run.
+
+# Studio web view layer is outside default-members (Dioxus web dep tree);
+# its unit tests are pure host-runnable view helpers. Separate invocation
+# per the no-workspace-wide-cargo rule (feature unification).
+# `stories` is on because the story book carries host-testable invariants of
+# the capture harness seam (see `overview_ids_are_reserved_for_generated_composites`);
+# without it that module is not compiled and its tests silently do not run.
+# CI gates this recipe on studio paths (the feature-unified Dioxus rebuild is
+# the single most expensive test compile); locally it is part of `test-rust`.
+test-studio-host:
     cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
+
+# Local parity: all host tests. CI composes the same pieces path-gated.
+test-rust: test-rust-core test-studio-host
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
@@ -783,7 +798,7 @@ test-app:
 # ============================================================================
 
 test-glsl:
-    cargo test --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-riscv-emu-shared --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
+    cargo test --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 test-glsl-filetests:
     scripts/filetests.sh
@@ -794,8 +809,17 @@ test-glsl-filetests:
 # CI and validation
 # ============================================================================
 
+# CI runs the lint-only half (`check-lint`) as its own parallel job and runs
+# `schema-check` inside the Validate job instead: schema-check needs a real
+# dev build of lp-cli, which shares warm artifacts with the test builds there
+# but shares nothing with clippy's check-mode output (racing clippy for cores
+# was measured at ~18 min for the pair on a 4-core runner). Local `check`
+# keeps the full meaning.
 [parallel]
-check: fmt-check clippy lint-serde-content lint-schemars-fw schema-check lint-torture-corpus
+check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus
+
+[parallel]
+check: check-lint schema-check
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -882,10 +906,10 @@ demo example="basic":
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
 # Usage: just demo-esp32c6-host [example-name]
 demo-esp32c6-host example="basic": install-rv32-target
-    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6,server
+    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server
     PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}; \
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
 
 # Run an ESP32-C6 demo as an automated hardware check: capture boot serial,
@@ -900,10 +924,10 @@ test-native-rainbow: build-rv32-builtins
 # Requires: ESP32-C6 device connected via USB. Builds the explicit Naga reference frontend.
 # Usage: just demo-esp32c6-host-naga [example-name]
 demo-esp32c6-host-naga example="basic": install-rv32-target
-    cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6,server,naga
+    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,naga
     PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}; \
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
 
 # Same as demo-esp32c6-check, but builds the explicit Naga frontend.
@@ -911,18 +935,18 @@ demo-esp32c6-check-naga example="basic": install-rv32-target
     cargo run --package lp-cli -- fwcheck demo esp32c6 {{ example }} --features server,naga
 
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
-demo-esp32c6-standalone: build-fw-esp32
+demo-esp32c6-standalone: build-fw-esp32c6
     PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}
 
 # Run firmware on ESP32-C6 device using the test_rmt feature
 fwtest-rmt-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo run --features test_rmt,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run firmware on ESP32-C6 device using the test_dither feature
 fwtest-dithering-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run host-driven GPIO calibration firmware on ESP32-C6
 fwtest-gpio-calibrate-esp32c6: install-rv32-target
@@ -943,7 +967,7 @@ fwtest-gpio-calibrate-esp32c6: install-rv32-target
         port="${candidates[0]}"
     fi
     echo "Using ESPFLASH_PORT=$port"
-    cd lp-fw/fw-esp32 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Flash GPIO calibration firmware, then run the host-side GPIO calibration prompt
 calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
@@ -964,9 +988,9 @@ calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
         port="${candidates[0]}"
     fi
     echo "Using ESPFLASH_PORT=$port"
-    cd lp-fw/fw-esp32 && cargo build --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo build --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
     cd ../..
-    espflash flash --chip esp32c6 --port "$port" --after hard-reset target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32
+    espflash flash --chip esp32c6 --port "$port" --after hard-reset target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6
     sleep 1
     args=(hardware calibrate esp32c6 --board "{{ board }}" --port "serial:$port")
     if [[ -n "{{ label }}" ]]; then
@@ -976,30 +1000,30 @@ calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
 
 # Run firmware on ESP32-C6 device using the test_json feature (validates ser-write-json)
 fwtest-json-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run firmware with test_oom: allocates until OOM, verifies catch_unwind recovers
 fwtest-oom-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_oom,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo run --features test_oom,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run firmware with test_msafluid: MSAFluid solver perf experiment, prints mcycle per step
 fwtest-msafluid-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_msafluid,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo run --features test_msafluid,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run firmware with test_fluid_demo: live RGB MSAFluid demo on examples/basic ring fixture (GPIO4)
 fwtest-fluid-demo-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_fluid_demo,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo run --features test_fluid_demo,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run firmware with test_jit_math_perf: Q32 JIT math kernel cycle experiment
 fwtest-jit-math-perf-esp32c6: install-rv32-target
     PORT="$(find /dev -maxdepth 1 -name 'cu.usbmodem*' | sort | head -n 1)"; \
     test -n "$PORT"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    cd lp-fw/fw-esp32 && ESPFLASH_PORT="$PORT" cargo run --features test_jit_math_perf,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$PORT" cargo run --features test_jit_math_perf,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run firmware with test_shader_compile_incremental: stepped native shader compile timing + heap experiment
 fwtest-shader-compile-incremental-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --features test_shader_compile_incremental,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo run --features test_shader_compile_incremental,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run the shader compile stress harness on ESP32-C6, save serial output to a trace file, and stop once the harness reports DONE.
 fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
@@ -1007,7 +1031,7 @@ fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
 
 # Run firmware with test_espnow: 1Hz simulated button events over ESP-NOW
 fwtest-espnow-esp32c6: install-rv32-target
-    cd lp-fw/fw-esp32 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32c6 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 cargo-update:
     cargo update -p regalloc2 \
@@ -1022,13 +1046,13 @@ cargo-update:
 # Decode ESP32-C6 backtrace addresses
 # Usage: just decode-backtrace 0x420381c2 0x42038172 ...
 #        pbpaste | just decode-backtrace
-# Build first: just build-fw-esp32
+# Build first: just build-fw-esp32c6
 
 # Uses `addr2line` (cargo install addr2line) or riscv32-esp-elf-addr2line if available
 decode-backtrace *addrs:
     #!/usr/bin/env bash
     set -e
-    test -f target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32
+    test -f target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6
     if [ -n "{{ addrs }}" ]; then
         ADDRS="{{ addrs }}"
     else
@@ -1039,9 +1063,9 @@ decode-backtrace *addrs:
         exit 1
     fi
     if command -v riscv32-esp-elf-addr2line >/dev/null 2>&1; then
-        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32 $ADDRS
+        riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6 $ADDRS
     else
-        addr2line -e target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32 -f -a $ADDRS
+        addr2line -e target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6 -f -a $ADDRS
     fi
 
 # ============================================================================

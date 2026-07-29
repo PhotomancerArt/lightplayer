@@ -12,7 +12,7 @@
 extern crate alloc;
 
 use alloc::string::ToString;
-use lp_riscv_emu_shared::recovery_handshake as hs;
+use lp_emu_abi::recovery_handshake as hs;
 use lpc_engine::node::NodeError;
 use lpc_engine::node::catch_node_panic::catch_node_panic_framed;
 

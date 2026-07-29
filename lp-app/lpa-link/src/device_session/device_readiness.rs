@@ -406,7 +406,7 @@ mod tests {
         ServerHello {
             proto,
             fw: FwProvenance {
-                package: "fw-esp32".to_string(),
+                package: "fw-esp32c6".to_string(),
                 commit: "test".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),

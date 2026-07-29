@@ -2,7 +2,8 @@
 //!
 //! These tests verify individual instruction decoding, encoding, and execution.
 
-use lp_riscv_emu::{Riscv32Emulator, StepResult};
+use lp_emu_core::StepResult;
+use lp_riscv_emu::Riscv32Emulator;
 use lp_riscv_inst::{Gpr, Inst, decode_instruction, encode};
 
 #[test]

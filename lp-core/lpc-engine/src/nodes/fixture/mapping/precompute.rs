@@ -31,7 +31,7 @@ pub fn compute_mapping(
 
     match config {
         MappingConfig::Unset => {}
-        MappingConfig::SvgPath { .. } => {}
+        MappingConfig::Map2d { .. } => {}
         MappingConfig::PathPoints {
             paths: _,
             sample_diameter: _,
