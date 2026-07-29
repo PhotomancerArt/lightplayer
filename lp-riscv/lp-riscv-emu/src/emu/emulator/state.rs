@@ -2,17 +2,16 @@
 
 extern crate alloc;
 
-use super::super::{
-    cycle_model::CycleModel, executor::ExecutionResult, logging::LogLevel, memory::Memory,
-};
-use crate::serial::host_serial::HostSerial;
-use crate::time::TimeMode;
+use super::super::executor::ExecutionResult;
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 #[cfg(feature = "std")]
 use alloc::string::String;
 use alloc::vec::Vec;
-use cranelift_codegen::ir::TrapCode;
+use lp_emu_core::Memory;
+use lp_emu_core::TrapCode;
+use lp_emu_core::serial::host_serial::HostSerial;
+use lp_emu_core::{CycleModel, LogLevel, TimeMode};
 
 #[cfg(feature = "std")]
 use std::path::PathBuf;
@@ -20,10 +19,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 #[cfg(feature = "std")]
-use crate::profile::{Collector, Gate, HaltReason, ProfileSession, SessionMetadata};
+use lp_emu_core::profile::{Collector, Gate, HaltReason, ProfileSession, SessionMetadata};
 
 /// Default RAM start address (0x80000000, matching embive's RAM_OFFSET).
-pub const DEFAULT_RAM_START: u32 = 0x80000000;
 
 /// Default per-call instruction limit for [`Riscv32Emulator::call_function`].
 /// Hard host-side backstop against runaway guest code (infinite loops in
@@ -32,8 +30,6 @@ pub const DEFAULT_RAM_START: u32 = 0x80000000;
 /// [`Riscv32Emulator::with_call_instruction_limit`] so the guest-level trap
 /// fires deterministically first.
 pub const DEFAULT_CALL_INSTRUCTION_LIMIT: u64 = 1_000_000;
-
-pub use super::super::memory::DEFAULT_SHARED_START;
 
 /// Result of running one driven frame (host workload driver).
 #[cfg(feature = "std")]
@@ -215,8 +211,8 @@ impl Riscv32Emulator {
 
     /// Take the active profiling session after emitting `profile:end` at the current cycle.
     ///
-    /// The emulator's session slot is cleared. Call [`crate::profile::ProfileSession::finish`] or
-    /// [`crate::profile::ProfileSession::finish_with_symbolizer`] on the returned value to flush
+    /// The emulator's session slot is cleared. Call [`lp_emu_core::profile::ProfileSession::finish`] or
+    /// [`lp_emu_core::profile::ProfileSession::finish_with_symbolizer`] on the returned value to flush
     /// collectors and write `report.txt`.
     #[cfg(feature = "std")]
     pub fn take_profile_session(&mut self) -> Option<ProfileSession> {
@@ -373,7 +369,7 @@ impl Riscv32Emulator {
     pub fn serial_write_line(
         &mut self,
         line: &str,
-    ) -> Result<usize, crate::serial::host_serial::SerialError> {
+    ) -> Result<usize, lp_emu_core::serial::host_serial::SerialError> {
         let serial = self.get_or_create_serial_host();
         serial.host_write_line(line)
     }
@@ -444,8 +440,8 @@ impl Riscv32Emulator {
     /// [`FrameOutcome::Yielded`] so the caller can re-tick clocks or adjust budgets.
     #[cfg(feature = "std")]
     pub fn run_until_yield_or_stop(&mut self, max_steps: u64) -> FrameOutcome {
-        use super::types::StepResult;
-        use lp_riscv_emu_shared::SYSCALL_YIELD;
+        use lp_emu_abi::SYSCALL_YIELD;
+        use lp_emu_core::StepResult;
 
         let mut steps = 0u64;
         loop {
@@ -507,12 +503,12 @@ impl Riscv32Emulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::TimeMode;
     use alloc::vec;
+    use lp_emu_core::TimeMode;
 
     #[test]
     fn step_returns_profile_stop_when_stop_pending_set() {
-        use super::super::types::StepResult;
+        use lp_emu_core::StepResult;
 
         let code = vec![0x13, 0x00, 0x00, 0x00]; // addi x0, x0, 0
         let mut emu = Riscv32Emulator::new(code, vec![0; 1024]);
@@ -527,7 +523,7 @@ mod tests {
     #[cfg(feature = "std")]
     #[test]
     fn run_until_yield_or_stop_returns_profile_stop() {
-        use super::super::types::StepResult;
+        use lp_emu_core::StepResult;
 
         let code = vec![
             0x13, 0x00, 0x00, 0x00, // nop

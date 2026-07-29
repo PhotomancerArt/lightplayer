@@ -185,7 +185,7 @@ Required checks for changes to this crate:
 
 ```bash
 # ESP32 build (on-device JIT)
-cargo check -p fw-esp32 \
+cargo check -p fw-esp32c6 \
     --target riscv32imac-unknown-none-elf \
     --profile release-esp32 \
     --features esp32c6,server

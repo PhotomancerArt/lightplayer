@@ -76,7 +76,7 @@ it is not currently packaged as a user-facing deployable CLI:
 The CLI uses `lp-client` with WebSocket transport for local development, and can also connect to
 remote servers.
 
-### Firmware ESP32 (`lp-fw/fw-esp32/`)
+### Firmware ESP32 (`lp-fw/fw-esp32c6/`)
 
 Bare-metal firmware for ESP32-C6 microcontrollers:
 
@@ -175,13 +175,26 @@ expected results; the harness compiles and executes on several backends:
 
 Run with `./scripts/filetests.sh` or `just test-filetests`.
 
+## Emulator Substrate (`lp-emu/`)
+
+Architecture-neutral emulator infrastructure shared by the architecture emulators
+(see `docs/adr/2026-07-28-emu-core-crate-family.md`):
+
+- **`lp-emu-core`** - Host-side emulator machinery: guest memory model, run-loop result
+  contract (`StepResult`/`TrapCode`), logging levels, cycle-cost accounting, serial, time
+  control, and the host-side profiler (`std` feature). No cranelift or arch-crate
+  dependencies; arch specifics are injected.
+
+- **`lp-emu-abi`** - Host↔guest protocol: syscall numbers, guest serial framing, recovery
+  handshake, JIT symbol entries.
+
 ## RISC-V Tooling (`lp-riscv/`)
 
 Tools for working with RISC-V code:
 
 - **`lp-riscv-emu`** - RISC-V 32-bit emulator used for testing and development. Supports
   instruction-level logging, memory access tracking, and syscall emulation. Can run in `no_std` mode
-  or with `std` for host tooling.
+  or with `std` for host tooling. Builds on the arch-neutral machinery in `lp-emu-core`.
 
 - **`lp-riscv-elf`** - ELF file loading and linking utilities. Handles symbol resolution,
   relocation, and GOT (Global Offset Table) management for linking JIT-compiled code with builtin

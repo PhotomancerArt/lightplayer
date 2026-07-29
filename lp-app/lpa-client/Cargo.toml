@@ -18,6 +18,7 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, default-features = false }
+lp-emu-core = { path = "../../lp-emu/lp-emu-core", optional = true }
 serialport = { version = "4.8", optional = true }
 hashbrown = { workspace = true, optional = true }
 log = { workspace = true, features = ["std"], optional = true }
@@ -30,10 +31,12 @@ serial = [
     "lp-riscv-elf",
     "lp-riscv-emu",
     "lp-riscv-emu/std",
+    "lp-emu-core",
+    "lp-emu-core/std",
     "hashbrown",
     "serialport",
 ]
-emu = ["host", "lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "hashbrown"]
+emu = ["host", "lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "lp-emu-core", "lp-emu-core/std", "hashbrown"]
 ws = ["host", "tokio-tungstenite"]
 
 [dev-dependencies]

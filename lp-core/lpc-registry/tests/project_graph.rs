@@ -54,7 +54,7 @@ fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consume
     assert_eq!(
         graph
             .asset_consumers
-            .get(&artifact_asset("/fyeah-mapping.svg"))
+            .get(&artifact_asset("/fyeah.map2d.json"))
             .unwrap(),
         &vec![root.child(SlotPath::parse("nodes[fixture]").unwrap())]
     );

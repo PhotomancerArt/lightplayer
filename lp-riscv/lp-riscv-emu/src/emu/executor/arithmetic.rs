@@ -3,7 +3,8 @@
 extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
-use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
+use crate::emu::{error::EmulatorError, logging::InstLog};
+use lp_emu_core::Memory;
 use lp_riscv_inst::{Gpr, format::TypeR};
 
 /// Decode and execute R-type arithmetic instructions.
@@ -1507,7 +1508,7 @@ mod tests {
 
     use super::*;
     use crate::emu::executor::{LoggingDisabled, LoggingEnabled};
-    use crate::emu::memory::Memory;
+    use lp_emu_core::Memory;
     use lp_riscv_inst::{Gpr, encode};
 
     #[test]

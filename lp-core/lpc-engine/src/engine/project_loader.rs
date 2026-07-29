@@ -21,7 +21,8 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeEntryState, TreeError};
-use crate::nodes::fixture::mapping::resolve_svg_path_mapping;
+use crate::nodes::FixtureMap2dSource;
+use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 use crate::nodes::{
     ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, FixtureNode, FluidNode, OutputNode,
     PlaylistNode, PlaylistRuntimeEntry, ProjectNode, ShaderNode, TextureNode, playlist_output_path,
@@ -602,18 +603,19 @@ impl ProjectLoader {
                 continue;
             };
             match resolve_fixture_mapping(fs, registry, node, &config) {
-                Ok(mapping) => {
+                Ok((mapping, map2d_source)) => {
+                    let mut fixture =
+                        FixtureNode::new(node.id, mapping, *config.sampling.value(), frame)
+                            .with_render_defaults(
+                                config.render_width(),
+                                config.render_height(),
+                                *config.color_order.value(),
+                            );
+                    if let Some(source) = map2d_source {
+                        fixture = fixture.with_map2d_source(source);
+                    }
                     runtime
-                        .attach_runtime_node(
-                            node.id,
-                            Box::new(FixtureNode::new(
-                                node.id,
-                                mapping,
-                                *config.sampling.value(),
-                                frame,
-                            )),
-                            frame,
-                        )
+                        .attach_runtime_node(node.id, Box::new(fixture), frame)
                         .map_err(|e| ProjectLoadError::InvalidProjectReference {
                             path: node_label(node),
                             reason: format!("attach fixture runtime: {e}"),
@@ -873,30 +875,39 @@ fn resolve_fixture_mapping(
     registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     config: &FixtureDef,
-) -> Result<MappingConfig, ProjectLoadError> {
+) -> Result<(MappingConfig, Option<FixtureMap2dSource>), ProjectLoadError> {
     match config.mapping.value() {
-        MappingConfig::SvgPath {
-            sample_diameter, ..
-        } => {
-            let svg = materialize_node_text_asset(
+        MappingConfig::Map2d { .. } => {
+            let text = materialize_node_text_asset(
                 fs,
                 registry,
                 node,
-                AssetContentType::FixtureSvg,
-                "fixture SVG",
+                AssetContentType::FixtureMap2d,
+                "fixture map2d document",
             )?;
-            resolve_svg_path_mapping(
-                &svg.text,
-                config.render_width(),
-                config.render_height(),
-                sample_diameter.value().0,
-            )
-            .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                path: node_label(node),
-                reason: format!("resolve svg fixture mapping: {e}"),
-            })
+            let doc = lpc_mapping::Map2dDoc::from_json(&text.text).map_err(|e| {
+                ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("resolve map2d fixture mapping: {e}"),
+                }
+            })?;
+            let mapping =
+                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("resolve map2d fixture mapping: {e}"),
+                    })?;
+            // Keep the source so the runtime node can re-resolve on asset
+            // refresh (the in-place editor's apply path).
+            let source = FixtureMap2dSource {
+                location: text.location,
+                revision: text.revision,
+                render_width: config.render_width(),
+                render_height: config.render_height(),
+            };
+            Ok((mapping, Some(source)))
         }
-        other => Ok(other.clone()),
+        other => Ok((other.clone(), None)),
     }
 }
 
@@ -1981,7 +1992,7 @@ mod tests {
         fs
     }
 
-    fn svg_fixture_project(svg: &[u8]) -> LpFsMemory {
+    fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
         fs.write_file(
             "/project.json".as_path(),
@@ -1998,83 +2009,71 @@ mod tests {
 "#,
         )
         .expect("project.json");
+        fs
+    }
+
+    #[test]
+    fn fixture_map2d_mapping_loads_from_project() {
+        let fs = fixture_project_fs();
         fs.write_file(
             "/fixture.json".as_path(),
             br#"
 {
   "kind": "Fixture",
-  "render_size": {
-    "width": 20,
-    "height": 10
-  },
+  "render_size": { "width": 20, "height": 10 },
   "sampling": "direct",
   "bindings": {
-    "input": {
-      "source": "bus:visual.out"
-    },
-    "output": {
-      "target": "bus:control.out"
-    }
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
   },
-  "mapping": {
-    "kind": "SvgPath",
-    "source": "./mapping.svg",
-    "sample_diameter": 2.0
-  }
+  "mapping": { "kind": "Map2d", "source": "./fixture.map2d.json" }
 }
 "#,
         )
         .expect("fixture.json");
-        fs.write_file("/mapping.svg".as_path(), svg)
-            .expect("mapping.svg");
-        fs
-    }
-
-    #[test]
-    fn fixture_svg_path_mapping_loads_from_project() {
-        let fs = svg_fixture_project(
+        fs.write_file(
+            "/fixture.map2d.json".as_path(),
             br#"
-<svg viewBox="0 0 20 10">
-  <g><polyline points="0 0 10 0"/><text>path:2,count:2</text></g>
-  <g><path d="M10,0 L20,0"/><text><tspan>path:1,count:3</tspan></text></g>
-</svg>
+{
+  "format": 1,
+  "objects": [
+    { "name": "run", "shape": { "path": { "points": [[0,0],[20,10]], "count": 3 } } }
+  ]
+}
 "#,
-        );
+        )
+        .expect("fixture.map2d.json");
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load svg fixture project");
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load map2d fixture project");
         assert!(node_for_def_path(&rt, "/fixture.json").is_some());
     }
 
     #[test]
-    fn fixture_svg_path_mapping_rejects_ungrouped_mapping_text() {
-        let fs = svg_fixture_project(
+    fn fixture_map2d_mapping_rejects_newer_format() {
+        let fs = fixture_project_fs();
+        fs.write_file(
+            "/fixture.json".as_path(),
             br#"
-<svg viewBox="0 0 20 10">
-  <path d="M0,0 L10,0"/>
-  <text>path:1,count:3</text>
-</svg>
+{
+  "kind": "Fixture",
+  "render_size": { "width": 20, "height": 10 },
+  "sampling": "direct",
+  "bindings": {
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
+  },
+  "mapping": { "kind": "Map2d", "source": "./fixture.map2d.json" }
+}
 "#,
-        );
+        )
+        .expect("fixture.json");
+        fs.write_file("/fixture.map2d.json".as_path(), br#"{ "format": 99 }"#)
+            .expect("fixture.map2d.json");
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
-        assert_fixture_node_error(&rt, "not inside a valid group");
-    }
-
-    #[test]
-    fn fixture_svg_path_mapping_rejects_curve_commands() {
-        let fs = svg_fixture_project(
-            br#"
-<svg viewBox="0 0 20 10">
-  <g><path d="M0,0 C1,1 2,2 3,3"/><text>path:1,count:3</text></g>
-</svg>
-"#,
-        );
-
-        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
-        assert_fixture_node_error(&rt, "unsupported SVG path command");
+        assert_fixture_node_error(&rt, "unsupported map2d format 99");
     }
 
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {
@@ -2623,18 +2622,13 @@ mod tests {
     "sample_diameter": 2.0,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1.0,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "offset_angle": 0.0,
-        "order": "inner_first",
-        "ring_lamp_counts": {
-          "0": 1
+        "kind": "PointList",
+        "first_channel": 0,
+        "points": {
+          "0": [
+            0.5,
+            0.5
+          ]
         }
       }
     }
@@ -3026,18 +3020,13 @@ mod tests {
     "sample_diameter": 2.0,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1.0,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "offset_angle": 0.0,
-        "order": "inner_first",
-        "ring_lamp_counts": {
-          "0": 1
+        "kind": "PointList",
+        "first_channel": 0,
+        "points": {
+          "0": [
+            0.5,
+            0.5
+          ]
         }
       }
     }
@@ -3104,18 +3093,13 @@ mod tests {
     "sample_diameter": 2.0,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1.0,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "offset_angle": 0.0,
-        "order": "inner_first",
-        "ring_lamp_counts": {
-          "0": 1
+        "kind": "PointList",
+        "first_channel": 0,
+        "points": {
+          "0": [
+            0.5,
+            0.5
+          ]
         }
       }
     }
@@ -4130,18 +4114,13 @@ mod tests {
     "sample_diameter": 2.0,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1.0,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "offset_angle": 0.0,
-        "order": "inner_first",
-        "ring_lamp_counts": {
-          "0": 1
+        "kind": "PointList",
+        "first_channel": 0,
+        "points": {
+          "0": [
+            0.5,
+            0.5
+          ]
         }
       }
     }

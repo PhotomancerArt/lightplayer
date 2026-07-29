@@ -41,13 +41,34 @@ and the correct solution was always to fix the dependency.
 
 ## How to Handle Binary Size Issues
 
-If the firmware binary exceeds available flash:
+The ESP32-C6 app image must fit a 3 MB partition, and the budget is tight —
+read `docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
+records what has already been spent (a ~200 KB diagnostics-for-flash flag
+stack, the deliberately-kept 500 KB WiFi blob), what is reserved (the lpfs
+partition, held for the future radio/WiFi decision), and what has been measured
+and *rejected* so you don't re-run dead ends.
+
+Check where you stand at any time:
+
+```bash
+just fw-esp32c6-size-check
+```
+
+This prints the image size and headroom, and pre-merge CI fails any PR that
+drops headroom below 64 KB.
+
+If the binary exceeds available flash:
 
 1. Disable optional compiler features (e.g. `cranelift-optimizer`, `cranelift-verifier`)
 2. Use LTO (`lto = true` in release profile)
 3. Use `opt-level = "z"` (size optimization)
 4. Strip debug info
 5. Audit for unnecessary dependencies
+6. Look for duplicate monomorphizations before looking for code to delete —
+   the same generic instantiated over two sinks/backends has twice been the
+   single biggest win (serde tagging, 2026-06; serializer sink erasure,
+   2026-07). `rust-nm --demangle --print-size --size-sort` on the ELF shows
+   them.
 
 Do NOT disable the compiler. The compiler is the product.
 
@@ -67,7 +88,7 @@ Do NOT disable the compiler. The compiler is the product.
 The core is IO-free state machines; async belongs to platform edges. See
 `docs/adr/2026-07-06-sans-io-core.md` for the full decision. The checklist:
 
-- **Core crates** (`lp-base/*`, `lp-core/*`, `lp-shader/*`, `lp-riscv/*`)
+- **Core crates** (`lp-base/*`, `lp-core/*`, `lp-shader/*`, `lp-riscv/*`, `lp-emu/*`)
   take effects by injection. They never read clocks, generate randomness,
   perform ambient IO, or depend on an executor/reactor. Edges are
   `lpa-*`, `fw-*`, `lp-cli`.
@@ -137,20 +158,20 @@ runtime.
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lp-server`      | Project management, client connections | yes              |
-| `fw-esp32`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
 ## Native RV32 backend (`lpvm-native`)
 
 **`lpvm-native`** lowers LPIR to custom RV32 machine code outside Cranelift
 (pool-based register allocation, `rt_jit` / `rt_emu`). It is the default
-on-device codegen path and is exercised by **`native-jit`** on `fw-esp32`/`fw-emu`
+on-device codegen path and is exercised by **`native-jit`** on `fw-esp32c6`/`fw-emu`
 and the **`rv32n.q32`** filetest target.
 
 ## Building the workspace (cross-target)
 
 This workspace mixes host crates and bare-metal RV32 firmware crates
-(`fw-esp32`, `fw-emu`, `lps-builtins-emu-app`, `lp-riscv-emu-guest*`).
+(`fw-esp32c6`, `fw-emu`, `lps-builtins-emu-app`, `lp-riscv-emu-guest*`).
 The RV32 crates depend on `esp-rom-sys`, `esp-sync`, `esp32c6`, etc., which
 **do not compile for the host target** (they use RISC-V intrinsics, RV32
 interrupt vectors, and section attributes that LLVM rejects on Mach-O /
@@ -179,26 +200,26 @@ just build              # parallel: host + rv32
 
 ### ESP32 linked-build pitfall
 
-For `fw-esp32`, **linked firmware builds, size measurements, and bloat
-analysis must run from `lp-fw/fw-esp32/`** (or through a just recipe that
-`cd`s there first, such as `just build-fw-esp32`). The crate-local
+For `fw-esp32c6`, **linked firmware builds, size measurements, and bloat
+analysis must run from `lp-fw/fw-esp32c6/`** (or through a just recipe that
+`cd`s there first, such as `just build-fw-esp32c6`). The crate-local
 `.cargo/config.toml` and linker setup are part of the build.
 
 This is fine from the workspace root because it does not final-link:
 
 ```bash
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 ```
 
 For a real linked ELF or size numbers, do this instead:
 
 ```bash
-cd lp-fw/fw-esp32
+cd lp-fw/fw-esp32c6
 cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
-rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32
+rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6
 ```
 
-Running `cargo build -p fw-esp32 ...` from the workspace root can fail at final
+Running `cargo build -p fw-esp32c6 ...` from the workspace root can fail at final
 link with `memory region not defined: ROTEXT`, because it bypasses the
 crate-local firmware build context.
 
@@ -214,7 +235,7 @@ the same exclusion list the justfile uses for clippy:
 
 ```bash
 cargo build --workspace \
-  --exclude fw-esp32 --exclude fw-emu \
+  --exclude fw-esp32c6 --exclude fw-emu \
   --exclude lps-builtins-emu-app \
   --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 ```
@@ -415,7 +436,7 @@ These commands must pass for any change touching the shader pipeline:
 cargo test -p fw-tests --test scene_render_emu --test profile_alloc_emu
 
 # ESP32 builds with compiler included
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 
 # Emulator build
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
@@ -427,18 +448,24 @@ cargo test -p lpa-server --no-run
 
 ## CI gate (run this before pushing)
 
-CI on `feature/*` branches runs `just check build-ci test` (see
-`.github/workflows/pre-merge.yml`). To avoid the round-trip of
-"push → wait 3 min → CI fails on lint → fix → repeat", run the same
-locally before every push:
+CI (see `.github/workflows/pre-merge.yml`) is path-gated per job: one
+`detect-changes` job computes the gates, then `Lint (x64)` runs
+`just check-lint` in parallel with `Validate (x64)`, which runs
+`just ci-prereqs`, the gated test recipes (`test-rust-core`, plus
+`test-studio-host` when studio paths changed, plus `test-filetests` when
+shader paths changed), then `schema-check`. Docs-only PRs skip every job.
+Pushes to main force all gates true, so filter misses surface on the next
+merge. To avoid the round-trip of "push → wait → CI fails on lint → fix →
+repeat", run the local equivalent before every push:
 
 ```bash
-just check                   # fmt-check + clippy-host + clippy-rv32  (the usual blocker)
-just build-ci                # host + rv32 builtins + emu-guest
+just check                   # check-lint + schema-check  (the usual blocker)
 just test                    # cargo test (+ studio-web view tests) + glsl filetests
 ```
 
-Or, in one go: `just ci` (which is the parallel composition above).
+Or, in one go: `just ci`. CI builds with sccache, `CARGO_INCREMENTAL=0`,
+and `debug=0`; local builds don't — a green local run is still the same
+lint/test signal.
 
 ### Why the nightly date is pinned
 
@@ -460,12 +487,12 @@ To bump the toolchain, do it deliberately as its own change:
 
 1. Update `channel` in `rust-toolchain.toml`.
 2. Update the matching `unwinding` version in the crates that depend on
-   it (`fw-esp32`, `fw-emu`, `lpc-engine`, `lp-riscv-emu-guest`) — the
+   it (`fw-esp32c6`, `fw-emu`, `lpc-engine`, `lp-riscv-emu-guest`) — the
    nightly date and the `unwinding` version move together.
 3. Update the hardcoded `toolchain:` value in every job in
    `.github/workflows/pre-merge.yml` (the workflow carries a
    "keep this in sync" comment at each site).
-4. Run the full gate (`just check build-ci test`) before pushing, and
+4. Run the full gate (`just check test`) before pushing, and
    expect new-lint fallout in the same change.
 
 ### Architecture coverage

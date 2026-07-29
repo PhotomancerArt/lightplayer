@@ -289,7 +289,7 @@ impl FakeDeviceCore {
             let mut server = create_memory_server_with(fs, hello);
             if load_at_boot {
                 // the real-hardware shape: firmware auto-resumes its
-                // startup project before serving (fw-esp32 boot.rs)
+                // startup project before serving (fw-esp32c6 boot.rs)
                 if let Err(error) = server.load_project(project_dir.as_path()) {
                     eprintln!("[fake-device] boot auto-load failed: {error}");
                 }

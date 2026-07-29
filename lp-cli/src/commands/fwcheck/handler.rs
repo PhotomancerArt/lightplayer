@@ -100,13 +100,13 @@ fn run_esp32c6(check: FwCheckConfig, args: &FwcheckRunArgs) -> Result<()> {
     println!("{}", style.heading("Firmware Check"));
     println!("check:  {} ({})", check.slug(), check.display_name);
     println!("target: esp32c6");
-    println!("fw:     fw-esp32 --features {features}");
+    println!("fw:     fw-esp32c6 --features {features}");
     println!("port:   {port}");
     println!("trace:  {}", trace.dir.display());
     println!();
 
     let ((), build_elapsed) = run_step(&style, "Build firmware", args.verbose, || {
-        process::cargo_build_fw_esp32(&root, &features, args.verbose)
+        process::cargo_build_fw_esp32c6(&root, &features, args.verbose)
     })?;
     let ((), flash_elapsed) = run_step(&style, "Flash firmware", args.verbose, || {
         flash::flash_esp32(&root, &port, args.verbose)
@@ -150,13 +150,13 @@ fn run_esp32c6_demo(args: &FwcheckDemoArgs) -> Result<()> {
     println!("{}", style.heading("Firmware Demo Check"));
     println!("project: {}", project_dir.display());
     println!("target:  esp32c6");
-    println!("fw:      fw-esp32 --features {features}");
+    println!("fw:      fw-esp32c6 --features {features}");
     println!("port:    {port}");
     println!("trace:   {}", trace.dir.display());
     println!();
 
     let ((), build_elapsed) = run_step(&style, "Build firmware", args.verbose, || {
-        process::cargo_build_fw_esp32(&root, &features, args.verbose)
+        process::cargo_build_fw_esp32c6(&root, &features, args.verbose)
     })?;
     let ((), flash_elapsed) = run_step(&style, "Flash firmware", args.verbose, || {
         flash::flash_esp32_no_reset_erase_lpfs(&root, &port, args.verbose)

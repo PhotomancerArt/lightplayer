@@ -5,9 +5,9 @@
 
 extern crate alloc;
 
-use super::super::memory::Memory;
 use super::state::Riscv32Emulator;
 use alloc::vec::Vec;
+use lp_emu_core::Memory;
 
 /// Maximum number of frames to unwind to avoid runaway on corrupted stacks.
 const MAX_FRAMES: usize = 32;
@@ -172,6 +172,70 @@ impl Riscv32Emulator {
 
         addrs
     }
+}
+
+/// rv32 frame-pointer walk as a free function, for use where the full emulator
+/// cannot be borrowed — supplied as the [`lp_emu_core::profile::StackUnwinder`]
+/// when constructing [`lp_emu_core::profile::EmuCtx`].
+///
+/// Logic matches [`Riscv32Emulator::unwind_backtrace`] (same walk, no debug
+/// output); keep the two in sync.
+#[cfg(feature = "std")]
+pub(crate) fn unwind_backtrace_rv32(pc: u32, regs: &[i32], mem: &Memory) -> Vec<u32> {
+    let mut addrs = Vec::with_capacity(MAX_FRAMES);
+    let ram_end = mem.ram_end();
+
+    addrs.push(pc);
+
+    let ra = regs[1] as u32;
+    if is_valid_code_address(ra, mem) {
+        addrs.push(ra);
+    }
+
+    let mut fp = regs[8] as u32;
+    if fp >= RAM_START && fp <= ram_end && fp % 4 == 0 {
+        match mem.read_word(fp.wrapping_sub(8)) {
+            Ok(pfp) => {
+                if (pfp as u32) >= RAM_START {
+                    fp = pfp as u32;
+                } else {
+                    return addrs;
+                }
+            }
+            _ => return addrs,
+        }
+    } else {
+        return addrs;
+    }
+
+    let mut frame_count = addrs.len();
+    while frame_count < MAX_FRAMES {
+        if fp < RAM_START || fp > ram_end || fp % 4 != 0 {
+            break;
+        }
+
+        let saved_ra = match mem.read_word(fp.wrapping_sub(4)) {
+            Ok(v) => v as u32,
+            Err(_) => break,
+        };
+        let prev_fp = match mem.read_word(fp.wrapping_sub(8)) {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+
+        if is_valid_code_address(saved_ra, mem) {
+            addrs.push(saved_ra);
+        }
+
+        let prev_fp_u32 = prev_fp as u32;
+        if prev_fp_u32 < RAM_START || prev_fp_u32 <= fp {
+            break;
+        }
+        fp = prev_fp_u32;
+        frame_count += 1;
+    }
+
+    addrs
 }
 
 /// Heuristic: address looks like a valid code address (in ROM range).
