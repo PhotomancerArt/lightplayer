@@ -67,7 +67,7 @@ use lp_xt_inst::{
 };
 
 use crate::abi::FrameLayout;
-use crate::isa::rv32::emit::{NativeReloc, Rv32EmitOutput};
+use crate::isa::shared::{IsaEmitOutput, NativeReloc};
 use crate::isa::xt::gpr::{self, SCRATCH, SCRATCH2, SP_REG};
 use crate::isa::xt::imm::{self, ImmOp};
 use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
@@ -1421,7 +1421,7 @@ impl<'a> EmitContext<'a> {
 
     /// Finish emission: lay out items (iterative branch relaxation), place the
     /// pool behind the entry `j`, and encode everything.
-    fn finish(mut self) -> Result<Rv32EmitOutput, AllocError> {
+    fn finish(mut self) -> Result<IsaEmitOutput, AllocError> {
         let n_lits = self.literals.len() as u32;
         // Pool prefix: `j` (3) + pad (1) + pool; absent when the pool is empty.
         let code_start = if n_lits == 0 { 0 } else { 4 + 4 * n_lits };
@@ -1559,7 +1559,7 @@ impl<'a> EmitContext<'a> {
             .map(|&(idx, within, op)| (self.items[idx].offset + within, Some(op)))
             .collect();
 
-        Ok(Rv32EmitOutput {
+        Ok(IsaEmitOutput {
             code,
             relocs,
             debug_lines,
@@ -1729,7 +1729,7 @@ mod tests {
         pool: &[VReg],
         output: &AllocOutput,
         frame: FrameLayout,
-    ) -> Rv32EmitOutput {
+    ) -> IsaEmitOutput {
         let symbols = ModuleSymbols::default();
         emit_function(vinsts, pool, output, frame, &symbols, false, true).expect("emit")
     }

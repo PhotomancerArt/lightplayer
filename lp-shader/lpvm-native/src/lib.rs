@@ -39,6 +39,10 @@ pub mod abi;
 pub mod compile;
 pub mod config;
 pub mod debug;
+// Host debugging tool that compiles against the rv32 reference target
+// explicitly (see its `let isa = IsaTarget::Rv32imac`), so it exists only
+// when that backend does.
+#[cfg(feature = "isa-rv32")]
 pub mod debug_asm;
 pub mod emit;
 pub mod error;
@@ -67,6 +71,7 @@ pub use compile::{
     CompileSession, CompiledFunction, CompiledModule, NativeCompileBudget, NativeCompileJob,
     NativeCompileStage, NativeCompileStepResult, NativeReloc, compile_function, compile_module,
 };
+#[cfg(feature = "isa-rv32")]
 pub use debug_asm::compile_module_asm_text;
 pub use emit::{EmittedCode, emit_lowered_with_alloc};
 pub use error::{LowerError, NativeError};

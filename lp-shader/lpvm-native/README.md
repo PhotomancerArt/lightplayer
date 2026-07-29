@@ -142,6 +142,24 @@ assembly in `rt_jit::call`, `IsaTarget::native`'s answer); the backport adds a
 sibling `#[cfg(target_arch = "xtensa")]` arm next to it instead. The same two
 spellings are used in `lp-gfx-lpvm::target_backend` and `lpc-shared::backtrace`.
 
+**3. Each backend is a Cargo feature, and firmware pays only for its own.**
+`isa-rv32` and `isa-xt` gate the modules, the `IsaTarget` variants, and every
+match arm. `default = ["isa-rv32", "isa-xt"]`, so host builds and tests get
+everything; firmware crates take `default-features = false` and name the one
+ISA they run on (`lp-fw/fw-esp32c6` → `isa-rv32`; `lp-gfx/lp-gfx-lpvm` has a
+per-arch dependency table for exactly this reason).
+
+This is not hypothetical tidiness. When `isa/xt` first landed ungated it cost
+**+26,448 B** on the ESP32-C6 image (2,862,032 B → 2,888,480 B of a 3 MB
+partition — 9.3% of the remaining headroom) for code the C6 can never
+execute. LTO does **not** remove it: `IsaTarget` is matched on a runtime
+value, so every arm stays reachable even though `IsaTarget::native()` is the
+only constructor firmware uses. Check with `just fw-esp32c6-size-check`.
+
+**Adding a third ISA means**: a new `isa-<name>` feature, `#[cfg]` on its
+module / variant / arms, the manifest edits below, and a firmware opt-in —
+plus a re-run of the size check to confirm nothing else grew.
+
 > **Note — the grep does not cover Cargo manifests.** Target-cfg dependency
 > tables are `cfg(...)` strings in TOML, invisible to the source sweep above.
 > The three that exist were widened by hand when Xtensa landed, and any

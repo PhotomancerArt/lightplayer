@@ -149,7 +149,9 @@ pub(crate) fn build_entry_info(
                 ))
             })?;
         let func_abi = match isa {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(gfn, Some(ir_func)),
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::abi::func_abi_xt(gfn, Some(ir_func)),
         };
         entries.insert(
