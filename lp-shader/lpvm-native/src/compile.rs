@@ -95,6 +95,7 @@ pub(crate) fn compile_function_func_abi(
 ) -> FuncAbi {
     match session.isa {
         IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(fn_sig, Some(func)),
+        IsaTarget::Xtensa => crate::isa::xt::abi::func_abi_xt(fn_sig, Some(func)),
     }
 }
 

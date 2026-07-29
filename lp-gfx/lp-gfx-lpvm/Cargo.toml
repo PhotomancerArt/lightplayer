@@ -23,11 +23,11 @@ lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 # feature.
 #   - riscv32         → lpvm-native (rt_jit)                     — bare-metal firmware
 #   - everything else → lpvm-wasm (rt_wasmtime / rt_browser)     — host or wasm32 guest
-[target.'cfg(target_arch = "riscv32")'.dependencies]
+[target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
 # Note: lpvm-native's 'debug' feature (interleaved/disasm sections) is disabled
 # for firmware builds to reduce code size and improve compilation performance.
 lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
 
-[target.'cfg(not(target_arch = "riscv32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "riscv32", target_arch = "xtensa")))'.dependencies]
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }

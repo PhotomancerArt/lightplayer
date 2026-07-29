@@ -98,6 +98,27 @@ where
                         )));
                     }
                 }
+                IsaTarget::Xtensa => {
+                    if reloc.r_type == isa.call_reloc_type() {
+                        // R_XTENSA_32 on a literal-pool slot: the emitted call
+                        // sequence is `l32r SCRATCH, <slot>; callx8 SCRATCH`,
+                        // so patching is writing the callee's absolute execute
+                        // address into the 4-byte slot.
+                        let off = absolute_offset;
+                        let slot = code.get_mut(off..off + 4).ok_or_else(|| {
+                            NativeError::Internal(alloc::format!(
+                                "Xtensa literal-slot relocation at {off:#x} out of code bounds"
+                            ))
+                        })?;
+                        slot.copy_from_slice(&target.to_le_bytes());
+                    } else {
+                        return Err(NativeError::Internal(alloc::format!(
+                            "unsupported JIT relocation r_type {} for ISA {:?}",
+                            reloc.r_type,
+                            isa
+                        )));
+                    }
+                }
             }
         }
     }

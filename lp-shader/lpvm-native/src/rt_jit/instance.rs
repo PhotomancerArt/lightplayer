@@ -16,7 +16,10 @@ use lpvm::{
 
 use crate::error::NativeError;
 
-use super::call::rv32_jalr_a0_a7;
+#[cfg(target_arch = "riscv32")]
+use super::call::rv32_jalr_a0_a7 as jit_entry_call;
+#[cfg(target_arch = "xtensa")]
+use super::call::xtensa_call8_args as jit_entry_call;
 use super::module::{NativeJitDirectCall, NativeJitModule};
 
 pub(crate) struct RenderTextureEntry {
@@ -238,13 +241,13 @@ impl NativeJitInstance {
             // Note: full[0] is vmctx, so we pass full[0..7] into a1-a7
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_sret_direct(sret_ptr as i32, &full);
             unsafe {
-                rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7);
+                jit_entry_call(entry, a0, a1, a2, a3, a4, a5, a6, a7);
             }
             self.take_trap()?;
         } else {
             // Direct return path: returns in a0, a1
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_direct_arr(&full);
-            let (r0, r1) = unsafe { rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
+            let (r0, r1) = unsafe { jit_entry_call(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
             self.take_trap()?;
 
             match handle.ret_count {
@@ -299,7 +302,7 @@ impl NativeJitInstance {
             let sret_ptr = sret_buf.as_mut_ptr() as usize;
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_sret(sret_ptr as i32, &full);
             unsafe {
-                rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7);
+                jit_entry_call(entry, a0, a1, a2, a3, a4, a5, a6, a7);
             }
             self.take_trap()?;
             sret_buf.truncate(n_ret);
@@ -313,7 +316,7 @@ impl NativeJitInstance {
         }
 
         let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_direct(&full);
-        let (r0, r1) = unsafe { rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
+        let (r0, r1) = unsafe { jit_entry_call(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
         self.take_trap()?;
 
         match n_ret {
@@ -567,7 +570,7 @@ impl LpvmInstance for NativeJitInstance {
         // piece (a sibling entry-call lands next to it with the Xtensa
         // backport), exactly as in `call_direct` / `invoke_flat`.
         unsafe {
-            rv32_jalr_a0_a7(
+            jit_entry_call(
                 entry,
                 vmctx,
                 tex_offset,
@@ -609,7 +612,7 @@ impl LpvmInstance for NativeJitInstance {
 
         // See `call_render_texture` for why there is no arch cfg here.
         unsafe {
-            rv32_jalr_a0_a7(
+            jit_entry_call(
                 entry,
                 vmctx,
                 points_offset,
