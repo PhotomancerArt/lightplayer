@@ -6,7 +6,9 @@ use lp_collection::VecMap;
 use object::write::{Object, Relocation, StandardSection, Symbol, SymbolId, SymbolSection};
 use object::{BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf};
 
-use crate::compile::{CompiledModule, NativeReloc};
+use crate::compile::CompiledModule;
+#[cfg(feature = "isa-rv32")]
+use crate::compile::NativeReloc;
 use crate::error::NativeError;
 use crate::isa::IsaTarget;
 
@@ -80,6 +82,7 @@ where
 
             let absolute_offset = func_base + reloc.offset;
             match isa {
+                #[cfg(feature = "isa-rv32")]
                 IsaTarget::Rv32imac => {
                     if reloc.r_type == isa.call_reloc_type() {
                         let abs_reloc = NativeReloc {
@@ -98,6 +101,7 @@ where
                         )));
                     }
                 }
+                #[cfg(feature = "isa-xt")]
                 IsaTarget::Xtensa => {
                     if reloc.r_type == isa.call_reloc_type() {
                         // R_XTENSA_32 on a literal-pool slot: the emitted call
