@@ -70,6 +70,7 @@ members = [
     "lp-riscv/lp-riscv-elf",
     "lp-riscv/lp-riscv-emu-guest",
     "lp-riscv/lp-riscv-emu-guest-test-app",
+    "lp-xt/lp-xt-inst",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-builtins-emu-app",
     "lp-shader/lps-filetests-app",
@@ -131,6 +132,7 @@ default-members = [
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
+    "lp-xt/lp-xt-inst",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-filetests-app",
 ]
@@ -226,6 +228,8 @@ opt-level = 3
 [profile.dev.package.lp-emu-abi]
 opt-level = 3
 [profile.dev.package.lp-riscv-inst]
+opt-level = 3
+[profile.dev.package.lp-xt-inst]
 opt-level = 3
 [profile.dev.package.lpvm]
 opt-level = 3

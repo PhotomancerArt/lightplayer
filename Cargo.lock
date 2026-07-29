@@ -1527,7 +1527,7 @@ dependencies = [
  "cranelift-control 0.127.0",
  "cranelift-module",
  "log",
- "object",
+ "object 0.37.3",
  "target-lexicon",
 ]
 
@@ -3083,7 +3083,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6aebfabb2c21bec45e575e4f6cb6bb7aa8e1b33e7ac45b5dffa0f9d33ff59105"
 dependencies = [
  "document-features",
- "object",
+ "object 0.37.3",
  "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
@@ -5370,7 +5370,7 @@ dependencies = [
  "lp-emu-core",
  "lp-riscv-emu",
  "lp-riscv-inst",
- "object",
+ "object 0.37.3",
  "rustc-demangle",
  "serde",
  "target-lexicon",
@@ -5434,6 +5434,13 @@ dependencies = [
  "lps-shared",
  "lpvm",
  "lpvm-wasm",
+]
+
+[[package]]
+name = "lp-xt-inst"
+version = "40.0.0"
+dependencies = [
+ "object 0.36.7",
 ]
 
 [[package]]
@@ -6027,7 +6034,7 @@ dependencies = [
  "lpvm",
  "lpvm-cranelift",
  "lpvm-emu",
- "object",
+ "object 0.37.3",
  "rstest",
  "spin",
 ]
@@ -6968,6 +6975,15 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-core-location",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "object"
+version = "0.36.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -9910,7 +9926,7 @@ dependencies = [
  "log",
  "mach2",
  "memfd",
- "object",
+ "object 0.37.3",
  "once_cell",
  "postcard",
  "pulley-interpreter",
@@ -9956,7 +9972,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "log",
- "object",
+ "object 0.37.3",
  "postcard",
  "rustc-demangle",
  "semver",
@@ -10037,7 +10053,7 @@ dependencies = [
  "gimli 0.33.0",
  "itertools",
  "log",
- "object",
+ "object 0.37.3",
  "pulley-interpreter",
  "smallvec",
  "target-lexicon",
@@ -10071,7 +10087,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "924980c50427885fd4feed2049b88380178e567768aaabf29045b02eb262eaa7"
 dependencies = [
  "cc",
- "object",
+ "object 0.37.3",
  "rustix 1.1.4",
  "wasmtime-internal-versioned-export-macros",
 ]
@@ -10105,7 +10121,7 @@ dependencies = [
  "cfg-if",
  "cranelift-codegen 0.129.1",
  "log",
- "object",
+ "object 0.37.3",
  "wasmtime-environ",
 ]
 
@@ -10129,7 +10145,7 @@ dependencies = [
  "cranelift-codegen 0.129.1",
  "gimli 0.33.0",
  "log",
- "object",
+ "object 0.37.3",
  "target-lexicon",
  "wasmparser 0.244.0",
  "wasmtime-environ",
