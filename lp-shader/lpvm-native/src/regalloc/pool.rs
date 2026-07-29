@@ -182,11 +182,9 @@ impl RegPool {
     }
 }
 
-impl Default for RegPool {
-    fn default() -> Self {
-        Self::new(IsaTarget::Rv32imac)
-    }
-}
+// No `Default` impl: a register pool is meaningless without an ISA, and the
+// one that used to live here silently meant RV32 — a latent wrong-pool bug
+// once a second backend existed. Construct with `RegPool::new(isa)`.
 
 #[cfg(test)]
 mod tests {

@@ -22,24 +22,8 @@ fn jal_offset_valid(imm: i32) -> bool {
     imm % 2 == 0 && imm >= -(1 << 20) && imm <= (1 << 20) - 2
 }
 
-/// Byte offset in `.text` where a relocation applies.
-#[derive(Clone, Debug)]
-pub struct NativeReloc {
-    pub offset: usize,
-    pub symbol: String,
-}
-
-/// Raw RV32 machine code for one function plus relocations and debug info
-/// (internal hand-off to [`crate::emit::EmittedCode`]).
-#[derive(Clone, Debug)]
-pub(crate) struct Rv32EmitOutput {
-    /// RISC-V machine code bytes.
-    pub code: Vec<u8>,
-    /// Relocations for auipc+jalr call pairs.
-    pub relocs: Vec<NativeReloc>,
-    /// Debug line table: (code_offset, optional_src_op).
-    pub debug_lines: Vec<(u32, Option<u32>)>,
-}
+pub(crate) use crate::isa::shared::IsaEmitOutput;
+pub use crate::isa::shared::NativeReloc;
 
 /// Emit context for building machine code.
 pub struct EmitContext<'a> {
@@ -952,9 +936,9 @@ impl<'a> EmitContext<'a> {
     }
 
     /// Finish emission and return the emitted code.
-    pub(crate) fn finish(mut self) -> Result<Rv32EmitOutput, AllocError> {
+    pub(crate) fn finish(mut self) -> Result<IsaEmitOutput, AllocError> {
         self.resolve_branch_fixups()?;
-        Ok(Rv32EmitOutput {
+        Ok(IsaEmitOutput {
             code: self.code,
             relocs: self.relocs,
             debug_lines: self.debug_lines,
@@ -971,7 +955,7 @@ pub(crate) fn emit_function(
     symbols: &ModuleSymbols,
     is_sret: bool,
     collect_debug_lines: bool,
-) -> Result<Rv32EmitOutput, AllocError> {
+) -> Result<IsaEmitOutput, AllocError> {
     log::debug!(
         "[native-fa] emit_function: starting with {} vinsts, {} edits",
         vinsts.len(),
