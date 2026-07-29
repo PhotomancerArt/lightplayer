@@ -1,0 +1,28 @@
+[package]
+name = "fw-esp32s3"
+version.workspace = true
+build = "build.rs"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
+
+[features]
+default = ["esp32s3"]
+esp32s3 = [
+    "esp-backtrace/esp32s3",
+    "esp-bootloader-esp-idf/esp32s3",
+    "esp-hal/esp32s3",
+]
+
+[dependencies]
+esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
+esp-backtrace = { version = "0.19.0", features = ["println"] }
+esp-bootloader-esp-idf = { version = "0.5.0" }
+esp-println = { version = "0.17.0", default-features = false, features = ["esp32s3", "jtag-serial", "log-04"] }
+esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+log = { workspace = true, default-features = false }
+
+[lints]
+workspace = true
