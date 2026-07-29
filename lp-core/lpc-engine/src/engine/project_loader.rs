@@ -1151,8 +1151,10 @@ fn register_node_bindings(
     // controls are validated here so a bad alias fails the load loudly.
     if node.kind == NodeKind::Project {
         if let Ok(NodeDef::Project(config)) = projected_node_config(registry, node) {
-            validate_promoted_controls(projected_nodes, node, config)?;
+            let config = config.clone();
+            validate_promoted_controls(projected_nodes, node, &config)?;
         }
+        register_project_mirror_default(runtime, node, frame, scopes)?;
         return Ok(());
     }
     match projected_node_config(registry, node)?.clone() {
@@ -1453,6 +1455,57 @@ fn register_node_bindings(
         }
         NodeDef::Project(_) | NodeDef::Texture(_) => {}
     }
+    Ok(())
+}
+
+/// An embedded project contributes its visual to its host by default: the
+/// mirror's produced `output` publishes to the project node's OWN nearest
+/// scope's `visual.out` at fallback priority (scoped-buses rule 4 — the
+/// project NODE sits in the parent scope, so this is its own scope, not an
+/// outward write; only its CHILDREN are isolated inside the scope it
+/// introduces). Effects are therefore drop-in: embed one and it lights up
+/// with no extra wiring.
+///
+/// The ROOT project is skipped: its own scope IS the scope its mirror
+/// reads, so a default there would be self-referential (and root's mirror
+/// is unread today).
+///
+/// Contention is accepted and deliberate (Yona, 2026-07-29): dropping an
+/// effect into a project that already drives `visual.out` leaves two
+/// equal-priority writers, which resolves as ambiguous until the author
+/// picks one. `ProjectDef` carries no `bindings` map yet, so that pick
+/// cannot currently be authored on the project node itself.
+fn register_project_mirror_default(
+    engine: &mut Engine,
+    node: &ProjectedNode,
+    frame: Revision,
+    scopes: &BusScopes,
+) -> Result<(), ProjectLoadError> {
+    if node.ownership == ProjectedNodeOwnership::Root {
+        return Ok(());
+    }
+    let slot = SlotPath::parse("output").expect("project output path");
+    let channel = lpc_model::ChannelName(String::from(lpc_model::PRIMARY_VISUAL_CHANNEL));
+    let source = BindingSource::ProducedSlot {
+        node: node.id,
+        slot,
+    };
+    let target = BindingTarget::BusChannel(scopes.write_channel(node.id, &channel));
+    engine
+        .add_binding(
+            BindingDraft {
+                kind: binding_kind(&source, &target, "output"),
+                source,
+                target,
+                priority: BindingPriority::default_fallback(),
+                owner: node.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
+            path: node_label(node),
+            reason: format!("register project output mirror default: {e}"),
+        })?;
     Ok(())
 }
 
@@ -4559,22 +4612,41 @@ mod tests {
             fx,
             "the mirror's row carries the project node's own handle"
         );
-        let _ = fx_shader;
 
-        // The host's root visual channel resolves to the host shader —
-        // never clobbered by the embedded project.
-        let root_visual = rt
-            .resolve_with_engine_host(
-                QueryKey::Bus(scoped_at(ScopeId::Project(root), "visual.out")),
-                ResolveLogLevel::Off,
-            )
-            .expect("resolve root visual")
-            .0;
-        let root_product = lpc_model::VisualProduct::from_lp_value(
-            root_visual.value_leaf().expect("root visual value").value(),
-        )
-        .expect("root visual is a product");
-        assert_eq!(root_product.node(), host, "host visual.out untouched");
+        // Isolation is about the effect's CHILDREN: the inner shader never
+        // writes root (asserted above). The effect NODE itself does, by
+        // design — its mirror default-publishes to its own nearest scope so
+        // effects are drop-in (Yona, 2026-07-29).
+        let root_visual = scoped_at(ScopeId::Project(root), "visual.out");
+        let root_writers: Vec<NodeId> =
+            rt.tree()
+                .bindings()
+                .filter_map(|binding| match (&binding.source, &binding.target) {
+                    (
+                        BindingSource::ProducedSlot { node, .. },
+                        BindingTarget::BusChannel(channel),
+                    ) if *channel == root_visual => Some(*node),
+                    _ => None,
+                })
+                .collect();
+        assert!(
+            root_writers.contains(&host),
+            "the host shader still writes root visual.out"
+        );
+        assert!(
+            root_writers.contains(&fx),
+            "the effect's mirror contributes its visual to the host scope"
+        );
+        assert!(
+            !root_writers.contains(&fx_shader),
+            "the effect's INNER shader never reaches the host scope"
+        );
+        // Accepted consequence: two equal-priority writers on one channel
+        // resolve as ambiguous until the author picks one.
+        assert!(matches!(
+            rt.resolve_with_engine_host(QueryKey::Bus(root_visual), ResolveLogLevel::Off),
+            Err(crate::dataflow::resolver::SessionResolveError::AmbiguousBusBinding { .. })
+        ));
     }
 
     #[test]
