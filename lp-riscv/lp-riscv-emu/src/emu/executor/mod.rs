@@ -2,7 +2,8 @@
 
 extern crate alloc;
 
-use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
+use crate::emu::{error::EmulatorError, logging::InstLog};
+use lp_emu_core::Memory;
 
 pub use lp_emu_core::InstClass;
 

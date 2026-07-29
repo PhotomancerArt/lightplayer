@@ -6,7 +6,8 @@
 extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
-use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
+use crate::emu::{error::EmulatorError, logging::InstLog};
+use lp_emu_core::Memory;
 use lp_riscv_inst::{Gpr, format::TypeR};
 
 /// Decode and execute atomic instructions (R-type, opcode 0x2f).
@@ -64,28 +65,9 @@ fn execute_lr_w<M: LoggingMode>(
     let address = base as u32;
 
     let error_regs = *regs;
-    let value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
@@ -139,28 +121,9 @@ fn execute_sc_w<M: LoggingMode>(
     } else {
         0
     };
-    memory.write_word(address, value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     // Return 0 in rd to indicate success
     if rd.num() != 0 {
@@ -208,51 +171,13 @@ fn execute_amoswap_w<M: LoggingMode>(
     let address = base as u32;
 
     let error_regs = *regs;
-    let old_value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let old_value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
-    memory.write_word(address, new_value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, new_value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     // Return old value in rd
     if rd.num() != 0 {
@@ -300,52 +225,14 @@ fn execute_amoadd_w<M: LoggingMode>(
     let address = base as u32;
 
     let error_regs = *regs;
-    let old_value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let old_value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let new_value = old_value.wrapping_add(addend);
-    memory.write_word(address, new_value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, new_value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     // Return old value in rd
     if rd.num() != 0 {
@@ -393,52 +280,14 @@ fn execute_amoxor_w<M: LoggingMode>(
     let address = base as u32;
 
     let error_regs = *regs;
-    let old_value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let old_value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let new_value = old_value ^ xor_val;
-    memory.write_word(address, new_value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, new_value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     // Return old value in rd
     if rd.num() != 0 {
@@ -486,52 +335,14 @@ fn execute_amoand_w<M: LoggingMode>(
     let address = base as u32;
 
     let error_regs = *regs;
-    let old_value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let old_value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let new_value = old_value & and_val;
-    memory.write_word(address, new_value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, new_value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     // Return old value in rd
     if rd.num() != 0 {
@@ -579,52 +390,14 @@ fn execute_amoor_w<M: LoggingMode>(
     let address = base as u32;
 
     let error_regs = *regs;
-    let old_value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let old_value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let new_value = old_value | or_val;
-    memory.write_word(address, new_value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, new_value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     // Return old value in rd
     if rd.num() != 0 {
@@ -660,8 +433,8 @@ fn execute_amoor_w<M: LoggingMode>(
 mod tests {
     use super::super::{LoggingDisabled, LoggingEnabled};
     use super::*;
-    use crate::emu::memory::{DEFAULT_RAM_START, Memory};
     use alloc::vec;
+    use lp_emu_core::{DEFAULT_RAM_START, Memory};
     use lp_riscv_inst::Gpr;
 
     // Helper to encode atomic instructions manually

@@ -5,12 +5,12 @@ extern crate alloc;
 use super::super::{
     error::EmulatorError,
     executor::{LoggingDisabled, LoggingEnabled, decode_execute},
-    memory::Memory,
 };
 use super::state::Riscv32Emulator;
-use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use lp_emu_core::LogLevel;
+use lp_emu_core::Memory;
+use lp_emu_core::{PanicInfo, StepResult, SyscallInfo};
 use lp_riscv_emu_shared::{
     SERIAL_ERROR_INVALID_POINTER, SYSCALL_ALLOC_TRACE, SYSCALL_JIT_MAP_LOAD,
     SYSCALL_JIT_MAP_UNLOAD, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_PERF_EVENT,
@@ -137,7 +137,7 @@ impl Riscv32Emulator {
                     return Ok(StepResult::Continue);
                 }
                 SyscallAction::Halt(HaltReason::Oom { size }) => {
-                    return Ok(StepResult::Oom(super::types::OomInfo { size, pc: self.pc }));
+                    return Ok(StepResult::Oom(lp_emu_core::OomInfo { size, pc: self.pc }));
                 }
                 SyscallAction::Halt(HaltReason::ProfileStop) => {
                     // Alloc trace syscall does not produce this; perf syscall (phase 5) will.
@@ -260,28 +260,10 @@ impl Riscv32Emulator {
             }
 
             // Fetch instruction
-            let inst_word = self.memory.fetch_instruction(self.pc).map_err(|mut e| {
-                match &mut e {
-                    super::super::error::EmulatorError::InvalidMemoryAccess {
-                        regs: err_regs,
-                        pc: err_pc,
-                        ..
-                    } => {
-                        *err_regs = self.regs;
-                        *err_pc = self.pc;
-                    }
-                    super::super::error::EmulatorError::UnalignedAccess {
-                        regs: err_regs,
-                        pc: err_pc,
-                        ..
-                    } => {
-                        *err_regs = self.regs;
-                        *err_pc = self.pc;
-                    }
-                    _ => {}
-                }
-                e
-            })?;
+            let inst_word = self
+                .memory
+                .fetch_instruction(self.pc)
+                .map_err(|e| EmulatorError::from_memory_error(e, self.pc, self.regs))?;
 
             // Increment instruction count before execution (for cycle counting)
             self.instruction_count += 1;
@@ -363,28 +345,10 @@ impl Riscv32Emulator {
             }
 
             // Fetch instruction
-            let inst_word = self.memory.fetch_instruction(self.pc).map_err(|mut e| {
-                match &mut e {
-                    super::super::error::EmulatorError::InvalidMemoryAccess {
-                        regs: err_regs,
-                        pc: err_pc,
-                        ..
-                    } => {
-                        *err_regs = self.regs;
-                        *err_pc = self.pc;
-                    }
-                    super::super::error::EmulatorError::UnalignedAccess {
-                        regs: err_regs,
-                        pc: err_pc,
-                        ..
-                    } => {
-                        *err_regs = self.regs;
-                        *err_pc = self.pc;
-                    }
-                    _ => {}
-                }
-                e
-            })?;
+            let inst_word = self
+                .memory
+                .fetch_instruction(self.pc)
+                .map_err(|e| EmulatorError::from_memory_error(e, self.pc, self.regs))?;
 
             // Increment instruction count before execution (for cycle counting)
             self.instruction_count += 1;
@@ -912,9 +876,10 @@ impl Riscv32Emulator {
 #[cfg(all(test, feature = "std"))]
 mod jit_map_syscall_tests {
     use super::*;
+    use crate::Riscv32Emulator;
     use crate::profile::{Collector, FinishCtx, SessionMetadata};
-    use crate::{DEFAULT_RAM_START, Riscv32Emulator, SyscallInfo};
     use alloc::boxed::Box;
+    use lp_emu_core::{DEFAULT_RAM_START, SyscallInfo};
     use std::any::Any;
 
     struct NoopCollector;

@@ -8,7 +8,8 @@ use core::fmt;
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::isa::CallConv;
 use lp_emu_core::{CycleModel, LogLevel};
-use lp_riscv_emu::{DEFAULT_SHARED_START, Memory, Riscv32Emulator};
+use lp_emu_core::{DEFAULT_SHARED_START, Memory};
+use lp_riscv_emu::Riscv32Emulator;
 use lpir::FloatMode;
 use lpir::lpir_module::IrFunction;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier};
@@ -631,7 +632,7 @@ impl EmuInstance {
             shared,
             0,
             DEFAULT_SHARED_START,
-            lp_riscv_emu::DEFAULT_RAM_START,
+            lp_emu_core::DEFAULT_RAM_START,
         );
         let log_level = if self.module.options.emu_trace_instructions {
             LogLevel::Instructions
