@@ -798,8 +798,21 @@ clippy-glsl-fix:
 # Testing - Workspace-wide
 # ============================================================================
 
+# `test-filetests` does not just read the rv32 builtins — it *builds* them
+# (scripts/filetests.sh calls build-builtins.sh). That build writes two things
+# `test-rust` is concurrently reading: the uplifted builtins ELF that
+# `lpvm-cranelift`'s build script embeds, and — when the builtin sources
+# changed — generated .rs files written straight into the source tree by
+# `lps-builtins-gen-app`. Cargo's build lock is profile+triple scoped, so
+# nothing serializes a host `cargo test` against an rv32 `cargo build`.
+# Building the builtins *before* the parallel half leaves it with no writer:
+# 0.5s when fresh, and when stale it is work `test-filetests` would have done
+# anyway. See docs/defects/2026-07-29-builtins-elf-uplift-race.md.
+test: build-rv32-builtins _test-parallel
+
 [parallel]
-test: test-rust test-filetests
+[private]
+_test-parallel: test-rust test-filetests
 
 test-rust-core:
     cargo test

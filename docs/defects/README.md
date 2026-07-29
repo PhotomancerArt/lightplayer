@@ -93,6 +93,9 @@ genuinely fits none of these, and define it here in one line.
 - **`nondeterministic-capture`** — a capture records one of several
   reachable renderings, because the thing being photographed had not
   reached a single settled state.
+- **`unsynchronized-shared-artifact`** — two steps share a filesystem
+  artifact, but the lock that would order them is scoped narrower than
+  the artifact, so a reader observes a writer's intermediate state.
 
 ## Index
 
@@ -130,6 +133,7 @@ bookkeeping fact.
 | untested-path | 2026-07-27 | [cranelift-q32-floor-ceil](2026-07-27-cranelift-q32-floor-ceil.md) | fixed | lpvm-cranelift q32_emit (rv32c) |
 | silent-drop | 2026-07-28 | [flash-progress-never-reached-the-ui](2026-07-28-flash-progress-never-reached-the-ui.md) | fixed | lpa-studio-core (actor/controller) |
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
+| unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 
 ## Predecessor: `docs/bugs/`
 
