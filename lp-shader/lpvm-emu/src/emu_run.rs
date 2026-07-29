@@ -1,4 +1,4 @@
-//! Run linked RV32 images in `lp-riscv-emu` with LPVM shared memory at [`DEFAULT_SHARED_START`](lp_riscv_emu::DEFAULT_SHARED_START).
+//! Run linked RV32 images in `lp-riscv-emu` with LPVM shared memory at [`DEFAULT_SHARED_START`](lp_emu_core::DEFAULT_SHARED_START).
 
 extern crate alloc;
 
@@ -9,8 +9,10 @@ use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::Signature;
 use cranelift_codegen::isa::{self, CallConv};
 use cranelift_codegen::settings::{self, Configurable};
+use lp_emu_core::LogLevel;
+use lp_emu_core::{DEFAULT_RAM_START, DEFAULT_SHARED_START, Memory};
 use lp_riscv_elf::ElfLoadInfo;
-use lp_riscv_emu::{DEFAULT_RAM_START, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
+use lp_riscv_emu::Riscv32Emulator;
 use lpir::FloatMode;
 use lpir::lpir_module::LpirModule;
 use lps_shared::{LpsModuleSig, LpsType};

@@ -5,15 +5,15 @@ extern crate alloc;
 use super::super::{
     abi_helper::{self, ArgLocation, ArgSlot, ReturnLocation, ReturnValueLocation},
     error::EmulatorError,
-    memory::DEFAULT_RAM_START,
 };
 use super::state::Riscv32Emulator;
-use super::types::StepResult;
 use alloc::{format, string::String, vec::Vec};
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::ir::types;
 use cranelift_codegen::ir::{ArgumentPurpose, Signature};
 use cranelift_codegen::settings::{self, Configurable, Flags};
+use lp_emu_core::DEFAULT_RAM_START;
+use lp_emu_core::StepResult;
 
 impl Riscv32Emulator {
     /// Call a compiled function using the RISC-V calling convention.

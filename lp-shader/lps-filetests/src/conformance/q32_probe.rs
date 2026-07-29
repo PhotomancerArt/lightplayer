@@ -6,7 +6,7 @@
 
 use anyhow::Context;
 use lp_collection::VecMap;
-use lp_riscv_emu::{CycleModel, LogLevel};
+use lp_emu_core::{CycleModel, LogLevel};
 use lpir::CompilerConfig;
 use lps_shared::LpsValueF32;
 

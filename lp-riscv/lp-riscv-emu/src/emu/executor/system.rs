@@ -6,8 +6,8 @@ use super::{ExecutionResult, InstClass, LoggingMode};
 use crate::emu::{
     error::EmulatorError,
     logging::{InstLog, SystemKind},
-    memory::Memory,
 };
+use lp_emu_core::Memory;
 use lp_riscv_inst::{Gpr, format::TypeI};
 
 /// Decode and execute system instructions (I-type, opcode 0x73).
@@ -420,7 +420,7 @@ mod tests {
 
     use super::*;
     use crate::emu::executor::{LoggingDisabled, LoggingEnabled};
-    use crate::emu::memory::Memory;
+    use lp_emu_core::Memory;
     use lp_riscv_inst::encode;
 
     #[test]

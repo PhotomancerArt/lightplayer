@@ -18,6 +18,7 @@ emu = [
     "dep:cranelift-codegen",
     "dep:lpvm-cranelift",
     "dep:lpvm-emu",
+    "dep:lp-emu-core",
     "dep:lp-riscv-elf",
     "dep:lp-riscv-emu",
     "lpvm-cranelift/riscv32-object",
@@ -46,6 +47,7 @@ lpvm-cranelift = { path = "../lpvm-cranelift", optional = true, default-features
     "riscv32-object",
 ] }
 lpvm-emu = { path = "../lpvm-emu", optional = true, default-features = false, features = ["std"] }
+lp-emu-core = { path = "../../lp-emu/lp-emu-core", optional = true, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }
 
 [dev-dependencies]

@@ -34,7 +34,7 @@ pub use panic::{ebreak, reset_request_exit};
 pub use print::_print;
 
 // Re-export guest serial types from shared crate
-pub use lp_riscv_emu_shared::{GuestSerial, SerialSyscall};
+pub use lp_emu_abi::{GuestSerial, SerialSyscall};
 
 // Re-export logger initialization
 pub use log::init as init_logger;
