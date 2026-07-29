@@ -104,7 +104,7 @@ bookkeeping fact.
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
-| budget-exhaustion | 2026-07-28 | [esp32c6-app-partition-overflow](2026-07-28-esp32c6-app-partition-overflow.md) | **open** | lp-fw/fw-esp32 (partitions) |
+| budget-exhaustion | 2026-07-28 | [esp32c6-app-partition-overflow](2026-07-28-esp32c6-app-partition-overflow.md) | **open** (mitigated −42 KB) | lp-fw/fw-esp32 (partitions) |
 | lifecycle-ownership | 2026-07-16 | [browser-serial-endpoint-lost](2026-07-16-browser-serial-endpoint-lost.md) | fixed | lpa-link/registry |
 | lifecycle-ownership | 2026-07-22 | [flash-session-map-deleted](2026-07-22-flash-session-map-deleted.md) | fixed | lpa-link/browser-serial |
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |

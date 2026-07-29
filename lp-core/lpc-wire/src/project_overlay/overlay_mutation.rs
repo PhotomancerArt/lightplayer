@@ -189,7 +189,7 @@ mod tests {
                         )),
                         StoredSlotEdit::put_with_base_display(
                             SlotEdit::remove(SlotPath::parse("paths[2]").unwrap()),
-                            Some("{\"kind\":\"RingArray\"}".into()),
+                            Some("{\"kind\":\"PointList\"}".into()),
                         ),
                         StoredSlotEdit::removed(SlotPath::parse("paths[0]").unwrap()),
                     ],
