@@ -6,8 +6,8 @@ use lp_shader::{
 };
 use lpvm_native::NativeJitEngine;
 
-use super::cycle_counter;
 use super::shader_compile_case::{SHADER_COMPILE_CASES, ShaderCompileCase};
+use crate::board::esp32c6::cycle_counter;
 
 const TARGET_TICK_US: u64 = 5_000;
 const COMPILE_BUDGET: ShaderCompileBudget = ShaderCompileBudget {
