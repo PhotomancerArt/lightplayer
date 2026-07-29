@@ -28,6 +28,8 @@ vendor
 # port on every other worktree (docs/adr/2026-07-27-worktree-local-launch-json.md).
 /.claude/launch.json
 *.coredump
+# rustc internal-compiler-error dumps land in the CWD (repo root) on a crash.
+rustc-ice-*.txt
 *.smt2
 *.cwasm
 /artifacts
