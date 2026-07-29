@@ -460,16 +460,13 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
 ///
 /// Used by main.rs to create the `MessageRouter` for
 /// `StreamingMessageRouterTransport`.
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_espnow",
-)))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_button",
+    feature = "test_gpio_calibrate",
+    feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental"
+))]
 pub fn get_message_channels() -> (
     &'static Channel<CriticalSectionRawMutex, String, 32>,
     &'static Channel<CriticalSectionRawMutex, String, 32>,
@@ -492,16 +489,13 @@ pub fn get_server_write_channels() -> (
 /// Lines are written without M! prefix so the client prints them.
 /// When the log channel is full, log lines are dropped.
 /// (Cannot log the drop - would recurse into logger.)
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_espnow",
-)))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_button",
+    feature = "test_gpio_calibrate",
+    feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental"
+))]
 pub fn log_write_to_outgoing(msg: &str) {
     use alloc::string::ToString;
     let _ = OUTGOING_MSG.sender().try_send(msg.to_string());

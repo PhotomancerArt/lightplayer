@@ -22,6 +22,8 @@ use log::info;
 use lps_q32::Q32;
 
 use super::msafluid_solver::MsaFluidSolver;
+use crate::board::esp32c6::constants::CPU_HZ;
+use crate::board::esp32c6::cycle_counter;
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;
 use crate::serial::Esp32UsbSerialIo;
@@ -33,7 +35,6 @@ const RESOLUTIONS: &[usize] = &[16, 32, 48, 64];
 const ITERATION_COUNTS: &[usize] = &[2, 4, 6, 8, 10];
 const STEPS_TOTAL: usize = 30;
 const STEPS_WARMUP: usize = 5;
-const ESP32C6_HZ: u64 = 160_000_000;
 const TARGET_FPS: u64 = 30;
 
 #[derive(Clone, Copy)]
@@ -59,11 +60,11 @@ pub async fn run_msafluid_test(_: embassy_executor::Spawner) -> ! {
     logger::init(logger::log_write_bytes);
 
     embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
-    setup_pmu_cycle_counter();
+    cycle_counter::setup();
     info!("[msafluid] === MSAFluid perf experiment starting ===");
     info!(
-        "[msafluid] esp32c6 @ {ESP32C6_HZ} Hz, frame budget @ {TARGET_FPS} fps = {} cycles",
-        ESP32C6_HZ / TARGET_FPS,
+        "[msafluid] esp32c6 @ {CPU_HZ} Hz, frame budget @ {TARGET_FPS} fps = {} cycles",
+        CPU_HZ / TARGET_FPS,
     );
     info!(
         "[msafluid] sweep: N={RESOLUTIONS:?} x iters={ITERATION_COUNTS:?} \
@@ -103,7 +104,7 @@ pub async fn run_msafluid_test(_: embassy_executor::Spawner) -> ! {
     info!("[msafluid] === SUMMARY ===");
     info!(
         "[msafluid] esp32c6 @ 160 MHz, frame budget @ {TARGET_FPS} fps = {} cycles",
-        ESP32C6_HZ / TARGET_FPS,
+        CPU_HZ / TARGET_FPS,
     );
     for r in &results {
         let (pct_int, pct_frac) = pct_of_budget(r.median);
@@ -187,9 +188,9 @@ fn run_one(n: usize, iters: usize) -> Vec<u64> {
         // cycle measurement remains comparable to pre-RGB baseline data.
         solver.add_color_at_cell(center_i, center_j, dye, Q32::ZERO, Q32::ZERO);
 
-        let start = read_cycle();
+        let start = cycle_counter::read();
         solver.update();
-        let end = read_cycle();
+        let end = cycle_counter::read();
         let cycles = end.wrapping_sub(start) as u64;
 
         if step >= STEPS_WARMUP {
@@ -210,34 +211,6 @@ fn run_one(n: usize, iters: usize) -> Vec<u64> {
 /// Returns (integer_percent, tenths_digit) so we can render `XX.Y%` with no
 /// floats: e.g. `(45, 1)` for 45.1%.
 fn pct_of_budget(median_cycles: u64) -> (u64, u64) {
-    let scaled = (median_cycles * 1000 * TARGET_FPS) / ESP32C6_HZ;
+    let scaled = (median_cycles * 1000 * TARGET_FPS) / CPU_HZ;
     (scaled / 10, scaled % 10)
-}
-
-/// Configure the ESP32-C6 PMU to count CPU cycles into `mpccr`.
-///
-/// The standard RISC-V Zicntr CSRs (`mcycle` 0xB00 and user-mode mirror
-/// `cycle` 0xC00) both raise "Illegal instruction" on this part — the
-/// LX core only implements Espressif's custom PMU CSRs:
-///   * `mpcer`  (0x7E0): event select (1 = cycles)
-///   * `mpcmr`  (0x7E1): mode / enable (1 = enabled)
-///   * `mpccr`  (0x7E2): 32-bit counter, read with `csrr`
-///
-/// Counter is 32-bit; at 160 MHz it wraps every ~26.8 s. A single
-/// `solver.update()` is far below that, so per-step `wrapping_sub`
-/// is correct.
-fn setup_pmu_cycle_counter() {
-    unsafe {
-        core::arch::asm!("csrw 0x7E0, {}", in(reg) 1u32);
-        core::arch::asm!("csrw 0x7E1, {}", in(reg) 1u32);
-    }
-}
-
-#[inline(always)]
-fn read_cycle() -> u32 {
-    let cycles: u32;
-    unsafe {
-        core::arch::asm!("csrr {}, 0x7E2", out(reg) cycles);
-    }
-    cycles
 }

@@ -145,7 +145,6 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 Ok(s) => s,
                 Err(_) => {
                     // Invalid UTF-8, ignore with warning
-                    #[cfg(any(feature = "emu", feature = "esp32"))]
                     log::warn!("SerialTransport: Invalid UTF-8 in message");
                     return Ok(None);
                 }
