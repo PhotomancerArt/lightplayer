@@ -28,7 +28,17 @@ pub fn init_board() -> (
     // Allocate heap while leaving enough RAM for the main task stack. Project loading
     // and on-device shader compilation use deep filesystem/compiler call stacks; too
     // large a heap reservation shrinks that stack and corrupts execution before OOM.
-    esp_alloc::heap_allocator!(size: 300_000);
+    //
+    // The binding constraint is `catch_unwind` panic recovery, not ordinary call depth.
+    // The main stack is whatever RAM is left after .bss, so every heap byte is a stack
+    // byte. Unwinding one panic costs ~41 KB of stack: `Frame::from_context` alone has a
+    // 20,736-byte frame (a gimli `UnwindContext` with 128 register-rule slots, plus the
+    // cloned `UnwindTableRow`), and the `_Unwind_RaiseException` loop adds 8,448 more.
+    // At 300_000 the stack was 32,392 B total — unwinding overflowed it, tripped esp-hal's
+    // stack guard, and cascaded (see docs/reports/2026-03-13-esp32-unwinding-implementation.md).
+    // 250_000 leaves an 82,392-byte stack; measured high-water for a boot-depth panic is
+    // 47,224 B. Do not raise this without re-running `--features test_oom` on hardware.
+    esp_alloc::heap_allocator!(size: 250_000);
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
