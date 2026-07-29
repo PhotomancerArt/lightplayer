@@ -177,7 +177,7 @@ pub async fn run_usb_test(spawner: embassy_executor::Spawner) -> ! {
     spawner.spawn(io_task(usb_device).unwrap());
 
     // Spawn heartbeat task (sends status every second)
-    spawner.spawn(heartbeat_task());
+    spawner.spawn(heartbeat_task().unwrap());
 
     // Main loop: blink LED, handle messages, increment frame counter
     let mut led_state = false;

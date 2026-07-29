@@ -221,12 +221,7 @@ fn on_alloc_error(layout: Layout) -> ! {
 mod board;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::boot;
-#[cfg(any(
-    not(fw_harness),
-    feature = "test_shader_compile_incremental",
-    feature = "test_button",
-    feature = "test_espnow",
-))]
+#[cfg(any(not(fw_harness), feature = "test_button", feature = "test_espnow"))]
 mod hardware;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
@@ -255,10 +250,7 @@ mod flash_storage;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 use fw_esp32_common::lp_fs;
 
-#[cfg(all(
-    feature = "radio",
-    any(not(fw_harness), feature = "test_shader_compile_incremental"),
-))]
+#[cfg(all(feature = "radio", not(fw_harness)))]
 use hardware::espnow_radio_driver::Esp32EspNowRadioDriver;
 #[cfg(not(fw_harness))]
 use lpfs::lp_path::AsLpPath;

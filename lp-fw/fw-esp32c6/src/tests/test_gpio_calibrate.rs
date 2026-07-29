@@ -61,8 +61,8 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
                 }
                 Command::Pulse(gpio) => {
                     if !supports_gpio(gpio) {
-                        if gpio == 12 {
-                            write_line(&mut serial, "CAL ERR blocked-gpio gpio=12");
+                        if gpio == 12 || gpio == 13 {
+                            write_line(&mut serial, &format!("CAL ERR blocked-gpio gpio={gpio}"));
                         } else {
                             write_line(
                                 &mut serial,
@@ -138,8 +138,11 @@ fn write_line(serial: &mut Esp32UsbSerialIo, line: &str) {
     let _ = serial.write(b"\n");
 }
 
+/// GPIO12 and GPIO13 are USB_D-/USB_D+ on the ESP32-C6. Opening either as an
+/// output tears down the USB-Serial-JTAG link this protocol runs over, so the
+/// host would lose the device mid-calibration rather than get an error back.
 fn supports_gpio(gpio: u8) -> bool {
-    matches!(gpio, 0..=11 | 13..=21)
+    matches!(gpio, 0..=11 | 14..=21)
 }
 
 struct ActivePulse {
