@@ -4,15 +4,18 @@ extern crate alloc;
 
 use alloc::string::String;
 
-use cranelift_codegen::ir::TrapCode;
 use lp_riscv_inst::Gpr;
 
-/// Kind of memory access that failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemoryAccessKind {
-    Read,
-    Write,
-    InstructionFetch,
+use lp_emu_core::MemoryError;
+use lp_emu_core::{MemoryAccessKind, TrapCode, trap_code_to_string};
+
+/// Convert a cranelift trap code into the arch-neutral [`TrapCode`],
+/// preserving the raw byte (named codes and user codes map 1:1).
+///
+/// A free function rather than a `From` impl because both types are foreign
+/// to this crate.
+pub fn trap_code_from_cranelift(code: cranelift_codegen::ir::TrapCode) -> TrapCode {
+    TrapCode::from_raw(code.as_raw())
 }
 
 /// Errors that can occur during emulation.
@@ -64,13 +67,13 @@ pub enum EmulatorError {
     },
     /// Panic occurred in the emulated program.
     Panic {
-        info: super::PanicInfo,
+        info: lp_emu_core::PanicInfo,
         pc: u32,
         regs: [i32; 32],
     },
     /// Guest ran out of memory.
     Oom {
-        info: super::OomInfo,
+        info: lp_emu_core::OomInfo,
         regs: [i32; 32],
     },
     /// Profile gate requested stop while the emulator was inside a
@@ -84,23 +87,40 @@ pub enum EmulatorError {
     ProfileStopped { pc: u32, regs: [i32; 32] },
 }
 
-/// Convert a TrapCode to a human-readable string.
-pub fn trap_code_to_string(code: TrapCode) -> &'static str {
-    match code {
-        TrapCode::STACK_OVERFLOW => "stack overflow",
-        TrapCode::INTEGER_OVERFLOW => "integer overflow",
-        TrapCode::HEAP_OUT_OF_BOUNDS => "heap out of bounds",
-        TrapCode::INTEGER_DIVISION_BY_ZERO => "integer division by zero",
-        TrapCode::BAD_CONVERSION_TO_INTEGER => "bad conversion to integer",
-        _ => {
-            // Check for user-defined trap codes
-            let raw = code.as_raw().get();
-            if raw == 1 {
-                "vector/matrix index out of bounds"
-            } else {
-                "unknown trap"
-            }
+impl EmulatorError {
+    /// Attach pc/register context to a [`MemoryError`].
+    ///
+    /// `Memory` itself has no pc/register state; the emulator supplies it at
+    /// the fault site so diagnostics carry the faulting instruction context.
+    pub(crate) fn from_memory_error(e: MemoryError, pc: u32, regs: [i32; 32]) -> Self {
+        match e {
+            MemoryError::InvalidAccess {
+                address,
+                size,
+                kind,
+            } => EmulatorError::InvalidMemoryAccess {
+                address,
+                size,
+                kind,
+                pc,
+                regs,
+            },
+            MemoryError::Unaligned { address, alignment } => EmulatorError::UnalignedAccess {
+                address,
+                alignment,
+                pc,
+                regs,
+            },
         }
+    }
+}
+
+impl From<MemoryError> for EmulatorError {
+    /// Context-free conversion (pc 0, zeroed registers) — matches what
+    /// `Memory` itself reported historically. Prefer
+    /// [`EmulatorError::from_memory_error`] where the fault pc is known.
+    fn from(e: MemoryError) -> Self {
+        EmulatorError::from_memory_error(e, 0, [0; 32])
     }
 }
 

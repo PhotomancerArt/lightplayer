@@ -16,15 +16,15 @@ use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;
 use crate::serial::Esp32UsbSerialIo;
 
+use crate::board::esp32c6::constants::CPU_HZ;
+use crate::board::esp32c6::cycle_counter;
+
 mod corpus;
-mod cycle_counter;
 mod div_kernels;
 mod lut_cost;
 mod mul_kernels;
 mod runner;
 mod trig_kernels;
-
-const ESP32C6_HZ: u64 = 160_000_000;
 
 pub async fn run_jit_math_perf(_: embassy_executor::Spawner) -> ! {
     let (sw_int, timg0, _rmt, usb_device, _gpio18, _flash, _gpio4, _gpio20, _wifi, _rwdt) =
@@ -42,7 +42,7 @@ pub async fn run_jit_math_perf(_: embassy_executor::Spawner) -> ! {
     cycle_counter::setup();
 
     info!("[jit-math-perf] === JIT math perf experiment starting ===");
-    info!("[jit-math-perf] esp32c6 @ {ESP32C6_HZ} Hz");
+    info!("[jit-math-perf] esp32c6 @ {CPU_HZ} Hz");
     runner::run_overhead_baseline();
     lut_cost::run();
     mul_kernels::run();

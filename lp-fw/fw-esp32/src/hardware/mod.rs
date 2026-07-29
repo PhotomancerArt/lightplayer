@@ -1,17 +1,5 @@
 pub mod button;
 #[cfg(feature = "radio")]
 pub mod espnow_radio_driver;
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_gpio_calibrate",
-    feature = "test_button",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_jit_math_perf",
-    feature = "test_espnow",
-)))]
+#[cfg(any(not(fw_harness), feature = "test_shader_compile_incremental"))]
 pub mod manifest_loader;

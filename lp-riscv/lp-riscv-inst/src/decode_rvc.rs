@@ -479,7 +479,7 @@ mod tests {
                 assert_eq!(rd.num(), 10);
                 assert_eq!(imm, 5);
             }
-            _ => panic!("Expected CAddi, got {:?}", inst),
+            _ => panic!("Expected CAddi, got {inst:?}"),
         }
     }
 
@@ -491,7 +491,7 @@ mod tests {
         let inst = decode_compressed(0x0001).unwrap();
         match inst {
             Inst::CNop => {}
-            _ => panic!("Expected CNop, got {:?}", inst),
+            _ => panic!("Expected CNop, got {inst:?}"),
         }
     }
 
@@ -507,7 +507,7 @@ mod tests {
                 assert_eq!(rd.num(), 10);
                 assert_eq!(imm, 5);
             }
-            _ => panic!("Expected CLi, got {:?}", inst),
+            _ => panic!("Expected CLi, got {inst:?}"),
         }
     }
 }
