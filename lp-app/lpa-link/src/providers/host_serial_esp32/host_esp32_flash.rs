@@ -396,7 +396,7 @@ mod tests {
         "firmwareId": "lightplayer-esp32c6-server",
         "displayName": "LightPlayer ESP32-C6 server firmware",
         "target": { "family": "esp32", "chip": "esp32c6" },
-        "build": { "package": "fw-esp32" },
+        "build": { "package": "fw-esp32c6" },
         "flash": { "format": "espflash-merged-image", "address": "0x0" },
         "images": [
             {

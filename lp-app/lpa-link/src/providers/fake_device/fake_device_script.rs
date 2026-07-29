@@ -78,7 +78,7 @@ pub struct FakeLightPlayerState {
     /// incompatible wire revision.
     pub proto_override: Option<u32>,
     /// Auto-load the seeded project at boot, like real firmware's
-    /// startup-project resume (fw-esp32 `boot::auto_load_project`): the
+    /// startup-project resume (fw-esp32c6 `boot::auto_load_project`): the
     /// server reports it via `project_list_loaded` from the first request.
     pub load_project_at_boot: bool,
     /// Absolute storage dir the seeded project files land in. Defaults to
@@ -184,7 +184,7 @@ impl FakeDeviceScript {
 /// identity.
 pub fn fake_provenance(image_identity: &str) -> lpc_wire::FwProvenance {
     lpc_wire::FwProvenance {
-        package: "fw-esp32".to_string(),
+        package: "fw-esp32c6".to_string(),
         commit: image_identity.to_string(),
         dirty: false,
         profile: "release-esp32".to_string(),

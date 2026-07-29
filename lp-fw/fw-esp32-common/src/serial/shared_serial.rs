@@ -3,8 +3,6 @@
 //! Allows sharing a SerialIo instance between logging and transport
 //! using Rc<RefCell<>> for interior mutability.
 
-extern crate alloc;
-
 use alloc::rc::Rc;
 use core::cell::RefCell;
 use fw_core::serial::{SerialError, SerialIo};

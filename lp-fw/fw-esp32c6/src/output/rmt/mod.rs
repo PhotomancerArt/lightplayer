@@ -61,6 +61,6 @@ mod buffer;
 mod channel;
 mod config;
 mod interrupt;
-mod state;
+pub(crate) use fw_esp32_common::output::rmt_state as state;
 
 pub use channel::{LedChannel, LedTransaction};
