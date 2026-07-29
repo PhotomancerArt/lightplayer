@@ -19,7 +19,6 @@ use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::logger;
 use crate::serial::Esp32UsbSerialIo;
 
-mod cycle_counter;
 mod runner;
 mod shader_compile_case;
 
@@ -36,7 +35,7 @@ pub async fn run_incremental_shader_compile(_: embassy_executor::Spawner) -> ! {
     logger::init(logger::log_write_bytes);
 
     embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
-    cycle_counter::setup();
+    crate::board::esp32c6::cycle_counter::setup();
 
     lps_builtins::ensure_builtins_referenced();
     let mut table = BuiltinTable::new();

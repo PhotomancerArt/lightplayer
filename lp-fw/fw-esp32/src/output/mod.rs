@@ -1,48 +1,36 @@
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_espnow",
-)))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_button",
+    feature = "test_gpio_calibrate",
+    feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental"
+))]
 mod provider;
 mod rmt;
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_espnow",
-)))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_button",
+    feature = "test_gpio_calibrate",
+    feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental"
+))]
 mod rmt_ws281x_driver;
 
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_espnow",
-)))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_button",
+    feature = "test_gpio_calibrate",
+    feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental"
+))]
 pub use provider::Esp32OutputProvider;
-#[cfg(not(any(
-    feature = "test_rmt",
-    feature = "test_dither",
-    feature = "test_gpio",
-    feature = "test_usb",
-    feature = "test_json",
-    feature = "test_msafluid",
-    feature = "test_fluid_demo",
-    feature = "test_espnow",
-)))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_button",
+    feature = "test_gpio_calibrate",
+    feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental"
+))]
 pub use rmt_ws281x_driver::Esp32RmtWs281xDriver;
 // Public API - will be used when provider is updated
 #[allow(unused_imports, reason = "public API reserved for future use")]

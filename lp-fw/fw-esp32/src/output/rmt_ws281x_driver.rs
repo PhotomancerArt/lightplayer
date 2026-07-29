@@ -24,7 +24,6 @@ use crate::output::{LedChannel, LedTransaction};
 const DRIVER_ID: &str = "esp32-rmt-ws281x0";
 const DISPLAY_LABEL: &str = "ESP32 RMT WS281x 0";
 const MAX_LEDS: usize = 256;
-const MAX_ESP32C6_GPIO: u8 = 30;
 
 // Unsafe static to store the currently initialized LED channel.
 // This is needed because LedChannel has lifetime constraints that do not fit the
@@ -372,7 +371,7 @@ fn gpio_number(address: &HwAddress) -> Result<u8, HardwareEndpointError> {
         .map_err(|_| HardwareEndpointError::UnsupportedConfig {
             reason: format!("invalid ESP32 GPIO address: {address}"),
         })?;
-    if gpio > MAX_ESP32C6_GPIO {
+    if gpio > crate::board::esp32c6::constants::MAX_GPIO {
         return Err(HardwareEndpointError::UnsupportedConfig {
             reason: format!("ESP32-C6 GPIO {gpio} is outside the supported range"),
         });
