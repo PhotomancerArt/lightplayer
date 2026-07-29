@@ -18,15 +18,15 @@ use serialport::{SerialPortType, UsbPortInfo};
 
 const CHIP: Chip = Chip::Esp32c6;
 const CONNECT_BAUD: u32 = 115_200;
-const PARTITION_TABLE: &str = "lp-fw/fw-esp32/partitions.csv";
-const FW_ELF: &str = "target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32";
+const PARTITION_TABLE: &str = "lp-fw/fw-esp32c6/partitions.csv";
+const FW_ELF: &str = "target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6";
 
-/// Flash the built fw-esp32 ELF and hard-reset into it.
+/// Flash the built fw-esp32c6 ELF and hard-reset into it.
 pub fn flash_esp32(root: &Path, port: &str, verbose: bool) -> Result<()> {
     flash_esp32_elf(root, port, ResetAfterOperation::HardReset, false, verbose)
 }
 
-/// Flash the built fw-esp32 ELF with a blank `lpfs` data partition, leaving
+/// Flash the built fw-esp32c6 ELF with a blank `lpfs` data partition, leaving
 /// the chip in the bootloader. The demo monitor opens the port with
 /// `reset_after_open`, so the first application boot happens under the line
 /// observer and every boot log is captured.

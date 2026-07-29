@@ -8,7 +8,7 @@ serialization, target-specific logging support, and small runtime loop helpers.
 
 ## Relationship To Other Crates
 
-- `fw-esp32` uses `fw-core` (no extra features) for ESP32-C6 firmware.
+- `fw-esp32c6` uses `fw-core` (no extra features) for ESP32-C6 firmware.
 - `fw-emu` uses `fw-core` with the `emu` feature for RV32 emulator firmware.
 - `lpa-server`, `lpc-shared`, `lpc-model`, and `lpc-wire` provide the server,
   shared transport, model, and wire concepts that firmware hosts.
@@ -50,5 +50,5 @@ cargo test -p fw-core
 ```
 
 When changing code that affects firmware behavior, also run the relevant target
-checks from the root `AGENTS.md`, especially `fw-esp32` and `fw-emu` target
+checks from the root `AGENTS.md`, especially `fw-esp32c6` and `fw-emu` target
 checks.

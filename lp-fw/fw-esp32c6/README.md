@@ -1,6 +1,6 @@
-# fw-esp32
+# fw-esp32c6
 
-`fw-esp32` is the reference embedded LightPlayer firmware target for ESP32-C6.
+`fw-esp32c6` is the reference embedded LightPlayer firmware target for ESP32-C6.
 
 This is the main bare-metal product path: GLSL shaders are compiled on the
 device at runtime and executed from RAM. Do not replace this with host/browser
@@ -17,6 +17,12 @@ compile/execute path to solve build, size, or `no_std` issues.
 - Root-owned hardware capabilities such as buttons and ESP-NOW radio support.
 - Firmware check and test harness modes behind feature flags.
 
+Chip-generic firmware logic (server loop, transport, logger, boot, output
+provider, littlefs glue) lives in `fw-esp32-common` and is consumed here;
+this crate keeps only what is genuinely ESP32-C6: board init, RMT register
+code, USB-Serial-JTAG, recovery backend + `panic=unwind`/`__eh_frame`
+machinery, and the hardware test harnesses (see
+`docs/adr/2026-07-29-per-chip-fw-toolchains.md` for the seam rules).
 Shared firmware plumbing belongs in `fw-core`. Host-local runtime lifecycle
 belongs in `fw-host`. Browser Studio simulation belongs in `fw-browser`.
 
@@ -31,16 +37,16 @@ just demo-esp32
 Target check from the workspace root:
 
 ```bash
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 ```
 
 For linked firmware builds, size measurements, or bloat analysis, run from this
 crate directory so the crate-local linker configuration is active:
 
 ```bash
-cd lp-fw/fw-esp32
+cd lp-fw/fw-esp32c6
 cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
-rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32
+rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6
 ```
 
 ## Feature Notes

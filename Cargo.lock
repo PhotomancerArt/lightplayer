@@ -3822,7 +3822,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "fw-esp32"
+name = "fw-esp32-common"
+version = "40.0.0"
+dependencies = [
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "fw-core",
+ "hashbrown 0.15.5",
+ "littlefs-rust",
+ "log",
+ "lp-collection 1.0.0",
+ "lp-recovery",
+ "lpa-server",
+ "lpc-hardware",
+ "lpc-model",
+ "lpc-shared",
+ "lpc-wire",
+ "lpfs",
+ "smart-leds",
+]
+
+[[package]]
+name = "fw-esp32c6"
 version = "40.0.0"
 dependencies = [
  "embassy-executor",
@@ -3841,6 +3862,7 @@ dependencies = [
  "esp-storage",
  "fw-checks",
  "fw-core",
+ "fw-esp32-common",
  "hashbrown 0.15.5",
  "libm",
  "littlefs-rust",

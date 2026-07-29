@@ -138,7 +138,7 @@ cargo run -p lps-filetests-app -- test --target rv32n.q32,rv32lpn.q32 --concise 
 Firmware check for the Naga-free path:
 
 ```bash
-cargo check -p fw-esp32 \
+cargo check -p fw-esp32c6 \
   --target riscv32imac-unknown-none-elf \
   --profile release-esp32 \
   --features esp32c6,server

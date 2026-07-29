@@ -220,7 +220,7 @@ fn on_alloc_error(layout: Layout) -> ! {
 
 mod board;
 #[cfg(not(fw_harness))]
-mod boot;
+use fw_esp32_common::boot;
 #[cfg(any(
     not(fw_harness),
     feature = "test_shader_compile_incremental",
@@ -228,8 +228,9 @@ mod boot;
     feature = "test_espnow",
 ))]
 mod hardware;
-mod jit_fns;
-mod logger;
+pub use fw_esp32_common::logger;
+// jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
+// extern reference from the JIT builtin table.
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
@@ -243,16 +244,16 @@ mod output;
 mod recovery;
 mod serial;
 #[cfg(not(fw_harness))]
-mod server_loop;
+use fw_esp32_common::server_loop;
 #[cfg(not(fw_harness))]
-mod time;
+use fw_esp32_common::time;
 #[cfg(all(feature = "server", not(fw_harness),))]
-mod transport;
+use fw_esp32_common::transport;
 
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod flash_storage;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
-mod lp_fs_flash;
+use fw_esp32_common::lp_fs;
 
 #[cfg(all(
     feature = "radio",
@@ -369,7 +370,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Initialize log crate to write to outgoing serial (host will see these)
     crate::logger::init(serial::io_task::log_write_to_outgoing);
 
-    log::info!("[fw-esp32] Shader backend: native JIT (lpvm-native rt_jit)");
+    log::info!("[fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)");
 
     #[cfg(feature = "test_oom")]
     {
@@ -402,7 +403,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Create serial transport. Project-read responses stream through io_task;
     // small messages use the simpler full-message serializer.
     esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
-    let transport = transport::StreamingMessageRouterTransport::from_io_channels();
+    let (incoming, _) = serial::io_task::get_message_channels();
+    let (write_request, write_result) = serial::io_task::get_server_write_channels();
+    let transport =
+        transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
     esp_println::println!("[INIT] StreamingMessageRouterTransport created");
 
     // Initialize RMT peripheral for output
@@ -417,7 +421,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         #[cfg(not(feature = "memory_fs"))]
         {
             let flash_storage = esp_storage::FlashStorage::new(flash);
-            match lp_fs_flash::LpFsFlash::init(flash_storage) {
+            match lp_fs::LpFsFlash::init(
+                crate::flash_storage::LpFlashStorage::new(flash_storage),
+                crate::flash_storage::lpfs_config,
+            ) {
                 Ok(fs) => {
                     esp_println::println!("[INIT] Flash filesystem mounted");
                     Box::new(fs)
@@ -438,9 +445,12 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     #[cfg(feature = "memory_fs")]
     esp_println::println!("[INIT] In-memory filesystem created");
 
-    let hardware_manifest = load_hardware_manifest(base_fs.as_ref());
+    let hardware_manifest = load_hardware_manifest(
+        base_fs.as_ref(),
+        lpc_hardware::default_esp32c6_hardware_manifest,
+    );
     log::info!(
-        "[fw-esp32] Hardware manifest: {} ({})",
+        "[fw-esp32c6] Hardware manifest: {} ({})",
         hardware_manifest.board_id(),
         hardware_manifest.board_name()
     );
@@ -458,7 +468,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
             .expect("Failed to initialize ESP-NOW radio");
         log::info!(
-            "[fw-esp32] ESP-NOW radio ready: device_id={:?} channel={}",
+            "[fw-esp32c6] ESP-NOW radio ready: device_id={:?} channel={}",
             radio_driver.device_id(),
             radio_driver.default_channel()
         );
@@ -512,7 +522,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     server.set_hello(lpc_wire::ServerHello {
         proto: lpc_wire::WIRE_PROTO_VERSION,
         fw: lpc_wire::FwProvenance {
-            package: alloc::string::String::from("fw-esp32"),
+            package: alloc::string::String::from("fw-esp32c6"),
             commit: alloc::string::String::from(env!("LP_BUILD_COMMIT")),
             dirty: env!("LP_BUILD_DIRTY") == "true",
             profile: alloc::string::String::from(env!("LP_BUILD_PROFILE")),
@@ -629,7 +639,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(not(fw_harness))]
     {
         let app = boot_firmware(spawner);
-        // Keep the marker substring "fw-esp32 initialized, starting server
+        // Keep the marker substring "fw-esp32c6 initialized, starting server
         // loop" intact: two readiness classifiers grep for it
         // (lpa-studio-core browser_serial_readiness, lp-cli fwcheck). The
         // version suffix is additive only.
@@ -641,6 +651,14 @@ async fn main(spawner: embassy_executor::Spawner) {
         );
 
         // Run server loop (never returns)
-        run_server_loop(app.server, app.transport, app.time_provider, app.watchdog).await;
+        let mut watchdog = app.watchdog;
+        run_server_loop(
+            app.server,
+            app.transport,
+            app.time_provider,
+            esp32_memory_stats,
+            move |now_ms| watchdog.feed(now_ms),
+        )
+        .await;
     }
 }

@@ -137,20 +137,20 @@ runtime.
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lp-server`      | Project management, client connections | yes              |
-| `fw-esp32`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
 ## Native RV32 backend (`lpvm-native`)
 
 **`lpvm-native`** lowers LPIR to custom RV32 machine code outside Cranelift
 (pool-based register allocation, `rt_jit` / `rt_emu`). It is the default
-on-device codegen path and is exercised by **`native-jit`** on `fw-esp32`/`fw-emu`
+on-device codegen path and is exercised by **`native-jit`** on `fw-esp32c6`/`fw-emu`
 and the **`rv32n.q32`** filetest target.
 
 ## Building the workspace (cross-target)
 
 This workspace mixes host crates and bare-metal RV32 firmware crates
-(`fw-esp32`, `fw-emu`, `lps-builtins-emu-app`, `lp-riscv-emu-guest*`).
+(`fw-esp32c6`, `fw-emu`, `lps-builtins-emu-app`, `lp-riscv-emu-guest*`).
 The RV32 crates depend on `esp-rom-sys`, `esp-sync`, `esp32c6`, etc., which
 **do not compile for the host target** (they use RISC-V intrinsics, RV32
 interrupt vectors, and section attributes that LLVM rejects on Mach-O /
@@ -179,26 +179,26 @@ just build              # parallel: host + rv32
 
 ### ESP32 linked-build pitfall
 
-For `fw-esp32`, **linked firmware builds, size measurements, and bloat
-analysis must run from `lp-fw/fw-esp32/`** (or through a just recipe that
-`cd`s there first, such as `just build-fw-esp32`). The crate-local
+For `fw-esp32c6`, **linked firmware builds, size measurements, and bloat
+analysis must run from `lp-fw/fw-esp32c6/`** (or through a just recipe that
+`cd`s there first, such as `just build-fw-esp32c6`). The crate-local
 `.cargo/config.toml` and linker setup are part of the build.
 
 This is fine from the workspace root because it does not final-link:
 
 ```bash
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 ```
 
 For a real linked ELF or size numbers, do this instead:
 
 ```bash
-cd lp-fw/fw-esp32
+cd lp-fw/fw-esp32c6
 cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
-rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32
+rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6
 ```
 
-Running `cargo build -p fw-esp32 ...` from the workspace root can fail at final
+Running `cargo build -p fw-esp32c6 ...` from the workspace root can fail at final
 link with `memory region not defined: ROTEXT`, because it bypasses the
 crate-local firmware build context.
 
@@ -214,7 +214,7 @@ the same exclusion list the justfile uses for clippy:
 
 ```bash
 cargo build --workspace \
-  --exclude fw-esp32 --exclude fw-emu \
+  --exclude fw-esp32c6 --exclude fw-emu \
   --exclude lps-builtins-emu-app \
   --exclude lp-riscv-emu-guest --exclude lp-riscv-emu-guest-test-app
 ```
@@ -415,7 +415,7 @@ These commands must pass for any change touching the shader pipeline:
 cargo test -p fw-tests --test scene_render_emu --test profile_alloc_emu
 
 # ESP32 builds with compiler included
-cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
 
 # Emulator build
 cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
@@ -466,7 +466,7 @@ To bump the toolchain, do it deliberately as its own change:
 
 1. Update `channel` in `rust-toolchain.toml`.
 2. Update the matching `unwinding` version in the crates that depend on
-   it (`fw-esp32`, `fw-emu`, `lpc-engine`, `lp-riscv-emu-guest`) — the
+   it (`fw-esp32c6`, `fw-emu`, `lpc-engine`, `lp-riscv-emu-guest`) — the
    nightly date and the `unwinding` version move together.
 3. Update the hardcoded `toolchain:` value in every job in
    `.github/workflows/pre-merge.yml` (the workflow carries a

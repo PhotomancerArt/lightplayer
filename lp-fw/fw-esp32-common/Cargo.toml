@@ -1,0 +1,38 @@
+[package]
+name = "fw-esp32-common"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Chip-generic firmware layer shared by per-SOC ESP32 firmware crates"
+
+[lints]
+workspace = true
+
+# Seam rules (ADR 2026-07-29-per-chip-fw-toolchains): this crate must build under
+# both the pinned nightly and the Espressif fork. NO esp-hal/esp-alloc/esp-println/
+# esp-storage/esp-rtos/esp-radio, NO `unwinding`, no rust-toolchain.toml, no
+# .cargo/config.toml, no panic-strategy assumptions. Chip facts arrive by injection
+# (memory-stats fn, RMT RAM base, flash Storage impl, manifest fallback).
+[dependencies]
+fw-core = { path = "../fw-core", default-features = false }
+lp-collection = { workspace = true, features = ["serde"] }
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+embassy-time = "0.5.0"
+embassy-sync = "0.8.0"
+smart-leds = "0.3"
+log = { workspace = true, default-features = false }
+hashbrown = { workspace = true }
+littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
+
+# Server stack (heavy) — only with the `server` feature, mirroring the bin crates.
+lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, optional = true }
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"], optional = true }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
+lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
+
+[features]
+default = []
+server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs"]

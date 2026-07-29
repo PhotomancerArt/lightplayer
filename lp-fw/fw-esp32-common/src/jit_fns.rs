@@ -3,8 +3,6 @@
 //! These functions are called by JIT-compiled GLSL code when using host functions
 //! like __host_log. They must be provided by the firmware binary.
 
-extern crate alloc;
-
 use crate::logger::write_log;
 
 /// Host function implementation for log output (no_std mode).
