@@ -32,7 +32,7 @@ pub use server::{LpServer, MemoryStatsFn};
 
 /// GLSL frontend that ships on LightPlayer devices — the product constant.
 ///
-/// Device hosts (`fw-esp32`, `fw-emu`, and device-emulating hosts such as
+/// Device hosts (`fw-esp32c6`, `fw-emu`, and device-emulating hosts such as
 /// `fw-host` and `lp-cli`) pass this when constructing their CPU graphics
 /// backend. It is stated exactly once, here: frontend selection is an
 /// explicit host decision, never a Cargo-feature default, so feature

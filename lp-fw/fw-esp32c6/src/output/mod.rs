@@ -1,11 +1,3 @@
-#[cfg(any(
-    not(fw_harness),
-    feature = "test_button",
-    feature = "test_gpio_calibrate",
-    feature = "test_jit_math_perf",
-    feature = "test_shader_compile_incremental"
-))]
-mod provider;
 mod rmt;
 #[cfg(any(
     not(fw_harness),
@@ -23,7 +15,7 @@ mod rmt_ws281x_driver;
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental"
 ))]
-pub use provider::Esp32OutputProvider;
+pub use fw_esp32_common::output::provider::Esp32OutputProvider;
 #[cfg(any(
     not(fw_harness),
     feature = "test_button",

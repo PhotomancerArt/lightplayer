@@ -15,7 +15,7 @@ The crate is `no_std` by default so firmware crates can depend on it. Enable the
 
 1. Add a module under `src/checks/<name>/`.
 2. Add a `FwCheck` variant and a `FwCheckConfig` entry.
-3. Add a feature flag in the target firmware crate, such as `fw-esp32`.
+3. Add a feature flag in the target firmware crate, such as `fw-esp32c6`.
 4. Add a small firmware harness that initializes the board/logging and delegates
    to shared check code where possible.
 5. Emit structured records with `fw_checks::emit_record_json(...)` when the

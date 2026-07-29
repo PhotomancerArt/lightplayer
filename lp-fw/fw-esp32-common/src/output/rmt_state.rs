@@ -8,21 +8,21 @@ use smart_leds::RGB8;
 
 /// Per-channel state for interrupt handler coordination
 #[derive(Debug)]
-pub(crate) struct ChannelState {
+pub struct ChannelState {
     /// Flag indicating if the current frame transmission is complete
-    pub(crate) frame_complete: AtomicBool,
+    pub frame_complete: AtomicBool,
     /// Current LED position in the transmission
-    pub(crate) led_counter: AtomicUsize,
+    pub led_counter: AtomicUsize,
     /// Counter for completed frames
-    pub(crate) frame_counter: AtomicUsize,
+    pub frame_counter: AtomicUsize,
     /// Statistics: number of threshold interrupts
-    pub(crate) stats_count: AtomicI32,
+    pub stats_count: AtomicI32,
     /// Statistics: sum of bytes elapsed per interrupt
-    pub(crate) stats_sum: AtomicI32,
+    pub stats_sum: AtomicI32,
     /// Pointer to the current LED buffer (for interrupt handler)
-    pub(crate) led_buffer_ptr: AtomicPtr<RGB8>,
+    pub led_buffer_ptr: AtomicPtr<RGB8>,
     /// Number of LEDs in the current transmission
-    pub(crate) num_leds: AtomicUsize,
+    pub num_leds: AtomicUsize,
 }
 
 impl ChannelState {
@@ -45,4 +45,4 @@ const fn make_channel_state_array() -> [ChannelState; 2] {
 }
 
 /// Global state for interrupt handling (one per channel, currently only [0] used)
-pub(crate) static CHANNEL_STATE: [ChannelState; 2] = make_channel_state_array();
+pub static CHANNEL_STATE: [ChannelState; 2] = make_channel_state_array();

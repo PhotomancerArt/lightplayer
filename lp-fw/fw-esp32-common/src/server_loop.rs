@@ -23,8 +23,6 @@
 //! which sends heartbeat messages for debugging. This implementation makes heartbeat messages
 //! part of the formal protocol using proper `ServerMessage` types with `M!` prefix.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 use lpa_server::LpServer;
 use lpc_shared::fps::FpsTracker;
@@ -59,7 +57,10 @@ pub async fn run_server_loop<T: ServerTransport>(
     mut server: LpServer,
     mut transport: T,
     time_provider: Esp32TimeProvider,
-    mut watchdog: crate::recovery::watchdog::WatchdogFeeder,
+    // Chip-injected seams: heap stats for the heartbeat (used/free bytes) and
+    // the watchdog feed. Both are chip facts this crate must not know.
+    memory_stats: fn() -> Option<(u32, u32)>,
+    mut feed_watchdog: impl FnMut(u64),
 ) -> ! {
     // Wire hello: the first id-0 frame this loop ever sends, so clients can
     // check the protocol version before anything else arrives (see
@@ -197,14 +198,12 @@ pub async fn run_server_loop<T: ServerTransport>(
             fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
             let fps_stats = fps_collector.compute_stats();
 
-            // Query heap memory from esp_alloc
-            let used_bytes = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
-            let free_bytes = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
-            let memory = Some(lpc_wire::server::MemoryStats {
-                free_bytes,
-                used_bytes,
-                total_bytes: used_bytes.saturating_add(free_bytes),
-            });
+            let memory =
+                memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
+                    free_bytes,
+                    used_bytes,
+                    total_bytes: used_bytes.saturating_add(free_bytes),
+                });
 
             // Create heartbeat message (unsolicited: id 0, single/final message).
             let heartbeat_msg = WireServerMessage::new(
@@ -230,7 +229,7 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Feed the RWDT while the loop and the I/O task are both alive; a
         // hang anywhere stops the feeding and the watchdog resets us with
         // the recovery frame stack as the blame record.
-        watchdog.feed(current_time);
+        feed_watchdog(current_time);
 
         // Yield to Embassy runtime (allows other tasks to run)
         // Use embassy_time::Timer to delay slightly

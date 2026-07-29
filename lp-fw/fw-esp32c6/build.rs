@@ -1,4 +1,4 @@
-//! Build script for fw-esp32.
+//! Build script for fw-esp32c6.
 //!
 //! Linker script (-Tlinkall.x) is configured via .cargo/config.toml to avoid
 //! duplicate -Tlinkall.x (which would cause "region 'RAM' already defined").
@@ -54,7 +54,7 @@ fn profile_dir_name() -> Option<String> {
 /// to the epoch. The backdating matters: this script watches these files via
 /// rerun-if-changed, and cargo's staleness reference is the script's *start*
 /// time — so our own writes would otherwise look newer and self-invalidate
-/// the script, re-running it (and rebuilding fw-esp32) on every build. With
+/// the script, re-running it (and rebuilding fw-esp32c6) on every build. With
 /// the epoch mtime, only a regeneration by esp-hal's build script (which
 /// writes with a real timestamp) registers as a change.
 fn patch_file(path: &std::path::Path, contents: &str) {

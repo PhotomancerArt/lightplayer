@@ -21,11 +21,12 @@ members = [
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-fw/fw-browser",
+    "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
     "lp-fw/fw-checks",
     "lp-cli",
-    "lp-fw/fw-esp32",
+    "lp-fw/fw-esp32c6",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lpc-mapping",
@@ -77,9 +78,9 @@ members = [
 ]
 resolver = "2"
 
-# Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32 from default workspace builds (cross-target only)
+# Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)
 # They're still in workspace members so they can use workspace dependencies
-# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32
+# Build them explicitly with: just build-builtins, just build-rv32, or just build-fw-esp32c6
 default-members = [
     # lp-base workspace members
     "lp-base/lp-recovery",
@@ -96,6 +97,7 @@ default-members = [
     "lp-app/lpa-link",
     "lp-app/lpa-mapping-editor",
     "lp-app/lpa-studio-core",
+    "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
     "lp-fw/fw-checks",
@@ -248,7 +250,7 @@ debug = 1
 inherits = "release"
 panic = "unwind"
 
-[profile.release-esp32.package.fw-esp32]
+[profile.release-esp32.package.fw-esp32c6]
 debug = 1
 strip = "none"
 

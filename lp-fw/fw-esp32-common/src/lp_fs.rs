@@ -1,7 +1,9 @@
 //! Flash-backed LpFs implementation using littlefs-rust.
 //!
-//! Wraps `littlefs_rust::Filesystem<LpFlashStorage>` and implements the
-//! `LpFs` trait for use with LpServer.
+//! Wraps `littlefs_rust::Filesystem<S>` over a chip-supplied
+//! `littlefs_rust::Storage` implementation and implements the `LpFs` trait
+//! for use with LpServer. The chip crate owns the flash adapter and the
+//! partition-derived littlefs `Config`.
 
 use alloc::{format, rc::Rc, string::ToString, vec, vec::Vec};
 use core::cell::RefCell;
@@ -10,54 +12,54 @@ use hashbrown::HashMap;
 use lpfs::lp_path::{LpPath, LpPathBuf};
 use lpfs::{FsError, FsEvent, FsEventKind, FsVersion, LpFs, LpFsMemory, LpFsView};
 
-use crate::flash_storage::{LpFlashStorage, lpfs_config};
-use littlefs_rust::{Error as LfsError, FileType as LfsFileType, Filesystem, OpenFlags};
+use littlefs_rust::{
+    Config, Error as LfsError, FileType as LfsFileType, Filesystem, OpenFlags, Storage,
+};
 
 /// Flash-backed filesystem implementing LpFs.
 ///
 /// Uses littlefs-rust over the lpfs partition. Supports chroot via LpFsView.
-pub struct LpFsFlash {
-    inner: Rc<RefCell<LpFsFlashInner>>,
+pub struct LpFsFlash<S: Storage> {
+    inner: Rc<RefCell<LpFsFlashInner<S>>>,
 }
 
-struct LpFsFlashInner {
-    fs: Filesystem<LpFlashStorage>,
+struct LpFsFlashInner<S: Storage> {
+    fs: Filesystem<S>,
     current_version: FsVersion,
     changes: HashMap<LpPathBuf, (FsVersion, FsEventKind)>,
 }
 
-impl LpFsFlash {
+impl<S: Storage> LpFsFlash<S> {
     /// Initialize flash filesystem by mounting the lpfs partition.
     ///
     /// If the partition is unformatted or corrupted, formats it and retries.
     /// Returns `Err` only if both mount and format-then-mount fail.
-    pub fn init(flash: esp_storage::FlashStorage<'static>) -> Result<Self, LfsError> {
-        let storage = LpFlashStorage::new(flash);
-        let config = lpfs_config();
+    pub fn init(storage: S, make_config: fn() -> Config) -> Result<Self, LfsError> {
+        let config = make_config();
 
         let (mut storage, config) = match Filesystem::mount(storage, config) {
             Ok(fs) => return Ok(Self::from_fs(fs)),
             Err((e, storage)) => {
-                esp_println::println!("[FS] Mount failed ({e}), formatting partition...");
-                (storage, lpfs_config())
+                log::warn!("[FS] Mount failed ({e}), formatting partition...");
+                (storage, make_config())
             }
         };
 
         Filesystem::format(&mut storage, &config).map_err(|e| {
-            esp_println::println!("[FS] Format failed: {e}");
+            log::warn!("[FS] Format failed: {e}");
             e
         })?;
 
         let fs = Filesystem::mount(storage, config).map_err(|(e, _)| {
-            esp_println::println!("[FS] Mount after format failed: {e}");
+            log::warn!("[FS] Mount after format failed: {e}");
             e
         })?;
 
-        esp_println::println!("[FS] Formatted and mounted fresh filesystem");
+        log::info!("[FS] Formatted and mounted fresh filesystem");
         Ok(Self::from_fs(fs))
     }
 
-    fn from_fs(fs: Filesystem<LpFlashStorage>) -> Self {
+    fn from_fs(fs: Filesystem<S>) -> Self {
         LpFsFlash {
             inner: Rc::new(RefCell::new(LpFsFlashInner {
                 fs,
@@ -157,7 +159,7 @@ fn map_lfs_read_error(path: &LpPath, error: LfsError) -> FsError {
     }
 }
 
-impl LpFs for LpFsFlash {
+impl<S: Storage + 'static> LpFs for LpFsFlash<S> {
     fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
         if !path.is_absolute() {
             return Err(FsError::InvalidPath(format!(
