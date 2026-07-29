@@ -3,7 +3,8 @@
 extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
-use crate::emu::{error::EmulatorError, logging::InstLog, memory::Memory};
+use crate::emu::{error::EmulatorError, logging::InstLog};
+use lp_emu_core::Memory;
 use lp_riscv_inst::{
     Gpr,
     format::{TypeI, TypeS},
@@ -79,20 +80,9 @@ fn execute_lb<M: LoggingMode>(
     let address = base.wrapping_add(imm) as u32;
 
     let error_regs = *regs;
-    let byte_val = memory.read_byte(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let byte_val = memory
+        .read_byte(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
     let value = byte_val as i32; // Sign extend
 
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
@@ -139,28 +129,9 @@ fn execute_lh<M: LoggingMode>(
     let address = base.wrapping_add(imm) as u32;
 
     let error_regs = *regs;
-    let half_val = memory.read_halfword(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let half_val = memory
+        .read_halfword(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
     let value = half_val as i32; // Sign extend
 
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
@@ -207,28 +178,9 @@ fn execute_lw<M: LoggingMode>(
     let address = base.wrapping_add(imm) as u32;
 
     let error_regs = *regs;
-    let value = memory.read_word(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let value = memory
+        .read_word(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
     if rd.num() != 0 {
@@ -274,20 +226,9 @@ fn execute_lbu<M: LoggingMode>(
     let address = base.wrapping_add(imm) as u32;
 
     let error_regs = *regs;
-    let byte_val = memory.read_byte(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let byte_val = memory
+        .read_byte(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
     let value = (byte_val as u8) as i32; // Zero extend
 
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
@@ -334,28 +275,9 @@ fn execute_lhu<M: LoggingMode>(
     let address = base.wrapping_add(imm) as u32;
 
     let error_regs = *regs;
-    let half_val = memory.read_halfword(address).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    let half_val = memory
+        .read_halfword(address)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
     let value = (half_val as u16) as i32; // Zero extend
 
     let rd_old = if M::ENABLED { read_reg(regs, rd) } else { 0 };
@@ -410,20 +332,9 @@ fn execute_sb<M: LoggingMode>(
     let old_value = old_byte as i32;
 
     let error_regs = *regs;
-    memory.write_byte(address, value as i8).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_byte(address, value as i8)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let log = if M::ENABLED {
         Some(InstLog::Store {
@@ -473,28 +384,7 @@ fn execute_sh<M: LoggingMode>(
     let error_regs = *regs;
     memory
         .write_halfword(address, value as i16)
-        .map_err(|mut e| {
-            match &mut e {
-                EmulatorError::InvalidMemoryAccess {
-                    regs: err_regs,
-                    pc: err_pc,
-                    ..
-                } => {
-                    *err_regs = error_regs;
-                    *err_pc = pc;
-                }
-                EmulatorError::UnalignedAccess {
-                    regs: err_regs,
-                    pc: err_pc,
-                    ..
-                } => {
-                    *err_regs = error_regs;
-                    *err_pc = pc;
-                }
-                _ => {}
-            }
-            e
-        })?;
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let log = if M::ENABLED {
         Some(InstLog::Store {
@@ -541,28 +431,9 @@ fn execute_sw<M: LoggingMode>(
     };
 
     let error_regs = *regs;
-    memory.write_word(address, value).map_err(|mut e| {
-        match &mut e {
-            EmulatorError::InvalidMemoryAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            EmulatorError::UnalignedAccess {
-                regs: err_regs,
-                pc: err_pc,
-                ..
-            } => {
-                *err_regs = error_regs;
-                *err_pc = pc;
-            }
-            _ => {}
-        }
-        e
-    })?;
+    memory
+        .write_word(address, value)
+        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
 
     let log = if M::ENABLED {
         Some(InstLog::Store {
@@ -595,15 +466,16 @@ mod tests {
 
     use super::*;
     use crate::emu::executor::{LoggingDisabled, LoggingEnabled};
-    use crate::emu::memory::DEFAULT_RAM_START;
-    use crate::emu::memory::Memory;
-    use crate::{EmulatorError, Riscv32Emulator, StepResult};
+    use crate::{EmulatorError, Riscv32Emulator};
+    use lp_emu_core::DEFAULT_RAM_START;
+    use lp_emu_core::Memory;
+    use lp_emu_core::StepResult;
     use lp_riscv_inst::{Gpr, encode};
 
     #[test]
     fn test_lw_fast_path() {
         let mut regs = [0i32; 32];
-        let ram_addr = crate::emu::memory::DEFAULT_RAM_START;
+        let ram_addr = lp_emu_core::DEFAULT_RAM_START;
         regs[1] = ram_addr as i32; // Base address
         let mut memory = Memory::with_default_addresses(vec![], vec![0u8; 1024]);
         memory.write_word(ram_addr, 0x12345678).unwrap();
@@ -619,7 +491,7 @@ mod tests {
     #[test]
     fn test_lw_logging_path() {
         let mut regs = [0i32; 32];
-        let ram_addr = crate::emu::memory::DEFAULT_RAM_START;
+        let ram_addr = lp_emu_core::DEFAULT_RAM_START;
         regs[1] = ram_addr as i32;
         let mut memory = Memory::with_default_addresses(vec![], vec![0u8; 1024]);
         memory.write_word(ram_addr, 0x12345678).unwrap();
@@ -638,7 +510,7 @@ mod tests {
     #[test]
     fn test_sw_fast_path() {
         let mut regs = [0i32; 32];
-        let ram_addr = crate::emu::memory::DEFAULT_RAM_START;
+        let ram_addr = lp_emu_core::DEFAULT_RAM_START;
         regs[1] = ram_addr as i32; // Base address
         regs[2] = 0x12345678; // Value to store
         let mut memory = Memory::with_default_addresses(vec![], vec![0u8; 1024]);

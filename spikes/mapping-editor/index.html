@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>2D mapping editor — UX spike, round 2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio-ish palette (spike convention) ---------------------- */
+  :root {
+    --bg: #0b0c0e;
+    --card: #14161a;
+    --panel: #101216;
+    --border: #262a31;
+    --border-strong: #3a3f48;
+    --text: #e8e6e1;
+    --strong: #f4f2ec;
+    --muted: #9a978f;
+    --dim: #6f6d66;
+    --name: #e4c065;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+    --good: #3fd68e;
+    --attn: #f0913b;
+    --error: #ef5350;
+    --sel: #4c9ffe;          /* selection accent (spike-only; palette TBD) */
+    --sel-bg: rgba(76,159,254,.12);
+    --wire: #8a8f98;
+    --wire-inter: #e4c065;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.45 -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+
+  /* ---- layout ----------------------------------------------------- */
+  #app { display: flex; height: 100vh; }
+  #canvas-wrap { position: relative; flex: 1; min-width: 0; }
+  #canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+            touch-action: none; cursor: default; display: block; }
+  #canvas.tool-grid, #canvas.tool-ring, #canvas.tool-path { cursor: crosshair; }
+  #canvas.panning { cursor: grabbing; }
+
+  /* ---- floating chrome: one responsive top row, no overlaps ------- */
+  .float { background: var(--card);
+           border: 1px solid var(--border-strong); border-radius: 10px;
+           box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+  #topbar {
+    position: absolute; top: 12px; left: 12px; right: 12px; z-index: 4;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 8px; flex-wrap: wrap; pointer-events: none;
+  }
+  #topbar > * { pointer-events: auto; }
+  #toolbar { display: flex; gap: 2px; padding: 4px; flex-wrap: wrap; }
+  #toolbar button, #viewbar button {
+    background: none; border: none; color: var(--muted);
+    border-radius: 7px; padding: 7px 10px; font: inherit; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  #toolbar button:hover, #viewbar button:hover { color: var(--strong); background: rgba(255,255,255,.05); }
+  #toolbar button.active { background: var(--sel-bg); color: var(--sel); }
+  #toolbar button svg { display: block; }
+  #toolbar .key, #viewbar .key {
+    font: 10px var(--mono); color: var(--dim); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0 4px; line-height: 15px;
+  }
+  #toolbar button.active .key { color: var(--sel); border-color: var(--sel); opacity: .7; }
+  #toolbar .sep { width: 1px; background: var(--border); margin: 4px 3px; }
+  #viewbar { display: flex; gap: 2px; padding: 4px; flex-wrap: wrap; }
+  #viewbar button.on { color: var(--good); background: rgba(63,214,142,.08); }
+
+  #hint {
+    position: absolute; top: 62px; left: 12px; z-index: 3;
+    padding: 5px 12px; max-width: min(520px, calc(100% - 24px));
+    font-size: 11px; color: var(--dim); border-radius: 8px;
+    pointer-events: none;   /* informational — must never eat clicks */
+  }
+  #hud {
+    position: absolute; bottom: 14px; left: 14px; z-index: 4; padding: 6px 12px;
+    font: 11px var(--mono); color: var(--muted); border-radius: 8px;
+    max-width: calc(100% - 150px); pointer-events: none;
+  }
+  #hud b { color: var(--strong); font-weight: 600; }
+  #hud .u { color: var(--name); }
+  #zoombar { position: absolute; bottom: 14px; right: 14px; z-index: 4;
+             display: flex; padding: 3px; gap: 1px; }
+  #zoombar button { background: none; border: none; color: var(--muted); font: 12px var(--mono);
+                    padding: 5px 9px; cursor: pointer; border-radius: 6px; }
+  #zoombar button:hover { color: var(--strong); background: rgba(255,255,255,.05); }
+
+  /* ---- properties popover ----------------------------------------- */
+  #popover {
+    position: absolute; z-index: 5; width: 236px; display: none;
+    padding: 10px 12px 12px;
+  }
+  #popover.show { display: block; }
+  #popover .pop-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
+  #popover .pop-title { color: var(--strong); font-weight: 600; font-size: 12px;
+                        flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #popover .pop-kind { font: 10px var(--mono); color: var(--dim); }
+
+  /* ---- right panel ------------------------------------------------ */
+  #panel {
+    width: 270px; flex: none; background: var(--panel);
+    border-left: 1px solid var(--border-strong);
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  #panel h1 { font-size: 11px; letter-spacing: .12em; color: var(--muted);
+              text-transform: uppercase; margin: 14px 14px 2px; }
+  #panel p.hint { color: var(--dim); font-size: 11px; margin: 0 14px 10px; }
+  .section { border-top: 1px solid var(--border); padding: 10px 14px 12px; }
+  .section > .label { font-size: 10px; letter-spacing: .1em; color: var(--muted);
+                      text-transform: uppercase; margin-bottom: 8px; }
+
+  .scene-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .scene-chips button {
+    background: var(--card); color: var(--muted); border: 1px solid var(--border-strong);
+    border-radius: 7px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .scene-chips button:hover { color: var(--strong); border-color: var(--dim); }
+
+  /* object list */
+  .obj-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+             border-radius: 7px; cursor: pointer; }
+  .obj-row:hover { background: rgba(255,255,255,.04); }
+  .obj-row.sel { background: var(--sel-bg); }
+  .obj-row .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .obj-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; color: var(--text); }
+  .obj-row.sel .nm { color: var(--strong); }
+  .obj-row .range { font: 10px var(--mono); color: var(--dim); flex: none; }
+  .obj-row .mv { display: none; flex: none; gap: 0; }
+  .obj-row:hover .mv { display: flex; }
+  .obj-row .mv button { background: none; border: none; color: var(--dim); cursor: pointer;
+                        padding: 0 3px; font-size: 11px; }
+  .obj-row .mv button:hover { color: var(--strong); }
+  .empty-note { color: var(--dim); font-size: 11px; padding: 2px 6px; }
+
+  /* property fields (used inside the popover) */
+  .fields { display: grid; grid-template-columns: 84px 1fr; gap: 7px 10px; align-items: center; }
+  .fields label { color: var(--muted); font-size: 11px; }
+  .fields input[type=text], .fields input[type=number] {
+    background: var(--bg); border: 1px solid var(--border-strong); color: var(--strong);
+    border-radius: 6px; padding: 4px 8px; font: 12px var(--mono); width: 100%;
+  }
+  .fields input:focus { outline: none; border-color: var(--sel); }
+  .seg { display: flex; background: var(--bg); border: 1px solid var(--border-strong);
+         border-radius: 6px; overflow: hidden; }
+  .seg button { flex: 1; background: none; border: none; color: var(--dim); font: 11px var(--mono);
+                padding: 4px 0; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--sel-bg); color: var(--sel); }
+  .row-actions { display: flex; gap: 8px; margin-top: 11px; }
+  .row-actions button {
+    background: var(--bg); border: 1px solid var(--border-strong); color: var(--muted);
+    border-radius: 7px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .row-actions button:hover { color: var(--strong); }
+  .row-actions button.danger:hover { color: var(--error); border-color: var(--error); }
+  .sel-meta { font: 10px var(--mono); color: var(--dim); margin-top: 9px; }
+
+  details.qs { margin-top: auto; border-top: 1px solid var(--border); padding: 10px 14px 14px; }
+  details.qs summary { font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+                       color: var(--muted); cursor: pointer; }
+  details.qs ol { margin: 8px 0 0; padding-left: 18px; color: var(--dim); font-size: 11px; }
+  details.qs li { margin-bottom: 6px; }
+
+  /* svg content */
+  .lamp { stroke: #000; stroke-width: 1; }
+  .lamp.sel-lamp { stroke: var(--sel); }
+  .lamp-num { font: 600 8px var(--mono); fill: #0b0c0e; text-anchor: middle;
+              pointer-events: none; }
+  .wire { stroke: var(--wire); fill: none; opacity: .55; }
+  .wire-inter { stroke: var(--wire-inter); fill: none; opacity: .8; stroke-dasharray: 5 4; }
+  .path-ghost { stroke: var(--dim); fill: none; opacity: .5; stroke-dasharray: 3 4; }
+  .sel-outline { stroke: var(--sel); fill: none; stroke-dasharray: 4 3; opacity: .9; }
+  .handle { fill: var(--card); stroke: var(--sel); cursor: nwse-resize; }
+  .vertex { fill: var(--card); stroke: var(--sel); cursor: move; }
+  .vertex.hot { fill: var(--sel); }
+  .draft { stroke: var(--sel); fill: none; stroke-dasharray: 4 3; }
+  .marquee { stroke: var(--sel); fill: rgba(76,159,254,.08); stroke-dasharray: 4 3; }
+  .hitline { stroke: transparent; stroke-width: 14; fill: none; cursor: default; }
+  .uni-chip-box { fill: var(--card); stroke-width: 1; }
+  .uni-chip-text { font: 600 8px var(--mono); text-anchor: middle; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="canvas-wrap">
+    <svg id="canvas"></svg>
+    <div id="topbar">
+      <div id="toolbar" class="float"></div>
+      <div id="viewbar" class="float"></div>
+    </div>
+    <div id="hint" class="float"></div>
+    <div id="hud" class="float"></div>
+    <div id="zoombar" class="float">
+      <button id="z-out" title="zoom out">−</button>
+      <button id="z-fit" title="zoom to fit">fit</button>
+      <button id="z-in" title="zoom in">+</button>
+    </div>
+    <div id="popover" class="float"></div>
+  </div>
+  <div id="panel">
+    <h1>2D mapping editor — spike r2</h1>
+    <p class="hint">Multi-select (marquee / ⇧-click), corner-handle resize, universe
+      colors (U), multi-ring circles, properties popover. Undo: ⌘Z / ⇧⌘Z.</p>
+
+    <div class="section">
+      <div class="label">Scenes</div>
+      <div class="scene-chips" id="scenes"></div>
+    </div>
+
+    <div class="section">
+      <div class="label">Objects · wiring order</div>
+      <div id="objlist"></div>
+    </div>
+
+    <details class="qs">
+      <summary>Round-2 questions</summary>
+      <ol>
+        <li>Properties as an anchored popover vs the r1 sidebar — which survives contact with a crowded Studio UI?</li>
+        <li>Universe colors (U): is fill-by-universe the right treatment, or should universes be chips/boundaries only?</li>
+        <li>Group resize: uniform-only scaling from corners — enough for the fyeah fixup case?</li>
+        <li>Click (no drag) with grid/ring tool drops a default object and opens its properties — good default-vs-dialog compromise?</li>
+        <li>Multi-ring: outer count + ring count + spacing with derived inner counts — or explicit per-ring counts like the real fixture?</li>
+      </ol>
+    </details>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   Document model — parametric objects; resolve() is the single source
+   of lamp positions + wiring order. Mirrors the planned lpc-mapping
+   split: doc (authored) -> resolved lamps (derived).
+   ===================================================================== */
+
+let uid = 1;
+const OBJ_COLORS = ["#5aa9e6", "#3fd68e", "#e4c065", "#c792ea", "#f0913b", "#64d8cb"];
+const UNI_COLORS = ["#5aa9e6", "#e4c065", "#3fd68e", "#c792ea", "#f0913b", "#ef5350", "#64d8cb", "#f06292"];
+const LAMPS_PER_UNIVERSE = 170;   /* RGB lamps per DMX universe */
+
+function makeGrid(x, y, cols, rows, pitch) {
+  return { id: uid++, kind: "grid", name: "grid", x, y, cols, rows, pitch,
+           routing: "snake", corner: "tl" };
+}
+function makeRing(cx, cy, radius, count) {
+  return { id: uid++, kind: "ring", name: "ring", cx, cy, radius, count,
+           rings: 1, spacing: 40, order: "outer-first", startAngle: -90, dir: "cw" };
+}
+function makePath(points, count) {
+  return { id: uid++, kind: "path", name: "path", points, count, reversed: false };
+}
+
+/* ---- resolution ---------------------------------------------------- */
+
+function resolveObject(o) {
+  const pts = [];
+  if (o.kind === "grid") {
+    const rows = [...Array(o.rows).keys()];
+    const cols = [...Array(o.cols).keys()];
+    const flipRows = o.corner === "bl" || o.corner === "br";
+    const flipCols = o.corner === "tr" || o.corner === "br";
+    const rOrder = flipRows ? rows.slice().reverse() : rows;
+    rOrder.forEach((r, ri) => {
+      let cOrder = flipCols ? cols.slice().reverse() : cols;
+      if (o.routing === "snake" && ri % 2 === 1) cOrder = cOrder.slice().reverse();
+      for (const c of cOrder) pts.push([o.x + c * o.pitch, o.y + r * o.pitch]);
+    });
+  } else if (o.kind === "ring") {
+    const sign = o.dir === "cw" ? 1 : -1;
+    const nRings = Math.max(1, Math.round(o.rings || 1));
+    const radii = [];
+    for (let k = 0; k < nRings; k++) {
+      const r = o.radius - k * (o.spacing || 0);
+      if (r > 2) radii.push(r);
+    }
+    if (o.order === "inner-first") radii.reverse();
+    for (const r of radii) {
+      const count = Math.max(1, Math.round(o.count * r / o.radius));
+      for (let i = 0; i < count; i++) {
+        const a = (o.startAngle + sign * (i * 360 / count)) * Math.PI / 180;
+        pts.push([o.cx + r * Math.cos(a), o.cy + r * Math.sin(a)]);
+      }
+    }
+  } else if (o.kind === "path") {
+    let ps = o.points;
+    if (o.reversed) ps = ps.slice().reverse();
+    const segs = [];
+    let total = 0;
+    for (let i = 0; i + 1 < ps.length; i++) {
+      const d = Math.hypot(ps[i+1][0]-ps[i][0], ps[i+1][1]-ps[i][1]);
+      segs.push(d); total += d;
+    }
+    const n = Math.max(1, o.count);
+    for (let i = 0; i < n; i++) {
+      if (n === 1 || total === 0) { pts.push([...ps[0]]); continue; }
+      let t = i / (n - 1) * total, si = 0;
+      while (si < segs.length - 1 && t > segs[si]) { t -= segs[si]; si++; }
+      const a = ps[si], b = ps[si+1] || ps[si];
+      const f = segs[si] ? t / segs[si] : 0;
+      pts.push([a[0] + (b[0]-a[0]) * f, a[1] + (b[1]-a[1]) * f]);
+    }
+  }
+  return pts;
+}
+
+/* -> { lamps: [{x,y,g,obj}], ranges: Map(id -> {start,end}), total } */
+function resolveDoc(doc) {
+  const lamps = [], ranges = new Map();
+  let g = 0;
+  for (const o of doc.objects) {
+    const pts = resolveObject(o);
+    ranges.set(o.id, { start: g, end: g + pts.length - 1 });
+    for (const p of pts) lamps.push({ x: p[0], y: p[1], g: g++, obj: o.id });
+  }
+  return { lamps, ranges, total: g };
+}
+
+function selectionBounds(lamps) {
+  if (!lamps.length) return null;
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const l of lamps) { x0 = Math.min(x0,l.x); y0 = Math.min(y0,l.y); x1 = Math.max(x1,l.x); y1 = Math.max(y1,l.y); }
+  return { x0, y0, x1, y1 };
+}
+
+/* =====================================================================
+   Editor state
+   ===================================================================== */
+
+let doc = { objects: [] };
+let selIds = new Set(), selVertex = null;
+let tool = "select";
+let cam = { x: 60, y: 60, s: 1 };
+let view = { numbers: true, arrows: true, universes: false, live: false };
+let undoStack = [], redoStack = [];
+let draft = null;          // path tool in-progress: {points, cursor}
+let dragGhost = null;      // grid/ring creation preview object
+let drag = null;           // pointer drag state
+let liveT0 = performance.now();
+
+const LAMP_R = 7;
+const $ = (id) => document.getElementById(id);
+const svg = $("canvas");
+
+function snapshot() { return JSON.stringify({ doc, uid }); }
+function pushUndo(snap) { undoStack.push(snap); if (undoStack.length > 100) undoStack.shift(); redoStack = []; persist(); }
+function restore(snap) {
+  const s = JSON.parse(snap);
+  doc = s.doc; uid = s.uid;
+  selIds = new Set([...selIds].filter(id => doc.objects.some(o => o.id === id)));
+  selVertex = null;
+  renderAll(); persist();
+}
+function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); }
+function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); }
+
+/* persist is deferred so callers can pushUndo(snapshot()) *before* mutating
+   and localStorage still captures the post-mutation doc */
+let persistTimer = null;
+function persist() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    try { localStorage.setItem("map2d-spike-r2", snapshot()); } catch (e) {}
+  }, 50);
+}
+
+function selObjs() { return doc.objects.filter(o => selIds.has(o.id)); }
+function singleSel() { const s = selObjs(); return s.length === 1 ? s[0] : null; }
+
+/* =====================================================================
+   Scenes — the three archetypes + the real fyeah sign
+   ===================================================================== */
+
+const FYEAH_PATHS = [
+  { c: 23, pts: "51.2 43.8 33.6 91.7 78.4 92.8 32.9 93.8 16.3 132.8 49.9 40.9 103.5 41.1 53.3 43.2" },
+  { c: 25, pts: "136.3 40.2 115.7 103.6 121.9 116.2 132.9 118.5 145 113.6 158.2 102.8 189.8 35.6 165.1 107.7 152 119.8 137.8 126 126.2 126.2 110.5 119.8 106.2 106.9 131.9 37.4" },
+  { c: 25, pts: "276.3 54.9 276.6 41.3 260.6 34.8 239.2 44.1 219.7 72.9 211.7 101 212.5 114.9 224.6 122.4 243.9 120 268.6 101.5 246.7 126.5 229.5 130.6 213.8 125.4 202.9 110.5 206.5 76.3 224.3 45.9 248.8 29.2 269.9 27.9 284.8 36.9 286.3 54.7" },
+  { c: 27, pts: "332.7 31.8 318 77.8 333.5 77 387.3 25.8 341.2 83.9 351.8 130.9 332.5 87.2 314.7 87.4 295.8 129.3 330.2 31.8" },
+  { c: 21, pts: "469 30.3 471.1 82.8 526.3 24.7 471.1 98 456.2 130.3 461.4 94.6 457.4 23.1" },
+  { c: 26, pts: "611.3 36.3 560.7 33.2 544.8 83 588.9 83 544.8 85.3 530.2 128.9 576.9 131.6 524.4 133.9 558.7 29.3 612 32.8" },
+  { c: 30, pts: "676.5 42.4 669.9 104.6 646 104.6 669.6 107.3 667.9 137.1 680.8 38.6 657.2 37.4 602 138.2 623.2 105.4 639.8 104.2 624.4 103.1 659.9 42.4" },
+  { c: 29, pts: "745.2 24.3 729 77.2 779.2 77.6 803.2 23.9 766.5 130.1 778.4 82.6 727.1 81 708.9 129.7 742.9 23.9" },
+  { c: 7,  pts: "848.1 28.9 822.3 98.8 843.1 28.5" },
+  { c: 6,  pts: "821.1 118.1 820.2 132.4 803.6 140.4 799.4 120.3 812.7 113.5 803.1 124.8 805.7 135.9 818.5 131.1 819 118" },
+];
+
+function parsePts(str) {
+  const nums = str.trim().split(/[\s,]+/).map(Number);
+  const pts = [];
+  for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i], nums[i+1]]);
+  return pts;
+}
+
+const SCENES = {
+  "basic (button)": () => {
+    const r = makeRing(240, 200, 90, 16);
+    r.name = "button rings"; r.rings = 2; r.spacing = 45;
+    return [r];
+  },
+  "cat ears (linear art)": () => {
+    const band = makePath([[80,330],[95,265],[130,205],[185,163],[250,148],[315,163],[370,205],[405,265],[420,330]], 22);
+    band.name = "headband";
+    const earL = makePath([[130,210],[172,72],[228,172]], 13); earL.name = "ear L";
+    const earR = makePath([[272,172],[328,72],[370,210]], 13); earR.name = "ear R";
+    return [earL, earR, band];
+  },
+  "panel 16×16": () => {
+    const gr = makeGrid(100, 80, 16, 16, 26); gr.name = "panel";
+    return [gr];
+  },
+  "fyeah sign": () =>
+    FYEAH_PATHS.map((p, i) => {
+      const o = makePath(parsePts(p.pts), p.c);
+      o.name = "p" + (i + 1);
+      return o;
+    }),
+};
+
+function loadScene(name) {
+  pushUndo(snapshot());
+  doc = { objects: SCENES[name]() };
+  selIds = new Set(); selVertex = null; draft = null;
+  renderAll(); zoomFit();
+}
+
+/* =====================================================================
+   Camera
+   ===================================================================== */
+
+function screenToWorld(sx, sy) {
+  const r = svg.getBoundingClientRect();
+  return [(sx - r.left - cam.x) / cam.s, (sy - r.top - cam.y) / cam.s];
+}
+function worldToScreen(wx, wy) {
+  return [wx * cam.s + cam.x, wy * cam.s + cam.y];
+}
+function applyCam() {
+  const root = svg.querySelector("#world");
+  if (root) root.setAttribute("transform", `translate(${cam.x},${cam.y}) scale(${cam.s})`);
+  renderHud(); positionPopover();
+}
+function zoomAt(sx, sy, factor) {
+  const r = svg.getBoundingClientRect();
+  const wx = (sx - r.left - cam.x) / cam.s, wy = (sy - r.top - cam.y) / cam.s;
+  cam.s = Math.min(8, Math.max(0.1, cam.s * factor));
+  cam.x = sx - r.left - wx * cam.s;
+  cam.y = sy - r.top - wy * cam.s;
+  renderCanvas(); renderHud(); positionPopover();
+}
+function zoomFit() {
+  const { lamps } = resolveDoc(doc);
+  const r = svg.getBoundingClientRect();
+  if (!lamps.length) { cam = { x: r.width / 2 - 200, y: r.height / 2 - 160, s: 1 }; renderCanvas(); renderHud(); return; }
+  const b = selectionBounds(lamps);
+  const pad = 60;
+  const s = Math.min(2.5, Math.min(
+    (r.width - 2 * pad) / Math.max(50, b.x1 - b.x0),
+    (r.height - 2 * pad) / Math.max(50, b.y1 - b.y0)));
+  cam.s = s;
+  cam.x = (r.width - (b.x1 - b.x0) * s) / 2 - b.x0 * s;
+  cam.y = (r.height - (b.y1 - b.y0) * s) / 2 - b.y0 * s;
+  renderCanvas(); renderHud(); positionPopover();
+}
+
+/* =====================================================================
+   Rendering (SVG string regen on state change; live tick mutates fills)
+   ===================================================================== */
+
+function objColor(o) {
+  const i = doc.objects.indexOf(o);
+  return OBJ_COLORS[((i % OBJ_COLORS.length) + OBJ_COLORS.length) % OBJ_COLORS.length];
+}
+function uniOf(g) { return Math.floor(g / LAMPS_PER_UNIVERSE); }
+function uniColor(u) { return UNI_COLORS[u % UNI_COLORS.length]; }
+
+function lampFill(l, now) {
+  if (view.live) {
+    const t = (now - liveT0) / 1000;
+    const hue = (l.x * 0.55 + l.y * 0.3 - t * 120) % 360;
+    return `hsl(${(hue + 360) % 360} 90% 60%)`;
+  }
+  if (view.universes) return uniColor(uniOf(l.g));
+  const o = doc.objects.find(x => x.id === l.obj);
+  return o ? objColor(o) : "#888";
+}
+
+function arrowSeg(a, b, r) {
+  const d = Math.hypot(b.x - a.x, b.y - a.y);
+  if (d < r * 2 + 2) return null;
+  const ux = (b.x - a.x) / d, uy = (b.y - a.y) / d;
+  return { x1: a.x + ux * r, y1: a.y + uy * r, x2: b.x - ux * (r + 2), y2: b.y - uy * (r + 2) };
+}
+
+function renderCanvas() {
+  const { lamps } = resolveDoc(doc);
+  const now = performance.now();
+  let s = `<defs>
+    <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0,0.6 L7.4,4 L0,7.4 z" fill="var(--wire)"/></marker>
+    <marker id="arr-inter" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0.6 L7.4,4 L0,7.4 z" fill="var(--wire-inter)"/></marker>
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="rgba(255,255,255,.06)"/></pattern>
+  </defs>`;
+  s += `<rect x="-100000" y="-100000" width="200000" height="200000" fill="url(#dots)" data-bgnd="1"/>`;
+  s += `<g id="world" transform="translate(${cam.x},${cam.y}) scale(${cam.s})">`;
+
+  const byObj = new Map();
+  for (const l of lamps) {
+    if (!byObj.has(l.obj)) byObj.set(l.obj, []);
+    byObj.get(l.obj).push(l);
+  }
+
+  // ghost geometry + wide hit lines for paths
+  for (const o of doc.objects) {
+    if (o.kind === "path") {
+      const pl = o.points.map(p => p.join(",")).join(" ");
+      s += `<polyline class="path-ghost" points="${pl}" stroke-width="${1.5 / cam.s}"/>`;
+      s += `<polyline class="hitline" points="${pl}" data-obj="${o.id}"/>`;
+    }
+  }
+
+  // wiring arrows
+  if (view.arrows) {
+    for (const [, ls] of byObj) {
+      for (let i = 0; i + 1 < ls.length; i++) {
+        const seg = arrowSeg(ls[i], ls[i+1], LAMP_R);
+        if (seg) s += `<line class="wire" x1="${seg.x1}" y1="${seg.y1}" x2="${seg.x2}" y2="${seg.y2}"
+                        stroke-width="${1.2/Math.sqrt(cam.s)}" marker-end="url(#arr)"/>`;
+      }
+    }
+    for (let i = 0; i + 1 < doc.objects.length; i++) {
+      const a = byObj.get(doc.objects[i].id), b = byObj.get(doc.objects[i+1].id);
+      if (a && a.length && b && b.length) {
+        const seg = arrowSeg(a[a.length-1], b[0], LAMP_R);
+        if (seg) s += `<line class="wire-inter" x1="${seg.x1}" y1="${seg.y1}" x2="${seg.x2}" y2="${seg.y2}"
+                        stroke-width="${1.4/Math.sqrt(cam.s)}" marker-end="url(#arr-inter)"/>`;
+      }
+    }
+  }
+
+  // lamps + numbers
+  const showNums = view.numbers && cam.s * LAMP_R >= 5.5;
+  for (const l of lamps) {
+    const selCls = selIds.has(l.obj) ? " sel-lamp" : "";
+    const sw = selIds.has(l.obj) ? 2.2 / Math.sqrt(cam.s) : 1 / cam.s;
+    s += `<circle class="lamp${selCls}" data-obj="${l.obj}" data-g="${l.g}" cx="${l.x}" cy="${l.y}" r="${LAMP_R}"
+           fill="${lampFill(l, now)}" stroke-width="${sw}"/>`;
+  }
+  if (showNums) {
+    for (const l of lamps) {
+      const n = l.g + 1;
+      const fs = n >= 100 ? 5.8 : 8;
+      s += `<text class="lamp-num" style="font-size:${fs}px" x="${l.x}" y="${l.y + fs * 0.33}">${n}</text>`;
+    }
+  }
+
+  // universe start chips
+  if (view.universes) {
+    for (const l of lamps) {
+      if (l.g % LAMPS_PER_UNIVERSE !== 0) continue;
+      const u = uniOf(l.g);
+      const w = 24, h = 13;
+      const cx = l.x + LAMP_R + 4, cy = l.y - LAMP_R - h + 2;
+      s += `<rect class="uni-chip-box" x="${cx}" y="${cy}" width="${w}" height="${h}" rx="3"
+             stroke="${uniColor(u)}"/>
+            <text class="uni-chip-text" x="${cx + w/2}" y="${cy + h - 3.5}" fill="${uniColor(u)}">U${u + 1}</text>`;
+    }
+  }
+
+  // selection outline + resize handles
+  const selLamps = lamps.filter(l => selIds.has(l.obj));
+  const b = selectionBounds(selLamps);
+  if (b && !dragGhost) {
+    const m = LAMP_R + 6 / cam.s;
+    const x = b.x0 - m, y = b.y0 - m, w = b.x1 - b.x0 + 2*m, h = b.y1 - b.y0 + 2*m;
+    s += `<rect class="sel-outline" x="${x}" y="${y}" width="${w}" height="${h}"
+           rx="${8/cam.s}" stroke-width="${1.5/cam.s}"/>`;
+    if (w > 4 / cam.s || h > 4 / cam.s) {
+      const hs = 8 / cam.s;
+      const corners = [["tl", x, y], ["tr", x + w, y], ["bl", x, y + h], ["br", x + w, y + h]];
+      for (const [name, hx, hy] of corners) {
+        s += `<rect class="handle" data-handle="${name}" x="${hx - hs/2}" y="${hy - hs/2}"
+               width="${hs}" height="${hs}" stroke-width="${1.4/cam.s}"/>`;
+      }
+    }
+  }
+
+  // vertex handles for a single selected path
+  const so = singleSel();
+  if (so && so.kind === "path" && tool === "select") {
+    so.points.forEach((p, i) => {
+      const r = 4.5 / Math.sqrt(cam.s);
+      s += `<rect class="vertex ${i === selVertex ? "hot" : ""}" data-vertex="${i}" data-obj="${so.id}"
+             x="${p[0]-r}" y="${p[1]-r}" width="${2*r}" height="${2*r}" stroke-width="${1.4/cam.s}"/>`;
+    });
+  }
+
+  // creation previews
+  if (dragGhost) {
+    const pts = resolveObject(dragGhost);
+    for (const p of pts) s += `<circle cx="${p[0]}" cy="${p[1]}" r="${LAMP_R}" fill="var(--sel)" opacity="0.35"/>`;
+  }
+  if (draft && draft.points.length) {
+    const all = draft.cursor ? [...draft.points, draft.cursor] : draft.points;
+    s += `<polyline class="draft" points="${all.map(p => p.join(",")).join(" ")}" stroke-width="${1.5/cam.s}"/>`;
+    for (const p of draft.points)
+      s += `<circle cx="${p[0]}" cy="${p[1]}" r="${3.5/Math.sqrt(cam.s)}" fill="var(--sel)"/>`;
+  }
+
+  // marquee
+  if (drag && drag.kind === "marquee" && drag.cur) {
+    const x = Math.min(drag.x0, drag.cur[0]), y = Math.min(drag.y0, drag.cur[1]);
+    const w = Math.abs(drag.cur[0] - drag.x0), h = Math.abs(drag.cur[1] - drag.y0);
+    s += `<rect class="marquee" x="${x}" y="${y}" width="${w}" height="${h}" stroke-width="${1.2/cam.s}"/>`;
+  }
+
+  s += `</g>`;
+  svg.innerHTML = s;
+}
+
+let liveRaf = null;
+function liveTick() {
+  if (!view.live) { liveRaf = null; return; }
+  const now = performance.now();
+  const { lamps } = resolveDoc(doc);
+  const els = svg.querySelectorAll(".lamp");
+  els.forEach((el, i) => { if (lamps[i]) el.setAttribute("fill", lampFill(lamps[i], now)); });
+  liveRaf = requestAnimationFrame(liveTick);
+}
+
+/* ---- panel: object list -------------------------------------------- */
+
+function renderObjList() {
+  const { ranges } = resolveDoc(doc);
+  const el = $("objlist");
+  if (!doc.objects.length) {
+    el.innerHTML = `<div class="empty-note">No objects — pick a tool (G / R / P) and draw, or load a scene.</div>`;
+    return;
+  }
+  el.innerHTML = doc.objects.map((o, i) => {
+    const r = ranges.get(o.id);
+    return `<div class="obj-row ${selIds.has(o.id) ? "sel" : ""}" data-row="${o.id}">
+      <span class="swatch" style="background:${objColor(o)}"></span>
+      <span class="nm">${o.name}</span>
+      <span class="range">${r.start + 1}–${r.end + 1}</span>
+      <span class="mv">
+        <button data-mv="up" data-row="${o.id}" title="earlier in chain" ${i === 0 ? "disabled" : ""}>▲</button>
+        <button data-mv="dn" data-row="${o.id}" title="later in chain" ${i === doc.objects.length - 1 ? "disabled" : ""}>▼</button>
+      </span>
+    </div>`;
+  }).join("");
+}
+
+/* ---- properties popover -------------------------------------------- */
+
+function segHtml(field, options, current) {
+  return `<div class="seg" data-field="${field}">` + options.map(([v, lbl]) =>
+    `<button data-val="${v}" class="${v === current ? "on" : ""}">${lbl}</button>`).join("") + `</div>`;
+}
+
+let popKey = "";
+function popoverKey() {
+  const ids = [...selIds].sort((a, b) => a - b).join(",");
+  const o = singleSel();
+  return ids + "|" + (o ? o.kind + (o.kind === "ring" ? ":" + (o.rings > 1) : "") : "");
+}
+
+function renderPopover(force) {
+  const pop = $("popover");
+  const objs = selObjs();
+  if (!objs.length || dragGhost || draft) {
+    pop.classList.remove("show"); popKey = ""; return;
+  }
+  const key = popoverKey();
+  if (!force && key === popKey && pop.classList.contains("show")) { positionPopover(); return; }
+  popKey = key;
+
+  const { ranges, lamps } = resolveDoc(doc);
+  let html;
+  if (objs.length > 1) {
+    const total = objs.reduce((n, o) => { const r = ranges.get(o.id); return n + r.end - r.start + 1; }, 0);
+    html = `<div class="pop-head"><span class="pop-title">${objs.length} objects</span>
+        <span class="pop-kind">${total} lamps</span></div>
+      <div class="sel-meta">drag corner handles to resize the group</div>
+      <div class="row-actions">
+        <button data-act="delete" class="danger">delete all</button>
+      </div>`;
+  } else {
+    const o = objs[0];
+    const r = ranges.get(o.id);
+    let f = `<div class="pop-head"><span class="pop-title">${o.name}</span>
+        <span class="pop-kind">${o.kind}</span></div>
+      <div class="fields">
+      <label>name</label><input type="text" data-field="name" value="${o.name}">`;
+    if (o.kind === "grid") {
+      f += `<label>cols</label><input type="number" data-field="cols" min="1" max="128" value="${o.cols}">
+            <label>rows</label><input type="number" data-field="rows" min="1" max="128" value="${o.rows}">
+            <label>pitch</label><input type="number" data-field="pitch" min="4" max="200" value="${Math.round(o.pitch)}">
+            <label>routing</label>${segHtml("routing", [["snake","snake"],["raster","raster"]], o.routing)}
+            <label>start corner</label>${segHtml("corner", [["tl","↖"],["tr","↗"],["bl","↙"],["br","↘"]], o.corner)}`;
+    } else if (o.kind === "ring") {
+      f += `<label>outer count</label><input type="number" data-field="count" min="1" max="512" value="${o.count}">
+            <label>radius</label><input type="number" data-field="radius" min="5" max="2000" value="${Math.round(o.radius)}">
+            <label>rings</label><input type="number" data-field="rings" min="1" max="16" value="${o.rings || 1}">`;
+      if ((o.rings || 1) > 1) {
+        f += `<label>spacing</label><input type="number" data-field="spacing" min="4" max="500" value="${Math.round(o.spacing)}">
+              <label>ring order</label>${segHtml("order", [["outer-first","outer→in"],["inner-first","inner→out"]], o.order)}`;
+      }
+      f += `<label>start angle</label><input type="number" data-field="startAngle" step="15" value="${o.startAngle}">
+            <label>direction</label>${segHtml("dir", [["cw","cw ↻"],["ccw","ccw ↺"]], o.dir)}`;
+    } else if (o.kind === "path") {
+      f += `<label>count</label><input type="number" data-field="count" min="1" max="1024" value="${o.count}">
+            <label>direction</label>${segHtml("reversed", [["false","forward"],["true","reversed"]], String(o.reversed))}`;
+    }
+    f += `</div>
+      <div class="row-actions">
+        <button data-act="delete" class="danger">delete</button>
+      </div>
+      <div class="sel-meta">${r.end - r.start + 1} lamps · chain ${r.start + 1}–${r.end + 1}</div>`;
+    html = f;
+  }
+  pop.innerHTML = html;
+  pop.classList.add("show");
+  positionPopover();
+}
+
+function positionPopover() {
+  const pop = $("popover");
+  if (!pop.classList.contains("show")) return;
+  const { lamps } = resolveDoc(doc);
+  const selLamps = lamps.filter(l => selIds.has(l.obj));
+  const b = selectionBounds(selLamps);
+  if (!b) { pop.classList.remove("show"); return; }
+  const wrap = $("canvas-wrap").getBoundingClientRect();
+  const [sx1, sy0] = worldToScreen(b.x1, b.y0);
+  const [sx0] = worldToScreen(b.x0, b.y0);
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let x = sx1 + 22;
+  if (x + pw > wrap.width - 10) x = sx0 - pw - 22;      // flip to the left
+  x = Math.max(10, Math.min(x, wrap.width - pw - 10));
+  let y = Math.max(66, Math.min(sy0, wrap.height - ph - 10));
+  pop.style.left = x + "px";
+  pop.style.top = y + "px";
+}
+
+/* ---- hud / toolbar -------------------------------------------------- */
+
+function renderHud() {
+  const { total } = resolveDoc(doc);
+  const universes = Math.max(1, Math.ceil(total / LAMPS_PER_UNIVERSE));
+  const hints = {
+    select: "V select · ⇧-click / marquee multi · ⌘Z undo",
+    grid: "drag an area — or click for a default grid",
+    ring: "drag from center — or click for a default ring",
+    path: "click points · ⏎ finish · esc cancel",
+  };
+  $("hud").innerHTML = `<b>${total}</b> lamps · <span class="u">${universes}</span> universe${universes > 1 ? "s" : ""} @${LAMPS_PER_UNIVERSE} · ${Math.round(cam.s * 100)}% — ${hints[tool]}`;
+}
+
+function renderToolbar() {
+  const icon = {
+    select: `<svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 1.5 L12.5 8 L8 9 L10 14 L8 14.8 L6.2 9.8 L3 12.5 z" fill="currentColor"/></svg>`,
+    grid: `<svg width="14" height="14" viewBox="0 0 16 16">${[2,8,14].map(y=>[2,8,14].map(x=>`<circle cx="${x}" cy="${y}" r="1.7" fill="currentColor"/>`).join("")).join("")}</svg>`,
+    ring: `<svg width="14" height="14" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.4 2.2"/></svg>`,
+    path: `<svg width="14" height="14" viewBox="0 0 16 16"><path d="M2 13 C5 3, 10 13, 14 4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="2" cy="13" r="1.8" fill="currentColor"/><circle cx="14" cy="4" r="1.8" fill="currentColor"/></svg>`,
+  };
+  $("toolbar").innerHTML =
+    ["select", "grid", "ring", "path"].map((t, i) =>
+      `<button data-tool="${t}" class="${tool === t ? "active" : ""}" title="${t}">
+        ${icon[t]} ${t} <span class="key">${["V","G","R","P"][i]}</span></button>`
+    ).join("") +
+    `<div class="sep"></div>
+     <button data-hist="undo" title="undo (⌘Z)" ${undoStack.length ? "" : "disabled"}>↩</button>
+     <button data-hist="redo" title="redo (⇧⌘Z)" ${redoStack.length ? "" : "disabled"}>↪</button>`;
+  $("viewbar").innerHTML =
+    `<button data-view="numbers" class="${view.numbers ? "on" : ""}">numbers <span class="key">N</span></button>
+     <button data-view="arrows" class="${view.arrows ? "on" : ""}">arrows <span class="key">A</span></button>
+     <button data-view="universes" class="${view.universes ? "on" : ""}">universes <span class="key">U</span></button>
+     <button data-view="live" class="${view.live ? "on" : ""}">live <span class="key">L</span></button>`;
+  $("hint").style.top = ($("topbar").offsetHeight + 18) + "px";
+  $("hint").textContent = tool === "select"
+    ? "Click selects an object · shift-click adds · drag empty space for marquee · corners resize."
+    : { grid: "Drag out an area (cols × rows derive from size) — or just click to drop a default grid.",
+        ring: "Drag outward from the center — or just click to drop a default ring.",
+        path: "Click to place vertices along the strip. Enter or double-click to finish." }[tool];
+}
+
+function renderAll() {
+  renderCanvas(); renderObjList(); renderToolbar(); renderHud(); renderPopover(true);
+}
+
+/* =====================================================================
+   Interaction
+   ===================================================================== */
+
+function setTool(t) {
+  tool = t; draft = null; dragGhost = null;
+  svg.className = "tool-" + t;
+  renderAll();
+}
+
+function scaleSelected(orig, anchor, s) {
+  for (const o of doc.objects) {
+    const src = orig.find(x => x.id === o.id);
+    if (!src) continue;
+    if (o.kind === "grid") {
+      o.x = anchor[0] + (src.x - anchor[0]) * s;
+      o.y = anchor[1] + (src.y - anchor[1]) * s;
+      o.pitch = Math.max(2, src.pitch * s);
+    } else if (o.kind === "ring") {
+      o.cx = anchor[0] + (src.cx - anchor[0]) * s;
+      o.cy = anchor[1] + (src.cy - anchor[1]) * s;
+      o.radius = Math.max(3, src.radius * s);
+      o.spacing = Math.max(2, src.spacing * s);
+    } else if (o.kind === "path") {
+      o.points = src.points.map(p => [anchor[0] + (p[0] - anchor[0]) * s,
+                                      anchor[1] + (p[1] - anchor[1]) * s]);
+    }
+  }
+}
+
+svg.addEventListener("pointerdown", (e) => {
+  if (e.button === 1 || (e.button === 0 && spaceDown)) {
+    drag = { kind: "pan", sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y };
+    svg.classList.add("panning"); svg.setPointerCapture(e.pointerId);
+    return;
+  }
+  if (e.button !== 0) return;
+  const [wx, wy] = screenToWorld(e.clientX, e.clientY);
+  svg.setPointerCapture(e.pointerId);
+
+  if (tool === "grid" || tool === "ring") {
+    drag = { kind: "create", x0: wx, y0: wy };
+    return;
+  }
+  if (tool === "path") {
+    if (!draft) draft = { points: [], cursor: null };
+    draft.points.push([wx, wy]);
+    renderCanvas();
+    return;
+  }
+
+  // ---- select tool ----
+  const handle = e.target.closest?.("[data-handle]");
+  if (handle) {
+    const { lamps } = resolveDoc(doc);
+    const b = selectionBounds(lamps.filter(l => selIds.has(l.obj)));
+    if (b) {
+      const corners = { tl: [b.x1, b.y1], tr: [b.x0, b.y1], bl: [b.x1, b.y0], br: [b.x0, b.y0] };
+      const anchor = corners[handle.dataset.handle];
+      drag = { kind: "resize", snap: snapshot(), anchor,
+               start: [wx, wy],
+               startDist: Math.max(1e-6, Math.hypot(wx - anchor[0], wy - anchor[1])),
+               orig: JSON.parse(JSON.stringify(selObjs())), moved: false };
+      $("popover").classList.remove("show");
+    }
+    return;
+  }
+  const vtx = e.target.closest?.("[data-vertex]");
+  if (vtx) {
+    selVertex = +vtx.dataset.vertex;
+    drag = { kind: "vertex", snap: snapshot(), wx, wy, moved: false };
+    renderCanvas();
+    return;
+  }
+  const hit = e.target.closest?.("[data-obj]");
+  if (hit) {
+    const id = +hit.dataset.obj;
+    if (e.shiftKey) {
+      selIds.has(id) ? selIds.delete(id) : selIds.add(id);
+      selVertex = null;
+      renderAll();
+      return;                       // shift-click toggles; no drag
+    }
+    let collapse = null;
+    if (!selIds.has(id)) { selIds = new Set([id]); selVertex = null; renderAll(); }
+    else if (selIds.size > 1) collapse = id;
+    drag = { kind: "move", snap: snapshot(), wx, wy, moved: false, collapse };
+    $("popover").classList.remove("show");
+  } else {
+    if (!e.shiftKey) { selIds = new Set(); selVertex = null; renderAll(); }
+    drag = { kind: "marquee", x0: wx, y0: wy, cur: null, add: e.shiftKey };
+  }
+});
+
+svg.addEventListener("pointermove", (e) => {
+  const [wx, wy] = screenToWorld(e.clientX, e.clientY);
+  if (draft) { draft.cursor = [wx, wy]; renderCanvas(); }
+  if (!drag) return;
+  if (e.buttons === 0) { endDrag(); return; }   // missed pointerup: finalize stale drag
+
+  if (drag.kind === "pan") {
+    cam.x = drag.cx + (e.clientX - drag.sx);
+    cam.y = drag.cy + (e.clientY - drag.sy);
+    applyCam();
+  } else if (drag.kind === "create") {
+    if (tool === "grid") {
+      const pitch = 26;
+      const x = Math.min(drag.x0, wx), y = Math.min(drag.y0, wy);
+      const cols = Math.max(2, Math.round(Math.abs(wx - drag.x0) / pitch) + 1);
+      const rows = Math.max(2, Math.round(Math.abs(wy - drag.y0) / pitch) + 1);
+      dragGhost = makeGrid(x, y, cols, rows, pitch); uid--;
+    } else {
+      const r = Math.max(20, Math.hypot(wx - drag.x0, wy - drag.y0));
+      const count = Math.min(96, Math.max(4, Math.round(2 * Math.PI * r / 26)));
+      dragGhost = makeRing(drag.x0, drag.y0, r, count); uid--;
+    }
+    renderCanvas();
+  } else if (drag.kind === "move") {
+    const dx = wx - drag.wx, dy = wy - drag.wy;
+    if (!drag.moved && Math.hypot(dx, dy) * cam.s < 3) return;
+    drag.moved = true;
+    for (const o of selObjs()) {
+      if (o.kind === "grid") { o.x += dx; o.y += dy; }
+      else if (o.kind === "ring") { o.cx += dx; o.cy += dy; }
+      else if (o.kind === "path") o.points = o.points.map(p => [p[0] + dx, p[1] + dy]);
+    }
+    drag.wx = wx; drag.wy = wy;
+    renderCanvas();
+  } else if (drag.kind === "vertex") {
+    const o = singleSel();
+    if (o && o.kind === "path" && selVertex != null) {
+      drag.moved = true;
+      o.points[selVertex] = [wx, wy];
+      renderCanvas();
+    }
+  } else if (drag.kind === "resize") {
+    drag.moved = true;
+    const d = Math.hypot(wx - drag.anchor[0], wy - drag.anchor[1]);
+    const s = Math.min(50, Math.max(0.05, d / drag.startDist));
+    scaleSelected(drag.orig, drag.anchor, s);
+    renderCanvas();
+  } else if (drag.kind === "marquee") {
+    drag.cur = [wx, wy];
+    renderCanvas();
+  }
+});
+
+svg.addEventListener("pointerup", () => endDrag());
+
+function endDrag() {
+  if (!drag) return;
+  if (drag.kind === "pan") svg.classList.remove("panning");
+  if (drag.kind === "create") {
+    if (dragGhost) {
+      pushUndo(snapshot());
+      dragGhost.id = uid++;
+      dragGhost.name = dragGhost.kind + " " + dragGhost.id;
+      doc.objects.push(dragGhost);
+      selIds = new Set([dragGhost.id]); selVertex = null;
+      dragGhost = null;
+      setTool("select");
+    } else {
+      // click without drag: drop a default object and open its properties
+      pushUndo(snapshot());
+      let o;
+      if (tool === "grid") o = makeGrid(drag.x0 - 3.5 * 26, drag.y0 - 3.5 * 26, 8, 8, 26);
+      else o = makeRing(drag.x0, drag.y0, 80, 19);
+      o.name = o.kind + " " + o.id;
+      doc.objects.push(o);
+      selIds = new Set([o.id]); selVertex = null;
+      setTool("select");
+      requestAnimationFrame(() => {
+        const inp = $("popover").querySelector("input[type=number]");
+        if (inp) { inp.focus(); inp.select(); }
+      });
+    }
+  }
+  if (drag.kind === "marquee" && drag.cur) {
+    const x0 = Math.min(drag.x0, drag.cur[0]), x1 = Math.max(drag.x0, drag.cur[0]);
+    const y0 = Math.min(drag.y0, drag.cur[1]), y1 = Math.max(drag.y0, drag.cur[1]);
+    if ((x1 - x0) * cam.s > 4 || (y1 - y0) * cam.s > 4) {
+      const { lamps } = resolveDoc(doc);
+      const hit = new Set();
+      for (const l of lamps) {
+        if (l.x >= x0 && l.x <= x1 && l.y >= y0 && l.y <= y1) hit.add(l.obj);
+      }
+      selIds = drag.add ? new Set([...selIds, ...hit]) : hit;
+      selVertex = null;
+    }
+    renderAll();
+  }
+  if (drag.kind === "move" && !drag.moved && drag.collapse != null) {
+    selIds = new Set([drag.collapse]);
+    renderAll();
+  }
+  if ((drag.kind === "move" || drag.kind === "vertex" || drag.kind === "resize") && drag.moved) {
+    pushUndo(drag.snap);
+    renderObjList(); renderPopover(true);
+  } else if (drag.kind !== "marquee") {
+    renderPopover(true);
+  }
+  drag = null;
+  persist();
+}
+
+svg.addEventListener("dblclick", (e) => {
+  if (tool === "path") { e.preventDefault(); finishPath(); }
+});
+
+function finishPath() {
+  if (!draft || draft.points.length < 2) { draft = null; setTool("select"); return; }
+  // double-click adds a duplicate final point; drop near-duplicates
+  const pts = draft.points.filter((p, i, a) =>
+    i === 0 || Math.hypot(p[0] - a[i-1][0], p[1] - a[i-1][1]) > 4);
+  if (pts.length < 2) { draft = null; setTool("select"); return; }
+  let len = 0;
+  for (let i = 0; i + 1 < pts.length; i++) len += Math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]);
+  pushUndo(snapshot());
+  const o = makePath(pts, Math.max(2, Math.round(len / 26)));
+  o.name = "path " + o.id;
+  doc.objects.push(o);
+  selIds = new Set([o.id]); draft = null;
+  setTool("select");
+}
+
+svg.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) {
+    zoomAt(e.clientX, e.clientY, Math.pow(1.0015, -e.deltaY));
+  } else {
+    cam.x -= e.deltaX; cam.y -= e.deltaY; applyCam();
+  }
+}, { passive: false });
+
+/* ---- keyboard ------------------------------------------------------ */
+
+let spaceDown = false;
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  const k = e.key.toLowerCase();
+  if (k === " ") { spaceDown = true; e.preventDefault(); return; }
+  if ((e.metaKey || e.ctrlKey) && k === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.metaKey || e.ctrlKey) && k === "a") { e.preventDefault();
+    selIds = new Set(doc.objects.map(o => o.id)); selVertex = null; renderAll(); return; }
+  if (e.metaKey || e.ctrlKey) return;
+  if (k === "v") setTool("select");
+  else if (k === "g") setTool("grid");
+  else if (k === "r") setTool("ring");
+  else if (k === "p") setTool("path");
+  else if (k === "n") { view.numbers = !view.numbers; renderCanvas(); renderToolbar(); }
+  else if (k === "a") { view.arrows = !view.arrows; renderCanvas(); renderToolbar(); }
+  else if (k === "u") { view.universes = !view.universes; renderCanvas(); renderToolbar(); }
+  else if (k === "l") toggleLive();
+  else if (k === "enter") { if (draft) finishPath(); }
+  else if (k === "escape") {
+    if (draft) { draft = null; renderCanvas(); }
+    else if (selIds.size) { selIds = new Set(); selVertex = null; renderAll(); }
+    else setTool("select");
+  }
+  else if (k === "backspace" || k === "delete") {
+    if (!selIds.size) return;
+    pushUndo(snapshot());
+    const so = singleSel();
+    if (so && so.kind === "path" && selVertex != null && so.points.length > 2) {
+      so.points.splice(selVertex, 1); selVertex = null;
+      if (so.count > 2) so.count--;
+    } else {
+      doc.objects = doc.objects.filter(x => !selIds.has(x.id));
+      selIds = new Set(); selVertex = null;
+    }
+    renderAll();
+  }
+});
+window.addEventListener("keyup", (e) => { if (e.key === " ") spaceDown = false; });
+
+function toggleLive() {
+  view.live = !view.live;
+  renderToolbar();
+  if (view.live && !liveRaf) { liveT0 = performance.now(); liveRaf = requestAnimationFrame(liveTick); }
+  if (!view.live) renderCanvas();
+}
+
+/* ---- panel events -------------------------------------------------- */
+
+$("objlist").addEventListener("click", (e) => {
+  const mv = e.target.closest("[data-mv]");
+  if (mv) {
+    const id = +mv.dataset.row;
+    const i = doc.objects.findIndex(o => o.id === id);
+    const j = mv.dataset.mv === "up" ? i - 1 : i + 1;
+    if (j < 0 || j >= doc.objects.length) return;
+    pushUndo(snapshot());
+    [doc.objects[i], doc.objects[j]] = [doc.objects[j], doc.objects[i]];
+    renderAll();
+    return;
+  }
+  const row = e.target.closest("[data-row]");
+  if (row) {
+    const id = +row.dataset.row;
+    if (e.shiftKey) selIds.has(id) ? selIds.delete(id) : selIds.add(id);
+    else selIds = new Set([id]);
+    selVertex = null;
+    renderAll();
+  }
+});
+
+/* ---- popover events ------------------------------------------------ */
+
+const pop = $("popover");
+pop.addEventListener("input", (e) => {
+  const o = singleSel();
+  const field = e.target.dataset.field;
+  if (!o || !field) return;
+  if (!pop.dataset.snap) pop.dataset.snap = snapshot();
+  if (field === "name") o.name = e.target.value;
+  else {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v)) o[field] = v;
+  }
+  renderCanvas(); renderObjList(); renderHud();
+});
+pop.addEventListener("change", () => {
+  if (pop.dataset.snap) {
+    pushUndo(pop.dataset.snap);
+    delete pop.dataset.snap;
+  }
+  renderPopover(true);
+});
+pop.addEventListener("click", (e) => {
+  const objs = selObjs();
+  if (!objs.length) return;
+  const segBtn = e.target.closest(".seg button");
+  if (segBtn) {
+    const o = singleSel();
+    if (!o) return;
+    const field = segBtn.closest(".seg").dataset.field;
+    pushUndo(snapshot());
+    const raw = segBtn.dataset.val;
+    o[field] = raw === "true" ? true : raw === "false" ? false : raw;
+    renderAll();
+    return;
+  }
+  if (e.target.closest("[data-act='delete']")) {
+    pushUndo(snapshot());
+    doc.objects = doc.objects.filter(x => !selIds.has(x.id));
+    selIds = new Set(); selVertex = null;
+    renderAll();
+  }
+});
+
+$("toolbar").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-tool]");
+  if (t) { setTool(t.dataset.tool); return; }
+  const h = e.target.closest("[data-hist]");
+  if (h) h.dataset.hist === "undo" ? undo() : redo();
+});
+$("viewbar").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-view]");
+  if (!b) return;
+  const v = b.dataset.view;
+  if (v === "live") toggleLive();
+  else { view[v] = !view[v]; renderCanvas(); renderToolbar(); }
+});
+
+$("z-in").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(r.left + r.width/2, r.top + r.height/2, 1.25); };
+$("z-out").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(r.left + r.width/2, r.top + r.height/2, 0.8); };
+$("z-fit").onclick = zoomFit;
+
+/* ---- scenes UI ----------------------------------------------------- */
+
+$("scenes").innerHTML = Object.keys(SCENES).map(n =>
+  `<button data-scene="${n}">${n}</button>`).join("");
+$("scenes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-scene]");
+  if (b) loadScene(b.dataset.scene);
+});
+
+window.addEventListener("resize", () => { renderCanvas(); positionPopover(); });
+
+/* ---- boot ---------------------------------------------------------- */
+
+(function boot() {
+  let restored = false;
+  try {
+    const saved = localStorage.getItem("map2d-spike-r2");
+    if (saved) {
+      const s = JSON.parse(saved);
+      if (s.doc && Array.isArray(s.doc.objects) && s.doc.objects.length) {
+        doc = s.doc; uid = s.uid; restored = true;
+      }
+    }
+  } catch (e) {}
+  if (!restored) doc = { objects: SCENES["fyeah sign"]() };
+  renderAll();
+  requestAnimationFrame(zoomFit);
+})();
+</script>
+</body>
+</html>

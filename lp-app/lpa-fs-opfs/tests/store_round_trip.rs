@@ -139,8 +139,16 @@ async fn flush_loop_drains_in_background() {
     store
         .write_file(LpPath::new("/bg.txt"), b"background")
         .unwrap();
-    TimeoutFuture::new(200).await;
-
+    // Poll until the background loop drains rather than sleeping a fixed
+    // 200ms: OPFS handle ops can stall past any fixed budget on a loaded CI
+    // runner (observed 2026-07-28), and the invariant under test is "the
+    // loop drains", not "it drains within one arbitrary interval". The
+    // deadline only bounds a genuinely broken loop.
+    let mut waited_ms = 0;
+    while store.has_dirty() && waited_ms < 5_000 {
+        TimeoutFuture::new(25).await;
+        waited_ms += 25;
+    }
     assert!(!store.has_dirty());
     let store2 = LpFsOpfs::mount(dir).await.unwrap();
     assert_eq!(

@@ -26,7 +26,7 @@ pub type TargetLpvmGraphics = LpvmGraphics<TargetLpvmEngine>;
 
 /// RV32 native JIT (`lpvm-native` `rt_jit`): in-process machine-code JIT, no
 /// Cranelift, no ELF link. The only backend on firmware targets
-/// (`fw-esp32`, `fw-emu`).
+/// (`fw-esp32c6`, `fw-emu`).
 #[cfg(target_arch = "riscv32")]
 impl TargetLpvmGraphics {
     /// `frontend` is the host's GLSL-frontend product decision (see

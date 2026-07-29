@@ -2,7 +2,7 @@
 
 use crate::targets::Target;
 use lp_collection::VecMap;
-use lp_riscv_emu::LogLevel;
+use lp_emu_core::LogLevel;
 use lpir::CompilerConfig;
 use lps_shared::TextureBindingSpec;
 use std::sync::Mutex;
@@ -71,7 +71,7 @@ pub fn compile_for_target(
 mod texture_spec_compile_tests {
     use super::*;
     use crate::targets::{Backend, ExecMode, FloatMode, Frontend, Isa, Target};
-    use lp_riscv_emu::LogLevel;
+    use lp_emu_core::LogLevel;
     use lps_shared::{TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap};
 
     fn wasm_q32_target() -> Target {

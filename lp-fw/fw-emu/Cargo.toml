@@ -20,7 +20,7 @@ lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", default-features = false 
 lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
 lp-perf = { path = "../../lp-base/lp-perf", features = ["syscall"] }
 lp-recovery = { workspace = true }
-lp-riscv-emu-shared = { path = "../../lp-riscv/lp-riscv-emu-shared" }
+lp-emu-abi = { path = "../../lp-emu/lp-emu-abi" }
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["panic-recovery"] }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
 hashbrown = { workspace = true }

@@ -15,25 +15,8 @@
   "sampling": "texture_area",
   "diagnostic_mode": "off",
   "mapping": {
-    "kind": "PathPoints",
-    "paths": {
-      "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "ring_lamp_counts": {
-          "0": 1
-        },
-        "offset_angle": 0,
-        "order": "inner_first"
-      }
-    },
-    "sample_diameter": 2
+    "kind": "Map2d",
+    "source": "fixture.map2d.json"
   },
   "color_order": "rgb",
   "transform": [

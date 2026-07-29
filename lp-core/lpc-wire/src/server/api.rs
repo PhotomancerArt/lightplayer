@@ -98,7 +98,7 @@ pub enum ServerMsgBody {
     ///
     /// # Prior Art
     ///
-    /// This follows the pattern established in `fw-esp32/src/tests/test_usb.rs` which sends
+    /// This follows the pattern established in `fw-esp32c6/src/tests/test_usb.rs` which sends
     /// heartbeat messages for debugging. This implementation makes heartbeat messages part
     /// of the formal protocol using proper `ServerMessage` types with `M!` prefix.
     ///

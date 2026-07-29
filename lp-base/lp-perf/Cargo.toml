@@ -8,11 +8,11 @@ rust-version.workspace = true
 
 [features]
 default = []
-syscall = ["dep:lp-riscv-emu-shared"]
+syscall = ["dep:lp-emu-abi"]
 log     = ["dep:log"]
 
 [dependencies]
-lp-riscv-emu-shared = { path = "../../lp-riscv/lp-riscv-emu-shared", optional = true }
+lp-emu-abi = { path = "../../lp-emu/lp-emu-abi", optional = true }
 log = { workspace = true, default-features = false, optional = true }
 
 [lints]

@@ -4,7 +4,7 @@
 //! and JSON parsing. Implements `ServerTransport` trait.
 //!
 //! When `emu` feature is enabled, uses ser-write-json for streaming serialization
-//! (same as fw-esp32) instead of buffering full JSON.
+//! (same as fw-esp32c6) instead of buffering full JSON.
 
 extern crate alloc;
 
@@ -59,7 +59,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
 
         #[cfg(feature = "emu")]
         {
-            // Stream JSON via ser-write-json (same as fw-esp32, no full buffer)
+            // Stream JSON via ser-write-json (same as fw-esp32c6, no full buffer)
             self.io
                 .write(b"M!")
                 .map_err(|e| TransportError::Other(alloc::format!("Serial write error: {e}")))?;
@@ -145,7 +145,6 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 Ok(s) => s,
                 Err(_) => {
                     // Invalid UTF-8, ignore with warning
-                    #[cfg(any(feature = "emu", feature = "esp32"))]
                     log::warn!("SerialTransport: Invalid UTF-8 in message");
                     return Ok(None);
                 }

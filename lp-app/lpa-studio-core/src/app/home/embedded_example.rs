@@ -46,6 +46,7 @@ static PLASMA_FILES: &[EmbeddedExampleFile] = example_files!(
         "project.json",
         "clock.json",
         "fixture.json",
+        "fixture.map2d.json",
         "output.json",
         "plasma/project.json",
         "plasma/shader.json",
@@ -152,6 +153,60 @@ mod tests {
                 files.iter().any(|(path, _)| path == effect_def),
                 "{id}: nested effect def present"
             );
+            // Every asset the workbench's fixture references must travel
+            // with the copy — a missing mapping document would open as a
+            // fixture with no lamps.
+            for (path, bytes) in &files {
+                assert!(!bytes.is_empty(), "{id}: {path} is empty");
+            }
+        }
+    }
+
+    /// Every asset an embedded example's node defs reference must be in
+    /// its file list: a gallery-opened copy has only these bytes, so a
+    /// missing mapping document or shader source opens broken.
+    #[test]
+    fn effect_example_files_carry_every_referenced_asset() {
+        for id in [PLASMA_EXAMPLE_ID, METEOR_EXAMPLE_ID] {
+            let files = embedded_example(id).expect("example").files();
+            let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
+            for (path, bytes) in &files {
+                if !path.ends_with(".json") {
+                    continue;
+                }
+                let text = core::str::from_utf8(bytes).expect("utf-8");
+                let dir = path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+                // Asset refs are file-relative bare strings on `source`
+                // fields (shader/compute source, Map2d mapping document).
+                for needle in ["\"source\": \""] {
+                    let mut rest = text;
+                    while let Some(at) = rest.find(needle) {
+                        rest = &rest[at + needle.len()..];
+                        let Some(end) = rest.find('"') else { break };
+                        let asset = &rest[..end];
+                        // Binding endpoints share the `source` key name but
+                        // are refs, not files.
+                        if asset.is_empty()
+                            || asset.contains('{')
+                            || asset.starts_with("node:")
+                            || asset.starts_with("bus:")
+                        {
+                            continue;
+                        }
+                        let stripped = asset.strip_prefix("./").unwrap_or(asset);
+                        let expected = if dir.is_empty() {
+                            stripped.to_string()
+                        } else {
+                            format!("{dir}/{stripped}")
+                        };
+                        assert!(
+                            paths.contains(&expected.as_str()),
+                            "{id}: {path} references {asset}, which is not in the package \
+                             (paths: {paths:?})"
+                        );
+                    }
+                }
+            }
         }
     }
 
