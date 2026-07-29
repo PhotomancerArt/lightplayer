@@ -7,8 +7,8 @@
 # has been enabled somewhere it must not be (flash budget + no_std). This
 # asserts `cargo tree -i schemars` is empty for the firmware packages, using
 # the same package/target/feature combinations as the fw build recipes
-# (justfile `build-fw-esp32` / `build-fw-emu`; `server` added to cover the
-# largest fw-esp32 graph).
+# (justfile `build-fw-esp32c6` / `build-fw-emu`; `server` added to cover the
+# largest fw-esp32c6 graph).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -41,7 +41,7 @@ check_graph() {
     fi
 }
 
-check_graph "fw-esp32 (esp32c6,server)" lp-fw/fw-esp32 --features esp32c6,server
+check_graph "fw-esp32c6 (esp32c6,server)" lp-fw/fw-esp32c6 --features esp32c6,server
 check_graph "fw-emu" . -p fw-emu
 
 if [ "$fail" -ne 0 ]; then

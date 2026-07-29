@@ -18,6 +18,75 @@ use ser_write_json::SerWrite;
 use ser_write_json::ser::to_writer;
 use serde::Serialize;
 
+/// Error from a type-erased wire serialization.
+///
+/// The concrete sink's error is deliberately discarded: erasing it is what
+/// lets every wire type share one serializer instantiation (see
+/// [`ser_write_json_to`]). Both call sites only need "did it fit" — the
+/// firmware's stack writer has exactly one failure mode (buffer full) and the
+/// counting sink is infallible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ErasedWriteError;
+
+impl core::fmt::Display for ErasedWriteError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("wire serialization failed")
+    }
+}
+
+/// Object-safe byte sink. One method, one concrete error, so `&mut dyn DynSink`
+/// is a single type regardless of the underlying writer.
+trait DynSink {
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), ErasedWriteError>;
+}
+
+/// Adapts any [`SerWrite`] into a [`DynSink`]. This *is* generic, but it
+/// monomorphizes to a two-line forwarding shim — not to a copy of the whole
+/// serializer.
+struct SinkOf<'a, W: SerWrite>(&'a mut W);
+
+impl<W: SerWrite> DynSink for SinkOf<'_, W> {
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), ErasedWriteError> {
+        self.0.write(buf).map_err(|_| ErasedWriteError)
+    }
+}
+
+/// The single [`SerWrite`] type the JSON serializer is ever instantiated over.
+struct ErasedSerWrite<'a> {
+    sink: &'a mut dyn DynSink,
+}
+
+impl SerWrite for ErasedSerWrite<'_> {
+    type Error = ErasedWriteError;
+
+    fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        self.sink.write_all(buf)
+    }
+}
+
+/// Serialize `value` into `sink` with the wire serializer, through a
+/// type-erased writer.
+///
+/// Why this exists: `ser_write_json::ser::to_writer` is generic over the sink,
+/// so serializing the same wire type into two different sinks emits two full
+/// copies of that type's serializer. On device we do exactly that for every
+/// server message — once into [`CountingSerWrite`] to budget the frame, then
+/// again into the firmware's stack buffer to actually write it. Routing both
+/// through `ErasedSerWrite` collapses each pair into one instantiation, which
+/// is worth tens of KB of flash in an image that must fit a 3 MB partition.
+/// See `docs/adr/2026-07-28-esp32c6-flash-budget.md`.
+///
+/// The cost is one virtual call per write op. The serializer writes slices
+/// rather than single bytes, so this is not measurable on the streaming path.
+pub fn ser_write_json_to<W: SerWrite, T: Serialize + ?Sized>(
+    sink: &mut W,
+    value: &T,
+) -> Result<(), ErasedWriteError> {
+    let mut adapter = SinkOf(sink);
+    let mut erased = ErasedSerWrite { sink: &mut adapter };
+    to_writer(&mut erased, value).map_err(|_| ErasedWriteError)
+}
+
 /// A [`SerWrite`] sink that discards output and counts bytes.
 ///
 /// Writing never fails, so [`SerWrite::Error`] is [`core::convert::Infallible`].
@@ -70,11 +139,14 @@ impl SerWrite for CountingSerWrite {
 #[must_use]
 pub fn ser_write_json_len<T: Serialize>(value: &T) -> usize {
     let mut counter = CountingSerWrite::new();
+    // Goes through the erased writer so this shares its serializer
+    // instantiation with the real write path (see `ser_write_json_to`).
+    //
     // The only error channel is the sink (infallible); ser-write-json does not
     // otherwise fail for these wire types. If a future type does fail to
     // serialize, treat it as "does not fit" by reporting usize::MAX so the
     // budget check rejects it instead of silently under-counting.
-    match to_writer(&mut counter, value) {
+    match ser_write_json_to(&mut counter, value) {
         Ok(()) => counter.len(),
         Err(_) => usize::MAX,
     }

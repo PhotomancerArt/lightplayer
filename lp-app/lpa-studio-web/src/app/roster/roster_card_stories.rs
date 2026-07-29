@@ -674,7 +674,7 @@ fn device_card_with_console(state: RosterCardState, with_project: bool) -> UiDev
         UiLogEntry::new(
             STORY_NOW + offset,
             level,
-            UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32"),
+            UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32c6"),
             message,
         )
     };
@@ -703,7 +703,7 @@ fn device_card_with_console(state: RosterCardState, with_project: bool) -> UiDev
 fn device_card_with_fw(state: RosterCardState, with_project: bool) -> UiDeviceCard {
     UiDeviceCard {
         fw: Some(FwProvenance {
-            package: "fw-esp32".to_string(),
+            package: "fw-esp32c6".to_string(),
             commit: "def987654321".to_string(),
             dirty: false,
             profile: "release-esp32".to_string(),

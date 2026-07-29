@@ -30,15 +30,15 @@ CI builds `fw-esp32` but never runs the espflash image-fits-partition
 packaging step, so `main` can (and did) cross the line silently — the
 failure only surfaces on the next `just studio-dev`.
 
-**Fix** — none yet. Options, in decision order: (a) grow the app
-partition at `lpfs`'s expense (e.g. +128 KB app / −128 KB lpfs — a
-device-layout change; existing devices need a reflash and lose stored
-projects); (b) win back size (the −431 KB tagging/VecMap round from the
-size-reduction pass is precedent; legacy mapping-variant retirement in
-the debt register is a real candidate); (c) both. Workaround meanwhile:
-a `studio-dev-nofw` launch entry that runs `dx serve` directly on the
-worktree port, skipping firmware packaging (Flash-firmware in Studio is
-unavailable while using it).
+**Fix** — partial (same day): the legacy mapping-variant retirement
+(`SvgPath` + `RingArray` deletion, debt register entry) freed ~42 KB —
+3,178,272 → 3,136,320 B, the image fits again at **99.70%**. That is
+~9 KB of headroom: the next feature lands on the wall again. Still
+open, in decision order: (a) grow the app partition at `lpfs`'s expense
+(device-layout change; reflash + stored-project loss); (b) a real size
+dive (the −431 KB tagging/VecMap round is precedent); (c) the ESP32-S3
+pivot (16 MB flash) may moot the budget entirely. The `studio-dev-nofw`
+launch-entry workaround is no longer needed but kept documented.
 
 **Regression coverage** — none: the missing coverage IS the finding.
 The packaging (or at least an image-size assertion against

@@ -54,7 +54,7 @@ CURRENT_PIN="$(grep -Eo 'nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}' "$TOOLCHAIN_FILE" |
 echo "Pinning toolchain: ${CURRENT_PIN:-<unpinned>} -> $CHANNEL (unwinding currently $(unwinding_version))"
 
 # 1. Every rust-toolchain.toml in the repo (workspace root + per-crate pins, e.g.
-#    lp-fw/fw-esp32 which the recipes `cd` into). They must all match or build-std
+#    lp-fw/fw-esp32c6 which the recipes `cd` into). They must all match or build-std
 #    crates resolve a different, possibly unpinned, toolchain.
 while IFS= read -r tc; do
     if grep -q '^channel = "esp"' "$tc"; then

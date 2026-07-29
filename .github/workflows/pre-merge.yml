@@ -58,6 +58,7 @@ jobs:
       gfx: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.gfx }}
       browser: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.browser }}
       studio: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.studio }}
+      firmware: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.firmware }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -135,6 +136,26 @@ jobs:
             studio:
               - 'lp-app/lpa-studio-web/**'
               - 'lp-app/lpa-studio-core/**'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+            # firmware gates the esp32c6 image size check. This list is
+            # deliberately broad — it is the link closure of the device image,
+            # and size regressions arrive through shared crates far more often
+            # than through lp-fw itself (the 2026-07 overrun came from
+            # lp-core mapping work). Cargo.lock is in: a dep bump is exactly
+            # the kind of change that silently adds 40 KB.
+            firmware:
+              - 'lp-fw/**'
+              - 'lp-core/**'
+              - 'lp-app/lpa-server/**'
+              - 'lp-shader/**'
+              - 'lp-gfx/**'
+              - 'lp-base/**'
+              - 'lp-riscv/**'
+              - 'third_party/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
 
@@ -230,6 +251,72 @@ jobs:
 
       - name: Lint
         run: cd lp2025 && just check-lint
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The esp32c6 app image must fit a 3 MB partition. It has overrun twice, and
+  # both times the signal was a red Deploy Studio Pages run *after* the merge,
+  # because no pre-merge job built the device firmware. This job builds it and
+  # fails under 64 KB of headroom; it prints the number either way, so the size
+  # is visible on every PR that can move it.
+  # See docs/adr/2026-07-28-esp32c6-flash-budget.md.
+  firmware-size:
+    name: Firmware size (esp32c6)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.firmware == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for espflash)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Toolchain is pinned in lp2025/lp-fw/fw-esp32c6/rust-toolchain.toml; keep
+      # this in sync. rust-src is required: the firmware builds core/alloc from
+      # source (build-std) to apply optimize_for_size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match deploy-studio-pages.yml, which packages the image this
+      # job measures. ~/.cargo/bin is restored by rust-cache above, so this is
+      # a no-op on a warm cache.
+      - name: Install espflash
+        run: cargo install espflash --version 3.3.0 --locked
+
+      - name: Check esp32c6 image size
+        run: cd lp2025 && just fw-esp32c6-size-check
 
       - name: sccache stats
         if: always()
