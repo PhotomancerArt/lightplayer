@@ -65,6 +65,7 @@ tempfile = "3"
 # lpc-model's schema_gen dev-dep.
 jsonschema = { version = "0.46", default-features = false }
 lpc-engine = { path = "../lp-core/lpc-engine" }
+lpc-mapping = { path = "../lp-core/lpc-mapping" }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }

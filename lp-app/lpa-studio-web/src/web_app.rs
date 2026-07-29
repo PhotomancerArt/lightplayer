@@ -66,6 +66,17 @@ pub fn App() -> Element {
         };
     }
 
+    // The standalone mapping editor is a separate page, like the story
+    // book: an early return before any hooks (route changes into/out of it
+    // hard-reload — see the route listener below).
+    if matches!(router::current_route(), StudioRoute::MappingEditor) {
+        return rsx! {
+            style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            lpa_mapping_editor::MapEditorPage {}
+        };
+    }
+
     let mut view = use_signal(UiStudioView::empty);
     // The OpenRouter connect return leg (`?code=…`): consumed synchronously
     // BEFORE the router reads the URL — it scrubs the query and restores the
@@ -365,10 +376,11 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Stories { .. } => {
-                    // the story book mounts on fresh page loads only (its
-                    // early return in App runs before any hooks); reload to
-                    // keep the hook order sound
+                StudioRoute::Stories { .. } | StudioRoute::MappingEditor => {
+                    // the story book and the mapping editor mount on fresh
+                    // page loads only (their early returns in App run
+                    // before any hooks); reload to keep the hook order
+                    // sound
                     router::hard_reload();
                 }
             }
@@ -429,7 +441,7 @@ pub fn App() -> Element {
                             },
                         )));
                 }
-                StudioRoute::Home | StudioRoute::Stories { .. } => {}
+                StudioRoute::Home | StudioRoute::Stories { .. } | StudioRoute::MappingEditor => {}
             }
             // D32 auto-connect (M6): the load-time attach sweep — queued
             // AFTER the route dispatch, so a `#/device/<uid>` reload's own

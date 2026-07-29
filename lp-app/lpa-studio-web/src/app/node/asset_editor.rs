@@ -796,7 +796,9 @@ fn editor_language(kind: UiAssetEditorKind) -> CodeEditorLanguage {
     match kind {
         UiAssetEditorKind::Glsl => CodeEditorLanguage::Glsl,
         UiAssetEditorKind::Svg => CodeEditorLanguage::Xml,
-        UiAssetEditorKind::Text | UiAssetEditorKind::Binary => CodeEditorLanguage::Plain,
+        UiAssetEditorKind::Map2d | UiAssetEditorKind::Text | UiAssetEditorKind::Binary => {
+            CodeEditorLanguage::Plain
+        }
     }
 }
 

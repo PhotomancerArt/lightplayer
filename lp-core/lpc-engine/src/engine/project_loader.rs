@@ -21,7 +21,8 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeEntryState, TreeError};
-use crate::nodes::fixture::mapping::resolve_svg_path_mapping;
+use crate::nodes::FixtureMap2dSource;
+use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 use crate::nodes::{
     ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
     FluidNode, OutputNode, PlaylistNode, PlaylistRuntimeEntry, ShaderNode, TextureNode,
@@ -590,18 +591,19 @@ impl ProjectLoader {
                 continue;
             };
             match resolve_fixture_mapping(fs, registry, node, &config) {
-                Ok(mapping) => {
+                Ok((mapping, map2d_source)) => {
+                    let mut fixture =
+                        FixtureNode::new(node.id, mapping, *config.sampling.value(), frame)
+                            .with_render_defaults(
+                                config.render_width(),
+                                config.render_height(),
+                                *config.color_order.value(),
+                            );
+                    if let Some(source) = map2d_source {
+                        fixture = fixture.with_map2d_source(source);
+                    }
                     runtime
-                        .attach_runtime_node(
-                            node.id,
-                            Box::new(FixtureNode::new(
-                                node.id,
-                                mapping,
-                                *config.sampling.value(),
-                                frame,
-                            )),
-                            frame,
-                        )
+                        .attach_runtime_node(node.id, Box::new(fixture), frame)
                         .map_err(|e| ProjectLoadError::InvalidProjectReference {
                             path: node_label(node),
                             reason: format!("attach fixture runtime: {e}"),
@@ -857,7 +859,7 @@ fn resolve_fixture_mapping(
     registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     config: &FixtureDef,
-) -> Result<MappingConfig, ProjectLoadError> {
+) -> Result<(MappingConfig, Option<FixtureMap2dSource>), ProjectLoadError> {
     match config.mapping.value() {
         MappingConfig::SvgPath {
             sample_diameter, ..
@@ -869,18 +871,50 @@ fn resolve_fixture_mapping(
                 AssetContentType::FixtureSvg,
                 "fixture SVG",
             )?;
-            resolve_svg_path_mapping(
-                &svg.text,
-                config.render_width(),
-                config.render_height(),
-                sample_diameter.value().0,
-            )
-            .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                path: node_label(node),
-                reason: format!("resolve svg fixture mapping: {e}"),
-            })
+            let doc = lpc_mapping::import::svg_to_doc(&svg.text, sample_diameter.value().0)
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("resolve svg fixture mapping: {e}"),
+                })?;
+            let mapping =
+                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("resolve svg fixture mapping: {e}"),
+                    })?;
+            Ok((mapping, None))
         }
-        other => Ok(other.clone()),
+        MappingConfig::Map2d { .. } => {
+            let text = materialize_node_text_asset(
+                fs,
+                registry,
+                node,
+                AssetContentType::FixtureMap2d,
+                "fixture map2d document",
+            )?;
+            let doc = lpc_mapping::Map2dDoc::from_json(&text.text).map_err(|e| {
+                ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("resolve map2d fixture mapping: {e}"),
+                }
+            })?;
+            let mapping =
+                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("resolve map2d fixture mapping: {e}"),
+                    })?;
+            // Keep the source so the runtime node can re-resolve on asset
+            // refresh (the in-place editor's apply path).
+            let source = FixtureMap2dSource {
+                location: text.location,
+                revision: text.revision,
+                render_width: config.render_width(),
+                render_height: config.render_height(),
+            };
+            Ok((mapping, Some(source)))
+        }
+        other => Ok((other.clone(), None)),
     }
 }
 
@@ -1902,7 +1936,73 @@ mod tests {
     }
 
     #[test]
-    fn fixture_svg_path_mapping_rejects_curve_commands() {
+    fn fixture_map2d_mapping_loads_from_project() {
+        let fs = svg_fixture_project(b"unused");
+        fs.write_file(
+            "/fixture.json".as_path(),
+            br#"
+{
+  "kind": "Fixture",
+  "render_size": { "width": 20, "height": 10 },
+  "sampling": "direct",
+  "bindings": {
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
+  },
+  "mapping": { "kind": "Map2d", "source": "./fixture.map2d.json" }
+}
+"#,
+        )
+        .expect("fixture.json");
+        fs.write_file(
+            "/fixture.map2d.json".as_path(),
+            br#"
+{
+  "format": 1,
+  "objects": [
+    { "name": "run", "shape": { "path": { "points": [[0,0],[20,10]], "count": 3 } } }
+  ]
+}
+"#,
+        )
+        .expect("fixture.map2d.json");
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load map2d fixture project");
+        assert!(node_for_def_path(&rt, "/fixture.json").is_some());
+    }
+
+    #[test]
+    fn fixture_map2d_mapping_rejects_newer_format() {
+        let fs = svg_fixture_project(b"unused");
+        fs.write_file(
+            "/fixture.json".as_path(),
+            br#"
+{
+  "kind": "Fixture",
+  "render_size": { "width": 20, "height": 10 },
+  "sampling": "direct",
+  "bindings": {
+    "input": { "source": "bus:visual.out" },
+    "output": { "target": "bus:control.out" }
+  },
+  "mapping": { "kind": "Map2d", "source": "./fixture.map2d.json" }
+}
+"#,
+        )
+        .expect("fixture.json");
+        fs.write_file("/fixture.map2d.json".as_path(), br#"{ "format": 99 }"#)
+            .expect("fixture.map2d.json");
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
+        assert_fixture_node_error(&rt, "unsupported map2d format 99");
+    }
+
+    #[test]
+    fn fixture_svg_path_mapping_flattens_curve_commands() {
+        // Curves flatten to endpoint lines on import (P3 gate direction) —
+        // a curved export loads instead of erroring.
         let fs = svg_fixture_project(
             br#"
 <svg viewBox="0 0 20 10">
@@ -1912,8 +2012,8 @@ mod tests {
         );
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
-        assert_fixture_node_error(&rt, "unsupported SVG path command");
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load svg fixture project");
+        assert!(node_for_def_path(&rt, "/fixture.json").is_some());
     }
 
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {

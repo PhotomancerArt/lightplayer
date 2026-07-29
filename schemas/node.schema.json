@@ -1052,6 +1052,50 @@
                 "kind"
               ],
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "Map2d"
+                },
+                "source": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "$path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "$path"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "description": "Asset reference: an artifact spec string, or { \"path\": <spec> }."
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
             }
           ]
         },

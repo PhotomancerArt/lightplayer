@@ -123,9 +123,9 @@ pub use nodes::{
     starter_def_for_kind, starter_for_kind, starter_project_files,
 };
 pub use product::{
-    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ProductKind, ProductRef,
-    VisualProduct,
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
+    ControlProduct, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ProductKind,
+    ProductRef, VisualProduct,
 };
 pub use project::overlay::{
     ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,

@@ -1,11 +1,16 @@
+//! Strict SVG-subset structure parsing: top-level `<g>` mapping groups with
+//! one path-like element and one `path:N,count:N` label.
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::svg_path_data::{parse_path_data, parse_polyline};
-use super::svg_path_error::{SvgPathError, invalid_label, invalid_number};
-use super::svg_path_group::{ParsedSvgPathGroups, SvgBounds, SvgPathGroup};
+use crate::map2d_fit::Bounds2d;
 
-pub fn parse_svg_path_groups(svg: &str) -> Result<ParsedSvgPathGroups, SvgPathError> {
+use super::svg_data::{parse_path_data, parse_polyline};
+use super::svg_error::{SvgImportError, invalid_label, invalid_number};
+use super::svg_group::{ParsedSvgPathGroups, SvgPathGroup};
+
+pub fn parse_svg_path_groups(svg: &str) -> Result<ParsedSvgPathGroups, SvgImportError> {
     let view_box = parse_view_box(svg)?;
     let text_nodes = collect_text_nodes(svg)?;
     let groups = collect_groups(svg)?;
@@ -26,10 +31,10 @@ pub fn parse_svg_path_groups(svg: &str) -> Result<ParsedSvgPathGroups, SvgPathEr
             continue;
         }
         if group.body.contains("<g") {
-            return Err(SvgPathError::NestedGroup);
+            return Err(SvgImportError::NestedGroup);
         }
         if group_text_nodes.len() != 1 {
-            return Err(SvgPathError::MultipleTextElements);
+            return Err(SvgImportError::MultipleTextElements);
         }
 
         let label = parse_label(&mapping_texts[0].normalized)?;
@@ -48,7 +53,7 @@ pub fn parse_svg_path_groups(svg: &str) -> Result<ParsedSvgPathGroups, SvgPathEr
                 .iter()
                 .any(|(start, end)| *start == text.start && *end == text.end)
         {
-            return Err(SvgPathError::UngroupedMappingText(text.normalized));
+            return Err(SvgImportError::UngroupedMappingText(text.normalized));
         }
     }
 
@@ -76,7 +81,7 @@ struct PathLabel {
     count: u32,
 }
 
-fn parse_view_box(svg: &str) -> Result<Option<SvgBounds>, SvgPathError> {
+fn parse_view_box(svg: &str) -> Result<Option<Bounds2d>, SvgImportError> {
     let Some(svg_start) = find_tag(svg, "svg", 0) else {
         return Ok(None);
     };
@@ -91,16 +96,16 @@ fn parse_view_box(svg: &str) -> Result<Option<SvgBounds>, SvgPathError> {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     if values.len() != 4 {
-        return Err(SvgPathError::InvalidViewBox);
+        return Err(SvgImportError::InvalidViewBox);
     }
     let min_x = parse_f32(values[0])?;
     let min_y = parse_f32(values[1])?;
     let width = parse_f32(values[2])?;
     let height = parse_f32(values[3])?;
     if width <= f32::EPSILON || height <= f32::EPSILON {
-        return Err(SvgPathError::InvalidViewBox);
+        return Err(SvgImportError::InvalidViewBox);
     }
-    Ok(Some(SvgBounds {
+    Ok(Some(Bounds2d {
         min_x,
         min_y,
         width,
@@ -108,18 +113,18 @@ fn parse_view_box(svg: &str) -> Result<Option<SvgBounds>, SvgPathError> {
     }))
 }
 
-fn collect_groups(svg: &str) -> Result<Vec<SvgGroup<'_>>, SvgPathError> {
+fn collect_groups(svg: &str) -> Result<Vec<SvgGroup<'_>>, SvgImportError> {
     let mut groups = Vec::new();
     let mut cursor = 0usize;
     while let Some(start) = find_tag(svg, "g", cursor) {
         let open_end = svg[start..]
             .find('>')
             .map(|offset| start + offset + 1)
-            .ok_or(SvgPathError::InvalidAttribute { name: "g" })?;
+            .ok_or(SvgImportError::InvalidAttribute { name: "g" })?;
         let close_start = svg[open_end..]
             .find("</g>")
             .map(|offset| open_end + offset)
-            .ok_or(SvgPathError::InvalidAttribute { name: "g" })?;
+            .ok_or(SvgImportError::InvalidAttribute { name: "g" })?;
         groups.push(SvgGroup {
             body: &svg[open_end..close_start],
             body_start: open_end,
@@ -130,18 +135,18 @@ fn collect_groups(svg: &str) -> Result<Vec<SvgGroup<'_>>, SvgPathError> {
     Ok(groups)
 }
 
-fn collect_text_nodes(svg: &str) -> Result<Vec<TextNode>, SvgPathError> {
+fn collect_text_nodes(svg: &str) -> Result<Vec<TextNode>, SvgImportError> {
     let mut nodes = Vec::new();
     let mut cursor = 0usize;
     while let Some(start) = find_tag(svg, "text", cursor) {
         let open_end = svg[start..]
             .find('>')
             .map(|offset| start + offset + 1)
-            .ok_or(SvgPathError::InvalidAttribute { name: "text" })?;
+            .ok_or(SvgImportError::InvalidAttribute { name: "text" })?;
         let close_start = svg[open_end..]
             .find("</text>")
             .map(|offset| open_end + offset)
-            .ok_or(SvgPathError::InvalidAttribute { name: "text" })?;
+            .ok_or(SvgImportError::InvalidAttribute { name: "text" })?;
         let raw = &svg[open_end..close_start];
         nodes.push(TextNode {
             normalized: normalize_text_payload(raw),
@@ -156,16 +161,16 @@ fn collect_text_nodes(svg: &str) -> Result<Vec<TextNode>, SvgPathError> {
 fn collect_path_like_elements(
     group: &str,
     path_index: u32,
-) -> Result<super::SvgPathGeometry, SvgPathError> {
+) -> Result<super::svg_group::SvgPathGeometry, SvgImportError> {
     let mut parsed = Vec::new();
     let mut cursor = 0usize;
     while let Some(start) = find_tag(group, "path", cursor) {
         let tag_end = group[start..]
             .find('>')
             .map(|offset| start + offset)
-            .ok_or(SvgPathError::InvalidAttribute { name: "path" })?;
+            .ok_or(SvgImportError::InvalidAttribute { name: "path" })?;
         let tag = &group[start..=tag_end];
-        let d = attr_value(tag, "d").ok_or(SvgPathError::InvalidAttribute { name: "d" })?;
+        let d = attr_value(tag, "d").ok_or(SvgImportError::InvalidAttribute { name: "d" })?;
         parsed.push(parse_path_data(d)?);
         cursor = tag_end + 1;
     }
@@ -175,22 +180,22 @@ fn collect_path_like_elements(
         let tag_end = group[start..]
             .find('>')
             .map(|offset| start + offset)
-            .ok_or(SvgPathError::InvalidAttribute { name: "polyline" })?;
+            .ok_or(SvgImportError::InvalidAttribute { name: "polyline" })?;
         let tag = &group[start..=tag_end];
         let points =
-            attr_value(tag, "points").ok_or(SvgPathError::InvalidAttribute { name: "points" })?;
+            attr_value(tag, "points").ok_or(SvgImportError::InvalidAttribute { name: "points" })?;
         parsed.push(parse_polyline(points)?);
         cursor = tag_end + 1;
     }
 
     match parsed.len() {
-        0 => Err(SvgPathError::MissingPathLikeElement { path_index }),
+        0 => Err(SvgImportError::MissingPathLikeElement { path_index }),
         1 => Ok(parsed.remove(0)),
-        _ => Err(SvgPathError::MultiplePathLikeElements { path_index }),
+        _ => Err(SvgImportError::MultiplePathLikeElements { path_index }),
     }
 }
 
-fn parse_label(value: &str) -> Result<PathLabel, SvgPathError> {
+fn parse_label(value: &str) -> Result<PathLabel, SvgImportError> {
     let mut path_index = None;
     let mut count = None;
     for part in value.split(',') {
@@ -206,7 +211,7 @@ fn parse_label(value: &str) -> Result<PathLabel, SvgPathError> {
     let path_index = path_index.ok_or_else(|| invalid_label(value))?;
     let count = count.ok_or_else(|| invalid_label(value))?;
     if count == 0 {
-        return Err(SvgPathError::ZeroCount { path_index });
+        return Err(SvgImportError::ZeroCount { path_index });
     }
     Ok(PathLabel { path_index, count })
 }
@@ -289,18 +294,18 @@ fn find_tag(svg: &str, name: &str, from: usize) -> Option<usize> {
     None
 }
 
-fn parse_f32(value: &str) -> Result<f32, SvgPathError> {
+fn parse_f32(value: &str) -> Result<f32, SvgImportError> {
     value.parse().map_err(|_| invalid_number(value))
 }
 
-fn parse_u32(value: &str) -> Result<u32, SvgPathError> {
+fn parse_u32(value: &str) -> Result<u32, SvgImportError> {
     value.parse().map_err(|_| invalid_number(value))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nodes::fixture::mapping::svg_path::SvgPathGeometry;
+    use crate::import::svg_group::SvgPathGeometry;
 
     #[test]
     fn parses_grouped_polyline_with_tspan_text() {
@@ -323,7 +328,7 @@ mod tests {
         let svg = r#"<svg><text>path:1,count:10</text></svg>"#;
         assert!(matches!(
             parse_svg_path_groups(svg),
-            Err(SvgPathError::UngroupedMappingText(_))
+            Err(SvgImportError::UngroupedMappingText(_))
         ));
     }
 
@@ -332,7 +337,7 @@ mod tests {
         let svg = r#"<svg><g><text>path:1,count:10</text></g></svg>"#;
         assert!(matches!(
             parse_svg_path_groups(svg),
-            Err(SvgPathError::MissingPathLikeElement { path_index: 1 })
+            Err(SvgImportError::MissingPathLikeElement { path_index: 1 })
         ));
     }
 
@@ -347,7 +352,7 @@ mod tests {
 "#;
         assert!(matches!(
             parse_svg_path_groups(svg),
-            Err(SvgPathError::MultiplePathLikeElements { path_index: 1 })
+            Err(SvgImportError::MultiplePathLikeElements { path_index: 1 })
         ));
     }
 
@@ -362,7 +367,7 @@ mod tests {
 "#;
         assert!(matches!(
             parse_svg_path_groups(svg),
-            Err(SvgPathError::MultipleTextElements)
+            Err(SvgImportError::MultipleTextElements)
         ));
     }
 
@@ -371,7 +376,7 @@ mod tests {
         let svg = r#"<svg><g><polyline points="0 0 1 1"/><text>path:one,count:10</text></g></svg>"#;
         assert!(matches!(
             parse_svg_path_groups(svg),
-            Err(SvgPathError::InvalidNumber(_))
+            Err(SvgImportError::InvalidNumber(_))
         ));
     }
 
@@ -380,7 +385,7 @@ mod tests {
         let svg = r#"<svg><g><path d="M0,0 C1,1 2,2 3,3"/><text>path:1,count:10</text></g></svg>"#;
         assert!(matches!(
             parse_svg_path_groups(svg),
-            Err(SvgPathError::UnsupportedCommand('C'))
+            Err(SvgImportError::UnsupportedCommand('C'))
         ));
     }
 }

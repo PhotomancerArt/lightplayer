@@ -83,6 +83,9 @@ pub(crate) enum StudioRoute {
     Device { uid: String },
     /// The story book; `None` selects the book's default story.
     Stories { story_id: Option<String> },
+    /// The standalone 2D mapping editor (project-free; edits
+    /// `.map2d.json` documents with localStorage autosave).
+    MappingEditor,
 }
 
 #[cfg_attr(
@@ -115,6 +118,7 @@ impl StudioRoute {
                 },
                 _ => StudioRoute::Home,
             },
+            Some("mapping") if segments.next().is_none() => StudioRoute::MappingEditor,
             Some("stories") => {
                 let rest: Vec<&str> = segments.collect();
                 StudioRoute::Stories {
@@ -134,6 +138,7 @@ impl StudioRoute {
             StudioRoute::Device { uid } => format!("#/device/{uid}"),
             StudioRoute::Stories { story_id: None } => "#/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("#/stories/{id}"),
+            StudioRoute::MappingEditor => "#/mapping".to_string(),
         }
     }
 
@@ -364,6 +369,7 @@ mod tests {
             StudioRoute::Stories {
                 story_id: Some("base/detail-popover/open-sections".to_string()),
             },
+            StudioRoute::MappingEditor,
         ];
         for route in routes {
             assert_eq!(StudioRoute::parse(&route.hash()), route, "{route:?}");
@@ -381,6 +387,7 @@ mod tests {
             "#/sim/prj_x/extra",
             "#/device",
             "#/device/dev_x/extra",
+            "#/mapping/extra",
         ] {
             assert_eq!(StudioRoute::parse(hash), StudioRoute::Home, "{hash:?}");
         }

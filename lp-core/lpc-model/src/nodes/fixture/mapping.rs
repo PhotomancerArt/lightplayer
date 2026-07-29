@@ -27,6 +27,11 @@ pub enum MappingConfig {
         source: AssetSlot,
         sample_diameter: PositiveF32Slot,
     },
+
+    /// An opaque 2D mapping document (`*.map2d.json`) resolved at project
+    /// load. The document's contents (objects, sample diameter, canvas) are
+    /// deliberately not slot-modeled; `lpc-mapping` owns the schema.
+    Map2d { source: AssetSlot },
 }
 
 /// Specifies one path for a fixture.
@@ -79,6 +84,12 @@ impl MappingConfig {
         Self::SvgPath {
             source: AssetSlot::path(source),
             sample_diameter: PositiveF32Slot::new(PositiveF32(sample_diameter)),
+        }
+    }
+
+    pub fn map2d(source: impl Into<LpPathBuf>) -> Self {
+        Self::Map2d {
+            source: AssetSlot::path(source),
         }
     }
 }

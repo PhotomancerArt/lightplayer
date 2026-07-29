@@ -31,6 +31,7 @@ lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
+lpc-mapping = { path = "../lpc-mapping", default-features = false }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpc-hardware = { path = "../lpc-hardware", default-features = false }
 lpc-registry = { path = "../lpc-registry", default-features = false }

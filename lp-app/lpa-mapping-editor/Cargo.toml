@@ -1,0 +1,36 @@
+[package]
+name = "lpa-mapping-editor"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+# Component-library feature set (no renderer, no launch): the consuming app
+# picks the platform.
+dioxus = { version = "0.7", default-features = false, features = ["lib"] }
+dioxus-icons = "0.1"
+lpc-mapping = { path = "../../lp-core/lpc-mapping" }
+serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The standalone page's persistence + open-dialog plumbing only; the editor
+# itself is DOM-free.
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "DomRect",
+    "Element",
+    "Event",
+    "EventTarget",
+    "HtmlElement",
+    "PointerEvent",
+    "ResizeObserver",
+    "Storage",
+    "Window",
+] }
+
+[lints]
+workspace = true
