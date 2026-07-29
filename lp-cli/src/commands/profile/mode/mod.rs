@@ -13,7 +13,7 @@ pub mod project_load;
 pub mod startup;
 pub mod steady_render;
 
-pub use lp_riscv_emu::profile::Gate;
+pub use lp_emu_core::profile::Gate;
 
 /// Selectable profile modes for `lp-cli profile --mode <…>`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
@@ -56,8 +56,8 @@ impl ProfileMode {
 #[cfg(test)]
 mod profile_mode_smoke {
     use super::ProfileMode;
+    use lp_emu_core::profile::{PerfEvent, PerfEventKind};
     use lp_perf::EVENT_FRAME;
-    use lp_riscv_emu::profile::{PerfEvent, PerfEventKind};
 
     #[test]
     fn build_gate_slug_and_on_event_smoke() {

@@ -5244,6 +5244,10 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lp-riscv-emu-shared",
+ "rustc-demangle",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -5357,9 +5361,6 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu-shared",
  "lp-riscv-inst",
- "rustc-demangle",
- "serde",
- "serde_json",
  "tempfile",
 ]
 

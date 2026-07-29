@@ -2,7 +2,8 @@
 //! the profile gate signals stop or the cycle cap is reached.
 
 use anyhow::{Context, Result};
-use lp_riscv_emu::{FrameOutcome, Riscv32Emulator, profile::HaltReason};
+use lp_emu_core::profile::HaltReason;
+use lp_riscv_emu::{FrameOutcome, Riscv32Emulator};
 use lpa_client::TokioLpClient;
 use lpfs::LpFsStd;
 use std::sync::{Arc, Mutex};

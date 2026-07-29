@@ -6,11 +6,10 @@ use ::alloc::vec::Vec;
 use std::any::Any;
 use std::collections::HashMap;
 
-use lp_emu_core::InstClass;
+use crate::cycle_model::InstClass;
+use crate::memory::DEFAULT_RAM_START;
 
 use super::{Collector, FinishCtx, GateAction, PcSymbolizer};
-
-const RAM_START: u32 = 0x8000_0000;
 
 /// Synthetic program counter for the logical root (before any call).
 pub const ROOT_PC: u32 = 0;
@@ -81,10 +80,19 @@ pub struct CpuCollector {
     pub total_cycles_attributed: u64,
     pub cycle_model_label: &'static str,
     profiled_instructions: u64,
+    /// Lowest guest RAM address; stack samples with `sp` below this are discarded.
+    /// Arch/board-specific — supplied at construction.
+    ram_start: u32,
 }
 
 impl CpuCollector {
+    /// Like [`CpuCollector::new_with_ram_start`], defaulting `ram_start` to
+    /// [`DEFAULT_RAM_START`].
     pub fn new(cycle_model_label: &'static str) -> Self {
+        Self::new_with_ram_start(cycle_model_label, DEFAULT_RAM_START)
+    }
+
+    pub fn new_with_ram_start(cycle_model_label: &'static str, ram_start: u32) -> Self {
         Self {
             shadow_stack: Vec::with_capacity(64),
             func_stats: HashMap::new(),
@@ -96,6 +104,7 @@ impl CpuCollector {
             total_cycles_attributed: 0,
             cycle_model_label,
             profiled_instructions: 0,
+            ram_start,
         }
     }
 
@@ -177,7 +186,7 @@ impl CpuCollector {
     }
 
     fn record_stack_sample(&mut self, pc: u32, sp: u32, stack_top: u32) {
-        if !self.active || sp < RAM_START || sp > stack_top {
+        if !self.active || sp < self.ram_start || sp > stack_top {
             return;
         }
 

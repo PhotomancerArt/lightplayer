@@ -22,11 +22,11 @@ use lp_riscv_inst::Gpr;
 /// Default fuel for run() function
 const DEFAULT_FUEL: u64 = 100_000;
 
-/// Dispatches `SYSCALL_ALLOC_TRACE` through [`crate::profile::ProfileSession`] using disjoint
+/// Dispatches `SYSCALL_ALLOC_TRACE` through [`lp_emu_core::profile::ProfileSession`] using disjoint
 /// borrows (session vs. regs/memory) so the caller does not hit the overlapping `&mut self` issue.
 #[cfg(feature = "std")]
 fn dispatch_profile_alloc_syscall(
-    profile_session: &mut Option<crate::profile::ProfileSession>,
+    profile_session: &mut Option<lp_emu_core::profile::ProfileSession>,
     pc: u32,
     regs: &[i32; 32],
     cycle_count: u64,
@@ -34,25 +34,26 @@ fn dispatch_profile_alloc_syscall(
     memory: &Memory,
     syscall_id: u32,
     args: &[u32],
-) -> crate::profile::SyscallAction {
+) -> lp_emu_core::profile::SyscallAction {
     let Some(session) = profile_session.as_mut() else {
-        return crate::profile::SyscallAction::Pass;
+        return lp_emu_core::profile::SyscallAction::Pass;
     };
-    let mut ctx = crate::profile::EmuCtx {
+    let mut ctx = lp_emu_core::profile::EmuCtx {
         pc,
         regs,
         cycle_count,
         instruction_count,
         memory,
+        unwinder: super::backtrace::unwind_backtrace_rv32,
     };
     session.dispatch_syscall(&mut ctx, syscall_id, args)
 }
 
 /// Reads a `JitSymbolEntry` array from guest memory and forwards to
-/// [`crate::profile::ProfileSession::on_jit_map_load`].
+/// [`lp_emu_core::profile::ProfileSession::on_jit_map_load`].
 #[cfg(feature = "std")]
 fn dispatch_profile_jit_map_load(
-    profile_session: &mut Option<crate::profile::ProfileSession>,
+    profile_session: &mut Option<lp_emu_core::profile::ProfileSession>,
     cycle_count: u64,
     memory: &Memory,
     base: u32,
@@ -118,7 +119,7 @@ impl Riscv32Emulator {
     ) -> Result<StepResult, EmulatorError> {
         #[cfg(feature = "std")]
         {
-            use crate::profile::{HaltReason, SyscallAction};
+            use lp_emu_core::profile::{HaltReason, SyscallAction};
 
             let args_u32 = syscall_info.args.map(|a| a as u32);
             match dispatch_profile_alloc_syscall(
@@ -154,13 +155,13 @@ impl Riscv32Emulator {
 
 #[cfg(feature = "std")]
 impl Riscv32Emulator {
-    /// Guest `SYSCALL_PERF_EVENT` ECALL: parse ABI, dispatch to [`crate::profile::ProfileSession::on_perf_event`].
+    /// Guest `SYSCALL_PERF_EVENT` ECALL: parse ABI, dispatch to [`lp_emu_core::profile::ProfileSession::on_perf_event`].
     pub(super) fn handle_perf_event_syscall(
         &mut self,
         syscall_info: &SyscallInfo,
     ) -> Result<StepResult, EmulatorError> {
-        use crate::profile::perf_event::{MAX_EVENT_NAME_LEN, intern_known_name};
-        use crate::profile::{PerfEvent, PerfEventKind};
+        use lp_emu_core::profile::perf_event::{MAX_EVENT_NAME_LEN, intern_known_name};
+        use lp_emu_core::profile::{PerfEvent, PerfEventKind};
         use lp_riscv_inst::Gpr;
 
         let name_ptr = syscall_info.args[0] as u32;
@@ -877,8 +878,8 @@ impl Riscv32Emulator {
 mod jit_map_syscall_tests {
     use super::*;
     use crate::Riscv32Emulator;
-    use crate::profile::{Collector, FinishCtx, SessionMetadata};
     use alloc::boxed::Box;
+    use lp_emu_core::profile::{Collector, FinishCtx, SessionMetadata};
     use lp_emu_core::{DEFAULT_RAM_START, SyscallInfo};
     use std::any::Any;
 

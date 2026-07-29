@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 #[cfg(feature = "std")]
-use crate::profile::{Collector, Gate, HaltReason, ProfileSession, SessionMetadata};
+use lp_emu_core::profile::{Collector, Gate, HaltReason, ProfileSession, SessionMetadata};
 
 /// Default RAM start address (0x80000000, matching embive's RAM_OFFSET).
 
@@ -211,8 +211,8 @@ impl Riscv32Emulator {
 
     /// Take the active profiling session after emitting `profile:end` at the current cycle.
     ///
-    /// The emulator's session slot is cleared. Call [`crate::profile::ProfileSession::finish`] or
-    /// [`crate::profile::ProfileSession::finish_with_symbolizer`] on the returned value to flush
+    /// The emulator's session slot is cleared. Call [`lp_emu_core::profile::ProfileSession::finish`] or
+    /// [`lp_emu_core::profile::ProfileSession::finish_with_symbolizer`] on the returned value to flush
     /// collectors and write `report.txt`.
     #[cfg(feature = "std")]
     pub fn take_profile_session(&mut self) -> Option<ProfileSession> {
