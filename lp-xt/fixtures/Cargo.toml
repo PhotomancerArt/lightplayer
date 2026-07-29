@@ -6,7 +6,7 @@
 # in its exclude list. Build with ./build.sh (or `cargo build --release` here).
 [workspace]
 resolver = "2"
-members = ["../lp-xt-emu-guest", "corpus"]
+members = ["../lp-xt-emu-guest", "../lps-builtins-xt-app", "corpus"]
 
 [profile.release]
 opt-level = "s"

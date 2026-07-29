@@ -20,6 +20,12 @@ instruction model, emulator, and ELF loading that the shader compiler's
   allocator / syscalls) for programs running inside the emulator. DEVICE-target
   crate: excluded from the host workspace, built via `fixtures/` (esp
   toolchain); future `fw-emu-xt` consumer.
+- **`lps-builtins-xt-app`** — the Xtensa **builtins image**: a guest
+  executable carrying every `__lps_*` builtin at the addresses `lp-xt-emu`
+  models, so host-side execution can link compiled shader code against real
+  builtins. Counterpart of `lp-shader/lps-builtins-emu-app` (rv32). Build it
+  with `scripts/build-builtins-xt.sh`; DEVICE-target crate, excluded from the
+  host workspace.
 - **`fixtures/`** — its own esp-toolchain workspace: the Rust fixture corpus
   (14 guest programs) + hand-written reloc fixtures. Built artifacts are NOT
   checked in — `lp-xt-elf`'s fixture tests skip gracefully until
