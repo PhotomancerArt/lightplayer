@@ -9,18 +9,25 @@ instruction model, emulator, and ELF loading that the shader compiler's
 - **`lp-xt-inst`** — Xtensa instruction model, encoder, variable-length
   decoder, and objdump-style disassembler (integer subset). Everything else
   sits on this crate.
-- **`lp-xt-emu`** *(lands with M2 of the backport roadmap)* — the Xtensa
-  emulator: windowed-register machinery, per-board memory maps
-  (`BoardProfile`), built on `lp-emu/lp-emu-core`.
-- **`lp-xt-elf`** *(lands with M2 — its loader/host API depends on
-  `lp-xt-emu`)* — linked-ELF loader + guest-syscall host, plus a feature-gated
-  relocatable-object engine (`R_XTENSA_32` / `R_XTENSA_SLOT0_OP`).
-- **`lp-xt-emu-guest`** *(lands with M2)* — guest-side runtime for code
-  running inside the emulator.
+- **`lp-xt-emu`** — the Xtensa emulator: windowed-register machinery,
+  per-board memory maps (`BoardProfile::esp32s3()` / `esp32()`), and the
+  `lp-emu-core` consumer surface (`LogLevel` instruction log,
+  `CycleModel`/`InstClass` counters, debug dumps).
+- **`lp-xt-elf`** — linked-ELF loader + guest-syscall host for `lp-xt-emu`,
+  plus a feature-gated relocatable-object engine (`R_XTENSA_32` /
+  `R_XTENSA_SLOT0_OP`; the future isa/xt builtins-link path).
+- **`lp-xt-emu-guest`** — `no_std` guest-side runtime (entry / print / panic /
+  allocator / syscalls) for programs running inside the emulator. DEVICE-target
+  crate: excluded from the host workspace, built via `fixtures/` (esp
+  toolchain); future `fw-emu-xt` consumer.
+- **`fixtures/`** — its own esp-toolchain workspace: the Rust fixture corpus
+  (14 guest programs) + hand-written reloc fixtures. Built artifacts are NOT
+  checked in — `lp-xt-elf`'s fixture tests skip gracefully until
+  `fixtures/build.sh` (and `fixtures/reloc/build.sh`) have been run.
 
 Naming rule (settled in the standalone-core plan): `lp-xt-*` crates are
-product code; experiment-only tooling (payload runners, test rigs) stays in
-the experiment repo.
+product code; experiment-only tooling (payload runners, test rigs, the
+hardware dual-run harness) stays in the experiment repo.
 
 ## Provenance
 
