@@ -1,7 +1,7 @@
 //! Trap handling tests for RISC-V emulator.
 
-use cranelift_codegen::ir::TrapCode;
-use lp_riscv_emu::{Riscv32Emulator, StepResult};
+use lp_emu_core::{StepResult, TrapCode};
+use lp_riscv_emu::Riscv32Emulator;
 
 #[test]
 fn test_trap_with_code() {

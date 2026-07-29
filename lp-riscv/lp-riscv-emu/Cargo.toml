@@ -10,29 +10,28 @@ description = "RISC-V 32-bit emulator runtime"
 workspace = true
 
 [dependencies]
+lp-emu-core = { path = "../../lp-emu/lp-emu-core" }
 lp-riscv-inst = { path = "../lp-riscv-inst" }
-lp-riscv-emu-shared = { path = "../lp-riscv-emu-shared" }
+lp-emu-abi = { path = "../../lp-emu/lp-emu-abi" }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 env_logger = { workspace = true, optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
-rustc-demangle = { version = "0.1", optional = true }
 
 libc = { version = "0.2", optional = true }
 
 [features]
 std = [
+    "lp-emu-core/std",
     "env_logger",
     "log/std",
-    "serde",
-    "serde_json",
     "libc",
-    "rustc-demangle",
 ]
 
 [dev-dependencies]
+# Self-dependency: lp-riscv-emu's own tests need the `std` feature. This used to
+# arrive implicitly via lp-riscv-elf's (now dev-only) dependency on this crate.
+lp-riscv-emu = { path = ".", features = ["std"] }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 cranelift-frontend = { workspace = true }
 cranelift-module = { workspace = true }

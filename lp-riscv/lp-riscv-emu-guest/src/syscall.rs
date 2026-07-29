@@ -1,9 +1,9 @@
 // Re-export syscall constants from shared crate
 #[cfg(feature = "profile")]
-pub use lp_riscv_emu_shared::{
+pub use lp_emu_abi::{
     ALLOC_TRACE_ALLOC, ALLOC_TRACE_DEALLOC, ALLOC_TRACE_OOM, ALLOC_TRACE_REALLOC,
 };
-pub use lp_riscv_emu_shared::{
+pub use lp_emu_abi::{
     SYSCALL_ALLOC_TRACE, SYSCALL_ARGS, SYSCALL_LOG, SYSCALL_PANIC, SYSCALL_SERIAL_HAS_DATA,
     SYSCALL_SERIAL_READ, SYSCALL_SERIAL_WRITE, SYSCALL_TIME_MS, SYSCALL_WRITE, SYSCALL_YIELD,
 };

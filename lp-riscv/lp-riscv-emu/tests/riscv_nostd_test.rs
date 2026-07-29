@@ -3,9 +3,10 @@
 //! This test builds the embive-program (now a simple RISC-V program without embive)
 //! and runs it in the lp-riscv-emu emulator to verify the entire toolchain works.
 
+use lp_emu_core::StepResult;
 #[cfg(feature = "std")]
 use lp_riscv_elf::load_elf;
-use lp_riscv_emu::{Riscv32Emulator, StepResult};
+use lp_riscv_emu::Riscv32Emulator;
 use lp_riscv_inst::Gpr;
 use std::{sync::mpsc, thread, time::Duration};
 

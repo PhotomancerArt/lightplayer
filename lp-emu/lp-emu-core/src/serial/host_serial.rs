@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::collections::VecDeque;
-use lp_riscv_emu_shared::SERIAL_ERROR_BUFFER_FULL;
+use lp_emu_abi::SERIAL_ERROR_BUFFER_FULL;
 
 use log;
 

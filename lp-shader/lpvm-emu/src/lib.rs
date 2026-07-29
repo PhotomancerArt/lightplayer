@@ -1,6 +1,6 @@
 //! LPVM implementations on top of [`lp_riscv_emu::Riscv32Emulator`].
 //!
-//! Shared guest memory for the engine lives at [`lp_riscv_emu::DEFAULT_SHARED_START`]. Use
+//! Shared guest memory for the engine lives at [`lp_emu_core::DEFAULT_SHARED_START`]. Use
 //! [`EmuEngine`] / [`EmuModule`] / [`EmuInstance`] for the trait API, or
 //! [`glsl_q32_call_emulated`] for the legacy Q32 filetest-style entry point.
 
@@ -53,7 +53,7 @@ mod tests {
         let b = engine.memory().alloc(8, 8).expect("alloc");
         assert_eq!(
             b.guest_base(),
-            u64::from(lp_riscv_emu::DEFAULT_SHARED_START),
+            u64::from(lp_emu_core::DEFAULT_SHARED_START),
             "first bump slot should start at shared base"
         );
     }

@@ -125,6 +125,8 @@ firmware tests.
 - **`lp-fw/`** Firmware: ESP32-C6 (`fw-esp32`), emulator firmware (`fw-emu`), browser worker
   (`fw-browser`), integration tests (`fw-tests`)
 - **`lp-gfx/`** GPU rendering layer (wgpu) used for Studio previews
+- **`lp-emu/`** Architecture-neutral emulator substrate (`lp-emu-core`) and host↔guest ABI
+  (`lp-emu-abi`) shared by the architecture emulators
 - **`lp-riscv/`** RISC-V 32-bit emulator, instruction encoding/decoding, and ELF tooling
 - **`lp-cli/`** Developer CLI (projects, dev server, hardware manifests, GPIO calibration); runs
   from a source checkout

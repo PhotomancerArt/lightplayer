@@ -168,7 +168,7 @@ mod tests {
         let mut base_info = match load_elf(&builtins_exe) {
             Ok(info) => info,
             Err(e) => {
-                panic!("Failed to load base executable: {}", e);
+                panic!("Failed to load base executable: {e}");
             }
         };
 
@@ -181,7 +181,7 @@ mod tests {
         ) {
             Ok(info) => info,
             Err(e) => {
-                panic!("Failed to load object file: {}", e);
+                panic!("Failed to load object file: {e}");
             }
         };
 
@@ -269,7 +269,7 @@ mod tests {
         let mut base_info = match load_elf(&builtins_exe) {
             Ok(info) => info,
             Err(e) => {
-                panic!("Failed to load base executable: {}", e);
+                panic!("Failed to load base executable: {e}");
             }
         };
 
@@ -285,7 +285,7 @@ mod tests {
         ) {
             Ok(info) => info,
             Err(e) => {
-                panic!("Failed to load first object file: {}", e);
+                panic!("Failed to load first object file: {e}");
             }
         };
 
@@ -298,7 +298,7 @@ mod tests {
         ) {
             Ok(info) => info,
             Err(e) => {
-                panic!("Failed to load second object file: {}", e);
+                panic!("Failed to load second object file: {e}");
             }
         };
 
@@ -452,7 +452,9 @@ mod tests {
 
     #[test]
     fn test_load_object_file_with_actual_builtins() {
-        use lp_riscv_emu::{LogLevel, Riscv32Emulator, StepResult};
+        use lp_emu_core::LogLevel;
+        use lp_emu_core::StepResult;
+        use lp_riscv_emu::Riscv32Emulator;
         use lp_riscv_inst::Gpr;
 
         // Skip test if builtins executable is not available
@@ -527,10 +529,7 @@ mod tests {
         let mut called_sqrt = false;
         loop {
             if steps >= max_steps {
-                panic!(
-                    "Emulator exceeded {} steps - possible infinite loop",
-                    max_steps
-                );
+                panic!("Emulator exceeded {max_steps} steps - possible infinite loop");
             }
 
             match emu.step() {
