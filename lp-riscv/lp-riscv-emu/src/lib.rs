@@ -29,10 +29,9 @@ pub mod test_util;
 // Re-exports for convenience
 #[cfg(feature = "std")]
 pub use emu::FrameOutcome;
-pub use emu::memory::{DEFAULT_RAM_START, Memory};
 pub use emu::{
-    DEFAULT_CALL_INSTRUCTION_LIMIT, DEFAULT_SHARED_START, EmulatorError, InstLog, MemoryAccessKind,
-    OomInfo, PanicInfo, Riscv32Emulator, StepResult, SyscallInfo, trap_code_to_string,
+    DEFAULT_CALL_INSTRUCTION_LIMIT, EmulatorError, InstLog, Riscv32Emulator,
+    trap_code_from_cranelift,
 };
 
 #[cfg(feature = "std")]

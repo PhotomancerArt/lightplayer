@@ -5394,6 +5394,7 @@ dependencies = [
 name = "lp-riscv-inst"
 version = "40.0.0"
 dependencies = [
+ "lp-emu-core",
  "lp-riscv-emu",
 ]
 
@@ -5439,6 +5440,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.15.5",
  "log",
+ "lp-emu-core",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",

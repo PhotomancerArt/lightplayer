@@ -1,18 +1,23 @@
-//! Public types for the RISC-V 32-bit emulator.
+//! Public result types for emulator run loops.
+//!
+//! These form the arch-neutral run-loop contract shared by LightPlayer
+//! emulators: a single step (or fueled run) yields a [`StepResult`], and the
+//! host reacts to syscalls, traps, panics, and fuel exhaustion.
 
 extern crate alloc;
 
 use alloc::string::String;
-use cranelift_codegen::ir::TrapCode;
+
+use crate::trap_code::TrapCode;
 
 /// Result of a single step.
 #[derive(Debug, Clone)]
 pub enum StepResult {
     /// Normal step completed, continue execution
     Continue,
-    /// ECALL encountered, syscall information available
+    /// Syscall encountered, syscall information available
     Syscall(SyscallInfo),
-    /// EBREAK encountered, execution halted
+    /// Breakpoint/halt instruction encountered, execution halted
     Halted,
     /// Trap encountered with trap code
     Trap(TrapCode),
@@ -37,12 +42,12 @@ pub struct OomInfo {
     pub pc: u32,
 }
 
-/// Information about a syscall (ECALL).
+/// Information about a syscall.
 #[derive(Debug, Clone)]
 pub struct SyscallInfo {
-    /// Syscall number (from a7 register)
+    /// Syscall number
     pub number: i32,
-    /// Syscall arguments (from a0-a6 registers)
+    /// Syscall arguments (`SYSCALL_ARGS` = 7 words in the shared protocol)
     pub args: [i32; 7],
 }
 

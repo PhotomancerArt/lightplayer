@@ -5,13 +5,13 @@ extern crate alloc;
 use super::super::{
     error::EmulatorError,
     executor::{LoggingDisabled, LoggingEnabled, decode_execute},
-    memory::Memory,
 };
 use super::state::Riscv32Emulator;
-use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use log;
 use lp_emu_core::LogLevel;
+use lp_emu_core::Memory;
+use lp_emu_core::{PanicInfo, StepResult, SyscallInfo};
 use lp_riscv_emu_shared::{SERIAL_ERROR_INVALID_POINTER, SYSCALL_JIT_MAP_LOAD, SYSCALL_PERF_EVENT};
 use lp_riscv_inst::Gpr;
 
@@ -23,28 +23,10 @@ impl Riscv32Emulator {
     #[inline(always)]
     pub(super) fn step_inner(&mut self) -> Result<StepResult, EmulatorError> {
         // Fetch instruction
-        let inst_word = self.memory.fetch_instruction(self.pc).map_err(|mut e| {
-            match &mut e {
-                EmulatorError::InvalidMemoryAccess {
-                    regs: err_regs,
-                    pc: err_pc,
-                    ..
-                } => {
-                    *err_regs = self.regs;
-                    *err_pc = self.pc;
-                }
-                EmulatorError::UnalignedAccess {
-                    regs: err_regs,
-                    pc: err_pc,
-                    ..
-                } => {
-                    *err_regs = self.regs;
-                    *err_pc = self.pc;
-                }
-                _ => {}
-            }
-            e
-        })?;
+        let inst_word = self
+            .memory
+            .fetch_instruction(self.pc)
+            .map_err(|e| EmulatorError::from_memory_error(e, self.pc, self.regs))?;
 
         // Check if compressed instruction (bits [1:0] != 0b11)
         let is_compressed = (inst_word & 0x3) != 0x3;

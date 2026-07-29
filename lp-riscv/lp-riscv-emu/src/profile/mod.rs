@@ -1,9 +1,9 @@
 //! Unified profiling: collectors, session, and trace directory layout.
 
-use crate::Memory;
 use ::alloc::boxed::Box;
 use ::alloc::string::{String, ToString};
 use ::alloc::vec::Vec;
+use lp_emu_core::Memory;
 use serde::Serialize;
 use std::any::Any;
 use std::borrow::Cow;

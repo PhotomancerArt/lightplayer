@@ -5,9 +5,9 @@
 
 extern crate alloc;
 
-use super::super::memory::Memory;
 use super::state::Riscv32Emulator;
 use alloc::vec::Vec;
+use lp_emu_core::Memory;
 
 /// Maximum number of frames to unwind to avoid runaway on corrupted stacks.
 const MAX_FRAMES: usize = 32;

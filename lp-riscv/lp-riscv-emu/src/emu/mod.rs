@@ -4,13 +4,9 @@ pub mod emulator;
 pub mod error;
 mod executor;
 pub mod logging;
-pub mod memory;
 
 #[cfg(feature = "std")]
 pub use emulator::FrameOutcome;
-pub use emulator::{
-    DEFAULT_CALL_INSTRUCTION_LIMIT, DEFAULT_RAM_START, DEFAULT_SHARED_START, OomInfo, PanicInfo,
-    Riscv32Emulator, StepResult, SyscallInfo,
-};
-pub use error::{EmulatorError, MemoryAccessKind, trap_code_to_string};
+pub use emulator::{DEFAULT_CALL_INSTRUCTION_LIMIT, Riscv32Emulator};
+pub use error::{EmulatorError, trap_code_from_cranelift};
 pub use logging::InstLog;
