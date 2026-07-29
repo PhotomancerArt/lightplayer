@@ -1,4 +1,8 @@
+pub mod shared;
+
+#[cfg(feature = "isa-rv32")]
 pub mod rv32;
+#[cfg(feature = "isa-xt")]
 pub mod xt;
 
 use alloc::string::String;
@@ -13,14 +17,13 @@ use crate::vinst::{AluImmOp, ModuleSymbols, VInst, VReg};
 /// Options for annotated disassembly text.
 ///
 /// Re-exported here so callers outside `isa::` never name an ISA-specific
-/// module; the type itself lives with the RV32 disassembler for now.
-pub use rv32::debug::disasm::DisasmOptions;
+/// module.
+pub use shared::DisasmOptions;
 
 /// Backend emitter output: machine code, call relocations, and debug lines.
 ///
-/// The shape is ISA-neutral even though RV32 owns the struct today; a second
-/// backend reuses it rather than introducing a parallel type.
-pub(crate) type IsaEmitOutput = rv32::emit::Rv32EmitOutput;
+/// One shape for every backend — see [`shared`].
+pub(crate) use shared::IsaEmitOutput;
 
 /// The target ISA + sub-architecture for a compiled module.
 ///
@@ -31,10 +34,12 @@ pub(crate) type IsaEmitOutput = rv32::emit::Rv32EmitOutput;
 /// them, not because we emit them.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IsaTarget {
+    #[cfg(feature = "isa-rv32")]
     Rv32imac,
     /// Xtensa windowed-ABI target (ESP32-S3 / LX7 and classic ESP32 / LX6 —
     /// the two are ISA-identical for the emitted integer subset; only the JIT
     /// buffer placement differs per chip, and that lives in `rt_jit`).
+    #[cfg(feature = "isa-xt")]
     Xtensa,
 }
 
@@ -42,7 +47,9 @@ impl IsaTarget {
     /// Pool-init order for the register allocator's LRU.
     pub fn allocatable_pool_order(self) -> &'static [u8] {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::ALLOC_POOL,
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::ALLOC_POOL,
         }
     }
@@ -50,7 +57,9 @@ impl IsaTarget {
     /// True if `p` is in the allocatable register pool.
     pub fn is_in_allocatable_pool(self, p: u8) -> bool {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::pool_contains(p),
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::pool_contains(p),
         }
     }
@@ -58,7 +67,9 @@ impl IsaTarget {
     /// Human-readable name for `p` (debug rendering only).
     pub fn reg_name(self, p: u8) -> &'static str {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::reg_name(p),
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::reg_name(p),
         }
     }
@@ -67,9 +78,11 @@ impl IsaTarget {
     /// sret-via-buffer convention rather than direct registers.
     pub fn sret_uses_buffer_for(self, scalar_count: u32) -> bool {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => {
                 (scalar_count as usize) > crate::isa::rv32::abi::SRET_SCALAR_THRESHOLD
             }
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => {
                 (scalar_count as usize) > crate::isa::xt::abi::SRET_SCALAR_THRESHOLD
             }
@@ -79,7 +92,9 @@ impl IsaTarget {
     /// Minimum stack frame alignment in bytes.
     pub fn stack_alignment(self) -> u32 {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::abi::STACK_ALIGNMENT,
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::abi::STACK_ALIGNMENT,
         }
     }
@@ -103,7 +118,9 @@ impl IsaTarget {
     /// repo.
     pub fn frame_top_reserved_bytes(self) -> u32 {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::abi::FRAME_TOP_RESERVED_BYTES,
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::abi::FRAME_TOP_RESERVED_BYTES,
         }
     }
@@ -138,10 +155,12 @@ impl IsaTarget {
     /// fold.
     pub fn alu_imm_fits(self, op: AluImmOp, val: i32) -> bool {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => {
                 let _ = op;
                 crate::isa::rv32::abi::fits_imm12(val)
             }
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => {
                 use crate::isa::xt::imm::{ImmOp, is_legal};
                 match op {
@@ -165,7 +184,9 @@ impl IsaTarget {
     /// `object` crate Architecture for ELF emission.
     pub fn elf_architecture(self) -> Architecture {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => Architecture::Riscv32,
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => Architecture::Xtensa,
         }
     }
@@ -173,7 +194,9 @@ impl IsaTarget {
     /// e_flags value for ELF header.
     pub fn elf_e_flags(self) -> u32 {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::link::EF_RISCV_FLOAT_ABI_SOFT,
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::link::EF_XTENSA_NONE,
         }
     }
@@ -181,7 +204,9 @@ impl IsaTarget {
     /// Caller-saved GPR indices within the allocatable pool (clobbered across calls).
     pub fn caller_saved_pool_hw(self) -> &'static [u8] {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::CALLER_SAVED_POOL,
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::CALLER_SAVED_POOL,
         }
     }
@@ -189,11 +214,13 @@ impl IsaTarget {
     /// Hardware index for the `idx`-th scalar return register for direct (non-sret) returns.
     pub fn direct_ret_reg_hw(self, idx: usize) -> Option<u8> {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.get(idx).copied(),
             // CALLER view: this hook names where a call's result lands
             // (regalloc/walk.rs allocates call-def vregs here). Under the
             // CALL8 rotation that is a10/a11, NOT the callee-view a2/a3 —
             // the classic two-views trap; see isa/xt/gpr.rs.
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::CALL_RET_REGS.get(idx).copied(),
         }
     }
@@ -201,7 +228,9 @@ impl IsaTarget {
     /// Count of direct return registers in the hardware ABI (e.g. 2 for RV32 a0–a1).
     pub fn direct_ret_reg_count(self) -> usize {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::RET_REGS.len(),
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::CALL_RET_REGS.len(),
         }
     }
@@ -209,8 +238,10 @@ impl IsaTarget {
     /// Hardware index for the `idx`-th incoming call argument register.
     pub fn call_arg_reg_hw(self, idx: usize) -> Option<u8> {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.get(idx).copied(),
             // CALLEE view (incoming parameters precolor here).
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::ARG_REGS.get(idx).copied(),
         }
     }
@@ -218,7 +249,9 @@ impl IsaTarget {
     /// Number of argument registers in the hardware calling convention.
     pub fn call_arg_reg_count(self) -> usize {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::gpr::ARG_REGS.len(),
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::gpr::ARG_REGS.len(),
         }
     }
@@ -235,6 +268,7 @@ impl IsaTarget {
         caller_passes_sret_ptr: bool,
     ) -> usize {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => {
                 if callee_uses_sret && !caller_passes_sret_ptr {
                     crate::isa::rv32::abi::ARG_REGS.len() - 1
@@ -244,6 +278,7 @@ impl IsaTarget {
             }
             // rv32's exact formula over 6 argument registers (BACKPORT.md:
             // the rotation is invisible to slot mapping).
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => {
                 if callee_uses_sret && !caller_passes_sret_ptr {
                     crate::isa::xt::abi::ARG_REGS.len() - 1
@@ -264,6 +299,7 @@ impl IsaTarget {
         arg_index: usize,
     ) -> Option<u8> {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => {
                 let slot = if !callee_uses_sret {
                     arg_index
@@ -283,6 +319,7 @@ impl IsaTarget {
                 };
                 crate::isa::rv32::abi::ARG_REGS.get(slot).map(|p| p.hw)
             }
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => {
                 // Same slot computation as rv32; the target registers are the
                 // CALLER-view staging bank a10..a15 (the callee's ENTRY
@@ -329,7 +366,9 @@ impl IsaTarget {
     /// ELF / JIT relocation type for a direct call to a named symbol.
     pub fn call_reloc_type(self) -> u32 {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::link::R_RISCV_CALL_PLT,
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::link::R_XTENSA_32,
         }
     }
@@ -346,6 +385,7 @@ impl IsaTarget {
         collect_debug_lines: bool,
     ) -> Result<IsaEmitOutput, AllocError> {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => crate::isa::rv32::emit::emit_function(
                 vinsts,
                 vreg_pool,
@@ -355,6 +395,7 @@ impl IsaTarget {
                 is_sret,
                 collect_debug_lines,
             ),
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => crate::isa::xt::emit::emit_function(
                 vinsts,
                 vreg_pool,
@@ -370,10 +411,12 @@ impl IsaTarget {
     /// Render one instruction word as assembly text (debug output only).
     pub fn format_instruction(self, word: u32) -> String {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => lp_riscv_inst::format_instruction(word),
             // Xtensa instructions are 2 or 3 bytes; render the word's low
             // three little-endian bytes at pc 0 (callers with real buffers
             // use `format_instruction_at`).
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => {
                 let bytes = word.to_le_bytes();
                 lp_xt_inst::disasm::format_instruction(&bytes[..3], 0)
@@ -391,10 +434,12 @@ impl IsaTarget {
     /// complete instruction.
     pub fn format_instruction_at(self, bytes: &[u8]) -> Option<(String, usize)> {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => {
                 let word = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?);
                 Some((lp_riscv_inst::format_instruction(word), 4))
             }
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => {
                 // Variable-width: the density rule on the first byte decides
                 // 2 vs 3 bytes, known only after decoding.
@@ -425,10 +470,12 @@ impl IsaTarget {
         opts: DisasmOptions,
     ) -> String {
         match self {
+            #[cfg(feature = "isa-rv32")]
             IsaTarget::Rv32imac => {
                 let table = crate::isa::rv32::debug::LineTable::from_debug_lines(debug_lines);
                 crate::isa::rv32::debug::disasm::disassemble_function(code, &table, func, opts)
             }
+            #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => {
                 // Plain variable-width listing; the annotated rv32-style
                 // interleave arrives with the xt debug pass when a consumer

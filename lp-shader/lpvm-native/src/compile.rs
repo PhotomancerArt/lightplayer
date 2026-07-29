@@ -94,7 +94,9 @@ pub(crate) fn compile_function_func_abi(
     fn_sig: &LpsFnSig,
 ) -> FuncAbi {
     match session.isa {
+        #[cfg(feature = "isa-rv32")]
         IsaTarget::Rv32imac => crate::isa::rv32::abi::func_abi_rv32(fn_sig, Some(func)),
+        #[cfg(feature = "isa-xt")]
         IsaTarget::Xtensa => crate::isa::xt::abi::func_abi_xt(fn_sig, Some(func)),
     }
 }

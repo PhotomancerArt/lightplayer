@@ -70,7 +70,9 @@ fw-checks = { path = "../fw-checks", default-features = false, features = ["chec
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }
-lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, optional = true }
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = [
+    "isa-rv32",
+], optional = true }
 lpir = { path = "../../lp-shader/lpir", default-features = false, optional = true }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false, optional = true }
 libm = "0.2"

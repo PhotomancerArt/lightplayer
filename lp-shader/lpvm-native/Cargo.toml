@@ -10,11 +10,24 @@ rust-version.workspace = true
 workspace = true
 
 [features]
-default = []
+# Host builds and tests get every backend; firmware opts in to exactly the one
+# it runs on. An ISA left out costs nothing — and an ISA left IN costs real
+# flash: `isa/xt` measured +26,448 B on the ESP32-C6 image before this gate
+# existed (LTO cannot drop it — `IsaTarget` is matched on a runtime value).
+# Adding a backend means adding a feature here AND opting the firmware crates
+# in; see README "Multi-ISA seam".
+default = ["isa-rv32", "isa-xt"]
+# RISC-V 32-bit backend (ESP32-C6): `isa/rv32`, its emitter and encoder.
+isa-rv32 = ["dep:lp-riscv-inst"]
+# Xtensa backend (ESP32-S3 / classic ESP32): `isa/xt`, its emitter and the
+# per-opcode immediate table.
+isa-xt = ["dep:lp-xt-inst"]
 # Enable debug info generation (increases binary size, for development only)
 debug = []
 # Host: link with builtins ELF and run in lp-riscv-emu (pulls std).
 emu = [
+    # The emulation path is the rv32 reference target (lp-riscv-emu).
+    "isa-rv32",
     "dep:cranelift-codegen",
     "dep:lpvm-cranelift",
     "dep:lpvm-emu",
@@ -32,7 +45,7 @@ lp-collection = { workspace = true, features = ["serde"] }
 lpir = { path = "../lpir" }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lps-q32 = { path = "../lps-q32" }
-lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
+lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst", optional = true }
 lpvm = { path = "../lpvm" }
 lps-shared = { path = "../lps-shared" }
 lps-builtin-ids = { path = "../lps-builtin-ids" }
@@ -49,7 +62,7 @@ lpvm-cranelift = { path = "../lpvm-cranelift", optional = true, default-features
 lpvm-emu = { path = "../lpvm-emu", optional = true, default-features = false, features = ["std"] }
 lp-emu-core = { path = "../../lp-emu/lp-emu-core", optional = true, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }
-lp-xt-inst = { path = "../../lp-xt/lp-xt-inst" }
+lp-xt-inst = { path = "../../lp-xt/lp-xt-inst", optional = true }
 
 [dev-dependencies]
 rstest = "0.25"
