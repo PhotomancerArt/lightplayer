@@ -3,8 +3,6 @@
 //! The provider is the compatibility layer used by the engine. Hardware-specific
 //! details live in capability drivers registered on the root `HardwareSystem`.
 
-extern crate alloc;
-
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::Rc;

@@ -1,5 +1,5 @@
 [package]
-name = "fw-esp32"
+name = "fw-esp32c6"
 version.workspace = true
 build = "build.rs"
 authors.workspace = true
@@ -16,6 +16,7 @@ esp32c6 = [
     "esp-hal/esp32c6",
 ]
 server = [
+    "fw-esp32-common/server",
     "lpc-hardware",
     "lpc-model",
     "lpc-wire",
@@ -64,6 +65,7 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
 
 fw-core = { path = "../fw-core", default-features = false }
+fw-esp32-common = { path = "../fw-esp32-common" }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }

@@ -174,10 +174,10 @@ impl RadioDriver for Esp32EspNowRadioDriver {
         }
         match esp_now.version() {
             Ok(version) => {
-                log::info!("[fw-esp32] ESP-NOW radio version={version} channel={channel}");
+                log::info!("[fw-esp32c6] ESP-NOW radio version={version} channel={channel}");
             }
             Err(error) => {
-                log::warn!("[fw-esp32] ESP-NOW version query failed: {error:?}");
+                log::warn!("[fw-esp32c6] ESP-NOW version query failed: {error:?}");
             }
         }
         let (manager, sender, receiver) = esp_now.split();
@@ -246,7 +246,7 @@ impl Esp32EspNowRadioDevice {
             Ok(message) => message,
             Err(error) => {
                 log::debug!(
-                    "[fw-esp32] ESP-NOW ignored packet src={:02x?} len={} error={error}",
+                    "[fw-esp32c6] ESP-NOW ignored packet src={:02x?} len={} error={error}",
                     received.info.src_address,
                     received.data().len()
                 );
@@ -260,7 +260,7 @@ impl Esp32EspNowRadioDevice {
         }
         if !self.seen.remember_new(received.info.src_address, &message) {
             log::debug!(
-                "[fw-esp32] ESP-NOW duplicate packet src={:02x?} device={:?} event={:?}",
+                "[fw-esp32c6] ESP-NOW duplicate packet src={:02x?} device={:?} event={:?}",
                 received.info.src_address,
                 message.source_device_id(),
                 message.event_id()

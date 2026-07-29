@@ -6,15 +6,15 @@ toolchain for simplicity.
 
 ## Why nightly
 
-Three features used by `fw-esp32` and `fw-emu` are unstable:
+Three features used by `fw-esp32c6` and `fw-emu` are unstable:
 
 1. **`#![feature(alloc_error_handler)]`** — Custom OOM handler that panics normally
    (the default handler uses `nounwind` panic, which `catch_unwind` can't intercept).
-   Used in `fw-esp32/src/main.rs`.
+   Used in `fw-esp32c6/src/main.rs`.
 
 2. **`-Zbuild-std`** — Rebuilds `core` and `alloc` from source with `panic = "unwind"`.
    The pre-built sysroot for `riscv32imac-unknown-none-elf` uses `panic = "abort"`;
-   mixing strategies causes a linker error. Configured in `fw-esp32/.cargo/config.toml`.
+   mixing strategies causes a linker error. Configured in `fw-esp32c6/.cargo/config.toml`.
 
 3. **`#[lang = eh_personality]`** — Provided by the `unwinding` crate to implement the
    Itanium EH personality routine in `no_std`. This is a lang item, which is unstable.
@@ -29,8 +29,8 @@ rolling `nightly`. The pin lives in three places that must stay in sync:
 
 - `rust-toolchain.toml` (workspace root) — drives local dev and any in-repo
   `cargo`/`rustc` call.
-- `lp-fw/fw-esp32/rust-toolchain.toml` — a per-crate pin. Several recipes `cd` into
-  `lp-fw/fw-esp32`, so *this* file wins there; it also carries `rust-src` for
+- `lp-fw/fw-esp32c6/rust-toolchain.toml` — a per-crate pin. Several recipes `cd` into
+  `lp-fw/fw-esp32c6`, so *this* file wins there; it also carries `rust-src` for
   `-Zbuild-std`. If it drifts from the root pin, the firmware build resolves a
   different (possibly unpinned) toolchain — which is exactly how CI broke once: the
   root was pinned but this file still said `nightly`, so the build-std step ran on a
@@ -74,10 +74,10 @@ fires), it reports what to try and reverts only the speculative `unwinding` bump
 
 ## Alternatives considered
 
-Keeping the workspace on stable with per-crate nightly overrides (`lp-fw/fw-esp32/rust-toolchain.toml`,
+Keeping the workspace on stable with per-crate nightly overrides (`lp-fw/fw-esp32c6/rust-toolchain.toml`,
 etc.) would isolate nightly to firmware builds. This was rejected because:
 
-- Three crates need nightly (`fw-esp32`, `fw-emu`, `emu-guest-test-app`)
+- Three crates need nightly (`fw-esp32c6`, `fw-emu`, `emu-guest-test-app`)
 - Justfile recipes would need `cd` into each crate directory for the local toolchain
   file to take effect
 - The maintenance cost of split toolchains exceeds the risk of nightly regressions on

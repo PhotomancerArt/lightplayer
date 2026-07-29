@@ -3,16 +3,12 @@
 //! Sends a server write request to io_task and waits for io_task to serialize
 //! and write the message before returning success.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::WireServerMessage;
 use lpc_wire::{ClientMessage, TransportError, json};
-
-use crate::serial::io_task;
 
 /// Server transport that sends WireServerMessage to io_task for serialization.
 ///
@@ -30,10 +26,21 @@ pub struct StreamingMessageRouterTransport {
 }
 
 impl StreamingMessageRouterTransport {
-    /// Create using channels from io_task
-    pub fn from_io_channels() -> Self {
-        let (incoming, _) = io_task::get_message_channels();
-        let (server_write_request, server_write_result) = io_task::get_server_write_channels();
+    /// Create from the chip crate's io-task channels: the incoming message-line
+    /// channel plus the single-slot write request/result pair.
+    pub fn new(
+        incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
+        server_write_request: &'static Channel<
+            CriticalSectionRawMutex,
+            (u32, WireServerMessage),
+            1,
+        >,
+        server_write_result: &'static Channel<
+            CriticalSectionRawMutex,
+            (u32, Result<(), TransportError>),
+            1,
+        >,
+    ) -> Self {
         Self {
             incoming,
             server_write_request,

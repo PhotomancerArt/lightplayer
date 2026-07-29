@@ -727,7 +727,7 @@ impl RenderNode for ShaderNode {
 
 /// Route an out-of-fuel trap to the node error path.
 ///
-/// Under `panic-recovery` (fw-esp32 / fw-emu) this is a **panic** —
+/// Under `panic-recovery` (fw-esp32c6 / fw-emu) this is a **panic** —
 /// deliberate, limited panic-as-control-flow per the lpvm-native fuel ADR
 /// (`docs/adr/2026-07-20-lpvm-native-fuel.md`): the render/sample calls
 /// above run inside `catch_node_panic_framed` (`FrameKind::NodeRender`),

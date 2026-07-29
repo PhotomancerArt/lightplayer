@@ -3,8 +3,6 @@
 //! Provides logging functionality using USB serial directly. Uses our own USB serial instance
 //! that's shared with the transport layer.
 
-extern crate alloc;
-
 use alloc::format;
 use core::sync::atomic::{AtomicPtr, Ordering};
 use fw_core::serial::SerialIo;
@@ -43,13 +41,18 @@ pub type LogWriteFn = fn(&str);
 /// This is set once at startup and then used by the logger
 static LOG_WRITE_FN: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
+/// Serial handle stored by [`set_log_serial`] for [`log_write_bytes`].
+static LOG_SERIAL: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
+
+/// Type-erased shared serial: one concrete type on both sides of the
+/// AtomicPtr round-trip, so any chip's `SerialIo` fits.
+type SharedSerial = alloc::rc::Rc<core::cell::RefCell<dyn SerialIo>>;
+
 /// USB serial instance for our logger
 #[allow(dead_code, reason = "reserved for future use")]
-static LOG_SERIAL: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
 /// USB serial instance for esp-println (used by esp-backtrace for panic output)
 #[allow(dead_code, reason = "reserved for future use")]
-static ESP_PRINTLN_SERIAL: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
 /// Set the log write function
 ///
@@ -122,30 +125,22 @@ impl Log for Esp32Logger {
     }
 }
 
-/// Set the USB serial instance for our logger to use
-#[allow(dead_code, reason = "public API reserved for future use")]
-pub fn set_log_serial(
-    serial_io: alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>>,
-) {
+/// Set the serial instance for [`log_write_bytes`] to use (harness entry points).
+pub fn set_log_serial(serial_io: SharedSerial) {
     // Leak the Rc to get a 'static reference
     let leaked = alloc::boxed::Box::leak(alloc::boxed::Box::new(serial_io));
     LOG_SERIAL.store(leaked as *mut _ as *mut (), Ordering::Release);
 }
 
-/// Write function for our logger to use
+/// Write function for our logger to use (pass to [`init`] in harnesses).
 ///
 /// This function is called synchronously from the log crate and writes
-/// synchronously to USB serial.
-#[allow(dead_code, reason = "public API reserved for future use")]
+/// synchronously to the serial set by [`set_log_serial`].
 pub fn log_write_bytes(msg: &str) {
     let serial_ptr = LOG_SERIAL.load(Ordering::Acquire);
     if !serial_ptr.is_null() {
-        let serial_io: &alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>> = unsafe {
-            &*(serial_ptr
-                as *const alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>>)
-        };
+        let serial_io: &SharedSerial = unsafe { &*(serial_ptr as *const SharedSerial) };
         if let Ok(mut io) = serial_io.try_borrow_mut() {
-            // Use synchronous write directly
             let _ = io.write(msg.as_bytes());
         }
     }
@@ -160,36 +155,5 @@ pub fn write_log(msg: &str) {
     if !write_fn_ptr.is_null() {
         let write_fn: LogWriteFn = unsafe { core::mem::transmute(write_fn_ptr) };
         write_fn(msg);
-    }
-}
-
-/// Set the USB serial instance for esp-println to use
-///
-/// This allows esp-println (used by esp-backtrace) to route output through
-/// our shared USB serial instance.
-#[allow(dead_code, reason = "public API reserved for future use")]
-pub fn set_esp_println_serial(
-    serial_io: alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>>,
-) {
-    // Leak the Rc to get a 'static reference
-    let leaked = alloc::boxed::Box::leak(alloc::boxed::Box::new(serial_io));
-    ESP_PRINTLN_SERIAL.store(leaked as *mut _ as *mut (), Ordering::Release);
-}
-
-/// Write function for esp-println to use
-///
-/// This is called by esp-println when a custom writer is set.
-/// It writes bytes to our shared USB serial instance.
-#[allow(dead_code, reason = "public API reserved for future use")]
-pub fn esp_println_write_bytes(bytes: &[u8]) {
-    let serial_ptr = ESP_PRINTLN_SERIAL.load(Ordering::Acquire);
-    if !serial_ptr.is_null() {
-        let serial_io: &alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>> = unsafe {
-            &*(serial_ptr
-                as *const alloc::rc::Rc<core::cell::RefCell<crate::serial::Esp32UsbSerialIo>>)
-        };
-        if let Ok(mut io) = serial_io.try_borrow_mut() {
-            let _ = SerialIo::write(&mut *io, bytes);
-        }
     }
 }

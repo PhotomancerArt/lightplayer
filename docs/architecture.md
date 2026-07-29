@@ -76,7 +76,7 @@ it is not currently packaged as a user-facing deployable CLI:
 The CLI uses `lp-client` with WebSocket transport for local development, and can also connect to
 remote servers.
 
-### Firmware ESP32 (`lp-fw/fw-esp32/`)
+### Firmware ESP32 (`lp-fw/fw-esp32c6/`)
 
 Bare-metal firmware for ESP32-C6 microcontrollers:
 
