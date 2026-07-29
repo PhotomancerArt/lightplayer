@@ -154,7 +154,7 @@ fn real_source_defs_sync_as_slot_roots() {
             &fixture_data,
             FixtureDef::SHAPE_ID.slot_shape_from(&shape_registry),
             &shape_registry,
-            "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts[8]"
+            "mapping.Map2d.source"
         ),
         SlotData::Value(_)
     ));
