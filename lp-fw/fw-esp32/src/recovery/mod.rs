@@ -4,11 +4,24 @@
 //!   the software-reset hook.
 //! - [`reset_cause_map`]: `SocResetReason` → platform-agnostic `ResetCause`.
 //! - [`watchdog`]: RWDT arming and the io-task-aware feed policy.
+//!
+//! Harness builds (`fw_harness`) replace the app entrypoint and never boot
+//! recovery; they link this module only for `watchdog::note_io_alive`, reached
+//! from `serial::io_task`. Everything else here has no caller there, so the
+//! whole module carries one dead-code allowance rather than a cfg per item.
+#![cfg_attr(
+    fw_harness,
+    allow(
+        dead_code,
+        reason = "boot-path recovery has no caller in harness builds"
+    )
+)]
 
 pub mod esp32_recovery_backend;
 pub mod reset_cause_map;
 pub mod watchdog;
 
+#[cfg(not(fw_harness))]
 pub use esp32_recovery_backend::Esp32RecoveryBackend;
 
 use lp_recovery::BootAssessment;

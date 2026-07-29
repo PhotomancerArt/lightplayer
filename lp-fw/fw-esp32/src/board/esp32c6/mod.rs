@@ -12,10 +12,6 @@ pub mod constants;
 ))]
 pub mod cycle_counter;
 pub mod init;
-#[cfg(any(
-    not(fw_harness),
-    feature = "test_jit_math_perf",
-    feature = "test_json",
-    feature = "test_shader_compile_incremental"
-))]
+// Sole consumer is `serial::io_task`; keep this gate identical to its own.
+#[cfg(any(not(fw_harness), feature = "test_json"))]
 pub mod usb_connection;

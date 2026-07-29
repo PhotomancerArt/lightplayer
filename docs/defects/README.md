@@ -87,6 +87,9 @@ genuinely fits none of these, and define it here in one line.
 - **`budget-exhaustion`** — a hard resource budget is enforced only by
   a tool outside CI, so growth crosses the limit silently and the wall
   surfaces on whoever builds next.
+- **`ungated-variant`** — a build configuration no gate ever compiles,
+  so upstream API drift accumulates in it invisibly until someone
+  reaches for it.
 - **`nondeterministic-capture`** — a capture records one of several
   reachable renderings, because the thing being photographed had not
   reached a single settled state.
@@ -105,6 +108,7 @@ bookkeeping fact.
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
 | budget-exhaustion | 2026-07-28 | [esp32c6-app-partition-overflow](2026-07-28-esp32c6-app-partition-overflow.md) | **open** | lp-fw/fw-esp32 (partitions) |
+| ungated-variant | 2026-07-28 | [fw-esp32-harnesses-rotted-uncompiled](2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md) | fixed | lp-fw/fw-esp32 (src/tests/ + cfg gates) |
 | lifecycle-ownership | 2026-07-16 | [browser-serial-endpoint-lost](2026-07-16-browser-serial-endpoint-lost.md) | fixed | lpa-link/registry |
 | lifecycle-ownership | 2026-07-22 | [flash-session-map-deleted](2026-07-22-flash-session-map-deleted.md) | fixed | lpa-link/browser-serial |
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
