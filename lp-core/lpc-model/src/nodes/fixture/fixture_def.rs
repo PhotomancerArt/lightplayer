@@ -325,27 +325,14 @@ impl SlotValue for ColorOrder {
 mod tests {
     use super::*;
     use crate::NodeKind;
-    use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
+    use crate::nodes::fixture::mapping::PathSpec;
     use crate::{Affine2d, FixtureDefView, MapSlot, SlotPath, SlotShapeRegistry};
     use lp_collection::VecMap;
 
     #[test]
     fn test_fixture_def_kind() {
-        let mut ring_lamp_counts = VecMap::new();
-        ring_lamp_counts.insert(0, ValueSlot::new(1_u32));
         let mut paths = VecMap::new();
-        paths.insert(
-            0,
-            EnumSlot::new(PathSpec::ring_array(
-                [0.5, 0.5],
-                1.0,
-                0,
-                1,
-                MapSlot::new(ring_lamp_counts),
-                0.0,
-                RingOrder::InnerFirst,
-            )),
-        );
+        paths.insert(0, EnumSlot::new(PathSpec::point_list(0, [[0.5, 0.5]])));
         let def = FixtureDef {
             input: VisualProductSlot::default(),
             render_size: default_render_size(),

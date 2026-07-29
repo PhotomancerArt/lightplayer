@@ -861,29 +861,6 @@ fn resolve_fixture_mapping(
     config: &FixtureDef,
 ) -> Result<(MappingConfig, Option<FixtureMap2dSource>), ProjectLoadError> {
     match config.mapping.value() {
-        MappingConfig::SvgPath {
-            sample_diameter, ..
-        } => {
-            let svg = materialize_node_text_asset(
-                fs,
-                registry,
-                node,
-                AssetContentType::FixtureSvg,
-                "fixture SVG",
-            )?;
-            let doc = lpc_mapping::import::svg_to_doc(&svg.text, sample_diameter.value().0)
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("resolve svg fixture mapping: {e}"),
-                })?;
-            let mapping =
-                mapping_from_map2d_doc(&doc, config.render_width(), config.render_height())
-                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                        path: node_label(node),
-                        reason: format!("resolve svg fixture mapping: {e}"),
-                    })?;
-            Ok((mapping, None))
-        }
         MappingConfig::Map2d { .. } => {
             let text = materialize_node_text_asset(
                 fs,
@@ -1854,7 +1831,7 @@ mod tests {
         fs
     }
 
-    fn svg_fixture_project(svg: &[u8]) -> LpFsMemory {
+    fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
         fs.write_file(
             "/project.json".as_path(),
@@ -1871,73 +1848,12 @@ mod tests {
 "#,
         )
         .expect("project.json");
-        fs.write_file(
-            "/fixture.json".as_path(),
-            br#"
-{
-  "kind": "Fixture",
-  "render_size": {
-    "width": 20,
-    "height": 10
-  },
-  "sampling": "direct",
-  "bindings": {
-    "input": {
-      "source": "bus:visual.out"
-    },
-    "output": {
-      "target": "bus:control.out"
-    }
-  },
-  "mapping": {
-    "kind": "SvgPath",
-    "source": "./mapping.svg",
-    "sample_diameter": 2.0
-  }
-}
-"#,
-        )
-        .expect("fixture.json");
-        fs.write_file("/mapping.svg".as_path(), svg)
-            .expect("mapping.svg");
         fs
     }
 
     #[test]
-    fn fixture_svg_path_mapping_loads_from_project() {
-        let fs = svg_fixture_project(
-            br#"
-<svg viewBox="0 0 20 10">
-  <g><polyline points="0 0 10 0"/><text>path:2,count:2</text></g>
-  <g><path d="M10,0 L20,0"/><text><tspan>path:1,count:3</tspan></text></g>
-</svg>
-"#,
-        );
-
-        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load svg fixture project");
-        assert!(node_for_def_path(&rt, "/fixture.json").is_some());
-    }
-
-    #[test]
-    fn fixture_svg_path_mapping_rejects_ungrouped_mapping_text() {
-        let fs = svg_fixture_project(
-            br#"
-<svg viewBox="0 0 20 10">
-  <path d="M0,0 L10,0"/>
-  <text>path:1,count:3</text>
-</svg>
-"#,
-        );
-
-        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
-        assert_fixture_node_error(&rt, "not inside a valid group");
-    }
-
-    #[test]
     fn fixture_map2d_mapping_loads_from_project() {
-        let fs = svg_fixture_project(b"unused");
+        let fs = fixture_project_fs();
         fs.write_file(
             "/fixture.json".as_path(),
             br#"
@@ -1974,7 +1890,7 @@ mod tests {
 
     #[test]
     fn fixture_map2d_mapping_rejects_newer_format() {
-        let fs = svg_fixture_project(b"unused");
+        let fs = fixture_project_fs();
         fs.write_file(
             "/fixture.json".as_path(),
             br#"
@@ -1997,23 +1913,6 @@ mod tests {
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
         assert_fixture_node_error(&rt, "unsupported map2d format 99");
-    }
-
-    #[test]
-    fn fixture_svg_path_mapping_flattens_curve_commands() {
-        // Curves flatten to endpoint lines on import (P3 gate direction) —
-        // a curved export loads instead of erroring.
-        let fs = svg_fixture_project(
-            br#"
-<svg viewBox="0 0 20 10">
-  <g><path d="M0,0 C1,1 2,2 3,3"/><text>path:1,count:3</text></g>
-</svg>
-"#,
-        );
-
-        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load svg fixture project");
-        assert!(node_for_def_path(&rt, "/fixture.json").is_some());
     }
 
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {
@@ -2562,18 +2461,13 @@ mod tests {
     "sample_diameter": 2.0,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1.0,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "offset_angle": 0.0,
-        "order": "inner_first",
-        "ring_lamp_counts": {
-          "0": 1
+        "kind": "PointList",
+        "first_channel": 0,
+        "points": {
+          "0": [
+            0.5,
+            0.5
+          ]
         }
       }
     }
@@ -2945,18 +2839,13 @@ mod tests {
     "sample_diameter": 2.0,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1.0,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "offset_angle": 0.0,
-        "order": "inner_first",
-        "ring_lamp_counts": {
-          "0": 1
+        "kind": "PointList",
+        "first_channel": 0,
+        "points": {
+          "0": [
+            0.5,
+            0.5
+          ]
         }
       }
     }
@@ -3023,18 +2912,13 @@ mod tests {
     "sample_diameter": 2.0,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1.0,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "offset_angle": 0.0,
-        "order": "inner_first",
-        "ring_lamp_counts": {
-          "0": 1
+        "kind": "PointList",
+        "first_channel": 0,
+        "points": {
+          "0": [
+            0.5,
+            0.5
+          ]
         }
       }
     }
@@ -4049,18 +3933,13 @@ mod tests {
     "sample_diameter": 2.0,
     "paths": {
       "0": {
-        "kind": "RingArray",
-        "center": [
-          0.5,
-          0.5
-        ],
-        "diameter": 1.0,
-        "start_ring_inclusive": 0,
-        "end_ring_exclusive": 1,
-        "offset_angle": 0.0,
-        "order": "inner_first",
-        "ring_lamp_counts": {
-          "0": 1
+        "kind": "PointList",
+        "first_channel": 0,
+        "points": {
+          "0": [
+            0.5,
+            0.5
+          ]
         }
       }
     }

@@ -4409,7 +4409,6 @@ fn mapping_kind_label(mapping: &lpc_model::nodes::fixture::MappingConfig) -> &'s
     match mapping {
         MappingConfig::Unset => "unset",
         MappingConfig::PathPoints { .. } => "path points",
-        MappingConfig::SvgPath { .. } => "svg path (no sample points yet)",
         MappingConfig::Map2d { .. } => "map2d document",
     }
 }

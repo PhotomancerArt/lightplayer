@@ -64,10 +64,6 @@ pub fn demo_project_files() -> &'static [DemoProjectFile] {
             bytes: include_bytes!("../../../../../examples/fyeah-sign/blast.glsl"),
         },
         DemoProjectFile {
-            relative_path: "fyeah-mapping.svg",
-            bytes: include_bytes!("../../../../../examples/fyeah-sign/fyeah-mapping.svg"),
-        },
-        DemoProjectFile {
             relative_path: "fyeah.map2d.json",
             bytes: include_bytes!("../../../../../examples/fyeah-sign/fyeah.map2d.json"),
         },
