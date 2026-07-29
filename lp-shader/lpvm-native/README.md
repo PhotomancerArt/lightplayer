@@ -103,9 +103,10 @@ The intermediate representation between LPIR and machine code:
 
 ### Multi-ISA seam
 
-RV32 is the only ISA today, but the crate is shaped for a second one (Xtensa /
-ESP32-S3, arriving from the ESP32-S3 experiment repo — see its `BACKPORT.md`
-for the full seam description). Two mechanisms carry that:
+Two ISAs today: RV32 (ESP32-C6) and Xtensa (`isa/xt/`, ESP32-S3 / LX7 and
+classic ESP32 / LX6 — ISA-identical for the emitted integer subset), ported
+from the ESP32-S3 experiment repo per its `BACKPORT.md`. Two mechanisms carry
+the split:
 
 **1. `IsaTarget` is the single dispatch point.** Nothing outside `isa/` names an
 ISA-specific module. Each backend-varying decision is a method on `IsaTarget`
@@ -141,19 +142,20 @@ assembly in `rt_jit::call`, `IsaTarget::native`'s answer); the backport adds a
 sibling `#[cfg(target_arch = "xtensa")]` arm next to it instead. The same two
 spellings are used in `lp-gfx-lpvm::target_backend` and `lpc-shared::backtrace`.
 
-> **Backport note — the grep does not cover Cargo manifests.** Target-cfg
-> dependency tables are `cfg(...)` strings in TOML, invisible to the source
-> sweep above, and they are written in the bare form. Three must be updated by
-> hand when Xtensa lands:
+> **Note — the grep does not cover Cargo manifests.** Target-cfg dependency
+> tables are `cfg(...)` strings in TOML, invisible to the source sweep above.
+> The three that exist were widened by hand when Xtensa landed, and any
+> *third* ISA must update them the same way:
 >
-> - `lp-gfx/lp-gfx-lpvm/Cargo.toml:26` — `[target.'cfg(target_arch = "riscv32")'.dependencies]`
-> - `lp-gfx/lp-gfx-lpvm/Cargo.toml:32` — `[target.'cfg(not(target_arch = "riscv32"))'.dependencies]`
-> - `lp-shader/lpvm-native/Cargo.toml:58` — `[target.'cfg(target_arch = "riscv32")'.dependencies]`
+> - `lp-gfx/lp-gfx-lpvm/Cargo.toml` — the JIT-capable and non-JIT tables
+> - `lp-shader/lpvm-native/Cargo.toml` — the JIT-capable table
 
-`isa/xt/` arrives from the experiment repo alongside the `lp-xt-*` crates.
-Those crates contain material derived from LLVM under
-Apache-2.0-WITH-LLVM-exception and carry per-file provenance headers — see
-`docs/adr/2026-07-29-license-provenance-discipline.md` before touching them.
+`isa/xt/` and the `lp-xt-*` crates it builds on contain material derived from
+LLVM under Apache-2.0-WITH-LLVM-exception and carry per-file provenance
+headers — see `docs/adr/2026-07-29-license-provenance-discipline.md` before
+touching them. `isa/xt/imm.rs` is such a file: its per-opcode immediate table
+is derived data, and **the encoder silently truncates**, so every immediate
+must be gated through `is_legal` before it reaches `lp_xt_inst::encode`.
 
 ### Fuel Metering
 
