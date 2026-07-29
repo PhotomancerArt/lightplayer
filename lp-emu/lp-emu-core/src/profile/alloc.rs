@@ -3,7 +3,7 @@
 use ::alloc::format;
 use ::alloc::string::{String, ToString};
 use ::alloc::vec::Vec;
-use lp_riscv_emu_shared::{
+use lp_emu_abi::{
     ALLOC_TRACE_ALLOC, ALLOC_TRACE_DEALLOC, ALLOC_TRACE_OOM, ALLOC_TRACE_REALLOC,
     SYSCALL_ALLOC_TRACE,
 };

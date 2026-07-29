@@ -5,7 +5,7 @@ use crate::targets::Target;
 use crate::test_run::compile::{build_compiler_config, compile_for_target};
 use crate::test_run::{PerTargetStats, TestCaseStats};
 use anyhow::Result;
-use lp_riscv_emu::LogLevel;
+use lp_emu_core::LogLevel;
 use std::collections::BTreeMap;
 use std::path::Path;
 

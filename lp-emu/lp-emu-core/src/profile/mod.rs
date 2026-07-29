@@ -20,8 +20,9 @@ pub mod perf_event;
 pub use jit_symbols::{JitSymbolRecord, JitSymbols};
 pub use perf_event::{EVENT_PROFILE_END, EVENT_PROFILE_START, PerfEvent, PerfEventKind};
 
-pub use crate::emu::cycle_model::InstClass;
 pub use cpu::{CpuCollector, StackFrameSample};
+
+use crate::cycle_model::InstClass;
 
 /// A symbol entry shared across profile metadata (`meta.json`).
 #[derive(Debug, Clone, Serialize)]
@@ -48,98 +49,32 @@ pub struct SessionMetadata {
     pub symbols: Vec<TraceSymbol>,
 }
 
+/// Architecture-specific guest stack walk injected into [`EmuCtx`].
+///
+/// Arguments are `(pc, regs, memory)`; returns addresses in order: faulting PC
+/// first, then caller return sites. Each emulator supplies its own walk (e.g.
+/// the rv32 frame-pointer chain lives in `lp-riscv-emu`).
+pub type StackUnwinder = fn(pc: u32, regs: &[i32], memory: &Memory) -> Vec<u32>;
+
 /// Read-only emulator surface passed to collectors during syscall handling.
 pub struct EmuCtx<'a> {
     pub pc: u32,
-    pub regs: &'a [i32; 32],
+    pub regs: &'a [i32],
     pub cycle_count: u64,
     pub instruction_count: u64,
     pub memory: &'a Memory,
+    /// Arch-specific stack walk; see [`StackUnwinder`].
+    pub unwinder: StackUnwinder,
 }
 
 impl EmuCtx<'_> {
     /// Unwind the guest call stack and return addresses (faulting PC first, then return sites).
     ///
-    /// Logic matches `Riscv32Emulator::unwind_backtrace` (frame-pointer walk); duplicated here
-    /// so collectors can use it without borrowing the full emulator.
+    /// Delegates to the arch-specific [`StackUnwinder`] supplied at construction, so
+    /// collectors can unwind without borrowing the full emulator.
     pub fn unwind_backtrace(&self) -> Vec<u32> {
-        unwind_backtrace_inner(self.pc, self.regs, self.memory)
+        (self.unwinder)(self.pc, self.regs, self.memory)
     }
-}
-
-/// Maximum number of frames to unwind to avoid runaway on corrupted stacks.
-const MAX_FRAMES: usize = 32;
-
-/// RISC-V RAM start (stack lives in RAM).
-const RAM_START: u32 = 0x8000_0000;
-
-fn unwind_backtrace_inner(pc: u32, regs: &[i32; 32], mem: &Memory) -> Vec<u32> {
-    let mut addrs = Vec::with_capacity(MAX_FRAMES);
-    let ram_end = mem.ram_end();
-
-    addrs.push(pc);
-
-    let ra = regs[1] as u32;
-    if is_valid_code_address(ra, mem) {
-        addrs.push(ra);
-    }
-
-    let mut fp = regs[8] as u32;
-    if fp >= RAM_START && fp <= ram_end && fp % 4 == 0 {
-        match mem.read_word(fp.wrapping_sub(8)) {
-            Ok(pfp) => {
-                if (pfp as u32) >= RAM_START {
-                    fp = pfp as u32;
-                } else {
-                    return addrs;
-                }
-            }
-            _ => return addrs,
-        }
-    } else {
-        return addrs;
-    }
-
-    let mut frame_count = addrs.len();
-    while frame_count < MAX_FRAMES {
-        if fp < RAM_START || fp > ram_end || fp % 4 != 0 {
-            break;
-        }
-
-        let saved_ra = match mem.read_word(fp.wrapping_sub(4)) {
-            Ok(v) => v as u32,
-            Err(_) => break,
-        };
-        let prev_fp = match mem.read_word(fp.wrapping_sub(8)) {
-            Ok(v) => v,
-            Err(_) => break,
-        };
-
-        if is_valid_code_address(saved_ra, mem) {
-            addrs.push(saved_ra);
-        }
-
-        let prev_fp_u32 = prev_fp as u32;
-        if prev_fp_u32 < RAM_START || prev_fp_u32 <= fp {
-            break;
-        }
-        fp = prev_fp_u32;
-        frame_count += 1;
-    }
-
-    addrs
-}
-
-fn is_valid_code_address(addr: u32, mem: &Memory) -> bool {
-    if addr == 0 {
-        return false;
-    }
-    if addr >= RAM_START {
-        return false;
-    }
-    let code_start = mem.code_start();
-    let offset = addr.wrapping_sub(code_start) as usize;
-    offset < mem.code().len()
 }
 
 /// What the emulator should do after a collector handles a syscall.

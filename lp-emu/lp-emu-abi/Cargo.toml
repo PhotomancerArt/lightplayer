@@ -1,9 +1,9 @@
 [package]
-name = "lp-riscv-emu-shared"
+name = "lp-emu-abi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Shared code for RISC-V JIT testing using Cranelift"
+description = "Shared ABI between emulator host and guest (syscall constants, serial, recovery handshake)"
 
 [lib]
 

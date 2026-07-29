@@ -67,7 +67,7 @@ Do NOT disable the compiler. The compiler is the product.
 The core is IO-free state machines; async belongs to platform edges. See
 `docs/adr/2026-07-06-sans-io-core.md` for the full decision. The checklist:
 
-- **Core crates** (`lp-base/*`, `lp-core/*`, `lp-shader/*`, `lp-riscv/*`)
+- **Core crates** (`lp-base/*`, `lp-core/*`, `lp-shader/*`, `lp-riscv/*`, `lp-emu/*`)
   take effects by injection. They never read clocks, generate randomness,
   perform ambient IO, or depend on an executor/reactor. Edges are
   `lpa-*`, `fw-*`, `lp-cli`.
