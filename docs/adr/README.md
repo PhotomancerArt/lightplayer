@@ -112,6 +112,8 @@ holds the full context.
 | Sim "non-collapsed" probe scope becomes real (collapse is view-local today, so sim probes ALL nodes) | `2026-07-27-completion-based-refresh-pacing` | The ui-state-audit plan moves live collapse state into core |
 | Packed base64 geometry encoding (`points_packed`-style additive field) | `2026-07-27-map2d-document-architecture` | An imported mapping document approaches the 10 KiB asset body budget |
 | Legacy `MappingConfig` variant retirement (`PathPoints`/`RingArray`/`PointList`/`SvgPath`) | `2026-07-27-map2d-document-architecture` | M5 one-home mapping editing lands and shipped projects are migrated |
+| Vendored `licenses/LLVM-Apache-2.0-with-LLVM-exception.txt` (nothing to vendor until derived code exists) | `2026-07-29-license-provenance-discipline` | The `lp-xt-*` crates land |
+| CLA / DCO-with-explicit-grant mechanism (recorded as intent only) | `2026-07-29-license-provenance-discipline` | The first outside contribution to relicensing-sensitive code is proposed |
 
 ## Relationship To Shared Planning
 

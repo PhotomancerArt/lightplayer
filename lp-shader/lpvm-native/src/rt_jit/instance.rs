@@ -142,7 +142,7 @@ impl NativeJitInstance {
                 "symbol `{fn_name}` not in JIT image"
             )))
         })?;
-        let entry_pc = unsafe { self.module.buffer().entry_ptr(entry_off) as usize };
+        let entry_pc = unsafe { self.module.buffer().exec_ptr(entry_off) as usize };
 
         self.render_texture_cache = Some(RenderTextureEntry {
             name: fn_name.into(),
@@ -173,7 +173,7 @@ impl NativeJitInstance {
                 "symbol `{fn_name}` not in JIT image"
             )))
         })?;
-        let entry_pc = unsafe { self.module.buffer().entry_ptr(entry_off) as usize };
+        let entry_pc = unsafe { self.module.buffer().exec_ptr(entry_off) as usize };
 
         self.render_samples_cache = Some(RenderTextureEntry {
             name: fn_name.into(),
@@ -221,7 +221,7 @@ impl NativeJitInstance {
             full[1 + i] = *arg;
         }
 
-        let entry = unsafe { self.module.buffer().entry_ptr(handle.entry_offset) as usize };
+        let entry = unsafe { self.module.buffer().exec_ptr(handle.entry_offset) as usize };
 
         self.arm_fuel_header();
 
@@ -284,7 +284,7 @@ impl NativeJitInstance {
             .module
             .entry_offset(name)
             .ok_or_else(|| CallError::Unsupported(format!("symbol `{name}` not in JIT image")))?;
-        let entry = unsafe { self.module.buffer().entry_ptr(entry_off) as usize };
+        let entry = unsafe { self.module.buffer().exec_ptr(entry_off) as usize };
 
         self.arm_fuel_header();
 
@@ -562,9 +562,12 @@ impl LpvmInstance for NativeJitInstance {
 
         self.arm_fuel_header();
 
-        #[cfg(target_arch = "riscv32")]
+        // No arch cfg here: the whole `rt_jit` module is gated on the
+        // JIT-capable target set, and `rv32_jalr_a0_a7` is the ISA-specific
+        // piece (a sibling entry-call lands next to it with the Xtensa
+        // backport), exactly as in `call_direct` / `invoke_flat`.
         unsafe {
-            crate::rt_jit::call::rv32_jalr_a0_a7(
+            rv32_jalr_a0_a7(
                 entry,
                 vmctx,
                 tex_offset,
@@ -576,15 +579,7 @@ impl LpvmInstance for NativeJitInstance {
                 0,
             );
         }
-        #[cfg(not(target_arch = "riscv32"))]
-        {
-            let _ = (entry, vmctx, tex_offset, width, height);
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeJitInstance::call_render_texture requires riscv32 host",
-            ))));
-        }
 
-        #[cfg(target_arch = "riscv32")]
         self.take_trap()?;
 
         Ok(())
@@ -612,9 +607,9 @@ impl LpvmInstance for NativeJitInstance {
 
         self.arm_fuel_header();
 
-        #[cfg(target_arch = "riscv32")]
+        // See `call_render_texture` for why there is no arch cfg here.
         unsafe {
-            crate::rt_jit::call::rv32_jalr_a0_a7(
+            rv32_jalr_a0_a7(
                 entry,
                 vmctx,
                 points_offset,
@@ -626,15 +621,7 @@ impl LpvmInstance for NativeJitInstance {
                 0,
             );
         }
-        #[cfg(not(target_arch = "riscv32"))]
-        {
-            let _ = (entry, vmctx, points_offset, out_offset, count);
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeJitInstance::call_render_samples requires riscv32 host",
-            ))));
-        }
 
-        #[cfg(target_arch = "riscv32")]
         self.take_trap()?;
 
         Ok(())

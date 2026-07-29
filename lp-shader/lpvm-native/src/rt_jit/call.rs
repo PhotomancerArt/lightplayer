@@ -2,8 +2,16 @@
 
 /// `jalr` to `entry` with `a0`–`a7` set; returns `(a0, a1)` after the call.
 ///
+/// `entry` is an **execute** address — always [`crate::rt_jit::JitBuffer::exec_ptr`],
+/// never the buffer's write address.
+///
 /// # Safety
 /// `entry` must point at valid RISC-V code; the callee must obey the RISC-V calling convention.
+///
+/// This gate is deliberately **not** the JIT-capable-target set spelled
+/// `any(target_arch = "riscv32")` (see `lib.rs`): the body is RV32 inline
+/// assembly, so the Xtensa backport adds a sibling `#[cfg(target_arch =
+/// "xtensa")]` entry-call next to it rather than widening this one.
 #[cfg(target_arch = "riscv32")]
 pub(crate) unsafe fn rv32_jalr_a0_a7(
     entry: usize,

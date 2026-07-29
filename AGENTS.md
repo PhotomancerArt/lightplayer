@@ -26,6 +26,25 @@ If you are about to:
 
 **STOP. You are about to break the product.**
 
+## License discipline — HARD RULE
+
+LightPlayer is AGPL-3.0 **by choice**; relicensing stays possible only while
+provenance is provable. See
+`docs/adr/2026-07-29-license-provenance-discipline.md`.
+
+- **NEVER copy, transliterate, or line-by-line adapt GPL source** into this
+  repo. QEMU, binutils/GDB, and GCC are **behavioral references only** — run
+  them, read them to understand semantics, then implement independently from
+  primary specs. Their *output* (e.g. objdump golden vectors) is fact and is
+  fine; their code is not.
+- **Apache/MIT/BSD material** (e.g. `espressif/llvm-project`'s Xtensa `.td`
+  files) MAY be used to derive encoding *data*, IF the derived file carries a
+  provenance header naming upstream repo, path, and commit SHA, and the
+  upstream license text is vendored under `licenses/`.
+- Prefer primary specs (Xtensa ISA Reference Manual, ESP32-S3 TRM, RISC-V
+  specs) over any implementation.
+- If unsure whether a source is safe to copy from: **ask; do not copy.**
+
 ## How to Handle `no_std` Issues
 
 When a dependency in the GLSL → LPIR → machine code path does not support
