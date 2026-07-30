@@ -7,7 +7,17 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["std"]
+default = [
+    "std",
+    "node-button",
+    "node-radio",
+    "node-fluid",
+    "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
+]
 # Panic recovery via catch_unwind (shader compilation, node render)
 panic-recovery = ["lpc-engine/panic-recovery"]
 naga = ["lpc-engine/naga"]
@@ -20,24 +30,40 @@ std = [
 	"log/std"
 ]
 
+# --- Per-node-kind runtime gates (forward to lpc-engine) -------------------
+#
+# `lpc-engine` is taken with `default-features = false` below, so without
+# these a consumer of `lpa-server` would silently get NO node runtimes at
+# all (see the trap note on the dependency line). All eight forward to the
+# matching `lpc-engine/node-*` feature and are in `default` above, so any
+# consumer taking lpa-server's defaults (the studio, `lp-cli`, tests) still
+# gets every node kind — nothing changes for them. A constrained firmware
+# build that opts out of lpa-server's defaults (`default-features = false`;
+# `fw-esp32c6` does this today) lists only the gates it wants, same shape as
+# `naga` above. This is the mechanism M3's `fw-esp32s3` uses to turn nodes
+# off — `lpa-server` forcing every gate on unconditionally would make that
+# impossible from firmware.
+node-button = ["lpc-engine/node-button"]
+node-radio = ["lpc-engine/node-radio"]
+node-fluid = ["lpc-engine/node-fluid"]
+node-fixture = ["lpc-engine/node-fixture"]
+node-texture = ["lpc-engine/node-texture"]
+node-playlist = ["lpc-engine/node-playlist"]
+node-clock = ["lpc-engine/node-clock"]
+node-shader = ["lpc-engine/node-shader"]
+
 [dependencies]
-# `default-features = false` here predates the per-node-kind gates on
-# `lpc-engine` (2026-07-30) and only ever meant "no `std`, forwarded
-# separately by our own `std` feature below" — it was never meant to opt out
-# of any node runtime. List every node gate explicitly so lpa-server keeps
-# getting the full node set regardless of its own feature selection; a
-# constrained firmware build picks gates on its OWN `lpc-engine` dependency
-# (see `lp-fw/fw-esp32c6`, once P4 wires that up), not by starving this one.
-lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = [
-    "node-button",
-    "node-radio",
-    "node-fluid",
-    "node-fixture",
-    "node-texture",
-    "node-playlist",
-    "node-clock",
-    "node-shader",
-] }
+# `default-features = false` here means lpa-server takes none of
+# `lpc-engine`'s defaults automatically — including its node-* gates, all
+# eight of which are default-on over there. The `node-*` features above are
+# what supply them: they forward into the matching `lpc-engine/node-*`
+# feature and are all in lpa-server's own `default`, so nothing changes for
+# a normal consumer. **The trap**: any crate depending on `lpa-server` (or
+# `lpc-engine` directly) with `default-features = false` gets NO node
+# runtimes unless it lists the gates it wants — this bit `fw-emu` and this
+# crate itself when the gates first landed (2026-07-30). Anyone adding a
+# ninth node gate to `lpc-engine` must add the forwarding feature here too.
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
@@ -56,17 +82,12 @@ serde = { workspace = true, features = ["derive"] }
 # an injected `Arc<dyn LpGraphics>`; hosts construct the backend).
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, features = ["std"] }
-lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = [
-    "std",
-    "node-button",
-    "node-radio",
-    "node-fluid",
-    "node-fixture",
-    "node-texture",
-    "node-playlist",
-    "node-clock",
-    "node-shader",
-] }
+# Same forwarding as the main [dependencies] entry above — `cargo test
+# -p lpa-server` builds with lpa-server's own default features (std + all
+# eight node-* gates) unless told otherwise, which forward into this dev
+# instance of lpc-engine too (Cargo unifies features across dep kinds for
+# the same resolved package). No explicit feature list needed here.
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
 lpc-registry = { path = "../../lp-core/lpc-registry", default-features = false, features = ["std"] }
 lpc-view = { path = "../../lp-core/lpc-view", default-features = false, features = ["std"] }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
