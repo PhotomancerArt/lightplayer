@@ -14,6 +14,16 @@ fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp3
 # fw-esp32s3 builds on Espressif's Rust fork (see lp-fw/fw-esp32s3/rust-toolchain.toml)
 xt_s3_target := "xtensa-esp32s3-none-elf"
 fw_esp32s3_elf := "target/" + xt_s3_target + "/release/fw-esp32s3"
+
+# The S3's 8 MB flash floor (docs/adr/2026-07-30-esp32s3-partition-floor.md).
+# This MUST be passed to every `espflash flash` for this chip and MUST match
+# partitions.csv: espflash writes a flash-size field into the image header and
+# defaults it to 4MB, and the bootloader validates the partition table against
+# that header — not against the physical chip. Omit it and a board with 16 MB
+# soldered on still boot-loops with "partition N invalid ... exceeds flash chip
+# size 0x400000". The same value is duplicated in
+# lp-fw/fw-esp32s3/.cargo/config.toml's runner, which cannot read this var.
+s3_flash_size := "8mb"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -645,7 +655,7 @@ _xt-gcc-dir:
 flash-fw-esp32s3 port="": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -671,7 +681,7 @@ fwtest-xt-jit-esp32s3 port="":
     fi
     cd lp-fw/fw-esp32s3 && cargo build --release --features test_xt_jit_corpus
     cd - >/dev/null
-    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -697,13 +707,19 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
 # is the chip whose app-layer port is still ahead of it, so the number is worth
 # trending from the start rather than from the first overrun.
 
-# Fail when the esp32s3 app image gets too close to its 3 MB partition.
+# Fail when the esp32s3 app image gets too close to its 6 MB partition.
+#
+# Unlike the C6, this number is a TREND, not a budget gate. The S3 moved to an
+# 8 MB partition floor (docs/adr/2026-07-30-esp32s3-partition-floor.md), which
+# removed the pressure the C6 still lives under — the check exists so Xtensa
+# code density stays a tracked number, not so anyone has to fight for space.
+# Do not tighten the margin to manufacture pressure.
 fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
     # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32s3/partitions.csv.
-    just _fw-size-check esp32s3 esp32s3 {{ fw_esp32s3_elf }} 3145728 {{ margin }} \
+    # lp-fw/fw-esp32s3/partitions.csv (0x600000).
+    just _fw-size-check esp32s3 esp32s3 {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and

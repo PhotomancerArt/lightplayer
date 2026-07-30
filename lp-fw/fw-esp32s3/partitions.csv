@@ -1,5 +1,11 @@
 # Name,   Type,  SubType, Offset,   Size,     Flags
+# 8 MB floor (N8/N16-class modules). See README "Partitions" and
+# docs/adr/2026-07-30-esp32s3-partition-floor.md — this table does NOT fit a
+# 4 MB (N4) board, deliberately.
+#   factory 6 MB  @ 0x010000 .. 0x610000
+#   lpfs    1.5 MB @ 0x610000 .. 0x790000
+#   end 0x790000 of 0x800000 — 448 KB slack
 nvs,      data,  nvs,     0x9000,   0x6000,
 phy_init, data,  phy,     0xf000,   0x1000,
-factory,  app,   factory, 0x10000,  0x300000,
-lpfs,     data,  spiffs,  0x310000, 0xF0000,
+factory,  app,   factory, 0x10000,  0x600000,
+lpfs,     data,  spiffs,  0x610000, 0x180000,
