@@ -3950,6 +3950,8 @@ dependencies = [
  "fw-core",
  "littlefs-rust",
  "log",
+ "lp-recovery",
+ "lpc-shared",
  "lpc-wire",
  "lpir",
  "lps-builtins",
