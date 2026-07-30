@@ -3940,6 +3940,11 @@ dependencies = [
  "esp-hal",
  "esp-println",
  "log",
+ "lpir",
+ "lps-builtins",
+ "lps-shared",
+ "lpvm",
+ "lpvm-native",
 ]
 
 [[package]]
