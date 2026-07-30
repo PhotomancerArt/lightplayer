@@ -563,6 +563,33 @@ build-rv32-release: build-rv32
 build-fw-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6
 
+# Build the ESP32-S3 firmware. Xtensa has no upstream Rust target, so this uses
+# Espressif's fork via the crate's own `rust-toolchain.toml` (channel = "esp").
+# The GNU binutils/gcc shipped inside that toolchain must be on PATH: the Rust
+# target spec links through xtensa-esp32s3-elf-gcc.
+#
+# Needs esp Rust >= 1.90 (the workspace MSRV). On 1.88 `lpc-model` genuinely
+# fails to compile — 70x E0716 from the Slotted derive — so a version error
+# here means `espup update`, not a code problem.
+clippy-fw-esp32s3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
+    export PATH="$GCC_BIN:$PATH"
+    cd lp-fw/fw-esp32s3 && cargo clippy --release -- --no-deps -D warnings
+
+build-fw-esp32s3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
+    if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
+      echo "error: xtensa-esp32s3-elf-gcc not found under ~/.rustup/toolchains/esp" >&2
+      echo "       run 'espup install' (or 'espup update' if it is stale)" >&2
+      exit 1
+    fi
+    export PATH="$GCC_BIN:$PATH"
+    cd lp-fw/fw-esp32s3 && cargo build --release
+
 # Fail when the esp32c6 app image gets too close to its 3 MB partition.
 # The image overran the partition twice in 2026 and both times it surfaced as a
 # red post-merge deploy, because nothing pre-merge built the firmware. This
@@ -710,7 +737,7 @@ fmt-check:
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
