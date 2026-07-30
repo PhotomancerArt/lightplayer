@@ -14,6 +14,8 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 | `wasm.q32` | Q32 fixed-point | wasmtime | yes |
 | `interp.f32` | IEEE f32 | host LPIR interpreter (`lpir::interpret`) — the CI f32 gate | yes |
 | `wgpu.f32` | IEEE f32 (GPU) | per-directive fragment probe on a wgpu device | no — explicit `--target wgpu.f32`; needs a GPU adapter |
+| `xtn.q32` | Q32 fixed-point | `lpvm-native` → **Xtensa** emulator + linked builtins (ESP32-S3 board profile) | no — explicit `--target xtn.q32`; needs the Xtensa builtins image |
+| `xtlpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → Xtensa emulator | no — as above |
 
 **Q32 is the primary tier**: the four Q32 targets assert exact on-device
 semantics and their expectations are the ground truth. `interp.f32` asserts
@@ -22,6 +24,36 @@ tiers legitimately diverge, directives split into `run[q32]:` / `run[f32]:`
 channels. `wgpu.f32` re-runs the f32 expectations on real GPU hardware —
 adapter-gated and slower (one GPU pipeline per directive), so it is not in the
 default set; run it explicitly when touching the GPU tier.
+
+### The Xtensa pair
+
+`xtn.q32` / `xtlpn.q32` are the Xtensa mirrors of `rv32n.q32` / `rv32lpn.q32` —
+same corpus, same engine (`rt_emu` takes the ISA as a runtime parameter), running
+on `lp-xt-emu`'s ESP32-S3 board profile. **`xtlpn.q32` is the one that matters for
+device conformance**: it is the `lps-glsl` frontend, the on-device pipeline. `xtn`
+exists so a frontend divergence can be told apart from a backend one.
+
+They need the **Xtensa builtins image**, a gitignored cross-target artifact:
+
+```bash
+scripts/build-builtins-xt.sh          # needs the esp toolchain (espup)
+scripts/filetests.sh -t xtn.q32       # builds the image for you when selected
+```
+
+Without it the runner **drops those targets with a loud note** and they are
+absent from the summary table — never a hard failure (the suite must work on a
+machine that has never installed espup) and never a silent pass.
+
+They are deliberately **not** in `DEFAULT_TARGETS`: the artifact requirement above,
+and because defaulting them is a cost decision to make against a measured number.
+Measured 2026-07-30: the five default targets run 31,587 cases in ~34 s, while one
+Xtensa target alone is ~16 s for 6,553 cases (`xtlpn` ~6 s warm) — so the pair is
+not free.
+
+**No Xtensa cycle model exists.** `lp-xt-emu` defaults to `InstructionCount`, and a
+chip-specific `--perf` request (`esp32c6`) reports **no data** for Xtensa rather
+than applying an RV32 core's cycle table to Xtensa instructions. Use
+`--perf insts` for a meaningful Xtensa cost column.
 
 ## Running tests
 
@@ -187,7 +219,8 @@ int add_int(int a, int b) {
 
 **`DEFAULT_TARGETS`** (when the runner does not pass `--target`): `rv32n.q32`,
 `rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`. CI runs this list via
-`just test-filetests`; `wgpu.f32` is explicit-only (see Targets above).
+`just test-filetests`; `wgpu.f32`, `xtn.q32` and `xtlpn.q32` are explicit-only
+(see Targets above).
 
 ### Run directives
 

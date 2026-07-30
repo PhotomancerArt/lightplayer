@@ -93,6 +93,9 @@ genuinely fits none of these, and define it here in one line.
 - **`nondeterministic-capture`** — a capture records one of several
   reachable renderings, because the thing being photographed had not
   reached a single settled state.
+- **`config-masked-defect`** — shared code is correct only under
+  incidental properties of the *one* configuration that exercises it, so
+  no test can falsify it until a second configuration arrives.
 - **`unsynchronized-shared-artifact`** — two steps share a filesystem
   artifact, but the lock that would order them is scoped narrower than
   the artifact, so a reader observes a writer's intermediate state.
@@ -107,6 +110,8 @@ bookkeeping fact.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed (1 known gap) | lpvm-native/regalloc (walk.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |

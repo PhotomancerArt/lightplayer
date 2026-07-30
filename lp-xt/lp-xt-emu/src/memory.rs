@@ -15,7 +15,34 @@
 //!
 //! Original code; no derivation from QEMU/binutils (see the repo license ADR).
 
+use std::sync::{Arc, Mutex};
+
 use crate::error::{Trap, TrapKind};
+
+/// Base D-bus address of the **host-shared** region — the window a host
+/// emulation engine maps its own buffer into so guest code can read and write
+/// it without copying (see [`Memory::add_shared`]).
+///
+/// This address is **host-emulator fiction**. On real silicon a shader's vmctx
+/// lives in ordinary DRAM and the on-device JIT (`rt_jit`) never needs a region
+/// like this; the address exists only so a host engine can hand the guest a
+/// pointer into host memory.
+///
+/// Chosen unmapped on **both** board profiles and outside the `0x4xxx_xxxx`
+/// I-bus quadrant: the S3 installs SRAM1 code/stack at `0x3FC8_8000` /
+/// `0x3FCC_0000` (I-bus images `0x4037_8000+`), and classic installs
+/// `0x3FFE_8000` / `0x3FFC_0000` (I-bus image `0x400A_1000..0x400B_8000`).
+/// `0x3F40_0000` is in the external-memory-mapped range on both chips, which no
+/// profile models.
+///
+/// It is deliberately **not** `lp_emu_core::DEFAULT_SHARED_START` (the rv32
+/// engine's `0x4000_0000`): that address is [`crate::SENTINEL_PC`], the
+/// unmapped return address the windowed run harness detects a top-level return
+/// with. Mapping the shared region there would put the vmctx at the sentinel
+/// and silently undermine the "chosen unmapped" property that harness relies
+/// on. The two ISAs therefore use different shared bases, which costs nothing —
+/// the guest reaches the region only through a pointer argument.
+pub const SHARED_DBUS_BASE: u32 = 0x3F40_0000;
 
 /// ESP32-S3 SRAM1 D-bus window start (data view).
 pub const SRAM1_DBUS_START: u32 = 0x3FC8_8000;
@@ -113,12 +140,54 @@ impl Region {
         let rule = self.alias?;
         self.dbus_index(rule.ibus_to_dbus(addr))
     }
+
+    /// Inclusive `[lo, hi]` bounds of this region's I-bus image, or `None` when
+    /// it has no alias. Conservative: computed from the endpoints and rounded
+    /// out to word boundaries, because a word-mirrored alias runs *downward*
+    /// and so maps the region's low D-bus address to its image's high end.
+    /// Used only by [`Memory::add_shared`]'s overlap check.
+    fn ibus_bounds(&self) -> Option<(u32, u32)> {
+        let rule = self.alias?;
+        let last = self.dbus_start.wrapping_add(self.data.len() as u32 - 1);
+        let a = rule.dbus_to_ibus(self.dbus_start);
+        let b = rule.dbus_to_ibus(last);
+        Some((a.min(b) & !3, (a.max(b) | 3)))
+    }
+}
+
+/// A region whose bytes are owned by the **host**, mapped into the guest's data
+/// space so both sides see the same memory (see [`Memory::add_shared`]).
+///
+/// Modeled on `lp-emu-core`'s `shared_backing`: one field on [`Memory`] rather
+/// than a variant of [`Region`], so the region list and its alias machinery are
+/// untouched and each typed access takes the lock exactly once.
+struct SharedRegion {
+    dbus_start: u32,
+    /// Length captured when the region was added. The backing must not be
+    /// resized afterwards; accesses bounds-check against the live `Vec` anyway.
+    len: usize,
+    backing: Arc<Mutex<Vec<u8>>>,
+}
+
+impl SharedRegion {
+    fn index(&self, addr: u32) -> Option<usize> {
+        let end = self.dbus_start.wrapping_add(self.len as u32);
+        if addr >= self.dbus_start && addr < end {
+            Some((addr - self.dbus_start) as usize)
+        } else {
+            None
+        }
+    }
 }
 
 /// The emulator's physical address space: a set of regions, each optionally
 /// carrying an [`AliasRule`] that makes its bytes fetchable at an I-bus view.
 pub struct Memory {
     regions: Vec<Region>,
+    /// Host-owned data window, when one has been attached
+    /// ([`add_shared`](Self::add_shared)). Deliberately not a [`Region`]: it is
+    /// never fetchable, and its bytes live behind a lock.
+    shared: Option<SharedRegion>,
     /// Max number of bytes accessible from any address (for load/store bounds).
     #[allow(dead_code, reason = "layout placeholder kept from the source repo")]
     _reserved: (),
@@ -140,6 +209,7 @@ impl Memory {
     pub fn new() -> Memory {
         Memory {
             regions: Vec::new(),
+            shared: None,
             _reserved: (),
         }
     }
@@ -179,6 +249,59 @@ impl Memory {
         self.add_executable(dbus_start, len, AliasRule::Offset(IBUS_ALIAS_OFFSET));
     }
 
+    /// Map a **host-owned** buffer into the guest's data space at `dbus_start`,
+    /// so guest loads and stores there read and write the host's bytes directly
+    /// — no copying, and the host sees guest writes as soon as it takes the
+    /// lock. This is how a host emulation engine hands compiled shader code its
+    /// vmctx, uniforms, globals and texture buffers.
+    ///
+    /// The region is **data only**: it carries no [`AliasRule`], so an
+    /// instruction fetch from it takes the ordinary
+    /// [`EXC_INSTR_FETCH_ERROR`] path. That is correct — jumping into the vmctx
+    /// is a bug, and modeling it as one keeps the emulator honest.
+    ///
+    /// Call this *after* the board profile has installed its regions
+    /// ([`crate::board::BoardProfile::install`]); the overlap assertion below is
+    /// what keeps the chosen base ([`SHARED_DBUS_BASE`]) honest as profiles
+    /// change, rather than a comment claiming the address is free.
+    ///
+    /// # Panics
+    /// If a shared region is already attached, if `backing` is empty, or if the
+    /// range overlaps any installed region — in either its D-bus range or its
+    /// I-bus image.
+    pub fn add_shared(&mut self, dbus_start: u32, backing: Arc<Mutex<Vec<u8>>>) {
+        assert!(
+            self.shared.is_none(),
+            "a shared region is already attached at {:#x}",
+            self.shared.as_ref().map_or(0, |s| s.dbus_start)
+        );
+        let len = backing.lock().expect("shared backing lock").len();
+        assert!(len > 0, "shared backing is empty");
+        let lo = dbus_start;
+        let hi = dbus_start.wrapping_add(len as u32 - 1);
+        for r in &self.regions {
+            let r_lo = r.dbus_start;
+            let r_hi = r.dbus_start.wrapping_add(r.data.len() as u32 - 1);
+            assert!(
+                hi < r_lo || lo > r_hi,
+                "shared region {lo:#x}..={hi:#x} overlaps the D-bus range \
+                 {r_lo:#x}..={r_hi:#x} of an installed region"
+            );
+            if let Some((i_lo, i_hi)) = r.ibus_bounds() {
+                assert!(
+                    hi < i_lo || lo > i_hi,
+                    "shared region {lo:#x}..={hi:#x} overlaps the I-bus image \
+                     {i_lo:#x}..={i_hi:#x} of an installed region"
+                );
+            }
+        }
+        self.shared = Some(SharedRegion {
+            dbus_start,
+            len,
+            backing,
+        });
+    }
+
     /// The I-bus (executable) alias of a D-bus **ESP32-S3** SRAM1 address.
     /// S3-specific; profile-aware code uses [`AliasRule::dbus_to_ibus`] /
     /// [`crate::board::BoardProfile::code_ibus_base`] instead.
@@ -209,6 +332,19 @@ impl Memory {
     /// under a word-mirrored alias (where the backing D-bus image is not
     /// contiguous).
     pub fn load_bytes(&mut self, addr: u32, bytes: &[u8]) {
+        if let Some(s) = &self.shared {
+            if let Some(idx) = s.index(addr) {
+                let mut v = s.backing.lock().expect("shared backing lock");
+                let end = idx + bytes.len();
+                assert!(
+                    end <= v.len(),
+                    "load_bytes: {} bytes at {addr:#x} run past the shared region",
+                    bytes.len()
+                );
+                v[idx..end].copy_from_slice(bytes);
+                return;
+            }
+        }
         for (i, b) in bytes.iter().enumerate() {
             let a = addr.wrapping_add(i as u32);
             let (ri, idx) = self
@@ -216,6 +352,33 @@ impl Memory {
                 .unwrap_or_else(|| panic!("load_bytes: address {a:#x} not mapped"));
             self.regions[ri].data[idx] = *b;
         }
+    }
+
+    /// Copy `bytes` into the single region that starts at `dbus_start`, in one
+    /// `copy_from_slice`.
+    ///
+    /// [`load_bytes`](Self::load_bytes) resolves every byte individually — it has
+    /// to, because under a word-mirrored alias a contiguous I-bus blob is not
+    /// contiguous in the backing store. That per-byte resolve is fine for a small
+    /// payload and far too slow for a host engine reloading a whole ~128 KiB code
+    /// region before every call. This is the bulk path for that case: `dbus_start`
+    /// must be a region's exact base, and `bytes` must fit it.
+    ///
+    /// # Panics
+    /// If no region starts at `dbus_start`, or `bytes` is longer than it.
+    pub fn load_region(&mut self, dbus_start: u32, bytes: &[u8]) {
+        let r = self
+            .regions
+            .iter_mut()
+            .find(|r| r.dbus_start == dbus_start)
+            .unwrap_or_else(|| panic!("load_region: no region based at {dbus_start:#x}"));
+        assert!(
+            bytes.len() <= r.data.len(),
+            "load_region: {} bytes do not fit the {} byte region at {dbus_start:#x}",
+            bytes.len(),
+            r.data.len()
+        );
+        r.data[..bytes.len()].copy_from_slice(bytes);
     }
 
     // --- fetch ---
@@ -248,6 +411,21 @@ impl Memory {
     // --- typed data access ---
 
     fn read_bytes(&self, addr: u32, n: u32) -> Result<u32, Trap> {
+        // Shared region first: one lock per typed access, not per byte
+        // (lp-emu-core's `shared_backing` sets the same granularity). An access
+        // starting inside the window must finish inside it — the shared region
+        // has no neighbours to straddle into.
+        if let Some(s) = &self.shared {
+            if let Some(idx) = s.index(addr) {
+                let g = s.backing.lock().expect("shared backing lock");
+                let mut v = 0u32;
+                for i in 0..n as usize {
+                    let b = *g.get(idx + i).ok_or_else(|| self.load_fault(addr))?;
+                    v |= (b as u32) << (8 * i as u32);
+                }
+                return Ok(v);
+            }
+        }
         let mut v = 0u32;
         for i in 0..n {
             let a = addr.wrapping_add(i);
@@ -260,6 +438,18 @@ impl Memory {
     }
 
     fn write_bytes(&mut self, addr: u32, n: u32, val: u32) -> Result<(), Trap> {
+        if let Some(s) = &self.shared {
+            if let Some(idx) = s.index(addr) {
+                let mut g = s.backing.lock().expect("shared backing lock");
+                for i in 0..n as usize {
+                    match g.get_mut(idx + i) {
+                        Some(slot) => *slot = (val >> (8 * i as u32)) as u8,
+                        None => return Err(self.store_fault(addr)),
+                    }
+                }
+                return Ok(());
+            }
+        }
         for i in 0..n {
             let a = addr.wrapping_add(i);
             match self.resolve(a, Access::Data) {

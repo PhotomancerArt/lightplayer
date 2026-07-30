@@ -211,6 +211,26 @@ impl IsaTarget {
         }
     }
 
+    /// A register the allocator may use to break a **cycle** when staging call
+    /// arguments — never in the allocatable pool, so nothing live is destroyed.
+    ///
+    /// Needed because an argument's source register can be another argument's
+    /// destination. On an ISA whose argument registers are disjoint from the
+    /// allocatable pool (rv32: args `a0..a7` = 10..17, pool = 18..31) that never
+    /// happens and this is dead weight. On Xtensa the caller-view staging bank
+    /// `a10..a15` **is** the caller-saved half of the pool, so it happens
+    /// constantly. See `regalloc::walk::sequence_arg_moves`.
+    pub fn move_cycle_scratch_hw(self) -> u8 {
+        match self {
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac => crate::isa::rv32::gpr::SCRATCH,
+            // a9, not a8: `CALL8` writes the mangled return address into a8, so
+            // keeping the swap temp clear of it leaves no overlap to reason about.
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => crate::isa::xt::gpr::SCRATCH2,
+        }
+    }
+
     /// Hardware index for the `idx`-th scalar return register for direct (non-sret) returns.
     pub fn direct_ret_reg_hw(self, idx: usize) -> Option<u8> {
         match self {
