@@ -324,7 +324,6 @@ fn same_kind_body_value_edit_does_not_report_node_use_change() {
       1.0,
       1.0
     ],
-    "brightness": 0.25,
     "interpolation_enabled": true,
     "dithering_enabled": false,
     "lut_enabled": true

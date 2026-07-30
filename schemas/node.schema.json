@@ -111,10 +111,6 @@
     "lpc_model::nodes::output::output_def::OutputDriverOptionsConfig": {
       "additionalProperties": false,
       "properties": {
-        "brightness": {
-          "description": "Ratio in the intended 0.0..=1.0 domain (not enforced on read).",
-          "type": "number"
-        },
         "dithering_enabled": {
           "type": "boolean"
         },

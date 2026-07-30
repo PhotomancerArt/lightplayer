@@ -36,6 +36,9 @@ const SOLVER_HZ_TARGET: u64 = 25;
 const INTENSITY: f32 = 2.5;
 const TARGET_X: f32 = 0.5;
 const TARGET_Y: f32 = 0.5;
+/// Demo dimming, applied to the rendered frame before it reaches the display
+/// pipeline. The pipeline itself no longer carries a brightness scalar —
+/// brightness is a fixture-level control in the product.
 const BRIGHTNESS: f32 = 0.12;
 /// Per-step dye decay (lp2014 `FluidRenderer.fadeSpeed` default = 0.01).
 /// Without this, dye accumulates forever and the field saturates to white.
@@ -72,7 +75,6 @@ pub async fn run_fluid_demo(_: embassy_executor::Spawner) -> ! {
     // DisplayPipeline (interpolation + LUT + dither).
     let options = DisplayPipelineOptions {
         white_point: [1.0, 1.0, 1.0],
-        brightness: BRIGHTNESS,
         interpolation_enabled: true,
         dithering_enabled: false,
         lut_enabled: true,
@@ -97,6 +99,10 @@ pub async fn run_fluid_demo(_: embassy_executor::Spawner) -> ! {
     let mut led_buf: Vec<u8> = vec![0u8; LAMP_COUNT * 3];
 
     let solver_period_us: u64 = 1_000_000 / SOLVER_HZ_TARGET;
+    // Integer dimming factor in 8.8 fixed point — the C6 has no FPU, so keep
+    // the per-channel scale off the soft-float path.
+    let brightness_q8 = (BRIGHTNESS * 256.0) as u16;
+
     let start = Instant::now();
     let mut last_solver_us: u64 = 0;
     let mut last_log_us: u64 = 0;
@@ -113,6 +119,9 @@ pub async fn run_fluid_demo(_: embassy_executor::Spawner) -> ! {
             pulser.tick(&mut solver, now_ms, TARGET_X, TARGET_Y, INTENSITY);
             solver.update();
             render_frame(&solver, &lamp_positions, &mut rgb_frame);
+            for channel in rgb_frame.iter_mut() {
+                *channel = ((u16::from(*channel) * brightness_q8) >> 8) as u8;
+            }
             // Stamp the frame one period in the future so DisplayPipeline's
             // temporal interpolation has a real prev_ts → current_ts window
             // that brackets `now_us` on subsequent ticks. Without the

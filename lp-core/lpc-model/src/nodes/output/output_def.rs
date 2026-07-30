@@ -1,7 +1,4 @@
-use crate::{
-    BindingDefs, ControlProductSlot, HwEndpointSpec, OptionSlot, Ratio, RatioSlot, Slotted,
-    ValueSlot,
-};
+use crate::{BindingDefs, ControlProductSlot, HwEndpointSpec, OptionSlot, Slotted, ValueSlot};
 
 pub const DEFAULT_OUTPUT_ENDPOINT_SPEC: &str = "ws281x:rmt:D10";
 
@@ -60,8 +57,6 @@ impl Default for OutputDef {
 pub struct OutputDriverOptionsConfig {
     /// RGB white point balance.
     pub white_point: ValueSlot<[f32; 3]>,
-    /// Global brightness multiplier.
-    pub brightness: RatioSlot,
     /// Enable interpolation between frames.
     pub interpolation_enabled: ValueSlot<bool>,
     /// Enable temporal dithering.
@@ -74,7 +69,6 @@ impl Default for OutputDriverOptionsConfig {
     fn default() -> Self {
         Self {
             white_point: default_white_point_slot(),
-            brightness: default_brightness_slot(),
             interpolation_enabled: default_true_slot(),
             dithering_enabled: default_true_slot(),
             lut_enabled: default_true_slot(),
@@ -84,10 +78,6 @@ impl Default for OutputDriverOptionsConfig {
 
 fn default_white_point_slot() -> ValueSlot<[f32; 3]> {
     ValueSlot::new([0.9, 1.0, 1.0])
-}
-
-fn default_brightness_slot() -> RatioSlot {
-    RatioSlot::new(Ratio(1.0))
 }
 
 fn default_true_slot() -> ValueSlot<bool> {
@@ -113,7 +103,7 @@ mod tests {
         let json = r#"{
   "kind": "Output",
   "endpoint": "ws281x:rmt:D10",
-  "options": { "brightness": 0.25, "dithering_enabled": false }
+  "options": { "white_point": [0.8, 1.0, 1.0], "dithering_enabled": false }
 }"#;
         let def = NodeDef::read_json(&registry(), json).unwrap();
         let NodeDef::Output(def) = def else {
@@ -121,7 +111,7 @@ mod tests {
         };
         assert_eq!(def.endpoint().as_str(), "ws281x:rmt:D10");
         let opts = def.options().unwrap();
-        assert!((opts.brightness.value().0 - 0.25).abs() < 0.001);
+        assert!((opts.white_point.value()[0] - 0.8).abs() < 0.001);
         assert!(!*opts.dithering_enabled.value());
         assert!(*opts.interpolation_enabled.value());
     }
