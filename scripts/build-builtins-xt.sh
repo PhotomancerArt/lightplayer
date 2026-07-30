@@ -8,16 +8,27 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
-# The GNU xtensa binutils/gcc shipped inside the rustup `esp` toolchain: the
-# rust target spec links via xtensa-esp32s3-elf-gcc, so it must be on PATH.
+# The GNU xtensa binutils/gcc shipped with the esp toolchain: the rust target
+# spec links via xtensa-esp32s3-elf-gcc, so it must be on PATH.
+#
+# Two install shapes to find it in. espup (developer machines) puts it under
+# ~/.rustup/toolchains/esp/; the esp-rs/xtensa-toolchain CI action puts it
+# somewhere of its own choosing and adds it to PATH. Check the espup layout
+# first, then fall back to whatever is already on PATH, so the same script
+# serves both.
 GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
-if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
+if [[ -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
+  export PATH="$GCC_BIN:$PATH"
+elif ! command -v xtensa-esp32s3-elf-gcc >/dev/null 2>&1; then
   echo "error: xtensa-esp32s3-elf-gcc not found under ~/.rustup/toolchains/esp" >&2
-  echo "       install the esp toolchain (espup install) first." >&2
+  echo "       and not on PATH. Install the esp toolchain (espup install) first." >&2
   exit 1
 fi
-export PATH="$GCC_BIN:$PATH"
-NM="$GCC_BIN/xtensa-esp32s3-elf-nm"
+NM="$(command -v xtensa-esp32s3-elf-nm)"
+if [[ -z "$NM" ]]; then
+  echo "error: xtensa-esp32s3-elf-nm not found alongside the gcc above" >&2
+  exit 1
+fi
 
 OUT_DIR="$ROOT/lp-xt/fixtures/elf"
 OUT="$OUT_DIR/lps-builtins-xt-app.elf"
