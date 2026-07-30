@@ -12,6 +12,7 @@ float test_round_half_up() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // run[q32]: test_round_half_up() ~= 3.0
@@ -32,7 +33,9 @@ float test_roundeven_half_up() {
 // per-mode: canonical f32 rounding is round-half-to-even (IEEE, user decision 2026-07-15); Q32 rounds half away from zero.
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wasm.q32)
 // run[q32]: test_roundeven_half_up() ~= 3.0
 // run[f32]: test_roundeven_half_up() ~= 2.0
@@ -58,7 +61,9 @@ float test_large_number_precision() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wasm.q32)
 // run: test_large_number_precision() ~= 10000000000.0
 
@@ -76,7 +81,9 @@ vec2 test_vec_precision() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wasm.q32)
 // run: test_vec_precision() ~= vec2(1.0, 10000000000.0)
 
