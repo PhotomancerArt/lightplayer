@@ -114,7 +114,7 @@ a week is an argument for a conformance suite. When a class accumulates
 entries, say so out loud — that is an architecture finding, not a
 bookkeeping fact.
 
-Saying it out loud: **`config-masked-defect` took three entries on
+Saying it out loud: **`config-masked-defect` took four entries on
 2026-07-30**, all in `lpvm-native`'s shared register allocator, all
 latent for the entire life of the rv32-only era, and all made
 observable within hours of the Xtensa corpus landing. The finding is not
@@ -140,12 +140,20 @@ worth keeping — but it splits a recurrence across buckets, which defeats the
 point of grouping. If a fourth of these lands, collapse the axes: class by the
 disagreement, record the masking mechanism as a field.
 
+A sharper sub-lesson from the fourth: three of the four were the *same
+invariant* — a call-boundary register transfer must behave as a parallel
+move — applied at three of its four sites. Each fix was correct and
+under-scoped. When a fix establishes an invariant, enumerate every place
+it applies before closing the entry; here that enumeration was one
+sentence (arguments in, returns out; registers and stack).
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
 | split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-two-value-return-clobber](2026-07-30-xtensa-two-value-return-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
