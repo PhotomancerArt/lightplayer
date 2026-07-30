@@ -21,7 +21,23 @@ std = [
 ]
 
 [dependencies]
-lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
+# `default-features = false` here predates the per-node-kind gates on
+# `lpc-engine` (2026-07-30) and only ever meant "no `std`, forwarded
+# separately by our own `std` feature below" — it was never meant to opt out
+# of any node runtime. List every node gate explicitly so lpa-server keeps
+# getting the full node set regardless of its own feature selection; a
+# constrained firmware build picks gates on its OWN `lpc-engine` dependency
+# (see `lp-fw/fw-esp32c6`, once P4 wires that up), not by starving this one.
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = [
+    "node-button",
+    "node-radio",
+    "node-fluid",
+    "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
+] }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
@@ -40,7 +56,17 @@ serde = { workspace = true, features = ["derive"] }
 # an injected `Arc<dyn LpGraphics>`; hosts construct the backend).
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, features = ["std"] }
-lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["std"] }
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = [
+    "std",
+    "node-button",
+    "node-radio",
+    "node-fluid",
+    "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
+] }
 lpc-registry = { path = "../../lp-core/lpc-registry", default-features = false, features = ["std"] }
 lpc-view = { path = "../../lp-core/lpc-view", default-features = false, features = ["std"] }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
