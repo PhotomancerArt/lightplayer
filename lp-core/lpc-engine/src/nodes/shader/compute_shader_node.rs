@@ -633,6 +633,7 @@ void tick() {{
                 default: lpc_model::OptionSlot::none(),
                 min: lpc_model::OptionSlot::none(),
                 max: lpc_model::OptionSlot::none(),
+                step: lpc_model::OptionSlot::none(),
                 mapping: lpc_model::OptionSlot::none(),
                 label: ValueSlot::default(),
                 description: ValueSlot::default(),
