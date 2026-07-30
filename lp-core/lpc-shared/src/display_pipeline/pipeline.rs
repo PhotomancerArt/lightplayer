@@ -9,7 +9,7 @@ use core::cmp;
 
 use super::dither::dither_step;
 
-/// Below this value (post-LUT, post-brightness), use shared luminance dithering
+/// Below this value (post-LUT), use shared luminance dithering
 /// to avoid R/G/B divergence and color flicker. ~5% of 16-bit max.
 /// Disabled for now—was making colored light monochrome.
 #[allow(
@@ -34,7 +34,6 @@ pub struct DisplayPipeline {
     dither_overflow: Vec<[i8; 3]>,
     lut: [[u32; LUT_LEN]; 3],
     options: DisplayPipelineOptions,
-    brightness_u8: u8,
 }
 
 impl DisplayPipeline {
@@ -59,7 +58,6 @@ impl DisplayPipeline {
         build_lut(&mut lut[0], options.white_point[0]);
         build_lut(&mut lut[1], options.white_point[1]);
         build_lut(&mut lut[2], options.white_point[2]);
-        let brightness_u8 = (options.brightness.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         Ok(Self {
             num_leds,
             prev,
@@ -75,7 +73,6 @@ impl DisplayPipeline {
             dither_overflow,
             lut,
             options,
-            brightness_u8,
         })
     }
 
@@ -212,28 +209,21 @@ impl DisplayPipeline {
     }
 
     fn apply_lut_dither(&mut self, r: u32, g: u32, b: u32, pixel: usize) -> (u8, u8, u8) {
-        let mut ir = if self.options.lut_enabled {
+        let ir = if self.options.lut_enabled {
             lut_interpolate(r, &self.lut[0])
         } else {
             r
         };
-        let mut ig = if self.options.lut_enabled {
+        let ig = if self.options.lut_enabled {
             lut_interpolate(g, &self.lut[1])
         } else {
             g
         };
-        let mut ib = if self.options.lut_enabled {
+        let ib = if self.options.lut_enabled {
             lut_interpolate(b, &self.lut[2])
         } else {
             b
         };
-        let brightness = self.brightness_u8;
-        if brightness < 255 {
-            ir = (ir * brightness as u32) >> 8;
-            ig = (ig * brightness as u32) >> 8;
-            ib = (ib * brightness as u32) >> 8;
-        }
-
         // Shared luminance dithering for low-gray grayscale disabled for now:
         // was causing colored light to appear monochrome; grayscale check was insufficient
         let use_shared_luma = false;

@@ -9,8 +9,6 @@
 pub struct DisplayPipelineOptions {
     /// RGB white point balance
     pub white_point: [f32; 3],
-    /// Global brightness multiplier (0.0–1.0, default 1.0)
-    pub brightness: f32,
     /// Enable interpolation between frames
     pub interpolation_enabled: bool,
     /// Enable temporal dithering
@@ -23,7 +21,6 @@ impl Default for DisplayPipelineOptions {
     fn default() -> Self {
         Self {
             white_point: [0.9, 1.0, 1.0],
-            brightness: 1.0,
             interpolation_enabled: true,
             dithering_enabled: true,
             lut_enabled: true,

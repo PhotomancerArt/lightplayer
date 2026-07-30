@@ -13,8 +13,7 @@ use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, ChannelName, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode,
     FixtureSamplingConfig, HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot,
-    OptionSlot, ProjectDef, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, SlotShapeRegistry,
-    ValueSlot,
+    OptionSlot, ProjectDef, RenderOrder, RenderOrderSlot, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -121,13 +120,12 @@ impl ProjectBuilder {
         }
     }
 
-    /// Start building an output node (defaults to `ws281x:rmt:D10`, no interpolation/dithering/LUT, full brightness)
+    /// Start building an output node (defaults to `ws281x:rmt:D10`, no interpolation/dithering/LUT)
     pub fn output(&mut self) -> OutputBuilder {
         OutputBuilder {
             endpoint: OutputDef::default_endpoint(),
             options: OutputDriverOptionsConfig {
                 white_point: ValueSlot::new([1.0, 1.0, 1.0]),
-                brightness: RatioSlot::new(Ratio(1.0)),
                 interpolation_enabled: ValueSlot::new(false),
                 dithering_enabled: ValueSlot::new(false),
                 lut_enabled: ValueSlot::new(false),
