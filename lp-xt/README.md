@@ -12,7 +12,11 @@ instruction model, emulator, and ELF loading that the shader compiler's
 - **`lp-xt-emu`** — the Xtensa emulator: windowed-register machinery,
   per-board memory maps (`BoardProfile::esp32s3()` / `esp32()`), and the
   `lp-emu-core` consumer surface (`LogLevel` instruction log,
-  `CycleModel`/`InstClass` counters, debug dumps).
+  `CycleModel`/`InstClass` counters, debug dumps). Also the **host-engine
+  substrate**: a host-shared data window (`Memory::add_shared`) and the
+  full-argument-list call path (`run_loaded_with_args`) that let a host engine
+  run compiled shader code against a vmctx living in host memory — see
+  `docs/adr/2026-07-30-xtensa-host-shared-memory.md`.
 - **`lp-xt-elf`** — linked-ELF loader + guest-syscall host for `lp-xt-emu`,
   plus a feature-gated relocatable-object engine (`R_XTENSA_32` /
   `R_XTENSA_SLOT0_OP`; the future isa/xt builtins-link path).
@@ -26,6 +30,10 @@ instruction model, emulator, and ELF loading that the shader compiler's
   builtins. Counterpart of `lp-shader/lps-builtins-emu-app` (rv32). Build it
   with `scripts/build-builtins-xt.sh`; DEVICE-target crate, excluded from the
   host workspace.
+- **`lps-builtins-xt-image`** — host crate that **embeds** that image at build
+  time and serves it as `&'static [u8]` (empty when unbuilt, which consumers
+  treat as "skip the Xtensa host path"). Exists because `lp-shader/*` is sans-IO
+  and its consumer `lpvm-native` is also built for firmware; see its README.
 - **`fixtures/`** — its own esp-toolchain workspace: the Rust fixture corpus
   (14 guest programs) + hand-written reloc fixtures. Built artifacts are NOT
   checked in — `lp-xt-elf`'s fixture tests skip gracefully until

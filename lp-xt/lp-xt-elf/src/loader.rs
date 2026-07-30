@@ -134,6 +134,21 @@ impl<'d> XtensaElf<'d> {
             .map(|s| s.address() as u32)
     }
 
+    /// Every named symbol as `(name, address)`.
+    ///
+    /// [`symbol`](Self::symbol) answers one lookup; a host engine linking
+    /// compiled code against this image needs the whole map so it can resolve
+    /// call relocations by name. Unnamed symbols are skipped.
+    pub fn symbols(&self) -> Vec<(String, u32)> {
+        self.file
+            .symbols()
+            .filter_map(|s| match s.name() {
+                Ok(n) if !n.is_empty() => Some((n.to_string(), s.address() as u32)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The `PT_LOAD` segments (the `object` segment iterator yields only
     /// loadable segments).
     pub fn segments(&self) -> Result<Vec<Segment<'d>>, ElfError> {

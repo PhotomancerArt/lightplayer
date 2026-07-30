@@ -38,9 +38,9 @@ pub mod trace;
 mod executor;
 
 pub use board::BoardProfile;
-pub use emu::{Emulator, RunOutcome, SyscallHandler, SyscallOutcome};
+pub use emu::{CallOutcome, Emulator, RunOutcome, SyscallHandler, SyscallOutcome};
 pub use error::{Trap, TrapKind};
 // The arch-neutral contract types consumers configure the emulator with.
 pub use lp_emu_core::{CycleModel, InstClass, LogLevel};
-pub use memory::AliasRule;
+pub use memory::{AliasRule, SHARED_DBUS_BASE};
 pub use trace::{NoopTracer, TextTracer, TraceEvent, Tracer};

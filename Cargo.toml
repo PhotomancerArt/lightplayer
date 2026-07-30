@@ -74,6 +74,7 @@ members = [
     "lp-xt/lp-xt-inst",
     "lp-xt/lp-xt-emu",
     "lp-xt/lp-xt-elf",
+    "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-builtins-emu-app",
     "lp-shader/lps-filetests-app",
@@ -141,6 +142,7 @@ default-members = [
     "lp-xt/lp-xt-inst",
     "lp-xt/lp-xt-emu",
     "lp-xt/lp-xt-elf",
+    "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-filetests-app",
 ]

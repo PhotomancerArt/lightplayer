@@ -11,6 +11,13 @@ pub enum Backend {
     Rv32,
     /// LPIR → RV32 via `lpvm-native` + linked builtins + emulator.
     Rv32fa,
+    /// LPIR → Xtensa via `lpvm-native` + linked builtins + emulator
+    /// (`lp-xt-emu` on the ESP32-S3 board profile).
+    ///
+    /// Same engine as [`Backend::Rv32fa`] — `rt_emu` takes the ISA as a runtime
+    /// parameter — so this variant only picks `IsaTarget::Xtensa` at engine
+    /// construction. See `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`.
+    Xtfa,
     /// WebAssembly via wasmtime.
     Wasm,
     /// Host-side LPIR interpreter (`lpir::interpret`), f32 semantics; no codegen.
@@ -33,6 +40,9 @@ pub enum Frontend {
 pub enum Isa {
     /// RISC-V 32-bit.
     Riscv32,
+    /// Xtensa (ESP32-S3 / LX7 and classic ESP32 / LX6 — ISA-identical for the
+    /// emitted integer subset). Filetests run the S3 board profile.
+    Xtensa,
     /// WebAssembly 32-bit.
     Wasm32,
     /// Host CPU (no guest ISA; LPIR is interpreted directly).
@@ -75,7 +85,12 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu — used for error messages and CLI.
+/// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu, xtn, xtlpn — used for error
+/// messages and CLI.
+///
+/// The Xtensa pair is **appended**, deliberately: [`DEFAULT_TARGETS`] indexes into
+/// this list, so inserting anywhere else would silently repoint the defaults.
+/// `test_default_targets_order_matches_const` is the guard.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         frontend: Frontend::Naga,
@@ -119,6 +134,20 @@ pub const ALL_TARGETS: &[Target] = &[
         isa: Isa::Host,
         exec_mode: ExecMode::Gpu,
     },
+    Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Xtfa,
+        float_mode: FloatMode::Q32,
+        isa: Isa::Xtensa,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Lp,
+        backend: Backend::Xtfa,
+        float_mode: FloatMode::Q32,
+        isa: Isa::Xtensa,
+        exec_mode: ExecMode::Emulator,
+    },
 ];
 
 /// Default targets for local `cargo test` / app runs: rv32n, rv32lpn (lps-glsl
@@ -126,6 +155,13 @@ pub const ALL_TARGETS: &[Target] = &[
 /// plus interp.f32 (the CI-runnable f32 gate — host LPIR interpretation; the
 /// whole corpus carries triaged f32 expectations via `run[q32]:`/`run[f32]:`
 /// channels and per-target annotations).
+///
+/// **`xtn.q32` / `xtlpn.q32` are deliberately NOT here.** They are in
+/// [`ALL_TARGETS`] and run on request (`-t xtn.q32`). Two reasons: they need the
+/// Xtensa builtins image, a cross-target artifact that requires the esp toolchain
+/// and is absent on a fresh clone; and defaulting them is a cost decision to make
+/// against a measured number, not by assumption. Select them explicitly until
+/// that measurement says otherwise.
 pub const DEFAULT_TARGETS: &[Target] = &[
     ALL_TARGETS[2],
     ALL_TARGETS[3],

@@ -26,7 +26,8 @@ isa-xt = ["dep:lp-xt-inst"]
 debug = []
 # Host: link with builtins ELF and run in lp-riscv-emu (pulls std).
 emu = [
-    # The emulation path is the rv32 reference target (lp-riscv-emu).
+    # The emulation path's reference target is rv32 (lp-riscv-emu); Xtensa is
+    # additive on top of it via `emu-xt`.
     "isa-rv32",
     "dep:cranelift-codegen",
     "dep:lpvm-cranelift",
@@ -38,6 +39,19 @@ emu = [
     "lpvm-cranelift/std",
     "lpvm-emu/std",
     "lp-riscv-emu/std",
+]
+# Host: additionally run Xtensa code in lp-xt-emu, linked against the Xtensa
+# builtins image. Additive on `emu` — `isa-xt` alone still compiles just the
+# backend, so the firmware ISA gate (which recovered 26,432 B of C6 flash) is
+# unaffected. The builtins image is a cross-target artifact; when it has not been
+# built the engine returns a clear error and consumers skip (see
+# `lps-builtins-xt-image`).
+emu-xt = [
+    "emu",
+    "isa-xt",
+    "dep:lp-xt-emu",
+    "dep:lp-xt-elf",
+    "dep:lps-builtins-xt-image",
 ]
 
 [dependencies]
@@ -63,18 +77,27 @@ lpvm-emu = { path = "../lpvm-emu", optional = true, default-features = false, fe
 lp-emu-core = { path = "../../lp-emu/lp-emu-core", optional = true, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, features = ["std"] }
 lp-xt-inst = { path = "../../lp-xt/lp-xt-inst", optional = true }
+# Host Xtensa execution (feature `emu-xt`): the emulator, the ELF loader for the
+# builtins base image, and the build-time-embedded image itself.
+lp-xt-emu = { path = "../../lp-xt/lp-xt-emu", optional = true }
+lp-xt-elf = { path = "../../lp-xt/lp-xt-elf", optional = true }
+lps-builtins-xt-image = { path = "../../lp-xt/lps-builtins-xt-image", optional = true }
 
 [dev-dependencies]
 rstest = "0.25"
 # Real synth render wrappers for the rt_emu per-invocation fuel tests.
 lp-shader = { path = "../lp-shader" }
-# Emulator oracle for the isa/xt emitter tests (windowed execution).
-lp-xt-emu = { path = "../../lp-xt/lp-xt-emu" }
-# Loader + host-side oracle for the Xtensa builtins-image test: the ELF is
-# cross-compiled from the SAME lps-builtins source this links natively, so the
-# host build is the reference answer.
-lp-xt-elf = { path = "../../lp-xt/lp-xt-elf" }
+# Host-side oracle for the Xtensa builtins-image test: the ELF is cross-compiled
+# from the SAME lps-builtins source this links natively, so the host build is the
+# reference answer.
 lps-builtins = { path = "../lps-builtins", default-features = false }
+# Also listed above as OPTIONAL regular dependencies (feature `emu-xt`). They stay
+# here unconditionally because the isa/xt emitter tests and the Xtensa fixture
+# tests use the emulator and loader as their oracle at *default* features, where
+# `emu-xt` is off — `emu-xt` is about the host execution *engine*, not about
+# whether tests may run guest code.
+lp-xt-emu = { path = "../../lp-xt/lp-xt-emu" }
+lp-xt-elf = { path = "../../lp-xt/lp-xt-elf" }
 
 [target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]
 lps-builtins = { path = "../lps-builtins", default-features = false }

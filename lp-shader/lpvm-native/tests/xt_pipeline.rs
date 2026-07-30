@@ -424,3 +424,113 @@ fn cross_function_call_via_literal_slot_callx8() {
     let out = expect_ok(compile_link_run(&module, &sig, "f", &[0, 14], false));
     assert_eq!(out as i32, 14 * 3 + 1);
 }
+
+/// Multi-argument guest→guest calls, one arity per case.
+///
+/// Regression for two allocator defects the Xtensa filetest corpus surfaced
+/// (2026-07-30). Both were in *shared* allocator code that rv32's register
+/// layout happens to make safe, and Xtensa's does not:
+///
+/// 1. **Call-argument staging was not a parallel move.** Moves were emitted in
+///    argument order, so an argument whose source register was another
+///    argument's destination got clobbered and the callee received a duplicate.
+///    Xtensa's staging bank `a10..a15` *is* the caller-saved half of its
+///    allocatable pool, so sources land there constantly; rv32's argument
+///    registers (10..17) and pool (18..31) are disjoint.
+/// 2. **Entry parameter moves had the same hazard**, callee-side, plus an
+///    ordering dependency with the incoming-stack-arg loads.
+///
+/// Before the fix this broke at **three** user arguments — well inside the six
+/// argument registers, so it was never about stack arguments. M3's
+/// `cross_function_call_via_literal_slot_callx8` passed throughout because it
+/// uses exactly one.
+///
+/// The arguments are distinct powers of two and the callee sums them, so any
+/// dropped, duplicated or misplaced argument changes the total.
+///
+/// **Known gap:** 12 user arguments still fails (register pressure forces
+/// spilling around the call). Tracked in
+/// `docs/defects/2026-07-30-xtensa-call-argument-clobber.md`; the corpus files
+/// `lpvm/native/perf/stack-args-outgoing.glsl`,
+/// `lpvm/native/spill_pressure_call.glsl` and `function/param-many.glsl` are
+/// its corpus-level face.
+#[rstest::rstest]
+#[case(1)]
+#[case(2)]
+#[case(3)]
+#[case(4)]
+#[case(5)]
+#[case(6)]
+#[case(7)]
+#[case(8)]
+#[case(9)]
+#[case(10)]
+#[case(11)]
+fn multi_arg_call_passes_every_argument(#[case] n: usize) {
+    let mut cb = FunctionBuilder::new("g", &[IrType::I32]);
+    let ps: Vec<_> = (0..n).map(|_| cb.add_param(IrType::I32)).collect();
+    let acc = cb.alloc_vreg(IrType::I32);
+    cb.push(LpirOp::IaddImm {
+        dst: acc,
+        src: ps[0],
+        imm: 0,
+    });
+    for p in &ps[1..] {
+        cb.push(LpirOp::Iadd {
+            dst: acc,
+            lhs: acc,
+            rhs: *p,
+        });
+    }
+    cb.push_return(&[acc]);
+    let g = cb.finish();
+
+    let mut fb = FunctionBuilder::new("f", &[IrType::I32]);
+    let mut call_args = vec![lpir::VMCTX_VREG];
+    for i in 0..n {
+        let v = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: v,
+            value: 1 << i,
+        });
+        call_args.push(v);
+    }
+    let out = fb.alloc_vreg(IrType::I32);
+    fb.push_call(lpir::CalleeRef::Local(FuncId(0)), &call_args, &[out]);
+    fb.push_return(&[out]);
+    let f = fb.finish();
+
+    let module = LpirModule {
+        imports: vec![],
+        functions: VecMap::from([(FuncId(0), g), (FuncId(1), f)]),
+    };
+    let sig_of = |name: &str, np: usize| LpsFnSig {
+        name: name.to_string(),
+        parameters: (0..np)
+            .map(|i| FnParam {
+                name: alloc_name(i),
+                ty: LpsType::Int,
+                qualifier: ParamQualifier::In,
+            })
+            .collect(),
+        return_type: LpsType::Int,
+        kind: LpsFnKind::UserDefined,
+    };
+    let sig = LpsModuleSig {
+        functions: vec![sig_of("g", n), sig_of("f", 0)],
+        uniforms_type: None,
+        globals_type: None,
+        ..Default::default()
+    };
+
+    let expect: u32 = (0..n).map(|i| 1u32 << i).sum();
+    let got = expect_ok(compile_link_run(&module, &sig, "f", &[0], false));
+    assert_eq!(
+        got, expect,
+        "{n}-argument call: an argument was dropped, duplicated or misplaced"
+    );
+}
+
+fn alloc_name(i: usize) -> String {
+    format!("p{i}")
+}
