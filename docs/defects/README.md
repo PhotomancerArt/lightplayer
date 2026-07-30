@@ -96,6 +96,12 @@ genuinely fits none of these, and define it here in one line.
 - **`config-masked-defect`** — shared code is correct only under
   incidental properties of the *one* configuration that exercises it, so
   no test can falsify it until a second configuration arrives.
+- **`split-source-of-truth`** — one fact is derived two ways from two
+  sources, both derivations are used, and nothing checks they agree.
+  Each producer can have a passing test asserting its own opinion; what
+  is untested is the *hand-off*. Note this classes the **defect**,
+  whereas `config-masked-defect` classes the **masking** — the two are
+  orthogonal axes and a given entry may sit on both (see the note below).
 - **`unsynchronized-shared-artifact`** — two steps share a filesystem
   artifact, but the lock that would order them is scoped narrower than
   the artifact, so a reader observes a writer's intermediate state.
@@ -108,10 +114,38 @@ a week is an argument for a conformance suite. When a class accumulates
 entries, say so out loud — that is an architecture finding, not a
 bookkeeping fact.
 
+Saying it out loud: **`config-masked-defect` took three entries on
+2026-07-30**, all in `lpvm-native`'s shared register allocator, all
+latent for the entire life of the rv32-only era, and all made
+observable within hours of the Xtensa corpus landing. The finding is not
+"the allocator had bugs" — it is that a single-configuration test suite
+cannot falsify configuration-dependent code, however large it is
+(31,587 rv32 cases did not). The mitigation is a second configuration
+that overlaps where the first is disjoint, which is what the Xtensa
+targets now are.
+
+Saying it out loud again, one axis over: **`split-source-of-truth` and
+`config-masked-defect` are describing the same 2026-07-30 defects from two
+directions.** `xtensa-sret-pointer-clobber` (`FuncAbi::allocatable` computed
+the withheld register, `RegPool` ignored it) and `jit-sret-return-count-zero`
+(`ret_count` from the IR, `is_sret` from the ABI) are the *same bug twice* —
+one fact, two derivations, no check on the hand-off. In both, the producer had
+a passing unit test asserting its own opinion; neither had a test on the
+consumer honouring it.
+
+They are filed under different classes because the existing entries are classed
+by *how they survived* (register-layout accident vs a `cfg` boundary no host
+test can cross) rather than by *what went wrong*. That is a real distinction
+worth keeping — but it splits a recurrence across buckets, which defeats the
+point of grouping. If a fourth of these lands, collapse the axes: class by the
+disagreement, record the masking mechanism as a field.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
-| config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed (1 known gap) | lpvm-native/regalloc (walk.rs) |
+| split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
