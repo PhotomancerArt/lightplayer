@@ -3,6 +3,20 @@ name: CI
 on:
   pull_request:
     branches: ["main", "feature/*"]
+    # `edited` is on top of the defaults (opened, synchronize, reopened) for one
+    # reason: **retargeting**. A stacked PR based on a `claude/*` branch matches
+    # no filter above, so it gets NO CI AT ALL — not pending, not red, simply no
+    # runs. When its base merges and it is retargeted to main, that is a base
+    # edit, and without `edited` here nothing re-triggers: the PR sits there
+    # looking clean, having never been validated once. That happened on #195 and
+    # was caught by a human reading the checks list, which is not a control.
+    #
+    # Cost, accepted deliberately: `edited` also fires on title and body edits,
+    # so editing a PR description re-runs the suite. Wasteful, never wrong —
+    # and wrongness is the failure mode being fixed. If that cost ever bites,
+    # tighten by gating on `github.event.changes.base` rather than by dropping
+    # this, and check what skipped jobs do to required checks before you do.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: ["main"]
 
