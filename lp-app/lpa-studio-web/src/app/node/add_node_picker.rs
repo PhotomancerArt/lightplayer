@@ -6,11 +6,15 @@
 //! serves every add surface: the node tree's "Add node…" row, the
 //! workspace's add button ([`WorkspaceAddNodeButton`]) — both attach at the
 //! project root — and the playlist strip's add chip (attach = that
-//! playlist). Deliberately one flat popover, no submenu: the future source
-//! dimension (blank/copy/import/examples) grows inside this panel.
+//! playlist). Deliberately one flat popover, no submenu: the source
+//! dimension (blank/copy/import/examples) grows inside this panel — the
+//! "Paste node" row below is its first inhabitant.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiAddNodeMenu, UiAddNodeMenuEntry};
+use lpa_studio_core::{
+    NODE_KIND, NodePasteOp, ProjectController, UiAction, UiAddNodeMenu, UiAddNodeMenuEntry,
+    UiAttachTarget, peek_header,
+};
 
 use crate::base::{
     DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
@@ -59,8 +63,67 @@ pub fn AddNodePicker(
                     }
                 }
             }
+            // The second source: a node someone copied, here or elsewhere.
+            // The clipboard read is async and permission-gated, so this
+            // cannot be a controller-built action like the kind rows —
+            // the edge reads, then dispatches.
+            DetailSection { title: "From clipboard",
+                div { class: "tw:grid tw:gap-0.5",
+                    PasteNodeMenuRow { attach: menu.attach.clone(), on_action }
+                }
+            }
         }
     }
+}
+
+/// "Paste node": read the clipboard, and dispatch a paste if it holds an
+/// `lp.node` envelope. A clipboard holding something else (or a denied
+/// read) logs and does nothing — the row cannot know in advance, because
+/// checking would itself need the permission-gated read.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PasteNodeMenuRow(attach: UiAttachTarget, on_action: EventHandler<UiAction>) -> Element {
+    let close = try_consume_context::<PopoverCloseHandle>();
+    rsx! {
+        button {
+            class: menu_item_action_class(),
+            r#type: "button",
+            title: "Create a node from a copied node on the clipboard.",
+            onclick: move |event| {
+                event.stop_propagation();
+                paste_node_from_clipboard(attach.clone(), on_action);
+                if let Some(mut close) = close {
+                    close.close();
+                }
+            },
+            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                StudioIcon { name: StudioIconName::Copy, size: 14 }
+            }
+            span { "Paste node" }
+        }
+    }
+}
+
+/// Read the clipboard and dispatch the paste. Kept beside the row so the
+/// classification rule — only `lp.node` envelopes paste here — is next to
+/// the affordance that relies on it.
+fn paste_node_from_clipboard(attach: UiAttachTarget, on_action: EventHandler<UiAction>) {
+    crate::clipboard::read_text(move |text| match peek_header(&text) {
+        Ok(header) if header.kind == NODE_KIND => {
+            on_action.call(UiAction::from_op(
+                ProjectController::NODE_ID,
+                NodePasteOp {
+                    envelope: text,
+                    attach,
+                },
+            ));
+        }
+        Ok(header) => log::warn!(
+            "paste node: the clipboard holds a {} envelope, not a node",
+            header.kind
+        ),
+        Err(error) => log::warn!("paste node: {error}"),
+    });
 }
 
 /// The workspace variant: a dashed card-family "Add node" button at the end
