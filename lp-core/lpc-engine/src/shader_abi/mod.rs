@@ -9,6 +9,10 @@
 pub mod compute_desc;
 pub mod convert_type;
 pub mod convert_value;
+// The visual-shader uniform block: built only by `nodes::shader::shader_node`
+// (`ShaderNode`, not `ComputeShaderNode` — compute uses `compute_desc`
+// instead), so it follows `node-shader`.
+#[cfg(feature = "node-shader")]
 pub(crate) mod uniforms;
 
 pub use compute_desc::{ComputeDescError, compute_desc_from_model_def};

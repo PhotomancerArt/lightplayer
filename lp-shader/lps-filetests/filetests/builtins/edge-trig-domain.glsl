@@ -17,6 +17,7 @@ float test_asin_domain_over() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -29,6 +30,7 @@ float test_asin_domain_under() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
@@ -42,7 +44,9 @@ float test_acos_domain_over() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -55,7 +59,9 @@ float test_acos_domain_under() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -68,6 +74,7 @@ float test_atan2_zero_zero() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
@@ -81,6 +88,7 @@ float test_acosh_domain_under() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
@@ -94,6 +102,7 @@ float test_atanh_domain_over() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
@@ -107,6 +116,7 @@ float test_atanh_domain_under() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
@@ -120,6 +130,7 @@ float test_atanh_domain_one() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
@@ -134,6 +145,7 @@ float test_atanh_domain_neg_one() {
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(rv32lpn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)

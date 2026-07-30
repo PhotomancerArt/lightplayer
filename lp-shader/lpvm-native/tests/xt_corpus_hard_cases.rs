@@ -174,3 +174,59 @@ fn deep_call_chain_really_overflows_a_register_window() {
         counter.spills, counter.reloads
     );
 }
+
+/// Pins the trap that made the `rt_jit` sret bug possible.
+///
+/// For an sret function the two obvious sources of "how many words does this
+/// return" **disagree**, and only one of them is right:
+///
+/// - `ir_func.return_types.len()` is **0**, because `FunctionBuilder::finish`
+///   asserts sret functions have empty `return_types` — the results leave
+///   through the caller's pointer, not in registers.
+/// - `FuncAbi::sret_word_count()` is the real count, taken from the
+///   signature's return type, and is what the emitter builds the prologue
+///   from.
+///
+/// `rt_jit`'s cached `NativeJitEntryInfo::ret_count` used the first. That made
+/// `invoke_flat` size its sret buffer at `0.max(1)` = one word while the callee
+/// wrote four, and made `call_direct` reject a correctly-sized output buffer
+/// while accepting an empty one. `rt_emu` never had the bug — it sizes from the
+/// return type (`run_emulator_call`'s `struct_size`).
+///
+/// This test exists so the next person who "simplifies" `ret_count` back to
+/// `return_types.len()` gets a failure that explains itself.
+#[test]
+fn sret_return_word_count_does_not_come_from_return_types() {
+    use lpvm_native::isa::xt::abi::func_abi_xt;
+
+    let c = case("sret_vec4_return");
+    let (ir, sig) = (c.build)();
+    let ir_func = ir.functions.values().next().expect("one function");
+    let gfn = sig.functions.first().expect("one signature");
+
+    assert!(
+        ir_func.sret_arg.is_some(),
+        "the corpus case is not actually an sret function"
+    );
+    assert_eq!(
+        ir_func.return_types.len(),
+        0,
+        "sret functions must have empty return_types (FunctionBuilder asserts this)"
+    );
+
+    let abi = func_abi_xt(gfn, Some(ir_func));
+    assert!(abi.is_sret(), "vec4 return should classify as sret");
+    assert_eq!(
+        abi.sret_word_count(),
+        Some(4),
+        "vec4 is four words; this is the number `ret_count` must carry"
+    );
+
+    // The invariant in one line: the ABI knows, the IR function does not.
+    assert_ne!(
+        abi.sret_word_count().map(|w| w as usize),
+        Some(ir_func.return_types.len()),
+        "if these ever agree for an sret function, this test is no longer \
+         guarding anything — re-derive the invariant before deleting it"
+    );
+}
