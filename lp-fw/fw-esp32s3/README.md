@@ -18,7 +18,8 @@ backport roadmap that created this crate is closed.
 
 Verified on hardware 2026-07-30 (ESP32-S3 rev v0.2, 16 MB flash): flashes and
 boots to `[INIT] ready`, and runs the Xtensa JIT corpus (below) with 11/11
-cases matching their goldens.
+cases matching their goldens. The desk board is a 16 MB part, but the
+firmware only requires **8 MB** — see [Partitions](#partitions).
 
 ## Hardware harnesses
 
@@ -93,16 +94,63 @@ always tries to sync with the bootloader — so use the flash path above.
 
 ### Partitions
 
-`partitions.csv` **mirrors the C6's table exactly**: 3 MB `factory` + 960 KB
-`lpfs`, totalling precisely 4 MB. That is deliberate — the 4 MB floor is the
-target, not the desk board's 16 MB, and matching the C6 means the storage
-layer's offsets port across unchanged.
+`partitions.csv` targets an **8 MB floor**: 6 MB `factory` + 1.5 MB `lpfs`,
+ending at 0x790000 with 448 KB of slack. It no longer mirrors the C6's table
+(3 MB + 960 KB = exactly 4 MB), which stays as it is because the C6's own
+budget is genuinely tight.
 
-Passing it is not optional. espflash **silently** substitutes a default table
-whose factory partition is only 1 MB if `--partition-table` is omitted; the
-boot skeleton fits that, so the mistake stays invisible until the firmware
-grows past it. Both the `.cargo/config.toml` runner and the justfile recipe
-pass it.
+**This encodes a board assumption: ≥8 MB of flash.** An N4 (4 MB) module
+cannot flash this image, and that is deliberate. The reasoning, with sourcing
+data, is in `docs/adr/2026-07-30-esp32s3-partition-floor.md`; the short
+version is that N8R8 and N16R8 are the two most-sourced ESP32-S3 WROOM-1
+variants, so 8 MB covers the realistic hardware while 16 MB would strand N8
+boards and inherit the longest lead times. 4 MB was ruled out on measurement:
+the C6's RISC-V image already sits at ~2.86 MB of a 3 MB partition, and Xtensa
+has no compressed instructions.
+
+A consequence worth stating: the S3's app image size is a **trend, not a
+budget gate**. `just fw-esp32s3-size-check` exists so Xtensa code density
+stays a tracked number — useful for the C6 and the classic ESP32, which *are*
+constrained — not so anyone has to fight for space here.
+
+Two espflash flags are mandatory, and forgetting either produces a confusing
+failure rather than an obvious one.
+
+**`--partition-table`.** espflash **silently** substitutes a default table
+whose factory partition is only 1 MB if it is omitted; the boot skeleton fits
+that, so the mistake stays invisible until the firmware grows past it. This
+matters more now, not less: our table has diverged further from any default, so
+a silent substitution fails later and more confusingly.
+
+**`--flash-size 8mb`.** espflash writes a flash-size field into the image
+header and **defaults it to 4 MB**, and the bootloader validates the partition
+table against *that header*, not against the physical chip. Omit it and even
+this 16 MB desk board boot-loops:
+
+```
+I (45) boot.esp32s3: SPI Flash Size : 4MB
+E (56) flash_parts: partition 2 invalid - offset 0x10000 size 0x600000
+       exceeds flash chip size 0x400000
+E (66) boot: Failed to verify partition table
+```
+
+`espflash board-info` reports the *real* chip size and is the quickest way to
+tell a header problem from a genuinely small board.
+
+Both the `.cargo/config.toml` runner and the justfile recipes pass both flags.
+The justfile carries the size once as `s3_flash_size`; the cargo runner
+duplicates it because it cannot read a justfile variable. Those two and
+`partitions.csv` must move together.
+
+A correct boot prints:
+
+```
+I (46) boot.esp32s3: SPI Flash Size : 8MB
+I (82) boot:  2 factory          factory app      00 00 00010000 00600000
+I (89) boot:  3 lpfs             Unknown data     01 82 00610000 00180000
+I (153) boot: Loaded app from partition at offset 0x10000
+[INIT] fw-esp32s3 boot
+```
 
 ## How this differs from fw-esp32c6
 
