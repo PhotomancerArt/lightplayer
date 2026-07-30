@@ -1,0 +1,129 @@
+# fw-esp32s3
+
+LightPlayer firmware for the **ESP32-S3** (Xtensa LX7). Sibling of
+`fw-esp32c6` (RISC-V).
+
+> **Not yet a consumer of `fw-esp32-common`.** An earlier version of this file
+> called the crate its "third consumer"; that was wrong at the dependency
+> level and is corrected here. What was actually proven during M5 is weaker
+> but still useful: `fw-esp32-common` *compiles* for `xtensa-esp32s3-none-elf`
+> pulling no `esp-hal`, so the chip-agnostic seam holds against a second
+> architecture. Wiring it in is the app-layer milestone's job.
+
+Currently a **boot skeleton plus hardware harnesses**: clocks, heap, and serial
+logging far enough to print the `[INIT]` marker family, and a JIT corpus runner
+(below). The server, storage, and output stacks are the app-layer milestone of
+`~/.photomancer/planning/lp2025/2026-07-30-s3-app-layer-with-jit/`; the Xtensa
+backport roadmap that created this crate is closed.
+
+Verified on hardware 2026-07-30 (ESP32-S3 rev v0.2, 16 MB flash): flashes and
+boots to `[INIT] ready`, and runs the Xtensa JIT corpus (below) with 11/11
+cases matching their goldens.
+
+## Hardware harnesses
+
+Any `test_*` feature makes `build.rs` set the `fw_harness` cfg, which replaces
+the boot path's park loop with a harness runner — the same mechanism
+`fw-esp32c6` uses, deliberately not a second one.
+
+### `test_xt_jit_corpus`
+
+```bash
+just fwtest-xt-jit-esp32s3 /dev/cu.usbmodem1101
+```
+
+Compiles shaders on-device through `lpvm-native`'s JIT (`isa/xt`) and prints
+`PASS`/`FAIL` per named case. It was the first execution of LightPlayer-compiled
+code on Xtensa silicon, and it is what proved the **exec-alias fix**:
+intra-module call targets must hold the I-bus alias, not the D-bus address the
+linker wrote through.
+
+The corpus lives in `lpvm-native::xt_corpus` rather than here, and that
+placement is load-bearing: the host golden test
+(`lpvm-native/tests/xt_corpus_goldens.rs`) runs the **same** modules on
+`lp-xt-emu` and on rv32, so a device mismatch is a real emulator-vs-silicon
+difference rather than two harnesses disagreeing.
+
+**Goldens are committed constants confirmed before any hardware run. A device
+mismatch is a finding to triage — never a reason to edit a golden**, which
+would turn the comparison into a tautology that passes forever.
+
+Run the host oracle first:
+
+```bash
+cargo test -p lpvm-native --features xt-corpus,emu-xt
+```
+
+## Building
+
+```bash
+just build-fw-esp32s3
+```
+
+Xtensa has no upstream Rust target, so this crate carries its own
+`rust-toolchain.toml` with `channel = "esp"` — Espressif's fork, installed by
+`espup`. That per-crate quarantine is required by
+`docs/adr/2026-07-29-per-chip-fw-toolchains.md`: the rv32 crates stay on the
+shared pinned nightly and are unaffected.
+
+**Needs esp Rust >= 1.90** (the workspace MSRV). On 1.88 `lpc-model` genuinely
+fails to compile — 70 × E0716 from the `Slotted` derive's const-promotion of a
+temporary — so an MSRV error here means `espup update`, not a code problem.
+The recipe also puts the toolchain's bundled GNU binutils on `PATH`, because
+the Rust target spec links through `xtensa-esp32s3-elf-gcc`.
+
+## Flashing
+
+```bash
+just flash-fw-esp32s3 /dev/cu.usbmodem1101
+```
+
+The port argument is optional but usually wanted: several boards are typically
+on the desk bus and auto-detection picks the first match, not necessarily the
+S3. The S3 speaks **USB-Serial-JTAG**, not a UART bridge, so it enumerates as
+`/dev/cu.usbmodem*` and **its port number changes** each time the chip
+re-enumerates after a reset.
+
+Before concluding a board is dead: a stray `espflash` holding this port wedges
+it *uninterruptibly* (`ps` STAT `Us+`; `kill -9` does not land, because the
+process is blocked reading a device node that went away when the chip
+re-enumerated). Only a physical replug clears it. Check `pgrep -fl espflash`
+first. Bare `espflash monitor` cannot attach to a running app at all — it
+always tries to sync with the bootloader — so use the flash path above.
+
+### Partitions
+
+`partitions.csv` **mirrors the C6's table exactly**: 3 MB `factory` + 960 KB
+`lpfs`, totalling precisely 4 MB. That is deliberate — the 4 MB floor is the
+target, not the desk board's 16 MB, and matching the C6 means the storage
+layer's offsets port across unchanged.
+
+Passing it is not optional. espflash **silently** substitutes a default table
+whose factory partition is only 1 MB if `--partition-table` is omitted; the
+boot skeleton fits that, so the mistake stays invisible until the firmware
+grows past it. Both the `.cargo/config.toml` runner and the justfile recipe
+pass it.
+
+## How this differs from fw-esp32c6
+
+Per the per-chip-toolchains ADR, the recovery strategy is **per chip** and does
+not migrate into `fw-esp32-common`:
+
+| | fw-esp32c6 | fw-esp32s3 |
+|---|---|---|
+| Toolchain | shared pinned nightly | `channel = "esp"` |
+| Panic strategy | `panic=unwind` + `unwinding` | **`panic=abort`** (abort tier) |
+| Unwind tables | `.eh_frame` retained via a build.rs patch | none — nothing to retain |
+| Recovery | `catch_unwind` around node render | RTC ledger + reset |
+| Linker | rust-lld, `-Tlinkall.x` | GNU ld, `-Wl,-Tlinkall.x` |
+
+That is why this crate's `build.rs` is nearly empty: the C6's exists mostly to
+patch esp-hal's `eh_frame.x`, which is meaningless without unwinding.
+
+## Workspace notes
+
+A workspace **member** (so it shares workspace dependencies and the lockfile)
+but not in `default-members`, and excluded from `clippy-host` — exactly like
+`fw-esp32c6`. Both are cross-target-only, and including this one in host
+clippy triggers a real `critical-section` feature-unification conflict
+(multiple `restore-state-*` features) rather than a mere build failure.

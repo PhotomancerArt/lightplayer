@@ -27,6 +27,7 @@ members = [
     "lp-fw/fw-checks",
     "lp-cli",
     "lp-fw/fw-esp32c6",
+    "lp-fw/fw-esp32s3",
     "lp-fw/fw-emu",
     "lp-fw/fw-tests",
     "lp-core/lpc-mapping",
@@ -70,6 +71,10 @@ members = [
     "lp-riscv/lp-riscv-elf",
     "lp-riscv/lp-riscv-emu-guest",
     "lp-riscv/lp-riscv-emu-guest-test-app",
+    "lp-xt/lp-xt-inst",
+    "lp-xt/lp-xt-emu",
+    "lp-xt/lp-xt-elf",
+    "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-builtins-emu-app",
     "lp-shader/lps-filetests-app",
@@ -77,6 +82,9 @@ members = [
     "spikes/naga-wasm-poc",
     "lp-shader/lps-q32",
 ]
+# Xtensa DEVICE-target crates (esp toolchain): lp-xt/fixtures is its own
+# workspace; lp-xt-emu-guest is its out-of-tree member (see lp-xt/README.md).
+exclude = ["lp-xt/fixtures", "lp-xt/lp-xt-emu-guest"]
 resolver = "2"
 
 # Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)
@@ -131,6 +139,10 @@ default-members = [
     "lp-riscv/lp-riscv-inst",
     "lp-riscv/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
+    "lp-xt/lp-xt-inst",
+    "lp-xt/lp-xt-emu",
+    "lp-xt/lp-xt-elf",
+    "lp-xt/lps-builtins-xt-image",
     "lp-shader/lps-builtins-gen-app",
     "lp-shader/lps-filetests-app",
 ]
@@ -226,6 +238,12 @@ opt-level = 3
 [profile.dev.package.lp-emu-abi]
 opt-level = 3
 [profile.dev.package.lp-riscv-inst]
+opt-level = 3
+[profile.dev.package.lp-xt-inst]
+opt-level = 3
+[profile.dev.package.lp-xt-emu]
+opt-level = 3
+[profile.dev.package.lp-xt-elf]
 opt-level = 3
 [profile.dev.package.lpvm]
 opt-level = 3

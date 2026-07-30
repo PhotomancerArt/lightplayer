@@ -65,7 +65,7 @@ use lps_builtin_ids::{
 use crate::LowerOpts;
 use crate::abi::ModuleAbi;
 use crate::error::LowerError;
-use crate::imm::fits_imm12;
+use crate::isa::IsaTarget;
 use crate::region::{REGION_ID_NONE, RegionId, RegionTree};
 use crate::vinst::{
     AluImmOp, AluOp, IcmpCond, LabelId, ModuleSymbols, SRC_OP_NONE, TempVRegs, VInst, VReg,
@@ -100,8 +100,8 @@ fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice
 }
 
 /// Emit `dst = src OP imm` for an op that has both an `addi`-class immediate
-/// form and an R-form. If `imm` fits a signed 12-bit immediate (the only
-/// thing the RV32 `OP-IMM` encoding can hold) emit the I-form; otherwise
+/// form and an R-form. If `imm` is a legal immediate for `imm_op` on the
+/// target ISA ([`IsaTarget::alu_imm_fits`]) emit the I-form; otherwise
 /// materialize `imm` into a fresh temp via [`VInst::IConst32`] and emit the
 /// R-form. This is the fix for the silent low-12-bit truncation that used
 /// to happen when LPIR emitted `IaddImm { imm: 65536 }` (the texture
@@ -109,6 +109,7 @@ fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice
 fn lower_alu_imm12(
     out: &mut Vec<VInst>,
     temps: &mut TempVRegs,
+    isa: IsaTarget,
     dst: VReg,
     src: VReg,
     imm: i32,
@@ -116,7 +117,7 @@ fn lower_alu_imm12(
     rrr_op: AluOp,
     src_op: u16,
 ) {
-    if fits_imm12(imm) {
+    if isa.alu_imm_fits(imm_op, imm) {
         out.push(VInst::AluRRI {
             op: imm_op,
             dst,
@@ -479,6 +480,7 @@ pub fn lower_lpir_op(
             lower_alu_imm12(
                 out,
                 temps,
+                abi.isa(),
                 fa_vreg(*dst),
                 fa_vreg(*src),
                 *imm,
@@ -489,12 +491,15 @@ pub fn lower_lpir_op(
             Ok(())
         }
         LpirOp::IsubImm { dst, src, imm } => {
-            // Try to fold into `addi rd, rs, -imm` (matches the wider RV32
-            // immediate range; e.g. `imm == 2048` does not fit imm12 but
-            // `-imm == -2048` does). Fall back to materializing `imm` and
-            // emitting an R-form `sub` when neither form fits, including the
-            // `imm == i32::MIN` case where `-imm` overflows.
-            let neg = imm.checked_neg().filter(|n| fits_imm12(*n));
+            // Try to fold into `addi rd, rs, -imm` (the negation can land in
+            // range when the original does not; e.g. on RV32 `imm == 2048`
+            // does not fit imm12 but `-imm == -2048` does). Fall back to
+            // materializing `imm` and emitting an R-form `sub` when neither
+            // form fits, including the `imm == i32::MIN` case where `-imm`
+            // overflows.
+            let neg = imm
+                .checked_neg()
+                .filter(|n| abi.isa().alu_imm_fits(AluImmOp::Addi, *n));
             if let Some(neg) = neg {
                 out.push(VInst::AluRRI {
                     op: AluImmOp::Addi,

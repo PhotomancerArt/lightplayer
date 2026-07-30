@@ -51,7 +51,7 @@ LPIR (LightPlayer IR)
     ▼
 ┌─────────────────┐
 │  Emission       │  VInst + allocation edits → machine code
-│  (rv32/emit.rs) │  Direct machine code emission
+│ (isa/rv32/emit) │  Direct machine code emission (via `IsaTarget`)
 └─────────────────┘
     │
     ▼
@@ -89,16 +89,126 @@ The intermediate representation between LPIR and machine code:
 
 ### Module Structure
 
-| Module                         | Purpose                                  |
-| ------------------------------ | ---------------------------------------- |
-| [`regalloc/`](src/regalloc/)   | Register allocator                       |
-| [`rv32/`](src/rv32/)           | RISC-V instruction encoding and emission |
-| [`abi/`](src/abi/)             | Calling convention and frame layout      |
-| [`lower.rs`](src/lower.rs)     | LPIR → VInst lowering                    |
-| [`emit.rs`](src/emit.rs)       | Emission orchestration                   |
-| [`compile.rs`](src/compile.rs) | Module-level compilation                 |
-| [`rt_jit/`](src/rt_jit/)       | JIT runtime for RISC-V targets           |
-| [`rt_emu/`](src/rt_emu/)       | Emulation runtime for host testing       |
+| Module                              | Purpose                                  |
+| ----------------------------------- | ---------------------------------------- |
+| [`regalloc/`](src/regalloc/)        | Register allocator                       |
+| [`isa/`](src/isa/)                  | Per-ISA backends behind `IsaTarget`      |
+| [`isa/rv32/`](src/isa/rv32/)        | RISC-V instruction encoding and emission |
+| [`abi/`](src/abi/)                  | Calling convention and frame layout      |
+| [`lower.rs`](src/lower.rs)          | LPIR → VInst lowering                    |
+| [`emit.rs`](src/emit.rs)            | Emission orchestration                   |
+| [`compile.rs`](src/compile.rs)      | Module-level compilation                 |
+| [`rt_jit/`](src/rt_jit/)            | JIT runtime for RISC-V targets           |
+| [`rt_emu/`](src/rt_emu/)            | Emulation runtime for host testing (both ISAs) |
+
+### Multi-ISA seam
+
+Two ISAs today: RV32 (ESP32-C6) and Xtensa (`isa/xt/`, ESP32-S3 / LX7 and
+classic ESP32 / LX6 — ISA-identical for the emitted integer subset), ported
+from the ESP32-S3 experiment repo per its `BACKPORT.md`. Two mechanisms carry
+the split:
+
+**1. `IsaTarget` is the single dispatch point.** Nothing outside `isa/` names an
+ISA-specific module. Each backend-varying decision is a method on `IsaTarget`
+whose body is a `match` with one arm per ISA, so adding a backend is adding
+arms, not rerouting call sites. The methods added for the seam:
+
+| Method                      | What varies                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `frame_top_reserved_bytes`  | Bytes the ABI reserves at the frame **top** (0 on RV32; Xtensa's window-overflow handlers write `16 * u`) |
+| `alu_imm_fits(op, val)`     | Per-opcode immediate legality (uniform imm12 on RV32; per-op tables and `NoImmForm` on Xtensa)            |
+| `call_reloc_type`           | Direct-call relocation type (`R_RISCV_CALL_PLT` on RV32)                                                  |
+| `emit_function`             | The backend emitter itself                                                                                |
+| `format_instruction`        | One-word disassembly text                                                                                 |
+| `disassemble_function`      | Annotated listing, including line-table construction                                                      |
+| `native()`                  | The ISA of the CPU this crate is compiled *for* (JIT hosts only)                                           |
+
+`frame_top_reserved_bytes` is the one that changes frame arithmetic rather than
+just selecting a table — BACKPORT.md calls it the single structural change the
+compiler core needs, because getting it wrong corrupts ancestor frames silently.
+It is pinned on the RV32 side by `abi::frame::tests::rv32_reserves_nothing_at_frame_top`.
+
+**2. Two `cfg` spellings with different meanings.** See the crate docs in
+`src/lib.rs`. `any(target_arch = "riscv32")` marks a **capability** gate ("this
+target can JIT and run its own code") and gains `, target_arch = "xtensa"` at
+backport time — a mechanical insertion found by:
+
+```bash
+rg 'any\(target_arch = "riscv32"\)'
+```
+
+A bare `target_arch = "riscv32"` means the code is RV32-**specific** (inline
+assembly in `rt_jit::call`, `IsaTarget::native`'s answer); the backport adds a
+sibling `#[cfg(target_arch = "xtensa")]` arm next to it instead. The same two
+spellings are used in `lp-gfx-lpvm::target_backend` and `lpc-shared::backtrace`.
+
+**3. Each backend is a Cargo feature, and firmware pays only for its own.**
+`isa-rv32` and `isa-xt` gate the modules, the `IsaTarget` variants, and every
+match arm. `default = ["isa-rv32", "isa-xt"]`, so host builds and tests get
+everything; firmware crates take `default-features = false` and name the one
+ISA they run on (`lp-fw/fw-esp32c6` → `isa-rv32`; `lp-gfx/lp-gfx-lpvm` has a
+per-arch dependency table for exactly this reason).
+
+This is not hypothetical tidiness. When `isa/xt` first landed ungated it cost
+**+26,448 B** on the ESP32-C6 image (2,862,032 B → 2,888,480 B of a 3 MB
+partition — 9.3% of the remaining headroom) for code the C6 can never
+execute. LTO does **not** remove it: `IsaTarget` is matched on a runtime
+value, so every arm stays reachable even though `IsaTarget::native()` is the
+only constructor firmware uses. Check with `just fw-esp32c6-size-check`.
+
+**Adding a third ISA means**: a new `isa-<name>` feature, `#[cfg]` on its
+module / variant / arms, the manifest edits below, and a firmware opt-in —
+plus a re-run of the size check to confirm nothing else grew.
+
+> **Note — the grep does not cover Cargo manifests.** Target-cfg dependency
+> tables are `cfg(...)` strings in TOML, invisible to the source sweep above.
+> The three that exist were widened by hand when Xtensa landed, and any
+> *third* ISA must update them the same way:
+>
+> - `lp-gfx/lp-gfx-lpvm/Cargo.toml` — the JIT-capable and non-JIT tables
+> - `lp-shader/lpvm-native/Cargo.toml` — the JIT-capable table
+
+**4. `rt_emu` is one engine for both ISAs, not one per ISA.**
+`NativeEmuEngine::new_for_isa(options, isa)` takes the ISA as a **runtime value**
+(`new()` stays rv32). Of `rt_emu/instance.rs`'s ~1,230 lines only
+`run_emulator_call` is ISA-specific — ~30 lines per arm to construct the
+emulator, place arguments, call, and read counters; the vmctx, uniform, global,
+snapshot, texture, fuel and Q32 plumbing is neutral, and all host-side read-back
+goes through the shared arena rather than through the emulator. The linked image
+is the neutral `rt_emu::GuestImage`; each ISA's loader converts into it.
+
+The consequence worth knowing: `LpvmEngine`/`LpvmModule`/`LpvmInstance` stay
+ISA-agnostic **types**, so consumers (`lps-filetests`, `lp-shader`) never grow
+per-ISA match arms. See
+`docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`, which also records
+why there is no `EmuCore` trait.
+
+Host Xtensa execution is the **additive `emu-xt` feature** (`emu` + `isa-xt` +
+`lp-xt-emu` + `lp-xt-elf` + `lps-builtins-xt-image`). It does not weaken the
+firmware ISA gate above: `isa-xt` alone still compiles only the backend.
+
+`emu-xt` needs the **Xtensa builtins image**, a gitignored cross-target artifact:
+
+```bash
+scripts/build-builtins-xt.sh          # needs the esp toolchain
+cargo test -p lpvm-native --features emu-xt   # or: just test-xt-host
+```
+
+Without it, `lps_builtins_xt_image::is_available()` is false and Xtensa
+consumers skip with a loud note rather than failing — the workspace must build
+and test on a machine with no esp toolchain.
+
+Xtensa shader code shares the image's 112 KiB text region with ~84 KiB of
+builtins, leaving **~28 KiB**. Overflowing it is an explicit error naming the
+budget, never a silent write past the region; the fix would be
+`lp-xt/lps-builtins-xt-app/link.ld`'s split, not the host region size.
+
+`isa/xt/` and the `lp-xt-*` crates it builds on contain material derived from
+LLVM under Apache-2.0-WITH-LLVM-exception and carry per-file provenance
+headers — see `docs/adr/2026-07-29-license-provenance-discipline.md` before
+touching them. `isa/xt/imm.rs` is such a file: its per-opcode immediate table
+is derived data, and **the encoder silently truncates**, so every immediate
+must be gated through `is_legal` before it reaches `lp_xt_inst::encode`.
 
 ### Fuel Metering
 

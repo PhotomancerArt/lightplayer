@@ -8,9 +8,7 @@ use lps_shared::LpsModuleSig;
 
 use crate::compile::compile_module;
 use crate::error::NativeError;
-use crate::isa::IsaTarget;
-use crate::isa::rv32::debug::LineTable;
-use crate::isa::rv32::debug::disasm::{DisasmOptions, disassemble_function};
+use crate::isa::{DisasmOptions, IsaTarget};
 
 /// Emit annotated assembly for every function in `ir` (concatenated).
 ///
@@ -35,8 +33,9 @@ pub fn compile_module_asm_text(
         ..Default::default()
     };
 
-    // Compile module
-    let compiled = compile_module(ir, sig, float_mode, options, IsaTarget::Rv32imac)?;
+    // Compile module. Explicit: `debug_asm` is the rv32 reference target.
+    let isa = IsaTarget::Rv32imac;
+    let compiled = compile_module(ir, sig, float_mode, options, isa)?;
 
     // Build a map from function name to LPIR function
     let mut out = String::new();
@@ -51,12 +50,13 @@ pub fn compile_module_asm_text(
                 NativeError::Internal(format!("compiled function {} not found", func.name))
             })?;
 
-        // Build line table from debug_lines
-        let table =
-            LineTable::from_debug_lines(compiled_func.debug_lines.as_deref().unwrap_or(&[]));
-
-        // Disassemble function
-        let asm = disassemble_function(&compiled_func.code, &table, func, opts);
+        // Disassemble function (the ISA owns line-table construction)
+        let asm = isa.disassemble_function(
+            &compiled_func.code,
+            compiled_func.debug_lines.as_deref().unwrap_or(&[]),
+            func,
+            opts,
+        );
         out.push_str(&asm);
         out.push('\n');
     }

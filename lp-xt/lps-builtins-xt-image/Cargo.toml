@@ -1,0 +1,19 @@
+# Host-side crate that embeds the Xtensa builtins image at build time.
+#
+# The image itself is built by the DEVICE-target crate `lps-builtins-xt-app`
+# (esp toolchain, in the `lp-xt/fixtures` workspace) via
+# `scripts/build-builtins-xt.sh`. This crate exists so the consumer
+# (`lpvm-native`'s `rt_emu`) can read the bytes without a build script of its
+# own and without ambient file IO in a sans-IO core crate.
+[package]
+name = "lps-builtins-xt-image"
+description = "Build-time embedding of the Xtensa builtins image for host emulation."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

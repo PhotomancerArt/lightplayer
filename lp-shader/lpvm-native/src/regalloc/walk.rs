@@ -466,16 +466,28 @@ impl<'a> WalkState<'a> {
             entry_precolors.push((vreg, preg.hw));
         }
 
-        let mut entry_edits: Vec<(EditPoint, Edit)> = Vec::new();
+        // Entry parameter setup, built in four dependency-ordered groups.
+        //
+        // The incoming ABI parameter registers are *read* by the first two
+        // groups and *written* by the last two. On an ISA whose allocatable
+        // pool overlaps its parameter registers — Xtensa: pool `a2..a7` +
+        // `a10..a15`, callee params `a2..a7` — a naive interleaving lets one
+        // parameter's register be overwritten before its own move reads it,
+        // and the function then computes on a duplicate. Grouping, plus
+        // `sequence_arg_moves` on the reg→reg group, is what keeps "every
+        // parameter reaches its home carrying its incoming value" true.
+        // rv32 is unaffected either way (pool 18..31 vs params 10..17 are
+        // disjoint), so this is a no-op there.
+        let mut entry_spills: Vec<(EditPoint, Edit)> = Vec::new();
+        let mut pending_entry: Vec<(Alloc, u8)> = Vec::new();
+        let mut slot_inits: Vec<(EditPoint, Edit)> = Vec::new();
+        let mut stack_arg_loads: Vec<(EditPoint, Edit)> = Vec::new();
+
         for (vreg, abi_reg) in entry_precolors {
             if let Some(final_preg) = self.pool.home(vreg) {
-                entry_edits.push((
-                    EditPoint::Before(0),
-                    Edit::Move {
-                        from: Alloc::Reg(abi_reg),
-                        to: Alloc::Reg(final_preg),
-                    },
-                ));
+                if final_preg != abi_reg {
+                    pending_entry.push((Alloc::Reg(abi_reg), final_preg));
+                }
                 TracePush::push_with(&mut self.trace, || TraceEntry {
                     vinst_idx: 0,
                     vinst_mnemonic: String::from("entry_move"),
@@ -485,8 +497,9 @@ impl<'a> WalkState<'a> {
                 // Spill slots can be assigned during the backward walk (e.g. for a later call) before
                 // any instruction stores the live value. A `Before(0)` reload would otherwise read
                 // garbage; mirror the incoming register into the slot so early reloads match the ABI.
+                // Reads the move's *destination*, so it runs after every move has landed.
                 if let Some(slot) = self.spill.has_slot(vreg) {
-                    entry_edits.push((
+                    slot_inits.push((
                         EditPoint::Before(0),
                         Edit::Move {
                             from: Alloc::Reg(final_preg),
@@ -501,7 +514,9 @@ impl<'a> WalkState<'a> {
                     });
                 }
             } else if let Some(slot) = self.spill.has_slot(vreg) {
-                entry_edits.push((
+                // Reads an incoming register and writes memory, so it must run
+                // before any move can overwrite that register.
+                entry_spills.push((
                     EditPoint::Before(0),
                     Edit::Move {
                         from: Alloc::Reg(abi_reg),
@@ -521,7 +536,7 @@ impl<'a> WalkState<'a> {
             if let crate::abi::classify::ArgLoc::Stack { offset, .. } = loc {
                 let vreg = VReg(vreg_idx as u16);
                 if let Some(final_preg) = self.pool.home(vreg) {
-                    entry_edits.push((
+                    stack_arg_loads.push((
                         EditPoint::Before(0),
                         Edit::LoadIncomingArg {
                             fp_offset: *offset,
@@ -535,7 +550,7 @@ impl<'a> WalkState<'a> {
                         register_state: String::new(),
                     });
                 } else if let Some(slot) = self.spill.has_slot(vreg) {
-                    entry_edits.push((
+                    stack_arg_loads.push((
                         EditPoint::Before(0),
                         Edit::LoadIncomingArg {
                             fp_offset: *offset,
@@ -552,6 +567,16 @@ impl<'a> WalkState<'a> {
             }
         }
 
+        // Concatenate in dependency order: reads-to-memory, then the
+        // hazard-free register shuffle, then writes derived from its results.
+        let mut entry_edits: Vec<(EditPoint, Edit)> = entry_spills;
+        for (from, to) in
+            sequence_arg_moves(pending_entry, self.func_abi.isa().move_cycle_scratch_hw())
+        {
+            entry_edits.push((EditPoint::Before(0), Edit::Move { from, to }));
+        }
+        entry_edits.extend(slot_inits);
+        entry_edits.extend(stack_arg_loads);
         entry_edits.extend(self.edits);
         Ok(AllocOutput {
             allocs: self.allocs,
@@ -579,7 +604,7 @@ pub fn walk_linear(
     vreg_pool: &[VReg],
     func_abi: &FuncAbi,
 ) -> Result<AllocOutput, AllocError> {
-    walk_linear_with_pool(vinsts, vreg_pool, func_abi, RegPool::new(func_abi.isa()))
+    walk_linear_with_pool(vinsts, vreg_pool, func_abi, RegPool::for_abi(func_abi))
 }
 
 /// Walk a Linear region backward with a configured pool.
@@ -936,6 +961,23 @@ fn process_call(
     } = scratch;
 
     // ── Step 1: Defs (return values) ──
+    //
+    // The direct return registers are read *simultaneously* in ABI terms, just
+    // like the argument registers are written simultaneously: every return
+    // value must leave its ABI register carrying the value the callee put
+    // there, before any other return's move overwrites it. Emitting the moves
+    // in return order is only safe when no return's destination is another
+    // return's source — true on rv32, whose return registers (hw 10..11) and
+    // allocatable pool (18..31) are disjoint, and false on Xtensa, where the
+    // caller-view return bank a10/a11 sits inside its own 12-register pool.
+    //
+    // Collected here and sequenced below via the same `sequence_arg_moves`
+    // used for the argument direction.
+    let mut pending_ret_moves: Vec<(Alloc, u8)> = Vec::new();
+    // Write-throughs `Reg(pool_home) -> Stack(slot)`: they read a *destination*
+    // of the moves above, so they must run after all of them.
+    let mut ret_write_throughs: Vec<(EditPoint, Edit)> = Vec::new();
+
     let mut operand_idx: usize = 0;
     for (i, &ret_vreg) in rets.iter().enumerate() {
         let alloc_idx = offset + operand_idx;
@@ -965,15 +1007,9 @@ fn process_call(
 
         if let Some(pool_reg) = pool.home(ret_vreg) {
             ret_value_pool_regs.push(pool_reg);
-            after_ret_moves.push((
-                EditPoint::After(inst_idx_u16),
-                Edit::Move {
-                    from: Alloc::Reg(target),
-                    to: Alloc::Reg(pool_reg),
-                },
-            ));
+            pending_ret_moves.push((Alloc::Reg(target), pool_reg));
             if let Some(slot) = spill.has_slot(ret_vreg) {
-                after_ret_moves.push((
+                ret_write_throughs.push((
                     EditPoint::After(inst_idx_u16),
                     Edit::Move {
                         from: Alloc::Reg(pool_reg),
@@ -1004,6 +1040,17 @@ fn process_call(
             });
         }
     }
+
+    // Order within the After(call) return group:
+    //   1. `Reg(ret_reg) -> Stack(slot)` stores pushed by the loop above. They
+    //      read a return register, so they must precede any move that writes
+    //      one. Stores touch no register, so they cannot disturb the moves.
+    //   2. the sequenced reg->reg moves.
+    //   3. the write-throughs, which read a move *destination*.
+    for (from, to) in sequence_arg_moves(pending_ret_moves, isa.move_cycle_scratch_hw()) {
+        after_ret_moves.push((EditPoint::After(inst_idx_u16), Edit::Move { from, to }));
+    }
+    after_ret_moves.extend(ret_write_throughs);
 
     // ── Step 2: Evict-then-reload for caller-saved pool t-regs ──
     // regalloc2-style: evict clobbered-reg occupants from the pool and remove
@@ -1169,29 +1216,22 @@ fn process_call(
         });
     }
 
-    // ── Phase B1: record final locations for stack-pass args ──
-    for &(alloc_idx, arg_vreg) in stack_pass_args.iter() {
-        allocs[alloc_idx] = if let Some(pool_reg) = pool.home(arg_vreg) {
-            Alloc::Reg(pool_reg)
-        } else if let Some(slot) = spill.has_slot(arg_vreg) {
-            Alloc::Stack(slot)
-        } else {
-            Alloc::None
-        };
-    }
-
-    // ── Phase B: emit Before(call) moves for register-pass args ──
+    // ── Phase B: compute the Before(call) moves for register-pass args ──
     // The pool now reflects the final allocation state after all evictions.
+    //
+    // These moves happen *simultaneously* in ABI terms: every argument must
+    // reach its staging register carrying the value it had before any of them
+    // ran. Emitting them in argument order is only safe when no argument's
+    // source register is another argument's destination — true on rv32, where
+    // the argument registers and the allocatable pool are disjoint sets, and
+    // false on Xtensa, where the staging bank IS the caller-saved half of the
+    // pool. `sequence_arg_moves` orders them (and breaks cycles) so the
+    // simultaneity holds on both.
+    let mut pending_moves: Vec<(Alloc, u8)> = Vec::new();
     for &(arg_vreg, target) in reg_pass_args.iter() {
         if let Some(pool_reg) = pool.home(arg_vreg) {
             if pool_reg != target {
-                before_arg_moves.push((
-                    EditPoint::Before(inst_idx_u16),
-                    Edit::Move {
-                        from: Alloc::Reg(pool_reg),
-                        to: Alloc::Reg(target),
-                    },
-                ));
+                pending_moves.push((Alloc::Reg(pool_reg), target));
             }
             TracePush::push_with(trace, || TraceEntry {
                 vinst_idx: inst_idx,
@@ -1200,13 +1240,7 @@ fn process_call(
                 register_state: String::new(),
             });
         } else if let Some(slot) = spill.has_slot(arg_vreg) {
-            before_arg_moves.push((
-                EditPoint::Before(inst_idx_u16),
-                Edit::Move {
-                    from: Alloc::Stack(slot),
-                    to: Alloc::Reg(target),
-                },
-            ));
+            pending_moves.push((Alloc::Stack(slot), target));
             TracePush::push_with(trace, || TraceEntry {
                 vinst_idx: inst_idx,
                 vinst_mnemonic: String::from("call_arg_move"),
@@ -1214,6 +1248,68 @@ fn process_call(
                 register_state: String::new(),
             });
         }
+    }
+    // ── Phase B1: record final locations for stack-pass args ──
+    //
+    // A stack-pass arg is written to the outgoing argument area by the *ISA
+    // emitter*, inside `emit_call` — i.e. after every staging move computed
+    // above has already run. Its home register is therefore live across those
+    // moves, and naming it here is only safe if no staging move writes it.
+    //
+    // That holds on rv32 for the usual reason: the staging targets are the
+    // argument registers (hw 10..17) and a home comes from the allocatable
+    // pool (18..31), which is disjoint from them. On Xtensa the staging bank
+    // a10..a15 *is* the caller-saved half of the pool, so at high arity — 12
+    // user arguments is the first — a value that overflows to the stack sits
+    // in a register another argument is staged into. The store then reads the
+    // staged value and the callee sees a duplicate.
+    //
+    // Where that collides, park the value in its spill slot before the staging
+    // moves run and hand the emitter the slot instead; both emitters already
+    // reload a `Stack` outgoing arg through their scratch register.
+    let move_scratch = isa.move_cycle_scratch_hw();
+    for &(alloc_idx, arg_vreg) in stack_pass_args.iter() {
+        let home = pool.home(arg_vreg);
+        // `move_scratch` is outside the allocatable pool on both ISAs, so it is
+        // never a home; it is in the set because `sequence_arg_moves` writes it
+        // when breaking a cycle, and this set means "written before the store".
+        let staged_over = home.is_some_and(|r| {
+            r == move_scratch || pending_moves.iter().any(|&(_, target)| target == r)
+        });
+        allocs[alloc_idx] = match home {
+            Some(pool_reg) if !staged_over => Alloc::Reg(pool_reg),
+            Some(pool_reg) => {
+                let slot = spill.get_or_assign(arg_vreg);
+                before_arg_moves.push((
+                    EditPoint::Before(inst_idx_u16),
+                    Edit::Move {
+                        from: Alloc::Reg(pool_reg),
+                        to: Alloc::Stack(slot),
+                    },
+                ));
+                TracePush::push_with(trace, || TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("call_arg_park"),
+                    decision: alloc::format!(
+                        "v{}: x{pool_reg} -> slot{slot} (staged over)",
+                        arg_vreg.0
+                    ),
+                    register_state: String::new(),
+                });
+                Alloc::Stack(slot)
+            }
+            None => match spill.has_slot(arg_vreg) {
+                Some(slot) => Alloc::Stack(slot),
+                None => Alloc::None,
+            },
+        };
+    }
+
+    // The parks are pushed after the Phase-A reloads and before the staging
+    // moves, which is the only order that works: a stack-pass arg may itself
+    // have been reloaded into its home by one of those reloads.
+    for (from, to) in sequence_arg_moves(pending_moves, move_scratch) {
+        before_arg_moves.push((EditPoint::Before(inst_idx_u16), Edit::Move { from, to }));
     }
 
     // Restore clobbered registers to the LRU now that arg allocation is done.
@@ -1236,6 +1332,78 @@ fn process_call(
     for &e in before_arg_moves.iter().rev() {
         edits.push(e);
     }
+}
+
+/// Order a set of simultaneous register moves into a safe sequence.
+///
+/// Used in both call directions:
+///
+/// - **arguments** — `from` is wherever the value lives, `to` is the ABI's
+///   argument register. Emitting in argument order destroys a value before its
+///   consumer reads it and the caller silently passes a duplicate.
+/// - **returns** — `from` is the ABI's return register, `to` is the value's
+///   pool home. Emitting in return order destroys a return value before it is
+///   moved out, and the caller silently reads a duplicate.
+///
+/// Every `to` is distinct in both cases (distinct ABI registers one way,
+/// distinct pool homes the other), but a `to` may also be another move's
+/// `from`. This is the standard "parallel move" problem.
+///
+/// The sequence is built by repeatedly emitting any move whose destination is
+/// no longer anyone's source. When only cycles remain, one destination's live
+/// value is parked in `scratch` and its readers rewritten to read `scratch`,
+/// which breaks the cycle; `scratch` is outside the allocatable pool, and it is
+/// reusable across cycles because a parked value is always consumed before the
+/// next break.
+///
+/// On rv32 this is an identity transform in both directions (the argument and
+/// return registers are disjoint from the pool, so no destination is ever a
+/// source). It exists for Xtensa, whose staging bank `a10..a15` and return
+/// bank `a10..a11` both sit inside its own allocatable pool — and as a
+/// correctness net for any future ISA that overlaps them.
+fn sequence_arg_moves(mut pending: Vec<(Alloc, u8)>, scratch: u8) -> Vec<(Alloc, Alloc)> {
+    fn src_reg(a: &Alloc) -> Option<u8> {
+        match a {
+            Alloc::Reg(r) => Some(*r),
+            _ => None,
+        }
+    }
+
+    let mut out: Vec<(Alloc, Alloc)> = Vec::with_capacity(pending.len());
+    while !pending.is_empty() {
+        let mut progressed = false;
+        let mut i = 0;
+        while i < pending.len() {
+            let (from, to) = pending[i];
+            let still_needed = pending
+                .iter()
+                .enumerate()
+                .any(|(j, (f, _))| j != i && src_reg(f) == Some(to));
+            if still_needed {
+                i += 1;
+                continue;
+            }
+            out.push((from, Alloc::Reg(to)));
+            pending.remove(i);
+            progressed = true;
+        }
+        if pending.is_empty() {
+            break;
+        }
+        if !progressed {
+            // Everything left is in a cycle: park one destination's live value
+            // in scratch and point its readers at scratch instead. That move
+            // becomes emittable on the next pass.
+            let (_, blocked_to) = pending[0];
+            out.push((Alloc::Reg(blocked_to), Alloc::Reg(scratch)));
+            for (f, _) in pending.iter_mut() {
+                if src_reg(f) == Some(blocked_to) {
+                    *f = Alloc::Reg(scratch);
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1431,6 +1599,138 @@ mod tests {
             has_reload,
             "expected a stack->reg reload edit, got edits: {edits:?}",
             edits = output.edits
+        );
+    }
+    /// Independent moves keep their order and all land.
+    #[test]
+    fn sequence_arg_moves_passes_through_independent_moves() {
+        let out = sequence_arg_moves(vec![(Alloc::Reg(20), 10), (Alloc::Reg(21), 11)], 9);
+        assert_eq!(
+            out,
+            vec![
+                (Alloc::Reg(20), Alloc::Reg(10)),
+                (Alloc::Reg(21), Alloc::Reg(11)),
+            ]
+        );
+    }
+
+    /// The defect this function exists for: `a12`'s value is needed by the move
+    /// into `a13`, so the write to `a12` must come second. Emitting in argument
+    /// order silently passed a duplicate.
+    #[test]
+    fn sequence_arg_moves_orders_a_chain_before_its_source_is_clobbered() {
+        // want: a12 <- a13, a13 <- a12's ORIGINAL value is not required here;
+        // the chain is a13 <- a12 and a12 <- a11.
+        let out = sequence_arg_moves(vec![(Alloc::Reg(11), 12), (Alloc::Reg(12), 13)], 9);
+        assert_eq!(
+            out,
+            vec![
+                // a13 <- a12 first: a12 is still carrying its incoming value.
+                (Alloc::Reg(12), Alloc::Reg(13)),
+                (Alloc::Reg(11), Alloc::Reg(12)),
+            ],
+            "a chain must be emitted from its tail"
+        );
+    }
+
+    /// A true swap has no safe order, so one value goes through the scratch
+    /// register. Checked by simulation rather than by pinning an instruction
+    /// sequence, so the test constrains the semantics and not the strategy.
+    #[test]
+    fn sequence_arg_moves_breaks_a_two_cycle_through_scratch() {
+        const SCRATCH: u8 = 9;
+        let out = sequence_arg_moves(vec![(Alloc::Reg(10), 11), (Alloc::Reg(11), 10)], SCRATCH);
+
+        // Simulate: each register starts holding its own id.
+        let mut regs: [u8; 32] = core::array::from_fn(|i| i as u8);
+        for (from, to) in &out {
+            let (Alloc::Reg(f), Alloc::Reg(t)) = (from, to) else {
+                panic!("register moves only");
+            };
+            regs[*t as usize] = regs[*f as usize];
+        }
+        assert_eq!(regs[11], 10, "a11 must end up with a10's incoming value");
+        assert_eq!(regs[10], 11, "a10 must end up with a11's incoming value");
+        assert!(
+            out.iter()
+                .any(|(_, to)| matches!(to, Alloc::Reg(r) if *r == SCRATCH)),
+            "a two-cycle cannot be resolved without the scratch register"
+        );
+    }
+
+    /// Three-cycle, same simulation check — the cycle-breaking must not be
+    /// special-cased to pairs.
+    #[test]
+    fn sequence_arg_moves_breaks_a_three_cycle() {
+        let out = sequence_arg_moves(
+            vec![
+                (Alloc::Reg(10), 11),
+                (Alloc::Reg(11), 12),
+                (Alloc::Reg(12), 10),
+            ],
+            9,
+        );
+        let mut regs: [u8; 32] = core::array::from_fn(|i| i as u8);
+        for (from, to) in &out {
+            let (Alloc::Reg(f), Alloc::Reg(t)) = (from, to) else {
+                panic!("register moves only");
+            };
+            regs[*t as usize] = regs[*f as usize];
+        }
+        assert_eq!([regs[11], regs[12], regs[10]], [10, 11, 12]);
+    }
+
+    /// Spill-slot sources have no register to clobber, but their destination can
+    /// still be another move's source.
+    #[test]
+    fn sequence_arg_moves_orders_stack_sources_after_their_destination_is_read() {
+        let out = sequence_arg_moves(vec![(Alloc::Stack(0), 12), (Alloc::Reg(12), 13)], 9);
+        assert_eq!(
+            out,
+            vec![
+                (Alloc::Reg(12), Alloc::Reg(13)),
+                (Alloc::Stack(0), Alloc::Reg(12)),
+            ],
+            "the reload into a12 must not run before a12 is read"
+        );
+    }
+
+    /// Pins the **return** direction's move set, which `process_call` began
+    /// routing through this function on 2026-07-30
+    /// (`docs/defects/2026-07-30-xtensa-two-value-return-clobber.md`).
+    ///
+    /// This is a characterization test, not the regression test: the sequencer
+    /// was always correct, and the defect was that the return path never called
+    /// it. Reverting that fix does not fail this test. The negative-controlled
+    /// regression lives in the corpus at
+    /// `lpvm/native/perf/call-clobber-correctness.glsl:99`
+    /// (`test_interleaved_vec2`), which goes 6/7 → 7/7 across the fix. What
+    /// this test buys is that a future refactor of the sequencer cannot break
+    /// the return direction silently.
+    ///
+    /// A two-value return arrives in the caller-view `a10`/`a11`. When the
+    /// first return's pool home happens to be `a11`, moving it out first
+    /// destroys the second return before anyone reads it. This is the exact
+    /// move set observed for `vec2 a = make_vec2(…)` held live across a second
+    /// call — the emitted code was:
+    ///
+    /// ```text
+    /// or a11, a10, a10   ; ret0 -> home a11, clobbering ret1
+    /// or a12, a11, a11   ; ret1 -> home a12, reading the clobbered value
+    /// ```
+    ///
+    /// so `a.y` silently became `a.x`.
+    #[test]
+    fn sequence_arg_moves_orders_return_values_out_of_the_return_bank() {
+        let out = sequence_arg_moves(vec![(Alloc::Reg(10), 11), (Alloc::Reg(11), 12)], 9);
+        assert_eq!(
+            out,
+            vec![
+                // a11 (ret1) must vacate before ret0 is moved on top of it.
+                (Alloc::Reg(11), Alloc::Reg(12)),
+                (Alloc::Reg(10), Alloc::Reg(11)),
+            ],
+            "the second return value must leave a11 before the first overwrites it"
         );
     }
 }

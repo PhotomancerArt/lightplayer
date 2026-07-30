@@ -4,6 +4,32 @@ The workspace uses **nightly Rust** (`rust-toolchain.toml`). This is required by
 bare-metal firmware targets; host crates compile fine on stable but share the workspace
 toolchain for simplicity.
 
+## The second toolchain: Espressif's Xtensa fork
+
+Xtensa has no upstream Rust target, so anything built for ESP32-S3 / classic
+ESP32 uses Espressif's fork, installed as the `esp` rustup channel (`espup
+install`). Two directory trees select it locally: `lp-fw/fw-esp32s3` and
+`lp-xt/fixtures` each carry their own `rust-toolchain.toml`. CI pins it via
+`esp-rs/xtensa-toolchain` (see `pre-merge.yml`; keep the version in sync across
+the `firmware-xtensa` and `validate-xtensa` jobs).
+
+**It is needed for a *host* test path, not only firmware.** The Xtensa filetest
+targets (`xtn.q32` / `xtlpn.q32`) and `just test-xt-host` execute Xtensa code on
+the host emulator, linked against a cross-compiled builtins image built by
+`scripts/build-builtins-xt.sh`.
+
+**Without the esp toolchain everything still builds and tests.** The image is a
+gitignored artifact; when it is absent the Xtensa targets and tests skip with a
+loud note naming the build command. That is deliberate — `just check` and
+`just test` must work on a machine that has never run espup. The corollary is
+that those tests can pass vacuously, which is why CI's `validate-xtensa` job
+asserts the image is non-empty before running them.
+
+Requires esp Rust **≥ 1.90** for the workspace MSRV: on 1.88 `lpc-model`
+genuinely fails to compile (70× E0716 from the `Slotted` derive's
+const-promotion of a temporary). `scripts/build-builtins-xt.sh` fails loudly and
+names `espup update` rather than working around it.
+
 ## Why nightly
 
 Three features used by `fw-esp32c6` and `fw-emu` are unstable:

@@ -34,7 +34,7 @@ use crate::mutation::{MutationAction, MutationPlan};
 use crate::parse::RunDirective;
 use crate::perf_model::PerfModel;
 use crate::targets::{
-    AnnotationKind, DEFAULT_TARGETS, Disposition, Target, directive_disposition,
+    AnnotationKind, DEFAULT_TARGETS, Disposition, Isa, Target, directive_disposition,
     parse_target_filters,
 };
 
@@ -428,6 +428,36 @@ struct FileSpec {
 /// markers onto another backend (e.g. `rv32c.q32` → `rv32n.q32`) without touching unrelated failures.
 /// Requires exactly one `--target`.
 ///
+/// Drop targets whose toolchain-built prerequisites are missing, with **one loud
+/// note per target** — never a per-file skip, and never a hard failure.
+///
+/// The Xtensa targets execute against the Xtensa builtins image, a gitignored
+/// cross-target artifact that needs the esp toolchain. A fresh clone does not have
+/// it, and `just test-filetests` must still work there.
+///
+/// The note goes to stderr and the dropped targets are absent from the summary
+/// table, so a run that tested nothing cannot look like a run that tested
+/// everything — the failure mode this is written against is silent green.
+fn drop_unavailable_targets(requested: Vec<&'static Target>) -> Vec<&'static Target> {
+    let xt_image = lps_builtins_xt_image::is_available();
+    requested
+        .into_iter()
+        .filter(|t| {
+            let needs_xt_image = t.isa == Isa::Xtensa;
+            if needs_xt_image && !xt_image {
+                eprintln!(
+                    "SKIPPING TARGET {}: the Xtensa builtins image is not built. \
+                     Run `{}` (needs the esp toolchain) to enable it.",
+                    t.name(),
+                    lps_builtins_xt_image::BUILD_COMMAND
+                );
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
 /// `force_opts` are applied after each file's `compile-opt(...)` directives (see
 /// [`test_run::compile::build_compiler_config`]). Parsed from `--force-opt` /
 /// `LPS_FILETEST_FORCE_OPT` in the `lps-filetests-app` binary only.
@@ -485,11 +515,15 @@ pub fn run(
         } else {
             None
         };
-    let active_targets: Vec<&Target> = if let Some(spec) = target_spec {
+    let requested_targets: Vec<&Target> = if let Some(spec) = target_spec {
         parse_target_filters(spec).map_err(anyhow::Error::msg)?
     } else {
         DEFAULT_TARGETS.iter().collect()
     };
+    let active_targets = drop_unavailable_targets(requested_targets);
+    if active_targets.is_empty() {
+        anyhow::bail!("every requested target is unavailable (see the notes above)");
+    }
 
     if baseline_for_dup.is_some() && active_targets.len() != 1 {
         anyhow::bail!(

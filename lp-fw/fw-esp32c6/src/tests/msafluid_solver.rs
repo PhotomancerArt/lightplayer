@@ -108,6 +108,10 @@ impl MsaFluidSolver {
     /// step); range `0.001..=0.3`. The internal default is `0` (no decay)
     /// so the perf test characterises the solver in isolation; the live
     /// demo must set this explicitly or dye saturates the field to white.
+    #[allow(
+        dead_code,
+        reason = "tuning knob; only the test_fluid_demo harness sets it, not test_msafluid"
+    )]
     pub fn set_fade_speed(&mut self, fade_speed: Q32) {
         self.fade_speed = fade_speed;
     }
@@ -117,6 +121,10 @@ impl MsaFluidSolver {
     /// chaotic flow), lower values let small eddies persist. Affects the
     /// `diffuse_uv` Jacobi solve, so the cycle cost is independent of the
     /// value.
+    #[allow(
+        dead_code,
+        reason = "tuning knob; only the test_fluid_demo harness sets it, not test_msafluid"
+    )]
     pub fn set_viscosity(&mut self, viscosity: Q32) {
         self.visc = viscosity;
     }
