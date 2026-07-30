@@ -1194,18 +1194,7 @@ fn process_call(
         });
     }
 
-    // ── Phase B1: record final locations for stack-pass args ──
-    for &(alloc_idx, arg_vreg) in stack_pass_args.iter() {
-        allocs[alloc_idx] = if let Some(pool_reg) = pool.home(arg_vreg) {
-            Alloc::Reg(pool_reg)
-        } else if let Some(slot) = spill.has_slot(arg_vreg) {
-            Alloc::Stack(slot)
-        } else {
-            Alloc::None
-        };
-    }
-
-    // ── Phase B: emit Before(call) moves for register-pass args ──
+    // ── Phase B: compute the Before(call) moves for register-pass args ──
     // The pool now reflects the final allocation state after all evictions.
     //
     // These moves happen *simultaneously* in ABI terms: every argument must
@@ -1238,7 +1227,66 @@ fn process_call(
             });
         }
     }
-    for (from, to) in sequence_arg_moves(pending_moves, isa.move_cycle_scratch_hw()) {
+    // ── Phase B1: record final locations for stack-pass args ──
+    //
+    // A stack-pass arg is written to the outgoing argument area by the *ISA
+    // emitter*, inside `emit_call` — i.e. after every staging move computed
+    // above has already run. Its home register is therefore live across those
+    // moves, and naming it here is only safe if no staging move writes it.
+    //
+    // That holds on rv32 for the usual reason: the staging targets are the
+    // argument registers (hw 10..17) and a home comes from the allocatable
+    // pool (18..31), which is disjoint from them. On Xtensa the staging bank
+    // a10..a15 *is* the caller-saved half of the pool, so at high arity — 12
+    // user arguments is the first — a value that overflows to the stack sits
+    // in a register another argument is staged into. The store then reads the
+    // staged value and the callee sees a duplicate.
+    //
+    // Where that collides, park the value in its spill slot before the staging
+    // moves run and hand the emitter the slot instead; both emitters already
+    // reload a `Stack` outgoing arg through their scratch register.
+    let move_scratch = isa.move_cycle_scratch_hw();
+    for &(alloc_idx, arg_vreg) in stack_pass_args.iter() {
+        let home = pool.home(arg_vreg);
+        // `move_scratch` is outside the allocatable pool on both ISAs, so it is
+        // never a home; it is in the set because `sequence_arg_moves` writes it
+        // when breaking a cycle, and this set means "written before the store".
+        let staged_over = home.is_some_and(|r| {
+            r == move_scratch || pending_moves.iter().any(|&(_, target)| target == r)
+        });
+        allocs[alloc_idx] = match home {
+            Some(pool_reg) if !staged_over => Alloc::Reg(pool_reg),
+            Some(pool_reg) => {
+                let slot = spill.get_or_assign(arg_vreg);
+                before_arg_moves.push((
+                    EditPoint::Before(inst_idx_u16),
+                    Edit::Move {
+                        from: Alloc::Reg(pool_reg),
+                        to: Alloc::Stack(slot),
+                    },
+                ));
+                TracePush::push_with(trace, || TraceEntry {
+                    vinst_idx: inst_idx,
+                    vinst_mnemonic: String::from("call_arg_park"),
+                    decision: alloc::format!(
+                        "v{}: x{pool_reg} -> slot{slot} (staged over)",
+                        arg_vreg.0
+                    ),
+                    register_state: String::new(),
+                });
+                Alloc::Stack(slot)
+            }
+            None => match spill.has_slot(arg_vreg) {
+                Some(slot) => Alloc::Stack(slot),
+                None => Alloc::None,
+            },
+        };
+    }
+
+    // The parks are pushed after the Phase-A reloads and before the staging
+    // moves, which is the only order that works: a stack-pass arg may itself
+    // have been reloaded into its home by one of those reloads.
+    for (from, to) in sequence_arg_moves(pending_moves, move_scratch) {
         before_arg_moves.push((EditPoint::Before(inst_idx_u16), Edit::Move { from, to }));
     }
 
