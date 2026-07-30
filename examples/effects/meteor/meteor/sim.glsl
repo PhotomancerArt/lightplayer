@@ -3,11 +3,13 @@
 float prev_time;
 
 void tick() {
-    float dt = clamp(time - prev_time, 0.0, 0.1);
-    prev_time = time;
     float active = clamp(count, 1.0, 4.0);
 
     if (meteors[0].id == 0u) {
+        // Seed the clock alongside the table so the first tick advances by
+        // zero rather than by the whole elapsed project time.
+        prev_time = time;
+
         meteors[0].id = 1u;
         meteors[0].pos = vec2(0.0, 0.5);
         meteors[0].velocity = 0.22;
@@ -32,6 +34,15 @@ void tick() {
         meteors[3].color = vec3(1.0, 0.3, 0.8);
         meteors[3].radius = 0.09;
     }
+
+    // True elapsed time, deliberately UNCLAMPED: integrating constant
+    // velocity over the real delta is exact at any frame rate, so the
+    // meteors travel the same distance per second whether the tier renders
+    // at 60fps or 1fps. A clamp here (there was one) throttles motion on
+    // slow frames only, which reads as stutter on the CPU tier while the
+    // GPU tier looks fine.
+    float dt = max(time - prev_time, 0.0);
+    prev_time = time;
 
     meteors[0].pos = vec2(mod(meteors[0].pos.x + meteors[0].velocity * speed * dt, 1.0), 0.5);
     meteors[1].pos = vec2(mod(meteors[1].pos.x + meteors[1].velocity * speed * dt, 1.0), 0.5);

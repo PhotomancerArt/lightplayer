@@ -1999,7 +1999,7 @@ mod binding_kind_tests {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::engine) mod tests {
     extern crate std;
 
     use core::cell::Cell;
@@ -2144,6 +2144,11 @@ mod tests {
             entry.state.value(),
             NodeEntryState::Failed { reason } if reason.contains(expected)
         ));
+    }
+
+    /// Shared with the read-probe tests (entry-scope omission regression).
+    pub(in crate::engine) fn playlist_project_fs_for_probe() -> LpFsMemory {
+        playlist_project_fs()
     }
 
     fn playlist_project_fs() -> LpFsMemory {

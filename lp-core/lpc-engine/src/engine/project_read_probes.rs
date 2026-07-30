@@ -98,9 +98,17 @@ impl Engine {
             bindings.push(wire_effective_binding(self, entry));
         }
 
+        // Anonymous ISOLATING scopes (playlist entries) are sinks by
+        // construction: the playlist reads each entry child's produced
+        // `output` slot directly, so nothing ever consumes these channels
+        // (scoped-buses ADR rule 2). Listing them is noise, and resolving
+        // their values would DEMAND every entry child's shader on each bus
+        // refresh — rendering inactive entries every frame, which is what
+        // the retired suppression rule used to prevent (2026-07-30).
         let channel_names: Vec<(ScopedChannel, Kind)> = self
             .tree()
             .bus_channels()
+            .filter(|(name, _)| !matches!(name.scope, ScopeId::Entry(_)))
             .map(|(name, kind)| (name.clone(), kind))
             .collect();
 
@@ -365,6 +373,55 @@ mod tests {
     }
 
     #[test]
+    /// A playlist's entry children each own an anonymous-scope `visual.out`
+    /// (scoped-buses rule 2). Those channels must stay OUT of the bus graph:
+    /// the probe resolves a value per listed channel, so listing them would
+    /// demand every entry child's shader on each bus refresh — inactive
+    /// entries rendering every frame. That is the behavior the retired
+    /// suppression rule used to prevent; regression found live on
+    /// examples/fyeah-sign, where the blast entry ran constantly (2026-07-30).
+    #[test]
+    fn binding_graph_probe_omits_isolating_entry_scope_channels() {
+        let fs = crate::engine::project_loader::tests::playlist_project_fs_for_probe();
+        let services = crate::engine::EngineServices::new(
+            lpc_model::TreePath::parse("/playlist.show").expect("path"),
+        );
+        let rt =
+            crate::engine::ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let (mut engine, registry) = rt.into_parts();
+
+        let BindingGraphProbeResult::Graph(graph) = engine.read_project_binding_graph_probe(
+            &registry,
+            BindingGraphProbeRequest {
+                include_values: true,
+            },
+        ) else {
+            panic!("expected graph result");
+        };
+
+        // Entry-scope channels render scope-qualified (`idle›visual.out`);
+        // none may appear.
+        let scoped: Vec<&str> = graph
+            .channels
+            .iter()
+            .map(|channel| channel.name.as_str())
+            .filter(|name| name.contains('\u{203a}'))
+            .collect();
+        assert!(
+            scoped.is_empty(),
+            "isolating entry scopes must not reach the bus graph: {scoped:?}"
+        );
+        // The root bus is unaffected.
+        assert!(
+            graph
+                .channels
+                .iter()
+                .any(|channel| channel.name == "visual.out"),
+            "root visual.out still listed: {:?}",
+            graph.channels.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+
     fn binding_graph_probe_reports_bindings_channels_and_values() {
         let mut h = EngineTestBuilder::new()
             .shader("writer", output("outputs[0]", 0.5))
