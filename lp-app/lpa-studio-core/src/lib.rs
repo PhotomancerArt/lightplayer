@@ -64,8 +64,8 @@ pub use app::preview_host::{
 pub use app::project::{
     AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
     MAX_ASSET_BODY_BYTES, NodeCardDrawer, NodeCardUiState, NodeController, NodeControllerState,
-    NodeCreateOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PendingAssetEdit, PendingEdit,
-    PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
+    NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PendingAssetEdit,
+    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
     ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
     ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
     ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
@@ -100,6 +100,10 @@ pub use app::settings::{
     SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiModelOption,
     UiSettingsView, provider_guidance,
 };
+pub use app::share::{
+    NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
+    ShareFile, ShareHeader, peek_header,
+};
 pub use app::studio::{
     ConsoleCommand, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY,
     LogClock, LogFilter, LogRing, RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK,
@@ -107,7 +111,7 @@ pub use app::studio::{
     StudioViewReceiver, StudioViewSender, UiConsoleView, UiError, UiLensRuntime, UiLogDraft,
     UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel, UiResult,
     UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
-    ViewPublisher, studio_view_channel,
+    ViewPublisher, has_unsaved_work, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

@@ -114,6 +114,9 @@ holds the full context.
 | Sim "non-collapsed" probe scope becomes real (collapse is view-local today, so sim probes ALL nodes) | `2026-07-27-completion-based-refresh-pacing` | The ui-state-audit plan moves live collapse state into core |
 | Packed base64 geometry encoding (`points_packed`-style additive field) | `2026-07-27-map2d-document-architecture` | An imported mapping document approaches the 10 KiB asset body budget |
 | Legacy `MappingConfig` variant retirement (`PathPoints`/`RingArray`/`PointList`/`SvgPath`) | `2026-07-27-map2d-document-architecture` | M5 one-home mapping editing lands and shipped projects are migrated |
+| Share-envelope format migration (`format` mismatches are refused outright during alpha, never migrated) | `2026-07-28-share-envelopes`; `../debt/library-format-migration-gap.md` | The authored formats settle enough that migration is written once, not weekly |
+| Wire-read (`FsRequest`) export for device-hosted projects absent from the local library (editor-popup export is library-backed only) | `2026-07-28-share-envelopes` | Someone needs to export a project that only exists on a device |
+| Size guard on node share envelopes (a large binary asset base64s into something no clipboard should carry) | `2026-07-28-share-envelopes` | A real shader-with-texture share hits a clipboard limit |
 | CLA / DCO-with-explicit-grant mechanism (recorded as intent only) | `2026-07-29-license-provenance-discipline` | The first outside contribution to relicensing-sensitive code is proposed |
 
 ## Relationship To Shared Planning

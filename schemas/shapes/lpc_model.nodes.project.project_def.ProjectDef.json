@@ -24,6 +24,9 @@
       },
       {
         "name": "uid",
+        "policy": {
+          "writable": false
+        },
         "shape": {
           "option": {
             "meta": {},
