@@ -125,7 +125,7 @@ machine for the cases listed below.
 |----------------------------------------------|-----------------------------------------------|
 | Float arithmetic                             | IEEE 754                                      |
 | Integer arithmetic                           | Wrapping mod 2³²                              |
-| Integer division / remainder by zero         | Result `0`                                    |
+| Integer division / remainder by zero         | Never traps; RV32M (`02-core-ops.md`)         |
 | Float division by zero                       | IEEE 754 (±Inf, NaN as defined by IEEE rules) |
 | NaN in arithmetic                            | NaN propagates per IEEE rules                 |
 | NaN in comparisons                           | Treated as false (`0` for condition values)   |

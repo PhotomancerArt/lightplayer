@@ -108,10 +108,24 @@ a week is an argument for a conformance suite. When a class accumulates
 entries, say so out loud — that is an architecture finding, not a
 bookkeeping fact.
 
+> **Saying it out loud: `config-masked-defect` has four entries from
+> 2026-07-30, all in `lpvm-native`, all found by the Xtensa corpus.** Three
+> were register-layout coincidences in `regalloc/`; the fourth was a
+> hardware-semantics coincidence in `lower.rs`. The shared mechanism is that
+> `lpvm-native` had exactly one ISA for its whole life, so every place it
+> leaned on an rv32 property looked like ordinary correct code, and no test
+> could say otherwise. The finding is not "add more tests" — the tests mostly
+> existed — it is that **shared compiler code needs ISA-varying properties
+> named as capability hooks rather than assumed**, and that the second ISA is
+> the only thing that can find the ones already there. Expect more until the
+> Xtensa corpus is green; each one is evidence for the hook discipline, not a
+> new surprise.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
 | config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed (1 known gap) | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-integer-div-by-zero-trap](2026-07-30-xtensa-integer-div-by-zero-trap.md) | fixed | lpvm-native lowering (lower.rs) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |

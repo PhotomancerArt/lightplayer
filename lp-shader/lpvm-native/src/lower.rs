@@ -252,6 +252,162 @@ fn emit_q32_fdiv_const_zero(
     });
 }
 
+/// Lower one of the four LPIR integer divide/remainder ops.
+///
+/// On an ISA whose native divide already implements the LPIR contract this is
+/// the bare instruction; on one whose divide traps it is
+/// [`emit_guarded_int_div`]. The choice is made by the named ISA property
+/// [`IsaTarget::integer_div_traps_on_zero`] rather than by matching on the ISA
+/// here, so a new backend declares its answer in one place and shared lowering
+/// stays honest about *why* it differs.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mirrors the LpirOp arm's own operands; bundling them would only \
+              move the positional risk into a tuple"
+)]
+fn lower_int_div(
+    out: &mut Vec<VInst>,
+    temps: &mut TempVRegs,
+    isa: IsaTarget,
+    op: AluOp,
+    dst: lpir::VReg,
+    lhs: lpir::VReg,
+    rhs: lpir::VReg,
+    src_op: u16,
+) {
+    let (dst, lhs, rhs) = (fa_vreg(dst), fa_vreg(lhs), fa_vreg(rhs));
+
+    let guard = isa.integer_div_traps_on_zero();
+    if guard {
+        emit_guarded_int_div(out, temps, op, dst, lhs, rhs, src_op);
+    } else {
+        out.push(VInst::AluRRR {
+            op,
+            dst,
+            src1: lhs,
+            src2: rhs,
+            src_op,
+        });
+    }
+}
+
+/// Emit an integer divide/remainder on an ISA whose native instruction
+/// **traps** on a zero divisor ([`IsaTarget::integer_div_traps_on_zero`]).
+///
+/// LPIR requires integer division and remainder to never trap and to follow
+/// RV32M semantics (`docs/design/lpir/02-core-ops.md`,
+/// `docs/adr/2026-07-30-integer-division-never-traps.md`):
+///
+/// | op | divisor `0` | `i32::MIN` / `-1` |
+/// |---|---|---|
+/// | `idiv_s` | `-1` | `i32::MIN` |
+/// | `idiv_u` | `0xFFFF_FFFF` | n/a |
+/// | `irem_s` | the dividend | `0` |
+/// | `irem_u` | the dividend | n/a |
+///
+/// Only the **zero divisor** column is guarded here. Xtensa — the one ISA that
+/// currently answers `true` — already produces the RV32M answers for
+/// `i32::MIN / -1` and `i32::MIN % -1`, so guarding that column too would be
+/// wasted instructions. Cranelift's equivalent
+/// (`lpvm-cranelift/src/emit/scalar.rs`) guards both because its `sdiv` traps
+/// on both; the guard set is per-ISA on purpose.
+///
+/// The expansion is branchless and needs no scratch *hardware* registers —
+/// every temporary is a fresh vreg, so register allocation owns the lifetimes
+/// and any `dst`/`src` aliasing:
+///
+/// ```text
+///     IcmpImm  is_zero, Eq, rhs, 0     ; is_zero ∈ {0, 1}
+///     Or       safe,    rhs, is_zero   ; rhs, or 1 when rhs == 0
+///     AluRRR   quot,    op,  lhs, safe ; cannot trap
+///     Neg      mask,    is_zero        ; 0 or -1 (all ones)
+///     ...                              ; op-specific fixup, below
+/// ```
+///
+/// `safe = rhs | is_zero` replaces a compare-and-select: `is_zero` is exactly
+/// `0` or `1`, so the `or` is a no-op on a non-zero divisor and yields `1` on a
+/// zero one. `x / 1 == x` and `x % 1 == 0` are both defined, so the divide is
+/// then unconditionally safe.
+///
+/// The fixup exploits the same mask:
+///
+/// * **divide** — `dst = quot | mask`. A zero divisor forces all ones (`-1`
+///   signed, `0xFFFF_FFFF` unsigned — the same bit pattern, so both signed and
+///   unsigned divide share this arm).
+/// * **remainder** — `dst = quot | (lhs & mask)`. `quot` is `lhs % 1 == 0`
+///   whenever the divisor was zero, so the `or` reduces to the dividend
+///   exactly then and to `quot` otherwise.
+fn emit_guarded_int_div(
+    out: &mut Vec<VInst>,
+    temps: &mut TempVRegs,
+    op: AluOp,
+    dst: VReg,
+    lhs: VReg,
+    rhs: VReg,
+    src_op: u16,
+) {
+    let is_zero = temps.mint();
+    let safe = temps.mint();
+    let quot = temps.mint();
+    let mask = temps.mint();
+
+    out.push(VInst::IcmpImm {
+        dst: is_zero,
+        src: rhs,
+        imm: 0,
+        cond: IcmpCond::Eq,
+        src_op,
+    });
+    out.push(VInst::AluRRR {
+        op: AluOp::Or,
+        dst: safe,
+        src1: rhs,
+        src2: is_zero,
+        src_op,
+    });
+    out.push(VInst::AluRRR {
+        op,
+        dst: quot,
+        src1: lhs,
+        src2: safe,
+        src_op,
+    });
+    out.push(VInst::Neg {
+        dst: mask,
+        src: is_zero,
+        src_op,
+    });
+    match op {
+        AluOp::DivS | AluOp::DivU => {
+            out.push(VInst::AluRRR {
+                op: AluOp::Or,
+                dst,
+                src1: quot,
+                src2: mask,
+                src_op,
+            });
+        }
+        // RemS / RemU — the zero-divisor result is the dividend.
+        _ => {
+            let kept = temps.mint();
+            out.push(VInst::AluRRR {
+                op: AluOp::And,
+                dst: kept,
+                src1: lhs,
+                src2: mask,
+                src_op,
+            });
+            out.push(VInst::AluRRR {
+                op: AluOp::Or,
+                dst,
+                src1: quot,
+                src2: kept,
+                src_op,
+            });
+        }
+    }
+}
+
 fn sym_call(
     out: &mut Vec<VInst>,
     symbols: &mut ModuleSymbols,
@@ -319,43 +475,19 @@ pub fn lower_lpir_op(
             Ok(())
         }
         LpirOp::IdivS { dst, lhs, rhs } => {
-            out.push(VInst::AluRRR {
-                op: AluOp::DivS,
-                dst: fa_vreg(*dst),
-                src1: fa_vreg(*lhs),
-                src2: fa_vreg(*rhs),
-                src_op: po,
-            });
+            lower_int_div(out, temps, abi.isa(), AluOp::DivS, *dst, *lhs, *rhs, po);
             Ok(())
         }
         LpirOp::IdivU { dst, lhs, rhs } => {
-            out.push(VInst::AluRRR {
-                op: AluOp::DivU,
-                dst: fa_vreg(*dst),
-                src1: fa_vreg(*lhs),
-                src2: fa_vreg(*rhs),
-                src_op: po,
-            });
+            lower_int_div(out, temps, abi.isa(), AluOp::DivU, *dst, *lhs, *rhs, po);
             Ok(())
         }
         LpirOp::IremS { dst, lhs, rhs } => {
-            out.push(VInst::AluRRR {
-                op: AluOp::RemS,
-                dst: fa_vreg(*dst),
-                src1: fa_vreg(*lhs),
-                src2: fa_vreg(*rhs),
-                src_op: po,
-            });
+            lower_int_div(out, temps, abi.isa(), AluOp::RemS, *dst, *lhs, *rhs, po);
             Ok(())
         }
         LpirOp::IremU { dst, lhs, rhs } => {
-            out.push(VInst::AluRRR {
-                op: AluOp::RemU,
-                dst: fa_vreg(*dst),
-                src1: fa_vreg(*lhs),
-                src2: fa_vreg(*rhs),
-                src_op: po,
-            });
+            lower_int_div(out, temps, abi.isa(), AluOp::RemU, *dst, *lhs, *rhs, po);
             Ok(())
         }
         LpirOp::Ineg { dst, src } => {
