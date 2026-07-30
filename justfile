@@ -578,21 +578,43 @@ build-fw-esp32c6: install-rv32-target
 clippy-fw-esp32s3:
     #!/usr/bin/env bash
     set -euo pipefail
-    GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
-    export PATH="$GCC_BIN:$PATH"
+    # Plain assignment, not `export VAR=$(...)`: the latter reports export's own
+    # exit status, so a failing lookup would sail past `set -e`.
+    GCC_BIN="$(just _xt-gcc-dir)"
+    # Empty means already on PATH. Prepending "" would put the CURRENT
+    # DIRECTORY on PATH, so guard it.
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
     cd lp-fw/fw-esp32s3 && cargo clippy --release -- --no-deps -D warnings
 
 build-fw-esp32s3:
     #!/usr/bin/env bash
     set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --release
+
+# Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
+# or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
+# which is how CI arrives (the esp-rs/xtensa-toolchain action puts it there),
+# versus a local espup install, which leaves it under ~/.rustup.
+_xt-gcc-dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v xtensa-esp32s3-elf-gcc >/dev/null 2>&1; then
+      exit 0
+    fi
     GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
     if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
-      echo "error: xtensa-esp32s3-elf-gcc not found under ~/.rustup/toolchains/esp" >&2
-      echo "       run 'espup install' (or 'espup update' if it is stale)" >&2
+      echo "error: xtensa-esp32s3-elf-gcc is not on PATH and was not found under" >&2
+      echo "       ~/.rustup/toolchains/esp — run 'espup install' (or 'espup update'" >&2
+      echo "       if it is stale). The Rust target spec links through it, not rust-lld." >&2
       exit 1
     fi
-    export PATH="$GCC_BIN:$PATH"
-    cd lp-fw/fw-esp32s3 && cargo build --release
+    echo "$GCC_BIN"
 
 # Always passes --partition-table: espflash's default table has a 1 MB factory
 # partition, and this crate is budgeted for the same 3 MB as the C6.
@@ -627,26 +649,52 @@ flash-fw-esp32s3 port="": build-fw-esp32s3
 fw-esp32c6-size-check margin="65536": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
+    (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
+    # Keep `partition` in sync with the `factory` app partition in
+    # lp-fw/fw-esp32c6/partitions.csv.
+    just _fw-size-check esp32c6 esp32c6 {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
+        "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+
+# Fail when the esp32s3 app image gets too close to its 3 MB partition.
+# Same cliff and the same reasoning as the C6 above — this crate is budgeted
+# for the identical 4 MB layout (lp-fw/fw-esp32s3/partitions.csv), and the S3
+# is the chip whose app-layer port is still ahead of it, so the number is worth
+# trending from the start rather than from the first overrun.
+fw-esp32s3-size-check margin="65536": build-fw-esp32s3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Keep `partition` in sync with the `factory` app partition in
+    # lp-fw/fw-esp32s3/partitions.csv.
+    just _fw-size-check esp32s3 esp32s3 {{ fw_esp32s3_elf }} 3145728 {{ margin }} \
+        "See lp-fw/fw-esp32s3/README.md 'Partitions'."
+
+# Shared tail of the per-chip size checks: measure the flashable image and
+# compare it against the app partition. Factored so the two chips cannot drift
+# apart — the C6 partition has overrun twice, and a second copy of this logic
+# is exactly how the second chip would miss the fix.
+#
+# Callers build the ELF first; the build differs per chip (target, profile,
+# features, toolchain) but the measurement does not.
+_fw-size-check name chip elf partition margin doc:
+    #!/usr/bin/env bash
+    set -euo pipefail
     if ! command -v espflash >/dev/null 2>&1; then
         echo "espflash not found. Install it before running the firmware size check."
         exit 1
     fi
-    # Keep in sync with the `factory` app partition in lp-fw/fw-esp32c6/partitions.csv.
-    partition=3145728
-    (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
-    img="$(mktemp)"
-    trap 'rm -f "${img}"' EXIT
     # No --partition-table here on purpose: espflash errors out when the image
     # overruns the real table, and we want to report *how far* over it is.
-    espflash save-image --chip esp32c6 {{ fw_esp32c6_elf }} "${img}" >/dev/null
+    img="$(mktemp)"
+    trap 'rm -f "${img}"' EXIT
+    espflash save-image --chip {{ chip }} {{ elf }} "${img}" >/dev/null
     size="$(wc -c < "${img}" | tr -d ' ')"
-    headroom=$(( partition - size ))
-    echo "fw-esp32c6 image ${size} B / ${partition} B — headroom ${headroom} B (margin {{ margin }} B)"
+    headroom=$(( {{ partition }} - size ))
+    echo "fw-{{ name }} image ${size} B / {{ partition }} B — headroom ${headroom} B (margin {{ margin }} B)"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-        echo "esp32c6 image \`${size}\` B of \`${partition}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+        echo "{{ name }} image \`${size}\` B of \`{{ partition }}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
     fi
     if [ "${headroom}" -lt "{{ margin }}" ]; then
-        echo "::error::esp32c6 image headroom ${headroom} B is under the {{ margin }} B margin. See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+        echo "::error::{{ name }} image headroom ${headroom} B is under the {{ margin }} B margin. {{ doc }}"
         exit 1
     fi
 

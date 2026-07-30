@@ -260,6 +260,81 @@ jobs:
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # fw-esp32s3 is the repo's only crate on a SECOND toolchain (Espressif's
+  # Xtensa Rust fork — no upstream target exists), so no other job compiles it.
+  # That is precisely the shape that rots here: 13 fw-esp32 test harnesses
+  # silently stopped compiling because CI never built them. This job is the
+  # anti-rot gate, and it measures the image against the same 3 MB partition
+  # the C6 has overrun twice.
+  #
+  # Deliberately shares the broad `firmware` filter with firmware-size rather
+  # than a narrow lp-fw/fw-esp32s3 one: that filter is the link closure of the
+  # device image, and once this crate grows its app layer (server, storage,
+  # shader engine — still ahead of it) a narrow filter would stop rebuilding on
+  # the changes most likely to break it. A narrow filter here would recreate
+  # the rot this job exists to prevent.
+  #
+  # Compile-only. Hardware validation is manual at the M6 gate; tethered CI is
+  # recorded as future work, not attempted here.
+  firmware-xtensa:
+    name: Firmware build (esp32s3)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.firmware == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Install system deps (libudev for espflash)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Installs the Xtensa Rust fork as the `esp` toolchain plus its bundled
+      # GNU binutils, which the build needs on PATH — the Rust target spec
+      # links through xtensa-esp32s3-elf-gcc, not rust-lld.
+      #
+      # Pinned rather than floating. The crate's rust-toolchain.toml says
+      # `channel = "esp"`, which locally tracks whatever espup installed; CI
+      # pins so a fork release cannot turn a green PR red on its own. Needs
+      # >= 1.90 for the workspace MSRV — on 1.88 lpc-model genuinely fails to
+      # compile (70x E0716 from the Slotted derive). Bump deliberately.
+      - name: Install Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3
+          default: true
+          ldproxy: false
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match the firmware-size job. ~/.cargo/bin is restored by
+      # rust-cache above, so this is a no-op on a warm cache.
+      - name: Install espflash
+        run: cargo install espflash --version 3.3.0 --locked
+
+      # Builds the crate and checks the image against its 3 MB app partition.
+      - name: Check esp32s3 image size
+        run: cd lp2025 && just fw-esp32s3-size-check
+
+      # The lint gate for this crate. It is separate from `clippy-host`, which
+      # deliberately EXCLUDES fw-esp32s3: including it triggers a real
+      # critical-section feature-unification conflict, so without this step the
+      # crate has no clippy coverage anywhere.
+      - name: Clippy esp32s3 firmware
+        run: cd lp2025 && just clippy-fw-esp32s3
+
   # The esp32c6 app image must fit a 3 MB partition. It has overrun twice, and
   # both times the signal was a red Deploy Studio Pages run *after* the merge,
   # because no pre-merge job built the device firmware. This job builds it and
