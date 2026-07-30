@@ -47,6 +47,9 @@ pub mod debug_asm;
 pub mod emit;
 pub mod error;
 mod exec_addr;
+// The Xtensa hardware-risk corpus. Feature-gated because the firmware harness
+// wants it and the app build must not pay for it; `no_std`, so the same module
+// builds for the device and for the host golden test.
 #[cfg(any(test, any(target_arch = "riscv32", target_arch = "xtensa")))]
 mod jit_symbol_sizes;
 pub mod link;
@@ -59,6 +62,8 @@ pub mod region;
 pub mod regset;
 pub mod types;
 pub mod vinst;
+#[cfg(feature = "xt-corpus")]
+pub mod xt_corpus;
 
 #[cfg(feature = "emu")]
 pub mod rt_emu;

@@ -586,7 +586,17 @@ clippy-fw-esp32s3:
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo clippy --release -- --no-deps -D warnings
+    cd lp-fw/fw-esp32s3
+    # The app path.
+    cargo clippy --release -- --no-deps -D warnings
+    # Every harness, individually. Harness code is cfg'd out of the app build,
+    # so linting only the default features would leave it completely uncovered
+    # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
+    # repo. Add new `test_*` features to this list.
+    for feat in test_xt_jit_corpus; do
+      echo "clippy: --features $feat"
+      cargo clippy --release --features "$feat" -- --no-deps -D warnings
+    done
 
 build-fw-esp32s3:
     #!/usr/bin/env bash
@@ -641,6 +651,32 @@ flash-fw-esp32s3 port="": build-fw-esp32s3
     fi
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
+# Run the Xtensa JIT corpus on a connected ESP32-S3 and print PASS/FAIL per case.
+#
+# The goldens it compares against are confirmed on lp-xt-emu AND on rv32 by
+# `cargo test -p lpvm-native --features xt-corpus,emu-xt`, which runs FIRST for
+# a reason: a device result is only meaningful against an oracle that was
+# established without the device. A failure here is a finding to triage, never
+# a reason to edit a golden.
+#
+#   just fwtest-xt-jit-esp32s3 /dev/cu.usbmodem1101
+
+# Run the Xtensa JIT corpus on a connected ESP32-S3 (PASS/FAIL per case).
+fwtest-xt-jit-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --release --features test_xt_jit_corpus
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
 # Fail when the esp32c6 app image gets too close to its 3 MB partition.
 # The image overran the partition twice in 2026 and both times it surfaced as a
 # red post-merge deploy, because nothing pre-merge built the firmware. This
@@ -660,6 +696,8 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
 # for the identical 4 MB layout (lp-fw/fw-esp32s3/partitions.csv), and the S3
 # is the chip whose app-layer port is still ahead of it, so the number is worth
 # trending from the start rather than from the first overrun.
+
+# Fail when the esp32s3 app image gets too close to its 3 MB partition.
 fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
@@ -963,8 +1001,23 @@ test-rust-core:
 # it the tests SKIP with a loud note rather than failing, so this recipe is safe
 # on a machine with no esp toolchain — build the image with
 # `scripts/build-builtins-xt.sh` to make it mean something.
+# NO `--test` allowlist, deliberately. There used to be one, and it silently
+# excluded the two files added by #197 — they ran in neither CI nor `just
+# test`, and reported success by executing nothing.
+#
+# An allowlist has to be maintained to stay correct, and the cost of forgetting
+# is SILENCE rather than an error. That is the same property that made the
+# defect those tests guard invisible in the first place, so it is the wrong
+# shape here: explicit-but-stale is worse than implicit-and-complete. Running
+# all targets picks up any future test file automatically; the lib tests it
+# adds cost ~0.2s.
+#
+# `xt-corpus` must be in the feature list alongside `emu-xt`. The corpus tests
+# are `#![cfg(feature = "emu-xt")]` but their subject
+# (`lpvm_native::xt_corpus`) sits behind `xt-corpus` — with only one of the
+# two, the files compile to NOTHING and pass having run nothing.
 test-xt-host:
-    cargo test -p lpvm-native --features emu-xt --test xt_engine --test xt_pipeline --test xt_builtins_image --test xt_imm_legality
+    cargo test -p lpvm-native --features emu-xt,xt-corpus
 
 # Studio web view layer is outside default-members (Dioxus web dep tree);
 # its unit tests are pure host-runnable view helpers. Separate invocation
