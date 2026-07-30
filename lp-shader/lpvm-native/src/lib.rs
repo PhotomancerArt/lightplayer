@@ -46,6 +46,7 @@ pub mod debug;
 pub mod debug_asm;
 pub mod emit;
 pub mod error;
+mod exec_addr;
 #[cfg(any(test, any(target_arch = "riscv32", target_arch = "xtensa")))]
 mod jit_symbol_sizes;
 pub mod link;

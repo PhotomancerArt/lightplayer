@@ -7,6 +7,9 @@ Currently a **boot skeleton**: clocks, heap, and serial logging far enough to
 print the `[INIT]` marker family. The server, radio, and LED-output stacks
 arrive in later phases of the Xtensa backport's M5.
 
+Verified on hardware 2026-07-30 (ESP32-S3 rev v0.2, 16 MB flash): flashes and
+boots to `[INIT] ready`.
+
 ## Building
 
 ```bash
@@ -24,6 +27,38 @@ fails to compile — 70 × E0716 from the `Slotted` derive's const-promotion of 
 temporary — so an MSRV error here means `espup update`, not a code problem.
 The recipe also puts the toolchain's bundled GNU binutils on `PATH`, because
 the Rust target spec links through `xtensa-esp32s3-elf-gcc`.
+
+## Flashing
+
+```bash
+just flash-fw-esp32s3 /dev/cu.usbmodem1101
+```
+
+The port argument is optional but usually wanted: several boards are typically
+on the desk bus and auto-detection picks the first match, not necessarily the
+S3. The S3 speaks **USB-Serial-JTAG**, not a UART bridge, so it enumerates as
+`/dev/cu.usbmodem*` and **its port number changes** each time the chip
+re-enumerates after a reset.
+
+Before concluding a board is dead: a stray `espflash` holding this port wedges
+it *uninterruptibly* (`ps` STAT `Us+`; `kill -9` does not land, because the
+process is blocked reading a device node that went away when the chip
+re-enumerated). Only a physical replug clears it. Check `pgrep -fl espflash`
+first. Bare `espflash monitor` cannot attach to a running app at all — it
+always tries to sync with the bootloader — so use the flash path above.
+
+### Partitions
+
+`partitions.csv` **mirrors the C6's table exactly**: 3 MB `factory` + 960 KB
+`lpfs`, totalling precisely 4 MB. That is deliberate — the 4 MB floor is the
+target, not the desk board's 16 MB, and matching the C6 means the storage
+layer's offsets port across unchanged.
+
+Passing it is not optional. espflash **silently** substitutes a default table
+whose factory partition is only 1 MB if `--partition-table` is omitted; the
+boot skeleton fits that, so the mistake stays invisible until the firmware
+grows past it. Both the `.cargo/config.toml` runner and the justfile recipe
+pass it.
 
 ## How this differs from fw-esp32c6
 

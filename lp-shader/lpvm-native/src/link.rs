@@ -70,14 +70,23 @@ where
             let target = if let Some(addr) = resolve_symbol(&reloc.symbol) {
                 addr
             } else {
-                // Fall back to intra-module function resolution
+                // Fall back to intra-module function resolution.
+                //
+                // The resolver's answers (builtins) are addresses of code
+                // linked into the firmware, so they are already execute
+                // addresses. Intra-module targets are not: they are derived
+                // from `image_base`, which is where the linker *writes*. The
+                // emitted code jumps to whatever goes in here, so it must be
+                // the address the fetch path names — on the S3 that is the
+                // I-bus alias, not the D-bus address the bytes were stored
+                // through. See `crate::exec_addr`.
                 let target_offset = entries.get(&reloc.symbol).ok_or_else(|| {
                     NativeError::Internal(format!(
                         "unresolved symbol `{}` for JIT relocation at offset {}",
                         reloc.symbol, reloc.offset
                     ))
                 })?;
-                image_base.wrapping_add(*target_offset) as u32
+                crate::exec_addr::exec_addr(image_base.wrapping_add(*target_offset)) as u32
             };
 
             let absolute_offset = func_base + reloc.offset;
