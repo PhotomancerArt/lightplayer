@@ -921,6 +921,19 @@ _test-parallel: test-rust test-filetests
 test-rust-core:
     cargo test
 
+# Host Xtensa execution (`lpvm-native/emu-xt`): the ISA-parameterized rt_emu
+# engine running compiled Xtensa code on lp-xt-emu, differentially checked
+# against rv32. Separate invocation because `emu-xt` is not a default feature
+# (plain `cargo test` must not require the esp toolchain) and enabling it here
+# would unify features across the whole default-members build.
+#
+# Needs the Xtensa builtins image, a gitignored cross-target artifact. Without
+# it the tests SKIP with a loud note rather than failing, so this recipe is safe
+# on a machine with no esp toolchain — build the image with
+# `scripts/build-builtins-xt.sh` to make it mean something.
+test-xt-host:
+    cargo test -p lpvm-native --features emu-xt --test xt_engine --test xt_pipeline --test xt_builtins_image --test xt_imm_legality
+
 # Studio web view layer is outside default-members (Dioxus web dep tree);
 # its unit tests are pure host-runnable view helpers. Separate invocation
 # per the no-workspace-wide-cargo rule (feature unification).
@@ -933,7 +946,7 @@ test-studio-host:
     cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
 
 # Local parity: all host tests. CI composes the same pieces path-gated.
-test-rust: test-rust-core test-studio-host
+test-rust: test-rust-core test-studio-host test-xt-host
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the

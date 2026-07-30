@@ -29,12 +29,24 @@ pub struct EmuSharedArena {
 }
 
 impl EmuSharedArena {
-    /// New arena filled with zeros.
+    /// New arena filled with zeros, exposed to the guest at
+    /// [`DEFAULT_SHARED_START`] — the rv32 guest map's free window.
     pub fn new(capacity: usize) -> Self {
+        Self::with_start(capacity, DEFAULT_SHARED_START)
+    }
+
+    /// New arena filled with zeros, exposed to the guest at `shared_start`.
+    ///
+    /// The base is **per-ISA**: each guest map has its own free window, and
+    /// [`DEFAULT_SHARED_START`] (`0x4000_0000`) is only free in rv32's. On
+    /// Xtensa that address is the emulator's unmapped return sentinel, so the
+    /// Xtensa host engine passes `lp_xt_emu::SHARED_DBUS_BASE` instead. See
+    /// `docs/adr/2026-07-30-xtensa-host-shared-memory.md`.
+    pub fn with_start(capacity: usize, shared_start: u32) -> Self {
         Self {
             storage: Arc::new(std::sync::Mutex::new(vec![0u8; capacity])),
             next: Arc::new(AtomicUsize::new(0)),
-            shared_start: DEFAULT_SHARED_START,
+            shared_start,
         }
     }
 

@@ -278,7 +278,7 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
         tree,
         root,
         func_abi,
-        RegPool::new(func_abi.isa()),
+        RegPool::for_abi(func_abi),
     )?;
     let spill_slots = output.num_spill_slots;
     let used_callee_saved = used_callee_saved_from_output(&output, func_abi);

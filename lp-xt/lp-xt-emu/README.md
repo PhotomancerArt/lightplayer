@@ -112,6 +112,27 @@ region carries its `AliasRule`); fetch is permitted only at the executable
 (I-bus) view, so jumping to a D-bus address faults exactly as hardware does
 (FINDINGS E2D, and classic C2g).
 
+### The host-shared window — data the host and guest both own
+
+`Memory::add_shared(dbus_start, Arc<Mutex<Vec<u8>>>)` maps a **host-owned**
+buffer into the guest's data space, so guest loads and stores there read and
+write the host's bytes with no copying. This is how a host emulation engine
+(`lpvm-native`'s `rt_emu`) hands compiled shader code its vmctx — uniforms,
+globals, snapshot region, texture buffers — and reads results back out.
+
+The window is **data only**: it carries no `AliasRule`, so an instruction fetch
+from it faults (`EXC_INSTR_FETCH_ERROR`) exactly as jumping into a data region
+does. `SHARED_DBUS_BASE` (`0x3F40_0000`) is the base both board profiles leave
+free; `add_shared` **asserts** the range does not overlap any installed region,
+in either its D-bus range or its I-bus image, so the choice cannot rot silently
+as profiles change.
+
+This address is **host-emulator fiction** — no ESP32 has a host-shared region,
+and the on-device JIT never needs one. See
+`docs/adr/2026-07-30-xtensa-host-shared-memory.md`, which also records why it is
+deliberately *not* the rv32 engine's `0x4000_0000` (that address is
+`SENTINEL_PC`).
+
 ## Run API
 
 `Emulator::run(code, entry_offset, arg)` loads `code` into SRAM1 and invokes it
@@ -119,7 +140,30 @@ exactly as the device runner does — a synthesized windowed `CALL8`, `arg` stag
 in `a10` and arriving in the callee's `a2` after its `ENTRY` — returning
 `RunOutcome::Ok(result)` or `RunOutcome::Trap`. `run_traced` additionally emits
 `TraceEvent`s (per-instruction, register/memory writes naming the physical AR,
-and window rotate/spill/reload events).
+and window rotate/spill/reload events). `run_with_args` takes up to
+`OUT_ARG_REG_COUNT` (6) register arguments; `run_loaded` runs an image a loader
+already placed in memory.
+
+`run_loaded_with_args(entry, args, tracer, handler)` is the **host-call** entry
+point — what an emulation engine uses to invoke a compiled shader function in an
+already-loaded image. Over the others it adds:
+
+- **stack arguments**: `args[6..]` go to the caller's outgoing argument area at
+  `[caller SP + 4*k]`, matching `isa/xt`'s `classify_params`
+  (`ArgLoc::Stack { offset }`) and what its emitter stores;
+- **outgoing-area headroom**: the caller SP is lowered by that area's
+  (16-aligned) size first, since `initial_sp` sits only 16 bytes below the top
+  of the stack region;
+- **two-word results**: `CallOutcome::Ok { lo, hi }` carries the caller-view
+  `a10`/`a11` pair, which a two-scalar return uses in full.
+
+An sret return needs nothing extra: the buffer pointer is simply the first
+argument (callee `a2`), and the buffer normally lives in the shared window.
+
+`self.step_budget` bounds a run. A host engine that arms in-guest fuel should
+raise it well above the fuel tank so fuel traps fire first and the budget stays
+a backstop for fuel-off compiles; `DEFAULT_STEP_BUDGET` is sized for the fixture
+corpus, not for real shaders.
 
 ## Validation
 
@@ -146,6 +190,15 @@ literals and so are emulator-only known-answer.
 
 All payload bytes are objdump-derived from toolchain-assembled sources, never
 hand-recalled (repo lesson: 2/3 hand-recalls are wrong).
+
+`tests/host_call.rs` covers the host-shared window and the host-call entry point:
+the host↔guest byte round-trip, the fetch fault, the overlap assertion, both
+board profiles, an **eight-argument** call (distinct powers of two summed, so any
+misplaced argument changes the answer — a wrong stack base is otherwise a silent
+wrong-value bug), a two-word return, and an sret buffer in the shared window.
+Its payloads are assembled with `lp_xt_inst::encode` — the objdiff-verified
+encoder — rather than transcribed, because these programs need specific register
+and stack-offset shapes that no golden vector has.
 
 ## Provenance
 

@@ -6,35 +6,72 @@ use alloc::vec::Vec;
 
 /// Physical register pool with LRU eviction.
 pub struct RegPool {
-    isa: IsaTarget,
     /// Which vreg occupies each hardware GPR (None = free).
     preg_vreg: [Option<VReg>; 32],
     /// LRU order: index 0 = least recently used. Only allocatable regs.
     lru: Vec<u8>,
+    /// The registers this pool may hand out, in LRU-seed order.
+    ///
+    /// Usually the ISA's static pool, but a [`FuncAbi`](crate::abi::FuncAbi) can
+    /// withhold a register for the whole function — an sret pointer's home is
+    /// the case that matters. Storing the effective order here (rather than
+    /// re-reading the ISA's static list at each use) is what makes that
+    /// withholding actually hold: `clear` and `clear_all` reseed the LRU, and
+    /// reseeding from the static list would silently hand the register back.
+    pool_order: Vec<u8>,
 }
 
 impl RegPool {
     pub fn new(isa: IsaTarget) -> Self {
-        let lru: Vec<u8> = isa.allocatable_pool_order().iter().copied().collect();
+        let pool_order: Vec<u8> = isa.allocatable_pool_order().iter().copied().collect();
         Self {
-            isa,
             preg_vreg: [None; 32],
-            lru,
+            lru: pool_order.clone(),
+            pool_order,
+        }
+    }
+
+    /// Pool for a specific function, honouring registers its ABI withholds.
+    ///
+    /// `FuncAbi::allocatable` removes the sret pointer's register, which must
+    /// survive the whole function. That exclusion was previously computed and
+    /// then ignored, because the pool seeded itself from the ISA's static list.
+    /// It is invisible on rv32 — the register it withholds (`s1`) is not in
+    /// rv32's static pool to begin with — and load-bearing on Xtensa, where the
+    /// sret pointer lives in `a2`, squarely inside the pool.
+    pub fn for_abi(abi: &crate::abi::FuncAbi) -> Self {
+        let allocatable = abi.allocatable();
+        let pool_order: Vec<u8> = abi
+            .isa()
+            .allocatable_pool_order()
+            .iter()
+            .copied()
+            .filter(|&p| {
+                allocatable.contains(crate::abi::PReg {
+                    hw: p,
+                    class: crate::abi::RegClass::Int,
+                })
+            })
+            .collect();
+        Self {
+            preg_vreg: [None; 32],
+            lru: pool_order.clone(),
+            pool_order,
         }
     }
 
     /// Create pool with limited capacity (for testing spill logic).
     pub fn with_capacity(isa: IsaTarget, n: usize) -> Self {
-        let lru: Vec<u8> = isa
+        let pool_order: Vec<u8> = isa
             .allocatable_pool_order()
             .iter()
             .copied()
             .take(n)
             .collect();
         Self {
-            isa,
             preg_vreg: [None; 32],
-            lru,
+            lru: pool_order.clone(),
+            pool_order,
         }
     }
 
@@ -123,8 +160,7 @@ impl RegPool {
 
     /// Count occupied allocatable registers.
     pub fn occupied_count(&self) -> usize {
-        self.isa
-            .allocatable_pool_order()
+        self.pool_order
             .iter()
             .filter(|&&p| self.preg_vreg[p as usize].is_some())
             .count()
@@ -132,8 +168,7 @@ impl RegPool {
 
     /// Iterate over occupied (preg, vreg) pairs for allocatable registers.
     pub fn iter_occupied(&self) -> impl Iterator<Item = (u8, VReg)> + '_ {
-        self.isa
-            .allocatable_pool_order()
+        self.pool_order
             .iter()
             .copied()
             .filter_map(|p| self.preg_vreg[p as usize].map(|v| (p, v)))
@@ -146,20 +181,18 @@ impl RegPool {
 
     /// Clear allocatable registers only (preserves precolored mappings).
     pub fn clear(&mut self) {
-        for p in self.isa.allocatable_pool_order().iter() {
+        for p in self.pool_order.iter() {
             self.preg_vreg[*p as usize] = None;
         }
         self.lru.clear();
-        self.lru
-            .extend(self.isa.allocatable_pool_order().iter().copied());
+        self.lru.extend(self.pool_order.iter().copied());
     }
 
     /// Clear ALL registers including precolored ones outside the allocatable pool.
     pub fn clear_all(&mut self) {
         self.preg_vreg = [None; 32];
         self.lru.clear();
-        self.lru
-            .extend(self.isa.allocatable_pool_order().iter().copied());
+        self.lru.extend(self.pool_order.iter().copied());
     }
 
     /// Iterate ALL occupied registers, including precolored ones
@@ -261,5 +294,50 @@ mod tests {
         // Next eviction should be preg2 (LRU), not preg1 (MRU)
         let (_, evicted) = pool.alloc(VReg(100));
         assert_eq!(evicted, Some(VReg(1))); // preg2's vreg
+    }
+    /// A register the function's ABI withholds must never be handed out — not
+    /// on the first allocation, not after a `clear` reseeds the LRU.
+    ///
+    /// Regression for the sret-pointer clobber (2026-07-30): `FuncAbi`
+    /// computed the exclusion and the pool ignored it, seeding itself from the
+    /// ISA's static list instead. On Xtensa the withheld register is `a2`,
+    /// which holds the sret pointer for the entire function and sits squarely
+    /// inside the allocatable pool, so aggregate-returning shaders wrote their
+    /// results through whatever value had replaced the pointer. See
+    /// `docs/defects/2026-07-30-xtensa-sret-pointer-clobber.md`.
+    #[cfg(feature = "isa-xt")]
+    #[test]
+    fn for_abi_withholds_the_sret_pointer_register() {
+        use crate::isa::xt::abi::{A2, func_abi_xt};
+        use alloc::string::String;
+        use lps_shared::{LpsFnKind, LpsFnSig, LpsType};
+
+        // A vec4 return (4 scalars) is past the direct-return threshold, so it
+        // returns through an sret buffer whose pointer lives in a2.
+        let sig = LpsFnSig {
+            name: String::from("f"),
+            parameters: alloc::vec::Vec::new(),
+            return_type: LpsType::Vec4,
+            kind: LpsFnKind::UserDefined,
+        };
+        let abi = func_abi_xt(&sig, None);
+        assert!(
+            !abi.allocatable().contains(A2),
+            "precondition: the ABI must withhold a2 for the sret pointer"
+        );
+
+        let mut pool = RegPool::for_abi(&abi);
+        for i in 0..40u16 {
+            let (preg, _) = pool.alloc(VReg(i));
+            assert_ne!(preg, A2.hw, "pool handed out the withheld sret register");
+        }
+        pool.clear();
+        for i in 40..80u16 {
+            let (preg, _) = pool.alloc(VReg(i));
+            assert_ne!(
+                preg, A2.hw,
+                "clear() reseeded the withheld register back in"
+            );
+        }
     }
 }

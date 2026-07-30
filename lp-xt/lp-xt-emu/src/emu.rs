@@ -33,6 +33,11 @@ pub const INITIAL_SP: u32 = STACK_DBUS_BASE + STACK_REGION_LEN as u32 - 16;
 /// `finish_call`).
 pub const SENTINEL_PC: u32 = 0x4000_0000;
 
+/// Number of windowed call-argument registers: the caller stages `a10..a15`
+/// (`isa/xt`'s `OUT_ARG_REGS`), which the callee's ENTRY rotates into
+/// `a2..a7`. Arguments past these go to the caller's outgoing stack area.
+pub const OUT_ARG_REG_COUNT: usize = 6;
+
 /// Default instruction budget before a run is declared a [`TrapKind::Timeout`]
 /// (models the device watchdog catching an infinite loop). Far above any
 /// payload the corpus runs; the hang case is the only one that reaches it.
@@ -82,6 +87,23 @@ pub trait SyscallHandler {
 pub enum RunOutcome {
     /// The top-level function returned; the value is its result register.
     Ok(u32),
+    /// Execution trapped (exception or timeout).
+    Trap(Trap),
+}
+
+/// Outcome of a host-initiated call ([`Emulator::run_loaded_with_args`]).
+///
+/// Distinct from [`RunOutcome`] because a call can return **two** words: the
+/// windowed ABI's result bank is `a10`/`a11` in the caller's view
+/// (`isa/xt`'s `CALL_RET_REGS`), and a two-scalar return uses both. Returning
+/// them explicitly is deliberate — the alternative, letting the caller reach
+/// into `emu.cpu` for the second half of its own result, is an implicit
+/// contract that breaks the first time the run loop changes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CallOutcome {
+    /// The call returned. `lo`/`hi` are the caller-view `a10`/`a11`; `hi` is
+    /// meaningful only for a two-word return.
+    Ok { lo: u32, hi: u32 },
     /// Execution trapped (exception or timeout).
     Trap(Trap),
 }
@@ -208,8 +230,9 @@ impl Emulator {
     /// If `args.len() > 6`.
     pub fn run_with_args(&mut self, code: &[u8], entry_offset: u32, args: &[u32]) -> RunOutcome {
         assert!(
-            args.len() <= 6,
-            "run_with_args stages register args only (max 6, got {})",
+            args.len() <= OUT_ARG_REG_COUNT,
+            "run_with_args stages register args only (max {OUT_ARG_REG_COUNT}, got {}) — \
+             use run_loaded_with_args for stack arguments",
             args.len()
         );
         let ibus_base = self.profile.code_ibus_base();
@@ -258,14 +281,84 @@ impl Emulator {
         self.run_loop(tracer, Some(handler))
     }
 
-    /// Reset the CPU and stage the synthesized windowed CALL8 into `entry`.
+    /// Call already-loaded code with a full argument list and read back **both**
+    /// result words — the entry point a host emulation engine uses to invoke a
+    /// compiled shader function.
+    ///
+    /// What this adds over [`run_loaded`](Self::run_loaded) (one argument) and
+    /// [`run_with_args`](Self::run_with_args) (six, and it *loads a code blob*,
+    /// which is wrong once a loader has placed an ELF image):
+    ///
+    /// - **Register arguments**: `args[0..6]` are staged in the caller's
+    ///   `a10..a15` (`isa/xt`'s `OUT_ARG_REGS`), arriving as the callee's
+    ///   `a2..a7` after its ENTRY rotation.
+    /// - **Stack arguments**: `args[6..]` are written to the caller's outgoing
+    ///   argument area at `[caller SP + 4*i]`, matching what `isa/xt`'s
+    ///   `classify_params` computes (`ArgLoc::Stack { offset }`, from 0 by 4)
+    ///   and what its emitter stores (`[SP + (i - cap) * 4]`, where the callee's
+    ///   SP plus its ENTRY frame *is* the caller's SP).
+    /// - **Outgoing-area headroom**: the caller SP is lowered by the (16-aligned)
+    ///   size of that area first. `BoardProfile::initial_sp` sits 16 bytes below
+    ///   the top of the stack region, which would leave room for only four stack
+    ///   words before running off the end.
+    /// - **Two-word results**: see [`CallOutcome`].
+    ///
+    /// `self.step_budget` bounds the run. A host engine that arms in-guest fuel
+    /// should raise it well above the fuel tank so fuel traps fire first and the
+    /// budget stays a backstop for fuel-off compiles (rv32's `rt_emu` raises its
+    /// equivalent to 64M for exactly this reason); [`DEFAULT_STEP_BUDGET`] is
+    /// sized for the fixture corpus, not for real shaders.
+    pub fn run_loaded_with_args(
+        &mut self,
+        entry: u32,
+        args: &[u32],
+        tracer: &mut dyn Tracer,
+        handler: Option<&mut dyn SyscallHandler>,
+    ) -> CallOutcome {
+        let n_reg = args.len().min(OUT_ARG_REG_COUNT);
+        let stack_bytes = ((args.len() - n_reg) * 4) as u32;
+        // Keep SP 16-aligned (the ABI's frame invariant): initial_sp already is,
+        // and rounding the outgoing area up to 16 preserves it.
+        let sp = self
+            .profile
+            .initial_sp()
+            .wrapping_sub(stack_bytes.next_multiple_of(16));
+
+        self.stage_windowed_entry_at(entry, args.first().copied().unwrap_or(0), sp);
+        for (i, &a) in args.iter().enumerate().take(n_reg).skip(1) {
+            self.cpu.set_a(10 + i as u8, a);
+        }
+        for (i, &a) in args.iter().enumerate().skip(n_reg) {
+            let at = sp.wrapping_add(((i - n_reg) * 4) as u32);
+            if let Err(trap) = self.mem.write_u32(at, a) {
+                return CallOutcome::Trap(trap);
+            }
+        }
+
+        match self.run_loop(tracer, handler) {
+            RunOutcome::Ok(lo) => CallOutcome::Ok {
+                lo,
+                hi: self.cpu.a(11),
+            },
+            RunOutcome::Trap(t) => CallOutcome::Trap(t),
+        }
+    }
+
+    /// Reset the CPU and stage the synthesized windowed CALL8 into `entry`,
+    /// with the caller frame's SP at [`BoardProfile::initial_sp`].
     fn stage_windowed_entry(&mut self, entry: u32, arg: u32) {
+        self.stage_windowed_entry_at(entry, arg, self.profile.initial_sp());
+    }
+
+    /// As [`stage_windowed_entry`](Self::stage_windowed_entry) with an explicit
+    /// caller SP, so a caller that needs an outgoing-argument area can reserve
+    /// it below the top of the stack region.
+    fn stage_windowed_entry_at(&mut self, entry: u32, arg: u32, initial_sp: u32) {
         // Synthesize the caller frame (the runner's context) at base 0 and the
         // CALL8 that jumps into `entry`. A real CALL8 writes the (mangled)
         // return address into the caller's a8 and stages args in a10..; the
         // callee's ENTRY then rotates WindowBase by PS.CALLINC (=2), so a8→a0
         // and a10→a2.
-        let initial_sp = self.profile.initial_sp();
         self.instruction_count = 0;
         self.cycle_count = 0;
         self.inst_log.clear();
