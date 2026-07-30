@@ -180,12 +180,27 @@ runtime.
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
-## Native RV32 backend (`lpvm-native`)
+## Native backends (`lpvm-native`)
 
-**`lpvm-native`** lowers LPIR to custom RV32 machine code outside Cranelift
+**`lpvm-native`** lowers LPIR to custom machine code outside Cranelift
 (pool-based register allocation, `rt_jit` / `rt_emu`). It is the default
 on-device codegen path and is exercised by **`native-jit`** on `fw-esp32c6`/`fw-emu`
-and the **`rv32n.q32`** filetest target.
+and the **`rv32n.q32`** / **`rv32lpn.q32`** filetest targets.
+
+**Two ISAs**: RV32 (ESP32-C6) and Xtensa (ESP32-S3 / classic ESP32), each behind
+an `isa-*` Cargo feature so firmware pays only for the one it runs. `rt_emu` is
+**one engine parameterized by `IsaTarget`**, not one per ISA — see
+`docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`. The Xtensa host path
+is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
+targets; it needs a cross-compiled builtins image
+(`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
+
+> **`regalloc/` is shared by both ISAs, and rv32 passing does not prove it
+> correct.** Two defects landed there in 2026-07 that were correct on rv32 only
+> because its argument registers and allocatable pool happen to be disjoint sets;
+> Xtensa's overlap, and both became wrong-value bugs. See the
+> `config-masked-defect` class in `docs/defects/README.md`. When you change
+> allocation or ABI code, run **both** target families.
 
 ## Building the workspace (cross-target)
 
