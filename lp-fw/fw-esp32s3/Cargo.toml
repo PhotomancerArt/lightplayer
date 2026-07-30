@@ -16,6 +16,22 @@ esp32s3 = [
     "esp-hal/esp32s3",
 ]
 
+# Hardware harnesses. Any `test_*` feature makes build.rs set the `fw_harness`
+# cfg, which replaces the (future) app entrypoint with a harness — mirroring
+# fw-esp32c6 rather than inventing a second mechanism.
+#
+# Runs the Xtensa hardware-risk corpus (`lpvm_native::xt_corpus`) through the
+# on-device JIT and prints PASS/FAIL per case against goldens confirmed on
+# lp-xt-emu. The corpus is shared with the host golden test precisely so the
+# two cannot drift.
+test_xt_jit_corpus = [
+    "dep:lpvm-native",
+    "dep:lpvm",
+    "dep:lpir",
+    "dep:lps-shared",
+    "dep:lps-builtins",
+]
+
 [dependencies]
 esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
 esp-backtrace = { version = "0.19.0", features = ["println"] }
@@ -23,6 +39,19 @@ esp-bootloader-esp-idf = { version = "0.5.0" }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32s3", "jtag-serial", "log-04"] }
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
 log = { workspace = true, default-features = false }
+
+# Shader/JIT stack — harness-only for now, so the boot path stays dependency-free.
+# `default-features = false` + explicit `isa-xt` is load-bearing: pulling the
+# rv32 backend onto an Xtensa image costs flash for code the chip cannot
+# execute (measured +26,448 B on the C6 before that gate existed).
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = [
+    "isa-xt",
+    "xt-corpus",
+], optional = true }
+lpvm = { path = "../../lp-shader/lpvm", default-features = false, optional = true }
+lpir = { path = "../../lp-shader/lpir", default-features = false, optional = true }
+lps-shared = { path = "../../lp-shader/lps-shared", default-features = false, optional = true }
+lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 
 [lints]
 workspace = true

@@ -8,6 +8,7 @@ related:
   - docs/adr/2026-07-30-integer-division-never-traps.md
   - docs/defects/2026-07-30-xtensa-call-argument-clobber.md
   - docs/defects/2026-07-30-xtensa-sret-pointer-clobber.md
+  - docs/defects/2026-07-30-xtensa-stack-arg-staged-over.md
 ---
 # Defect: integer divide by zero took the device down on Xtensa
 
