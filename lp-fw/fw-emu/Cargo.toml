@@ -21,7 +21,21 @@ lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
 lp-perf = { path = "../../lp-base/lp-perf", features = ["syscall"] }
 lp-recovery = { workspace = true }
 lp-emu-abi = { path = "../../lp-emu/lp-emu-abi" }
-lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["panic-recovery"] }
+# `default-features = false` predates the per-node-kind gates on `lpc-engine`
+# (2026-07-30); list every node gate explicitly so fw-emu keeps exercising
+# the full node set it always has (filetests/scene_render_emu depend on it),
+# same reasoning as `lpa-server/Cargo.toml`.
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = [
+    "panic-recovery",
+    "node-button",
+    "node-radio",
+    "node-fluid",
+    "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
+] }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
 hashbrown = { workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
