@@ -165,16 +165,10 @@ fn corpus_covers_every_enumerated_risk() {
         .collect();
     seen.sort_unstable();
     seen.dedup();
-    // Risk 6 (sret) is knowingly absent — it needs `call_direct` with an
-    // output buffer rather than `call_q32`, and #194 already covers the
-    // underlying defect with a host regression test. See the long comment in
-    // `xt_corpus.rs`. This assertion names it so it CANNOT be forgotten:
-    // adding the case means updating this list, and dropping any other risk
-    // fails the test.
     assert_eq!(
         seen,
-        ["1", "2", "3", "4", "5", "7"],
-        "corpus must cover risks 1,2,3,4,5,7 (6 = sret is documented as not covered); got {seen:?}"
+        ["1", "2", "3", "4", "5", "6", "7"],
+        "corpus must cover all 7 enumerated risk-surface items; got {seen:?}"
     );
 }
 

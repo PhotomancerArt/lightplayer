@@ -83,6 +83,20 @@ fn int_sig(name: &str) -> LpsFnSig {
     }
 }
 
+/// Signature helper: `name(x: int) -> vec4` (4 return words => the sret path).
+fn vec4_ret_sig(name: &str) -> LpsFnSig {
+    LpsFnSig {
+        name: name.to_string(),
+        parameters: vec![FnParam {
+            name: String::from("x"),
+            ty: LpsType::Int,
+            qualifier: ParamQualifier::In,
+        }],
+        return_type: LpsType::Vec4,
+        kind: LpsFnKind::UserDefined,
+    }
+}
+
 fn sig_of(fns: Vec<LpsFnSig>) -> LpsModuleSig {
     LpsModuleSig {
         functions: fns,
@@ -279,33 +293,59 @@ fn build_imm_materialize() -> (LpirModule, LpsModuleSig) {
 }
 
 // ---------------------------------------------------------------------------
-// Risk 6 — sret returns. NOT COVERED HERE, and this is why.
+// Risk 6 — sret (aggregate) returns.
 // ---------------------------------------------------------------------------
-//
-// An sret function needs a DIFFERENT call API from every other case, so it
-// cannot join this table without splitting the harness in two:
-//
-// - `FunctionBuilder::finish` asserts sret functions have EMPTY `return_types`
-//   (the results go through a caller-provided destination pointer added by
-//   `add_sret_param`, written with `LpirOp::Store`).
-// - `entry_info.ret_count` is therefore 0, and `invoke_flat` truncates its
-//   sret buffer to `ret_count` — so `LpvmInstance::call_q32`, which every case
-//   here uses, returns an EMPTY vector for an sret function.
-// - Reading the values back requires `NativeJitInstance::call_direct(handle,
-//   args, out)` with an explicit output buffer, which the emulator side would
-//   have to mirror.
-//
-// Deliberately not bodged in: a case that silently returned `[]` and compared
-// equal to an empty golden would be worse than no case at all.
-//
-// It is also the least urgent of the seven. PR #194 fixed the real sret defect
-// (`RegPool::new` ignored `FuncAbi::allocatable`, handing out `a2` — the sret
-// pointer register — as a data register) and shipped a host regression test
-// verified to fail when reverted. So the risk is covered on the host; what is
-// missing is only the on-silicon confirmation.
-//
-// Follow-up: add an sret case once the harness grows a `call_direct` path on
-// both sides.
+
+/// `f(x) -> vec4 { x, x+1, x+2, x+3 }`.
+///
+/// Four return words take the **sret** path: the caller passes a hidden
+/// destination pointer (`add_sret_param`, always before user params) which the
+/// callee stores through, and `return_types` is empty because nothing comes
+/// back in registers. Vec4 and not Vec2 on purpose — two words return in
+/// `r0`/`r1` and never touch sret at all.
+///
+/// Two real defects live behind this shape:
+///
+/// - #194: `RegPool::new` ignored `FuncAbi::allocatable`, handing out `a2` —
+///   which must hold the sret pointer for the whole function — as a data
+///   register.
+/// - This session: `rt_jit` derived its cached `ret_count` from
+///   `return_types.len()`, which is 0 here, so `invoke_flat` sized the sret
+///   buffer at one word while the callee wrote four.
+///
+/// Both are invisible to a shader that returns a scalar, and vec3/vec4 returns
+/// are ubiquitous in real GLSL.
+fn build_sret_vec4() -> (LpirModule, LpsModuleSig) {
+    let mut fb = FunctionBuilder::new("f", &[]);
+    let dst = fb.add_sret_param();
+    let x = fb.add_param(IrType::I32);
+    let a = fb.alloc_vreg(IrType::I32);
+    let b = fb.alloc_vreg(IrType::I32);
+    let c = fb.alloc_vreg(IrType::I32);
+    for (dst_v, imm) in [(a, 1), (b, 2), (c, 3)] {
+        fb.push(LpirOp::IaddImm {
+            dst: dst_v,
+            src: x,
+            imm,
+        });
+    }
+    for (i, v) in [x, a, b, c].into_iter().enumerate() {
+        fb.push(LpirOp::Store {
+            base: dst,
+            offset: (i * 4) as u32,
+            value: v,
+        });
+    }
+    fb.push_return(&[]);
+
+    (
+        LpirModule {
+            imports: vec![],
+            functions: VecMap::from([(FuncId(0), fb.finish())]),
+        },
+        sig_of(vec![vec4_ret_sig("f")]),
+    )
+}
 
 // ---------------------------------------------------------------------------
 // Risk 7 — Q32 arithmetic.
@@ -472,6 +512,23 @@ pub const CASES: &[XtCase] = &[
             golden: &[0x0204_1230],
         }],
         build: build_imm_materialize,
+        needs_builtins: false,
+    },
+    XtCase {
+        name: "sret_vec4_return",
+        risk: "6: sret (aggregate) return",
+        entry: "f",
+        invocations: &[
+            XtInvocation {
+                args: &[7],
+                golden: &[7, 8, 9, 10],
+            },
+            XtInvocation {
+                args: &[-1],
+                golden: &[-1, 0, 1, 2],
+            },
+        ],
+        build: build_sret_vec4,
         needs_builtins: false,
     },
     XtCase {

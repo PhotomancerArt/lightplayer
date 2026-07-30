@@ -889,6 +889,38 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --no-default-features --features test_espnow,esp32c6 -- --no-deps -D warnings
 
+# Every lpc-engine node gate, one build per gate turned off.
+#
+# The gates are all default-on, so nothing else in the repo ever compiles a
+# gate-off configuration — the same invisible-rot shape as the fw-esp32c6
+# harnesses above, and the reason M2 added this alongside them. A gate-off
+# build is what M3's ESP32-S3 app layer actually ships, so it has to keep
+# compiling warning-free, and `disabled_node_kind_still_loads_project` (the
+# missing-node contract, `docs/debt/firmware-capability-reporting.md`) only
+# exists in a gate-off build and is only run here.
+#
+# `--all-targets` matters: without it the gate-off tests are never built.
+check-lpc-engine-gates:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    gates=(node-button node-radio node-fluid node-fixture node-texture \
+           node-playlist node-clock node-shader)
+    echo "==> lpc-engine: all node gates off"
+    cargo clippy -p lpc-engine --no-default-features --features std \
+        --all-targets -- --no-deps -D warnings
+    for off in "${gates[@]}"; do
+        on=$(printf '%s\n' "${gates[@]}" | grep -vx "$off" | paste -sd, -)
+        echo "==> lpc-engine: $off OFF"
+        cargo clippy -p lpc-engine --no-default-features --features "std,$on" \
+            --all-targets -- --no-deps -D warnings
+    done
+    # The missing-node contract test lives behind `not(feature = "node-button")`,
+    # so this is the only configuration that runs it.
+    on=$(printf '%s\n' "${gates[@]}" | grep -vx node-button | paste -sd, -)
+    echo "==> lpc-engine: missing-node contract test (node-button OFF)"
+    cargo test -p lpc-engine --no-default-features --features "std,$on" \
+        disabled_node_kind_still_loads_project
+
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
     cd lp-riscv/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
@@ -969,8 +1001,23 @@ test-rust-core:
 # it the tests SKIP with a loud note rather than failing, so this recipe is safe
 # on a machine with no esp toolchain — build the image with
 # `scripts/build-builtins-xt.sh` to make it mean something.
+# NO `--test` allowlist, deliberately. There used to be one, and it silently
+# excluded the two files added by #197 — they ran in neither CI nor `just
+# test`, and reported success by executing nothing.
+#
+# An allowlist has to be maintained to stay correct, and the cost of forgetting
+# is SILENCE rather than an error. That is the same property that made the
+# defect those tests guard invisible in the first place, so it is the wrong
+# shape here: explicit-but-stale is worse than implicit-and-complete. Running
+# all targets picks up any future test file automatically; the lib tests it
+# adds cost ~0.2s.
+#
+# `xt-corpus` must be in the feature list alongside `emu-xt`. The corpus tests
+# are `#![cfg(feature = "emu-xt")]` but their subject
+# (`lpvm_native::xt_corpus`) sits behind `xt-corpus` — with only one of the
+# two, the files compile to NOTHING and pass having run nothing.
 test-xt-host:
-    cargo test -p lpvm-native --features emu-xt --test xt_engine --test xt_pipeline --test xt_builtins_image --test xt_imm_legality
+    cargo test -p lpvm-native --features emu-xt,xt-corpus
 
 # Studio web view layer is outside default-members (Dioxus web dep tree);
 # its unit tests are pure host-runnable view helpers. Separate invocation

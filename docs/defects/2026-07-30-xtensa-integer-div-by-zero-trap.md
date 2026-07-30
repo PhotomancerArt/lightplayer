@@ -9,6 +9,7 @@ related:
   - docs/defects/2026-07-30-xtensa-call-argument-clobber.md
   - docs/defects/2026-07-30-xtensa-sret-pointer-clobber.md
   - docs/defects/2026-07-30-xtensa-stack-arg-staged-over.md
+  - docs/defects/2026-07-30-xtensa-two-value-return-clobber.md
 ---
 # Defect: integer divide by zero took the device down on Xtensa
 
@@ -74,7 +75,7 @@ obligation was phrased as a roster instead of a rule.
 - `lower.rs` gains `lower_int_div` / `emit_guarded_int_div`. When the hook says
   the ISA traps, the divide is guarded at the **VInst** level so register
   allocation owns the temporaries — not in the emitter with hand-managed
-  scratch registers, which is the shape that produced the three allocator
+  scratch registers, which is the shape that produced the four allocator
   entries alongside this one. rv32 still emits the bare instruction, byte for byte.
 - Only the **zero divisor** is guarded on Xtensa. Its divide already yields
   `i32::MIN` for `i32::MIN / -1` and `0` for `i32::MIN % -1`, matching RV32M, so
@@ -104,11 +105,11 @@ reach 39/39 directives and 3/3 files.
 
 ## Lesson
 
-This is the **fourth `config-masked-defect` in three days**, all in
+This is the **fifth `config-masked-defect` on 2026-07-30**, all in
 `lpvm-native`, all the same shape: shared code that was correct only because
-rv32 happened to make it correct. The first three were register-layout
-coincidences; this one is a hardware-semantics coincidence, which is the same
-mechanism one level down.
+rv32 happened to make it correct. The other four were register-layout
+coincidences in `regalloc/`; this one is a hardware-semantics coincidence in
+lowering, which is the same mechanism one level down.
 
 What distinguishes it is worth keeping: **the falsifying test already existed.**
 `op-divide-by-zero.glsl` has pinned this contract for as long as the corpus has
