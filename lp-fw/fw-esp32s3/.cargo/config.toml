@@ -2,7 +2,11 @@
 target = "xtensa-esp32s3-none-elf"
 
 [target.xtensa-esp32s3-none-elf]
-runner = "espflash flash --chip esp32s3 --monitor --after hard-reset"
+# `--partition-table` is not optional: without it espflash silently substitutes
+# a default table whose factory partition is 1 MB, and the firmware will
+# outgrow that long before it outgrows the 3 MB this crate is budgeted. The
+# path is relative because the runner executes from the crate directory.
+runner = "espflash flash --chip esp32s3 --partition-table partitions.csv --monitor --after hard-reset"
 rustflags = [
   # The Xtensa target links through xtensa-esp32s3-elf-gcc (GNU ld), so linker
   # scripts are passed with -Wl, unlike the C6's rust-lld path.
