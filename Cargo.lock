@@ -5924,6 +5924,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lps-builtins-xt-image"
+version = "40.0.0"
+
+[[package]]
 name = "lps-diagnostics"
 version = "40.0.0"
 
@@ -5944,6 +5948,7 @@ dependencies = [
  "lp-shader",
  "lpir",
  "lps-builtins",
+ "lps-builtins-xt-image",
  "lps-diagnostics",
  "lps-frontend",
  "lps-glsl",
@@ -6102,6 +6107,7 @@ dependencies = [
  "lpir",
  "lps-builtin-ids",
  "lps-builtins",
+ "lps-builtins-xt-image",
  "lps-q32",
  "lps-shared",
  "lpvm",

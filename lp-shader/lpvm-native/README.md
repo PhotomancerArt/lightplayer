@@ -99,7 +99,7 @@ The intermediate representation between LPIR and machine code:
 | [`emit.rs`](src/emit.rs)            | Emission orchestration                   |
 | [`compile.rs`](src/compile.rs)      | Module-level compilation                 |
 | [`rt_jit/`](src/rt_jit/)            | JIT runtime for RISC-V targets           |
-| [`rt_emu/`](src/rt_emu/)            | Emulation runtime for host testing       |
+| [`rt_emu/`](src/rt_emu/)            | Emulation runtime for host testing (both ISAs) |
 
 ### Multi-ISA seam
 
@@ -167,6 +167,41 @@ plus a re-run of the size check to confirm nothing else grew.
 >
 > - `lp-gfx/lp-gfx-lpvm/Cargo.toml` — the JIT-capable and non-JIT tables
 > - `lp-shader/lpvm-native/Cargo.toml` — the JIT-capable table
+
+**4. `rt_emu` is one engine for both ISAs, not one per ISA.**
+`NativeEmuEngine::new_for_isa(options, isa)` takes the ISA as a **runtime value**
+(`new()` stays rv32). Of `rt_emu/instance.rs`'s ~1,230 lines only
+`run_emulator_call` is ISA-specific — ~30 lines per arm to construct the
+emulator, place arguments, call, and read counters; the vmctx, uniform, global,
+snapshot, texture, fuel and Q32 plumbing is neutral, and all host-side read-back
+goes through the shared arena rather than through the emulator. The linked image
+is the neutral `rt_emu::GuestImage`; each ISA's loader converts into it.
+
+The consequence worth knowing: `LpvmEngine`/`LpvmModule`/`LpvmInstance` stay
+ISA-agnostic **types**, so consumers (`lps-filetests`, `lp-shader`) never grow
+per-ISA match arms. See
+`docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`, which also records
+why there is no `EmuCore` trait.
+
+Host Xtensa execution is the **additive `emu-xt` feature** (`emu` + `isa-xt` +
+`lp-xt-emu` + `lp-xt-elf` + `lps-builtins-xt-image`). It does not weaken the
+firmware ISA gate above: `isa-xt` alone still compiles only the backend.
+
+`emu-xt` needs the **Xtensa builtins image**, a gitignored cross-target artifact:
+
+```bash
+scripts/build-builtins-xt.sh          # needs the esp toolchain
+cargo test -p lpvm-native --features emu-xt   # or: just test-xt-host
+```
+
+Without it, `lps_builtins_xt_image::is_available()` is false and Xtensa
+consumers skip with a loud note rather than failing — the workspace must build
+and test on a machine with no esp toolchain.
+
+Xtensa shader code shares the image's 112 KiB text region with ~84 KiB of
+builtins, leaving **~28 KiB**. Overflowing it is an explicit error naming the
+budget, never a silent write past the region; the fix would be
+`lp-xt/lps-builtins-xt-app/link.ld`'s split, not the host region size.
 
 `isa/xt/` and the `lp-xt-*` crates it builds on contain material derived from
 LLVM under Apache-2.0-WITH-LLVM-exception and carry per-file provenance
