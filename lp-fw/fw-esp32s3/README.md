@@ -1,14 +1,58 @@
 # fw-esp32s3
 
 LightPlayer firmware for the **ESP32-S3** (Xtensa LX7). Sibling of
-`fw-esp32c6` (RISC-V) and the **third consumer** of `fw-esp32-common`.
+`fw-esp32c6` (RISC-V).
 
-Currently a **boot skeleton**: clocks, heap, and serial logging far enough to
-print the `[INIT]` marker family. The server, radio, and LED-output stacks
-arrive in later phases of the Xtensa backport's M5.
+> **Not yet a consumer of `fw-esp32-common`.** An earlier version of this file
+> called the crate its "third consumer"; that was wrong at the dependency
+> level and is corrected here. What was actually proven during M5 is weaker
+> but still useful: `fw-esp32-common` *compiles* for `xtensa-esp32s3-none-elf`
+> pulling no `esp-hal`, so the chip-agnostic seam holds against a second
+> architecture. Wiring it in is the app-layer milestone's job.
+
+Currently a **boot skeleton plus hardware harnesses**: clocks, heap, and serial
+logging far enough to print the `[INIT]` marker family, and a JIT corpus runner
+(below). The server, storage, and output stacks are the app-layer milestone of
+`~/.photomancer/planning/lp2025/2026-07-30-s3-app-layer-with-jit/`; the Xtensa
+backport roadmap that created this crate is closed.
 
 Verified on hardware 2026-07-30 (ESP32-S3 rev v0.2, 16 MB flash): flashes and
-boots to `[INIT] ready`.
+boots to `[INIT] ready`, and runs the Xtensa JIT corpus (below) with 11/11
+cases matching their goldens.
+
+## Hardware harnesses
+
+Any `test_*` feature makes `build.rs` set the `fw_harness` cfg, which replaces
+the boot path's park loop with a harness runner — the same mechanism
+`fw-esp32c6` uses, deliberately not a second one.
+
+### `test_xt_jit_corpus`
+
+```bash
+just fwtest-xt-jit-esp32s3 /dev/cu.usbmodem1101
+```
+
+Compiles shaders on-device through `lpvm-native`'s JIT (`isa/xt`) and prints
+`PASS`/`FAIL` per named case. It was the first execution of LightPlayer-compiled
+code on Xtensa silicon, and it is what proved the **exec-alias fix**:
+intra-module call targets must hold the I-bus alias, not the D-bus address the
+linker wrote through.
+
+The corpus lives in `lpvm-native::xt_corpus` rather than here, and that
+placement is load-bearing: the host golden test
+(`lpvm-native/tests/xt_corpus_goldens.rs`) runs the **same** modules on
+`lp-xt-emu` and on rv32, so a device mismatch is a real emulator-vs-silicon
+difference rather than two harnesses disagreeing.
+
+**Goldens are committed constants confirmed before any hardware run. A device
+mismatch is a finding to triage — never a reason to edit a golden**, which
+would turn the comparison into a tautology that passes forever.
+
+Run the host oracle first:
+
+```bash
+cargo test -p lpvm-native --features xt-corpus,emu-xt
+```
 
 ## Building
 
