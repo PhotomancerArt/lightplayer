@@ -45,6 +45,14 @@ that mention `lp_value` / `LpType` vs `LpsValueF32` / `LpsType`).
 
 ## Node-kind feature gates (M2)
 
+> **This gate set is provisional and expected to be revisited.** It was sized
+> against one constraint — the ESP32-C6's 3 MB partition — and deliberately
+> kept light-touch. The ESP32-S3 has 16 MB and will soon carry features the
+> other builds do not, at which point the useful axis stops being "which node
+> kinds fit" and becomes "which capabilities does this board have". Treat the
+> granularity below as a first cut, not doctrine: adding, merging, or
+> re-drawing gates is expected work, not a redesign.
+
 Every node runtime kind except `Project` (the always-present root
 placeholder) and `Output` (`LpServer` requires an output provider) is behind
 its own Cargo feature, all default-on:
