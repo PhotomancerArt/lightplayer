@@ -472,6 +472,105 @@ fn guarded_division_idiom_does_not_trap_when_the_guard_is_false() {
     assert_eq!(run_binary(build, 10, -2), 0);
 }
 
+/// A divisor that is a single-definition non-zero constant cannot be zero, so
+/// the guard is elided entirely and the bare `QUOS`/`REMS` is emitted. The
+/// values must be unchanged, and the function must be *smaller* than the same
+/// division by a runtime divisor — the size assertion is what proves the
+/// elision actually fired rather than the test merely re-checking arithmetic.
+#[test]
+fn constant_nonzero_divisor_elides_the_guard() {
+    let const_div = |value: i32| {
+        move |fb: &mut FunctionBuilder, x: lpir::VReg, _y: lpir::VReg| {
+            let c = fb.alloc_vreg(IrType::I32);
+            let d = fb.alloc_vreg(IrType::I32);
+            fb.push(LpirOp::IconstI32 { dst: c, value });
+            fb.push(LpirOp::IdivS {
+                dst: d,
+                lhs: x,
+                rhs: c,
+            });
+            fb.push_return(&[d]);
+        }
+    };
+    assert_eq!(run_binary(const_div(7), 42, 0) as i32, 6);
+    assert_eq!(run_binary(const_div(7), -42, 0) as i32, -6);
+    assert_eq!(run_binary(const_div(-1), i32::MIN, 0) as i32, i32::MIN);
+
+    // A zero constant divisor must still be guarded — it is exactly the case
+    // the contract is about, and eliding it would reintroduce the trap.
+    assert_eq!(run_binary(const_div(0), 42, 0) as i32, -1);
+
+    let bytes = |b: fn(&mut FunctionBuilder, lpir::VReg, lpir::VReg)| {
+        let (ir, sig) = binary_module(b);
+        compile_module(
+            &ir,
+            &sig,
+            FloatMode::Q32,
+            NativeCompileOptions {
+                float_mode: FloatMode::Q32,
+                ..Default::default()
+            },
+            IsaTarget::Xtensa,
+        )
+        .expect("compile")
+        .functions[0]
+            .code
+            .len()
+    };
+    let folded = bytes(|fb, x, _y| {
+        let c = fb.alloc_vreg(IrType::I32);
+        let d = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: c, value: 7 });
+        fb.push(LpirOp::IdivS {
+            dst: d,
+            lhs: x,
+            rhs: c,
+        });
+        fb.push_return(&[d]);
+    });
+    let guarded = bytes(|fb, x, y| {
+        let d = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IdivS {
+            dst: d,
+            lhs: x,
+            rhs: y,
+        });
+        fb.push_return(&[d]);
+    });
+    assert!(
+        folded < guarded,
+        "constant divisor should skip the guard: {folded} B folded vs {guarded} B guarded"
+    );
+}
+
+/// The soundness boundary: a divisor with more than one definition is not
+/// knowable from a linear walk, so the guard must stay even though one of the
+/// definitions is a non-zero constant. Here the second definition makes the
+/// divisor zero at run time — with an unsound elision this traps.
+#[test]
+fn redefined_divisor_keeps_the_guard() {
+    assert_eq!(
+        run_binary(
+            |fb, x, y| {
+                let c = fb.alloc_vreg(IrType::I32);
+                let d = fb.alloc_vreg(IrType::I32);
+                fb.push(LpirOp::IconstI32 { dst: c, value: 7 });
+                // Second definition: c now holds whatever the caller passed.
+                fb.push(LpirOp::Copy { dst: c, src: y });
+                fb.push(LpirOp::IdivS {
+                    dst: d,
+                    lhs: x,
+                    rhs: c,
+                });
+                fb.push_return(&[d]);
+            },
+            42,
+            0,
+        ) as i32,
+        -1,
+    );
+}
+
 #[test]
 fn shifts_signed_and_unsigned() {
     let r = run_unary(
