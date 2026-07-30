@@ -268,6 +268,7 @@ fn emit_q32_fdiv_const_zero(
 fn lower_int_div(
     out: &mut Vec<VInst>,
     temps: &mut TempVRegs,
+    func: &IrFunction,
     isa: IsaTarget,
     op: AluOp,
     dst: lpir::VReg,
@@ -275,9 +276,10 @@ fn lower_int_div(
     rhs: lpir::VReg,
     src_op: u16,
 ) {
+    let konst = const_divisor(func, rhs);
     let (dst, lhs, rhs) = (fa_vreg(dst), fa_vreg(lhs), fa_vreg(rhs));
 
-    let guard = isa.integer_div_traps_on_zero();
+    let guard = isa.integer_div_traps_on_zero() && !matches!(konst, Some(c) if c != 0);
     if guard {
         emit_guarded_int_div(out, temps, op, dst, lhs, rhs, src_op);
     } else {
@@ -289,6 +291,54 @@ fn lower_int_div(
             src_op,
         });
     }
+}
+
+/// The constant value of divisor `v`, when it has one.
+///
+/// A non-zero answer means the zero-divisor guard ([`emit_guarded_int_div`])
+/// can be skipped: the guard exists only to make a *zero* divisor
+/// well-defined, so a divisor that cannot be zero should pay nothing for it.
+///
+/// Most integer division in shader code is by a literal (`i / 3`, `x % 16`).
+///
+/// The rule is deliberately the most conservative one that still catches the
+/// literal case: `v` must be defined **exactly once** in the whole function
+/// body, by an [`LpirOp::IconstI32`] with a non-zero value. Single-definition
+/// is what makes it sound without any dominance or loop analysis: in a
+/// well-formed function the sole definition dominates every use, and the case
+/// `opt.rs`'s `fold_immediates` needs `compute_loop_def_sets` for (a constant
+/// killed by a later redefinition inside a loop) cannot arise when there is no
+/// later redefinition anywhere.
+/// [`LpirOp::Call`] is checked separately because it defines its `results`
+/// range without reporting a `def_vreg`.
+///
+/// Wrong here is expensive and quiet: an unsound answer reintroduces the very
+/// trap the guard removes, on inputs the corpus may not reach. When anything
+/// is unclear this returns `None` and the guard stays.
+fn const_divisor(func: &IrFunction, v: lpir::VReg) -> Option<i32> {
+    // A parameter arrives from the caller: never a known constant.
+    if v.0 < func.hidden_param_slots() + func.param_count as u32 {
+        return None;
+    }
+    let mut found: Option<i32> = None;
+    for op in func.body.iter() {
+        if let LpirOp::Call { results, .. } = op {
+            let start = results.start as usize;
+            if func.vreg_pool[start..start + results.count as usize].contains(&v) {
+                return None;
+            }
+        }
+        if op.def_vreg() != Some(v) {
+            continue;
+        }
+        match op {
+            // A second definition of any kind gives up: the value reaching
+            // this use is no longer knowable from a linear walk.
+            LpirOp::IconstI32 { value, .. } if found.is_none() => found = Some(*value),
+            _ => return None,
+        }
+    }
+    found
 }
 
 /// Emit an integer divide/remainder on an ISA whose native instruction
@@ -475,19 +525,59 @@ pub fn lower_lpir_op(
             Ok(())
         }
         LpirOp::IdivS { dst, lhs, rhs } => {
-            lower_int_div(out, temps, abi.isa(), AluOp::DivS, *dst, *lhs, *rhs, po);
+            lower_int_div(
+                out,
+                temps,
+                func,
+                abi.isa(),
+                AluOp::DivS,
+                *dst,
+                *lhs,
+                *rhs,
+                po,
+            );
             Ok(())
         }
         LpirOp::IdivU { dst, lhs, rhs } => {
-            lower_int_div(out, temps, abi.isa(), AluOp::DivU, *dst, *lhs, *rhs, po);
+            lower_int_div(
+                out,
+                temps,
+                func,
+                abi.isa(),
+                AluOp::DivU,
+                *dst,
+                *lhs,
+                *rhs,
+                po,
+            );
             Ok(())
         }
         LpirOp::IremS { dst, lhs, rhs } => {
-            lower_int_div(out, temps, abi.isa(), AluOp::RemS, *dst, *lhs, *rhs, po);
+            lower_int_div(
+                out,
+                temps,
+                func,
+                abi.isa(),
+                AluOp::RemS,
+                *dst,
+                *lhs,
+                *rhs,
+                po,
+            );
             Ok(())
         }
         LpirOp::IremU { dst, lhs, rhs } => {
-            lower_int_div(out, temps, abi.isa(), AluOp::RemU, *dst, *lhs, *rhs, po);
+            lower_int_div(
+                out,
+                temps,
+                func,
+                abi.isa(),
+                AluOp::RemU,
+                *dst,
+                *lhs,
+                *rhs,
+                po,
+            );
             Ok(())
         }
         LpirOp::Ineg { dst, src } => {
