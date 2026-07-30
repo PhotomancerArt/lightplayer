@@ -294,6 +294,15 @@ impl NativeEmuInstance {
                 }
                 lps_shared::type_size(rt, LayoutRules::Std430)
             } else {
+                // Safe *only* because the branch above catches the explicit
+                // form. `FunctionBuilder::finish` empties `return_types` when
+                // `sret_arg` is set, so reaching this arm means the sret is
+                // implicit-scalar and `return_types` still describes the whole
+                // return. Sizing an explicit-sret function from
+                // `return_types.len()` yields **zero**, and a buffer sized zero
+                // for a callee that writes four words is a heap overflow. That
+                // is not hypothetical: `rt_jit` derived its `ret_count` that
+                // way and had exactly that bug. Do not collapse these two arms.
                 ir_func.return_types.len() * 4
             }
         } else {
