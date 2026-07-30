@@ -1522,4 +1522,97 @@ mod tests {
             edits = output.edits
         );
     }
+    /// Independent moves keep their order and all land.
+    #[test]
+    fn sequence_arg_moves_passes_through_independent_moves() {
+        let out = sequence_arg_moves(vec![(Alloc::Reg(20), 10), (Alloc::Reg(21), 11)], 9);
+        assert_eq!(
+            out,
+            vec![
+                (Alloc::Reg(20), Alloc::Reg(10)),
+                (Alloc::Reg(21), Alloc::Reg(11)),
+            ]
+        );
+    }
+
+    /// The defect this function exists for: `a12`'s value is needed by the move
+    /// into `a13`, so the write to `a12` must come second. Emitting in argument
+    /// order silently passed a duplicate.
+    #[test]
+    fn sequence_arg_moves_orders_a_chain_before_its_source_is_clobbered() {
+        // want: a12 <- a13, a13 <- a12's ORIGINAL value is not required here;
+        // the chain is a13 <- a12 and a12 <- a11.
+        let out = sequence_arg_moves(vec![(Alloc::Reg(11), 12), (Alloc::Reg(12), 13)], 9);
+        assert_eq!(
+            out,
+            vec![
+                // a13 <- a12 first: a12 is still carrying its incoming value.
+                (Alloc::Reg(12), Alloc::Reg(13)),
+                (Alloc::Reg(11), Alloc::Reg(12)),
+            ],
+            "a chain must be emitted from its tail"
+        );
+    }
+
+    /// A true swap has no safe order, so one value goes through the scratch
+    /// register. Checked by simulation rather than by pinning an instruction
+    /// sequence, so the test constrains the semantics and not the strategy.
+    #[test]
+    fn sequence_arg_moves_breaks_a_two_cycle_through_scratch() {
+        const SCRATCH: u8 = 9;
+        let out = sequence_arg_moves(vec![(Alloc::Reg(10), 11), (Alloc::Reg(11), 10)], SCRATCH);
+
+        // Simulate: each register starts holding its own id.
+        let mut regs: [u8; 32] = core::array::from_fn(|i| i as u8);
+        for (from, to) in &out {
+            let (Alloc::Reg(f), Alloc::Reg(t)) = (from, to) else {
+                panic!("register moves only");
+            };
+            regs[*t as usize] = regs[*f as usize];
+        }
+        assert_eq!(regs[11], 10, "a11 must end up with a10's incoming value");
+        assert_eq!(regs[10], 11, "a10 must end up with a11's incoming value");
+        assert!(
+            out.iter()
+                .any(|(_, to)| matches!(to, Alloc::Reg(r) if *r == SCRATCH)),
+            "a two-cycle cannot be resolved without the scratch register"
+        );
+    }
+
+    /// Three-cycle, same simulation check — the cycle-breaking must not be
+    /// special-cased to pairs.
+    #[test]
+    fn sequence_arg_moves_breaks_a_three_cycle() {
+        let out = sequence_arg_moves(
+            vec![
+                (Alloc::Reg(10), 11),
+                (Alloc::Reg(11), 12),
+                (Alloc::Reg(12), 10),
+            ],
+            9,
+        );
+        let mut regs: [u8; 32] = core::array::from_fn(|i| i as u8);
+        for (from, to) in &out {
+            let (Alloc::Reg(f), Alloc::Reg(t)) = (from, to) else {
+                panic!("register moves only");
+            };
+            regs[*t as usize] = regs[*f as usize];
+        }
+        assert_eq!([regs[11], regs[12], regs[10]], [10, 11, 12]);
+    }
+
+    /// Spill-slot sources have no register to clobber, but their destination can
+    /// still be another move's source.
+    #[test]
+    fn sequence_arg_moves_orders_stack_sources_after_their_destination_is_read() {
+        let out = sequence_arg_moves(vec![(Alloc::Stack(0), 12), (Alloc::Reg(12), 13)], 9);
+        assert_eq!(
+            out,
+            vec![
+                (Alloc::Reg(12), Alloc::Reg(13)),
+                (Alloc::Stack(0), Alloc::Reg(12)),
+            ],
+            "the reload into a12 must not run before a12 is read"
+        );
+    }
 }

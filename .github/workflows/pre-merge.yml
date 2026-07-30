@@ -68,8 +68,15 @@ jobs:
       # shader gates the GLSL filetest suite (31k cases x 5 targets), the
       # longest single unit of work in `just test`. Closure of the two
       # binaries the suite builds: lps-filetests-app -> lp-shader, lp-riscv,
-      # lp-gfx, lp-base, third_party; lps-builtins-emu-app (the guest ELF,
-      # built by scripts/build-builtins.sh) additionally pulls in lp-core.
+      # lp-xt, lp-gfx, lp-base, third_party; lps-builtins-emu-app (the guest
+      # ELF, built by scripts/build-builtins.sh) additionally pulls in lp-core.
+      #
+      # lp-xt is in the closure because lps-filetests enables lpvm-native's
+      # `emu-xt` (the Xtensa host engine, behind the xtn/xtlpn targets) and
+      # because `isa-xt` is on by default, pulling lp-xt-inst into every host
+      # build of lpvm-native. It is deliberately NOT in `gfx`/`browser`:
+      # lp-gfx-lpvm selects its ISA per target_arch, so a host build of those
+      # never compiles an Xtensa backend.
       # Cargo.lock is included deliberately: a naga or wasmtime bump changes
       # shader results, and the suite is cheap enough after the profile.dev
       # overrides in Cargo.toml that the insurance is free.
@@ -86,6 +93,7 @@ jobs:
             shader:
               - 'lp-shader/**'
               - 'lp-riscv/**'
+              - 'lp-xt/**'
               - 'lp-gfx/**'
               - 'lp-base/**'
               - 'lp-core/**'
@@ -334,6 +342,101 @@ jobs:
       # crate has no clippy coverage anywhere.
       - name: Clippy esp32s3 firmware
         run: cd lp2025 && just clippy-fw-esp32s3
+
+  # The Xtensa HOST path: `lpvm-native`'s `rt_emu` compiling shaders for Xtensa
+  # and executing them on `lp-xt-emu`, linked against a cross-compiled builtins
+  # image. Nothing else in CI runs Xtensa *code* — `firmware-xtensa` above only
+  # compiles a device image.
+  #
+  # This job exists because those tests were inert. They skip when the Xtensa
+  # builtins image is absent (it is a gitignored cross-target artifact, and that
+  # skip is deliberate — the workspace must build and test without the esp
+  # toolchain), so before this job every one of them silently no-opped in CI
+  # while looking green.
+  #
+  # Self-contained rather than passing the image between jobs: the toolchain and
+  # the consumers sit in one place, `validate-x64` is untouched, and there is no
+  # cross-gate coupling to get wrong. (`firmware-xtensa` is gated on `firmware`
+  # and this on `shader`; wiring an artifact between them would leave a
+  # shader-only PR running the suite against an EMPTY image and reporting green
+  # — exactly the failure this job is meant to end.)
+  #
+  # Scope note: this gates the engine/emitter tests, NOT the xtn/xtlpn filetest
+  # corpus targets. Those are registered and runnable (`-t xtn.q32`) but not yet
+  # green — 46 files still fail, ~31 of them target-independent frontend limits
+  # awaiting annotation. Gating a known-red suite would just train people to
+  # ignore this job. Add the corpus run here once it is green.
+  validate-xtensa:
+    name: Validate Xtensa (host)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.shader == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+    steps:
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Mirrors validate-x64. regalloc2 resolves from git today, so this is not
+      # strictly required — it is what makes the commented-out `[patch]` in the
+      # root Cargo.toml work if anyone uncomments it, and a job that omitted it
+      # would be the one that mysteriously broke.
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      # Two toolchains, both needed: the pinned nightly builds the host test
+      # binaries, and the Espressif fork cross-compiles the builtins image.
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rustfmt, clippy, rust-src
+
+      # Same pin as firmware-xtensa; keep the two in sync. `default: false`
+      # leaves the host nightly as the default toolchain — the image build
+      # selects the esp channel itself through lp-xt/fixtures/rust-toolchain.toml.
+      - name: Install Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3
+          default: false
+          ldproxy: false
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # The base image the host engine links compiled shader code against.
+      - name: Build the Xtensa builtins image
+        run: cd lp2025 && scripts/build-builtins-xt.sh
+
+      # Guard the whole point of this job: if the image is missing or empty the
+      # tests below SKIP and still report success, which is what was happening
+      # before. Fail loudly here instead of passing vacuously.
+      - name: Assert the image is present
+        run: |
+          cd lp2025
+          img=lp-xt/fixtures/elf/lps-builtins-xt-app.elf
+          test -s "$img" || { echo "::error::$img missing or empty — the Xtensa tests would skip and report green"; exit 1; }
+          echo "image: $(wc -c < "$img") bytes"
+
+      - name: Xtensa host tests
+        run: cd lp2025 && just test-xt-host
 
   # The esp32c6 app image must fit a 3 MB partition. It has overrun twice, and
   # both times the signal was a red Deploy Studio Pages run *after* the merge,
