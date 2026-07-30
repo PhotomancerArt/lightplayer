@@ -17,6 +17,7 @@ mat2 test_matrixcompmult_mat2_identity() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -30,6 +31,7 @@ mat2 test_matrixcompmult_mat2_simple() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -43,6 +45,7 @@ mat3 test_matrixcompmult_mat3() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -56,6 +59,7 @@ mat4 test_matrixcompmult_mat4() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -69,6 +73,7 @@ mat2 test_matrixcompmult_mat2_zeros() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -82,6 +87,7 @@ mat2 test_matrixcompmult_mat2_negative() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -95,6 +101,7 @@ mat3 test_matrixcompmult_mat3_negative() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -108,6 +115,7 @@ mat4 test_matrixcompmult_mat4_negative() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -121,6 +129,7 @@ mat2 test_matrixcompmult_mat2_fractions() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -134,6 +143,7 @@ mat3 test_matrixcompmult_mat3_fractions() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -147,6 +157,7 @@ mat4 test_matrixcompmult_mat4_fractions() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -160,6 +171,7 @@ mat2 test_matrixcompmult_mat2_variables() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -173,6 +185,7 @@ mat3 test_matrixcompmult_mat3_variables() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -186,6 +199,7 @@ mat4 test_matrixcompmult_mat4_variables() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -197,6 +211,7 @@ mat2 test_matrixcompmult_mat2_expressions() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -208,6 +223,7 @@ mat3 test_matrixcompmult_mat3_expressions() {
 
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
@@ -220,6 +236,7 @@ mat4 test_matrixcompmult_mat4_expressions() {
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(wasm.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)

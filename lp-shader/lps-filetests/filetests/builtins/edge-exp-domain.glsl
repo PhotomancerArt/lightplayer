@@ -17,6 +17,7 @@ float test_pow_negative_base() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_pow_negative_base() ~= 0.0
@@ -29,6 +30,7 @@ float test_pow_zero_negative_exponent() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_pow_zero_negative_exponent() ~= 0.0
@@ -41,6 +43,7 @@ float test_pow_zero_zero() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_pow_zero_zero() ~= 0.0
@@ -53,6 +56,7 @@ float test_log_zero() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_log_zero() ~= 0.0
@@ -65,6 +69,7 @@ float test_log_negative() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_log_negative() ~= 0.0
@@ -77,6 +82,7 @@ float test_log2_zero() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_log2_zero() ~= 0.0
@@ -89,6 +95,7 @@ float test_log2_negative() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_log2_negative() ~= 0.0
@@ -101,6 +108,7 @@ float test_sqrt_negative() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_sqrt_negative() ~= 0.0
@@ -113,6 +121,7 @@ float test_inversesqrt_zero() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_inversesqrt_zero() ~= 0.0
@@ -126,6 +135,7 @@ float test_inversesqrt_negative() {
 // @unsupported(wasm.q32)
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
+// @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_inversesqrt_negative() ~= 0.0
