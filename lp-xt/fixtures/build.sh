@@ -29,6 +29,7 @@ cargo build --release
 : "$OBJDUMP"
 
 mkdir -p elf
+count=0
 for src in corpus/src/bin/*.rs; do
   name="$(basename "$src" .rs)"
   bin="target/xtensa-esp32s3-none-elf/release/$name"
@@ -38,6 +39,9 @@ for src in corpus/src/bin/*.rs; do
   fi
   cp "$bin" "elf/$name.elf"
   echo "built elf/$name.elf"
+  count=$((count + 1))
 done
 
-echo "build.sh: OK ($(ls elf/*.elf | wc -l | tr -d ' ') fixture ELFs)"
+# Count what this loop built — elf/ also holds the builtins image
+# (scripts/build-builtins-xt.sh), which is not a fixture.
+echo "build.sh: OK ($count fixture ELFs)"

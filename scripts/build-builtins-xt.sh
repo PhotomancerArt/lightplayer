@@ -26,11 +26,18 @@ BUILT="$ROOT/lp-xt/fixtures/target/xtensa-esp32s3-none-elf/release/lps-builtins-
 cd "$ROOT/lp-xt/fixtures"
 export CARGO_TARGET_DIR="$PWD/target"
 
-# --ignore-rust-version: the esp toolchain ships rustc 1.88-nightly while the
-# workspace declares rust-version = 1.90. It is a DECLARED gate, not a real
-# incompatibility — the whole builtins dependency chain compiles and links
-# cleanly on 1.88 (verified). Revisit if espup ships a 1.90-based fork.
-cargo build --release -p lps-builtins-xt-app --ignore-rust-version
+# No --ignore-rust-version: esp Rust >= 1.90 satisfies the workspace MSRV, and
+# 1.90.0.0 shipped 2025-09. Overriding the check would hide a stale toolchain,
+# and staleness is not harmless here — on esp Rust 1.88 `lpc-model` genuinely
+# fails to compile (70x E0716 from the Slotted derive's const-promotion of a
+# temporary), which is what blocked the firmware crates. Fail loudly instead.
+if ! cargo build --release -p lps-builtins-xt-app; then
+  echo >&2
+  echo "error: build failed. If that was an MSRV error, the esp toolchain is stale:" >&2
+  echo "       installed: $(rustc +esp --version 2>/dev/null || echo unknown)" >&2
+  echo "       fix:       espup update   (needs esp Rust >= 1.90)" >&2
+  exit 1
+fi
 
 mkdir -p "$OUT_DIR"
 cp "$BUILT" "$OUT"

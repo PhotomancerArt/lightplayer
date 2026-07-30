@@ -1,0 +1,24 @@
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+[target.xtensa-esp32s3-none-elf]
+runner = "espflash flash --chip esp32s3 --monitor --after hard-reset"
+rustflags = [
+  # The Xtensa target links through xtensa-esp32s3-elf-gcc (GNU ld), so linker
+  # scripts are passed with -Wl, unlike the C6's rust-lld path.
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-nostartfiles",
+
+  # Abort-tier recovery (ADR 2026-07-29-per-chip-fw-toolchains): panic=abort +
+  # the lp-recovery RTC ledger. Deliberately NOT the C6's panic=unwind +
+  # `unwinding` + __eh_frame machinery, which the ADR says stays chip-local.
+  # That is why there is no force-unwind-tables / force-frame-pointers here.
+  "-C", "panic=abort",
+]
+
+[env]
+ESP_LOG = "info"
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem", "optimize_for_size"]
