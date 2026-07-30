@@ -114,15 +114,28 @@ a week is an argument for a conformance suite. When a class accumulates
 entries, say so out loud — that is an architecture finding, not a
 bookkeeping fact.
 
-Saying it out loud: **`config-masked-defect` took four entries on
-2026-07-30**, all in `lpvm-native`'s shared register allocator, all
-latent for the entire life of the rv32-only era, and all made
-observable within hours of the Xtensa corpus landing. The finding is not
-"the allocator had bugs" — it is that a single-configuration test suite
-cannot falsify configuration-dependent code, however large it is
-(31,587 rv32 cases did not). The mitigation is a second configuration
-that overlaps where the first is disjoint, which is what the Xtensa
-targets now are.
+Saying it out loud: **`config-masked-defect` took five entries on
+2026-07-30**, all in `lpvm-native`, all latent for the entire life of the
+rv32-only era, and all made observable within hours of the Xtensa corpus
+landing. The finding is not "the allocator had bugs" — it is that a
+single-configuration test suite cannot falsify configuration-dependent
+code, however large it is (31,587 rv32 cases did not). The mitigation is
+a second configuration that overlaps where the first is disjoint, which
+is what the Xtensa targets now are.
+
+Four of the five are in the shared register allocator. The fifth — the
+integer div-by-zero trap — is worth separating, because it says the class
+is not confined to `regalloc/`. That one is in *lowering*, and the
+incidental property it leaned on was not a register layout but a
+**hardware semantic**: RV32M defines `x / 0` and `x % 0`, so emitting the
+bare divide was correct on rv32 for free. Its falsifying test also already
+existed — the corpus has pinned that contract for as long as it has
+existed; what was missing was a backend to run it against, plus
+documentation that told the backend author the guard obligation was
+somebody else's. The generalizable rule: when a contract is satisfied for
+free on the reference target, that is exactly when it must be stated as an
+obligation behind a named capability hook, because nothing in the code
+will ever remind you it was a choice.
 
 Saying it out loud again, one axis over: **`split-source-of-truth` and
 `config-masked-defect` are describing the same 2026-07-30 defects from two
@@ -154,6 +167,7 @@ sentence (arguments in, returns out; registers and stack).
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-two-value-return-clobber](2026-07-30-xtensa-two-value-return-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-integer-div-by-zero-trap](2026-07-30-xtensa-integer-div-by-zero-trap.md) | fixed | lpvm-native lowering (lower.rs) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
