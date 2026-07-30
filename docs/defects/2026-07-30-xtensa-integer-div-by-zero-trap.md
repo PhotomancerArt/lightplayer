@@ -74,8 +74,8 @@ obligation was phrased as a roster instead of a rule.
 - `lower.rs` gains `lower_int_div` / `emit_guarded_int_div`. When the hook says
   the ISA traps, the divide is guarded at the **VInst** level so register
   allocation owns the temporaries — not in the emitter with hand-managed
-  scratch registers, which is the shape that produced this week's other two
-  entries. rv32 still emits the bare instruction, byte for byte.
+  scratch registers, which is the shape that produced the three allocator
+  entries alongside this one. rv32 still emits the bare instruction, byte for byte.
 - Only the **zero divisor** is guarded on Xtensa. Its divide already yields
   `i32::MIN` for `i32::MIN / -1` and `0` for `i32::MIN % -1`, matching RV32M, so
   guarding that column too would be wasted instructions. Cranelift guards both
