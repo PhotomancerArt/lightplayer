@@ -844,6 +844,7 @@ mod tests {
     use crate::dataflow::resolver::ResolveLogLevel;
     use crate::engine::Engine;
     use crate::engine::resolve_with_engine_host;
+    #[cfg(feature = "node-texture")]
     use crate::nodes::TextureNode;
     use crate::products::visual::{
         TextureSampleBatch, TextureUvSamplePoint, VisualProduct, VisualSampleBufferRequest,
@@ -851,9 +852,11 @@ mod tests {
     };
     use lp_gfx::{GfxError, LpGraphics, SampleOutHandle, SamplePointsHandle, TextureData};
     use lp_gfx_lpvm::TargetLpvmGraphics;
+    #[cfg(feature = "node-texture")]
+    use lpc_model::TextureDef;
     use lpc_model::{
         ArtifactLocation, ArtifactSpec, AssetContentType, MapSlot, NodeDef, NodeInvocation,
-        NodeRuntimeStatus, Revision, SlotDataAccess, StaticSlotShape, TextureDef, TreePath,
+        NodeRuntimeStatus, Revision, SlotDataAccess, StaticSlotShape, TreePath,
     };
     use lpc_registry::{AssetText, ProjectRegistry};
     use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -885,6 +888,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-texture")]
     fn build_texture_and_shader_engine() -> (Engine, ProjectRegistry, NodeId, NodeId, VisualProduct)
     {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
@@ -975,6 +979,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-texture")]
     fn shader_core_produces_visual_product_value() {
         let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         engine.tick(&registry, 1000).expect("tick");
@@ -1062,6 +1067,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-texture")]
     fn shader_core_visual_product_is_sampleable_red_channel() {
         let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         engine.tick(&registry, 500).expect("tick");
@@ -1218,6 +1224,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-texture")]
     fn shader_compile_cache_survives_unchanged_config_across_frames() {
         let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         let graphics = Arc::new(CountingGraphics::new());
@@ -1253,6 +1260,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-texture")]
     fn shader_compile_failure_sets_runtime_status_error_and_renders_fallback() {
         let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         let graphics = Arc::new(CountingGraphics::failing());

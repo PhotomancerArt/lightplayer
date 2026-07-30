@@ -192,6 +192,17 @@ pub fn capture_frames(buf: &mut [u32]) -> usize {
     capture_frames_arch(buf)
 }
 
+/// RISC-V (ESP32-C6) frame-pointer walk.
+///
+/// The `s0` chain and the C6 DRAM window below are both RV32-specific, so this
+/// gate is a bare `target_arch = "riscv32"`: the Xtensa walk is a **sibling**
+/// `#[cfg(target_arch = "xtensa")] fn capture_frames_arch` below rather than a
+/// widening of this arm. The only gate that took a mechanical
+/// `, target_arch = "xtensa"` is the
+/// `any(target_arch = "riscv32", target_arch = "xtensa")` inside the fallback's
+/// exclusion set below (the JIT-capable-target spelling documented in
+/// `lpvm_native`'s crate docs), which is what stops the new arm from colliding
+/// with the 0-frame default.
 #[cfg(target_arch = "riscv32")]
 fn capture_frames_arch(buf: &mut [u32]) -> usize {
     const ESP32C6_DRAM_START: u32 = 0x4080_0000;
@@ -238,7 +249,25 @@ fn capture_frames_arch(_buf: &mut [u32]) -> usize {
     0
 }
 
-#[cfg(not(any(target_arch = "riscv32", target_arch = "wasm32")))]
+/// Xtensa (ESP32-S3 / classic ESP32) sibling — placeholder.
+///
+/// A correct windowed-ABI walk must first force the live register windows to
+/// their stack save areas (`_WindowSpill` semantics) and then follow the
+/// `a0`/`sp` chain through the 16-byte base save areas at `[sp-16, sp)`.
+/// Without the spill step the innermost frames are still in the physical
+/// register file and a memory walk reports garbage, so this reports zero
+/// frames until the fw-esp32s3 milestone lands the spill + walk pair (M5 of
+/// the Xtensa backport roadmap).
+#[cfg(target_arch = "xtensa")]
+fn capture_frames_arch(_buf: &mut [u32]) -> usize {
+    0
+}
+
+/// No frame walker for this target: report zero frames.
+#[cfg(not(any(
+    any(target_arch = "riscv32", target_arch = "xtensa"),
+    target_arch = "wasm32"
+)))]
 fn capture_frames_arch(_buf: &mut [u32]) -> usize {
     0
 }

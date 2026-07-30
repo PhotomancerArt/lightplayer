@@ -10,6 +10,10 @@ rv32_firmware_packages := "fw-esp32c6"
 
 fw_esp32c6_profile := "release-esp32"
 fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp32c6"
+
+# fw-esp32s3 builds on Espressif's Rust fork (see lp-fw/fw-esp32s3/rust-toolchain.toml)
+xt_s3_target := "xtensa-esp32s3-none-elf"
+fw_esp32s3_elf := "target/" + xt_s3_target + "/release/fw-esp32s3"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -563,6 +567,175 @@ build-rv32-release: build-rv32
 build-fw-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6
 
+# Build the ESP32-S3 firmware. Xtensa has no upstream Rust target, so this uses
+# Espressif's fork via the crate's own `rust-toolchain.toml` (channel = "esp").
+# The GNU binutils/gcc shipped inside that toolchain must be on PATH: the Rust
+# target spec links through xtensa-esp32s3-elf-gcc.
+#
+# Needs esp Rust >= 1.90 (the workspace MSRV). On 1.88 `lpc-model` genuinely
+# fails to compile — 70x E0716 from the Slotted derive — so a version error
+# here means `espup update`, not a code problem.
+clippy-fw-esp32s3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Plain assignment, not `export VAR=$(...)`: the latter reports export's own
+    # exit status, so a failing lookup would sail past `set -e`.
+    GCC_BIN="$(just _xt-gcc-dir)"
+    # Empty means already on PATH. Prepending "" would put the CURRENT
+    # DIRECTORY on PATH, so guard it.
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3
+    # The app path.
+    cargo clippy --release -- --no-deps -D warnings
+    # Every harness, individually. Harness code is cfg'd out of the app build,
+    # so linting only the default features would leave it completely uncovered
+    # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
+    # repo. Add new `test_*` features to this list.
+    for feat in test_xt_jit_corpus; do
+      echo "clippy: --features $feat"
+      cargo clippy --release --features "$feat" -- --no-deps -D warnings
+    done
+
+build-fw-esp32s3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --release
+
+# Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
+# or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
+# which is how CI arrives (the esp-rs/xtensa-toolchain action puts it there),
+# versus a local espup install, which leaves it under ~/.rustup.
+_xt-gcc-dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v xtensa-esp32s3-elf-gcc >/dev/null 2>&1; then
+      exit 0
+    fi
+    GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
+    if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
+      echo "error: xtensa-esp32s3-elf-gcc is not on PATH and was not found under" >&2
+      echo "       ~/.rustup/toolchains/esp — run 'espup install' (or 'espup update'" >&2
+      echo "       if it is stale). The Rust target spec links through it, not rust-lld." >&2
+      exit 1
+    fi
+    echo "$GCC_BIN"
+
+# Always passes --partition-table: espflash's default table has a 1 MB factory
+# partition, and this crate is budgeted for the same 3 MB as the C6.
+#
+# Pass the port explicitly when more than one board is on the bus — several
+# usually are on the desk, and auto-detection picks the first match, not
+# necessarily the S3:
+#
+#   just flash-fw-esp32s3 /dev/cu.usbmodem1101
+#
+# The S3 speaks USB-Serial-JTAG, not a UART bridge, so it enumerates as
+# /dev/cu.usbmodem* and its port number CHANGES whenever the chip
+# re-enumerates after a reset. Before concluding a board is dead: a stray
+# espflash holding this port wedges it uninterruptibly (ps STAT `Us+`, kill -9
+# does not land) until someone physically replugs it.
+
+# Flash fw-esp32s3 to a connected ESP32-S3 and open the serial monitor.
+flash-fw-esp32s3 port="": build-fw-esp32s3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Run the Xtensa JIT corpus on a connected ESP32-S3 and print PASS/FAIL per case.
+#
+# The goldens it compares against are confirmed on lp-xt-emu AND on rv32 by
+# `cargo test -p lpvm-native --features xt-corpus,emu-xt`, which runs FIRST for
+# a reason: a device result is only meaningful against an oracle that was
+# established without the device. A failure here is a finding to triage, never
+# a reason to edit a golden.
+#
+#   just fwtest-xt-jit-esp32s3 /dev/cu.usbmodem1101
+
+# Run the Xtensa JIT corpus on a connected ESP32-S3 (PASS/FAIL per case).
+fwtest-xt-jit-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --release --features test_xt_jit_corpus
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Fail when the esp32c6 app image gets too close to its 3 MB partition.
+# The image overran the partition twice in 2026 and both times it surfaced as a
+# red post-merge deploy, because nothing pre-merge built the firmware. This
+# always prints the headroom, so size is a trended number and not a cliff.
+# See docs/adr/2026-07-28-esp32c6-flash-budget.md.
+fw-esp32c6-size-check margin="65536": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
+    # Keep `partition` in sync with the `factory` app partition in
+    # lp-fw/fw-esp32c6/partitions.csv.
+    just _fw-size-check esp32c6 esp32c6 {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
+        "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+
+# Fail when the esp32s3 app image gets too close to its 3 MB partition.
+# Same cliff and the same reasoning as the C6 above — this crate is budgeted
+# for the identical 4 MB layout (lp-fw/fw-esp32s3/partitions.csv), and the S3
+# is the chip whose app-layer port is still ahead of it, so the number is worth
+# trending from the start rather than from the first overrun.
+
+# Fail when the esp32s3 app image gets too close to its 3 MB partition.
+fw-esp32s3-size-check margin="65536": build-fw-esp32s3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Keep `partition` in sync with the `factory` app partition in
+    # lp-fw/fw-esp32s3/partitions.csv.
+    just _fw-size-check esp32s3 esp32s3 {{ fw_esp32s3_elf }} 3145728 {{ margin }} \
+        "See lp-fw/fw-esp32s3/README.md 'Partitions'."
+
+# Shared tail of the per-chip size checks: measure the flashable image and
+# compare it against the app partition. Factored so the two chips cannot drift
+# apart — the C6 partition has overrun twice, and a second copy of this logic
+# is exactly how the second chip would miss the fix.
+#
+# Callers build the ELF first; the build differs per chip (target, profile,
+# features, toolchain) but the measurement does not.
+_fw-size-check name chip elf partition margin doc:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v espflash >/dev/null 2>&1; then
+        echo "espflash not found. Install it before running the firmware size check."
+        exit 1
+    fi
+    # No --partition-table here on purpose: espflash errors out when the image
+    # overruns the real table, and we want to report *how far* over it is.
+    img="$(mktemp)"
+    trap 'rm -f "${img}"' EXIT
+    espflash save-image --chip {{ chip }} {{ elf }} "${img}" >/dev/null
+    size="$(wc -c < "${img}" | tr -d ' ')"
+    headroom=$(( {{ partition }} - size ))
+    echo "fw-{{ name }} image ${size} B / {{ partition }} B — headroom ${headroom} B (margin {{ margin }} B)"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        echo "{{ name }} image \`${size}\` B of \`{{ partition }}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    if [ "${headroom}" -lt "{{ margin }}" ]; then
+        echo "::error::{{ name }} image headroom ${headroom} B is under the {{ margin }} B margin. {{ doc }}"
+        exit 1
+    fi
+
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
 # but rustc still emits the object containing .stack_sizes before that point.
@@ -679,17 +852,74 @@ fmt-check:
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
     cargo clippy -p lp-gfx-wgpu -p fw-browser -p naga-wasm-poc -- --no-deps -D warnings
 
-clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-rv32-emu-guest-test-app
+clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-fw-esp32c6-harnesses clippy-rv32-emu-guest-test-app
 
 # riscv32: fw-esp32c6 clippy
 clippy-fw-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6 -- --no-deps -D warnings
+
+# riscv32: every fw-esp32c6 hardware-harness feature (one build per harness).
+#
+# The harnesses replace `main` with their own entrypoint, so nothing else in
+# the repo compiles them: `build-fw-esp32c6` and `clippy-fw-esp32c6` only cover
+# the default app build. Without this gate they rot invisibly, and three of
+# them (test_gpio, test_json, test_usb) had already broken against esp-hal 1.1
+# and a wire-type change before it existed. Each invocation mirrors how the
+# matching `fwtest-*-esp32c6` recipe builds that harness.
+clippy-fw-esp32c6-harnesses: install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd lp-fw/fw-esp32c6
+    for feature in test_rmt test_dither test_gpio test_gpio_calibrate test_button \
+                   test_usb test_json test_oom test_msafluid test_fluid_demo \
+                   test_jit_math_perf test_shader_compile_incremental; do
+        echo "==> fw-esp32c6 harness: $feature"
+        cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --features "$feature,esp32c6" -- --no-deps -D warnings
+    done
+    # test_espnow is the one harness built without default features: it wants
+    # the radio capability alone, not the server stack.
+    echo "==> fw-esp32c6 harness: test_espnow (--no-default-features)"
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --no-default-features --features test_espnow,esp32c6 -- --no-deps -D warnings
+
+# Every lpc-engine node gate, one build per gate turned off.
+#
+# The gates are all default-on, so nothing else in the repo ever compiles a
+# gate-off configuration — the same invisible-rot shape as the fw-esp32c6
+# harnesses above, and the reason M2 added this alongside them. A gate-off
+# build is what M3's ESP32-S3 app layer actually ships, so it has to keep
+# compiling warning-free, and `disabled_node_kind_still_loads_project` (the
+# missing-node contract, `docs/debt/firmware-capability-reporting.md`) only
+# exists in a gate-off build and is only run here.
+#
+# `--all-targets` matters: without it the gate-off tests are never built.
+check-lpc-engine-gates:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    gates=(node-button node-radio node-fluid node-fixture node-texture \
+           node-playlist node-clock node-shader)
+    echo "==> lpc-engine: all node gates off"
+    cargo clippy -p lpc-engine --no-default-features --features std \
+        --all-targets -- --no-deps -D warnings
+    for off in "${gates[@]}"; do
+        on=$(printf '%s\n' "${gates[@]}" | grep -vx "$off" | paste -sd, -)
+        echo "==> lpc-engine: $off OFF"
+        cargo clippy -p lpc-engine --no-default-features --features "std,$on" \
+            --all-targets -- --no-deps -D warnings
+    done
+    # The missing-node contract test lives behind `not(feature = "node-button")`,
+    # so this is the only configuration that runs it.
+    on=$(printf '%s\n' "${gates[@]}" | grep -vx node-button | paste -sd, -)
+    echo "==> lpc-engine: missing-node contract test (node-button OFF)"
+    cargo test -p lpc-engine --no-default-features --features "std,$on" \
+        disabled_node_kind_still_loads_project
 
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
@@ -742,11 +972,52 @@ clippy-glsl-fix:
 # Testing - Workspace-wide
 # ============================================================================
 
+# `test-filetests` does not just read the rv32 builtins — it *builds* them
+# (scripts/filetests.sh calls build-builtins.sh). That build writes two things
+# `test-rust` is concurrently reading: the uplifted builtins ELF that
+# `lpvm-cranelift`'s build script embeds, and — when the builtin sources
+# changed — generated .rs files written straight into the source tree by
+# `lps-builtins-gen-app`. Cargo's build lock is profile+triple scoped, so
+# nothing serializes a host `cargo test` against an rv32 `cargo build`.
+# Building the builtins *before* the parallel half leaves it with no writer:
+# 0.5s when fresh, and when stale it is work `test-filetests` would have done
+# anyway. See docs/defects/2026-07-29-builtins-elf-uplift-race.md.
+test: build-rv32-builtins _test-parallel
+
 [parallel]
-test: test-rust test-filetests
+[private]
+_test-parallel: test-rust test-filetests
 
 test-rust-core:
     cargo test
+
+# Host Xtensa execution (`lpvm-native/emu-xt`): the ISA-parameterized rt_emu
+# engine running compiled Xtensa code on lp-xt-emu, differentially checked
+# against rv32. Separate invocation because `emu-xt` is not a default feature
+# (plain `cargo test` must not require the esp toolchain) and enabling it here
+# would unify features across the whole default-members build.
+#
+# Needs the Xtensa builtins image, a gitignored cross-target artifact. Without
+# it the tests SKIP with a loud note rather than failing, so this recipe is safe
+# on a machine with no esp toolchain — build the image with
+# `scripts/build-builtins-xt.sh` to make it mean something.
+# NO `--test` allowlist, deliberately. There used to be one, and it silently
+# excluded the two files added by #197 — they ran in neither CI nor `just
+# test`, and reported success by executing nothing.
+#
+# An allowlist has to be maintained to stay correct, and the cost of forgetting
+# is SILENCE rather than an error. That is the same property that made the
+# defect those tests guard invisible in the first place, so it is the wrong
+# shape here: explicit-but-stale is worse than implicit-and-complete. Running
+# all targets picks up any future test file automatically; the lib tests it
+# adds cost ~0.2s.
+#
+# `xt-corpus` must be in the feature list alongside `emu-xt`. The corpus tests
+# are `#![cfg(feature = "emu-xt")]` but their subject
+# (`lpvm_native::xt_corpus`) sits behind `xt-corpus` — with only one of the
+# two, the files compile to NOTHING and pass having run nothing.
+test-xt-host:
+    cargo test -p lpvm-native --features emu-xt,xt-corpus
 
 # Studio web view layer is outside default-members (Dioxus web dep tree);
 # its unit tests are pure host-runnable view helpers. Separate invocation
@@ -760,7 +1031,7 @@ test-studio-host:
     cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
 
 # Local parity: all host tests. CI composes the same pieces path-gated.
-test-rust: test-rust-core test-studio-host
+test-rust: test-rust-core test-studio-host test-xt-host
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
@@ -947,6 +1218,18 @@ fwtest-rmt-esp32c6: install-rv32-target
 # Run firmware on ESP32-C6 device using the test_dither feature
 fwtest-dithering-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware on ESP32-C6 device using the test_gpio feature (cycles every configured pin)
+fwtest-gpio-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo run --features test_gpio,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware on ESP32-C6 device using the test_button feature (root-owned GPIO button input)
+fwtest-button-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo run --features test_button,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware on ESP32-C6 device using the test_usb feature (MessageRouter echo + heartbeat)
+fwtest-usb-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32c6 && cargo run --features test_usb,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
 # Run host-driven GPIO calibration firmware on ESP32-C6
 fwtest-gpio-calibrate-esp32c6: install-rv32-target

@@ -318,7 +318,10 @@ async fn timed_write_full_server_msg<W: Write>(
             "server message prefix exceeded JSON buffer".into(),
         ));
     }
-    if ser_write_json::ser::to_writer(&mut writer, &msg).is_err() {
+    // Erased writer: shares one serializer instantiation per wire type with the
+    // frame-budget measurement path (lpc_wire::ser_write_json_len), instead of
+    // emitting a second copy of every type's serializer for this sink.
+    if lpc_wire::ser_write_json_to(&mut writer, &msg).is_err() {
         let detail = server_message_detail(&msg);
         log::warn!(
             "[io_task] server message id={} {} exceeded JSON buffer size={} frame_budget={}; write failed",

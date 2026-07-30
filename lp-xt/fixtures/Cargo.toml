@@ -1,0 +1,19 @@
+# Fixture workspace — DEVICE-target crates (esp toolchain, xtensa-esp32s3-none-elf).
+#
+# This is its own workspace precisely so the root (stable, host-only) workspace
+# never tries to build it; the root Cargo.toml lists it (and the guest crate,
+# which lives one level up as a product crate — see the BACKPORT landing table)
+# in its exclude list. Build with ./build.sh (or `cargo build --release` here).
+[workspace]
+resolver = "2"
+members = ["../lp-xt-emu-guest", "../lps-builtins-xt-app", "corpus"]
+
+[profile.release]
+opt-level = "s"
+codegen-units = 1
+lto = "fat"
+debug = 2
+overflow-checks = false
+
+[profile.dev]
+opt-level = "s"

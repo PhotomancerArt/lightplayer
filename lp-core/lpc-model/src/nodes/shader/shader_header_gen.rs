@@ -242,6 +242,7 @@ mod tests {
                 default: crate::OptionSlot::none(),
                 min: crate::OptionSlot::none(),
                 max: crate::OptionSlot::none(),
+                step: crate::OptionSlot::none(),
                 mapping: crate::OptionSlot::none(),
                 label: crate::ValueSlot::default(),
                 description: crate::ValueSlot::default(),

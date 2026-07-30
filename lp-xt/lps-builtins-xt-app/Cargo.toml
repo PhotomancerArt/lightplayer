@@ -1,0 +1,22 @@
+# Xtensa counterpart of `lp-shader/lps-builtins-emu-app`: a guest image whose
+# only job is to carry every `__lps_*` builtin at known addresses so the host
+# emulator can link shader code against them.
+#
+# DEVICE-target crate (esp toolchain) — a member of the `lp-xt/fixtures`
+# workspace, NOT the host workspace. See lp-xt/README.md.
+[package]
+name = "lps-builtins-xt-app"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Xtensa builtins image for lp-xt-emu host execution (lps-builtins at known addresses)."
+workspace = "../fixtures"
+
+[[bin]]
+name = "lps-builtins-xt-app"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+lps-builtins = { path = "../../lp-shader/lps-builtins" }
+lp-xt-emu-guest = { path = "../lp-xt-emu-guest" }

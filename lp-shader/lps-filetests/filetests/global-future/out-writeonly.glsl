@@ -18,6 +18,7 @@ void test_out_writeonly_float() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_float() == 0.0
 
@@ -27,6 +28,7 @@ void test_out_writeonly_int() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_int() == 0.0
 
@@ -36,6 +38,7 @@ void test_out_writeonly_uint() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_uint() == 0.0
 
@@ -45,6 +48,7 @@ void test_out_writeonly_bool() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_bool() == 0.0
 
@@ -54,6 +58,7 @@ void test_out_writeonly_vec2() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_vec2() == 0.0
 
@@ -63,6 +68,7 @@ void test_out_writeonly_vec3() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_vec3() == 0.0
 
@@ -72,6 +78,7 @@ void test_out_writeonly_vec4() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_vec4() == 0.0
 
@@ -86,6 +93,7 @@ void test_out_writeonly_calculations() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_calculations() == 0.0
 
@@ -101,5 +109,6 @@ void test_out_writeonly_fragment_output() {
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_out_writeonly_fragment_output() == 0.0

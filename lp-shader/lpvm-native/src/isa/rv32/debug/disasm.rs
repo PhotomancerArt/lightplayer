@@ -11,12 +11,7 @@ use super::LineTable;
 /// 1-based text column where `(` for the LPIR op index starts (monospace).
 const LPIR_COMMENT_INDEX_PAREN_COL: usize = 60;
 
-/// Options for text output.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DisasmOptions {
-    /// Prefix each line with a 4-digit hex offset (function-local).
-    pub show_hex_offset: bool,
-}
+pub use crate::isa::shared::DisasmOptions;
 
 fn format_lpir_op(op: &LpirOp, func: &IrFunction) -> String {
     match op {

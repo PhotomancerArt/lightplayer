@@ -26,6 +26,25 @@ If you are about to:
 
 **STOP. You are about to break the product.**
 
+## License discipline — HARD RULE
+
+LightPlayer is AGPL-3.0 **by choice**; relicensing stays possible only while
+provenance is provable. See
+`docs/adr/2026-07-29-license-provenance-discipline.md`.
+
+- **NEVER copy, transliterate, or line-by-line adapt GPL source** into this
+  repo. QEMU, binutils/GDB, and GCC are **behavioral references only** — run
+  them, read them to understand semantics, then implement independently from
+  primary specs. Their *output* (e.g. objdump golden vectors) is fact and is
+  fine; their code is not.
+- **Apache/MIT/BSD material** (e.g. `espressif/llvm-project`'s Xtensa `.td`
+  files) MAY be used to derive encoding *data*, IF the derived file carries a
+  provenance header naming upstream repo, path, and commit SHA, and the
+  upstream license text is vendored under `licenses/`.
+- Prefer primary specs (Xtensa ISA Reference Manual, ESP32-S3 TRM, RISC-V
+  specs) over any implementation.
+- If unsure whether a source is safe to copy from: **ask; do not copy.**
+
 ## How to Handle `no_std` Issues
 
 When a dependency in the GLSL → LPIR → machine code path does not support
@@ -41,13 +60,34 @@ and the correct solution was always to fix the dependency.
 
 ## How to Handle Binary Size Issues
 
-If the firmware binary exceeds available flash:
+The ESP32-C6 app image must fit a 3 MB partition, and the budget is tight —
+read `docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
+records what has already been spent (a ~200 KB diagnostics-for-flash flag
+stack, the deliberately-kept 500 KB WiFi blob), what is reserved (the lpfs
+partition, held for the future radio/WiFi decision), and what has been measured
+and *rejected* so you don't re-run dead ends.
+
+Check where you stand at any time:
+
+```bash
+just fw-esp32c6-size-check
+```
+
+This prints the image size and headroom, and pre-merge CI fails any PR that
+drops headroom below 64 KB.
+
+If the binary exceeds available flash:
 
 1. Disable optional compiler features (e.g. `cranelift-optimizer`, `cranelift-verifier`)
 2. Use LTO (`lto = true` in release profile)
 3. Use `opt-level = "z"` (size optimization)
 4. Strip debug info
 5. Audit for unnecessary dependencies
+6. Look for duplicate monomorphizations before looking for code to delete —
+   the same generic instantiated over two sinks/backends has twice been the
+   single biggest win (serde tagging, 2026-06; serializer sink erasure,
+   2026-07). `rust-nm --demangle --print-size --size-sort` on the ELF shows
+   them.
 
 Do NOT disable the compiler. The compiler is the product.
 
@@ -140,12 +180,27 @@ runtime.
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 
-## Native RV32 backend (`lpvm-native`)
+## Native backends (`lpvm-native`)
 
-**`lpvm-native`** lowers LPIR to custom RV32 machine code outside Cranelift
+**`lpvm-native`** lowers LPIR to custom machine code outside Cranelift
 (pool-based register allocation, `rt_jit` / `rt_emu`). It is the default
 on-device codegen path and is exercised by **`native-jit`** on `fw-esp32c6`/`fw-emu`
-and the **`rv32n.q32`** filetest target.
+and the **`rv32n.q32`** / **`rv32lpn.q32`** filetest targets.
+
+**Two ISAs**: RV32 (ESP32-C6) and Xtensa (ESP32-S3 / classic ESP32), each behind
+an `isa-*` Cargo feature so firmware pays only for the one it runs. `rt_emu` is
+**one engine parameterized by `IsaTarget`**, not one per ISA — see
+`docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`. The Xtensa host path
+is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
+targets; it needs a cross-compiled builtins image
+(`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
+
+> **`regalloc/` is shared by both ISAs, and rv32 passing does not prove it
+> correct.** Two defects landed there in 2026-07 that were correct on rv32 only
+> because its argument registers and allocatable pool happen to be disjoint sets;
+> Xtensa's overlap, and both became wrong-value bugs. See the
+> `config-masked-defect` class in `docs/defects/README.md`. When you change
+> allocation or ABI code, run **both** target families.
 
 ## Building the workspace (cross-target)
 

@@ -79,7 +79,9 @@ pub(crate) fn link_compiled_module_jit(
 
     let buffer_len = u32::try_from(buffer.len())
         .map_err(|_| NativeError::Internal("JIT buffer length does not fit u32".into()))?;
-    let base = unsafe { buffer.entry_ptr(0) } as usize as u32;
+    // The profiler symbolizes sampled program counters against this base, so it
+    // is an execute address, not the write address of the buffer.
+    let base = unsafe { buffer.exec_ptr(0) } as usize as u32;
     emit_jit_symbols(base, buffer_len, &linked.entries);
 
     Ok((buffer, linked.entries))

@@ -1,4 +1,4 @@
-//! [`LpvmModule`] implementation for linked + emulated native RV32.
+//! [`LpvmModule`] implementation for a linked + emulated native guest image.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -20,7 +20,10 @@ pub struct NativeEmuModule {
     /// Object bytes retained for debugging; not used at runtime.
     pub(crate) _elf: Vec<u8>,
     pub(crate) meta: LpsModuleSig,
-    pub(crate) load: Arc<lp_riscv_elf::ElfLoadInfo>,
+    /// Guest ISA this module was compiled and linked for. The one field
+    /// `instance.rs` branches on.
+    pub(crate) isa: crate::isa::IsaTarget,
+    pub(crate) load: Arc<super::GuestImage>,
     pub(crate) arena: EmuSharedArena,
     pub(crate) options: NativeCompileOptions,
     /// Debug info with sections per function.
@@ -69,6 +72,8 @@ impl LpvmModule for NativeEmuModule {
             armed_fuel: lpvm::DEFAULT_VMCTX_FUEL as u32,
             render_texture_cache: None,
             render_samples_cache: None,
+            #[cfg(feature = "emu-xt")]
+            sret_scratch: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot.

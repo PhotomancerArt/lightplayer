@@ -42,6 +42,25 @@ pub(crate) fn knob_control(
     state: UiSlotFieldState,
     source: UiSlotSourceState,
 ) -> UiPanelControl {
+    knob_control_stepped(label, value, min, max, None, state, source)
+}
+
+/// A knob quantized to `step` — what an integer uniform (`i32`/`u32`, or an
+/// authored `step`) derives to. `None` is the continuous knob.
+///
+/// The readout is snapped here exactly as `node_face_builder` snaps it, so
+/// a stepped control's value and widget agree in the story the same way they
+/// agree in the app.
+pub(crate) fn knob_control_stepped(
+    label: &str,
+    value: f32,
+    min: f32,
+    max: f32,
+    step: Option<f32>,
+    state: UiSlotFieldState,
+    source: UiSlotSourceState,
+) -> UiPanelControl {
+    let value = crate::app::node::panel::knob_snap(value, min, step);
     let slot_value = UiSlotValue::f32(value);
     let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
         .with_state(state.clone())
@@ -49,11 +68,7 @@ pub(crate) fn knob_control(
     UiPanelControl {
         label: label.to_string(),
         address: Some(story_slot_address(&format!("controls.{label}"))),
-        widget: UiPanelWidget::Knob {
-            min,
-            max,
-            step: None,
-        },
+        widget: UiPanelWidget::Knob { min, max, step },
         value: slot_value,
         live_value: None,
         unit: None,

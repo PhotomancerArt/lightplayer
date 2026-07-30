@@ -8,7 +8,9 @@ mod frame_num;
 mod frame_time;
 mod loaded_project_runtime;
 pub mod memory_pressure;
-#[cfg(test)]
+// All three tests in this module exercise a Fixture node fed by a Shader
+// node's output slot, so the module needs both node kinds.
+#[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
 mod output_flush_tests;
 mod project_apply;
 mod project_loader;
@@ -24,7 +26,9 @@ mod srgb8_lut;
 pub(crate) mod test_support;
 
 pub use engine::Engine;
-#[cfg(test)]
+// Consumed by fixture node tests directly and by `output_flush_tests`; both
+// require the fixture-fed-by-shader combination.
+#[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
 pub(crate) use engine::default_demand_input_path;
 pub use engine_error::EngineError;
 pub use engine_services::{ButtonService, EngineServices, OutputFlushError, RadioService};
