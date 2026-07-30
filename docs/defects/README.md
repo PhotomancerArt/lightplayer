@@ -108,10 +108,21 @@ a week is an argument for a conformance suite. When a class accumulates
 entries, say so out loud — that is an architecture finding, not a
 bookkeeping fact.
 
+Saying it out loud: **`config-masked-defect` took three entries on
+2026-07-30**, all in `lpvm-native`'s shared register allocator, all
+latent for the entire life of the rv32-only era, and all made
+observable within hours of the Xtensa corpus landing. The finding is not
+"the allocator had bugs" — it is that a single-configuration test suite
+cannot falsify configuration-dependent code, however large it is
+(31,587 rv32 cases did not). The mitigation is a second configuration
+that overlaps where the first is disjoint, which is what the Xtensa
+targets now are.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
-| config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed (1 known gap) | lpvm-native/regalloc (walk.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
