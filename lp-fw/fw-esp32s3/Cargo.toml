@@ -14,7 +14,17 @@ esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
     "esp-hal/esp32s3",
+    "esp-rtos/esp32s3",
 ]
+
+# Wire-protocol serialization inside `serial::io_task`.
+#
+# ⚠️ Deliberately NARROWER than fw-esp32c6's feature of the same name, which
+# also pulls `lpa-server`, `lp-gfx-lpvm`, `fw-esp32-common/server` and the rest
+# of the app stack. M3 P2 ports the transport only; P5 widens this to the full
+# server when it wires the app entrypoint. Non-default so the P2 image stays
+# minimal — `just clippy-fw-esp32s3` lints it explicitly so it cannot rot.
+server = ["dep:lpc-wire", "dep:ser-write-json"]
 
 # Hardware harnesses. Any `test_*` feature makes build.rs set the `fw_harness`
 # cfg, which replaces the (future) app entrypoint with a harness — mirroring
@@ -38,7 +48,37 @@ esp-backtrace = { version = "0.19.0", features = ["println"] }
 esp-bootloader-esp-idf = { version = "0.5.0" }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32s3", "jtag-serial", "log-04"] }
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
+
+# Async runtime for `serial::io_task`. Mirrors fw-esp32c6's set; the S3 runs the
+# same embassy executor through esp-rtos.
+embassy-executor = "0.10.0"
+embassy-time = "0.5.0"
+embassy-sync = "0.8.0"
+embassy-futures = "0.1"
+embedded-io-async = "0.6"
+
+# MessageRouter + the SerialIo trait the USB-Serial-JTAG adapter implements.
+# NOTE: fw-core depends unconditionally on lpa-server, so this is the edge at
+# which fw-esp32s3 starts linking the LightPlayer stack. It arrives with
+# `default-features = false` (no node runtimes, no std) — P5 is what opts into
+# gates deliberately.
+fw-core = { path = "../fw-core", default-features = false }
+
+# Flash-backed filesystem. The lpfs partition is located by label at runtime
+# (see src/flash_storage.rs), not transcribed from partitions.csv.
+embedded-storage = "0.3"
+# `critical-section` is esp-storage's own default and is added back
+# deliberately: it wraps every flash operation so an interrupt cannot run from
+# a disabled cache mid-write. `default-features = false` without it compiles
+# fine and corrupts silently — exactly the trap M2 hit twice.
+esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32s3", "panic-unaligned-buffer"] }
+littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
+
+# io_task's wire-serialization path, behind the narrow `server` feature.
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
+ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 # Shader/JIT stack — harness-only for now, so the boot path stays dependency-free.
 # `default-features = false` + explicit `isa-xt` is load-bearing: pulling the

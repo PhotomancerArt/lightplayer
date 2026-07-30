@@ -1,8 +1,14 @@
 //! LightPlayer firmware for ESP32-S3 (Xtensa LX7).
 //!
 //! Boot skeleton: brings up the clocks, heap, and serial logging far enough to
-//! print the `[INIT]` marker family the hardware gate looks for. The server /
-//! radio / output stacks arrive in later phases of M5.
+//! print the `[INIT]` marker family the hardware gate looks for.
+//!
+//! The chip-side pieces the app layer needs — `board::esp32s3::init`,
+//! `serial`, `flash_storage` — are ported and compiled (M3 P2) but nothing
+//! here drives them yet: M3 P5 replaces `boot` with the app entrypoint that
+//! does. Until then the linker strips them, so the image size below is not a
+//! measure of what they cost. See `board::esp32s3::init` for the
+//! peripheral-singleton hazard that hand-off has to resolve.
 
 #![no_std]
 #![no_main]
@@ -19,20 +25,34 @@
     )
 )]
 
-// Harness-only: the runner allocates (JIT buffers, module tables). The app
-// path has no allocating code yet, and an unconditional `extern crate alloc`
-// trips `-W unused-extern-crates` there.
+// The harness runner allocates (JIT buffers, module tables); on the app path
+// `serial` brings its own `extern crate alloc`, so an unconditional one here
+// trips `-W unused-extern-crates`.
 #[cfg(fw_harness)]
 extern crate alloc;
 
 use esp_hal::main;
 
-// Also harness-only for now. `board::esp32s3::cycle_counter` reads `CCOUNT`
-// with inline asm, which is unstable on Xtensa and gated behind
-// `asm_experimental_arch` — a feature the app path deliberately does not
-// enable. The app layer will take this module when it needs chip constants.
-#[cfg(fw_harness)]
 mod board;
+#[cfg(not(fw_harness))]
+#[allow(
+    dead_code,
+    reason = "the app entrypoint that mounts the filesystem lands in M3 P5"
+)]
+mod flash_storage;
+#[cfg(not(fw_harness))]
+#[allow(
+    dead_code,
+    reason = "only the producer half exists until M3 P3 writes the feeder"
+)]
+mod recovery;
+#[cfg(not(fw_harness))]
+#[allow(
+    dead_code,
+    reason = "nothing spawns io_task until M3 P5 wires the app entrypoint; \
+              the transport is ported here so the two phases cannot drift"
+)]
+mod serial;
 #[cfg(fw_harness)]
 mod tests;
 
