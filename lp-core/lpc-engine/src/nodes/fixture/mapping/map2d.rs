@@ -72,19 +72,13 @@ mod tests {
         let PathSpec::PointList {
             first_channel,
             points,
-        } = paths.entries.get(&0).unwrap().value()
-        else {
-            panic!("expected point list");
-        };
+        } = paths.entries.get(&0).unwrap().value();
         assert_eq!(*first_channel.value(), 0);
         assert_eq!(points.entries.len(), 3);
         let PathSpec::PointList {
             first_channel,
             points,
-        } = paths.entries.get(&1).unwrap().value()
-        else {
-            panic!("expected point list");
-        };
+        } = paths.entries.get(&1).unwrap().value();
         assert_eq!(*first_channel.value(), 3);
         assert_eq!(points.entries.len(), 2);
     }
@@ -101,9 +95,7 @@ mod tests {
         let MappingConfig::PathPoints { paths, .. } = mapping else {
             panic!("expected path points");
         };
-        let PathSpec::PointList { points, .. } = paths.entries.get(&0).unwrap().value() else {
-            panic!("expected point list");
-        };
+        let PathSpec::PointList { points, .. } = paths.entries.get(&0).unwrap().value();
         assert_eq!(points.entries.get(&0).unwrap().value().0, [0.0, 0.25]);
         assert_eq!(points.entries.get(&1).unwrap().value().0, [1.0, 0.75]);
     }
