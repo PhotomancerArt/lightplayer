@@ -51,6 +51,15 @@ esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
 
+# Abort-tier crash recovery (ADR 2026-07-29-per-chip-fw-toolchains): the
+# arch-neutral ledger, plus the backtrace capture the panic path stages. Both
+# are unconditional — the crash path must exist in every app build, not just
+# ones that happen to enable the server. `lpc-shared`'s reachable surface here
+# is `backtrace::capture_frames` alone (M3 P4 gives it an Xtensa walker); the
+# rest of the crate is stripped at link time.
+lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+
 # Async runtime for `serial::io_task`. Mirrors fw-esp32c6's set; the S3 runs the
 # same embassy executor through esp-rtos.
 embassy-executor = "0.10.0"

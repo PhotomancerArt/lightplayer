@@ -163,10 +163,22 @@ not migrate into `fw-esp32-common`:
 | Panic strategy | `panic=unwind` + `unwinding` | **`panic=abort`** (abort tier) |
 | Unwind tables | `.eh_frame` retained via a build.rs patch | none — nothing to retain |
 | Recovery | `catch_unwind` around node render | RTC ledger + reset |
+| Panic-path allocation | boxes a payload for `begin_panic` | none |
+| esp-sync reentrancy guard | needed — see below | not needed — see below |
+| Panic with no ledger installed | hangs in place | resets anyway |
 | Linker | rust-lld, `-Tlinkall.x` | GNU ld, `-Wl,-Tlinkall.x` |
 
 That is why this crate's `build.rs` is nearly empty: the C6's exists mostly to
 patch esp-hal's `eh_frame.x`, which is meaningless without unwinding.
+
+The last three rows all follow from the same fact: this panic handler allocates
+nothing, so it cannot re-enter `esp-alloc`'s non-reentrant lock the way the C6's
+`Box`-ing handler can. `src/recovery/panic_path.rs` carries the full reasoning,
+including what replaces the C6's `is_esp_sync_reentrant_lock_panic` guard.
+
+⚠️ The RTC watchdog is written (`src/recovery/watchdog.rs`) but **not armed**:
+its feed policy is deliberately conditional on a live `io_task`, so arming it
+before M3 P5 spawns one would boot-loop the board.
 
 ## Workspace notes
 

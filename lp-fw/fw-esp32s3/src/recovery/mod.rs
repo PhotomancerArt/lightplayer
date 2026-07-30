@@ -1,12 +1,24 @@
 //! Abort-tier crash recovery for the ESP32-S3.
 //!
-//! ⚠️ **Stub milestone.** M3 P3 writes this subsystem: the `lp-recovery`
-//! backend over the RTC-fast-RAM region, the reset-cause map, the RWDT feeder,
-//! and the panic handler that stages a crash record before resetting. The S3
-//! is abort tier (ADR `2026-07-29-per-chip-fw-toolchains`), so the C6's
-//! `catch_unwind` layer is a shape reference, not a source.
+//! The S3 is **abort tier** per ADR `2026-07-29-per-chip-fw-toolchains`:
+//! `panic = "abort"` plus the `lp-recovery` RTC ledger. A panic is terminal for
+//! the boot; all this subsystem can do is make the *next* boot able to say what
+//! died. `fw-esp32c6/src/recovery/` is a shape reference for the file split,
+//! not a source — its `catch_unwind` layer has no counterpart here.
 //!
-//! P2 only lands the piece `serial::io_task` publishes into — see
-//! [`watchdog::note_io_alive`].
+//! - [`esp32s3_recovery_backend`]: the persistent region in RTC fast RAM and
+//!   the software-reset hook.
+//! - [`reset_cause_map`]: the S3's `SocResetReason` → platform-agnostic
+//!   `ResetCause`. Deliberately not the C6's map; the variant sets differ.
+//! - [`panic_path`]: print, stage a breadcrumb, reset. Read its module docs for
+//!   why there is no `is_esp_sync_reentrant_lock_panic` guard here.
+//! - [`boot_report`]: boot-time init and the "what died last run" report.
+//! - [`watchdog`]: RWDT arming and the io-task-aware feed policy. The only
+//!   piece with no caller yet — arming belongs next to the `io_task` spawn that
+//!   feeds it (M3 P5); see that module's docs.
 
+pub mod boot_report;
+pub mod esp32s3_recovery_backend;
+pub mod panic_path;
+pub mod reset_cause_map;
 pub mod watchdog;
