@@ -17,6 +17,10 @@ mod toggle_field;
 
 pub use h_fader_field::HFaderField;
 pub use knob_field::KnobField;
+/// Story fixtures snap their values through the widget's own rule so the
+/// story stays a faithful record of what the app renders.
+#[cfg(feature = "stories")]
+pub(crate) use knob_field::knob_snap;
 pub use panel_control::PanelControl;
 pub use panel_emit::PanelEmit;
 pub use toggle_field::ToggleField;

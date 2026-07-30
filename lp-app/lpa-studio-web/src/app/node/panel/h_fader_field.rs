@@ -17,7 +17,7 @@ use crate::app::node::slot_edit_actions::slot_set_value_action;
 use crate::app::node::slot_fields::field_wiring;
 
 use super::PanelEmit;
-use super::knob_field::knob_fraction;
+use super::knob_field::{knob_fraction, knob_snap};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -44,7 +44,9 @@ pub fn HFaderField(
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
     let disabled = wired.is_none();
-    let frac = knob_fraction(live_value.unwrap_or(value), min, max);
+    // The fill rides the step grid the native input's thumb already snaps
+    // to, so a stepped fader never shows fill and thumb in different places.
+    let frac = knob_fraction(knob_snap(live_value.unwrap_or(value), min, step), min, max);
     let input_class = fader_input_class(bound);
     let fill_style = fader_fill_style(frac, &state, bound);
     let slot_style = fader_slot_style(&state, bound);

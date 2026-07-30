@@ -4439,6 +4439,7 @@ fn agent_param_def_records(
             default: f32_of(field_value(entry, "default")),
             min: f32_of(field_value(entry, "min")),
             max: f32_of(field_value(entry, "max")),
+            step: f32_of(field_value(entry, "step")),
             panel: matches!(
                 field_value(entry, "panel"),
                 Some(lpc_model::LpValue::Bool(true))
