@@ -1304,36 +1304,58 @@ fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
 mod tests {
     use super::*;
     use alloc::boxed::Box;
+    #[cfg(feature = "node-shader")]
     use alloc::sync::Arc;
     use alloc::vec;
+    #[cfg(feature = "node-shader")]
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use lpc_model::nodes::fixture::PathSpec;
     use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
     use lpc_registry::ProjectRegistry;
+    use lpc_wire::{WireChildKind, WireSlotIndex};
+    // Read-probe types exercised only by
+    // `fixture_project_read_control_probe_returns_native_samples_and_cached_layout`.
+    #[cfg(feature = "node-shader")]
     use lpc_wire::{
         ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
         ControlProductProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest,
-        WireChannelSampleFormat, WireChildKind, WireSlotIndex,
+        WireChannelSampleFormat,
     };
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::engine::Engine;
+    #[cfg(feature = "node-shader")]
+    use crate::engine::default_demand_input_path;
+    #[cfg(feature = "node-shader")]
     use crate::engine::test_support::read_probe_results;
-    use crate::engine::{Engine, default_demand_input_path};
-    use crate::node::{RenderContext, RenderNode, RuntimeStateShape, test_placeholder_spine};
+    #[cfg(feature = "node-shader")]
+    use crate::node::RuntimeStateShape;
+    use crate::node::test_placeholder_spine;
+    // Only the shader-fed producers below (`FixtureTickCountSolidProducer`,
+    // `FixtureExpectedSampleProducer`) need render-node plumbing.
+    #[cfg(feature = "node-shader")]
+    use crate::node::{RenderContext, RenderNode};
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     use crate::nodes::TextureNode;
+    #[cfg(feature = "node-shader")]
     use crate::nodes::shader_output_path;
+    #[cfg(feature = "node-shader")]
     use crate::products::visual::{
         TextureRenderProduct, VisualProduct, VisualSampleBufferRequest, VisualSampleTarget,
     };
-    use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
+    use lpc_model::SlotShapeRegistry;
+    #[cfg(feature = "node-shader")]
+    use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistryError};
 
+    #[cfg(feature = "node-shader")]
     struct FixtureTickCountSolidProducer {
         state: ShaderState,
         ticks: Arc<AtomicU32>,
         color: [u16; 4],
     }
 
+    #[cfg(feature = "node-shader")]
     impl NodeRuntime for FixtureTickCountSolidProducer {
         fn produce(
             &mut self,
@@ -1375,6 +1397,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     impl RenderNode for FixtureTickCountSolidProducer {
         fn render_texture(
             &mut self,
@@ -1407,6 +1430,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     struct FixtureExpectedSampleProducer {
         state: ShaderState,
         expected_points: Vec<i32>,
@@ -1415,6 +1439,7 @@ mod tests {
         expected_height: u32,
     }
 
+    #[cfg(feature = "node-shader")]
     impl NodeRuntime for FixtureExpectedSampleProducer {
         fn produce(
             &mut self,
@@ -1455,6 +1480,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     impl RenderNode for FixtureExpectedSampleProducer {
         fn render_texture(
             &mut self,
@@ -1463,8 +1489,7 @@ mod tests {
             _ctx: &mut RenderContext<'_>,
         ) -> Result<TextureRenderProduct, NodeError> {
             Err(NodeError::msg(format!(
-                "unexpected texture render for {:?}",
-                request
+                "unexpected texture render for {request:?}"
             )))
         }
 
@@ -1496,6 +1521,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     fn solid_texture(
         width: u32,
         height: u32,
@@ -1821,6 +1847,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     fn fixture_demand_resolve_and_tick_share_one_shader_producer_tick_via_resolver_cache() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -1945,6 +1972,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     fn fixture_direct_sampling_writes_expected_u16_rgb_for_solid_red_product() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -2088,6 +2116,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-shader")]
     fn fixture_project_read_control_probe_returns_native_samples_and_cached_layout() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -2264,6 +2293,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-shader")]
     fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();

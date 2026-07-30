@@ -851,6 +851,38 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --no-default-features --features test_espnow,esp32c6 -- --no-deps -D warnings
 
+# Every lpc-engine node gate, one build per gate turned off.
+#
+# The gates are all default-on, so nothing else in the repo ever compiles a
+# gate-off configuration — the same invisible-rot shape as the fw-esp32c6
+# harnesses above, and the reason M2 added this alongside them. A gate-off
+# build is what M3's ESP32-S3 app layer actually ships, so it has to keep
+# compiling warning-free, and `disabled_node_kind_still_loads_project` (the
+# missing-node contract, `docs/debt/firmware-capability-reporting.md`) only
+# exists in a gate-off build and is only run here.
+#
+# `--all-targets` matters: without it the gate-off tests are never built.
+check-lpc-engine-gates:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    gates=(node-button node-radio node-fluid node-fixture node-texture \
+           node-playlist node-clock node-shader)
+    echo "==> lpc-engine: all node gates off"
+    cargo clippy -p lpc-engine --no-default-features --features std \
+        --all-targets -- --no-deps -D warnings
+    for off in "${gates[@]}"; do
+        on=$(printf '%s\n' "${gates[@]}" | grep -vx "$off" | paste -sd, -)
+        echo "==> lpc-engine: $off OFF"
+        cargo clippy -p lpc-engine --no-default-features --features "std,$on" \
+            --all-targets -- --no-deps -D warnings
+    done
+    # The missing-node contract test lives behind `not(feature = "node-button")`,
+    # so this is the only configuration that runs it.
+    on=$(printf '%s\n' "${gates[@]}" | grep -vx node-button | paste -sd, -)
+    echo "==> lpc-engine: missing-node contract test (node-button OFF)"
+    cargo test -p lpc-engine --no-default-features --features "std,$on" \
+        disabled_node_kind_still_loads_project
+
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
     cd lp-riscv/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
