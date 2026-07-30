@@ -18,6 +18,8 @@ pub use shader_header_gen::{
     ShaderHeaderGenError, generate_compute_shader_header, glsl_type_for_lp_type,
 };
 pub use shader_param_def::{ScalarHint, ShaderParamDef};
-pub use shader_slot_def::{ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderValueShapeRef};
+pub use shader_slot_def::{
+    ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderValueShapeRef, shader_panel_step,
+};
 pub use shader_slot_mapping::{ShaderSlotMappingDef, ShaderSlotMappingKind};
 pub use shader_state::ShaderState;

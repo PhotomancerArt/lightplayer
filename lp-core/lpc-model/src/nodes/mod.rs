@@ -37,7 +37,7 @@ pub use shader::{
     ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
     ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
     ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef,
-    generate_compute_shader_header, glsl_type_for_lp_type,
+    generate_compute_shader_header, glsl_type_for_lp_type, shader_panel_step,
 };
 pub use starter::{
     NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, starter_def_for_kind,

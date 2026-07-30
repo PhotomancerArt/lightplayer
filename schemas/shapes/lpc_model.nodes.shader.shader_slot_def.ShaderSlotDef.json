@@ -118,6 +118,24 @@
         }
       },
       {
+        "name": "step",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2605450937,
+                  "meta": {},
+                  "ty": "f32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "mapping",
         "shape": {
           "option": {

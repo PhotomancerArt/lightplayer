@@ -269,6 +269,9 @@
         "panel": {
           "type": "boolean"
         },
+        "step": {
+          "type": "number"
+        },
         "unit": {
           "type": "string"
         },

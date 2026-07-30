@@ -11,7 +11,7 @@ use lpa_studio_core::{UiNodeDirtyState, UiSlotFieldState, UiSlotSourceState};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::PanelControl;
-use crate::app::node::face_story_fixtures::{bound_source, knob_control};
+use crate::app::node::face_story_fixtures::{bound_source, knob_control, knob_control_stepped};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -183,6 +183,64 @@ fn label_states() -> Element {
             }
             PanelControl {
                 control: knob_control("both", 2.8, 0.0, 4.0, dirty, bound_source()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Whole-number knob: a `count` uniform over 1..=4 (an i32/u32 shape, or an authored step of 1). The sweep is CUT INTO BLOCKS — one per increment, squared off, lighting whole — so a discrete control never reads as a continuous one. Drag it and blocks light one at a time instead of an arc growing smoothly."
+)]
+fn stepped() -> Element {
+    rsx! {
+        KnobStoryCard {
+            for (index, value) in [1.0_f32, 2.0, 3.0, 4.0].into_iter().enumerate() {
+                PanelControl {
+                    key: "{index}",
+                    control: knob_control_stepped(
+                        "count",
+                        value,
+                        1.0,
+                        4.0,
+                        Some(1.0),
+                        UiSlotFieldState::editable(),
+                        UiSlotSourceState::Unset,
+                    ),
+                    on_action: move |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The two visual languages side by side, same stored value: the whole-number knob is blocked (one lit of three) and reads 2; the continuous one is a smooth rounded arc with its fixed tick marks and reads 2.37. Off-grid stored values never look authoritative on a stepped control."
+)]
+fn stepped_vs_continuous() -> Element {
+    rsx! {
+        KnobStoryCard {
+            PanelControl {
+                control: knob_control_stepped(
+                    "count",
+                    2.37,
+                    1.0,
+                    4.0,
+                    Some(1.0),
+                    UiSlotFieldState::editable(),
+                    UiSlotSourceState::Unset,
+                ),
+                on_action: move |_| {},
+            }
+            PanelControl {
+                control: knob_control(
+                    "speed",
+                    2.37,
+                    1.0,
+                    4.0,
+                    UiSlotFieldState::editable(),
+                    UiSlotSourceState::Unset,
+                ),
                 on_action: move |_| {},
             }
         }

@@ -28,6 +28,10 @@ pub struct ShaderSlotDef {
     pub default: OptionSlot<ValueSlot<f32>>,
     pub min: OptionSlot<ValueSlot<f32>>,
     pub max: OptionSlot<ValueSlot<f32>>,
+    /// Quantization for this slot's panel control: gestures snap to whole
+    /// multiples of `step`. Integer-shaped uniforms (`i32`/`u32`) step by 1
+    /// without authoring it — see [`shader_panel_step`].
+    pub step: OptionSlot<ValueSlot<f32>>,
     pub mapping: OptionSlot<ShaderSlotMappingDef>,
     pub label: ValueSlot<String>,
     pub description: ValueSlot<String>,
@@ -57,6 +61,7 @@ impl ShaderSlotDef {
                 .map(ValueSlot::new)
                 .map_or_else(OptionSlot::none, OptionSlot::some),
             max: OptionSlot::none(),
+            step: OptionSlot::none(),
             mapping: OptionSlot::none(),
             label: ValueSlot::new(String::from(label)),
             description: ValueSlot::new(String::from(description)),
@@ -71,6 +76,20 @@ impl ShaderSlotDef {
         self
     }
 
+    /// Quantize this slot's panel control to whole multiples of `step`.
+    pub fn with_step(mut self, step: f32) -> Self {
+        self.step = OptionSlot::some(ValueSlot::new(step));
+        self
+    }
+
+    /// The step this slot's panel control snaps to, per [`shader_panel_step`].
+    pub fn panel_step(&self) -> Option<f32> {
+        shader_panel_step(
+            self.step.data.as_ref().map(|step| *step.value()),
+            self.value.value(),
+        )
+    }
+
     pub fn map_u32_native(value: &str, mapping: ShaderSlotMappingDef) -> Self {
         Self {
             kind: ValueSlot::new(ShaderSlotKind::Map),
@@ -80,6 +99,7 @@ impl ShaderSlotDef {
             default: OptionSlot::none(),
             min: OptionSlot::none(),
             max: OptionSlot::none(),
+            step: OptionSlot::none(),
             mapping: OptionSlot::some(mapping),
             label: ValueSlot::default(),
             description: ValueSlot::default(),
@@ -180,6 +200,11 @@ impl ShaderValueShapeRef {
         self.name.starts_with("lp::")
     }
 
+    /// Whether this shape only takes whole values (`i32`/`u32`).
+    pub fn is_integer(&self) -> bool {
+        matches!(self.as_lp_type(), Some(LpType::I32 | LpType::U32))
+    }
+
     pub fn as_lp_type(&self) -> Option<LpType> {
         match self.name.as_str() {
             "f32" => Some(LpType::F32),
@@ -197,6 +222,23 @@ impl ShaderValueShapeRef {
 impl Default for ShaderValueShapeRef {
     fn default() -> Self {
         Self::builtin("f32")
+    }
+}
+
+/// The step a shader uniform's panel control snaps to: the authored `step`
+/// when positive, else 1 for integer-shaped uniforms (`i32`/`u32`) so a
+/// "how many" knob lands on whole numbers, else `None` (continuous).
+///
+/// This is the one rule; both the model ([`ShaderSlotDef::panel_step`]) and
+/// the studio's face derivation — which reads authored fields off DTO rows
+/// rather than the def itself — call it.
+pub fn shader_panel_step(authored: Option<f32>, value: &ShaderValueShapeRef) -> Option<f32> {
+    match authored {
+        Some(step) if step > 0.0 => Some(step),
+        // A non-positive authored step is meaningless; ignore it rather than
+        // letting it divide by zero downstream.
+        Some(_) => None,
+        None => value.is_integer().then_some(1.0),
     }
 }
 
@@ -373,6 +415,58 @@ mod tests {
         assert_eq!(slot.value.value().as_str(), "lp::fluid::Emitter");
         assert!(slot.value.value().is_native());
         assert!(slot.mapping.data.is_some());
+    }
+
+    #[test]
+    fn integer_shaped_uniforms_step_by_one_without_authoring() {
+        let slot = read_slot_def(
+            r#"{
+  "kind": "value",
+  "value": "u32",
+  "default": 2,
+  "min": 1,
+  "max": 4,
+  "label": "Count",
+  "description": "How many meteors",
+  "panel": true
+}"#,
+        );
+
+        assert_eq!(slot.panel_step(), Some(1.0));
+    }
+
+    #[test]
+    fn authored_step_wins_over_the_shape_default() {
+        let slot = read_slot_def(
+            r#"{
+  "kind": "value",
+  "value": "f32",
+  "default": 1.0,
+  "min": 0.0,
+  "max": 4.0,
+  "step": 0.25,
+  "label": "Speed",
+  "description": ""
+}"#,
+        );
+
+        assert_eq!(slot.panel_step(), Some(0.25));
+    }
+
+    #[test]
+    fn float_uniforms_stay_continuous_and_bad_steps_are_ignored() {
+        assert_eq!(
+            ShaderSlotDef::value_f32("Speed", "", 1.0, None).panel_step(),
+            None,
+            "an unstepped f32 uniform slides continuously"
+        );
+        assert_eq!(
+            ShaderSlotDef::value_f32("Speed", "", 1.0, None)
+                .with_step(0.0)
+                .panel_step(),
+            None,
+            "a zero step would divide by zero downstream"
+        );
     }
 
     fn read_slot_def(text: &str) -> ShaderSlotDef {
