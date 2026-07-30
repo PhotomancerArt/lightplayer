@@ -101,13 +101,39 @@ ret_count: func_abi
 
 ## Class
 
-Not `config-masked-defect` (the class #194 introduced, where rv32 is correct
-only by register-layout accident). This one is **engine-masked**: the bug lives
-in a code path that only compiles for embedded targets, so no host test could
-execute it regardless of ISA. The sibling engine in the same crate had the
-correct implementation the whole time.
+**`split-source-of-truth`** — one fact (how many words this function returns)
+derived two ways, both used, nothing checking they agree. `ret_count` came from
+the IR and `is_sret` came from the ABI, and no test asserted they described the
+same function.
 
-The general shape worth remembering: **two fields of the same struct, derived
-from different sources, that must agree.** `is_sret` came from the ABI and
-`ret_count` came from the IR, and nothing checked that they described the same
-function.
+`xtensa-sret-pointer-clobber` (same day, PR #194) is **the same bug**:
+`FuncAbi::allocatable` computed the withheld sret register and `RegPool`
+ignored it. In both cases the producer had a passing unit test asserting its
+own opinion; the untested thing was the hand-off. Two in one day is an
+architecture signal, not a coincidence.
+
+It is filed here rather than under `config-masked-defect` because that class
+describes *how a defect survived*, not what it was — and the masking mechanisms
+genuinely differ. Theirs survived a register-layout accident (rv32's argument
+registers and pool are disjoint; Xtensa's overlap). This one survived a **`cfg`
+boundary**: `rt_jit` compiles only for riscv32/xtensa, so no host test could
+execute it, including the 851-file filetest corpus, which runs on `rt_emu`.
+
+See the note in `README.md` on collapsing the two axes if a fourth lands.
+
+## Postscript: the guard was not running either
+
+The tests added alongside this fix (`xt_corpus_goldens`,
+`xt_corpus_hard_cases`) initially ran **nowhere** — `test-xt-host` used a
+`--test` allowlist they were never added to, and a file-level
+`#![cfg(feature = "emu-xt")]` meant that under any other feature set they
+compiled to an empty file and reported success having executed nothing.
+
+The allowlist has been removed rather than extended: it had to be maintained to
+stay correct, and the cost of forgetting was silence — the same property that
+made this defect invisible. `validate-xtensa` is separately gaining a
+minimum-test-count assert, so a job cannot pass while running nothing.
+
+Third instance of file-level-cfg-hides-tests in this repo (see
+`fw-esp32-harnesses-rotted-uncompiled` and the `stories` note on
+`test-studio-host`), which makes it a pattern rather than three mistakes.

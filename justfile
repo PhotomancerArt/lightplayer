@@ -969,18 +969,23 @@ test-rust-core:
 # it the tests SKIP with a loud note rather than failing, so this recipe is safe
 # on a machine with no esp toolchain — build the image with
 # `scripts/build-builtins-xt.sh` to make it mean something.
-# `xt-corpus` is in the feature list, not just `emu-xt`: the corpus tests are
-# `#![cfg(feature = "emu-xt")]` but their subject
-# (`lpvm_native::xt_corpus`) sits behind `xt-corpus`, so without both they
-# compile to an EMPTY file and report success having run nothing.
+# NO `--test` allowlist, deliberately. There used to be one, and it silently
+# excluded the two files added by #197 — they ran in neither CI nor `just
+# test`, and reported success by executing nothing.
 #
-# The `--test` list is an allowlist, so a new test file is invisible until it
-# is added here. `xt_corpus_goldens` shipped in #197 and ran nowhere until this
-# line — including in `just test`, which passed by executing zero of it. If you
-# add a test file under lpvm-native that needs the Xtensa host engine, add it
-# here too, and check it reports a non-zero test count.
+# An allowlist has to be maintained to stay correct, and the cost of forgetting
+# is SILENCE rather than an error. That is the same property that made the
+# defect those tests guard invisible in the first place, so it is the wrong
+# shape here: explicit-but-stale is worse than implicit-and-complete. Running
+# all targets picks up any future test file automatically; the lib tests it
+# adds cost ~0.2s.
+#
+# `xt-corpus` must be in the feature list alongside `emu-xt`. The corpus tests
+# are `#![cfg(feature = "emu-xt")]` but their subject
+# (`lpvm_native::xt_corpus`) sits behind `xt-corpus` — with only one of the
+# two, the files compile to NOTHING and pass having run nothing.
 test-xt-host:
-    cargo test -p lpvm-native --features emu-xt,xt-corpus --test xt_engine --test xt_pipeline --test xt_builtins_image --test xt_imm_legality --test xt_corpus_goldens --test xt_corpus_hard_cases
+    cargo test -p lpvm-native --features emu-xt,xt-corpus
 
 # Studio web view layer is outside default-members (Dioxus web dep tree);
 # its unit tests are pure host-runnable view helpers. Separate invocation
