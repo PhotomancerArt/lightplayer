@@ -323,7 +323,9 @@ impl Engine {
         loaded_registry_def(registry, location).ok()
     }
 
-    #[cfg(test)]
+    // Consumed by texture and shader node test modules (and the
+    // texture-def-root test in `project_read_stream`).
+    #[cfg(all(test, any(feature = "node-texture", feature = "node-shader")))]
     pub(crate) fn load_test_node_defs(
         &mut self,
         registry: &mut ProjectRegistry,
@@ -547,7 +549,8 @@ impl Engine {
         self.render_texture_product(registry, product, request)
     }
 
-    #[cfg(test)]
+    // Consumed only by fixture node control-rendering tests.
+    #[cfg(all(test, feature = "node-fixture"))]
     pub(crate) fn render_control_for_test(
         &mut self,
         registry: &ProjectRegistry,
@@ -2229,6 +2232,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-playlist")]
     fn node_command_dispatches_to_the_addressed_runtime() {
         use crate::nodes::{PlaylistNode, PlaylistRuntimeEntry};
         use lpc_wire::WireNodeCommand;
