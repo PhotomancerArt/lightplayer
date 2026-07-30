@@ -11,6 +11,16 @@ workspace = true
 [features]
 default = []
 std = []
+# The no-op `NullGraphics` backend, for constrained firmware that runs no
+# shaders (see `src/null_graphics.rs`). Off by default and opted into at the
+# firmware's own dependency line, so choosing it stays a visible act.
+#
+# It is gated rather than merely dead-stripped because it is not free when
+# absent: measured on the C6, simply *adding* the module — which links no
+# symbols, `rust-nm` finds none in the image — grew `.text` by 436 B and
+# `.rodata` by 64 B by perturbing inlining decisions across the LTO unit.
+# A build that does not want the null backend should not pay for it.
+null-backend = []
 
 [dependencies]
 lpir = { path = "../../lp-shader/lpir", default-features = false }
