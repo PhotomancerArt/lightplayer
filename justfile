@@ -10,6 +10,10 @@ rv32_firmware_packages := "fw-esp32c6"
 
 fw_esp32c6_profile := "release-esp32"
 fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp32c6"
+
+# fw-esp32s3 builds on Espressif's Rust fork (see lp-fw/fw-esp32s3/rust-toolchain.toml)
+xt_s3_target := "xtensa-esp32s3-none-elf"
+fw_esp32s3_elf := "target/" + xt_s3_target + "/release/fw-esp32s3"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -589,6 +593,31 @@ build-fw-esp32s3:
     fi
     export PATH="$GCC_BIN:$PATH"
     cd lp-fw/fw-esp32s3 && cargo build --release
+
+# Always passes --partition-table: espflash's default table has a 1 MB factory
+# partition, and this crate is budgeted for the same 3 MB as the C6.
+#
+# Pass the port explicitly when more than one board is on the bus — several
+# usually are on the desk, and auto-detection picks the first match, not
+# necessarily the S3:
+#
+#   just flash-fw-esp32s3 /dev/cu.usbmodem1101
+#
+# The S3 speaks USB-Serial-JTAG, not a UART bridge, so it enumerates as
+# /dev/cu.usbmodem* and its port number CHANGES whenever the chip
+# re-enumerates after a reset. Before concluding a board is dead: a stray
+# espflash holding this port wedges it uninterruptibly (ps STAT `Us+`, kill -9
+# does not land) until someone physically replugs it.
+
+# Flash fw-esp32s3 to a connected ESP32-S3 and open the serial monitor.
+flash-fw-esp32s3 port="": build-fw-esp32s3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Fail when the esp32c6 app image gets too close to its 3 MB partition.
 # The image overran the partition twice in 2026 and both times it surfaced as a
