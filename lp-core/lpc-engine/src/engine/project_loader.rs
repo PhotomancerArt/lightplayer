@@ -4428,4 +4428,70 @@ mod tests {
             assert!(!classify(kind).is_empty());
         }
     }
+
+    /// A project referencing a gated-off node kind must still **load**. The
+    /// missing-node contract is deliberately minimal (M2 scope decision,
+    /// `docs/debt/firmware-capability-reporting.md`): the attach loop for a
+    /// disabled kind falls back to `CorePlaceholderNode` and the load
+    /// succeeds silently. This asserts only that — never anything about
+    /// status/reporting, which is deliberately absent by design.
+    ///
+    /// Gated to `node-button` off, so it only compiles when that feature is
+    /// disabled; under the crate's own `default` (all eight node gates on)
+    /// this cfg compiles the test out entirely, same as the disabled-path
+    /// arm it exercises in `attach_projected_nodes_filtered` above. It does
+    /// **not** run under `just test` or any CI job today — nothing in this
+    /// workspace tests lpc-engine with a non-default feature set yet. It
+    /// runs when invoked directly with the gate off, mirroring the P4
+    /// compile matrix but for `test` instead of `check`:
+    ///
+    /// ```sh
+    /// cargo test -p lpc-engine --no-default-features --features \
+    ///   "std,node-radio,node-fluid,node-fixture,node-texture,node-playlist,node-clock,node-shader" \
+    ///   disabled_node_kind_still_loads_project
+    /// ```
+    #[test]
+    #[cfg(not(feature = "node-button"))]
+    fn disabled_node_kind_still_loads_project() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "button": {
+      "ref": "./button.json"
+    }
+  }
+}
+"#,
+        )
+        .expect("project.json");
+        fs.write_file(
+            "/button.json".as_path(),
+            br#"
+{
+  "kind": "Button",
+  "endpoint": "button:gpio:D9",
+  "stable_ms": 1,
+  "bindings": {
+    "down": {
+      "target": "bus:trigger"
+    }
+  }
+}
+"#,
+        )
+        .expect("button.json");
+
+        let services = EngineServices::new(TreePath::parse("/disabled_node.show").expect("path"));
+        let result = ProjectLoader::load_from_root(&fs, services);
+        assert!(
+            result.is_ok(),
+            "a project referencing a disabled node kind must still load: {:?}",
+            result.err()
+        );
+    }
 }
