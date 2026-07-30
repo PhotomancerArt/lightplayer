@@ -427,8 +427,8 @@ fn cross_function_call_via_literal_slot_callx8() {
 
 /// Multi-argument guest→guest calls, one arity per case.
 ///
-/// Regression for two allocator defects the Xtensa filetest corpus surfaced
-/// (2026-07-30). Both were in *shared* allocator code that rv32's register
+/// Regression for three allocator defects the Xtensa filetest corpus surfaced
+/// (2026-07-30). All were in *shared* allocator code that rv32's register
 /// layout happens to make safe, and Xtensa's does not:
 ///
 /// 1. **Call-argument staging was not a parallel move.** Moves were emitted in
@@ -440,20 +440,21 @@ fn cross_function_call_via_literal_slot_callx8() {
 /// 2. **Entry parameter moves had the same hazard**, callee-side, plus an
 ///    ordering dependency with the incoming-stack-arg loads.
 ///
-/// Before the fix this broke at **three** user arguments — well inside the six
-/// argument registers, so it was never about stack arguments. M3's
-/// `cross_function_call_via_literal_slot_callx8` passed throughout because it
-/// uses exactly one.
+///    Cases 1..=11 cover both: the hazard fires at **three** user arguments,
+///    well inside the six argument registers, so it was never about stack
+///    arguments. M3's `cross_function_call_via_literal_slot_callx8` passed
+///    throughout because it uses exactly one.
+///
+/// 3. **Stack-passed arguments were left out of that parallel move.** The
+///    overflow arguments are stored to the outgoing area by the ISA emitter,
+///    i.e. after every staging move has run, so a source register that a
+///    staging move writes is read too late. First observable at **twelve**
+///    arguments, where the values fill Xtensa's 12-register pool and the
+///    overflow one is sitting in a staging target. Cases 12..=20 cover it;
+///    see `docs/defects/2026-07-30-xtensa-stack-arg-staged-over.md`.
 ///
 /// The arguments are distinct powers of two and the callee sums them, so any
 /// dropped, duplicated or misplaced argument changes the total.
-///
-/// **Known gap:** 12 user arguments still fails (register pressure forces
-/// spilling around the call). Tracked in
-/// `docs/defects/2026-07-30-xtensa-call-argument-clobber.md`; the corpus files
-/// `lpvm/native/perf/stack-args-outgoing.glsl`,
-/// `lpvm/native/spill_pressure_call.glsl` and `function/param-many.glsl` are
-/// its corpus-level face.
 #[rstest::rstest]
 #[case(1)]
 #[case(2)]
@@ -466,6 +467,15 @@ fn cross_function_call_via_literal_slot_callx8() {
 #[case(9)]
 #[case(10)]
 #[case(11)]
+#[case(12)]
+#[case(13)]
+#[case(14)]
+#[case(15)]
+#[case(16)]
+#[case(17)]
+#[case(18)]
+#[case(19)]
+#[case(20)]
 fn multi_arg_call_passes_every_argument(#[case] n: usize) {
     let mut cb = FunctionBuilder::new("g", &[IrType::I32]);
     let ps: Vec<_> = (0..n).map(|_| cb.add_param(IrType::I32)).collect();
