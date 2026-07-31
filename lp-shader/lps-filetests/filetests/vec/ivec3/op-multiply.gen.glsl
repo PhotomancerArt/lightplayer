@@ -72,6 +72,7 @@ ivec3 test_ivec3_multiply_in_assignment() {
 // run: test_ivec3_multiply_in_assignment() == ivec3(12, 21, 8)
 
 ivec3 test_ivec3_multiply_large_numbers() {
+    // Integer vectors use exact arithmetic.
     ivec3 a = ivec3(1000, 2000, 3000);
     ivec3 b = ivec3(3000, 1000, 2000);
     return a * b;

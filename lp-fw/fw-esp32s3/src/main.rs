@@ -15,10 +15,9 @@
 //! this board is compiled to **Xtensa machine code on the board** and executed
 //! from RAM.
 //!
-//! Still absent: the RMT/ws281x driver, the button, and the radio. The output
-//! driver reports frames over serial instead (`output::readout_driver`), which
-//! is what makes the render verifiable — a serial hex dump can be diffed
-//! against a host render, and an LED cannot.
+//! Output is real: `output::rmt` drives WS281x strips from the RMT peripheral
+//! on up to four channels at once, over the portable `lp-ws281x` transmitter.
+//! Still absent: the button and the radio.
 //!
 //! ## Shape versus fw-esp32c6
 //!
@@ -54,7 +53,11 @@ extern crate alloc;
 mod board;
 #[cfg(not(fw_harness))]
 mod flash_storage;
-#[cfg(not(fw_harness))]
+// Not simply `not(fw_harness)`: the `test_loopback` harness drives the same RMT
+// backend and the same shared driver the app path does, and a self-test against
+// a different transmitter would prove nothing. The registry-facing driver
+// inside is still app-only.
+#[cfg(any(not(fw_harness), feature = "test_loopback"))]
 mod output;
 #[cfg(not(fw_harness))]
 mod recovery;
@@ -79,7 +82,7 @@ use {
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
-    output::{Esp32OutputProvider, SerialReadoutWs281xDriver},
+    output::{Esp32OutputProvider, Esp32S3RmtWs281xDriver},
     serial::io_task,
 };
 
@@ -148,8 +151,10 @@ fn boot() -> ! {
     // `board::esp32s3::constants::CPU_HZ` (the divisor in
     // `cycle_counter::cycles_to_us`) hardcodes 240 MHz. Booting the harness at
     // the default would make every cycle→µs figure it prints understate real
-    // elapsed time by 3×. This matches the app path's `init_board`.
-    let _peripherals =
+    // elapsed time by 3×. This matches the app path's `init_board`. The
+    // loopback harness additionally needs the fast clock to drain four RX
+    // transactions inside a 24-item (30 µs) capture window.
+    let peripherals =
         esp_hal::init(esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::max()));
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
 
@@ -157,14 +162,23 @@ fn boot() -> ! {
     esp_println::println!("[INIT] chip=esp32s3 arch=xtensa heap={HEAP_SIZE}");
     esp_println::println!("[INIT] ready");
 
-    // Both harnesses diverge, so there is no tail to park in — a harness build
-    // with neither feature cannot exist (`fw_harness` is set by build.rs from
-    // the presence of one).
+    // Every harness diverges, so there is no tail to park in — a harness build
+    // with no feature cannot exist (`fw_harness` is set by build.rs from the
+    // presence of one).
+    #[cfg(feature = "test_loopback")]
+    tests::loopback::run(peripherals);
+
     #[cfg(feature = "test_xt_jit_corpus")]
-    tests::xt_jit_corpus::run_all();
+    {
+        drop(peripherals);
+        tests::xt_jit_corpus::run_all();
+    }
 
     #[cfg(feature = "test_backtrace_oracle")]
-    tests::backtrace_oracle::run_all();
+    {
+        drop(peripherals);
+        tests::backtrace_oracle::run_all();
+    }
 }
 
 /// Heap free/used for the heartbeat. A chip fact `fw-esp32-common` must not
@@ -194,7 +208,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // boot skeleton that used to call it directly here is gone, and the harness
     // entrypoint above (which never runs `init_board`) is cfg-exclusive with
     // this function. Do not add a second `esp_hal::init` anywhere on this path.
-    let (sw_int, timg0, usb_device, flash, rwdt) = init_board();
+    let (sw_int, timg0, usb_device, flash, rwdt, rmt_peripheral) = init_board();
     // The heap is main.rs's, not the board's — `init_board` deliberately does
     // not allocate it (unlike the C6's). Recovery leaks its instance into a
     // `&'static mut`, so it cannot run before this line.
@@ -247,9 +261,22 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
-    hardware_system.add_ws281x_driver(Box::new(SerialReadoutWs281xDriver::new(Rc::clone(
-        &hardware_registry,
-    ))));
+
+    // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
+    // with divider 1 gives the 12.5 ns tick `lp_ws281x::PulseCodes` assumes; a
+    // failure here is a clock-tree problem, and it costs the board its output
+    // rather than its boot, so it is logged and not fatal.
+    match esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK) {
+        Ok(rmt) => {
+            hardware_system.add_ws281x_driver(Box::new(Esp32S3RmtWs281xDriver::new(
+                Rc::clone(&hardware_registry),
+                rmt,
+            )));
+        }
+        Err(error) => {
+            esp_println::println!("[ERROR] RMT init failed ({error:?}); no LED output this boot");
+        }
+    }
     // No button and no radio driver: neither is ported, and `LpServer` takes
     // both services as `Option`, so they are simply absent rather than stubbed.
     let hardware_system = Rc::new(hardware_system);

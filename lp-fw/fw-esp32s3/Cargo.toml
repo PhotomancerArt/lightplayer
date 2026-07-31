@@ -49,6 +49,14 @@ server = [
 # `lpc-shared` is already unconditional for the panic path.
 test_backtrace_oracle = []
 
+# The RMT loopback self-test: every TX channel transmits into its own RX
+# channel through the GPIO matrix (no wires, no strips) and the waveform is
+# asserted numerically. `lp-ws281x/test_hooks` is what lets it drop a threshold
+# interrupt on one channel and prove the guard word truncates that frame on
+# silicon — it must never be enabled in an app build, which is why it hangs off
+# this feature rather than off the dependency line.
+test_loopback = ["lp-ws281x/test_hooks"]
+
 test_xt_jit_corpus = [
     "dep:lpvm-native",
     "dep:lpvm",
@@ -152,7 +160,13 @@ lpa-server = { path = "../../lp-app/lpa-server", default-features = false, featu
 # the unused module still cost 512 B of LTO perturbation.
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
 
-# Hardware registry/manifest for the output readout driver, and the filesystem
+# The portable half of the WS281x driver: pulse encoding, ping-pong refill and
+# guard-word flicker protection, all tested on the host. Unconditional, because
+# the RMT backend under it is shared by the app path and the `test_loopback`
+# harness. `default-features = false` drops the host-only `MockRmt`.
+lp-ws281x = { path = "../lp-ws281x", default-features = false }
+
+# Hardware registry/manifest for the WS281x output driver, and the filesystem
 # traits the server is handed.
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }

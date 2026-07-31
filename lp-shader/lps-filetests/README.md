@@ -314,8 +314,25 @@ five different reasons, five annotations with five reasons is the honest record.
 written into them is reverted by the next `--write`. Put the disposition in the
 generator instead — the torture generator's `INTRINS` table has an
 `unimplemented` field that accepts any selector. `--mark-unimplemented` refuses
-to edit these files and tells you where the disposition belongs, and
-`just lint-torture-corpus` catches drift.
+to edit these files and tells you where the disposition belongs.
+
+Both corpora have a drift gate, run as part of `just check-lint`:
+
+| Corpus | Gate | Regenerate with |
+| --- | --- | --- |
+| `vec/**/*.gen.glsl` | `just lint-vec-corpus` | `cargo run -p lps-filetests-gen-app -- vec --write` |
+| `control/torture/` | `just lint-torture-corpus` | `python3 lp-shader/scripts/gen-control-torture.py --write` |
+
+Each gate compares the checked-in bytes against a fresh render and reports every
+file that `differs`, is `missing`, or is `stale` (still on disk but no longer
+produced). They exist because drift here is invisible: `lint-vec-corpus` was
+added after the vec generator was found to have drifted 2,700 lines of body
+indentation away from its own output, and to be one `--write` away from silently
+dropping the `run[f32]` channels hand-added to the float `op-add`/`op-multiply`
+large-numbers cases.
+
+Note that `bvec` is not a generator target — `vec/bvecN/` holds hand-written
+tests, and `lps-filetests-gen-app vec/bvecN` is a hard error explaining why.
 
 ## Test file format
 
