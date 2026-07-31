@@ -550,17 +550,32 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // The boot-control record was already consumed by the read, so this is a
     // one-shot: the next boot loads normally unless something says otherwise
     // again.
-    if boot_control.skip_project_autoload() {
-        log::error!("[BOOTCTL] SAFE BOOT: boot-control record — skipping project auto-load");
-    } else if boot_assessment.safe_mode {
-        let incomplete_boots = lp_recovery::snapshot()
-            .map(|s| s.consecutive_incomplete_boots)
-            .unwrap_or(0);
-        log::error!(
-            "[RECOVERY] SAFE MODE: {incomplete_boots} consecutive incomplete boots — skipping project auto-load"
-        );
-    } else {
-        boot::auto_load_project(&mut server);
+    // The boot-control record's action comes pre-decided by lp-bootctl's
+    // precedence rule (clamp wins over skip — a dim, visible board beats a
+    // dark one). An explicit user instruction outranks the ladder: the user
+    // may be recovering exactly the loop the ladder saw.
+    match boot_control.boot_action() {
+        lp_bootctl::BootAction::LoadClamped { level } => {
+            log::error!(
+                "[BOOTCTL] SAFE MODE: output clamped to {level}/255 — loading the project dimmed"
+            );
+            server.set_safe_output_clamp(Some(level));
+            boot::auto_load_project(&mut server);
+        }
+        lp_bootctl::BootAction::SkipAutoload => {
+            log::error!("[BOOTCTL] SAFE BOOT: boot-control record — skipping project auto-load");
+        }
+        lp_bootctl::BootAction::Normal if boot_assessment.safe_mode => {
+            let incomplete_boots = lp_recovery::snapshot()
+                .map(|s| s.consecutive_incomplete_boots)
+                .unwrap_or(0);
+            log::error!(
+                "[RECOVERY] SAFE MODE: {incomplete_boots} consecutive incomplete boots — skipping project auto-load"
+            );
+        }
+        lp_bootctl::BootAction::Normal => {
+            boot::auto_load_project(&mut server);
+        }
     }
 
     // Create time provider

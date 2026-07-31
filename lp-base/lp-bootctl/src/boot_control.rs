@@ -28,14 +28,42 @@ impl BootControl {
         self.flags.contains(BootFlags::SKIP_PROJECT_AUTOLOAD)
     }
 
-    /// Encode to the on-flash record.
+    /// The single boot decision, with the safe-mode precedence applied.
     ///
-    /// Writers that can be interrupted must use
-    /// [`encode_write_order`](crate::encode_write_order) instead, which
-    /// exposes the ordering that makes a torn write safe.
+    /// This is THE place the skip-vs-clamp precedence lives — consumers ask
+    /// for the action rather than re-deriving it from raw flags, so the rule
+    /// ("a clamp-capable firmware loads the project dimmed and ignores the
+    /// skip") cannot drift between implementations.
+    pub const fn boot_action(self) -> BootAction {
+        if let Some(level) = self.flags.safe_clamp() {
+            return BootAction::LoadClamped { level };
+        }
+        if self.skip_project_autoload() {
+            return BootAction::SkipAutoload;
+        }
+        BootAction::Normal
+    }
+
+    /// Encode to the on-flash record. Write it in ONE operation — see
+    /// [`encode_record`](crate::encode_record) for why splitting the write
+    /// destroys it.
     pub fn encode(self) -> [u8; RECORD_LEN] {
         encode_record(self.flags)
     }
+}
+
+/// What this boot should actually do, precedence already applied.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum BootAction {
+    /// Boot normally.
+    Normal,
+    /// Come up reachable with nothing loaded. The pre-clamp degradation,
+    /// and the fallback for firmware that predates the clamp.
+    SkipAutoload,
+    /// Load the project, but ceiling every fixture's output at
+    /// `level`/255. The preferred safe mode: the user sees their work
+    /// running dim, connects, and fixes it.
+    LoadClamped { level: u8 },
 }
 
 /// Every way a read of the boot-control sector can resolve.
@@ -70,12 +98,21 @@ impl DecodeOutcome {
 
     /// Whether this boot should skip the project auto-load.
     ///
-    /// The single question the boot path asks. Every failure mode answers
-    /// `false`, so a corrupt sector can never *cause* a degraded boot — it
-    /// can only fail to prevent one.
+    /// Prefer [`Self::boot_action`], which applies the safe-mode precedence.
+    /// Every failure mode answers `false`, so a corrupt sector can never
+    /// *cause* a degraded boot — it can only fail to prevent one.
     pub fn skip_project_autoload(self) -> bool {
         self.control()
             .is_some_and(BootControl::skip_project_autoload)
+    }
+
+    /// The boot decision, with the safe-mode precedence applied. Every
+    /// failure mode answers [`BootAction::Normal`].
+    pub fn boot_action(self) -> BootAction {
+        match self.control() {
+            Some(control) => control.boot_action(),
+            None => BootAction::Normal,
+        }
     }
 
     /// A short, stable reason for the firmware boot log.
@@ -138,6 +175,39 @@ mod tests {
         let outcome = DecodeOutcome::Valid(BootControl::NONE);
         assert!(!outcome.skip_project_autoload());
         assert!(outcome.control().is_some());
+    }
+
+    #[test]
+    fn the_precedence_rule_lives_here_and_clamp_wins() {
+        use crate::BootFlags;
+        // Studio writes skip + clamp together; a clamp-capable firmware
+        // must load-dimmed, not skip. This is the format-level rule the ADR
+        // promises, so it is asserted at the format level.
+        let both = BootControl::new(BootFlags::SKIP_PROJECT_AUTOLOAD.with_safe_clamp(26));
+        assert_eq!(both.boot_action(), BootAction::LoadClamped { level: 26 });
+
+        let skip_only = BootControl::new(BootFlags::SKIP_PROJECT_AUTOLOAD);
+        assert_eq!(skip_only.boot_action(), BootAction::SkipAutoload);
+
+        let clamp_only = BootControl::new(BootFlags::NONE.with_safe_clamp(128));
+        assert_eq!(
+            clamp_only.boot_action(),
+            BootAction::LoadClamped { level: 128 }
+        );
+
+        assert_eq!(BootControl::NONE.boot_action(), BootAction::Normal);
+    }
+
+    #[test]
+    fn every_failure_mode_boots_normally_via_boot_action() {
+        for outcome in [
+            DecodeOutcome::Blank,
+            DecodeOutcome::Invalid,
+            DecodeOutcome::CrcMismatch,
+            DecodeOutcome::UnsupportedVersion { found: 9 },
+        ] {
+            assert_eq!(outcome.boot_action(), BootAction::Normal);
+        }
     }
 
     #[test]

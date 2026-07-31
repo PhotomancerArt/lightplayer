@@ -582,8 +582,22 @@ impl ControlNode for FixtureNode {
             );
         }
 
-        let mut power = if settings.power.is_limited() {
-            PowerPass::limited(self.power_scale_q16)
+        // The device-level safe clamp composes with the fixture's own budget
+        // scale by `min` — ceilings compose; neither can boost. It applies to
+        // EVERY fixture, budgeted or not: the project being clamped may
+        // predate the power feature entirely, and safe mode must dim it
+        // anyway.
+        let budget_scale = if settings.power.is_limited() {
+            self.power_scale_q16
+        } else {
+            power_limit::UNITY_SCALE_Q16
+        };
+        let effective_scale = budget_scale.min(
+            ctx.safe_output_clamp_q16()
+                .unwrap_or(power_limit::UNITY_SCALE_Q16),
+        );
+        let mut power = if effective_scale < power_limit::UNITY_SCALE_Q16 {
+            PowerPass::limited(effective_scale)
         } else {
             PowerPass::unlimited()
         };
