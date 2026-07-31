@@ -282,7 +282,6 @@ fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOpt
 fn driver_options_from_cfg(cfg: &OutputDriverOptionsConfig) -> OutputDriverOptions {
     OutputDriverOptions {
         white_point: *cfg.white_point.value(),
-        brightness: cfg.brightness.value().0.clamp(0.0, 1.0),
         interpolation_enabled: *cfg.interpolation_enabled.value(),
         dithering_enabled: *cfg.dithering_enabled.value(),
         lut_enabled: *cfg.lut_enabled.value(),
@@ -297,7 +296,6 @@ fn output_options_eq(
         (None, None) => true,
         (Some(left), Some(right)) => {
             left.white_point == right.white_point
-                && left.brightness == right.brightness
                 && left.interpolation_enabled == right.interpolation_enabled
                 && left.dithering_enabled == right.dithering_enabled
                 && left.lut_enabled == right.lut_enabled
@@ -502,7 +500,7 @@ mod tests {
 
         let mut next = OutputDef::new(endpoint.clone());
         next.options = OptionSlot::some(OutputDriverOptionsConfig {
-            brightness: lpc_model::RatioSlot::new(lpc_model::Ratio(0.25)),
+            white_point: lpc_model::ValueSlot::new([0.5, 1.0, 1.0]),
             ..OutputDriverOptionsConfig::default()
         });
         services.update_output_sink_config(buffer_id, &next);

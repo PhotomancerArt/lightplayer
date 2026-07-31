@@ -2611,7 +2611,7 @@ fn project_files(marker: &str) -> Vec<(String, Vec<u8>)> {
     vec![
         (
             "project.json".to_string(),
-            format!(r#"{{"kind":"Project","format":1,"name":"Porch {marker}","nodes":{{}}}}"#)
+            format!(r#"{{"kind":"Project","format":2,"name":"Porch {marker}","nodes":{{}}}}"#)
                 .into_bytes(),
         ),
         ("shader.glsl".to_string(), marker.as_bytes().to_vec()),

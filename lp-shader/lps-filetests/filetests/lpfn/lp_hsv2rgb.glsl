@@ -12,6 +12,9 @@ float test_lpfn_hsv2rgb_pure_red() {
     return is_red ? 1.0 : 0.0;
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_lpfn_hsv2rgb_pure_red() == 1.0
 
 float test_lpfn_hsv2rgb_black() {
@@ -22,6 +25,7 @@ float test_lpfn_hsv2rgb_black() {
     return is_black ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_hsv2rgb_black() == 1.0
 
 float test_lpfn_hsv2rgb_white() {
@@ -34,6 +38,7 @@ float test_lpfn_hsv2rgb_white() {
     return is_white ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_hsv2rgb_white() == 1.0
 
 float test_lpfn_hsv2rgb_vec4() {
@@ -47,6 +52,7 @@ float test_lpfn_hsv2rgb_vec4() {
     return valid ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_hsv2rgb_vec4() == 1.0
 
 float test_lpfn_hsv2rgb_range() {
@@ -65,4 +71,5 @@ float test_lpfn_hsv2rgb_range() {
     return valid ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_hsv2rgb_range() == 1.0

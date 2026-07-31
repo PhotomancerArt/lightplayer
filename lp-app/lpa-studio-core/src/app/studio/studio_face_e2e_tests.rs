@@ -511,7 +511,7 @@ fn face_e2e_server() -> LpServer {
 
     let project_json = r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -617,7 +617,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 
     let project_json = r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "playlist": { "ref": "./playlist.json" },

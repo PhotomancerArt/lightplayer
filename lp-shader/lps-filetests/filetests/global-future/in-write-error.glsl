@@ -79,14 +79,11 @@ float test_edge_in_write_error_calculations() {
 }
 
 // interp.f32: in-qualified vertex inputs are not fed by the filetest harness
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
+// @unimplemented(wasm.f32)
 // run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {
