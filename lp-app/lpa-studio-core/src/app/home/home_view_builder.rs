@@ -580,6 +580,30 @@ mod tests {
     }
 
     #[test]
+    fn the_pinned_anonymous_card_takes_the_uid_less_op() {
+        // The two halves of the recovery-write ending, together: the pin
+        // keeps the anonymous card alive, AND the awaiting op rides it —
+        // half a fix showed the user a bare "Not seen yet" with no
+        // instruction (bench, 2026-07-31).
+        let evidence = HomeDeviceEvidence {
+            link: Some(DeviceState::Gone),
+            op_in_flight: true,
+            ..HomeDeviceEvidence::default()
+        };
+        let card = live_device_card(&evidence).expect("pinned");
+        assert!(
+            card.takes_card_op(None),
+            "the instruction must ride the pinned card"
+        );
+
+        // A REGISTERED offline card (uid'd) must not adopt a stray
+        // anonymous op — that guard is what the old rule was for.
+        let mut registered = card.clone();
+        registered.uid = Some("dev_other".to_string());
+        assert!(!registered.takes_card_op(None));
+    }
+
+    #[test]
     fn an_in_flight_op_pins_the_card_through_gone() {
         // The bench bug (2026-07-31): "Start in safe mode" resets the board,
         // the anonymous recovery session lands Gone, the state derives
