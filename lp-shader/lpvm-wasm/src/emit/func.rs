@@ -12,7 +12,6 @@ use crate::emit::imports;
 use crate::emit::memory;
 use crate::emit::ops::emit_op;
 use crate::emit::{EmitCtx, FdivRecipLocals, FuncEmitCtx};
-use lps_q32::q32_options::DivMode;
 
 fn ir_type_to_val(ty: IrType, mode: FloatMode) -> ValType {
     match (ty, mode) {
@@ -22,26 +21,21 @@ fn ir_type_to_val(ty: IrType, mode: FloatMode) -> ValType {
     }
 }
 
-fn func_needs_fdiv_recip_scratch(f: &IrFunction, mode: FloatMode, ctx: &EmitCtx<'_>) -> bool {
-    mode == FloatMode::Q32
-        && ctx.q32.div == DivMode::Reciprocal
-        && f.body.iter().any(|op| matches!(op, LpirOp::Fdiv { .. }))
+fn func_needs_fdiv_recip_scratch(f: &IrFunction, mode: FloatMode) -> bool {
+    mode == FloatMode::Q32 && f.body.iter().any(|op| matches!(op, LpirOp::Fdiv { .. }))
 }
 
+/// Only the integer→Q32 conversions still widen through `i64`. `Fadd`/`Fsub`/
+/// `Fmul` used to when they lowered to the saturating expansion; the shipped
+/// wrapping expansion is pure `i32`, so listing them here would allocate a
+/// dead local in every arithmetic function.
 fn func_needs_i64_scratch(f: &IrFunction, mode: FloatMode) -> bool {
     if mode != FloatMode::Q32 {
         return false;
     }
-    f.body.iter().any(|op| {
-        matches!(
-            op,
-            LpirOp::Fadd { .. }
-                | LpirOp::Fsub { .. }
-                | LpirOp::Fmul { .. }
-                | LpirOp::ItofS { .. }
-                | LpirOp::ItofU { .. }
-        )
-    })
+    f.body
+        .iter()
+        .any(|op| matches!(op, LpirOp::ItofS { .. } | LpirOp::ItofU { .. }))
 }
 
 /// WASM `(params) -> (results)` for `f`'s type section entry.
@@ -99,7 +93,7 @@ pub(crate) fn encode_ir_function(
     };
     func_ctx.i64_scratch = i64_scratch;
 
-    let fdiv_recip_scratch = if func_needs_fdiv_recip_scratch(f, mode, ctx) {
+    let fdiv_recip_scratch = if func_needs_fdiv_recip_scratch(f, mode) {
         let base = (param_slots + local_types.len()) as u32;
         for _ in 0..7 {
             local_types.push(ValType::I32);

@@ -1,0 +1,30 @@
+{
+  "record": {
+    "fields": [
+      {
+        "default_bind": "bus:control.out",
+        "name": "output",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "control_product",
+              "id": 4213724405,
+              "meta": {},
+              "ty": {
+                "product": "control"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

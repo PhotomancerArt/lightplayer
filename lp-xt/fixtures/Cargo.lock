@@ -48,7 +48,6 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "lp-collection",
- "lps-q32",
 ]
 
 [[package]]

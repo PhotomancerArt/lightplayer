@@ -1,9 +1,10 @@
 //! Fixed-point 16.16 multiplication with overflow/saturation handling.
 //!
-//! Reference saturating implementation. Backends inline a 5-VInst (native)
-//! / 6-op (wasm) wrapping multiply expansion when the shader opts into
-//! `Q32Options { mul: Wrapping, .. }`. See
-//! `docs/plans-old/2026-04-18-q32-options-dispatch/00-design.md`.
+//! Reference saturating implementation. **The shipped Q32 lowering does not
+//! call this**: `lpvm-native` and `lpvm-wasm` inline a 5-VInst (native) /
+//! 6-op (wasm) wrapping multiply for `LpirOp::Fmul` (`docs/design/q32.md`).
+//! It survives as `lpvm-cranelift`'s Q32 `Fmul` target and as the arithmetic
+//! used inside the Q32 transcendental builtins (`exp`, `log`, `pow`, …).
 
 const MAX_FIXED: i32 = 0x7FFF_FFFF; // Maximum representable fixed-point value (not i32::MAX)
 const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value

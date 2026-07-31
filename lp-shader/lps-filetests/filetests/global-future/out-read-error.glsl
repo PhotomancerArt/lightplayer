@@ -23,6 +23,7 @@ void test_edge_out_read_error_write() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_edge_out_read_error_write() == 0.0
 
@@ -44,6 +45,7 @@ float test_edge_out_read_error_indirect() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_edge_out_read_error_indirect() ~= 0.0
 
@@ -55,6 +57,7 @@ void test_edge_out_read_error_multiple_writes() {
 }
 
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_edge_out_read_error_multiple_writes() == 0.0
 
@@ -69,5 +72,6 @@ void test_edge_out_read_error_fragment_output() {
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
 // @unsupported(rv32lpn.q32)
+// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
 // run: test_edge_out_read_error_fragment_output() == 0.0

@@ -387,7 +387,7 @@ mod tests {
             .run_vinst_inner(vinsts, vreg_pool, symbols);
         let call_idx: u16 = 12;
         let ret_regs = (0..4)
-            .filter_map(|operand| r.output.operand_alloc(call_idx, operand).reg())
+            .filter_map(|operand| r.output.operand_alloc(call_idx, operand).preg())
             .collect::<Vec<_>>();
 
         assert!(
@@ -406,8 +406,9 @@ mod tests {
             } = edit
             {
                 assert!(
-                    !ret_regs.contains(reg),
-                    "post-call restore overwrites sret return register x{reg}\n{}",
+                    !ret_regs.contains(&reg.get()),
+                    "post-call restore overwrites sret return register x{}\n{}",
+                    reg.hw(),
                     r.rendered
                 );
             }

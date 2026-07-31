@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::abi::FrameLayout;
+use crate::abi::{FrameLayout, RegClass};
 use crate::isa::rv32::encode::*;
 use crate::isa::rv32::gpr::{ARG_REGS, FP_REG, PReg, RA_REG, RET_REGS, SP_REG};
 use crate::regalloc::{Alloc, AllocError, AllocOutput, Edit, EditPoint};
@@ -122,6 +122,23 @@ impl<'a> EmitContext<'a> {
         )
     }
 
+    /// The GPR named by a register allocation.
+    ///
+    /// The single gate between the allocator's class-aware `Alloc` and this
+    /// emitter's bare GPR indices. A float-class allocation is rejected rather
+    /// than unwrapped: RV32F codegen is a later milestone, and emitting an
+    /// integer instruction against a hardware index that names a float register
+    /// would be silently wrong rather than merely unimplemented.
+    fn hw(preg: crate::abi::PackedPReg) -> Result<PReg, AllocError> {
+        match preg.class() {
+            RegClass::Int => Ok(preg.hw()),
+            RegClass::Float => Err(crate::emit_err!(
+                "allocation names float register f{} — rv32 has no float backend",
+                preg.hw()
+            )),
+        }
+    }
+
     /// Use a vreg: return its physical register, loading from spill if needed.
     fn use_vreg(
         &mut self,
@@ -134,7 +151,7 @@ impl<'a> EmitContext<'a> {
         let alloc = Self::operand_alloc(output, inst_idx, operand_idx);
 
         match alloc {
-            Alloc::Reg(preg) => Ok(preg),
+            Alloc::Reg(preg) => Self::hw(preg),
             Alloc::Stack(slot) => {
                 let offset = self
                     .frame
@@ -160,7 +177,7 @@ impl<'a> EmitContext<'a> {
         let alloc = Self::operand_alloc(output, inst_idx, operand_idx);
 
         match alloc {
-            Alloc::Reg(preg) => Ok(preg),
+            Alloc::Reg(preg) => Self::hw(preg),
             Alloc::Stack(_) => Ok(temp), // Caller must store after
             Alloc::None => Err(crate::emit_err!()),
         }
@@ -195,6 +212,7 @@ impl<'a> EmitContext<'a> {
             Edit::Move { from, to } => match (*from, *to) {
                 (Alloc::None, _) | (_, Alloc::None) => return Err(crate::emit_err!()),
                 (Alloc::Reg(src), Alloc::Reg(dst)) => {
+                    let (src, dst) = (Self::hw(src)?, Self::hw(dst)?);
                     if src != dst {
                         self.push_u32(encode_addi(dst as u32, src as u32, 0), src_op);
                     }
@@ -204,14 +222,20 @@ impl<'a> EmitContext<'a> {
                         .frame
                         .spill_offset_from_fp(slot as u32)
                         .ok_or(crate::emit_err!())?;
-                    self.push_u32(encode_lw(dst as u32, FP_REG as u32, offset), src_op);
+                    self.push_u32(
+                        encode_lw(Self::hw(dst)? as u32, FP_REG as u32, offset),
+                        src_op,
+                    );
                 }
                 (Alloc::Reg(src), Alloc::Stack(slot)) => {
                     let offset = self
                         .frame
                         .spill_offset_from_fp(slot as u32)
                         .ok_or(crate::emit_err!())?;
-                    self.push_u32(encode_sw(src as u32, FP_REG as u32, offset), src_op);
+                    self.push_u32(
+                        encode_sw(Self::hw(src)? as u32, FP_REG as u32, offset),
+                        src_op,
+                    );
                 }
                 (Alloc::Stack(s_from), Alloc::Stack(s_to)) => {
                     let o_from = self
@@ -229,7 +253,10 @@ impl<'a> EmitContext<'a> {
             },
             Edit::LoadIncomingArg { fp_offset, to } => match *to {
                 Alloc::Reg(dst) => {
-                    self.push_u32(encode_lw(dst as u32, FP_REG as u32, *fp_offset), src_op);
+                    self.push_u32(
+                        encode_lw(Self::hw(dst)? as u32, FP_REG as u32, *fp_offset),
+                        src_op,
+                    );
                 }
                 Alloc::Stack(slot) => {
                     let spill_off = self
@@ -753,7 +780,10 @@ impl<'a> EmitContext<'a> {
                     let stack_off = ((i - cap) * 4) as i32;
                     match alloc {
                         Alloc::Reg(src) => {
-                            self.push_u32(encode_sw(src as u32, SP_REG as u32, stack_off), src_op);
+                            self.push_u32(
+                                encode_sw(Self::hw(src)? as u32, SP_REG as u32, stack_off),
+                                src_op,
+                            );
                         }
                         Alloc::Stack(slot) => {
                             let spill_off = self
@@ -799,7 +829,7 @@ impl<'a> EmitContext<'a> {
                         match alloc {
                             Alloc::Reg(dst) => {
                                 self.push_u32(
-                                    encode_lw(dst as u32, FP_REG as u32, buf_off),
+                                    encode_lw(Self::hw(dst)? as u32, FP_REG as u32, buf_off),
                                     src_op,
                                 );
                             }

@@ -87,20 +87,16 @@ fn interactive_manifest_actions(store: &BoardManifestStore, id: &str) -> Result<
 }
 
 fn interactive_new_manifest(store: &BoardManifestStore) -> Result<()> {
-    let target_items = [
-        HardwareTargetArg::Esp32c6.label(),
-        HardwareTargetArg::Rv32imacEmu.label(),
-    ];
+    let target_items: Vec<&str> = HardwareTargetArg::ALL
+        .iter()
+        .map(|target| target.label())
+        .collect();
     let target_choice = Select::new()
         .with_prompt("Target")
         .items(&target_items)
         .default(0)
         .interact()?;
-    let target = if target_choice == 0 {
-        HardwareTargetArg::Esp32c6
-    } else {
-        HardwareTargetArg::Rv32imacEmu
-    };
+    let target = HardwareTargetArg::ALL[target_choice];
     let vendor: String = Input::new().with_prompt("Vendor").interact_text()?;
     let product: String = Input::new().with_prompt("Product").interact_text()?;
     let url: String = Input::new()
@@ -286,6 +282,7 @@ fn non_empty(value: String) -> Option<String> {
 fn target_matches_calibration(target: HardwareTarget, calibration_target: &str) -> Result<()> {
     let expected = match calibration_target {
         "esp32c6" => HardwareTarget::Esp32c6,
+        "esp32s3" => HardwareTarget::Esp32s3,
         "rv32imac_emu" => HardwareTarget::Rv32imacEmu,
         other => return Err(anyhow!("unsupported calibration target: {other}")),
     };

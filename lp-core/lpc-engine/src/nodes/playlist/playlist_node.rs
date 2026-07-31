@@ -428,10 +428,6 @@ impl RenderNode for PlaylistNode {
     }
 }
 
-pub fn playlist_output_path() -> SlotPath {
-    SlotPath::parse("output").expect("playlist output path")
-}
-
 fn detect_triggered_entry(
     ctx: &mut TickContext<'_>,
     entries: &[PlaylistRuntimeEntry],

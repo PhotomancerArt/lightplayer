@@ -7,6 +7,12 @@ pub enum RegClass {
     Float,
 }
 
+impl RegClass {
+    /// Every class, for the sweeps that must cover all of them — a call
+    /// clobbering each class's caller-saved bank, say.
+    pub const ALL: [RegClass; 2] = [RegClass::Int, RegClass::Float];
+}
+
 /// A physical register: hardware encoding plus class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PReg {
@@ -34,6 +40,70 @@ impl PReg {
             RegClass::Int => self.hw as u32,
             RegClass::Float => 32 + self.hw as u32,
         }
+    }
+}
+
+/// A [`PReg`] squeezed into one byte: class in bit 7, hardware index in bits 0–6.
+///
+/// Exists for exactly one caller — [`Alloc::Reg`](crate::regalloc::Alloc) — and
+/// for exactly one reason. `Alloc` is stored in `AllocOutput::allocs`, a flat
+/// table with one entry per operand of every instruction in the function; it is
+/// the register allocator's largest single allocation and it is built on the
+/// device, inside the JIT's heap. A `size_of::<Alloc>() == 2` assertion has
+/// pinned that table's footprint since the ISA-decoupling refactor, and a
+/// register class is one bit of information. Storing `PReg` inline would have
+/// grown every entry by 50% to carry it, so the class rides in the spare high
+/// bit of the byte that already held the hardware index.
+///
+/// Both classes index at most 32 registers, so seven bits is room to spare;
+/// [`PackedPReg::new`] is `const` and total, and the round trip is exact.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct PackedPReg(u8);
+
+impl PackedPReg {
+    /// Set when the register belongs to [`RegClass::Float`].
+    const FLOAT_BIT: u8 = 0x80;
+
+    pub const fn new(p: PReg) -> Self {
+        debug_assert!(p.hw < 0x80);
+        match p.class {
+            RegClass::Int => Self(p.hw),
+            RegClass::Float => Self(p.hw | Self::FLOAT_BIT),
+        }
+    }
+
+    pub const fn int(hw: u8) -> Self {
+        Self::new(PReg::int(hw))
+    }
+
+    pub const fn get(self) -> PReg {
+        PReg {
+            hw: self.hw(),
+            class: self.class(),
+        }
+    }
+
+    /// Hardware encoding, **ignoring class**. Only correct where the class is
+    /// already established (an emitter that has just matched on it, say).
+    pub const fn hw(self) -> u8 {
+        self.0 & !Self::FLOAT_BIT
+    }
+
+    pub const fn class(self) -> RegClass {
+        if self.0 & Self::FLOAT_BIT != 0 {
+            RegClass::Float
+        } else {
+            RegClass::Int
+        }
+    }
+}
+
+impl core::fmt::Debug for PackedPReg {
+    /// Renders as the [`PReg`] it encodes — the packing is a storage detail and
+    /// should never show up in a panic message or a snapshot.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.get().fmt(f)
     }
 }
 
@@ -166,5 +236,31 @@ mod tests {
         let set = PregSet::singleton(i);
         assert!(set.contains(i));
         assert!(!set.contains(f));
+    }
+
+    #[test]
+    fn packed_preg_round_trips_both_classes() {
+        for hw in 0..32u8 {
+            for p in [PReg::int(hw), PReg::float(hw)] {
+                let packed = PackedPReg::new(p);
+                assert_eq!(packed.get(), p);
+                assert_eq!(packed.hw(), hw);
+                assert_eq!(packed.class(), p.class);
+            }
+        }
+    }
+
+    /// The same hardware index in the two classes must not collide — that
+    /// collision is the whole failure mode the class exists to prevent.
+    #[test]
+    fn packed_preg_separates_the_classes() {
+        assert_ne!(PackedPReg::int(10), PackedPReg::new(PReg::float(10)));
+    }
+
+    /// The packing exists to keep `Alloc` at two bytes; if `PackedPReg` ever
+    /// stops being one byte, that pin is already lost here.
+    #[test]
+    fn packed_preg_is_one_byte() {
+        assert_eq!(core::mem::size_of::<PackedPReg>(), 1);
     }
 }

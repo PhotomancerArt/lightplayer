@@ -1,0 +1,46 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "width",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 749747344,
+              "meta": {},
+              "ty": "i32"
+            }
+          }
+        }
+      },
+      {
+        "name": "height",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 749747344,
+              "meta": {},
+              "ty": "i32"
+            }
+          }
+        }
+      },
+      {
+        "name": "format",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

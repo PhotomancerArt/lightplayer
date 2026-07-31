@@ -34,7 +34,7 @@ pub use compile_job::{
     ShaderCompileStepResult,
 };
 pub use compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs, texture_binding};
-pub use compile_stats::LpsCompileStats;
+pub use compile_stats::{FloatImpl, LpsCompileStats};
 pub use compute_abi::{ComputeAbi, ComputeOutputAbi};
 pub use compute_shader::LpsComputeShader;
 pub use engine::LpsEngine;

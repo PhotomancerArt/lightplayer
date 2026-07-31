@@ -16,6 +16,14 @@
 //! - **Optional accelerated backends.** A GPU backend (`lp-gfx-wgpu`) may
 //!   additionally be constructed on capable targets. Which backend serves a
 //!   given runtime is decided at runtime creation, by the host.
+//! - **A no-op backend for builds that run no shaders.** `NullGraphics`,
+//!   behind the off-by-default `null-backend` feature, satisfies `LpServer`'s
+//!   non-optional `Arc<dyn LpGraphics>` for constrained bring-up firmware,
+//!   failing every request with a self-describing [`GfxError::Backend`] so
+//!   such a build does not link the compiler purely to fill a parameter. It is
+//!   never a default, and it is not a step toward making the compiler
+//!   optional — see its module docs. The feature gate is not ceremony: an
+//!   unused module still perturbs LTO inlining, measured at 500 B on the C6.
 //! - **Selection is explicit, never silent.** A backend must *error* on
 //!   options it cannot honor — most importantly the
 //!   [`ShaderSemantics`] tier in [`ShaderCompileOptions`] — instead of
@@ -42,6 +50,8 @@ pub mod compute_shader;
 pub mod gfx_error;
 pub mod graphics;
 pub mod handle_allocator;
+#[cfg(feature = "null-backend")]
+pub mod null_graphics;
 pub mod sample_out_handle;
 pub mod sample_points_handle;
 pub mod shader;
@@ -55,9 +65,11 @@ pub use gfx_error::GfxError;
 pub use graphics::LpGraphics;
 pub use handle_allocator::{HandleAllocator, HandleBacking};
 pub use lp_shader::{ShaderFuelTrap, ShaderFuelTrapEntry};
+#[cfg(feature = "null-backend")]
+pub use null_graphics::NullGraphics;
 pub use sample_out_handle::SampleOutHandle;
 pub use sample_points_handle::SamplePointsHandle;
-pub use shader::{LpShader, ShaderCompileStats};
+pub use shader::{LpShader, ShaderCompileStats, ShaderFloatImpl};
 pub use shader_compile_options::ShaderCompileOptions;
 pub use shader_semantics::ShaderSemantics;
 pub use texture_data::TextureData;
