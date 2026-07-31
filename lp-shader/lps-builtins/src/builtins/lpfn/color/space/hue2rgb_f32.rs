@@ -1,6 +1,7 @@
 //! Convert hue value to RGB color (float implementation - stub).
 //!
-//! **Unimplemented.** Every function here traps with `unimplemented!`. These
+//! **Unimplemented.** Every function here traps via
+//! [`crate::f32_unimplemented::f32_unimplemented`]. These
 //! are placeholders whose signatures, `lpfn_impl` annotations and builtin-table
 //! wiring are correct; only the bodies are missing. They previously round-tripped
 //! through Q32 via `Q32::from_f32_wrapping`, which silently returned
@@ -18,7 +19,5 @@
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_hue2rgb_f32(result_ptr: *mut f32, hue: f32) {
     let _ = (result_ptr, hue);
-    unimplemented!(
-        "__lp_lpfn_hue2rgb_f32: native f32 builtins are not implemented (f32 roadmap M5)"
-    )
+    crate::f32_unimplemented::f32_unimplemented()
 }

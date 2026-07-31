@@ -1623,9 +1623,12 @@ mod tests {
             vec![
                 MutationOp::PutSlotEdit {
                     artifact: project.clone(),
+                    // Deliberately not PROJECT_FORMAT_VERSION: the write must
+                    // be rejected, so it has to be distinguishable from the
+                    // value the fixture already carries.
                     edit: SlotEdit::assign_value(
                         SlotPath::parse("format.some").unwrap(),
-                        LpValue::U32(2),
+                        LpValue::U32(999),
                     ),
                 },
                 MutationOp::PutSlotEdit {
@@ -1663,7 +1666,11 @@ mod tests {
             .as_project()
             .expect("project def");
         assert_eq!(def.name(), Some("Renamed"));
-        assert_eq!(def.format(), Some(1), "format edit never applied");
+        assert_eq!(
+            def.format(),
+            Some(PROJECT_FORMAT_VERSION),
+            "format edit never applied"
+        );
         assert!(def.nodes.entries.contains_key("clock"));
         assert!(!def.nodes.entries.contains_key("strip"));
     }
