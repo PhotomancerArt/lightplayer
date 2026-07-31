@@ -20,10 +20,11 @@ esp32s3 = [
 # The LightPlayer app: `LpServer` over the USB-Serial-JTAG transport, plus the
 # wire-protocol serialization inside `serial::io_task`.
 #
-# ⚠️ Still NARROWER than fw-esp32c6's feature of the same name: this one takes
-# `lpa-server` with **two** of the eight node gates rather than all of them.
-# The graphics backend is no longer the difference — both crates now link
-# `lp-gfx-lpvm`. See the dependency section for why each of those is
+# Feature-for-feature this now matches fw-esp32c6's `server`: all eight
+# `lpa-server` node gates and the same `lp-gfx-lpvm` graphics backend. The
+# remaining differences are tier, not capability: no `panic-recovery` (the S3
+# is abort tier) and no `radio` transport (ESP-NOW bring-up on Xtensa is a
+# future milestone). See the dependency section for why each entry is
 # load-bearing.
 server = [
     "fw-esp32-common/server",
@@ -118,29 +119,33 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 # crate must stay free of chip code (ADR 2026-07-29-per-chip-fw-toolchains).
 fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
 
-# ⚠️ Two of eight node gates. `default-features = false` means no gate is
-# implied — a kind not listed here loads as an inert placeholder (see
-# lpc-engine/README.md) — so this list is the exact set of node kinds the board
-# can run. Contrast fw-esp32c6, which lists all eight.
+# All eight node gates, matching fw-esp32c6. `default-features = false` means
+# no gate is implied — a kind not listed here loads as an inert placeholder
+# (see lpc-engine/README.md) — so this list is the exact set of node kinds the
+# board can run.
 #
-# `node-shader` is what M4 exists to turn on. **`node-fixture` is not optional
-# for it**: `OutputNode::consume` requires a *control* product, `ShaderNode`
-# produces a *visual* one, and `FixtureNode` is the only runtime that converts
-# between them. With the fixture gated off the shader renders into a bus
-# nothing reads and the output node reports a resolve failure every frame —
-# which is precisely the M3 symptom this milestone had to clear. Turning the
-# shader on without the fixture would produce a build that compiles a shader on
-# device and still cannot show it.
+# `node-fixture` is load-bearing for `node-shader`: `OutputNode::consume`
+# requires a *control* product, `ShaderNode` produces a *visual* one, and
+# `FixtureNode` is the only runtime that converts between them — a shader
+# without the fixture renders into a bus nothing reads.
 #
-# Nothing else belongs here. Every further gate costs flash and blurs the
-# reading of what the shader path is worth.
+# `node-button` and `node-radio` are on ahead of their hardware services: with
+# no service wired the node runtime reports a visible error ("button node has
+# no button service") instead of loading as a silent placeholder, which is the
+# preferred failure mode until the S3 grows the corresponding drivers.
 #
 # `panic-recovery` is absent on purpose: the S3 is abort tier (`panic = "abort"`
 # + the lp-recovery RTC ledger), and that feature pulls `unwinding`, which is
 # the C6's tier. See src/recovery/.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
-    "node-shader",
+    "node-button",
+    "node-radio",
+    "node-fluid",
     "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
 ], optional = true }
 
 # The graphics backend, and the single biggest lever in the image. Through M3
