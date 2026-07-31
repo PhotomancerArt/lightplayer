@@ -358,37 +358,40 @@ fn generate_test_large_numbers(vec_type: VecType, dimension: Dimension) -> Strin
         Dimension::D4 => vec![200000, 30000, 15000, 5000],
     };
 
-    let expected_constructor = match vec_type {
-        VecType::Vec => {
-            let expected = match dimension {
-                Dimension::D2 => "vec2(-0.000030517578, -2768.0)",
-                Dimension::D3 => "vec3(-0.000030517578, -2768.0, -25536.0)",
-                Dimension::D4 => "vec4(-0.000030517578, -2768.0, -25536.0, 15000.0)",
-            };
-            expected.to_string()
-        }
-        _ => {
-            // For integer types, exact arithmetic
-            let expected_values = match dimension {
-                Dimension::D2 => vec![300000, 80000],
-                Dimension::D3 => vec![300000, 80000, 40000],
-                Dimension::D4 => vec![300000, 80000, 40000, 15000],
-            };
-            format_vector_constructor(vec_type, dimension, &expected_values)
-        }
+    // Exact arithmetic result: what the integer types produce, and also what the
+    // f32 channel of the float types is expected to produce.
+    let exact_values: Vec<i32> = match dimension {
+        Dimension::D2 => vec![300000, 80000],
+        Dimension::D3 => vec![300000, 80000, 40000],
+        Dimension::D4 => vec![300000, 80000, 40000, 15000],
     };
+    let exact_constructor = format_vector_constructor(vec_type, dimension, &exact_values);
 
     let a_constructor = format_vector_constructor(vec_type, dimension, &a_values);
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
-    let rv32c_annotation = if matches!(vec_type, VecType::Vec) {
-        "// @unsupported(rv32c.q32)\n"
-    } else {
-        ""
-    };
     let large_number_comment = if matches!(vec_type, VecType::Vec) {
         "    // Fast Q32 addition wraps after fixed16x16 encoding.\n"
     } else {
         "    // Integer vectors use exact arithmetic.\n"
+    };
+
+    // Float vectors need two run channels: Q32 wraps after fixed16x16 encoding,
+    // while the f32 channel asserts the exact IEEE result. Integer vectors are
+    // exact everywhere and keep a single unqualified `run:`.
+    let run_directives = if matches!(vec_type, VecType::Vec) {
+        let q32_constructor = match dimension {
+            Dimension::D2 => "vec2(-0.000030517578, -2768.0)",
+            Dimension::D3 => "vec3(-0.000030517578, -2768.0, -25536.0)",
+            Dimension::D4 => "vec4(-0.000030517578, -2768.0, -25536.0, 15000.0)",
+        };
+        format!(
+            "// per-mode: the f32 channel asserts IEEE f32 results; Q32 keeps its saturation/wrapping expectation (M6 triage).
+// @unsupported(rv32c.q32)
+// run[q32]: test_{type_name}_add_large_numbers() {cmp_op} {q32_constructor}
+// run[f32]: test_{type_name}_add_large_numbers() {cmp_op} {exact_constructor}\n"
+        )
+    } else {
+        format!("// run: test_{type_name}_add_large_numbers() {cmp_op} {exact_constructor}\n")
     };
 
     format!(
@@ -398,7 +401,7 @@ fn generate_test_large_numbers(vec_type: VecType, dimension: Dimension) -> Strin
     return a + b;
 }}
 
-{rv32c_annotation}// run: test_{type_name}_add_large_numbers() {cmp_op} {expected_constructor}\n"
+{run_directives}"
     )
 }
 
