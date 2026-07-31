@@ -292,6 +292,11 @@ impl HostSerialEsp32Provider {
                 self.extend_session_logs(session_id, &result.logs)?;
                 Ok(LinkManagementResult::SetBootControl(result))
             }
+            LinkManagementRequest::ReadRawFilesystem => {
+                let result = host_esp32_flash::read_raw_filesystem(&port_name, &events)?;
+                self.extend_session_logs(session_id, &result.logs)?;
+                Ok(LinkManagementResult::ReadRawFilesystem(result))
+            }
             LinkManagementRequest::EraseRawFilesystem => {
                 Err(LinkError::unsupported(format!("{:?}", request.operation())))
             }
@@ -510,7 +515,10 @@ fn upsert_port_endpoint(
         LinkCapabilities::esp32_serial_base()
             .with_flash()
             .with_device_erase()
-            .with_boot_control(),
+            .with_boot_control()
+            // READ only (M6). The write half is M7's; advertising it now
+            // would let the UI offer an operation that answers `unsupported`.
+            .with_raw_filesystem_read(),
     );
 
     if let Some(existing) = state

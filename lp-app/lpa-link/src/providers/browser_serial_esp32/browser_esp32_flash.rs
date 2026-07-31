@@ -2,7 +2,10 @@ use js_sys::{Array, Function, Promise, Reflect};
 use wasm_bindgen::{JsCast, closure::Closure, prelude::*};
 use wasm_bindgen_futures::JsFuture;
 
-use crate::{LinkError, LinkManagementEvent, LinkManagementEventSink, LinkManagementProgress};
+use crate::{
+    LinkError, LinkFlashRegion, LinkManagementEvent, LinkManagementEventSink,
+    LinkManagementProgress,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserEsp32FirmwareManifest {
@@ -37,6 +40,17 @@ pub struct BrowserEsp32FlashProgress {
     pub percent: Option<u32>,
 }
 
+/// A raw filesystem image read back over Web Serial, plus the region and
+/// chip the read resolved.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserEsp32FilesystemReadResult {
+    pub image: Vec<u8>,
+    pub region: LinkFlashRegion,
+    pub chip_name: Option<String>,
+    pub logs: Vec<String>,
+    pub progress: Vec<BrowserEsp32FlashProgress>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserEsp32ProbeResult {
     pub chip_name: Option<String>,
@@ -66,6 +80,14 @@ extern "C" {
     fn js_erase_device_flash(
         port_id: u32,
         esptool_module_path: &str,
+        on_event: &Function,
+    ) -> Promise;
+
+    #[wasm_bindgen(js_name = readRawFilesystem)]
+    fn js_read_raw_filesystem(
+        port_id: u32,
+        esptool_module_path: &str,
+        resolve_region: &Function,
         on_event: &Function,
     ) -> Promise;
 
@@ -157,6 +179,53 @@ pub async fn write_boot_control_with_events(
     .await
     .map_err(js_error)?;
     Ok(BrowserEsp32EraseResult {
+        chip_name: reflect_optional_string(&value, "chipName")?,
+        logs: reflect_string_array(&value, "logs")?,
+        progress: reflect_progress_array(&value, "progress")?,
+    })
+}
+
+/// Read the device's `lpfs` partition back into wasm memory.
+///
+/// The per-board region table stays HERE: the JS side asks for it by chip
+/// name once its SYNC handshake has one (see the `resolveRegion` callback in
+/// `browser_esp32_flash.js`). Mirroring the offsets into JS would put the
+/// same two numbers in two languages, and the wrong one produces a
+/// plausible-looking archive of the wrong partition.
+pub async fn read_raw_filesystem_with_events(
+    port_id: u32,
+    esptool_module_path: &str,
+    events: LinkManagementEventSink,
+) -> Result<BrowserEsp32FilesystemReadResult, LinkError> {
+    let on_event = management_event_callback(events);
+    let resolve_region = Closure::wrap(Box::new(|chip: JsValue| -> JsValue {
+        let Some(region) = chip
+            .as_string()
+            .as_deref()
+            .and_then(LinkFlashRegion::lpfs_for_chip)
+        else {
+            return JsValue::NULL;
+        };
+        let out = js_sys::Object::new();
+        let _ = Reflect::set(&out, &"offset".into(), &JsValue::from_f64(region.offset.into()));
+        let _ = Reflect::set(&out, &"length".into(), &JsValue::from_f64(region.length.into()));
+        out.into()
+    }) as Box<dyn FnMut(JsValue) -> JsValue>);
+
+    let value = JsFuture::from(js_read_raw_filesystem(
+        port_id,
+        esptool_module_path,
+        resolve_region.as_ref().unchecked_ref(),
+        on_event.as_ref().unchecked_ref(),
+    ))
+    .await
+    .map_err(js_error)?;
+    Ok(BrowserEsp32FilesystemReadResult {
+        image: js_sys::Uint8Array::new(&reflect_value(&value, "image")?).to_vec(),
+        region: LinkFlashRegion {
+            offset: reflect_u32(&value, "offset")?,
+            length: reflect_u32(&value, "length")?,
+        },
         chip_name: reflect_optional_string(&value, "chipName")?,
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?,

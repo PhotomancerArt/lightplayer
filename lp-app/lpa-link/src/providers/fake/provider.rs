@@ -122,7 +122,8 @@ impl FakeProvider {
                     LinkCapabilities::esp32_serial_base()
                         .with_flash()
                         .with_device_erase()
-                        .with_boot_control(),
+                        .with_boot_control()
+                        .with_raw_filesystem_read(),
                 ),
         );
         self.devices.insert(
@@ -442,7 +443,8 @@ fn manage_fake_device(
     use crate::providers::fake_device::FAKE_IMAGE_IDENTITY;
     use crate::{
         LinkBootControlResult, LinkEraseDeviceResult, LinkFirmwareFlashResult,
-        LinkFirmwareManifest, LinkManagementProgress, LinkManagementRequest, LinkManagementResult,
+        LinkFirmwareManifest, LinkFlashRegion, LinkManagementProgress, LinkManagementRequest,
+        LinkManagementResult, LinkRawFilesystemReadResult,
     };
 
     match request {
@@ -500,10 +502,70 @@ fn manage_fake_device(
                 },
             ))
         }
+        LinkManagementRequest::ReadRawFilesystem => {
+            let files = fake_device_files(device);
+            let region = LinkFlashRegion::lpfs_for_chip(FAKE_CHIP_NAME)
+                .expect("the fake device presents as a C6");
+            let image =
+                crate::providers::fake_device::fake_filesystem_image::build_image(region, &files);
+            Ok(LinkManagementResult::ReadRawFilesystem(
+                LinkRawFilesystemReadResult {
+                    logs: vec![format!(
+                        "fake filesystem read: {} bytes at {:#x}",
+                        image.len(),
+                        region.offset
+                    )],
+                    progress: vec![
+                        LinkManagementProgress::new("Reading filesystem")
+                            .with_steps(region.length, region.length)
+                            .with_percent(100),
+                    ],
+                    image,
+                    region,
+                    chip_name: Some(FAKE_CHIP_NAME.to_string()),
+                },
+            ))
+        }
         LinkManagementRequest::EraseRawFilesystem => {
             Err(LinkError::unsupported(format!("{:?}", request.operation())))
         }
     }
+}
+
+/// What the scripted device answers to a chip probe. Kept as one constant so
+/// the fake's flash-region lookup and its result payloads cannot disagree.
+#[cfg(feature = "fake-device")]
+const FAKE_CHIP_NAME: &str = "ESP32-C6 (fake)";
+
+/// The device's storage as absolute paths: its project files under the
+/// scripted project dir, plus the root-level identity stamp — the same two
+/// things `finish_light_player_boot` seeds into the fake server's memory fs.
+#[cfg(feature = "fake-device")]
+fn fake_device_files(
+    device: &crate::providers::fake_device::FakeEsp32Device,
+) -> Vec<(String, Vec<u8>)> {
+    let Some(state) = device.light_player_state() else {
+        return Vec::new();
+    };
+    let mut files: Vec<(String, Vec<u8>)> = state
+        .project_files
+        .iter()
+        .map(|(relative, bytes)| {
+            (
+                format!("{}/{relative}", state.project_dir),
+                bytes.clone(),
+            )
+        })
+        .collect();
+    if let Some(identity) = &state.identity
+        && let Ok(json) = lpc_wire::json::to_string(identity)
+    {
+        files.push((
+            fw_host::DEVICE_IDENTITY_PATH.to_string(),
+            json.into_bytes(),
+        ));
+    }
+    files
 }
 
 /// Resources built when a device-backed endpoint connects.
