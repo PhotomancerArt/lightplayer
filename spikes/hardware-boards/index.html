@@ -403,9 +403,15 @@
         go in a band above/below the rails, tied to the pad by a leader line.</dd>
       <dt>Leader</dt><dd>elbow line from a pad to its band row.</dd>
     </dl>
+    <dl>
+      <dt>Pad</dt><dd>the pin's physical marker on the edge, colored by role.</dd>
+      <dt>Label</dt><dd>pin name, silkscreen-style <i>inside</i> the board — so
+        outside cells share one start edge and align into columns.</dd>
+    </dl>
     <div>Board defs are plain JSON — buildable by agents (this page's were), editable
       by users later. Same renderer, four modes: <code>plain</code> ·
-      <code>caps</code> · <code>wired</code> · <code>swatch</code>.</div>
+      <code>caps</code> · <code>wired</code> · <code>swatch</code>.
+      Full vocab: <code>DESIGN-LANGUAGE.md</code> next to this file.</div>
     <div class="cell-legend" id="cellLegend"></div>
   </div>
 </div>
@@ -484,8 +490,9 @@
 <div class="step-card" id="orderCard">
   <div class="stitle"><span class="sn">Step 1 of 2</span><b>What colors do you see?</b></div>
   <div class="sexp">
-    Every pin is now playing this 9-pixel sequence (K = off). If your strip's color
-    order isn't RGB, you'll see swapped colors — pick the row that matches your strip.
+    Every pin repeats this 9-pixel palindrome (K = off, W = center marker) — it reads
+    the same from either end, so it doesn't matter which way your strip runs. If the
+    color order isn't RGB you'll see swapped colors — pick the row that matches.
   </div>
   <div class="seq" id="sentSeq"></div>
   <div class="order-opts" id="orderOpts"></div>
@@ -826,21 +833,24 @@ function renderBoard(b, opts = {}) {
   // ---- build cell lists per pin -------------------------------------
   // cell: {text,type} or {swatch:[...colors]}
   const cellW = c => c.swatch ? c.swatch.length * (cellH * .74) + 8 : Math.max(18, c.text.length * font * .66 + 9);
-  const cellsFor = (p) => {
+  // pin names live INSIDE the board (silkscreen-style) so outside cells share a
+  // common start x and align into columns. Band rows (terminals) have no inside
+  // space — they keep a leading name cell.
+  const cellsFor = (p, withName = false) => {
     if (mode === "plain") return [];
-    const name = { text: nameCellText(p), type: nameCellType(p) };
+    const base = withName ? [{ text: nameCellText(p), type: nameCellType(p) }] : [];
     if (mode === "caps")
-      return [name, ...(p.caps || []).map(([text, type]) => ({ text, type }))];
+      return [...base, ...(p.caps || []).map(([text, type]) => ({ text, type }))];
     if (mode === "wired") {
       const w = wired?.find(x => x.gpio === p.gpio && p.gpio != null);
-      return w ? [name, { text: w.title, type: "conn" }, ...(w.extra ? [{ text: w.extra, type: "conn" }] : [])]
-               : [name];
+      return w ? [...base, { text: w.title, type: "conn" }, ...(w.extra ? [{ text: w.extra, type: "conn" }] : [])]
+               : base;
     }
     if (mode === "swatch") {
       const s = swatches?.find(x => x.gpio === p.gpio && p.gpio != null);
-      return s ? [name, { swatch: s.colors, sel: s.sel }] : [name];
+      return s ? [...base, { swatch: s.colors, sel: s.sel }] : base;
     }
-    return [name];
+    return base;
   };
 
   // ---- vertical geometry --------------------------------------------
@@ -865,7 +875,7 @@ function renderBoard(b, opts = {}) {
   const terms = (hw.terminals || []).map((t, i) => ({ ...t, i }));
   const tw = 20, t0 = (W - terms.length * tw) / 2;
   const bandRows = mode === "plain" ? [] : terms.map((t, i) => {
-    const cells = cellsFor(t);
+    const cells = cellsFor(t, true);
     return { t, cells, padX: t0 + t.i * tw + (tw - 2) / 2,
       y: -(1.6 * u) - (terms.length - 1 - i) * u,
       w: cells.reduce((a, c) => a + cellW(c), 0) + gap * Math.max(0, cells.length - 1) };
@@ -953,14 +963,14 @@ function renderBoard(b, opts = {}) {
     rails[side].forEach(r => {
       const px = side === "left" ? 1 : W - 1 - padW;
       A(`<rect x="${px}" y="${r.y - padH / 2}" width="${padW}" height="${padH}" rx="1.4" fill="${ROLE_FILL[r.p.role] || ROLE_FILL.io}"/>`);
-      if (mode === "plain") {
-        if (labels) {
-          const lx = side === "left" ? px + padW + 3 : px - 3;
-          A(`<text x="${lx}" y="${r.y + 2.3}" text-anchor="${side === "left" ? "start" : "end"}" class="pinlabel">${esc(r.p.label)}</text>`);
-        }
-      } else if (r.cells.length) {
-        A(drawCells(r.cells, r.y, side === "left" ? -4 : W + 4, side === "left" ? -1 : 1, r.p.gpio));
+      if (labels) {
+        const lx = side === "left" ? px + padW + 3 : px - 3;
+        const txt = mode === "plain" ? r.p.label : nameCellText(r.p);
+        const fg = mode === "plain" ? "var(--silk)" : (CELL_STYLE[nameCellType(r.p)] || CELL_STYLE.name).fg;
+        A(`<text x="${lx}" y="${r.y + font * .36}" text-anchor="${side === "left" ? "start" : "end"}" class="pinlabel" style="font-size:${Math.min(6.5, font)}px;fill:${fg}">${esc(txt)}</text>`);
       }
+      if (mode !== "plain" && r.cells.length)
+        A(drawCells(r.cells, r.y, side === "left" ? -4 : W + 4, side === "left" ? -1 : 1, r.p.gpio));
     });
   }
 
@@ -1131,7 +1141,9 @@ const COLOR = { K: "#15181d", R: "#ef5350", G: "#3fd68e", B: "#4f9cf0",
 const COLOR_NAME = { R: "red", G: "green", B: "blue", C: "cyan", M: "magenta", Y: "yellow", W: "white" };
 
 /* --- step 1: color order --- */
-const SEQ = ["K","R","G","B","K","B","G","R","K"];
+// palindrome: reads the same from either end (art may hide data direction),
+// K bounds each repeat, W marks the center — start/end always obvious.
+const SEQ = ["K","R","G","B","W","B","G","R","K"];
 const ORDERS = [
   { o: "RGB", note: "colors as sent" },
   { o: "GRB", note: "most WS281x strips" },
@@ -1140,7 +1152,7 @@ const ORDERS = [
 ];
 // we emit bytes as R,G,B; a strip wired for order O reads byte i as channel O[i]
 function perceived(sent, order) {
-  if (sent === "K") return "K";
+  if (sent === "K" || sent === "W") return sent; // permutation-invariant
   const v = { R: sent === "R" ? 1 : 0, G: sent === "G" ? 1 : 0, B: sent === "B" ? 1 : 0 };
   const d = { R: 0, G: 0, B: 0 };
   [...order].forEach((ch, i) => d[ch] = v["RGB"[i]]);
