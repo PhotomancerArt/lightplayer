@@ -10,7 +10,19 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
+    // Watch the whole package, not just this file. Emitting ANY
+    // rerun-if-changed disables cargo's default "re-run when any package file
+    // changes" rule, so naming only `build.rs` pins the provenance stamp below
+    // to whatever commit was checked out the first time this script ran — the
+    // device then reports a stale commit in its wire hello, which is exactly
+    // the fact you reach for when asking "which build is on this board?".
+    // Observed during M3's hardware walk: the board reported P5's commit while
+    // running a P6 image. Same shape as fw-esp32c6's build.rs, which restates
+    // the package dir for the same reason.
+    println!(
+        "cargo:rerun-if-changed={}",
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).display()
+    );
 
     emit_build_provenance();
 
