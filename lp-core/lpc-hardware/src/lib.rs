@@ -47,7 +47,10 @@ pub use drivers::radio::radio_message::{
 };
 pub use drivers::radio::virtual_radio_driver::VirtualRadioDriver;
 pub use drivers::ws281x::virtual_ws281x_driver::{VirtualWs281xDriver, VirtualWs281xOutput};
-pub use drivers::ws281x::ws281x_driver::{Ws281xConfig, Ws281xDriver, Ws281xOutput};
+pub use drivers::ws281x::ws281x_driver::{
+    Ws281xConfig, Ws281xDriver, Ws281xOutput, ws281x_capped_byte_count,
+    WS281X_MAX_LEDS_PER_CHANNEL,
+};
 pub use endpoint::hw_endpoint::HwEndpoint;
 pub use endpoint::hw_endpoint_error::HardwareEndpointError;
 pub use endpoint::hw_endpoint_id::HwEndpointId;
