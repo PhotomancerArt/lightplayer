@@ -1,0 +1,76 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "source",
+        "shape": {
+          "custom": {
+            "codec": 2355797192,
+            "meta": {},
+            "shape": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 177956922,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "glsl_opts",
+        "shape": {
+          "ref": {
+            "id": 4084892601
+          }
+        }
+      },
+      {
+        "name": "consumed",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 90603770
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "produced",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 90603770
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

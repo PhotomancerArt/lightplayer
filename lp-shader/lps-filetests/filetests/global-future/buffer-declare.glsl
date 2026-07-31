@@ -28,13 +28,9 @@ float test_declare_buffer_array() {
     return data_array[0] + data_array[1];
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // wasm.f32: shader does not compile on any target (frontend gap) — same cause
 // as the @unsupported entries above, not an f32-specific failure.
@@ -51,13 +47,9 @@ vec4 test_declare_buffer_structured() {
     return colors[0] + colors[1] + colors[2] + colors[3];
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_declare_buffer_structured() ~= vec4(2.0, 2.0, 2.0, 4.0)
@@ -70,13 +62,9 @@ mat4 test_declare_buffer_matrix() {
     return transforms[0] * transforms[1];
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_declare_buffer_matrix() ~= mat4(2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0)
@@ -90,13 +78,9 @@ int test_declare_buffer_int_array() {
     return counts[0] + counts[1] + counts[2];
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_declare_buffer_int_array() == 60
@@ -111,13 +95,9 @@ float test_declare_buffer_single() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_declare_buffer_single() ~= 5.14

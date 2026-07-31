@@ -20,14 +20,15 @@ esp32s3 = [
 # The LightPlayer app: `LpServer` over the USB-Serial-JTAG transport, plus the
 # wire-protocol serialization inside `serial::io_task`.
 #
-# ⚠️ Still NARROWER than fw-esp32c6's feature of the same name even though the
-# dependency lists now overlap: this one takes `lpa-server` with **no** node
-# gates and `lp-gfx`'s `null-backend` instead of `lp-gfx-lpvm`. See the
-# dependency section for why each of those is load-bearing.
+# ⚠️ Still NARROWER than fw-esp32c6's feature of the same name: this one takes
+# `lpa-server` with **two** of the eight node gates rather than all of them.
+# The graphics backend is no longer the difference — both crates now link
+# `lp-gfx-lpvm`. See the dependency section for why each of those is
+# load-bearing.
 server = [
     "fw-esp32-common/server",
     "dep:lpa-server",
-    "dep:lp-gfx",
+    "dep:lp-gfx-lpvm",
     "dep:lpc-hardware",
     "dep:lpfs",
     "dep:lpc-wire",
@@ -109,29 +110,47 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 # crate must stay free of chip code (ADR 2026-07-29-per-chip-fw-toolchains).
 fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
 
-# ⚠️ THE dependency line this whole milestone exists to write.
+# ⚠️ Two of eight node gates. `default-features = false` means no gate is
+# implied — a kind not listed here loads as an inert placeholder (see
+# lpc-engine/README.md) — so this list is the exact set of node kinds the board
+# can run. Contrast fw-esp32c6, which lists all eight.
 #
-# `default-features = false` with **no `node-*` feature listed** is deliberate
-# and is not the same as "took the defaults": it yields no node runtimes at all
-# (a disabled kind loads as an inert placeholder — see lpc-engine/README.md) and
-# no `std`. Contrast fw-esp32c6, which lists all eight. M4 turns on exactly one
-# (`node-shader`), and that single-variable change is what makes M4's gate
-# readable. Anything added here silently costs flash and blurs that signal.
+# `node-shader` is what M4 exists to turn on. **`node-fixture` is not optional
+# for it**: `OutputNode::consume` requires a *control* product, `ShaderNode`
+# produces a *visual* one, and `FixtureNode` is the only runtime that converts
+# between them. With the fixture gated off the shader renders into a bus
+# nothing reads and the output node reports a resolve failure every frame —
+# which is precisely the M3 symptom this milestone had to clear. Turning the
+# shader on without the fixture would produce a build that compiles a shader on
+# device and still cannot show it.
 #
-# `panic-recovery` is likewise absent on purpose: the S3 is abort tier
-# (`panic = "abort"` + the lp-recovery RTC ledger), and that feature pulls
-# `unwinding`, which is the C6's tier. See src/recovery/.
-lpa-server = { path = "../../lp-app/lpa-server", default-features = false, optional = true }
+# Nothing else belongs here. Every further gate costs flash and blurs the
+# reading of what the shader path is worth.
+#
+# `panic-recovery` is absent on purpose: the S3 is abort tier (`panic = "abort"`
+# + the lp-recovery RTC ledger), and that feature pulls `unwinding`, which is
+# the C6's tier. See src/recovery/.
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
+    "node-shader",
+    "node-fixture",
+], optional = true }
 
-# The graphics backend, and the single biggest lever in the image (743,216 B
-# measured on the C6). `LpServer` takes a non-optional `Arc<dyn LpGraphics>`, so
-# *some* backend links; `lp-gfx-lpvm` would drag the whole on-device JIT
-# compiler into a build that never calls it. `null-backend` is off by default in
-# lp-gfx, so naming it here is the opt-in.
+# The graphics backend, and the single biggest lever in the image. Through M3
+# this was `lp-gfx` with `null-backend`, which linked no compiler at all;
+# M4 replaces it with the real thing, and the difference is the headline flash
+# number of this milestone.
 #
-# Note `lps-glsl` still shows in `cargo tree`: `lp-gfx → lp-shader → lps-glsl`
-# is unconditional and making it optional is an AGENTS.md red line. Known.
-lp-gfx = { path = "../../lp-gfx/lp-gfx", default-features = false, features = ["null-backend"], optional = true }
+# There is no ISA feature to get wrong here, and that is deliberate:
+# `lp-gfx-lpvm` selects the LPVM engine by `target_arch`, so an
+# `xtensa-esp32s3-none-elf` build takes `lpvm-native` with `isa-xt` and nothing
+# else. Naming an ISA on this line would be the way to silently pay for a
+# backend the chip cannot execute (+26,448 B measured on the C6).
+#
+# `lp-gfx` itself arrives transitively and **without** `null-backend`: that
+# feature exists so a shader-less firmware pays nothing, and leaving it on here
+# would compile a `NullGraphics` nothing constructs. When it was unconditional
+# the unused module still cost 512 B of LTO perturbation.
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
 
 # Hardware registry/manifest for the output readout driver, and the filesystem
 # traits the server is handed.

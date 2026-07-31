@@ -174,7 +174,7 @@ mod tests {
             MANIFEST_PATH.as_path(),
             br#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "name": "basic",
   "nodes": { "clock": { "ref": "./clock.json" } }
 }"#,

@@ -3951,7 +3951,7 @@ dependencies = [
  "fw-esp32-common",
  "littlefs-rust",
  "log",
- "lp-gfx",
+ "lp-gfx-lpvm",
  "lp-recovery",
  "lpa-server",
  "lpc-hardware",
@@ -5651,6 +5651,7 @@ dependencies = [
  "lpc-view",
  "lpc-wire",
  "lpfs",
+ "lpvm-native",
  "serde",
 ]
 
@@ -5900,7 +5901,6 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "lp-collection 1.0.0",
- "lps-q32",
 ]
 
 [[package]]

@@ -645,7 +645,7 @@ fn icmp_cond_str(cond: IcmpCond) -> &'static str {
 /// Format an allocation as a string.
 fn format_alloc(alloc: Alloc, isa: IsaTarget) -> String {
     match alloc {
-        Alloc::Reg(preg) => format!("Reg({})", isa.reg_name(preg)),
+        Alloc::Reg(preg) => format!("Reg({})", isa.reg_name(preg.get())),
         Alloc::Stack(slot) => format!("slot{slot}"),
         Alloc::None => String::from("none"),
     }
@@ -669,7 +669,7 @@ fn format_edit(edit: &Edit, isa: IsaTarget) -> String {
 
 fn format_arg_loc(loc: &ArgLoc, isa: IsaTarget) -> String {
     match loc {
-        ArgLoc::Reg(p) => isa.reg_name(p.hw).to_string(),
+        ArgLoc::Reg(p) => isa.reg_name(*p).to_string(),
         ArgLoc::Stack { offset, .. } => format!("stack+{offset}"),
     }
 }
@@ -693,8 +693,8 @@ fn format_return_method(rm: &ReturnMethod, isa: IsaTarget) -> String {
             word_count,
         } => format!(
             "sret ({word_count} words, ptr={}, preserved={})",
-            isa.reg_name(ptr_reg.hw),
-            isa.reg_name(preserved_reg.hw)
+            isa.reg_name(*ptr_reg),
+            isa.reg_name(*preserved_reg)
         ),
     }
 }

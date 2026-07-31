@@ -2035,7 +2035,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -2136,7 +2136,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "playlist": {
       "ref": "./playlist.json"
@@ -2233,7 +2233,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2412,7 +2412,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2542,7 +2542,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "def": {
@@ -2571,7 +2571,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -2927,7 +2927,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "broken": {
       "ref": "./broken.json"
@@ -2970,7 +2970,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "weird": {
       "ref": "./weird.json"
@@ -3140,7 +3140,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "compute": {
       "ref": "./compute.json"
@@ -3653,7 +3653,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3723,7 +3723,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -4016,7 +4016,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "name": "basic",
   "nodes": {
     "output": {
@@ -4206,7 +4206,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let project = format!(
-            "{{\n  \"kind\": \"Project\",\n  \"format\": 1,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
+            "{{\n  \"kind\": \"Project\",\n  \"format\": 2,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
         );
         fs.write_file("/project.json".as_path(), project.as_bytes())
             .expect("project.json");
@@ -4459,7 +4459,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"

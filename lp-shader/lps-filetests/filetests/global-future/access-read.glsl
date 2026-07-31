@@ -23,13 +23,9 @@ float test_access_read_float() {
     return global_float;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // wasm.f32: shader does not compile on any target (frontend gap) — same cause
 // as the @unsupported entries above, not an f32-specific failure.
@@ -41,13 +37,9 @@ int test_access_read_int() {
     return global_int;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_int() == -123
@@ -57,13 +49,9 @@ uint test_access_read_uint() {
     return int(global_uint);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_uint() == 987
@@ -73,13 +61,9 @@ bool test_access_read_bool() {
     return global_bool;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_bool() == true
@@ -89,13 +73,9 @@ vec2 test_access_read_vec2() {
     return global_vec2;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_vec2() ~= vec2(1.0, 2.0)
@@ -105,13 +85,9 @@ vec3 test_access_read_vec3() {
     return global_vec3;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_vec3() ~= vec3(1.0, 2.0, 3.0)
@@ -121,13 +97,9 @@ vec4 test_access_read_vec4() {
     return global_vec4;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
@@ -137,13 +109,9 @@ mat2 test_access_read_mat2() {
     return global_mat2;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0)
@@ -153,13 +121,9 @@ float test_access_read_const() {
     return CONST_FLOAT * 2.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_const() ~= 6.28
@@ -169,13 +133,9 @@ float test_access_read_uniform() {
     return uniform_time + 1.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_uniform() ~= 1.0
@@ -185,13 +145,9 @@ vec3 test_access_read_in() {
     return in_position + vec3(1.0, 1.0, 1.0);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_in() ~= vec3(1.0, 1.0, 1.0)
@@ -204,13 +160,9 @@ float test_access_read_buffer() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_access_read_buffer() ~= 15.0

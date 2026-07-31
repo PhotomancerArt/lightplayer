@@ -229,24 +229,52 @@ does not yet exist would boot-loop the board every 8 s.
 The default build is the LightPlayer app: `LpServer` over USB-Serial-JTAG,
 littlefs on the `lpfs` partition, and abort-tier recovery.
 
-Two dependency lines carry almost all of its size, and both are opt-*out*
-choices that a careless edit would silently reverse:
+Two dependency lines carry almost all of its size, and both are choices a
+careless edit would silently reverse:
 
-| Line | Choice | What the other choice costs |
+| Line | Choice | Why it is written that way |
 |---|---|---|
-| `lpa-server` | `default-features = false`, **no `node-*` gate listed** | each gate's runtime, 3–85 KB (see `lpc-engine/README.md`) |
-| `lp-gfx` | `null-backend`, **not `lp-gfx-lpvm`** | the whole on-device JIT compiler, 743,216 B measured |
+| `lpa-server` | `default-features = false`, **exactly two `node-*` gates** | each gate's runtime is 3–85 KB (see `lpc-engine/README.md`); the two listed are the two the board can actually run |
+| `lp-gfx-lpvm` | the real JIT backend, **no ISA feature named** | the ISA is chosen by `target_arch`; naming one is how you pay for a backend the chip cannot execute (+26,448 B measured on the C6) |
 
-`lps-glsl` still appears in `cargo tree` — `lp-gfx → lp-shader → lps-glsl` is
-unconditional and making it optional is an `AGENTS.md` red line. It contributes
-28 B to the image; the linker strips the rest. That is expected, not a leak.
+The two enabled node kinds are `node-shader` and `node-fixture`. The second is
+not decoration: `OutputNode` consumes a **control** product, `ShaderNode`
+produces a **visual** one, and `FixtureNode` is the only runtime that converts
+between them. A shader-only build compiles GLSL on device and still cannot show
+it.
 
-Because every node gate is off, a pushed project loads with every node kind
-inert, so **nothing can currently produce pixels**: an `Output` node bound to a
-gated-off producer logs a per-frame resolve error rather than rendering. The
-serial readout driver (`src/output/readout_driver.rs`) is wired for exactly that
-future — it prints a checksum and lit-LED count per second instead of driving
-LEDs, so a render path can be verified on a board with nothing attached to it.
+`lps-glsl` appears in `cargo tree` and is now genuinely linked — this build
+compiles GLSL on the board.
+
+### Verifying the render without LEDs
+
+The serial readout driver (`src/output/readout_driver.rs`) prints the frame
+bytes instead of driving LEDs: one full hex dump when a channel opens or
+resizes, then a checksum and lit-LED count once a second. That makes the render
+path *comparable*, which an LED never is.
+
+`examples/shader-oracle` is the project built for that comparison. It is
+deliberately clock-free, so every frame is identical and no time
+synchronisation is needed, and it is sized to 64 LEDs so the readout's one-shot
+dump covers the **whole** frame rather than a prefix. Its output node turns the
+display pipeline's LUT, dithering, interpolation and brightness off, which
+collapses that pipeline to a stateless `(v + 0x80) >> 8` — so any difference
+between host and device is the shader, not the pipeline.
+
+```bash
+scripts/m4-hardware-walk.sh            # flash, push, render, compare
+```
+
+The walk renders the same project on two host engines and diffs both against
+the board. Measured 2026-07-30 on the desk S3: **192 of 192 bytes identical**
+across all three.
+
+The two host engines are not redundant. `[ORACLE]` is wasmtime; `[ORACLE-RV32]`
+is `lpvm-native`'s rv32 emulation — the *same code generator* the S3 JITs, one
+ISA over. When the three disagree, which pair agrees is the entire diagnosis:
+device+rv32 against wasmtime is a native-versus-wasm difference that the C6
+shares, while a device disagreeing with both is Xtensa-specific. See
+`docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.md`.
 
 ## Board profile
 
@@ -262,7 +290,7 @@ wrong GPIO number is a short circuit:
 
 | Absent | Why |
 |---|---|
-| User LED | Seeed says GPIO21 for the plain XIAO ESP32-S3; espboards.dev says GPIO22 for the *Plus*, which is impossible (the ESP32-S3 numbers GPIO0-21 and GPIO26-48). Unverified on this board. |
+| User LED | **Tested and not found on GPIO21.** Seeed documents GPIO21 for the plain XIAO ESP32-S3, and espboards.dev says GPIO22 for the *Plus*, which is impossible (the ESP32-S3 numbers GPIO0-21 and GPIO26-48). Driving GPIO21 in a 3-blink/pause pattern for 20 s on the desk board produced **no visible change**, so GPIO21 is ruled out for this variant. The pin stays out of the profile. Settling it properly wants the Seeed schematic or an S3 `test_gpio_calibrate` harness (see "Not yet ported"), not another guess — the yellow LED on this board appears to be a power/charge indicator unrelated to any GPIO we drive. |
 | The nine 1.27 mm castellated pads | No published GPIO map. |
 | GPIO26-37 | In-package flash and octal PSRAM. Never claimable. |
 | `/radio/0` | No radio driver is registered here, so the resource would never open. |
