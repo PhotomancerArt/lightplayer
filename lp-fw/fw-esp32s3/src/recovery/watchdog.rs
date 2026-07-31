@@ -17,13 +17,13 @@
 //! seconds and run inside the server loop. We are catching escapes, not
 //! enforcing latency.
 //!
-//! ⚠️ **Nothing arms the RWDT yet.** [`WatchdogFeeder::start`] must be called
-//! by the app entrypoint, immediately next to the `io_task` spawn that keeps
-//! [`IO_ALIVE`] ticking — that is M3 P5's job, and it is why this type is the
-//! one part of `recovery` still carrying a dead-code allowance. Arming it from
-//! today's boot skeleton would be strictly worse than not arming it: with no
-//! I/O task the feeder is *designed* to withhold, so the board would reset
-//! every [`WATCHDOG_TIMEOUT_MS`] forever. Arm it where it can be fed.
+//! ⚠️ **Arming and feeding must stay together.** `main.rs`'s `boot_firmware`
+//! calls [`WatchdogFeeder::start`] immediately before the `io_task` spawn that
+//! keeps [`IO_ALIVE`] ticking, and hands the feeder to the server loop. Moving
+//! the arming earlier — into a boot path with no I/O task — would be strictly
+//! worse than not arming at all: the feeder is *designed* to withhold when the
+//! I/O task is silent, so the board would reset every
+//! [`WATCHDOG_TIMEOUT_MS`] forever. Arm it only where it can be fed.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -50,11 +50,6 @@ pub fn note_io_alive() {
 }
 
 /// Owns the armed RWDT; fed from the server loop.
-#[allow(
-    dead_code,
-    reason = "arming belongs next to the io_task spawn that feeds it — M3 P5; \
-              see the module docs for why the boot skeleton must not arm it"
-)]
 pub struct WatchdogFeeder {
     rwdt: Rwdt,
     last_io_confirm_ms: u64,
@@ -62,10 +57,6 @@ pub struct WatchdogFeeder {
     tightened: bool,
 }
 
-#[allow(
-    dead_code,
-    reason = "arming belongs next to the io_task spawn that feeds it — M3 P5"
-)]
 impl WatchdogFeeder {
     /// Arm stage 0 (system reset — the `enable()` default) with the generous
     /// boot timeout; the first `feed` from the server loop tightens it to

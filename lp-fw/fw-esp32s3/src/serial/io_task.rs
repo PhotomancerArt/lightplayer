@@ -10,8 +10,10 @@
 extern crate alloc;
 
 // Sole divergence from fw-esp32c6's copy beyond the `board::esp32s3` import:
-// `format!` is used only by the server-gated write paths, and unlike the C6
-// this crate does not enable `server` by default until M3 P5.
+// `format!` is used only by the server-gated write paths. `server` is in the
+// default features now (M3 P5), same as the C6, so the `not(server)` arm is not
+// reachable from any build recipe — the attribute stays only so the two copies
+// of this file remain diffable.
 #[cfg_attr(
     not(feature = "server"),
     allow(

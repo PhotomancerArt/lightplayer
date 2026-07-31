@@ -210,17 +210,43 @@ not migrate into `fw-esp32-common`:
 | Panic with no ledger installed | hangs in place | resets anyway |
 | Linker | rust-lld, `-Tlinkall.x` | GNU ld, `-Wl,-Tlinkall.x` |
 
-That is why this crate's `build.rs` is nearly empty: the C6's exists mostly to
-patch esp-hal's `eh_frame.x`, which is meaningless without unwinding.
+That is why this crate's `build.rs` is so small: apart from the wire-hello build
+provenance and the `fw_harness` cfg, the C6's exists mostly to patch esp-hal's
+`eh_frame.x`, which is meaningless without unwinding.
 
 The last three rows all follow from the same fact: this panic handler allocates
 nothing, so it cannot re-enter `esp-alloc`'s non-reentrant lock the way the C6's
 `Box`-ing handler can. `src/recovery/panic_path.rs` carries the full reasoning,
 including what replaces the C6's `is_esp_sync_reentrant_lock_panic` guard.
 
-⚠️ The RTC watchdog is written (`src/recovery/watchdog.rs`) but **not armed**:
-its feed policy is deliberately conditional on a live `io_task`, so arming it
-before M3 P5 spawns one would boot-loop the board.
+⚠️ The RTC watchdog (`src/recovery/watchdog.rs`) is armed by `boot_firmware`
+immediately next to the `io_task` spawn, and nowhere else. Its feed policy is
+deliberately conditional on a live `io_task`, so arming it anywhere the I/O task
+does not yet exist would boot-loop the board every 8 s.
+
+## The app layer
+
+The default build is the LightPlayer app: `LpServer` over USB-Serial-JTAG,
+littlefs on the `lpfs` partition, and abort-tier recovery.
+
+Two dependency lines carry almost all of its size, and both are opt-*out*
+choices that a careless edit would silently reverse:
+
+| Line | Choice | What the other choice costs |
+|---|---|---|
+| `lpa-server` | `default-features = false`, **no `node-*` gate listed** | each gate's runtime, 3–85 KB (see `lpc-engine/README.md`) |
+| `lp-gfx` | `null-backend`, **not `lp-gfx-lpvm`** | the whole on-device JIT compiler, 743,216 B measured |
+
+`lps-glsl` still appears in `cargo tree` — `lp-gfx → lp-shader → lps-glsl` is
+unconditional and making it optional is an `AGENTS.md` red line. It contributes
+28 B to the image; the linker strips the rest. That is expected, not a leak.
+
+Because every node gate is off, a pushed project loads with every node kind
+inert, so **nothing can currently produce pixels**: an `Output` node bound to a
+gated-off producer logs a per-frame resolve error rather than rendering. The
+serial readout driver (`src/output/readout_driver.rs`) is wired for exactly that
+future — it prints a checksum and lit-LED count per second instead of driving
+LEDs, so a render path can be verified on a board with nothing attached to it.
 
 ## Workspace notes
 

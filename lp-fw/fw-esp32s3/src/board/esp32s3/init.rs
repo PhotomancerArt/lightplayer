@@ -5,10 +5,11 @@
 //! RMT output driver, the button GPIO, or the radio (see M3 P2 scope). Those
 //! return values are added when the drivers that consume them are.
 //!
-//! ⚠️ `init_board` takes the `esp_hal` peripheral singleton. `main.rs`'s boot
-//! skeleton still calls `esp_hal::init` itself and owns the heap, so the two
-//! must never both run — P5 replaces that call with this one when it wires the
-//! app entrypoint. Until then this function is compiled but not called.
+//! ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it twice
+//! panics. It is the app path's **only** call to `esp_hal::init`: `main.rs`'s
+//! `boot_firmware` calls this and nothing else, and the harness entrypoint that
+//! does call `esp_hal::init` directly is `cfg`-exclusive with it. Do not add a
+//! second call on either path.
 
 use esp_hal::clock::CpuClock;
 use esp_hal::interrupt::software::SoftwareInterruptControl;

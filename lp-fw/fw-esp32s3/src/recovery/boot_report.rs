@@ -15,8 +15,8 @@ use super::reset_cause_map::current_reset_cause;
 /// Analyze the previous run, install the recovery global, and print the
 /// assessment. Call once, after the heap allocator is live.
 ///
-/// Returns the assessment so the caller can act on `safe_mode` (M3 P5 uses it
-/// to skip auto-loading a project that has been crashing).
+/// Returns the assessment so the caller can act on `safe_mode` — `main.rs` uses
+/// it to skip auto-loading a project that has been crashing.
 pub fn init_and_report() -> BootAssessment {
     let reset_cause = current_reset_cause();
     let (recovery, assessment) =
