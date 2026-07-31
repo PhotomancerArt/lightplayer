@@ -483,6 +483,11 @@ label:has(> input:not(:disabled)) {
 .ux-card-op-term {
     flex: 1;
     min-height: 0;
+    /* The grid-stack made the op overlay content-sized (2026-07-31): a
+       flex:1 + overflow scroller only scrolls when its parent is bounded,
+       and the parent no longer is. Unbounded streams own their cap now —
+       without this, a flash's terminal grows the card by its whole log. */
+    max-height: 220px;
     margin: 0;
     overflow-y: auto;
     padding: 8px 10px;
