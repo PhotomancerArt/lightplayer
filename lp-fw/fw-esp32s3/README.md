@@ -3,18 +3,26 @@
 LightPlayer firmware for the **ESP32-S3** (Xtensa LX7). Sibling of
 `fw-esp32c6` (RISC-V).
 
-> **Not yet a consumer of `fw-esp32-common`.** An earlier version of this file
-> called the crate its "third consumer"; that was wrong at the dependency
-> level and is corrected here. What was actually proven during M5 is weaker
-> but still useful: `fw-esp32-common` *compiles* for `xtensa-esp32s3-none-elf`
-> pulling no `esp-hal`, so the chip-agnostic seam holds against a second
-> architecture. Wiring it in is the app-layer milestone's job.
+> **Now a real consumer of `fw-esp32-common`, not just a compile target.** An
+> earlier version of this file called the crate `fw-esp32-common`'s "third
+> consumer" before any dependency existed; a later correction went the other
+> way and said "not yet a consumer" while M5 had only proven that
+> `fw-esp32-common` *compiles* for `xtensa-esp32s3-none-elf` pulling no
+> `esp-hal`. Both are now stale: the app-layer milestone wired it in for
+> real — `server_loop`, `boot`, `logger`, `lp_fs`, `transport`, and the
+> chip-agnostic `Esp32OutputProvider` this crate's RMT driver plugs into
+> (below) all come from `fw-esp32-common`.
 
-Currently a **boot skeleton plus hardware harnesses**: clocks, heap, and serial
-logging far enough to print the `[INIT]` marker family, and a JIT corpus runner
-(below). The server, storage, and output stacks are the app-layer milestone of
-`~/.photomancer/planning/lp2025/2026-07-30-s3-app-layer-with-jit/`; the Xtensa
-backport roadmap that created this crate is closed.
+Runs the LightPlayer app on device: `lp-server` over USB-Serial-JTAG, littlefs
+storage, GLSL compiled to Xtensa machine code by the on-device JIT, and real
+WS281x output on 4 concurrent RMT channels (below) — plus the hardware
+harnesses (clocks, heap, and serial logging far enough to print the `[INIT]`
+marker family, a JIT corpus runner, and the RMT loopback self-test). The
+server and storage stacks landed as the app-layer milestone of
+`~/.photomancer/planning/lp2025/2026-07-30-s3-app-layer-with-jit/`; the
+4-channel RMT output replaced the serial-readout stand-in that milestone
+shipped with, in `~/.photomancer/planning/lp2025/2026-07-31-0720-s3-led-output-4ch/`.
+The Xtensa backport roadmap that created this crate is closed.
 
 Verified on hardware 2026-07-30 (ESP32-S3 rev v0.2, 16 MB flash): flashes and
 boots to `[INIT] ready`, and runs the Xtensa JIT corpus (below) with 11/11
@@ -159,6 +167,17 @@ fails to compile — 70 × E0716 from the `Slotted` derive's const-promotion of 
 temporary — so an MSRV error here means `espup update`, not a code problem.
 The recipe also puts the toolchain's bundled GNU binutils on `PATH`, because
 the Rust target spec links through `xtensa-esp32s3-elf-gcc`.
+
+### Release profile
+
+This crate builds under `[profile.release-esp32s3]` (`inherits = "release"`,
+`opt-level = "s"`), not the workspace's default `opt-level = "z"`. The `"z"`
+codegen was slow enough on the cold first frame to miss the RMT loopback
+harness's 30 µs refill deadline on one channel — see
+`docs/defects/2026-07-31-opt-z-missed-rmt-drain-deadline.md`. `"z"` stays the
+default for the C6, whose flash budget is genuinely tight; the S3 has ~4.6 MB
+of headroom in its 6 MB app partition, so trading ~104 KB of image size for
+codegen the timing-critical driver was actually validated at is free here.
 
 ## Flashing
 
