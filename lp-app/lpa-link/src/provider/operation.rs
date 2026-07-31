@@ -80,6 +80,17 @@ impl LinkCapabilities {
         self
     }
 
+    /// Advertise the raw-filesystem READ only.
+    ///
+    /// Split out of [`Self::with_raw_filesystem`] (M6): backup ships before
+    /// restore, and advertising the write half early would let the UI offer
+    /// an operation every provider answers with `unsupported`. The paired
+    /// builder stays for M7, which completes the other half.
+    pub fn with_raw_filesystem_read(mut self) -> Self {
+        self.operations.insert(LinkOperation::ReadRawFilesystem);
+        self
+    }
+
     pub fn with_raw_filesystem(mut self) -> Self {
         self.operations.insert(LinkOperation::ReadRawFilesystem);
         self.operations.insert(LinkOperation::WriteRawFilesystem);

@@ -13,6 +13,7 @@ pub mod connection;
 pub mod diagnostic;
 pub mod endpoint;
 pub mod error;
+pub mod flash_region;
 pub mod log;
 pub mod management_event;
 pub mod management_progress;

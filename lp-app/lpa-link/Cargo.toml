@@ -23,8 +23,17 @@ lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 lpa-client = { path = "../lpa-client", optional = true, default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", optional = true }
+# The fake device's raw-filesystem read returns a REAL littlefs image (see
+# `providers/fake_device/fake_filesystem_image.rs`) — a fake that answered
+# with arbitrary bytes would hide the only failure that matters.
+littlefs-rust = { version = "0.1.0", default-features = false, features = [
+    "std",
+], optional = true }
 lpfs = { path = "../../lp-base/lpfs", optional = true, features = ["std"] }
 js-sys = { version = "0.3", optional = true }
+# Verifies the MD5 the ROM/stub sends after a raw flash read. Host-only:
+# the browser path gets its checksum from esptool-js.
+md-5 = { version = "0.10", optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 serde_json = { workspace = true, optional = true }
@@ -76,6 +85,7 @@ device-session-host = ["device-session", "lpa-client/host"]
 fake-device = [
     "device-session-host",
     "dep:fw-host",
+    "dep:littlefs-rust",
     "lpa-client/serial",
     "dep:lpc-model",
     "dep:lpfs",
@@ -91,6 +101,7 @@ host-serial-esp32 = [
     "lpa-client/serial",
     "dep:espflash",
     "dep:lpc-model",
+    "dep:md-5",
     "dep:serde_json",
     "dep:serialport",
     "dep:tokio",

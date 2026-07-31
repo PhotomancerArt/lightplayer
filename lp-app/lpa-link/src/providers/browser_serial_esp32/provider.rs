@@ -5,6 +5,7 @@ use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::provider::management_request::LinkManagementRequest;
 use crate::provider::management_result::{
     LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest, LinkManagementResult,
+    LinkRawFilesystemReadResult,
 };
 use crate::provider::session::LinkSessionId;
 use crate::providers::browser_serial_esp32::BrowserSerialEsp32Options;
@@ -74,7 +75,10 @@ impl BrowserSerialEsp32Provider {
             capabilities = capabilities
                 .with_flash()
                 .with_device_erase()
-                .with_boot_control();
+                .with_boot_control()
+                // READ only (M6): restore is M7's, and advertising the write
+                // half early would surface a button that answers `unsupported`.
+                .with_raw_filesystem_read();
         }
         let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
             .with_capabilities(capabilities);
@@ -339,6 +343,36 @@ impl BrowserSerialEsp32Provider {
                 Ok(LinkManagementResult::SetBootControl(
                     LinkBootControlResult {
                         flags,
+                        chip_name: result.chip_name,
+                        logs: result.logs,
+                        progress: map_progress(result.progress),
+                    },
+                ))
+            }
+            LinkManagementRequest::ReadRawFilesystem => {
+                let result = browser_esp32_flash::read_raw_filesystem_with_events(
+                    port_id,
+                    self.options.esptool_module_path(),
+                    events.clone(),
+                )
+                .await?;
+                let logs = result
+                    .logs
+                    .iter()
+                    .map(|message| {
+                        LinkLogEntry::new(
+                            endpoint_id.clone(),
+                            Some(session_id.clone()),
+                            LinkLogLevel::Info,
+                            message.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.extend_session_logs(session_id, logs)?;
+                Ok(LinkManagementResult::ReadRawFilesystem(
+                    LinkRawFilesystemReadResult {
+                        image: result.image,
+                        region: result.region,
                         chip_name: result.chip_name,
                         logs: result.logs,
                         progress: map_progress(result.progress),

@@ -13,6 +13,16 @@ pub enum LinkManagementRequest {
     EraseDeviceFlash,
     /// Erase the raw device filesystem partition below the running server.
     EraseRawFilesystem,
+    /// Read the raw device filesystem partition back to the host, verbatim.
+    ///
+    /// Takes no region: the partition is per board, and the board is
+    /// **discovered** by the SYNC handshake the provider performs anyway (see
+    /// [`crate::LinkFlashRegion`]). A device that cannot boot cannot be asked
+    /// what it is, which is exactly when this operation matters.
+    ///
+    /// Works from ROM download mode, so it is the one way to get a user's
+    /// work off a board whose own project prevents it from running.
+    ReadRawFilesystem,
     /// Write the boot-control sector, instructing the device's next boot.
     ///
     /// `flags` are `lp_bootctl::BootFlags` bits, carried as a plain `u32` so
@@ -52,6 +62,7 @@ impl LinkManagementRequest {
             Self::FlashFirmware => LinkOperation::FlashFirmware,
             Self::EraseDeviceFlash => LinkOperation::EraseDeviceFlash,
             Self::EraseRawFilesystem => LinkOperation::WriteRawFilesystem,
+            Self::ReadRawFilesystem => LinkOperation::ReadRawFilesystem,
             Self::SetBootControl { .. } => LinkOperation::WriteBootControl,
         }
     }

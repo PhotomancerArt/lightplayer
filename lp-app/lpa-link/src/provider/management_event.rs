@@ -69,6 +69,7 @@ impl LinkManagementResult {
             Self::FlashFirmware(result) => &result.logs,
             Self::EraseDeviceFlash(result) => &result.logs,
             Self::EraseRawFilesystem(result) => &result.logs,
+            Self::ReadRawFilesystem(result) => &result.logs,
             Self::SetBootControl(result) => &result.logs,
         }
     }
@@ -80,6 +81,7 @@ impl LinkManagementResult {
             Self::FlashFirmware(result) => &result.progress,
             Self::EraseDeviceFlash(result) => &result.progress,
             Self::EraseRawFilesystem(result) => &result.progress,
+            Self::ReadRawFilesystem(result) => &result.progress,
             Self::SetBootControl(result) => &result.progress,
         }
     }
