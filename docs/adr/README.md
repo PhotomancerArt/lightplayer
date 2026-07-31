@@ -123,6 +123,8 @@ holds the full context.
 | Graduated output clamp using boot-control flag bits `8..16` (reserved, unassigned) | `2026-07-30-boot-control-sector` | The safe-clamp / fixture mA-limiter work begins |
 | Last-crash summary mirrored into the boot-control sector (the RTC crash record is unreadable from a board that never boots) | `2026-07-30-boot-control-sector` | Post-mortem from a non-booting board is needed |
 | `lpfs` partition subtype is `spiffs` but the filesystem is littlefs (`esp-idf-part` supports `littlefs`) | `2026-07-30-boot-control-sector` | The partition table is being changed for another reason anyway |
+| Surfacing link mode in the UI + the "waiting for a device in bootloader mode" confirmation that makes the BOOT-button ritual learnable | `2026-07-30-bootloader-mode-detection` | M5 of the device-recovery plan |
+| Flapping-device heuristic (enumeration-drop counting), deliberately offer-only — it must never trigger a probe, which would reboot a device that may just have a loose cable | `2026-07-30-bootloader-mode-detection` | M9 of the device-recovery plan |
 
 ## Relationship To Shared Planning
 

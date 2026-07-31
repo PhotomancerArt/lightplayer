@@ -158,6 +158,33 @@ impl HostSerialEsp32Provider {
         Ok(core::mem::take(&mut *lines))
     }
 
+    /// Ask whether a bootloader is listening on this session's port, and
+    /// which chip it is.
+    ///
+    /// Not capability-gated: probing is a *question*, not an operation on
+    /// the device, and the answer is what tells callers which operations are
+    /// available at all. It still needs exclusive ownership of the wire,
+    /// because the SYNC handshake reboots the device.
+    pub async fn probe_target(
+        &self,
+        session_id: &LinkSessionId,
+        events: LinkManagementEventSink,
+    ) -> Result<Option<String>, LinkError> {
+        let port_name = self.session_port(session_id)?;
+        self.release_transport_if_open(session_id).await?;
+        host_esp32_flash::probe_target(&port_name, &events)
+    }
+
+    /// Resolve a session's port without gating on a capability.
+    fn session_port(&self, session_id: &LinkSessionId) -> Result<String, LinkError> {
+        let state = self.state();
+        let session = state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?;
+        Ok(session.port_name.clone())
+    }
+
     /// Capability-gate a management request and resolve the session's port.
     fn session_manage_port(
         &self,

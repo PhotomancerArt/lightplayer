@@ -163,6 +163,35 @@ impl FakeProvider {
         Ok(core::mem::take(&mut *lines))
     }
 
+    /// Scripted bootloader probe.
+    ///
+    /// Mirrors the real providers' contract: `Ok(Some(chip))` when a
+    /// bootloader answers, `Err` when nothing does — and `Err` is NOT proof
+    /// the device is absent, only that the handshake went unanswered. The
+    /// fake reports a bootloader whenever its scripted device is in a
+    /// no-firmware state, which is what a real board in download mode does.
+    pub async fn probe_target(
+        &self,
+        session_id: &LinkSessionId,
+    ) -> Result<Option<String>, LinkError> {
+        #[cfg(feature = "fake-device")]
+        {
+            let endpoint_id = {
+                let sessions = self.sessions.borrow();
+                sessions
+                    .get(session_id)
+                    .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))?
+                    .endpoint_id
+                    .clone()
+            };
+            if self.devices.contains_key(&endpoint_id) {
+                return Ok(Some("ESP32-C6 (fake)".to_string()));
+            }
+        }
+        let _ = session_id;
+        Err(LinkError::unsupported("probe_target"))
+    }
+
     fn endpoint(&self, endpoint_id: &LinkEndpointId) -> Result<&LinkEndpoint, LinkError> {
         self.endpoints
             .iter()

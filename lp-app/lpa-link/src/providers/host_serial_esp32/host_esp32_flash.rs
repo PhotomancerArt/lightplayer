@@ -161,6 +161,38 @@ pub(super) fn write_boot_control(
     })
 }
 
+/// Ask the device whether a ROM/stub bootloader is listening, and which chip
+/// it is.
+///
+/// This is the **authoritative** bootloader-mode test: `connect` performs the
+/// esptool SYNC handshake, which only a bootloader answers. Enumeration data
+/// cannot substitute — USB-Serial-JTAG parts present the same VID/PID in app
+/// mode and download mode.
+///
+/// **It reboots the device.** `connect` drives DTR/RTS to enter download
+/// mode, and on USB-Serial-JTAG that reset drops USB enumeration. Callers
+/// must own the wire exclusively and rebuild the link afterwards; never run
+/// this speculatively against a healthy board.
+///
+/// `Ok(None)` means "answered, but would not name itself" — still a
+/// bootloader. `Err` means nothing answered, which is *not* proof the device
+/// is absent; it may be running the app.
+pub(super) fn probe_target(
+    port_name: &str,
+    events: &LinkManagementEventSink,
+) -> Result<Option<String>, LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    recorder.log(format!("Probing {port_name} for a bootloader"));
+    let mut flasher = connect(port_name, &mut recorder)?;
+    let chip_name = chip_name(&mut flasher);
+    reset_into_app(&mut flasher, &mut recorder);
+    recorder.log(match &chip_name {
+        Some(name) => format!("Bootloader answered: {name}"),
+        None => "Bootloader answered (chip did not identify itself)".to_string(),
+    });
+    Ok(chip_name)
+}
+
 /// Reboot the device into its application firmware via a hard-reset signal
 /// pulse — no bootloader entry. Returns the emitted log lines.
 pub(super) fn reset_runtime(
