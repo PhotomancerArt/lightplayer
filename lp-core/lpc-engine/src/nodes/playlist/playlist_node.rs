@@ -224,6 +224,7 @@ impl NodeRuntime for PlaylistNode {
                 self.pending_activate = Some(*entry);
                 Ok(())
             }
+            _ => Err(NodeError::msg("playlist does not support this command")),
         }
     }
 

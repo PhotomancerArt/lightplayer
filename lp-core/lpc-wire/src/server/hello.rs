@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 5: `WireNodeCommand::ButtonEvent` + `OutputTestPattern` node action
+///   events (`docs/adr/2026-07-31-node-action-events.md`).
 /// - 4: `OutputDriverOptionsConfig.brightness` removed. Brightness is a
 ///   fixture-level control only; the output node no longer carries one.
 /// - 3: merge of the two independent "2" bumps below — one wire surface
@@ -35,7 +37,7 @@ use serde::{Deserialize, Serialize};
 ///   runtime command channel (playlist activate-entry;
 ///   `docs/adr/2026-07-27-runtime-node-command-channel.md`).
 /// - 1: hello handshake introduced.
-pub const WIRE_PROTO_VERSION: u32 = 4;
+pub const WIRE_PROTO_VERSION: u32 = 5;
 
 /// Unsolicited/boot-time server identity and version report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
