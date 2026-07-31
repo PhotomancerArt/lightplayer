@@ -57,10 +57,15 @@ That fits all five rows exactly: each "device logged" value is the byte length
 of the *preceding* row's upload, and row E is `✔` only because D and E deployed
 the same 1662 B source.
 
-Not yet confirmed on hardware — confirming it needs one walk that reads the
-compile line from a monitor attached strictly *after* the upload's own reload
-(reflash-then-boot, i.e. the walk's round 2), and compares it against the same
-walk's round-1 boot line.
+**Confirmed on hardware 2026-07-31** — and the fixed CLI itself became the
+instrument. With the wait keeping the connection open, a single upload of a
+1301-byte source (previous flash content: 1267 bytes) streams *both* compile
+lines in one session, in order: `compilation starting (…, 1267 bytes)` — the
+connect-reset's boot auto-loading the previous upload, the only line the old
+fire-and-forget CLI ever lived to see — then `compilation starting (…, 1301
+bytes)`, the deploy's own reload with the new source. The device always
+compiled both; the observation channel simply closed between them. One-step
+lag was purely observational, as hypothesized.
 
 **Fix** — `lp-cli upload` (`lp-cli/src/commands/upload/handler.rs`) no longer
 disconnects on the `LoadProject` ack. It now polls `project.read` on the
