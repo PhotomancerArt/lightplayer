@@ -208,6 +208,118 @@ pub fn format_inst(inst: &Inst, pc: u32) -> String {
             };
             m.to_string()
         }
+
+        // --- floating point ---
+        FpRrr(op, fr, fs, ft) => format!("{}\t{fr:?}, {fs:?}, {ft:?}", fp_rrr_mnem(op)),
+        FpRr(op, fr, fs) => format!("{}\t{fr:?}, {fs:?}", fp_rr_mnem(op)),
+        ConstS(fr, imm) => format!("const.s\t{fr:?}, {imm}"),
+        Rfr(ar, fs) => format!("rfr\t{ar:?}, {fs:?}"),
+        Wfr(fr, ars) => format!("wfr\t{fr:?}, {ars:?}"),
+        FpMovAr(op, fr, fs, at) => {
+            let m = match op {
+                FpMovArOp::MoveqzS => "moveqz.s",
+                FpMovArOp::MovnezS => "movnez.s",
+                FpMovArOp::MovltzS => "movltz.s",
+                FpMovArOp::MovgezS => "movgez.s",
+            };
+            format!("{m}\t{fr:?}, {fs:?}, {at:?}")
+        }
+        FpMovBr(op, fr, fs, bt) => {
+            let m = match op {
+                FpMovBrOp::MovfS => "movf.s",
+                FpMovBrOp::MovtS => "movt.s",
+            };
+            format!("{m}\t{fr:?}, {fs:?}, {bt:?}")
+        }
+        FpCmp(op, br, fs, ft) => {
+            let m = match op {
+                FpCmpOp::UnS => "un.s",
+                FpCmpOp::OeqS => "oeq.s",
+                FpCmpOp::UeqS => "ueq.s",
+                FpCmpOp::OltS => "olt.s",
+                FpCmpOp::UltS => "ult.s",
+                FpCmpOp::OleS => "ole.s",
+                FpCmpOp::UleS => "ule.s",
+            };
+            format!("{m}\t{br:?}, {fs:?}, {ft:?}")
+        }
+        FpToInt(op, ar, fs, imm) => {
+            let m = match op {
+                FpToIntOp::RoundS => "round.s",
+                FpToIntOp::TruncS => "trunc.s",
+                FpToIntOp::FloorS => "floor.s",
+                FpToIntOp::CeilS => "ceil.s",
+                FpToIntOp::UtruncS => "utrunc.s",
+            };
+            format!("{m}\t{ar:?}, {fs:?}, {imm}")
+        }
+        IntToFp(op, fr, ars, imm) => {
+            let m = match op {
+                IntToFpOp::FloatS => "float.s",
+                IntToFpOp::UfloatS => "ufloat.s",
+            };
+            format!("{m}\t{fr:?}, {ars:?}, {imm}")
+        }
+        FpLsx(op, fr, ars, at) => {
+            let m = match op {
+                FpLsxOp::Lsx => "lsx",
+                FpLsxOp::Lsxp => "lsxp",
+                FpLsxOp::Ssx => "ssx",
+                FpLsxOp::Ssxp => "ssxp",
+            };
+            format!("{m}\t{fr:?}, {ars:?}, {at:?}")
+        }
+        FpLsi(op, ft, ars, off) => {
+            let m = match op {
+                FpLsiOp::Lsi => "lsi",
+                FpLsiOp::Ssi => "ssi",
+                FpLsiOp::Lsip => "lsip",
+                FpLsiOp::Ssip => "ssip",
+            };
+            format!("{m}\t{ft:?}, {ars:?}, {off}")
+        }
+
+        // --- boolean register file ---
+        MovBool(set, ar, ars, bt) => {
+            let m = if set { "movt" } else { "movf" };
+            format!("{m}\t{ar:?}, {ars:?}, {bt:?}")
+        }
+        BranchBool(set, bs, off) => {
+            let m = if set { "bt" } else { "bf" };
+            format!("{m}\t{bs:?}, {:#x}", br_target(pc, off))
+        }
+
+        // --- special / user registers ---
+        Sr(op, sreg, at) => format!("{}.{}\t{at:?}", op.name(), sreg.name()),
+        Ur(op, ureg, at) => format!("{}.{}\t{at:?}", op.name(), ureg.name()),
+    }
+}
+
+fn fp_rrr_mnem(op: FpRrrOp) -> &'static str {
+    match op {
+        FpRrrOp::AddS => "add.s",
+        FpRrrOp::SubS => "sub.s",
+        FpRrrOp::MulS => "mul.s",
+        FpRrrOp::MaddS => "madd.s",
+        FpRrrOp::MsubS => "msub.s",
+        FpRrrOp::MaddnS => "maddn.s",
+        FpRrrOp::DivnS => "divn.s",
+    }
+}
+
+fn fp_rr_mnem(op: FpRrOp) -> &'static str {
+    match op {
+        FpRrOp::MovS => "mov.s",
+        FpRrOp::AbsS => "abs.s",
+        FpRrOp::NegS => "neg.s",
+        FpRrOp::Div0S => "div0.s",
+        FpRrOp::Recip0S => "recip0.s",
+        FpRrOp::Sqrt0S => "sqrt0.s",
+        FpRrOp::Rsqrt0S => "rsqrt0.s",
+        FpRrOp::Nexp01S => "nexp01.s",
+        FpRrOp::MkdadjS => "mkdadj.s",
+        FpRrOp::AddexpS => "addexp.s",
+        FpRrOp::AddexpmS => "addexpm.s",
     }
 }
 
