@@ -102,7 +102,7 @@ pub fn ModulePanelControl(
     let caption_row = rsx! {
         if let Some(caption) = caption.clone() {
             span {
-                class: "tw:max-w-[13ch] tw:truncate tw:text-center tw:text-[0.6rem] tw:leading-none tw:text-dim-foreground",
+                class: "tw:max-w-[17ch] tw:truncate tw:text-center tw:text-[0.6rem] tw:leading-none tw:text-dim-foreground",
                 title: "{caption}",
                 "{caption}"
             }

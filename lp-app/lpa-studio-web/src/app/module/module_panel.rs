@@ -128,9 +128,12 @@ pub fn NestedPanelGroup(
 
     rsx! {
         section { class: "tw:grid tw:min-w-0 tw:gap-2 tw:rounded-sm tw:border tw:border-border-muted tw:bg-card-subtle tw:px-3 tw:py-2",
-            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+            // Wraps rather than squeezes: at phone width the summary and
+            // reset chip drop to a second line instead of crushing the
+            // group's name to one letter.
+            div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-2 tw:gap-y-1",
                 button {
-                    class: "tw:group tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left",
+                    class: "tw:group tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left",
                     r#type: "button",
                     aria_expanded: "{!collapsed}",
                     title: if collapsed { "Expand {label}" } else { "Collapse {label}" },
@@ -146,7 +149,7 @@ pub fn NestedPanelGroup(
                             size: 11,
                         }
                     }
-                    span { class: "tw:truncate {heading_class}", "{group.label}" }
+                    span { class: heading_class, "{group.label}" }
                 }
                 // The scope path: the identity half of every control below
                 // (panel.md P1), and what makes two instances distinct.
