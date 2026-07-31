@@ -99,36 +99,44 @@ vec3 test_rainbow_palette_heatmap_0() {
     return paletteHeatmap(0.0);
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_rainbow_palette_heatmap_0() ~= vec3(0.0, 0.0, 0.91) (tolerance: 0.002)
 
 vec3 test_rainbow_palette_heatmap_half() {
     return paletteHeatmap(0.5);
 }
 
+// @unimplemented(wasm.f32)
 // run: test_rainbow_palette_heatmap_half() ~= vec3(0.4375, 0.99191284, 0.4375) (tolerance: 0.002)
 
 vec3 test_rainbow_palette_rainbow_quarter() {
     return paletteRainbow(0.25);
 }
 
+// @unimplemented(wasm.f32)
 // run: test_rainbow_palette_rainbow_quarter() ~= vec3(0.5, 0.9259186, 0.0740509) (tolerance: 0.002)
 
 vec2 test_rainbow_prsd_center_t1() {
     return prsd_demo(vec2(32.0, 32.0), 1.0);
 }
 
+// @unimplemented(wasm.f32)
 // run: test_rainbow_prsd_center_t1() ~= vec2(0.35671997, 0.7763977) (tolerance: 0.002)
 
 vec4 test_rainbow_main_center_t0() {
     return rainbow_main(vec2(32.0, 32.0), vec2(64.0, 64.0), 0.0);
 }
 
+// @unimplemented(wasm.f32)
 // run: test_rainbow_main_center_t0() ~= vec4(0.0, 0.56192017, 0.58535767, 1.0) (tolerance: 0.002)
 
 vec4 test_rainbow_main_center_t25() {
     return rainbow_main(vec2(32.0, 32.0), vec2(64.0, 64.0), 2.5);
 }
 
+// @unimplemented(wasm.f32)
 // run: test_rainbow_main_center_t25() ~= vec4(0.0, 0.6291504, 0.81777954, 1.0) (tolerance: 0.002)
 
 vec4 test_rainbow_main_corner_t5() {
@@ -136,4 +144,5 @@ vec4 test_rainbow_main_corner_t5() {
 }
 
 // @unsupported(rv32c.q32)
+// @unimplemented(wasm.f32)
 // run: test_rainbow_main_corner_t5() ~= vec4(0.64055, 0.0, 0.64708, 1.0) (tolerance: 0.002)

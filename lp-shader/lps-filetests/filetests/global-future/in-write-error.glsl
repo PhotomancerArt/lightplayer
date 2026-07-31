@@ -83,6 +83,7 @@ float test_edge_in_write_error_calculations() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unimplemented(wasm.f32)
 // run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {

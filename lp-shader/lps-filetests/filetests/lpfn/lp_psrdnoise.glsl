@@ -14,6 +14,9 @@ float test_lpfn_psrdnoise2_basic_range() {
     return (n >= -2.0 && n <= 2.0) ? 1.0 : 0.0;
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_lpfn_psrdnoise2_basic_range() ~= 1.0
 
 float test_lpfn_psrdnoise2_broadcast_period_zero_x_varies() {
@@ -26,6 +29,7 @@ float test_lpfn_psrdnoise2_broadcast_period_zero_x_varies() {
     return abs(n1 - n2) > 0.001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_psrdnoise2_broadcast_period_zero_x_varies() ~= 1.0
 
 float test_lpfn_psrdnoise2_broadcast_period_matches_explicit() {
@@ -39,6 +43,7 @@ float test_lpfn_psrdnoise2_broadcast_period_matches_explicit() {
     return ok ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_psrdnoise2_broadcast_period_matches_explicit() ~= 1.0
 
 // ============================================================================
@@ -53,6 +58,7 @@ float test_lpfn_psrdnoise3_broadcast_period_zero_x_varies() {
     return abs(n1 - n2) > 0.001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_psrdnoise3_broadcast_period_zero_x_varies() ~= 1.0
 
 float test_lpfn_psrdnoise3_broadcast_period_matches_explicit() {
@@ -67,4 +73,5 @@ float test_lpfn_psrdnoise3_broadcast_period_matches_explicit() {
     return ok ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_psrdnoise3_broadcast_period_matches_explicit() ~= 1.0

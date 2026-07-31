@@ -16,6 +16,7 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 | `wgpu.f32` | IEEE f32 (GPU) | per-directive fragment probe on a wgpu device | no — explicit `--target wgpu.f32`; needs a GPU adapter |
 | `xtn.q32` | Q32 fixed-point | `lpvm-native` → **Xtensa** emulator + linked builtins (ESP32-S3 board profile) | no — explicit `--target xtn.q32`; needs the Xtensa builtins image |
 | `xtlpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → Xtensa emulator | no — as above |
+| `wasm.f32` | IEEE f32 | `lpvm-wasm`'s f32 emit path → wasmtime | no — explicit `--target wasm.f32`; see below |
 
 **Q32 is the primary tier**: the four Q32 targets assert exact on-device
 semantics and their expectations are the ground truth. `interp.f32` asserts
@@ -24,6 +25,45 @@ tiers legitimately diverge, directives split into `run[q32]:` / `run[f32]:`
 channels. `wgpu.f32` re-runs the f32 expectations on real GPU hardware —
 adapter-gated and slower (one GPU pipeline per directive), so it is not in the
 default set; run it explicitly when touching the GPU tier.
+
+### `wasm.f32` — the first compiled f32 target
+
+`interp.f32` interprets LPIR; `wasm.f32` is the first target that **compiles** f32
+and executes the result, through `lpvm-wasm`'s `FloatMode::F32` emit path. That
+path existed for a long time with no target pointed at it, so it had never run.
+
+It is **not in `DEFAULT_TARGETS` and not in CI** pending review gate G1. Run it
+explicitly:
+
+```bash
+scripts/filetests.sh --target wasm.f32
+```
+
+Note that the `wasm` shorthand now expands to **both** `wasm.q32` and `wasm.f32`.
+Say `wasm.q32` when you mean only the Q32 one.
+
+Its known dispositions, and what unblocks them:
+
+- **52 files: `@unimplemented(wasm.f32)`** — the shader calls a builtin
+  (`@glsl::sin`, `@lpfn::*`, `@texture::*`, `@lpir::*`). There is no f32 builtin
+  resolution: `lps-builtin-ids` exposes `*_q32_builtin_id` resolvers only, and the
+  `_f32` bodies that exist are stubs that round-trip through
+  `Q32::from_f32_wrapping`. `lpvm-wasm` refuses these imports by name in f32 mode
+  rather than emitting a Q32-typed import into an f32 module. Unblocks with the
+  f32 builtin family.
+- **27 files: `@unsupported`** — the shader does not compile on any target (naga
+  gaps, GLSL parse errors). Not f32-specific, so most of these are already
+  covered by the axis-scoped `@unsupported(*)` / `@unsupported(frontend!=lp)`
+  the file carries for every other target; only the blocks that stop short of
+  `wasm.f32` name it explicitly.
+- **1 file: `@broken(wasm.f32)`** (`uniform/struct.glsl`) — `wasm.f32` and
+  `interp.f32` genuinely disagree, on `normalize(vec3(0))` and NaN propagation
+  through `max`.
+
+`lps-glsl/rainbow.glsl` is a `// test compile` file and was un-annotatable when
+this target first ran; file-level dispositions for compile-only files landed
+with the axis selectors, so it now carries `@unimplemented(wasm.f32)` like any
+other builtin-blocked file.
 
 ### The Xtensa pair
 
@@ -312,8 +352,8 @@ could not read" path — that is how a malformed selector stays visible.
 
 **`DEFAULT_TARGETS`** (when the runner does not pass `--target`): `rv32n.q32`,
 `rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`. CI runs this list via
-`just test-filetests`; `wgpu.f32`, `xtn.q32` and `xtlpn.q32` are explicit-only
-(see Targets above).
+`just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32` and `wasm.f32` are
+explicit-only (see Targets above).
 
 ### Run directives
 

@@ -10,6 +10,9 @@ float test_lpfn_saturate_below_zero() {
     return abs(result - 0.0) < 0.01 ? 1.0 : 0.0;
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_lpfn_saturate_below_zero() == 1.0
 
 float test_lpfn_saturate_above_one() {
@@ -18,6 +21,7 @@ float test_lpfn_saturate_above_one() {
     return abs(result - 1.0) < 0.01 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_saturate_above_one() == 1.0
 
 float test_lpfn_saturate_in_range() {
@@ -26,6 +30,7 @@ float test_lpfn_saturate_in_range() {
     return abs(result - 0.5) < 0.01 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_saturate_in_range() == 1.0
 
 float test_lpfn_saturate_vec3() {
@@ -38,6 +43,7 @@ float test_lpfn_saturate_vec3() {
     return valid ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_saturate_vec3() == 1.0
 
 float test_lpfn_saturate_vec4() {
@@ -51,4 +57,5 @@ float test_lpfn_saturate_vec4() {
     return valid ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_saturate_vec4() == 1.0
