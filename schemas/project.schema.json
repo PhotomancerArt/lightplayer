@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "format": {
-      "const": 1
+      "const": 2
     },
     "kind": {
       "const": "Project"

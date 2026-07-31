@@ -184,7 +184,7 @@ mod tests {
         let def = ComputeShaderDef {
             source: lpc_model::AssetSlot::path("emitters.glsl"),
             bindings: BindingDefs::default(),
-            glsl_opts: lpc_model::GlslOpts::default(),
+            float_mode: lpc_model::ValueSlot::default(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         };
@@ -268,7 +268,7 @@ void tick() {{
         let def = ComputeShaderDef {
             source: lpc_model::AssetSlot::path("events.glsl"),
             bindings: BindingDefs::default(),
-            glsl_opts: lpc_model::GlslOpts::default(),
+            float_mode: lpc_model::ValueSlot::default(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         };
