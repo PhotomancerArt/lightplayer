@@ -6,8 +6,13 @@
 //! so there are no unwind tables to preserve and none of that machinery
 //! belongs here.
 
+use std::path::PathBuf;
+use std::process::Command;
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+
+    emit_build_provenance();
 
     // Harness builds: any `test_*` feature selects a hardware harness
     // entrypoint instead of the app. Collapsed to a single cfg so app-only
@@ -18,4 +23,45 @@ fn main() {
     if harness {
         println!("cargo::rustc-cfg=fw_harness");
     }
+}
+
+/// Emit build provenance for the wire hello (`ServerHello.fw`):
+/// `LP_BUILD_COMMIT` (short git commit or "unknown"), `LP_BUILD_DIRTY`
+/// ("true"/"false", false when git is absent so vendored builds still
+/// compile), and `LP_BUILD_PROFILE` (the cargo profile directory name).
+///
+/// Same three variables as fw-esp32c6's build script, for the same reason: the
+/// server is sans-IO and never reads git or env itself, so the binary has to
+/// bake them in. `main.rs` injects them into `LpServer::set_hello`.
+fn emit_build_provenance() {
+    let commit =
+        git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let dirty = match git_output(&["status", "--porcelain"]) {
+        Some(status) => !status.is_empty(),
+        None => false,
+    };
+    let profile = profile_dir_name()
+        .or_else(|| std::env::var("PROFILE").ok())
+        .unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=LP_BUILD_COMMIT={commit}");
+    println!("cargo:rustc-env=LP_BUILD_DIRTY={dirty}");
+    println!("cargo:rustc-env=LP_BUILD_PROFILE={profile}");
+}
+
+fn git_output(args: &[&str]) -> Option<String> {
+    let output = Command::new("git").args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// The actual profile directory name from OUT_DIR
+/// (`…/<triple>/<profile>/build/<pkg>-<hash>/out`), which preserves custom
+/// profile names that the coarse `PROFILE` env collapses to "release".
+fn profile_dir_name() -> Option<String> {
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").ok()?);
+    // out -> <pkg>-<hash> -> build -> <profile>
+    let profile = out_dir.parent()?.parent()?.parent()?;
+    Some(profile.file_name()?.to_string_lossy().into_owned())
 }

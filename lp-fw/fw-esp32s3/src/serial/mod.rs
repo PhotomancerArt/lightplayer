@@ -15,8 +15,4 @@ pub mod usb_serial;
 pub mod io_task;
 
 #[cfg(all(feature = "esp32s3", not(fw_harness)))]
-#[allow(
-    unused_imports,
-    reason = "the app entrypoint that spawns this task lands in M3 P5"
-)]
 pub use io_task::io_task;

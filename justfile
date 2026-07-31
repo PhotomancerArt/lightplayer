@@ -597,13 +597,11 @@ clippy-fw-esp32s3:
       export PATH="$GCC_BIN:$PATH"
     fi
     cd lp-fw/fw-esp32s3
-    # The app path.
+    # The app path. `server` joined the defaults in M3 P5, so this one command
+    # now covers the whole app — entrypoint, transport, storage, output readout
+    # and the server-gated half of serial/io_task.rs — and the separate
+    # `--features server` pass it used to need is gone.
     cargo clippy --release -- --no-deps -D warnings
-    # `server` is off by default here (unlike fw-esp32c6) until M3 P5 wires the
-    # app entrypoint, so the server-gated half of serial/io_task.rs would be
-    # completely unlinted otherwise — the same way 13 fw-esp32 harnesses once
-    # rotted uncompiled. Drop this line when `server` joins the defaults.
-    cargo clippy --release --features server -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this

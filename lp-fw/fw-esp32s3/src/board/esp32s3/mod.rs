@@ -10,8 +10,8 @@
     not(feature = "test_xt_jit_corpus"),
     allow(
         dead_code,
-        reason = "only the JIT corpus harness reads CPU_HZ today; the app path \
-                  picks it up in M3 P5"
+        reason = "only the JIT corpus harness reads CPU_HZ; the app path gets \
+                  its timing from embassy-time, not the cycle counter"
     )
 )]
 pub mod constants;
@@ -28,14 +28,9 @@ pub mod constants;
     )
 )]
 pub mod cycle_counter;
-// Compiled but not yet called: `main.rs` still owns the boot skeleton and P5
-// hands it over to `init_board`. See the module doc for the singleton hazard.
+// The app entrypoint's sole source of the peripheral singleton. See the module
+// doc for the hazard that makes it the *only* one.
 #[cfg(not(fw_harness))]
-#[allow(
-    dead_code,
-    reason = "app entrypoint lands in M3 P5; the port is compiled here so it \
-              cannot rot between phases"
-)]
 pub mod init;
 // Sole consumer is `serial::io_task`; keep this gate identical to its own.
 #[cfg(not(fw_harness))]

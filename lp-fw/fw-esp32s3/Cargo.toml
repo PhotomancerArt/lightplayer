@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3"]
+default = ["esp32s3", "server"]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
@@ -17,14 +17,22 @@ esp32s3 = [
     "esp-rtos/esp32s3",
 ]
 
-# Wire-protocol serialization inside `serial::io_task`.
+# The LightPlayer app: `LpServer` over the USB-Serial-JTAG transport, plus the
+# wire-protocol serialization inside `serial::io_task`.
 #
-# ⚠️ Deliberately NARROWER than fw-esp32c6's feature of the same name, which
-# also pulls `lpa-server`, `lp-gfx-lpvm`, `fw-esp32-common/server` and the rest
-# of the app stack. M3 P2 ports the transport only; P5 widens this to the full
-# server when it wires the app entrypoint. Non-default so the P2 image stays
-# minimal — `just clippy-fw-esp32s3` lints it explicitly so it cannot rot.
-server = ["dep:lpc-wire", "dep:ser-write-json"]
+# ⚠️ Still NARROWER than fw-esp32c6's feature of the same name even though the
+# dependency lists now overlap: this one takes `lpa-server` with **no** node
+# gates and `lp-gfx`'s `null-backend` instead of `lp-gfx-lpvm`. See the
+# dependency section for why each of those is load-bearing.
+server = [
+    "fw-esp32-common/server",
+    "dep:lpa-server",
+    "dep:lp-gfx",
+    "dep:lpc-hardware",
+    "dep:lpfs",
+    "dep:lpc-wire",
+    "dep:ser-write-json",
+]
 
 # Hardware harnesses. Any `test_*` feature makes build.rs set the `fw_harness`
 # cfg, which replaces the (future) app entrypoint with a harness — mirroring
@@ -91,9 +99,44 @@ embedded-storage = "0.3"
 esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32s3", "panic-unaligned-buffer"] }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
 
-# io_task's wire-serialization path, behind the narrow `server` feature.
+# io_task's wire-serialization path plus the boot-time `ServerHello`.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
+
+# Chip-generic firmware layer: logger, time provider, output provider, and —
+# behind `server` — the server loop, transport, littlefs `LpFs`, project
+# auto-load, and hardware-manifest loader. Consumed, never reimplemented; this
+# crate must stay free of chip code (ADR 2026-07-29-per-chip-fw-toolchains).
+fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
+
+# ⚠️ THE dependency line this whole milestone exists to write.
+#
+# `default-features = false` with **no `node-*` feature listed** is deliberate
+# and is not the same as "took the defaults": it yields no node runtimes at all
+# (a disabled kind loads as an inert placeholder — see lpc-engine/README.md) and
+# no `std`. Contrast fw-esp32c6, which lists all eight. M4 turns on exactly one
+# (`node-shader`), and that single-variable change is what makes M4's gate
+# readable. Anything added here silently costs flash and blurs that signal.
+#
+# `panic-recovery` is likewise absent on purpose: the S3 is abort tier
+# (`panic = "abort"` + the lp-recovery RTC ledger), and that feature pulls
+# `unwinding`, which is the C6's tier. See src/recovery/.
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, optional = true }
+
+# The graphics backend, and the single biggest lever in the image (743,216 B
+# measured on the C6). `LpServer` takes a non-optional `Arc<dyn LpGraphics>`, so
+# *some* backend links; `lp-gfx-lpvm` would drag the whole on-device JIT
+# compiler into a build that never calls it. `null-backend` is off by default in
+# lp-gfx, so naming it here is the opt-in.
+#
+# Note `lps-glsl` still shows in `cargo tree`: `lp-gfx → lp-shader → lps-glsl`
+# is unconditional and making it optional is an AGENTS.md red line. Known.
+lp-gfx = { path = "../../lp-gfx/lp-gfx", default-features = false, features = ["null-backend"], optional = true }
+
+# Hardware registry/manifest for the output readout driver, and the filesystem
+# traits the server is handed.
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
+lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
 
 # Shader/JIT stack — harness-only for now, so the boot path stays dependency-free.
 # `default-features = false` + explicit `isa-xt` is load-bearing: pulling the

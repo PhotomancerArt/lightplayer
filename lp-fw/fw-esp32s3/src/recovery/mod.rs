@@ -13,9 +13,9 @@
 //! - [`panic_path`]: print, stage a breadcrumb, reset. Read its module docs for
 //!   why there is no `is_esp_sync_reentrant_lock_panic` guard here.
 //! - [`boot_report`]: boot-time init and the "what died last run" report.
-//! - [`watchdog`]: RWDT arming and the io-task-aware feed policy. The only
-//!   piece with no caller yet — arming belongs next to the `io_task` spawn that
-//!   feeds it (M3 P5); see that module's docs.
+//! - [`watchdog`]: RWDT arming and the io-task-aware feed policy. Armed by
+//!   `main.rs` next to the `io_task` spawn that feeds it — see that module's
+//!   docs for why the two must stay together.
 
 pub mod boot_report;
 pub mod esp32s3_recovery_backend;
