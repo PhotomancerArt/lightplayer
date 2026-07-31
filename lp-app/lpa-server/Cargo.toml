@@ -81,6 +81,10 @@ serde = { workspace = true, features = ["derive"] }
 # Concrete CPU graphics backend for tests and doc examples (the server takes
 # an injected `Arc<dyn LpGraphics>`; hosts construct the backend).
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
+# The client's request planner, so `tests/deploy_reload_source.rs` drives the
+# real deploy sequence (stop → write → load) instead of re-stating it. Only
+# the pure request builders are needed, so no host transports.
+lpa-client = { path = "../lpa-client", default-features = false }
 # A SECOND engine for `tests/shader_oracle_frame.rs`, and only for that.
 #
 # `TargetLpvmGraphics` on a host is wasmtime; firmware runs `lpvm-native`'s
