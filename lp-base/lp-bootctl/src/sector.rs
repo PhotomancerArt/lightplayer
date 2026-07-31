@@ -291,4 +291,30 @@ mod tests {
     fn the_record_fits_the_partition() {
         assert!(RECORD_LEN as u32 <= BOOTCTL_PARTITION_SIZE);
     }
+
+    /// Golden vector: the exact 16 bytes of a `SKIP_PROJECT_AUTOLOAD` record.
+    ///
+    /// This crate is not the only thing that will ever produce these bytes —
+    /// host writers over esptool encode the same record, and this is the
+    /// fixture they can be checked against. Changing it means changing the
+    /// on-flash format, which needs a `SECTOR_VERSION` bump, not a new
+    /// expected value here.
+    ///
+    /// Verified against a device: written to `bootctl` with esptool and
+    /// honored by `fw-esp32c6` on real silicon (2026-07-30).
+    #[test]
+    fn skip_autoload_matches_its_golden_bytes() {
+        let record = encode_record(BootFlags::SKIP_PROJECT_AUTOLOAD);
+        assert_eq!(
+            record,
+            [
+                0x4c, 0x50, 0x42, 0x43, // magic "LPBC"
+                0x01, 0x00, // version 1
+                0x00, 0x00, // pad
+                0x01, 0x00, 0x00, 0x00, // flags = SKIP_PROJECT_AUTOLOAD
+                0x9e, 0x6e, 0x44, 0x3f, // CRC-32 of the preceding 12 bytes
+            ],
+            "on-flash format changed; bump SECTOR_VERSION rather than this vector"
+        );
+    }
 }
