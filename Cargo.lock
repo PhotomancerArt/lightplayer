@@ -5514,6 +5514,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-ws281x"
+version = "0.1.0"
+
+[[package]]
 name = "lp-xt-elf"
 version = "40.0.0"
 dependencies = [
