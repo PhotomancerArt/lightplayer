@@ -112,10 +112,8 @@ mod tests {
     use crate::parse::parse_test_file;
 
     fn write_temp(name: &str, contents: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "lps_ft_compile_{name}_{}.glsl",
-            std::process::id()
-        ));
+        let p =
+            std::env::temp_dir().join(format!("lps_ft_compile_{name}_{}.glsl", std::process::id()));
         std::fs::write(&p, contents).unwrap();
         p
     }

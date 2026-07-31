@@ -55,15 +55,27 @@ impl Axis {
     /// Every legal value of this axis, in declaration order.
     pub fn values(self) -> Vec<AxisValue> {
         match self {
-            Axis::Frontend => Frontend::ALL.iter().copied().map(AxisValue::Frontend).collect(),
-            Axis::Backend => Backend::ALL.iter().copied().map(AxisValue::Backend).collect(),
+            Axis::Frontend => Frontend::ALL
+                .iter()
+                .copied()
+                .map(AxisValue::Frontend)
+                .collect(),
+            Axis::Backend => Backend::ALL
+                .iter()
+                .copied()
+                .map(AxisValue::Backend)
+                .collect(),
             Axis::FloatMode => FloatMode::ALL
                 .iter()
                 .copied()
                 .map(AxisValue::FloatMode)
                 .collect(),
             Axis::Isa => Isa::ALL.iter().copied().map(AxisValue::Isa).collect(),
-            Axis::ExecMode => ExecMode::ALL.iter().copied().map(AxisValue::ExecMode).collect(),
+            Axis::ExecMode => ExecMode::ALL
+                .iter()
+                .copied()
+                .map(AxisValue::ExecMode)
+                .collect(),
         }
     }
 

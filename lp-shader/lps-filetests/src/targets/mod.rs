@@ -482,12 +482,12 @@ mod tests {
         );
 
         let both_predicates = vec![
-            predicate(AnnotationKind::Unsupported, &[("backend", false, "wasm")], 1),
             predicate(
-                AnnotationKind::Broken,
-                &[("float_mode", false, "q32")],
-                2,
+                AnnotationKind::Unsupported,
+                &[("backend", false, "wasm")],
+                1,
             ),
+            predicate(AnnotationKind::Broken, &[("float_mode", false, "q32")], 2),
         ];
         assert_eq!(
             directive_disposition(&both_predicates, target),
