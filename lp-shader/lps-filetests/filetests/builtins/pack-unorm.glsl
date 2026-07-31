@@ -19,6 +19,9 @@ uint test_packunorm2x16_zeros() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_packunorm2x16_zeros() == 0u
 
 uint test_packunorm2x16_ones() {
@@ -34,6 +37,7 @@ uint test_packunorm2x16_ones() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packunorm2x16_ones() == 4294967295u
 
 uint test_packunorm2x16_half() {
@@ -49,6 +53,7 @@ uint test_packunorm2x16_half() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packunorm2x16_half() == 2147516416u
 
 uint test_packunorm4x8_zeros() {
@@ -64,6 +69,7 @@ uint test_packunorm4x8_zeros() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packunorm4x8_zeros() == 0u
 
 uint test_packunorm4x8_ones() {
@@ -79,6 +85,7 @@ uint test_packunorm4x8_ones() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packunorm4x8_ones() == 4294967295u
 
 uint test_packunorm4x8_quarters() {
@@ -95,6 +102,7 @@ uint test_packunorm4x8_quarters() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packunorm4x8_quarters() == 67372036u
 
 

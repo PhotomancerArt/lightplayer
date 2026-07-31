@@ -19,6 +19,9 @@ uvec2 test_uaddcarry_uint_no_carry() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_uaddcarry_uint_no_carry() == uvec2(3u, 0u)
 
 uvec2 test_uaddcarry_uint_with_carry() {
@@ -34,6 +37,7 @@ uvec2 test_uaddcarry_uint_with_carry() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_uaddcarry_uint_with_carry() == uvec2(0u, 1u)
 
 uvec2 test_uaddcarry_uint_large_no_carry() {
@@ -49,6 +53,7 @@ uvec2 test_uaddcarry_uint_large_no_carry() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_uaddcarry_uint_large_no_carry() == uvec2(4000000000u, 0u)
 
 uvec4 test_uaddcarry_uvec2() {
@@ -64,6 +69,7 @@ uvec4 test_uaddcarry_uvec2() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_uaddcarry_uvec2() == uvec4(3u, 0u, 0u, 1u)
 
 uvec4 test_uaddcarry_swizzle_out() {
@@ -80,6 +86,7 @@ uvec4 test_uaddcarry_swizzle_out() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_uaddcarry_swizzle_out() == uvec4(3u, 0u, 0u, 1u)
 
 

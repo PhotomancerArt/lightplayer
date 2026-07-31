@@ -20,6 +20,9 @@ float test_pow_negative_base() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_pow_negative_base() ~= 0.0
 
 float test_pow_zero_negative_exponent() {
@@ -33,6 +36,7 @@ float test_pow_zero_negative_exponent() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_pow_zero_negative_exponent() ~= 0.0
 
 float test_pow_zero_zero() {
@@ -46,6 +50,7 @@ float test_pow_zero_zero() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_pow_zero_zero() ~= 0.0
 
 float test_log_zero() {
@@ -59,6 +64,7 @@ float test_log_zero() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_log_zero() ~= 0.0
 
 float test_log_negative() {
@@ -72,6 +78,7 @@ float test_log_negative() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_log_negative() ~= 0.0
 
 float test_log2_zero() {
@@ -85,6 +92,7 @@ float test_log2_zero() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_log2_zero() ~= 0.0
 
 float test_log2_negative() {
@@ -98,6 +106,7 @@ float test_log2_negative() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_log2_negative() ~= 0.0
 
 float test_sqrt_negative() {
@@ -111,6 +120,7 @@ float test_sqrt_negative() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_sqrt_negative() ~= 0.0
 
 float test_inversesqrt_zero() {
@@ -124,6 +134,7 @@ float test_inversesqrt_zero() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_inversesqrt_zero() ~= 0.0
 
 float test_inversesqrt_negative() {
@@ -138,6 +149,7 @@ float test_inversesqrt_negative() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_inversesqrt_negative() ~= 0.0
 
 

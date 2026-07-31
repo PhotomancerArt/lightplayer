@@ -19,6 +19,9 @@ uvec4 test_imulextended_int_small() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_imulextended_int_small() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_imulextended_int_neg_pos() {
@@ -34,6 +37,7 @@ uvec4 test_imulextended_int_neg_pos() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_imulextended_int_neg_pos() == uvec4(4294967290u, 4294967295u, 0u, 0u)
 
 uvec4 test_imulextended_int_neg_neg() {
@@ -49,6 +53,7 @@ uvec4 test_imulextended_int_neg_neg() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_imulextended_int_neg_neg() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_imulextended_int_large() {
@@ -65,6 +70,7 @@ uvec4 test_imulextended_int_large() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_imulextended_int_large() == uvec4(1410065408u, 2u, 0u, 0u)
 
 

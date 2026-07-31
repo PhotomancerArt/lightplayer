@@ -14,6 +14,9 @@ float test_sinh_zero() {
     return sinh(rt(0.0));
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_sinh_zero() ~= 0.0
 
 float test_sinh_one() {
@@ -21,6 +24,7 @@ float test_sinh_one() {
     return sinh(rt(1.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sinh_one() ~= 1.1752011936438014
 
 float test_sinh_neg_one() {
@@ -28,6 +32,7 @@ float test_sinh_neg_one() {
     return sinh(rt(-1.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sinh_neg_one() ~= -1.1752011936438014
 
 float test_sinh_two() {
@@ -35,6 +40,7 @@ float test_sinh_two() {
     return sinh(rt(2.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sinh_two() ~= 3.626860407847019
 
 float test_sinh_neg_two() {
@@ -42,6 +48,7 @@ float test_sinh_neg_two() {
     return sinh(rt(-2.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sinh_neg_two() ~= -3.626860407847019
 
 float test_sinh_half() {
@@ -49,6 +56,7 @@ float test_sinh_half() {
     return sinh(rt(0.5));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sinh_half() ~= 0.5210953054937474
 
 vec2 test_sinh_vec2() {
@@ -56,6 +64,7 @@ vec2 test_sinh_vec2() {
     return sinh(vec2(rt(0.0), rt(1.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sinh_vec2() ~= vec2(0.0, 1.1752011936438014)
 
 vec3 test_sinh_vec3() {
@@ -63,6 +72,7 @@ vec3 test_sinh_vec3() {
     return sinh(vec3(rt(0.0), rt(1.0), rt(-1.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sinh_vec3() ~= vec3(0.0, 1.1752011936438014, -1.1752011936438014)
 
 vec4 test_sinh_vec4() {
@@ -70,6 +80,7 @@ vec4 test_sinh_vec4() {
     return sinh(vec4(rt(0.0), rt(0.5), rt(1.0), rt(-0.5)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sinh_vec4() ~= vec4(0.0, 0.5210953054937474, 1.1752011936438014, -0.5210953054937474)
 
 
