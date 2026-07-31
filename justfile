@@ -13,7 +13,7 @@ fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp3
 
 # fw-esp32s3 builds on Espressif's Rust fork (see lp-fw/fw-esp32s3/rust-toolchain.toml)
 xt_s3_target := "xtensa-esp32s3-none-elf"
-fw_esp32s3_elf := "target/" + xt_s3_target + "/release/fw-esp32s3"
+fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
 
 # The S3's 8 MB flash floor (docs/adr/2026-07-30-esp32s3-partition-floor.md).
 # This MUST be passed to every `espflash flash` for this chip and MUST match
@@ -606,7 +606,7 @@ clippy-fw-esp32s3:
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus test_backtrace_oracle; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -618,7 +618,7 @@ build-fw-esp32s3:
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --release
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3
 
 # Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
 # or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
@@ -682,7 +682,7 @@ fwtest-xt-jit-esp32s3 port="":
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --release --features test_xt_jit_corpus
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_xt_jit_corpus
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
@@ -711,7 +711,40 @@ fwtest-backtrace-esp32s3 port="":
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --release --features test_backtrace_oracle
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_backtrace_oracle
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Run the four-channel RMT loopback self-test on a connected ESP32-S3.
+#
+# No wires and no LED strips: each TX channel is routed into its own RX channel
+# through the GPIO matrix, so the harness measures its own waveform at 12.5 ns
+# resolution and asserts it numerically — decode, per-bit timing within ±25 ns,
+# cross-talk, latch, a 100-frame concurrent soak, and guard-word truncation on
+# one channel while the other three keep running.
+#
+# `E1:` lines cover the RMT RAM address probe, `E4:` the wire assertions; the
+# last line repeats the verdict forever. The `E4: MEASURE golden_*` block is
+# the re-derivation of `lp-fw/lp-ws281x/tests/golden/ws2812_grb_esp32s3.txt` —
+# a mismatch there is a finding to triage, never a reason to edit the golden.
+#
+# Run the host oracle first; it drives the same sequencing against a mock and
+# the same classifier against the committed capture:
+#
+#   cargo test -p lp-ws281x
+#   just fwtest-loopback-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-loopback-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_loopback
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
@@ -1139,7 +1172,7 @@ test-glsl-filetests:
 # was measured at ~18 min for the pair on a 4-core runner). Local `check`
 # keeps the full meaning.
 [parallel]
-check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus
+check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
 
 [parallel]
 check: check-lint schema-check
@@ -1154,6 +1187,14 @@ lint-serde-content:
 # per-directive @unsupported(wgpu.f32) markers were nearly lost).
 lint-torture-corpus:
     python3 lp-shader/scripts/gen-control-torture.py --check
+
+# Same story for the vec corpus (filetests/vec/**/*.gen.glsl): hand edits are
+# silently reverted by the next `--write`. Without this gate the generator had
+# drifted 2,700 lines of body indentation away from the checked-in files, and a
+# regeneration would have silently dropped the run[f32] channels that the M6 P2
+# triage hand-added to the float op-add/op-multiply large-numbers cases.
+lint-vec-corpus:
+    cargo run -p lps-filetests-gen-app -- --check
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
