@@ -128,5 +128,6 @@ section. Review of any PR touching `lp-xt-*` should check the headers.
 
 - Vendor `licenses/LLVM-Apache-2.0-with-LLVM-exception.txt` when the `lp-xt-*`
   crates land (nothing to vendor before then).
-- Formalize the CLA / DCO-with-grant mechanism when the first outside
-  contribution to relicensing-sensitive code is proposed.
+- ~~Formalize the CLA / DCO-with-grant mechanism when the first outside
+  contribution to relicensing-sensitive code is proposed.~~ Done ahead of that
+  trigger — see `2026-07-31-contributor-license-agreement.md`.
