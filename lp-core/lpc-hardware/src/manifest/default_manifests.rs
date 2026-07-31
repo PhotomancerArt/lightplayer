@@ -116,7 +116,15 @@ mod tests {
         assert_eq!(manifest.target(), Some(HardwareTarget::Esp32s3));
         // D10, the header pin the C6 profile uses for WS281x output.
         assert!(manifest.resource(&HwAddress::gpio(9)).is_some());
-        assert!(manifest.resource(&HwAddress::rmt_ws281x(0)).is_some());
+        // Four RMT timing resources, one per ESP32-S3 TX channel: the count of
+        // these is what `Esp32S3RmtWs281xDriver` offers, so a manifest that
+        // lost one would silently drop an output.
+        for channel in 0..4 {
+            assert!(
+                manifest.resource(&HwAddress::rmt_ws281x(channel)).is_some(),
+                "/rmt/ws281x{channel} must be declared"
+            );
+        }
         // GPIO19/20 are USB-Serial-JTAG D-/D+. They are listed only so a
         // driver cannot claim them: on this board that costs a physical replug.
         for pin in [0, 19, 20] {

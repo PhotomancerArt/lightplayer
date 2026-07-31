@@ -1,5 +1,4 @@
 // test run
-// @ignore(backend=wasm)
 
 // Spec: variables.adoc §4.3.3.1 "Constant integral expression"
 // Const in multi-dimensional array dimensions.

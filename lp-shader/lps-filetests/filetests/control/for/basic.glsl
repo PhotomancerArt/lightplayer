@@ -1,5 +1,4 @@
 // test run
-// @ignore(backend=wasm)
 
 // ============================================================================
 // Basic for loops with increment

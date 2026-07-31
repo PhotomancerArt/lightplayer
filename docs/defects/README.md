@@ -105,6 +105,13 @@ genuinely fits none of these, and define it here in one line.
 - **`unsynchronized-shared-artifact`** — two steps share a filesystem
   artifact, but the lock that would order them is scoped narrower than
   the artifact, so a reader observes a writer's intermediate state.
+- **`invented-encoding`** — a binary format's numbering (an instruction
+  encoding, a relocation type) is inferred from the shape of its
+  neighbours instead of read from the spec, and the invented value
+  collides with, or is renamed from, a real one. Toolchain output is the
+  only falsifier, so the collision surfaces whenever a compiler first
+  emits the stolen form — which is usually at some optimization
+  threshold nothing in the suite crosses.
 
 ## Index
 
@@ -162,12 +169,16 @@ sentence (arguments in, returns out; registers and stack).
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| invented-encoding | 2026-07-31 | [zexth-encoding-steals-xori-128](2026-07-31-zexth-encoding-steals-xori-128.md) | fixed | lp-riscv-inst (encode/decode) + lp-riscv-emu (executor) |
+| invented-encoding | 2026-07-31 | [elf-loader-riscv-reloc-numbering](2026-07-31-elf-loader-riscv-reloc-numbering.md) | **open** | lp-riscv-elf (relocations) |
+| partial-knowledge-loss | 2026-07-31 | [elf-loader-drops-relocation-addends](2026-07-31-elf-loader-drops-relocation-addends.md) | fixed | lp-riscv-elf (relocations) |
 | split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-two-value-return-clobber](2026-07-30-xtensa-two-value-return-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-integer-div-by-zero-trap](2026-07-30-xtensa-integer-div-by-zero-trap.md) | fixed | lpvm-native lowering (lower.rs) |
+| config-masked-defect | 2026-07-31 | [opt-z-missed-rmt-drain-deadline](2026-07-31-opt-z-missed-rmt-drain-deadline.md) | fixed | workspace release profile / fw-esp32s3 |
 | backend-contract-divergence | 2026-07-30 | [q32-native-vs-wasmtime-last-bit](2026-07-30-q32-native-vs-wasmtime-last-bit.md) | **open** | lpvm-native / lpvm-wasm (Q32 execution) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
@@ -192,12 +203,13 @@ sentence (arguments in, returns out; registers and stack).
 | stand-in-divergence | 2026-07-27 | [story-check-tolerance-ignores-amplitude](2026-07-27-story-check-tolerance-ignores-amplitude.md) | **open** | lpa-studio-web/scripts + CI |
 | nondeterministic-capture | 2026-07-28 | [overview-composite-capture-races](2026-07-28-overview-composite-capture-races.md) | fixed | lpa-studio-web story capture (overview composites) |
 | retired-surface-still-reachable | 2026-07-28 | [retired-device-pane-still-reachable](2026-07-28-retired-device-pane-still-reachable.md) | **open** | lpa-studio-core/home + studio_shell |
-| stale-measurement | 2026-07-30 | [deploy-compiles-previous-upload](2026-07-30-deploy-compiles-previous-upload.md) | **open** | lpa-server (project deploy/reload) |
+| stale-measurement | 2026-07-30 | [deploy-compiles-previous-upload](2026-07-30-deploy-compiles-previous-upload.md) | **open** | lp-cli (upload observability) |
 | stale-measurement | 2026-07-26 | [popover-outline-stale-on-content-resize](2026-07-26-popover-outline-stale-on-content-resize.md) | fixed | lpa-studio-web/base/popover |
 | stale-measurement | 2026-07-27 | [code-editor-gutter-misaligned](2026-07-27-code-editor-gutter-misaligned.md) | fixed | lpa-studio-web/base/code_editor |
 | inline-emit-stack-imbalance | 2026-07-27 | [wasm-q32-fabs-stack-leak](2026-07-27-wasm-q32-fabs-stack-leak.md) | fixed | lpvm-wasm emit (+ lpvm-cranelift trunc) |
 | untested-path | 2026-07-27 | [cranelift-q32-floor-ceil](2026-07-27-cranelift-q32-floor-ceil.md) | fixed | lpvm-cranelift q32_emit (rv32c) |
 | silent-drop | 2026-07-28 | [flash-progress-never-reached-the-ui](2026-07-28-flash-progress-never-reached-the-ui.md) | fixed | lpa-studio-core (actor/controller) |
+| silent-drop | 2026-07-31 | [loader-silently-drops-unparseable-nodes](2026-07-31-loader-silently-drops-unparseable-nodes.md) | fixed | lpc-engine loader + flush + virtual ws281x |
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 

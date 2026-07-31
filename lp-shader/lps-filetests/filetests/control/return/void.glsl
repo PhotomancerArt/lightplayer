@@ -1,5 +1,4 @@
 // test run
-// @ignore(backend=wasm)
 
 // ============================================================================
 // Return without value (void functions)
