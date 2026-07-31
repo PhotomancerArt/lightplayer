@@ -293,6 +293,17 @@ opt-level = "z"
 [profile.release-esp32.package.esp-wifi-sys-esp32c6]
 opt-level = "z"
 
+# fw-esp32s3: speed-optimized codegen, NOT the workspace's opt-level="z".
+# Measured on silicon 2026-07-31: at "z" the ws281x RX drain path misses the
+# 30 µs half-window deadline on the cold first frame and the loopback
+# harness deterministically truncates channel 0's first capture at 24 of 48
+# items; at "s" (what the driver was validated at in the experiment repo) the
+# full suite passes. The S3 has a 6 MB app budget with ~4.7 MB headroom, so
+# size-optimized codegen buys nothing this chip needs.
+[profile.release-esp32s3]
+inherits = "release"
+opt-level = "s"
+
 # Profile for fw-emu: opt-level=3 avoids Cranelift codegen bugs in emulator (InvalidMemoryAccess).
 # Used by test_scene_render_fw_emu via ensure_binary_built(..with_profile("release-emu")).
 [profile.release-emu]
