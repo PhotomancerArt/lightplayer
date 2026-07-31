@@ -100,5 +100,9 @@ host-serial-esp32 = [
 name = "manage_smoke"
 required-features = ["host-serial-esp32"]
 
+[[example]]
+name = "bootctl_smoke"
+required-features = ["host-serial-esp32"]
+
 [lints]
 workspace = true
