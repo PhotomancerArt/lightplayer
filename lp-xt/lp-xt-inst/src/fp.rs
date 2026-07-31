@@ -19,32 +19,38 @@
 //!   mnemonic for this chip? Answered here, no hardware needed.
 //! - **Silicon** — does the ESP32-S3's FPU configuration actually implement it?
 //!   Only a board answers that; `NOT PROBED` is a finding, never a default.
+//!   **All 26 probes came back PRESENT** on the desk S3 (XIAO-class, 16 MB,
+//!   MAC `d8:3b:da:47:29:70`) on 2026-07-31 — zero crashes, zero reboots. The
+//!   record is `p1-silicon-results.md` in this milestone's planning directory;
+//!   the payloads are `lp-xt/fixtures/fp/probe.S`. **PRESENT means the
+//!   instruction executed, not that its numeric behavior is known** — presence
+//!   is P1's question, behavior is P6's.
 //!
 //! | Instruction | Form | Asm | Silicon | Emitted by M7 |
 //! |---|---|---|---|---|
-//! | `add.s` `sub.s` `mul.s` | `fr, fs, ft` | OK | NOT PROBED | yes |
-//! | `madd.s` `msub.s` | `fr, fs, ft` | OK | NOT PROBED | yes |
-//! | `maddn.s` `divn.s` | `fr, fs, ft` | OK | NOT PROBED | division sequence |
-//! | `mov.s` `abs.s` `neg.s` | `fr, fs` | OK | NOT PROBED | yes |
-//! | `div0.s` `recip0.s` `sqrt0.s` `rsqrt0.s` | `fr, fs` | OK | NOT PROBED | division / sqrt sequence |
-//! | `nexp01.s` `mkdadj.s` `addexp.s` `addexpm.s` | `fr, fs` | OK | NOT PROBED | division / sqrt sequence |
-//! | `const.s` | `fr, imm0_15` | OK | NOT PROBED | division sequence |
-//! | `rfr` | `ar, fs` | OK | NOT PROBED | yes |
-//! | `wfr` | `fr, as` | OK | NOT PROBED | yes |
-//! | `moveqz.s` `movnez.s` `movltz.s` `movgez.s` | `fr, fs, at` | OK | NOT PROBED | yes |
-//! | `movf.s` `movt.s` | `fr, fs, bt` | OK | NOT PROBED | yes |
-//! | `oeq.s` `olt.s` `ole.s` `ueq.s` `ult.s` `ule.s` `un.s` | `br, fs, ft` | OK | NOT PROBED | yes |
-//! | `round.s` `trunc.s` `floor.s` `ceil.s` `utrunc.s` | `ar, fs, imm0_15` | OK | NOT PROBED | `trunc.s` at least |
-//! | `float.s` `ufloat.s` | `fr, as, imm0_15` | OK | NOT PROBED | yes |
-//! | `lsi` `ssi` | `ft, as, 0..=1020 step 4` | OK | NOT PROBED | yes (spills) |
-//! | `lsip` `ssip` | `ft, as, 0..=1020 step 4` | OK | NOT PROBED | no |
-//! | `lsx` `ssx` | `fr, as, at` | OK | NOT PROBED | yes |
-//! | `lsxp` `ssxp` | `fr, as, at` | OK | NOT PROBED | no |
-//! | `bt` `bf` | `bs, target` | OK | NOT PROBED | yes (compare → branch) |
-//! | `movt` `movf` | `ar, as, bt` | OK | NOT PROBED | yes (compare → AR) |
-//! | `rsr.br` `wsr.br` `xsr.br` | `at` | OK | NOT PROBED | maybe (bulk BR save) |
-//! | `rsr.cpenable` `wsr.cpenable` `xsr.cpenable` | `at` | OK | NOT PROBED | firmware, not shader code |
-//! | `rur.fcr` `wur.fcr` `rur.fsr` `wur.fsr` | `at` | OK | NOT PROBED | no (test/probe only) |
+//! | `add.s` `sub.s` `mul.s` | `fr, fs, ft` | OK | PRESENT | yes |
+//! | `madd.s` `msub.s` | `fr, fs, ft` | OK | PRESENT | yes |
+//! | `maddn.s` `divn.s` | `fr, fs, ft` | OK | PRESENT | division sequence |
+//! | `mov.s` `abs.s` `neg.s` | `fr, fs` | OK | PRESENT | yes |
+//! | `div0.s` `recip0.s` `sqrt0.s` `rsqrt0.s` | `fr, fs` | OK | PRESENT | division / sqrt sequence |
+//! | `nexp01.s` `mkdadj.s` `addexp.s` `addexpm.s` | `fr, fs` | OK | PRESENT | division / sqrt sequence |
+//! | `const.s` | `fr, imm0_15` | OK | PRESENT | division sequence |
+//! | `rfr` | `ar, fs` | OK | PRESENT | yes |
+//! | `wfr` | `fr, as` | OK | PRESENT | yes |
+//! | `moveqz.s` `movnez.s` `movltz.s` `movgez.s` | `fr, fs, at` | OK | PRESENT | yes |
+//! | `movf.s` `movt.s` | `fr, fs, bt` | OK | PRESENT | yes |
+//! | `oeq.s` `olt.s` `ole.s` `ueq.s` `ult.s` `ule.s` `un.s` | `br, fs, ft` | OK | PRESENT | yes |
+//! | `round.s` `trunc.s` `floor.s` `ceil.s` `utrunc.s` | `ar, fs, imm0_15` | OK | PRESENT | `trunc.s` at least |
+//! | `float.s` `ufloat.s` | `fr, as, imm0_15` | OK | PRESENT | yes |
+//! | `lsi` `ssi` | `ft, as, 0..=1020 step 4` | OK | PRESENT | yes (spills) |
+//! | `lsip` `ssip` | `ft, as, 0..=1020 step 4` | OK | PRESENT | no |
+//! | `lsx` `ssx` | `fr, as, at` | OK | PRESENT | yes |
+//! | `lsxp` `ssxp` | `fr, as, at` | OK | PRESENT | no |
+//! | `bt` `bf` | `bs, target` | OK | PRESENT | yes (compare → branch) |
+//! | `movt` `movf` | `ar, as, bt` | OK | PRESENT | yes (compare → AR) |
+//! | `rsr.br` `wsr.br` `xsr.br` | `at` | OK | PRESENT | maybe (bulk BR save) |
+//! | `rsr.cpenable` `wsr.cpenable` `xsr.cpenable` | `at` | OK | PRESENT | firmware, not shader code |
+//! | `rur.fcr` `wur.fcr` `rur.fsr` `wur.fsr` | `at` | OK | PRESENT | no (test/probe only) |
 //!
 //! ## Named in the plan but **not** in the subset
 //!
@@ -64,6 +70,23 @@
 //! - **A general SR/UR model.** Only `BR` (SR 4), `CPENABLE` (SR 224), `FCR`
 //!   (UR 232), and `FSR` (UR 233) decode; every other special/user register
 //!   stays `DecodeError::Unsupported`, as it was before this module existed.
+//!
+//! ## What the probe settled beyond presence (2026-07-31)
+//!
+//! - **The whole div/sqrt helper family exists** — `div0.s`, `divn.s`,
+//!   `maddn.s`, `nexp01.s`, `mkdadj.s`, `recip0.s`, `rsqrt0.s`, `sqrt0.s`,
+//!   `const.s` all executed. M6's escalation A1 ("if the helpers are absent,
+//!   M7's division lowering changes materially") is retired on silicon.
+//! - **`CPENABLE` arrives armed** under the esp-hal boot chain: the
+//!   deliberately-unarmed probe returned its staged value instead of faulting,
+//!   on a fresh boot too. Provenance is *not* pinned — no `wsr.cpenable` exists
+//!   in esp-hal 1.1.1 or xtensa-lx-rt 0.22 startup, so it is presumably ROM or
+//!   the second-stage bootloader. The measured fact is "armed under this boot
+//!   chain", not "armed by architecture", so M7 arms it defensively anyway.
+//! - **`FCR` and `FSR` both reset to 0**, and **FSR accumulates**: 0 on a fresh
+//!   boot, `0x400` after a 24-instruction FP sweep with no intervening write. So
+//!   FSR is a sticky-flag register on this chip and `lp-xt-emu` models
+//!   accumulation — even though `float.md` §2 puts it out of shader reach.
 //!
 //! ## What `docs/design/float.md` already constrains here
 //!

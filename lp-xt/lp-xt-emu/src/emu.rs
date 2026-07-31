@@ -44,6 +44,7 @@ pub const OUT_ARG_REG_COUNT: usize = 6;
 pub const DEFAULT_STEP_BUDGET: u64 = 2_000_000;
 
 /// Control-flow outcome of executing one instruction.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Flow {
     /// Advance to `pc + len`.
     Next,
@@ -498,6 +499,31 @@ impl Emulator {
         self.cpu.a(i)
     }
 
+    /// Write float register `f{i}` (raw bits) and emit a trace event.
+    ///
+    /// Executors go through here rather than touching `cpu.fr` so that every FP
+    /// write is on one traced path — P6 bisects numeric divergences off this
+    /// trace, and an intermediate you cannot see is a bad day.
+    pub(crate) fn wfreg(&mut self, i: u8, bits: u32, tracer: &mut dyn Tracer) {
+        self.cpu.set_f(i, bits);
+        tracer.event(TraceEvent::FRegWrite { index: i, bits });
+    }
+
+    /// Read float register `f{i}` (raw bits).
+    #[inline]
+    pub(crate) fn rfreg(&self, i: u8) -> u32 {
+        self.cpu.f(i)
+    }
+
+    /// Write boolean register `b{i}` and emit a trace event.
+    pub(crate) fn wbreg(&mut self, i: u8, v: bool, tracer: &mut dyn Tracer) {
+        self.cpu.set_b(i, v);
+        tracer.event(TraceEvent::BRegWrite {
+            index: i,
+            value: v,
+        });
+    }
+
     // --- debug dumps (the consumer-facing shape of lp-riscv-emu's debug.rs) ---
 
     /// A one-screen dump of the architectural state: pc, window registers,
@@ -526,6 +552,38 @@ impl Emulator {
                 self.cpu.a(base + 1),
                 self.cpu.a(base + 2),
                 self.cpu.a(base + 3)
+            );
+        }
+        // The FP block. `f{i}` is printed as bits *and* as an f32 reading: a raw
+        // NaN payload and a numeric value answer different questions, and the
+        // payload is exactly what M6 measures.
+        let _ = writeln!(
+            s,
+            "cpenable={:#x} ({})  fcr={:#010x}  fsr={:#010x}  br={:#06x}",
+            self.cpu.cpenable,
+            if self.cpu.fpu_enabled() {
+                "FPU armed"
+            } else {
+                "FPU DISABLED"
+            },
+            self.cpu.fcr,
+            self.cpu.fsr,
+            self.cpu.br
+        );
+        for row in 0..4u8 {
+            let base = row * 4;
+            let _ = writeln!(
+                s,
+                "f{:<2}..f{:<2}  {}",
+                base,
+                base + 3,
+                (0..4)
+                    .map(|k| {
+                        let bits = self.cpu.f(base + k);
+                        format!("{bits:#010x}={:e}", f32::from_bits(bits))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
             );
         }
         let _ = writeln!(
