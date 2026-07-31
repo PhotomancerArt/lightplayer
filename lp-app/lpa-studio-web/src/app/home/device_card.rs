@@ -24,12 +24,12 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp, CardVerb, ControllerId,
-    DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController, DeviceDetailAffordance, DeviceOp,
-    DeviceRichInput, HomeOp, LinkProviderKind, ProjectController, ProjectOp, RecoveryInstructions,
-    RichObjectView, RichSection, RosterAffordance, RosterCardState, RosterTreatment,
-    SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind,
-    device_card_tabs, device_rich_object, sim_rich_object,
+    BootloaderEntryFlow, BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp,
+    CardVerb, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController,
+    DeviceDetailAffordance, DeviceOp, DeviceRichInput, HomeOp, LinkProviderKind, ProjectController,
+    ProjectOp, RecoveryInstructions, RichObjectView, RichSection, RosterAffordance,
+    RosterCardState, RosterTreatment, SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard,
+    UiDeviceProjectChip, UiStatusKind, device_card_tabs, device_rich_object, sim_rich_object,
 };
 use lpa_studio_core::{UiLogEntry, UiLogLevel};
 
@@ -59,6 +59,8 @@ pub(crate) enum DeviceCardSheet {
     /// Reconnect and recovery-flash escapes. Card-resident per D41
     /// (supersedes the contract-era "merged-outline popup" language).
     Troubleshoot,
+    /// The bootloader-entry ritual (M5): steps, waiting, confirmation.
+    BootloaderEntry(BootloaderEntryFlow),
 }
 
 /// What a rendered affordance row does. Sheet and tab rows carry a
@@ -124,6 +126,7 @@ fn sheet_to_web(sheet: &CardSheetState, card: &UiDeviceCard) -> DeviceCardSheet 
         CardSheetState::Confirm(verb) => DeviceCardSheet::Confirm(verb_to_action(verb, card)),
         CardSheetState::Name => DeviceCardSheet::Name,
         CardSheetState::Troubleshoot => DeviceCardSheet::Troubleshoot,
+        CardSheetState::BootloaderEntry(flow) => DeviceCardSheet::BootloaderEntry(flow.clone()),
     }
 }
 
@@ -989,6 +992,9 @@ fn device_card_sheet_view(
                 on_action,
             }
         },
+        DeviceCardSheet::BootloaderEntry(flow) => rsx! {
+            BootloaderEntrySheet { flow: flow.clone(), card_key, on_action }
+        },
     }
 }
 
@@ -1086,6 +1092,93 @@ fn TroubleshootSheet(
                             on_action.call(recovery_flash.clone());
                         }
                     },
+                }
+                CardSheetButton {
+                    label: "Close",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: move |_| on_action.call(close_sheet_action(&card_key)),
+                }
+            }
+        }
+    }
+}
+
+/// The bootloader-entry sheet (M5): the ritual, and — the whole point —
+/// the confirmation that it worked.
+///
+/// Without feedback a failed attempt and a dead board look identical, so
+/// people repeat the wrong motion and conclude the device is bricked. The
+/// `Confirmed` arm is what makes the ritual learnable.
+///
+/// Advancing is re-opening the sheet with the next flow value, so the
+/// renderer holds no state of its own.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn BootloaderEntrySheet(
+    flow: BootloaderEntryFlow,
+    card_key: String,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let advance = |card_key: &str, next: BootloaderEntryFlow| {
+        open_sheet_action(card_key, CardSheetState::BootloaderEntry(next))
+    };
+    rsx! {
+        CardSheet {
+            on_dismiss: {
+                let card_key = card_key.clone();
+                move |_| on_action.call(close_sheet_action(&card_key))
+            },
+            match &flow {
+                BootloaderEntryFlow::Confirmed { chip_name } => {
+                    let subject = chip_name.clone().unwrap_or_else(|| "The device".to_string());
+                    rsx! {
+                        CardSheetTitle { text: "Recovery mode — ready" }
+                        p { class: "tw:m-0 tw:mb-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                            "{subject} is listening. You can flash firmware, back it up, or "
+                            "have it start once without its project."
+                        }
+                    }
+                }
+                _ => {
+                    let instructions = flow.instructions().expect("non-confirmed states carry steps");
+                    let waiting = flow.should_probe_on_arrival();
+                    rsx! {
+                        CardSheetTitle { text: "Put {instructions.subject} into recovery mode" }
+                        if matches!(flow, BootloaderEntryFlow::NotYet { .. }) {
+                            p { class: "tw:m-0 tw:mb-2 tw:text-xs tw:leading-normal tw:text-warn",
+                                "That attempt didn't land — the device answered as if it were "
+                                "running normally. Worth another go; the timing is fiddly."
+                            }
+                        }
+                        ol { class: "tw:m-0 tw:mb-3 tw:grid tw:list-decimal tw:gap-1 tw:pl-4 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                            for step in instructions.steps.iter() {
+                                li { "{step.text}" }
+                            }
+                        }
+                        if instructions.is_generic {
+                            p { class: "tw:m-0 tw:mb-3 tw:text-xs tw:text-muted-foreground",
+                                "These are the usual ESP32 steps — this board may differ."
+                            }
+                        }
+                        if waiting {
+                            p { class: "tw:m-0 tw:mb-3 tw:text-xs tw:leading-normal",
+                                "Waiting for the device to reappear…"
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "tw:grid tw:justify-end tw:gap-2",
+                if !flow.is_confirmed() && !flow.should_probe_on_arrival() {
+                    CardSheetButton {
+                        label: "I've done that",
+                        tone: SheetButtonTone::Primary,
+                        onclick: {
+                            let card_key = card_key.clone();
+                            let next = flow.clone().begin_waiting();
+                            move |_| on_action.call(advance(&card_key, next.clone()))
+                        },
+                    }
                 }
                 CardSheetButton {
                     label: "Close",
