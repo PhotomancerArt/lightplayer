@@ -504,6 +504,7 @@ fn origin_event_for(meta: Option<PackageMeta>) -> HistoryEvent {
             source_version: None,
         },
         PackageProvenance::ImportedZip { .. } => EventKind::ImportedZip,
+        PackageProvenance::ImportedJson { .. } => EventKind::ImportedJson,
         PackageProvenance::PulledFromDevice { device_uid, .. } => match device_uid.parse() {
             Ok(device) => EventKind::PulledFromDevice { device },
             Err(_) => {
