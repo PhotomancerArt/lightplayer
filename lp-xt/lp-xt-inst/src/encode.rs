@@ -557,14 +557,7 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
                 IntToFpOp::FloatS => 0xc,
                 IntToFpOp::UfloatS => 0xd,
             };
-            let w = pack(
-                0,
-                imm as u32,
-                ars.num() as u32,
-                fr.num() as u32,
-                0xa,
-                op2,
-            );
+            let w = pack(0, imm as u32, ars.num() as u32, fr.num() as u32, 0xa, op2);
             emit(&mut out, w, 3);
         }
         Inst::FpLsx(op, fr, ars, at) => {
@@ -591,13 +584,7 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
                 FpLsiOp::Lsip => 0x8,
                 FpLsiOp::Ssip => 0xc,
             };
-            let w = rri8(
-                3,
-                ft.num() as u32,
-                ars.num() as u32,
-                r,
-                (offset / 4) & 0xff,
-            );
+            let w = rri8(3, ft.num() as u32, ars.num() as u32, r, (offset / 4) & 0xff);
             emit(&mut out, w, 3);
         }
 
