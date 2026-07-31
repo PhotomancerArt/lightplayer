@@ -65,6 +65,30 @@
 //!   (UR 232), and `FSR` (UR 233) decode; every other special/user register
 //!   stays `DecodeError::Unsupported`, as it was before this module existed.
 //!
+//! ## What `docs/design/float.md` already constrains here
+//!
+//! The product spec outranks both IEEE-where-adopted and silicon-as-data, so
+//! three of its rows bind M7's use of this subset before any measurement:
+//!
+//! - **`FCR` is not shader-reachable.** float.md §2: rounding is
+//!   round-to-nearest-even always, there is no dynamic rounding mode, and
+//!   "emitters never change the mode". `rur.fcr`/`wur.fcr` are modeled so M6 can
+//!   *measure* the reset value and so the conformance harness can prove the mode
+//!   never moves — not so compiled shader code can touch them.
+//! - **`FSR` is not observable either.** float.md §2: no floating-point
+//!   exceptions or observable status flags. Same reasoning: modeled to measure,
+//!   not to emit.
+//! - **`trunc.s` alone does not satisfy the conversion row.** float.md §3 makes
+//!   float→int truncation toward zero with **saturation** of finite
+//!   out-of-range values a *Guaranteed* behavior, and §5 leaves NaN
+//!   unspecified. Whether the S3's `trunc.s` saturates or wraps is a P4/P6
+//!   measurement; if it does not saturate, M7 owes a clamp, not a spec
+//!   amendment.
+//!
+//! Denormal flush-to-zero is *target-defined by policy* (float.md §4, settled at
+//! G1): the S3 is expected to flush and M6's job is to supply the datum, not to
+//! decide the semantics.
+//!
 //! ## Encoding slots left unassigned
 //!
 //! Two slots in the FP1 group (`op0=0, op1=0xA, op2=0xF`) — selector `t=2` and
