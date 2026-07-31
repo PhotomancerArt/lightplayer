@@ -1346,6 +1346,9 @@
   .tw\:p-\[22px\] {
     padding: 22px;
   }
+  .tw\:px-0 {
+    padding-inline: calc(var(--tw-spacing) * 0);
+  }
   .tw\:px-1 {
     padding-inline: calc(var(--tw-spacing) * 1);
   }
