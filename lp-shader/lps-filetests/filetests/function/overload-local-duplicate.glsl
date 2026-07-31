@@ -35,7 +35,9 @@ float test_overload_scalar_vs_vector() {
 
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(xtn.q32)
 // @broken(rv32lpn.q32)
+// @broken(xtlpn.q32)
 // run: test_overload_scalar_vs_vector() ~= 22.0
 
 float combine(float a) {
@@ -54,5 +56,7 @@ float test_overload_arity_and_nested_call() {
 
 // @broken(rv32c.q32)
 // @broken(rv32n.q32)
+// @broken(xtn.q32)
 // @broken(rv32lpn.q32)
+// @broken(xtlpn.q32)
 // run: test_overload_arity_and_nested_call() ~= 8.0

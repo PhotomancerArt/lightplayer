@@ -961,6 +961,23 @@ fn process_call(
     } = scratch;
 
     // ── Step 1: Defs (return values) ──
+    //
+    // The direct return registers are read *simultaneously* in ABI terms, just
+    // like the argument registers are written simultaneously: every return
+    // value must leave its ABI register carrying the value the callee put
+    // there, before any other return's move overwrites it. Emitting the moves
+    // in return order is only safe when no return's destination is another
+    // return's source — true on rv32, whose return registers (hw 10..11) and
+    // allocatable pool (18..31) are disjoint, and false on Xtensa, where the
+    // caller-view return bank a10/a11 sits inside its own 12-register pool.
+    //
+    // Collected here and sequenced below via the same `sequence_arg_moves`
+    // used for the argument direction.
+    let mut pending_ret_moves: Vec<(Alloc, u8)> = Vec::new();
+    // Write-throughs `Reg(pool_home) -> Stack(slot)`: they read a *destination*
+    // of the moves above, so they must run after all of them.
+    let mut ret_write_throughs: Vec<(EditPoint, Edit)> = Vec::new();
+
     let mut operand_idx: usize = 0;
     for (i, &ret_vreg) in rets.iter().enumerate() {
         let alloc_idx = offset + operand_idx;
@@ -990,15 +1007,9 @@ fn process_call(
 
         if let Some(pool_reg) = pool.home(ret_vreg) {
             ret_value_pool_regs.push(pool_reg);
-            after_ret_moves.push((
-                EditPoint::After(inst_idx_u16),
-                Edit::Move {
-                    from: Alloc::Reg(target),
-                    to: Alloc::Reg(pool_reg),
-                },
-            ));
+            pending_ret_moves.push((Alloc::Reg(target), pool_reg));
             if let Some(slot) = spill.has_slot(ret_vreg) {
-                after_ret_moves.push((
+                ret_write_throughs.push((
                     EditPoint::After(inst_idx_u16),
                     Edit::Move {
                         from: Alloc::Reg(pool_reg),
@@ -1029,6 +1040,17 @@ fn process_call(
             });
         }
     }
+
+    // Order within the After(call) return group:
+    //   1. `Reg(ret_reg) -> Stack(slot)` stores pushed by the loop above. They
+    //      read a return register, so they must precede any move that writes
+    //      one. Stores touch no register, so they cannot disturb the moves.
+    //   2. the sequenced reg->reg moves.
+    //   3. the write-throughs, which read a move *destination*.
+    for (from, to) in sequence_arg_moves(pending_ret_moves, isa.move_cycle_scratch_hw()) {
+        after_ret_moves.push((EditPoint::After(inst_idx_u16), Edit::Move { from, to }));
+    }
+    after_ret_moves.extend(ret_write_throughs);
 
     // ── Step 2: Evict-then-reload for caller-saved pool t-regs ──
     // regalloc2-style: evict clobbered-reg occupants from the pool and remove
@@ -1312,12 +1334,20 @@ fn process_call(
     }
 }
 
-/// Order a set of simultaneous register-staging moves into a safe sequence.
+/// Order a set of simultaneous register moves into a safe sequence.
 ///
-/// Every `to` is distinct (they are the ABI's argument registers), but a `to`
-/// may also be another move's `from`. Emitting in argument order then destroys
-/// that value before its consumer reads it — the caller silently passes a
-/// duplicate. This is the standard "parallel move" problem.
+/// Used in both call directions:
+///
+/// - **arguments** — `from` is wherever the value lives, `to` is the ABI's
+///   argument register. Emitting in argument order destroys a value before its
+///   consumer reads it and the caller silently passes a duplicate.
+/// - **returns** — `from` is the ABI's return register, `to` is the value's
+///   pool home. Emitting in return order destroys a return value before it is
+///   moved out, and the caller silently reads a duplicate.
+///
+/// Every `to` is distinct in both cases (distinct ABI registers one way,
+/// distinct pool homes the other), but a `to` may also be another move's
+/// `from`. This is the standard "parallel move" problem.
 ///
 /// The sequence is built by repeatedly emitting any move whose destination is
 /// no longer anyone's source. When only cycles remain, one destination's live
@@ -1326,9 +1356,10 @@ fn process_call(
 /// reusable across cycles because a parked value is always consumed before the
 /// next break.
 ///
-/// On rv32 this is an identity transform (argument registers and the pool are
-/// disjoint, so no destination is ever a source). It exists for Xtensa, whose
-/// staging bank `a10..a15` overlaps its own allocatable pool — and as a
+/// On rv32 this is an identity transform in both directions (the argument and
+/// return registers are disjoint from the pool, so no destination is ever a
+/// source). It exists for Xtensa, whose staging bank `a10..a15` and return
+/// bank `a10..a11` both sit inside its own allocatable pool — and as a
 /// correctness net for any future ISA that overlaps them.
 fn sequence_arg_moves(mut pending: Vec<(Alloc, u8)>, scratch: u8) -> Vec<(Alloc, Alloc)> {
     fn src_reg(a: &Alloc) -> Option<u8> {
@@ -1661,6 +1692,45 @@ mod tests {
                 (Alloc::Stack(0), Alloc::Reg(12)),
             ],
             "the reload into a12 must not run before a12 is read"
+        );
+    }
+
+    /// Pins the **return** direction's move set, which `process_call` began
+    /// routing through this function on 2026-07-30
+    /// (`docs/defects/2026-07-30-xtensa-two-value-return-clobber.md`).
+    ///
+    /// This is a characterization test, not the regression test: the sequencer
+    /// was always correct, and the defect was that the return path never called
+    /// it. Reverting that fix does not fail this test. The negative-controlled
+    /// regression lives in the corpus at
+    /// `lpvm/native/perf/call-clobber-correctness.glsl:99`
+    /// (`test_interleaved_vec2`), which goes 6/7 → 7/7 across the fix. What
+    /// this test buys is that a future refactor of the sequencer cannot break
+    /// the return direction silently.
+    ///
+    /// A two-value return arrives in the caller-view `a10`/`a11`. When the
+    /// first return's pool home happens to be `a11`, moving it out first
+    /// destroys the second return before anyone reads it. This is the exact
+    /// move set observed for `vec2 a = make_vec2(…)` held live across a second
+    /// call — the emitted code was:
+    ///
+    /// ```text
+    /// or a11, a10, a10   ; ret0 -> home a11, clobbering ret1
+    /// or a12, a11, a11   ; ret1 -> home a12, reading the clobbered value
+    /// ```
+    ///
+    /// so `a.y` silently became `a.x`.
+    #[test]
+    fn sequence_arg_moves_orders_return_values_out_of_the_return_bank() {
+        let out = sequence_arg_moves(vec![(Alloc::Reg(10), 11), (Alloc::Reg(11), 12)], 9);
+        assert_eq!(
+            out,
+            vec![
+                // a11 (ret1) must vacate before ret0 is moved on top of it.
+                (Alloc::Reg(11), Alloc::Reg(12)),
+                (Alloc::Reg(10), Alloc::Reg(11)),
+            ],
+            "the second return value must leave a11 before the first overwrites it"
         );
     }
 }
