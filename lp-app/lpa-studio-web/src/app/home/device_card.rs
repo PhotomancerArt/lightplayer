@@ -195,6 +195,60 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (year, month, day)
 }
 
+/// The Recovery-mode face: the state's two exit verbs, each with a
+/// one-line summary that lets the user self-select their case. Studio
+/// cannot tell the cases apart — a board in download mode sends no hello,
+/// so it cannot be linked to a registered device — which is why the copy
+/// disambiguates instead of a wizard.
+///
+/// Order: Install first (the common new-board arrival), the rescue verb
+/// second. Neither endangers the other case: a flash does not touch the
+/// project partition, and a boot-control record on a non-LightPlayer
+/// board is inert.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RecoveryFace(on_action: EventHandler<UiAction>) -> Element {
+    rsx! {
+        div { class: "tw:mt-1 tw:grid tw:gap-3",
+            div { class: "tw:grid tw:gap-1",
+                div {
+                    CardSheetButton {
+                        label: "⚡ Install firmware",
+                        tone: SheetButtonTone::Primary,
+                        onclick: move |_| {
+                            on_action.call(UiAction::from_op(
+                                ControllerId::new(DeviceController::NODE_ID),
+                                DeviceOp::ProvisionFirmware { setup_name: None },
+                            ));
+                        },
+                    }
+                }
+                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
+                    "Put LightPlayer on this board. New boards and boards running "
+                    "other firmware start here. Projects on the board survive."
+                }
+            }
+            div { class: "tw:grid tw:gap-1",
+                div {
+                    CardSheetButton {
+                        label: "Start without the project",
+                        tone: SheetButtonTone::Quiet,
+                        onclick: {
+                            let action = boot_safe_once_action();
+                            move |_| on_action.call(action.clone())
+                        },
+                    }
+                }
+                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
+                    "Already runs LightPlayer, but its project stops it from "
+                    "starting? Boot once with nothing loaded, then fix or "
+                    "replace the project."
+                }
+            }
+        }
+    }
+}
+
 /// The blank board's SETUP FORM (state-flow model §1-A): the Status tab
 /// IS the form — a prefilled date-default name plus ONE Install button,
 /// no confirm, no separate naming dialog. The name rides the provision
@@ -556,85 +610,66 @@ pub(crate) fn DeviceCard(
             }
             // Everything below the title bar shares one wrapper: a D41
             // sheet dims exactly this region, so the name above it stays
-            // readable (spike round 3: sheets spare the title bar). An
-            // open sheet floors the region's height — a short tab body
-            // must never clip the panel (the card is overflow-hidden);
-            // the drift sheet's three stacked verbs need the tall floor.
-            div { class: match (pane, active_sheet.as_ref(), card.ui.op.is_some()) {
-                    (true, _, _) => "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
-                    // an op overlay covers this region — floor it so the
-                    // progress bar + technical terminal have room to read
-                    (false, _, true) => "tw:relative tw:min-h-[240px]",
-                    // title + three instruction bullets + three stacked
-                    // buttons — the tallest sheet
-                    (false, Some(DeviceCardSheet::Troubleshoot), _) => "tw:relative tw:min-h-[370px]",
-                    // title + message + input + button row (the 210px
-                    // floor clipped it — walkthrough §4.10)
-                    (false, Some(DeviceCardSheet::Name), _) => "tw:relative tw:min-h-[260px]",
-                    // the tallest sheet of all: a two-line title, up to four
-                    // numbered steps that wrap, plus a conditional warn line
-                    // (not-yet) or hedge line (generic), plus the button row.
-                    // The 210px catch-all clipped it at step 4, which made
-                    // the waiting state render byte-identically to the
-                    // instructing one — the states differ only BELOW the cut.
-                    (false, Some(DeviceCardSheet::BootloaderEntry(flow)), _) => {
-                        if flow.is_confirmed() {
-                            // the payoff is one line and a button — the tall
-                            // floor would strand it above a void
-                            "tw:relative tw:min-h-[210px]"
-                        } else {
-                            "tw:relative tw:min-h-[430px]"
+            // readable (spike round 3: sheets spare the title bar).
+            //
+            // GRID STACK, not an absolute overlay (2026-07-31). The tab
+            // content, the sheet, and the op overlay all occupy the same
+            // grid cell, so the region is as tall as the TALLEST of them —
+            // a sheet can grow the card. The previous scheme positioned
+            // overlays absolutely and compensated with a hand-maintained
+            // per-sheet min-height table, which produced a recurring class
+            // of clipping bugs (Name at 210px, the bootloader sheet, then
+            // the troubleshoot sheet leaving the user stuck with no
+            // scroll). Content-driven height deletes the class.
+            div { class: if pane { "ux-card-stack tw:min-h-0 tw:flex-1" } else { "ux-card-stack" },
+                div { class: if pane { "tw:relative tw:flex tw:min-h-0 tw:flex-col" } else { "tw:relative tw:flex tw:flex-col" },
+                    // the icon-tab row (below the title bar — spike anatomy;
+                    // pane mode drops the Console tab, round 3.5)
+                    div {
+                        class: "tw:flex tw:flex-none tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
+                        role: "tablist",
+                        for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
+                            {tab_button(tab_view, active_tab, &card_key, on_action)}
                         }
                     }
-                    (false, Some(_), _) => "tw:relative tw:min-h-[210px]",
-                    (false, None, _) => "tw:relative",
-                },
-                // the icon-tab row (below the title bar — spike anatomy;
-                // pane mode drops the Console tab, round 3.5)
-                div {
-                    class: "tw:flex tw:flex-none tw:gap-0.5 tw:border-b tw:border-border tw:bg-terminal tw:px-1.5 tw:py-1",
-                    role: "tablist",
-                    for tab_view in tabs.iter().filter(|tab| !(pane && tab.tab == DeviceCardTab::Console)) {
-                        {tab_button(tab_view, active_tab, &card_key, on_action)}
+                    div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
+                        match active_tab {
+                            DeviceCardTab::Status => rsx! {
+                                {status_tab_body(&card, &tabs, chip_muted, on_action, &card_key, now_secs)}
+                            },
+                            DeviceCardTab::Console => rsx! {
+                                {console_tab_body(&card.console_tail)}
+                            },
+                            DeviceCardTab::Project if picker_mode => rsx! {
+                                {project_picker_body(&project_choices, on_action)}
+                            },
+                            _ => rsx! {
+                                {sections_tab_body(&tabs, active_tab, on_action, &card_key)}
+                            },
+                        }
                     }
-                }
-                div { class: if pane { "tw:grid tw:min-h-0 tw:flex-1 tw:content-start tw:gap-1.5 tw:overflow-y-auto tw:p-3" } else { "tw:grid tw:content-start tw:gap-1.5 tw:p-3" },
-                    match active_tab {
-                        DeviceCardTab::Status => rsx! {
-                            {status_tab_body(&card, &tabs, chip_muted, on_action, &card_key, now_secs)}
-                        },
-                        DeviceCardTab::Console => rsx! {
-                            {console_tab_body(&card.console_tail)}
-                        },
-                        DeviceCardTab::Project if picker_mode => rsx! {
-                            {project_picker_body(&project_choices, on_action)}
-                        },
-                        _ => rsx! {
-                            {sections_tab_body(&tabs, active_tab, on_action, &card_key)}
-                        },
-                    }
-                }
-                if pane {
-                    // D42 pane mode (round 3.5): the console is a
-                    // permanent expanded bottom region — a normal console;
-                    // no tab, no strip.
-                    div { class: "ux-console-region",
-                        if card.console_tail.is_empty() {
-                            p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
-                                "No console output yet."
-                            }
-                        } else {
-                            for entry in card.console_tail.iter() {
-                                div { class: console_line_class(entry.level), "{entry.message}" }
+                    if pane {
+                        // D42 pane mode (round 3.5): the console is a
+                        // permanent expanded bottom region — a normal console;
+                        // no tab, no strip.
+                        div { class: "ux-console-region",
+                            if card.console_tail.is_empty() {
+                                p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground",
+                                    "No console output yet."
+                                }
+                            } else {
+                                for entry in card.console_tail.iter() {
+                                    div { class: console_line_class(entry.level), "{entry.message}" }
+                                }
                             }
                         }
                     }
-                }
-                // D42's ambient strip: the console's latest line at the
-                // card's bottom edge; clicking jumps to the Console tab,
-                // and the strip HIDES while that tab is active.
-                if !pane && active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
-                    {console_strip(&card.console_tail, &card_key, on_action)}
+                    // D42's ambient strip: the console's latest line at the
+                    // card's bottom edge; clicking jumps to the Console tab,
+                    // and the strip HIDES while that tab is active.
+                    if !pane && active_tab != DeviceCardTab::Console && !card.console_tail.is_empty() {
+                        {console_strip(&card.console_tail, &card_key, on_action)}
+                    }
                 }
                 if let Some(active_sheet) = active_sheet.as_ref() {
                     {device_card_sheet_view(active_sheet, &card, &card_key, on_action)}
@@ -840,6 +875,11 @@ fn status_tab_body(
             card.state,
             RosterCardState::ReadyToSetUp | RosterCardState::OtherFirmware
         );
+    // Recovery mode's Status tab carries the exit verbs DIRECTLY (bench
+    // feedback 2026-07-31): a user here has already done the hard part,
+    // and routing them through Troubleshoot — a sheet that mostly explains
+    // how to get INTO this state — was backwards.
+    let recovery_face = !card.sim && card.state == RosterCardState::RecoveryMode;
     rsx! {
         for section in health {
             for line in section.lines.iter() {
@@ -883,6 +923,8 @@ fn status_tab_body(
                 replaces: matches!(card.state, RosterCardState::OtherFirmware),
                 on_action,
             }
+        } else if recovery_face {
+            RecoveryFace { on_action }
         } else {
             for section in health {
                 for row in section.affordances.iter() {
