@@ -238,7 +238,12 @@ export async function writeBootControl(portId, esptoolModulePath, address, recor
         flashMode: "keep",
         flashFreq: "keep",
         eraseAll: false,
-        compress: false,
+        // MUST be true: esptool-js 0.6.0 implements ONLY deflate writes and
+        // throws "Yet to handle Non Compressed Writes" otherwise — found on
+        // the bench (2026-07-31) as "Arming safe mode failed". The ROM/stub
+        // accepts FLASH_DEFL_BEGIN in download mode; flashFirmware above has
+        // always used it.
+        compress: true,
       });
       assertNoFlashCommunicationWarning(logs, "Boot-control write");
       pushProgress(progress, onEvent, {
