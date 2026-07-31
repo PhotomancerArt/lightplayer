@@ -29,6 +29,7 @@ use crate::{
 
 use super::device_client_io::DeviceClientIo;
 use super::device_event::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
+use super::device_link_mode::DeviceLinkMode;
 use super::device_mode::{ChannelUseGuard, DeviceMode, DeviceModeGuard};
 use super::device_readiness::{BootLineClassifier, HelloGate, gate_first_frame};
 use super::device_snapshot::DeviceSnapshot;
@@ -103,11 +104,14 @@ impl DeviceSession {
     pub fn snapshot(&self) -> DeviceSnapshot {
         let state = self.shared.state();
         let session = self.shared.session.borrow().clone();
+        let classifier = self.shared.classifier.borrow();
+        let link_mode = DeviceLinkMode::from_boot_lines(&classifier, state.is_ready());
         DeviceSnapshot {
             endpoint_status: DeviceSnapshot::derive_endpoint_status(&state, &session),
             state,
             session,
-            recent_lines: self.shared.classifier.borrow().recent_lines().to_vec(),
+            recent_lines: classifier.recent_lines().to_vec(),
+            link_mode,
         }
     }
 

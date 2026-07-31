@@ -29,6 +29,7 @@
 
 mod device_client_io;
 mod device_event;
+mod device_link_mode;
 mod device_manage;
 mod device_mode;
 mod device_readiness;
@@ -42,6 +43,7 @@ mod device_wire;
 mod tests;
 
 pub use device_event::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
+pub use device_link_mode::{BootloaderEvidence, DeviceLinkMode};
 pub use device_manage::DeviceManageOutcome;
 pub use device_mode::{DeviceMode, DeviceModeGuard};
 pub use device_readiness::{

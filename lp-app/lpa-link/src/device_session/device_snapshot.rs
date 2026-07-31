@@ -2,6 +2,7 @@
 
 use crate::{LinkEndpointStatus, LinkSession, LinkSessionStatus};
 
+use super::device_link_mode::DeviceLinkMode;
 use super::device_state::DeviceState;
 
 /// Point-in-time view of a [`DeviceSession`]: the state machine position,
@@ -21,6 +22,16 @@ pub struct DeviceSnapshot {
     /// failed, `Connected` when ready, `Available` after a clean close.
     pub endpoint_status: LinkEndpointStatus,
     pub recent_lines: Vec<String>,
+    /// What is on the other end of the wire, as far as PASSIVE evidence can
+    /// tell: a hello means `App`, ROM download-mode boot lines mean
+    /// `Bootloader`, and anything else is `Unknown`.
+    ///
+    /// `Unknown` here means "no passive evidence", not "nothing is there" —
+    /// a board already sitting in download mode printed its banner before
+    /// Studio attached. Escalate with a SYNC probe
+    /// (`DeviceSession::probe_link_mode`) to tell those apart; that probe
+    /// reboots the device, which is why it is never automatic.
+    pub link_mode: DeviceLinkMode,
 }
 
 impl DeviceSnapshot {
