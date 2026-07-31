@@ -227,8 +227,17 @@ use crate::builtins::lpir::unorm_conv_q32::{
     __lp_lpir_fto_unorm8_q32, __lp_lpir_fto_unorm16_q32, __lp_lpir_unorm8_to_f_q32,
     __lp_lpir_unorm16_to_f_q32,
 };
+#[cfg(feature = "float-f32")]
+use crate::builtins::texture::{
+    r16_unorm_f32::__lp_texture1d_r16_unorm_f32, r16_unorm_f32::__lp_texture2d_r16_unorm_f32,
+};
 use crate::builtins::texture::{
     r16_unorm_q32::__lp_texture1d_r16_unorm_q32, r16_unorm_q32::__lp_texture2d_r16_unorm_q32,
+};
+#[cfg(feature = "float-f32")]
+use crate::builtins::texture::{
+    rgba16_unorm_f32::__lp_texture1d_rgba16_unorm_f32,
+    rgba16_unorm_f32::__lp_texture2d_rgba16_unorm_f32,
 };
 use crate::builtins::texture::{
     rgba16_unorm_q32::__lp_texture1d_rgba16_unorm_q32,
@@ -538,6 +547,16 @@ pub fn ensure_builtins_referenced() {
         let _lpfn_worley3_value_q32_fn: extern "C" fn(i32, i32, i32, u32) -> i32 =
             __lp_lpfn_worley3_value_q32;
         let _vm_get_fuel_fn: extern "C" fn(i32) -> u32 = __lp_vm_get_fuel;
+        #[cfg(feature = "float-f32")]
+        let _texture1d_r16_unorm_f32_fn: unsafe extern "C" fn(
+            *mut f32,
+            u32,
+            u32,
+            u32,
+            f32,
+            u32,
+            u32,
+        ) -> () = __lp_texture1d_r16_unorm_f32;
         let _texture1d_r16_unorm_q32_fn: unsafe extern "C" fn(
             *mut i32,
             u32,
@@ -547,6 +566,16 @@ pub fn ensure_builtins_referenced() {
             u32,
             u32,
         ) -> () = __lp_texture1d_r16_unorm_q32;
+        #[cfg(feature = "float-f32")]
+        let _texture1d_rgba16_unorm_f32_fn: unsafe extern "C" fn(
+            *mut f32,
+            u32,
+            u32,
+            u32,
+            f32,
+            u32,
+            u32,
+        ) -> () = __lp_texture1d_rgba16_unorm_f32;
         let _texture1d_rgba16_unorm_q32_fn: unsafe extern "C" fn(
             *mut i32,
             u32,
@@ -556,6 +585,19 @@ pub fn ensure_builtins_referenced() {
             u32,
             u32,
         ) -> () = __lp_texture1d_rgba16_unorm_q32;
+        #[cfg(feature = "float-f32")]
+        let _texture2d_r16_unorm_f32_fn: unsafe extern "C" fn(
+            *mut f32,
+            u32,
+            u32,
+            u32,
+            u32,
+            f32,
+            f32,
+            u32,
+            u32,
+            u32,
+        ) -> () = __lp_texture2d_r16_unorm_f32;
         let _texture2d_r16_unorm_q32_fn: unsafe extern "C" fn(
             *mut i32,
             u32,
@@ -568,6 +610,19 @@ pub fn ensure_builtins_referenced() {
             u32,
             u32,
         ) -> () = __lp_texture2d_r16_unorm_q32;
+        #[cfg(feature = "float-f32")]
+        let _texture2d_rgba16_unorm_f32_fn: unsafe extern "C" fn(
+            *mut f32,
+            u32,
+            u32,
+            u32,
+            u32,
+            f32,
+            f32,
+            u32,
+            u32,
+            u32,
+        ) -> () = __lp_texture2d_rgba16_unorm_f32;
         let _texture2d_rgba16_unorm_q32_fn: unsafe extern "C" fn(
             *mut i32,
             u32,
@@ -818,9 +873,17 @@ pub fn ensure_builtins_referenced() {
         let _ = core::ptr::read_volatile(&_lpfn_worley3_value_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_worley3_value_q32_fn as *const _);
         let _ = core::ptr::read_volatile(&_vm_get_fuel_fn as *const _);
+        #[cfg(feature = "float-f32")]
+        let _ = core::ptr::read_volatile(&_texture1d_r16_unorm_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_texture1d_r16_unorm_q32_fn as *const _);
+        #[cfg(feature = "float-f32")]
+        let _ = core::ptr::read_volatile(&_texture1d_rgba16_unorm_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_texture1d_rgba16_unorm_q32_fn as *const _);
+        #[cfg(feature = "float-f32")]
+        let _ = core::ptr::read_volatile(&_texture2d_r16_unorm_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_texture2d_r16_unorm_q32_fn as *const _);
+        #[cfg(feature = "float-f32")]
+        let _ = core::ptr::read_volatile(&_texture2d_rgba16_unorm_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_texture2d_rgba16_unorm_q32_fn as *const _);
     }
 }

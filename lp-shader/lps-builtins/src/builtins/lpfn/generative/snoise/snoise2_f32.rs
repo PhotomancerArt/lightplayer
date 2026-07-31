@@ -18,7 +18,7 @@ use crate::builtins::lpfn::hash::lpfn_hash2;
 use crate::f32_math::floor;
 
 /// 1/sqrt(2).
-const D: f32 = 0.707_106_78;
+const D: f32 = core::f32::consts::FRAC_1_SQRT_2;
 
 /// 8-entry gradient LUT: 4 axis-aligned + 4 diagonal.
 #[inline(always)]

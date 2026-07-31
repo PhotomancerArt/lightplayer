@@ -167,9 +167,13 @@ pub enum BuiltinId {
     LpLpfnWorley3ValueF32,
     LpLpfnWorley3ValueQ32,
     LpVmGetFuel,
+    LpTexTexture1dR16UnormF32,
     LpTexTexture1dR16UnormQ32,
+    LpTexTexture1dRgba16UnormF32,
     LpTexTexture1dRgba16UnormQ32,
+    LpTexTexture2dR16UnormF32,
     LpTexTexture2dR16UnormQ32,
+    LpTexTexture2dRgba16UnormF32,
     LpTexTexture2dRgba16UnormQ32,
 }
 
@@ -334,9 +338,13 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => "__lp_lpfn_worley3_value_f32",
             BuiltinId::LpLpfnWorley3ValueQ32 => "__lp_lpfn_worley3_value_q32",
             BuiltinId::LpVmGetFuel => "__lp_vm_get_fuel",
+            BuiltinId::LpTexTexture1dR16UnormF32 => "__lp_texture1d_r16_unorm_f32",
             BuiltinId::LpTexTexture1dR16UnormQ32 => "__lp_texture1d_r16_unorm_q32",
+            BuiltinId::LpTexTexture1dRgba16UnormF32 => "__lp_texture1d_rgba16_unorm_f32",
             BuiltinId::LpTexTexture1dRgba16UnormQ32 => "__lp_texture1d_rgba16_unorm_q32",
+            BuiltinId::LpTexTexture2dR16UnormF32 => "__lp_texture2d_r16_unorm_f32",
             BuiltinId::LpTexTexture2dR16UnormQ32 => "__lp_texture2d_r16_unorm_q32",
+            BuiltinId::LpTexTexture2dRgba16UnormF32 => "__lp_texture2d_rgba16_unorm_f32",
             BuiltinId::LpTexTexture2dRgba16UnormQ32 => "__lp_texture2d_rgba16_unorm_q32",
         }
     }
@@ -501,9 +509,13 @@ impl BuiltinId {
             "__lp_lpfn_worley3_value_f32" => Some(BuiltinId::LpLpfnWorley3ValueF32),
             "__lp_lpfn_worley3_value_q32" => Some(BuiltinId::LpLpfnWorley3ValueQ32),
             "__lp_vm_get_fuel" => Some(BuiltinId::LpVmGetFuel),
+            "__lp_texture1d_r16_unorm_f32" => Some(BuiltinId::LpTexTexture1dR16UnormF32),
             "__lp_texture1d_r16_unorm_q32" => Some(BuiltinId::LpTexTexture1dR16UnormQ32),
+            "__lp_texture1d_rgba16_unorm_f32" => Some(BuiltinId::LpTexTexture1dRgba16UnormF32),
             "__lp_texture1d_rgba16_unorm_q32" => Some(BuiltinId::LpTexTexture1dRgba16UnormQ32),
+            "__lp_texture2d_r16_unorm_f32" => Some(BuiltinId::LpTexTexture2dR16UnormF32),
             "__lp_texture2d_r16_unorm_q32" => Some(BuiltinId::LpTexTexture2dR16UnormQ32),
+            "__lp_texture2d_rgba16_unorm_f32" => Some(BuiltinId::LpTexTexture2dRgba16UnormF32),
             "__lp_texture2d_rgba16_unorm_q32" => Some(BuiltinId::LpTexTexture2dRgba16UnormQ32),
             _ => None,
         }
@@ -669,9 +681,13 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32,
             BuiltinId::LpLpfnWorley3ValueQ32,
             BuiltinId::LpVmGetFuel,
+            BuiltinId::LpTexTexture1dR16UnormF32,
             BuiltinId::LpTexTexture1dR16UnormQ32,
+            BuiltinId::LpTexTexture1dRgba16UnormF32,
             BuiltinId::LpTexTexture1dRgba16UnormQ32,
+            BuiltinId::LpTexTexture2dR16UnormF32,
             BuiltinId::LpTexTexture2dR16UnormQ32,
+            BuiltinId::LpTexTexture2dRgba16UnormF32,
             BuiltinId::LpTexTexture2dRgba16UnormQ32,
         ]
     }
@@ -836,9 +852,13 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => Module::Lpfn,
             BuiltinId::LpLpfnWorley3ValueQ32 => Module::Lpfn,
             BuiltinId::LpVmGetFuel => Module::Vm,
+            BuiltinId::LpTexTexture1dR16UnormF32 => Module::Texture,
             BuiltinId::LpTexTexture1dR16UnormQ32 => Module::Texture,
+            BuiltinId::LpTexTexture1dRgba16UnormF32 => Module::Texture,
             BuiltinId::LpTexTexture1dRgba16UnormQ32 => Module::Texture,
+            BuiltinId::LpTexTexture2dR16UnormF32 => Module::Texture,
             BuiltinId::LpTexTexture2dR16UnormQ32 => Module::Texture,
+            BuiltinId::LpTexTexture2dRgba16UnormF32 => Module::Texture,
             BuiltinId::LpTexTexture2dRgba16UnormQ32 => Module::Texture,
         }
     }
@@ -1003,9 +1023,13 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => "worley3_value",
             BuiltinId::LpLpfnWorley3ValueQ32 => "worley3_value",
             BuiltinId::LpVmGetFuel => "get_fuel",
+            BuiltinId::LpTexTexture1dR16UnormF32 => "texture1d_r16_unorm",
             BuiltinId::LpTexTexture1dR16UnormQ32 => "texture1d_r16_unorm",
+            BuiltinId::LpTexTexture1dRgba16UnormF32 => "texture1d_rgba16_unorm",
             BuiltinId::LpTexTexture1dRgba16UnormQ32 => "texture1d_rgba16_unorm",
+            BuiltinId::LpTexTexture2dR16UnormF32 => "texture2d_r16_unorm",
             BuiltinId::LpTexTexture2dR16UnormQ32 => "texture2d_r16_unorm",
+            BuiltinId::LpTexTexture2dRgba16UnormF32 => "texture2d_rgba16_unorm",
             BuiltinId::LpTexTexture2dRgba16UnormQ32 => "texture2d_rgba16_unorm",
         }
     }
@@ -1170,9 +1194,13 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => Some(Mode::F32),
             BuiltinId::LpLpfnWorley3ValueQ32 => Some(Mode::Q32),
             BuiltinId::LpVmGetFuel => None,
+            BuiltinId::LpTexTexture1dR16UnormF32 => Some(Mode::F32),
             BuiltinId::LpTexTexture1dR16UnormQ32 => Some(Mode::Q32),
+            BuiltinId::LpTexTexture1dRgba16UnormF32 => Some(Mode::F32),
             BuiltinId::LpTexTexture1dRgba16UnormQ32 => Some(Mode::Q32),
+            BuiltinId::LpTexTexture2dR16UnormF32 => Some(Mode::F32),
             BuiltinId::LpTexTexture2dR16UnormQ32 => Some(Mode::Q32),
+            BuiltinId::LpTexTexture2dRgba16UnormF32 => Some(Mode::F32),
             BuiltinId::LpTexTexture2dRgba16UnormQ32 => Some(Mode::Q32),
         }
     }
@@ -1337,9 +1365,13 @@ impl BuiltinId {
             BuiltinId::LpLpfnWorley3ValueF32 => false,
             BuiltinId::LpLpfnWorley3ValueQ32 => false,
             BuiltinId::LpVmGetFuel => true,
+            BuiltinId::LpTexTexture1dR16UnormF32 => false,
             BuiltinId::LpTexTexture1dR16UnormQ32 => false,
+            BuiltinId::LpTexTexture1dRgba16UnormF32 => false,
             BuiltinId::LpTexTexture1dRgba16UnormQ32 => false,
+            BuiltinId::LpTexTexture2dR16UnormF32 => false,
             BuiltinId::LpTexTexture2dR16UnormQ32 => false,
+            BuiltinId::LpTexTexture2dRgba16UnormF32 => false,
             BuiltinId::LpTexTexture2dRgba16UnormQ32 => false,
         }
     }

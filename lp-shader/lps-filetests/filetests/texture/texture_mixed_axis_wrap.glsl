@@ -20,7 +20,4 @@ vec4 repeat_x_clamp_y() {
 // wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: repeat_x_clamp_y() ~= vec4(1.0, 0.2, 0.1, 1.0) (tolerance: 0.0004)

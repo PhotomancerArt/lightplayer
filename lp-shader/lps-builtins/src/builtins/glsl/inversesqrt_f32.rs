@@ -30,9 +30,13 @@
 /// GLSL `inversesqrt(x)` = `1 / sqrt(x)`, to within 2e-3 relative.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lps_inversesqrt_f32(x: f32) -> f32 {
-    if !(x > 0.0) {
-        // Not `x <= 0.0`: that is false for NaN, which would then fall into
-        // the estimate below and produce nonsense bit patterns.
+    // NaN is tested explicitly: `x <= 0.0` is false for it, so a NaN would
+    // otherwise reach the bit-trick estimate and come back as a nonsense
+    // finite value rather than propagating.
+    if x.is_nan() {
+        return f32::NAN;
+    }
+    if x <= 0.0 {
         return if x == 0.0 { f32::INFINITY } else { f32::NAN };
     }
     let half = 0.5 * x;

@@ -14,7 +14,7 @@
 //! **Tolerance:** chaotic sin-hash — conformance is statistical, not pointwise.
 //! See `random1_f32` for the full reasoning.
 
-use super::random1_f32::{seed_phase, sin_hash};
+use super::random1_f32::{SIN_HASH_K, seed_phase, sin_hash};
 
 /// 2D Random function (float version).
 ///
@@ -29,7 +29,7 @@ use super::random1_f32::{seed_phase, sin_hash};
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_random2_f32(x: f32, y: f32, seed: u32) -> f32 {
     let d = x * 12.9898 + y * 78.233;
-    sin_hash(d + seed_phase(seed), 43758.5453)
+    sin_hash(d + seed_phase(seed), SIN_HASH_K)
 }
 
 #[cfg(test)]

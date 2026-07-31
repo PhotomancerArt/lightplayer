@@ -20,7 +20,7 @@ pub(crate) fn worley3_point(index: u32, cell_x: i32, cell_y: i32, cell_z: i32) -
     // length in [0, 0.5] from bits 5-7 of the hash.
     let length_bits = ((index & 0xE0) >> 5) as f32;
     let len = length_bits * 0.5 / 7.0;
-    let diag = len * 0.707_106_78; // 1/sqrt(2)
+    let diag = len * core::f32::consts::FRAC_1_SQRT_2;
 
     let offset = match index % 18 {
         0 => [diag, diag, 0.0],

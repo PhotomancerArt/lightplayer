@@ -14,6 +14,7 @@
 //!
 //! **Tolerance:** chaotic sin-hash — statistical, not pointwise.
 
+use crate::builtins::lpfn::generative::random::random1_f32::SIN_HASH_K3;
 use crate::f32_math::fract;
 
 /// 3D signed random vec3 (float version).
@@ -45,9 +46,9 @@ pub(crate) fn srandom3_vec(x: f32, y: f32, z: f32) -> [f32; 3] {
     let dy = x * 269.5 + y * 183.3 + z * 246.1;
     let dz = x * 113.5 + y * 271.9 + z * 124.6;
     [
-        -1.0 + 2.0 * fract(libm::sinf(dx) * 43758.5453123),
-        -1.0 + 2.0 * fract(libm::sinf(dy) * 43758.5453123),
-        -1.0 + 2.0 * fract(libm::sinf(dz) * 43758.5453123),
+        -1.0 + 2.0 * fract(libm::sinf(dx) * SIN_HASH_K3),
+        -1.0 + 2.0 * fract(libm::sinf(dy) * SIN_HASH_K3),
+        -1.0 + 2.0 * fract(libm::sinf(dz) * SIN_HASH_K3),
     ]
 }
 

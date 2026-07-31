@@ -317,6 +317,10 @@ pub fn vm_f32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
 /// Frontend may suffix the name with `_<naga id>` — strip that suffix before lookup.
 pub fn texture_f32_builtin_id(name: &str, arg_count: usize) -> Option<BuiltinId> {
     match (name, arg_count) {
+        ("texture1d_r16_unorm", 7) => Some(BuiltinId::LpTexTexture1dR16UnormF32),
+        ("texture1d_rgba16_unorm", 7) => Some(BuiltinId::LpTexTexture1dRgba16UnormF32),
+        ("texture2d_r16_unorm", 10) => Some(BuiltinId::LpTexTexture2dR16UnormF32),
+        ("texture2d_rgba16_unorm", 10) => Some(BuiltinId::LpTexTexture2dRgba16UnormF32),
         _ => None,
     }
 }

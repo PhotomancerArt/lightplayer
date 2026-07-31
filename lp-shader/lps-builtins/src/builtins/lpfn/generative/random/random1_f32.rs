@@ -26,6 +26,21 @@
 
 use crate::f32_math::fract;
 
+/// The canonical sin-hash multiplier, kept digit-for-digit from
+/// `random1.glsl` so the port can be diffed against its source.
+#[allow(
+    clippy::excessive_precision,
+    reason = "canonical GLSL constant, kept digit-for-digit so the source and the port can be diffed; the f32 value is identical"
+)]
+pub(crate) const SIN_HASH_K: f32 = 43758.5453;
+
+/// The 3D family uses a longer constant — also canonical, also verbatim.
+#[allow(
+    clippy::excessive_precision,
+    reason = "canonical GLSL constant, kept digit-for-digit so the source and the port can be diffed; the f32 value is identical"
+)]
+pub(crate) const SIN_HASH_K3: f32 = 43758.5453123;
+
 /// Seed → radians of phase. `1/65536` is exact in f32, so this conversion
 /// introduces no error of its own.
 #[inline(always)]
@@ -51,7 +66,7 @@ pub(crate) fn sin_hash(angle: f32, k: f32) -> f32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_random1_f32(x: f32, seed: u32) -> f32 {
     let combined = x + seed_phase(seed);
-    sin_hash(combined, 43758.5453)
+    sin_hash(combined, SIN_HASH_K)
 }
 
 #[cfg(test)]

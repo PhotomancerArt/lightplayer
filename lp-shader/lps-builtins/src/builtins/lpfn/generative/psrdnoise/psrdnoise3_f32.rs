@@ -56,7 +56,7 @@ fn hash(iu: i32, iv: i32, iw: i32) -> i32 {
     if hv < 0 {
         hv += 289;
     }
-    h = (hv * 34 + 1) * h;
+    h *= hv * 34 + 1;
     h = (h + iu) % 289;
     if h < 0 {
         h += 289;
@@ -68,15 +68,30 @@ fn hash(iu: i32, iv: i32, iw: i32) -> i32 {
     h
 }
 
+/// Fibonacci-spiral constants, kept digit-for-digit from `psrdnoise3.glsl`.
+/// `2*pi / golden ratio`, `1 - (2h + 0.5)/289` as slope+bias, and `10*pi / 289`.
+#[allow(
+    clippy::excessive_precision,
+    reason = "canonical GLSL constants, kept digit-for-digit so the source and the port can be diffed; the f32 values are identical"
+)]
+const THETA_STEP: f32 = 3.883222077452858;
+const SZ_SLOPE: f32 = -0.006920415;
+#[allow(
+    clippy::excessive_precision,
+    reason = "canonical GLSL constant, kept digit-for-digit; the f32 value is identical"
+)]
+const SZ_BIAS: f32 = 0.996539792;
+const PSI_STEP: f32 = 0.108705628;
+
 /// Gradient for a corner: Fibonacci-spiral sphere point, psi-rotated, then
 /// alpha-rotated about the tangent axis `q`.
 #[inline]
 fn grad(hash: i32, sin_alpha: f32, cos_alpha: f32) -> [f32; 3] {
     let h = hash as f32;
 
-    let theta = h * 3.883_222_1; // 2*pi / golden ratio
-    let sz = h * -0.006_920_415 + 0.996_539_8; // 1 - (2h + 0.5)/289
-    let psi = h * 0.108_705_63; // 10*pi / 289
+    let theta = h * THETA_STEP;
+    let sz = h * SZ_SLOPE + SZ_BIAS;
+    let psi = h * PSI_STEP;
 
     let ct = libm::cosf(theta);
     let st = libm::sinf(theta);
@@ -208,14 +223,14 @@ pub extern "C" fn __lp_lpfn_psrdnoise3_f32(
         n += w3 * gdotx;
         // Analytic derivative.
         let dw = -6.0 * w2 * gdotx;
-        for a in 0..3 {
-            gradient[a] += g[a] * w3 + off[a] * dw;
+        for (a, gr) in gradient.iter_mut().enumerate() {
+            *gr += g[a] * w3 + off[a] * dw;
         }
     }
 
     unsafe {
-        for a in 0..3 {
-            *gradient_out.add(a) = 39.5 * gradient[a];
+        for (a, gr) in gradient.iter().enumerate() {
+            *gradient_out.add(a) = 39.5 * gr;
         }
     }
 

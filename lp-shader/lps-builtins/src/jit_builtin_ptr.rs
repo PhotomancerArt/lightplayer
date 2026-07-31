@@ -255,9 +255,17 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
         BuiltinId::LpLpfnWorley3ValueF32 => crate::builtins::lpfn::generative::worley::worley3_value_f32::__lp_lpfn_worley3_value_f32 as *const u8,
         BuiltinId::LpLpfnWorley3ValueQ32 => crate::builtins::lpfn::generative::worley::worley3_value_q32::__lp_lpfn_worley3_value_q32 as *const u8,
         BuiltinId::LpVmGetFuel => crate::builtins::vm::get_fuel::__lp_vm_get_fuel as *const u8,
+        #[cfg(feature = "float-f32")]
+        BuiltinId::LpTexTexture1dR16UnormF32 => crate::builtins::texture::r16_unorm_f32::__lp_texture1d_r16_unorm_f32 as *const u8,
         BuiltinId::LpTexTexture1dR16UnormQ32 => crate::builtins::texture::r16_unorm_q32::__lp_texture1d_r16_unorm_q32 as *const u8,
+        #[cfg(feature = "float-f32")]
+        BuiltinId::LpTexTexture1dRgba16UnormF32 => crate::builtins::texture::rgba16_unorm_f32::__lp_texture1d_rgba16_unorm_f32 as *const u8,
         BuiltinId::LpTexTexture1dRgba16UnormQ32 => crate::builtins::texture::rgba16_unorm_q32::__lp_texture1d_rgba16_unorm_q32 as *const u8,
+        #[cfg(feature = "float-f32")]
+        BuiltinId::LpTexTexture2dR16UnormF32 => crate::builtins::texture::r16_unorm_f32::__lp_texture2d_r16_unorm_f32 as *const u8,
         BuiltinId::LpTexTexture2dR16UnormQ32 => crate::builtins::texture::r16_unorm_q32::__lp_texture2d_r16_unorm_q32 as *const u8,
+        #[cfg(feature = "float-f32")]
+        BuiltinId::LpTexTexture2dRgba16UnormF32 => crate::builtins::texture::rgba16_unorm_f32::__lp_texture2d_rgba16_unorm_f32 as *const u8,
         BuiltinId::LpTexTexture2dRgba16UnormQ32 => crate::builtins::texture::rgba16_unorm_q32::__lp_texture2d_rgba16_unorm_q32 as *const u8,
         #[cfg(not(feature = "float-f32"))]
         _ => f32_family_not_linked(),
