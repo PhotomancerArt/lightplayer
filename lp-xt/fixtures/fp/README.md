@@ -87,6 +87,46 @@ Several probes return a computed value rather than a staged id — `rfr_wfr`
 independent readback paths for one compare), `rur_fcr` / `rur_fsr` (the reset
 values). A wrong answer there is as loud as a fault.
 
-**Status: not yet run.** Every verdict in `lp-xt-inst/src/fp.rs`'s subset table
-still reads `NOT PROBED`, and that is a finding to report, not a default to
-assume. The desk session is scheduled; see the M6 sub-plan's P1 phase file.
+**Status: run 2026-07-31.** All 26 probes came back **PRESENT** on a XIAO-class
+ESP32-S3 (16 MB, MAC `d8:3b:da:47:29:70`) with zero crashes and zero reboots.
+The subset table's Silicon column in `lp-xt-inst/src/fp.rs` is filled from that
+session; the full record is `p1-silicon-results.md` in the M6 planning
+directory. PRESENT means *the instruction executed* — its numeric behavior is
+P6's question, not P1's.
+
+The `unarmed` probe returned its staged value rather than faulting: the S3
+arrives with `CPENABLE` **already armed** under the esp-hal boot chain. No
+`wsr.cpenable` exists in esp-hal 1.1.1 or xtensa-lx-rt 0.22 startup, so the
+provenance is presumably ROM or the second-stage bootloader and is *not* pinned.
+M7 arms it defensively regardless.
+
+## The FP-ABI probe (no hardware)
+
+`abi_probe.c` + `abi_probe.sh` answer a different question that needs no board:
+**which FRs does the esp toolchain treat as callee-saved?** M5 compiles the f32
+builtins with this toolchain at `-O3` and M7 must lay out a frame that survives
+calls into them — and the FR file is flat, so nothing is preserved for free.
+
+Answer, from `xtensa-esp32s3-elf-gcc 14.2.0` (esp-14.2.0_20240906) at `-O3`:
+
+> **No FR is callee-saved. Every FR is call-clobbered.**
+
+The evidence is the shape of the generated code, not a claim in a document. Six
+float values live across a `call8`, and the compiler:
+
+- passed the float arguments in **address** registers `a2..a7`, moving them into
+  FRs with `wfr` only at the point of use, and returned the result the same way
+  (`rfr a2, f0`);
+- spilled the surviving values with plain integer `s32i.n` to the frame *before*
+  the call, and reloaded them with `lsi` *after* it;
+- stored **no** FR before the call and restored none after it, then reused
+  `f0..f5` freely on the far side.
+
+Which is exactly what a flat FR file with no free preservation would produce: if
+saving is not free, the ABI does not ask a callee to do it. Consequence for M7:
+an FR value that must outlive a call is the *caller's* problem, and the frame
+needs the spill slots.
+
+One incidental measurement worth the ADR: the toolchain **contracts** `a*b + c`
+into `madd.s` at `-O3`. `docs/design/float.md` §4 files expression contraction
+under target-defined, and this is that target being definite about it.
