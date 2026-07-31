@@ -21,7 +21,12 @@ of implementation — code can lag these names during the transition.
 - **Artifact** — an authored JSON file (node, project manifest);
   serialized deterministically, byte-identical for unchanged models.
 - **Vendoring** — importing a module by *copying* its folder into the host
-  project (no links, no update flow). (module model)
+  project: **copy-to-own** (the shadcn model) — the source becomes the
+  user's; provenance records origin. No links, no update flow.
+  (module model)
+- **`.lp/`** — the single framework-owned directory in a project folder
+  (panel state, future caches); never authored, always safe to delete.
+  Everything else in the folder is user-owned content. (module model)
 - **Provenance** — author/version/license/created metadata; may sit on any
   node; copied onto a module when it is extracted from a project.
   (module model)
@@ -69,7 +74,7 @@ of implementation — code can lag these names during the transition.
 - **Drawer** — a collapsible authoring surface below a face (code,
   advanced slots, bus wiring).
 - **Panel state** — unauthored runtime writer state per (scope, channel);
-  persisted to `state.json` with throttled writes; never dirties the
+  persisted to `.lp/state.json` with throttled writes; never dirties the
   project. (module model)
 - **Engaged** — a panel control whose lazy runtime writer has
   materialized (it was touched): it overrides authored writers in its
