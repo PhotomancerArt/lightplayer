@@ -571,6 +571,21 @@ pub(crate) fn DeviceCard(
                     // title + message + input + button row (the 210px
                     // floor clipped it — walkthrough §4.10)
                     (false, Some(DeviceCardSheet::Name), _) => "tw:relative tw:min-h-[260px]",
+                    // the tallest sheet of all: a two-line title, up to four
+                    // numbered steps that wrap, plus a conditional warn line
+                    // (not-yet) or hedge line (generic), plus the button row.
+                    // The 210px catch-all clipped it at step 4, which made
+                    // the waiting state render byte-identically to the
+                    // instructing one — the states differ only BELOW the cut.
+                    (false, Some(DeviceCardSheet::BootloaderEntry(flow)), _) => {
+                        if flow.is_confirmed() {
+                            // the payoff is one line and a button — the tall
+                            // floor would strand it above a void
+                            "tw:relative tw:min-h-[210px]"
+                        } else {
+                            "tw:relative tw:min-h-[430px]"
+                        }
+                    }
                     (false, Some(_), _) => "tw:relative tw:min-h-[210px]",
                     (false, None, _) => "tw:relative",
                 },
@@ -1145,7 +1160,7 @@ fn BootloaderEntrySheet(
                     rsx! {
                         CardSheetTitle { text: "Put {instructions.subject} into recovery mode" }
                         if matches!(flow, BootloaderEntryFlow::NotYet { .. }) {
-                            p { class: "tw:m-0 tw:mb-2 tw:text-xs tw:leading-normal tw:text-warn",
+                            p { class: "tw:m-0 tw:mb-2 tw:text-xs tw:leading-normal tw:text-status-attention-foreground",
                                 "That attempt didn't land — the device answered as if it were "
                                 "running normally. Worth another go; the timing is fiddly."
                             }
