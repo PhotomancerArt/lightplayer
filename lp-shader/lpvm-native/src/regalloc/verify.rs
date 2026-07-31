@@ -11,6 +11,12 @@ use alloc::vec::Vec;
 
 /// Verify all structural invariants of an AllocOutput.
 /// Panics with a descriptive message on violation.
+///
+/// This is a **test-time** oracle — `regalloc/test/builder.rs` runs it after
+/// every allocation it builds. It is not on the on-device compile path, where a
+/// panic would take the firmware down. The always-on counterpart for the
+/// register class is [`SpillAlloc::get_or_assign`](crate::regalloc::spill)'s
+/// debug assertion.
 pub fn verify_alloc(
     vinsts: &[VInst],
     vreg_pool: &[VReg],
@@ -49,13 +55,13 @@ fn verify_every_use_allocated(vinsts: &[VInst], vreg_pool: &[VReg], output: &All
 
 /// Every register allocation must be in the class its operand requires.
 ///
-/// This is the cheap oracle for a two-class allocator. Everything else in this
-/// file is about *which* register was chosen; this one is about which register
+/// This is the oracle for a two-class allocator. Everything else in this file
+/// is about *which* register was chosen; this one is about which register
 /// *file*, and getting that wrong does not produce a crash or a bad address —
 /// it produces a silent bit reinterpretation, an integer read as a float or a
 /// float read as an integer, with plausible-looking wrong pixels at the end of
-/// it. There is no cheaper place to catch that than right here, so the check
-/// runs on every allocation rather than under a debug flag.
+/// it. Nothing downstream can tell that apart from a correct result, so the
+/// allocator has to be the thing that catches it.
 fn verify_operand_classes(vinsts: &[VInst], vreg_pool: &[VReg], output: &AllocOutput) {
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         let offset = output.inst_alloc_offsets[inst_idx] as usize;

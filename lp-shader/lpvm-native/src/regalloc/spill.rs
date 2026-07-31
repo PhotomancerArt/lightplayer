@@ -7,9 +7,15 @@
 //! and each slot records the [`RegClass`] of the value it holds. A word is a
 //! word, so an integer slot and a float slot are the same four bytes in the
 //! frame and splitting the index space would buy nothing but a bigger frame.
-//! What the tag buys is the check: a reload out of a slot must land in a
-//! register of the slot's own class, which is the one way a two-class allocator
-//! can quietly produce a bit-reinterpretation instead of a value.
+//!
+//! What the tag buys is [`SpillAlloc::get_or_assign`]'s consistency check. The
+//! walk derives an operand's class at roughly a dozen call sites — off the
+//! defining instruction, off the register a value was evicted from, off the
+//! pool home it is being parked out of — and every one of them must agree for a
+//! given vreg. If two of them disagree, a value is spilled as one class and
+//! reloaded as the other, which is not a crash or a bad address but a silent
+//! bit reinterpretation. The slot is where those independent derivations meet,
+//! so it is the cheapest place to notice.
 
 use crate::abi::RegClass;
 use crate::vinst::VReg;
@@ -35,9 +41,20 @@ impl SpillAlloc {
     }
 
     /// Get existing spill slot or assign a new one holding a `class` value.
+    ///
+    /// Asserts (debug builds) that repeat requests for the same vreg agree on
+    /// its class — see the module doc. A `debug_assert` rather than a hard one
+    /// because this runs inside the on-device compiler, where a panic takes the
+    /// firmware down; host tests and the filetest corpus are where the check
+    /// has to bite, and they run it on every spill.
     pub fn get_or_assign(&mut self, vreg: VReg, class: RegClass) -> u8 {
         let idx = vreg.0 as usize;
         if let Some(slot) = self.slots[idx] {
+            debug_assert_eq!(
+                self.slot_classes[slot as usize], class,
+                "vreg {} was assigned a {:?} spill slot and is now being asked for a {class:?} one",
+                vreg.0, self.slot_classes[slot as usize]
+            );
             slot
         } else {
             let slot = self.next_slot;
@@ -107,5 +124,17 @@ mod tests {
         assert_eq!(s.slot_class(2), Some(RegClass::Int));
         assert_eq!(s.slot_class(3), None);
         assert_eq!(s.total_slots(), 3);
+    }
+
+    /// The check the tag exists for: two call sites deriving different classes
+    /// for one vreg means a value gets spilled as one and reloaded as the
+    /// other. Debug-only, so the test asserts the panic directly.
+    #[test]
+    #[should_panic(expected = "spill slot and is now being asked for")]
+    #[cfg(debug_assertions)]
+    fn reassigning_a_slot_with_a_different_class_is_a_bug() {
+        let mut s = SpillAlloc::new(2);
+        s.get_or_assign(VReg(0), RegClass::Int);
+        s.get_or_assign(VReg(0), RegClass::Float);
     }
 }

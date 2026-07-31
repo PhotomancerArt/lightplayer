@@ -170,6 +170,14 @@ impl RegPool {
         )
     }
 
+    /// Dispatch by `match` on two named fields rather than by indexing a
+    /// `[ClassPool; RegClass::COUNT]`.
+    ///
+    /// The array reads better and was tried first. It cost **1,120 B** more on
+    /// the ESP32-C6 image, measured: bounds checks the `match` does not need,
+    /// plus iterator adapters over the array that LLVM kept as real code where
+    /// it folds the two-arm `match` away entirely. Adding a third class means
+    /// revisiting this, and re-measuring rather than reasoning about it.
     fn class_pool(&mut self, class: RegClass) -> &mut ClassPool {
         match class {
             RegClass::Int => &mut self.int,

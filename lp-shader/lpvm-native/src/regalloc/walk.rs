@@ -17,18 +17,34 @@ use crate::vinst::{VInst, VReg};
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Per-instruction operand offsets into the flat `allocs` table (global indices).
-pub(crate) fn build_operand_layout(vinsts: &[VInst], vreg_pool: &[VReg]) -> (Vec<u16>, usize) {
+/// Per-instruction operand offsets into the flat `allocs` table (global
+/// indices), plus every vreg's register class.
+///
+/// The classes ride along with the operand count rather than getting a pass of
+/// their own: this loop already visits every def, and `for_each_def` is generic
+/// over its callback, so a second walk would cost a second monomorphization of
+/// a match over the entire instruction set — real flash in a compiler that
+/// runs on the device.
+pub(crate) fn build_operand_layout(
+    vinsts: &[VInst],
+    vreg_pool: &[VReg],
+) -> (Vec<u16>, usize, VRegClasses) {
     let mut inst_alloc_offsets = Vec::with_capacity(vinsts.len());
     let mut total_operands: usize = 0;
+    let mut classes = VRegClasses::new();
     for inst in vinsts {
         inst_alloc_offsets.push(total_operands as u16);
         let mut num_operands: usize = 0;
-        inst.for_each_def(vreg_pool, |_def| num_operands += 1);
+        let mut def_idx: usize = 0;
+        inst.for_each_def(vreg_pool, |def| {
+            classes.record_def(def, crate::regalloc::classes::def_class(inst, def_idx));
+            def_idx += 1;
+            num_operands += 1;
+        });
         inst.for_each_use(vreg_pool, |_use| num_operands += 1);
         total_operands += num_operands;
     }
-    (inst_alloc_offsets, total_operands)
+    (inst_alloc_offsets, total_operands, classes)
 }
 
 /// First VInst index in `vinsts` covered by this region (for boundary edit anchors).
@@ -174,7 +190,7 @@ pub fn allocate_from_tree(
     func_abi: &FuncAbi,
     pool: RegPool,
 ) -> Result<AllocOutput, AllocError> {
-    let (inst_alloc_offsets, total_operands) = build_operand_layout(vinsts, vreg_pool);
+    let (inst_alloc_offsets, total_operands, classes) = build_operand_layout(vinsts, vreg_pool);
     let mut max_vreg_idx = vreg_pool.iter().map(|v| v.0).max().unwrap_or(0) as usize;
     for inst in vinsts {
         inst.for_each_vreg_touching(vreg_pool, |v| {
@@ -182,7 +198,6 @@ pub fn allocate_from_tree(
         });
     }
     let max_vreg_idx = max_vreg_idx + 32;
-    let classes = VRegClasses::compute(vinsts, vreg_pool, func_abi, max_vreg_idx + 16);
     let passthrough = build_passthrough_set(vinsts, vreg_pool, func_abi, &classes);
     let mut state = WalkState {
         vinsts,
@@ -1146,7 +1161,7 @@ fn process_call(
     // One call clobbers every class's caller-saved bank at once, so the sweep
     // is over both. `RegClass::Float` contributes nothing while no backend has
     // float registers.
-    for class in [RegClass::Int, RegClass::Float] {
+    for class in RegClass::ALL {
         clobbered.extend(isa.caller_saved_pool_hw(class).iter().filter_map(|&hw| {
             let preg = PReg { hw, class };
             pool.iter_occupied()
