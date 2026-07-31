@@ -81,6 +81,11 @@ impl LinkConnector {
         session_id: &LinkSessionId,
         events: LinkManagementEventSink,
     ) -> Result<Option<String>, LinkError> {
+        // Only the host provider surfaces probe progress as management
+        // events; the browser provider collects its logs into the probe
+        // result, and the rest have no bootloader to probe. Which arms exist
+        // is feature-dependent, so bind it unconditionally.
+        let _ = &events;
         match self {
             Self::Fake(provider) => provider.probe_target(session_id).await,
             #[cfg(feature = "host-process")]
