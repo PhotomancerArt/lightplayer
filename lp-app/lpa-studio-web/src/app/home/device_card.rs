@@ -245,10 +245,27 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                     "connect and fix the project."
                 }
             }
+            div { class: "tw:grid tw:gap-1",
+                div {
+                    CardSheetButton {
+                        label: "Download a backup",
+                        tone: SheetButtonTone::Quiet,
+                        onclick: {
+                            let action = back_up_filesystem_action();
+                            move |_| on_action.call(action.clone())
+                        },
+                    }
+                }
+                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
+                    "About to try something drastic? Save everything on the "
+                    "board to a ZIP on your computer first. This works even "
+                    "though it will not start."
+                }
+            }
             // Wayfinding, not another verb: everything else recovery-shaped
-            // (wipe, erase, and — once they land — backup/restore) lives in
-            // the danger zone, and a user on this face should not have to
-            // know that.
+            // (wipe, erase, and — once it lands — restore) lives in the
+            // danger zone, and a user on this face should not have to know
+            // that.
             button {
                 // No underline: at this size a dotted underline through two
                 // wrapped lines reads as STRIKETHROUGH — struck-out "wipe,
@@ -1496,6 +1513,24 @@ pub(crate) fn boot_safe_once_action() -> UiAction {
     .with_label("Start in safe mode")
 }
 
+/// Read the device's storage over the bootloader and download it as a ZIP.
+///
+/// No confirmation: nothing is written. It is deliberately the row people
+/// meet BEFORE the destructive verbs, because it is what makes them
+/// survivable — see `DeviceOp::BackUpFilesystem`.
+pub(crate) fn back_up_filesystem_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::BackUpFilesystem,
+    )
+    .with_label("Download a backup")
+    .with_summary(
+        "Save everything on this device to a ZIP on your computer — this \
+         works even if the board will not start.",
+    )
+    .with_icon("download")
+}
+
 pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(
@@ -1782,6 +1817,11 @@ fn wire_card_affordance(
             CardSheetState::Confirm(CardVerb::Flash),
             strip_confirmation(flash_device_action_destructive()),
         )),
+        // Non-destructive, so it dispatches straight from the row — a
+        // confirm gate on "save a copy of your work" would be theatre.
+        DeviceDetailAffordance::BackUpFilesystem => {
+            Some(CardRowAction::from_action(back_up_filesystem_action()))
+        }
         DeviceDetailAffordance::EraseDevice => Some(CardRowAction::Sheet(
             CardSheetState::Confirm(CardVerb::Erase),
             strip_confirmation(erase_device_action(card.name.clone())),

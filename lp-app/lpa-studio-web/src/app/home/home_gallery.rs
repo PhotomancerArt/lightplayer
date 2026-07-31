@@ -44,6 +44,22 @@ pub fn HomeGallery(
     // pastes aimed at a text field — so ordinary typing is untouched
     // (see `gallery_paste`).
     let _paste_listener = use_hook(move || install_paste_listener(on_action));
+    // A finished device backup downloads exactly when its `seq` advances.
+    // The view is a full snapshot, so without this paint key every
+    // re-render would drop another copy of a megabyte-sized zip into the
+    // user's Downloads folder (same discipline as the agent debug dump).
+    let downloaded_backup_seq = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(0_u64)));
+    if let Some(backup) = &home.backup
+        && downloaded_backup_seq.get() < backup.seq
+    {
+        downloaded_backup_seq.set(backup.seq);
+        if let Err(error) = crate::app::home::package_export::trigger_zip_download(
+            &backup.file_name,
+            &backup.bytes,
+        ) {
+            log::warn!("device backup download failed: {error:?}");
+        }
+    }
     // only touch the browser's serial API when the caller didn't already
     // answer the grant question (stories always do — headless Chrome's
     // getPorts is crash-prone, and the probe is pointless there anyway)

@@ -10,6 +10,9 @@ use zip::write::SimpleFileOptions;
 
 use super::backup_image::{BackupFile, read_image_files};
 use super::backup_manifest::{BACKUP_FORMAT_VERSION, BackupManifest};
+// The device's identity stamp is INSIDE lpfs, so it is inside every backup.
+// One definition of where it lives, shared with the pull path.
+use crate::app::places::DEVICE_IDENTITY_PATH;
 
 /// Where the device's own files live inside the archive.
 ///
@@ -21,11 +24,6 @@ pub const ARCHIVE_FILES_ROOT: &str = "files";
 
 /// The manifest's name at the archive root.
 pub const ARCHIVE_MANIFEST_NAME: &str = "manifest.json";
-
-/// The device's identity stamp, inside `lpfs` and therefore inside every
-/// backup. Mirrors `lpa_server::DEVICE_IDENTITY_PATH` — this crate does not
-/// depend on `lpa-server` at runtime, and the path is device-side vocabulary.
-const DEVICE_IDENTITY_PATH: &str = "/.lp/device.json";
 
 /// A finished backup: the bytes, the name to offer them under, and the
 /// manifest that went inside (kept so the UI can narrate without re-reading
