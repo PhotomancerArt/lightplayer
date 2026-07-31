@@ -146,9 +146,10 @@ impl ControllerOp for DeviceOp {
                 "Flash firmware",
             )),
             Self::BootSafeOnce => ActionMeta::new(
-                "Start without the project",
-                "Have this device start once without loading its project, so a \
-                 project that stops it from running can be fixed.",
+                "Start in safe mode",
+                "Have this device start once in safe mode — dim, or with \
+                 nothing loaded on older firmware — so a project that stops \
+                 it from running can be fixed.",
                 ActionPriority::Secondary,
             ),
             Self::ProbeBootloaderMode { .. } => ActionMeta::new(

@@ -207,7 +207,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 /// board is inert.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RecoveryFace(on_action: EventHandler<UiAction>) -> Element {
+fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element {
     rsx! {
         div { class: "tw:mt-1 tw:grid tw:gap-3",
             div { class: "tw:grid tw:gap-1",
@@ -231,7 +231,7 @@ fn RecoveryFace(on_action: EventHandler<UiAction>) -> Element {
             div { class: "tw:grid tw:gap-1",
                 div {
                     CardSheetButton {
-                        label: "Start without the project",
+                        label: "Start in safe mode",
                         tone: SheetButtonTone::Quiet,
                         onclick: {
                             let action = boot_safe_once_action();
@@ -241,9 +241,27 @@ fn RecoveryFace(on_action: EventHandler<UiAction>) -> Element {
                 }
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
                     "Already runs LightPlayer, but its project stops it from "
-                    "starting? Boot once with nothing loaded, then fix or "
-                    "replace the project."
+                    "starting? Start once with the LEDs dimmed so you can "
+                    "connect and fix the project."
                 }
+            }
+            // Wayfinding, not another verb: everything else recovery-shaped
+            // (wipe, erase, and — once they land — backup/restore) lives in
+            // the danger zone, and a user on this face should not have to
+            // know that.
+            button {
+                class: "tw:cursor-pointer tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-xs tw:text-muted-foreground tw:underline tw:decoration-dotted tw:hover:text-strong-foreground",
+                r#type: "button",
+                onclick: {
+                    let card_key = card_key.clone();
+                    move |_| {
+                        on_action.call(home_action(HomeOp::CardUi(CardUiOp::SelectTab {
+                            card: card_key.clone(),
+                            tab: DeviceCardTab::Danger,
+                        })));
+                    }
+                },
+                "More options — wipe, erase, or troubleshoot…"
             }
         }
     }
@@ -924,7 +942,7 @@ fn status_tab_body(
                 on_action,
             }
         } else if recovery_face {
-            RecoveryFace { on_action }
+            RecoveryFace { card_key: card_key.to_string(), on_action }
         } else {
             for section in health {
                 for row in section.affordances.iter() {
@@ -1098,7 +1116,7 @@ fn TroubleshootSheet(
                 li { "Unplug the device, plug it back in, then Reconnect." }
                 li {
                     "If it was fine until you changed the project, the project may be "
-                    "stopping it from starting — start it once without loading it."
+                    "stopping it from starting — start it once in safe mode."
                 }
             }
             div { class: "tw:mb-3 tw:rounded tw:border tw:border-line tw:p-2",
@@ -1129,7 +1147,7 @@ fn TroubleshootSheet(
                     },
                 }
                 CardSheetButton {
-                    label: "Start without the project",
+                    label: "Start in safe mode",
                     tone: SheetButtonTone::Quiet,
                     onclick: {
                         let card_key = card_key.clone();
@@ -1471,7 +1489,7 @@ pub(crate) fn boot_safe_once_action() -> UiAction {
         ControllerId::new(DeviceController::NODE_ID),
         DeviceOp::BootSafeOnce,
     )
-    .with_label("Start without the project")
+    .with_label("Start in safe mode")
 }
 
 pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {

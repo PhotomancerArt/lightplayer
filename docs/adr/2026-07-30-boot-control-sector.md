@@ -89,9 +89,21 @@ means a crash *during* the recovery boot cannot make it sticky. The failure
 mode traded for is an erase that fails, which strands the device reachable
 with no project loaded: the safe direction, and itself recoverable.
 
-**Unknown flag bits are ignored, not rejected.** Bits `8..16` are reserved
-for the follow-up plan's graduated output clamp. A newer host asking for a
-clamp this firmware cannot apply still gets the skip it also asked for.
+**Unknown flag bits are ignored, not rejected.** A newer host asking for
+something this firmware cannot apply still gets the instructions it does
+understand.
+
+**Amendment 2026-07-31 — the safe-mode clamp bits are assigned.** Bits
+`8..16` now carry a safe-mode output clamp level (`0` = none, else a
+brightness ceiling out of 255), with a precedence rule defined in the
+format: *a firmware that implements the clamp loads the project dimmed and
+ignores the skip bit* — a dim, visible board is a strictly better
+degradation than a dark one. Studio's "Start in safe mode" writes BOTH the
+skip and a dim clamp, so the same record means "nothing loaded" on firmware
+that predates the clamp and upgrades to "project running dim" when the
+clamp lands, with no format bump and no Studio change. Firmware consumption
+of the clamp remains with the follow-up plan (it shares the output path
+with the fixture mA limiter).
 
 ## Consequences
 
