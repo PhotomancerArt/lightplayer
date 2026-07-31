@@ -68,6 +68,15 @@ extern "C" {
         esptool_module_path: &str,
         on_event: &Function,
     ) -> Promise;
+
+    #[wasm_bindgen(js_name = writeBootControl)]
+    fn js_write_boot_control(
+        port_id: u32,
+        esptool_module_path: &str,
+        address: u32,
+        record: &[u8],
+        on_event: &Function,
+    ) -> Promise;
 }
 
 pub fn is_supported() -> bool {
@@ -114,6 +123,35 @@ pub async fn erase_device_flash_with_events(
     let value = JsFuture::from(js_erase_device_flash(
         port_id,
         esptool_module_path,
+        on_event.as_ref().unchecked_ref(),
+    ))
+    .await
+    .map_err(js_error)?;
+    Ok(BrowserEsp32EraseResult {
+        chip_name: reflect_optional_string(&value, "chipName")?,
+        logs: reflect_string_array(&value, "logs")?,
+        progress: reflect_progress_array(&value, "progress")?,
+    })
+}
+
+/// Write the boot-control record, instructing the device's next boot.
+///
+/// The record is encoded here, in Rust, and handed to JS as bytes — the
+/// firmware that reads it cannot renegotiate the format at runtime, so
+/// `lp-bootctl` stays the single implementation of it.
+pub async fn write_boot_control_with_events(
+    port_id: u32,
+    esptool_module_path: &str,
+    flags: lp_bootctl::BootFlags,
+    events: LinkManagementEventSink,
+) -> Result<BrowserEsp32EraseResult, LinkError> {
+    let on_event = management_event_callback(events);
+    let record = lp_bootctl::encode_record(flags);
+    let value = JsFuture::from(js_write_boot_control(
+        port_id,
+        esptool_module_path,
+        lp_bootctl::BOOTCTL_PARTITION_OFFSET,
+        &record,
         on_event.as_ref().unchecked_ref(),
     ))
     .await

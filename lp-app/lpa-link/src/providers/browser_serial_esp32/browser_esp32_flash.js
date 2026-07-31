@@ -189,6 +189,83 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
   }
 }
 
+/**
+ * Write the boot-control record — an instruction to the device's next boot,
+ * delivered through flash because a device that cannot boot has no other
+ * channel.
+ *
+ * `record` arrives already encoded (magic, version, flags, CRC) from
+ * `lp-bootctl` on the Rust side. Do NOT reconstruct it here: the firmware
+ * that reads these bytes cannot renegotiate the format at runtime, so one
+ * implementation of it is the point.
+ *
+ * One `writeFlash` call, deliberately. Its FLASH_BEGIN erases the sectors it
+ * is about to write, so splitting the record across two writes would have the
+ * second erase the first.
+ */
+export async function writeBootControl(portId, esptoolModulePath, address, record, onEvent) {
+  if (!isSupported()) {
+    throw new Error("Web Serial boot-control write is not supported in this browser.");
+  }
+
+  const logs = [];
+  const progress = [];
+  const terminal = terminalFor(logs, "esp32-bootctl", onEvent);
+  try {
+    const port = getPort(portId);
+    await releasePort(portId);
+
+    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
+    const loader = new ESPLoader({
+      transport,
+      baudrate: 115200,
+      terminal,
+      debugLogging: false,
+    });
+
+    try {
+      const chipName = await loader.main();
+      pushProgress(progress, onEvent, {
+        label: "Connected to ESP32 bootloader",
+        completedSteps: 1,
+        totalSteps: 2,
+        percent: 25,
+      });
+      await loader.writeFlash({
+        fileArray: [{ data: new Uint8Array(record), address }],
+        flashSize: "keep",
+        flashMode: "keep",
+        flashFreq: "keep",
+        eraseAll: false,
+        compress: false,
+      });
+      assertNoFlashCommunicationWarning(logs, "Boot-control write");
+      pushProgress(progress, onEvent, {
+        label: "Boot-control record written",
+        completedSteps: 2,
+        totalSteps: 2,
+        percent: 100,
+      });
+      await loader.after("hard_reset");
+      return {
+        chipName: chipName ? String(chipName) : null,
+        logs,
+        progress: compactProgress(progress),
+      };
+    } finally {
+      try {
+        await transport.disconnect();
+      } catch (error) {
+        console.warn("[esp32-bootctl] transport disconnect failed", error);
+      }
+    }
+  } catch (error) {
+    reportFailure("esp32-bootctl", error, onEvent);
+    throw error;
+  }
+}
+
 function assertNoFlashCommunicationWarning(logs, context) {
   const warning = logs.find((line) =>
     line.includes("Failed to communicate with the flash chip") ||
