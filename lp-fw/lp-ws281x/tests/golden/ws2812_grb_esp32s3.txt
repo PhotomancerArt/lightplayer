@@ -1,0 +1,31 @@
+# Hardware-derived golden vector — do not hand-edit.
+# Repo rule: golden vectors are hardware-verified or assembler-derived only.
+#
+# Provenance:
+#   chip:     ESP32-S3 (rev v0.2), RMT peripheral, 80 MHz clock, divider 1
+#             (12.5 ns per tick)
+#   captured: 2026-07-29 by the P3 loopback self-test
+#             (fw/led-lab-esp32s3, feature `test_loopback`): TX channel 0 on
+#             GPIO4 routed into RX channel 4 through the GPIO matrix via
+#             esp-hal `Flex::split` — no wire; serial `E3: MEASURE golden_*`
+#             lines transcribed verbatim
+#   re-derived: 2026-07-29 by that harness's P4 successor, which transmits on
+#             all four channels at once (`E4: MEASURE golden_*`, channel 0).
+#             Byte-for-byte identical — three neighbouring channels refilling
+#             through the same interrupt handler do not perturb the waveform.
+#   config:   lp_ws281x::ChannelTiming::WS2812 (T0H 400 ns / T0L 850 ns,
+#             T1H 800 ns / T1L 450 ns, latch 300 us), ColorOrder::Grb
+#   frame:    RGB bytes A5 3C 0F 01 80 FF (2 LEDs)
+#   wire:     GRB byte order => 3C A5 0F 80 01 FF
+#
+# Each token is one pulse: H<ticks> high or L<ticks> low, in 12.5 ns ticks,
+# transmission order; 48 H/L pairs, one per wire bit. The final bit's low is
+# recorded as L0: the receiver's idle threshold (30000 ticks = 375 us) expired
+# during it, i.e. the line stayed low for at least 30000 ticks — which bounds
+# the configured 24000-tick latch from below.
+H32 L68 H32 L68 H64 L36 H64 L36 H64 L36 H64 L36 H32 L68 H32 L68
+H64 L36 H32 L68 H64 L36 H32 L68 H32 L68 H64 L36 H32 L68 H64 L36
+H32 L68 H32 L68 H32 L68 H32 L68 H64 L36 H64 L36 H64 L36 H64 L36
+H64 L36 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68
+H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H64 L36
+H64 L36 H64 L36 H64 L36 H64 L36 H64 L36 H64 L36 H64 L36 H64 L0
