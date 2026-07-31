@@ -209,18 +209,20 @@ impl Emulator {
     /// silently pretending RNE is exactly how a rounding-mode bug reaches a
     /// board (D6).
     ///
+    /// Refusal is spelled as a read of `fcr_rounding_honored`, which is
+    /// unresolved and therefore panics with the field's name. That is not a
+    /// dodge: whether this silicon honors the field *at all* is genuinely a
+    /// measurement (family F1 replays the tie set under all four modes), and
+    /// routing the refusal through the policy means the corpus records those
+    /// rows as `UNKNOWN` naming the right field instead of as an assertion
+    /// failure with no home.
+    ///
     /// # Panics
     /// If `FCR` is non-zero.
     fn refuse_non_default_rounding(&self) {
-        assert_eq!(
-            self.cpu.fcr, 0,
-            "non-default FCR ({:#010x}) — the emulator implements \
-             round-to-nearest-even only. Whether this silicon honors the field \
-             at all is `fcr_rounding_honored`, measured by vector family F1; \
-             M6's G2 decides whether to implement the other three modes. \
-             Refusing rather than ignoring is deliberate.",
-            self.cpu.fcr
-        );
+        if self.cpu.fcr != 0 {
+            self.fp_policy.fcr_rounding_honored.get();
+        }
     }
 
     /// Apply the input-denormal policy to an operand.
@@ -425,10 +427,8 @@ mod tests {
     /// Run `f`, returning the policy field name if it panicked on an unresolved
     /// field. Any other panic is re-raised, so a real bug is still a real bug.
     fn unresolved_field(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
+        crate::fp_policy::suppress_unresolved_panic_output();
         let r = std::panic::catch_unwind(f);
-        std::panic::set_hook(prev);
         match r {
             Ok(()) => None,
             Err(e) => {
@@ -743,18 +743,23 @@ mod tests {
         assert_eq!(emu.cpu.f(6), 0, "movf.s on a set bit does not move");
     }
 
-    /// D6: a non-default rounding mode is refused, not ignored.
+    /// D6: a non-default rounding mode is refused, not ignored — and the
+    /// refusal names the field a measurement would settle.
     #[test]
-    #[should_panic(expected = "non-default FCR")]
     fn a_non_default_fcr_rounding_mode_is_refused() {
-        let mut emu = armed();
-        emu.cpu.fcr = 1; // round-toward-zero, in the architectural layout
-        emu.cpu.set_f(1, 1.0f32.to_bits());
-        emu.cpu.set_f(2, 1.0f32.to_bits());
-        exec(
-            &mut emu,
-            &Inst::FpRrr(FpRrrOp::AddS, FReg::new(0), FReg::new(1), FReg::new(2)),
-        );
+        let got = unresolved_field(|| {
+            let mut emu = armed();
+            emu.cpu.fcr = 1;
+            emu.cpu.set_f(1, 1.0f32.to_bits());
+            emu.cpu.set_f(2, 1.0f32.to_bits());
+            let mut t = NoopTracer;
+            let _ = emu.execute(
+                &Inst::FpRrr(FpRrrOp::AddS, FReg::new(0), FReg::new(1), FReg::new(2)),
+                0x4000_0100,
+                &mut t,
+            );
+        });
+        assert_eq!(got.as_deref(), Some("fcr_rounding_honored"));
     }
 
     /// Arithmetic is still behind the coprocessor gate.

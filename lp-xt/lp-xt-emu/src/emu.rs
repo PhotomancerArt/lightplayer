@@ -397,6 +397,48 @@ impl Emulator {
         self.cpu.pc = entry;
     }
 
+    /// Execute one already-decoded instruction against the current state,
+    /// advancing `pc` as the run loop would.
+    ///
+    /// The entry point for single-instruction harnesses — specifically
+    /// `tests/fp_conformance.rs`, which replays tens of thousands of FP vectors
+    /// and has no code image to fetch from. Real runs go through
+    /// [`run`](Self::run) and its siblings; this deliberately skips the fetch,
+    /// the decode, and the instruction log, so it is not a substitute for them.
+    ///
+    /// Instruction and cycle counters advance, so a harness can still read them.
+    pub fn exec_one(&mut self, inst: &lp_xt_inst::Inst) -> Result<(), Trap> {
+        let mut t = crate::trace::NoopTracer;
+        self.exec_one_traced(inst, &mut t)
+    }
+
+    /// As [`exec_one`](Self::exec_one), emitting [`TraceEvent`]s.
+    pub fn exec_one_traced(
+        &mut self,
+        inst: &lp_xt_inst::Inst,
+        tracer: &mut dyn Tracer,
+    ) -> Result<(), Trap> {
+        let pc = self.cpu.pc;
+        let flow = self.execute(inst, pc, tracer).map_err(|mut trap| {
+            if trap.pc == 0 {
+                trap.pc = pc;
+            }
+            trap
+        })?;
+        self.instruction_count += 1;
+        self.cycle_count += u64::from(
+            self.cycle_model
+                .cycles_for(crate::executor::inst_class(inst, &flow)),
+        );
+        match flow {
+            // Width is not known without the encoding; 3 is the wide form and
+            // the only thing a straight-line harness needs it for is progress.
+            Flow::Next | Flow::Syscall => self.cpu.pc = pc.wrapping_add(3),
+            Flow::Jump(addr) => self.cpu.pc = addr,
+        }
+        Ok(())
+    }
+
     fn run_loop(
         &mut self,
         tracer: &mut dyn Tracer,

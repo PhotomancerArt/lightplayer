@@ -184,6 +184,37 @@ P6. A non-default `FCR` is likewise **refused**, not ignored (D6).
 ROMs; they sit behind an empty table that P6 extracts exhaustively, so they
 become exact by construction. There is deliberately no polynomial placeholder.
 
+### `tests/fp_conformance.rs` — the replay, with no board
+
+```bash
+cargo test -p lp-xt-emu --test fp_conformance -- --nocapture
+```
+
+Runs every vector of [`lp-xt-fp-vectors`](../lp-xt-fp-vectors)' six families
+through the emulator and compares to the predictions committed under
+`tests/fixtures/fp/`. It needs no feature flag and no hardware: `lp-xt-emu` is in
+`default-members`, so plain `cargo test` (and therefore `just test-rust-core`,
+`just test`, and CI's Validate job) runs it. That is deliberate — a corpus wired
+behind a stale `--test` allowlist has twice in this repo "reported success by
+executing nothing".
+
+**An `UNKNOWN:<field>` row is not a failure.** It is a question addressed to
+silicon, naming the policy field that closes it, and the set is *derived* — the
+harness catches the policy panic and reads the field name out of it, so it
+cannot drift from what the executors actually need. Today: **4305 of 5630 rows
+UNKNOWN (76.5%)**, and the test asserts the count is not zero, because zero
+before the campaign would mean the policy layer had quietly acquired defaults.
+
+To regenerate after a generator or executor change:
+
+```bash
+UPDATE_FP_GOLDENS=1 cargo test -p lp-xt-emu --test fp_conformance
+```
+
+**Never** regenerate a row from device output. That inverts the test into a
+tautology that passes forever, and it is already the repo's stated rule
+(`lpvm-native/src/xt_corpus.rs`).
+
 ## Run API
 
 `Emulator::run(code, entry_offset, arg)` loads `code` into SRAM1 and invokes it

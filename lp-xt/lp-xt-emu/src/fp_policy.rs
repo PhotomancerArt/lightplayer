@@ -136,6 +136,34 @@ pub fn parse_unresolved(msg: &str) -> Option<&str> {
     rest.split('`').next()
 }
 
+/// Install a panic hook that prints nothing for an [`Unknown::get`] panic and
+/// defers to the previous hook for everything else. Idempotent.
+///
+/// A harness that expects thousands of these — `tests/fp_conformance.rs` — would
+/// otherwise bury its own output in backtraces. Installed **once**, globally,
+/// rather than swapped around each `catch_unwind`: the hook is process-wide
+/// state, and swapping it per call races with any other test running
+/// concurrently, which shows up as one test's panic printing under another's
+/// name.
+pub fn suppress_unresolved_panic_output() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let msg = info
+                .payload()
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| info.payload().downcast_ref::<&str>().copied())
+                .unwrap_or("");
+            if parse_unresolved(msg).is_none() {
+                prev(info);
+            }
+        }));
+    });
+}
+
 /// Which NaN survives an operation with one or more NaN operands.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NanRule {
