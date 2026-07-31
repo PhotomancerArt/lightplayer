@@ -250,7 +250,11 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
             // the danger zone, and a user on this face should not have to
             // know that.
             button {
-                class: "tw:cursor-pointer tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-xs tw:text-muted-foreground tw:underline tw:decoration-dotted tw:hover:text-strong-foreground",
+                // No underline: at this size a dotted underline through two
+                // wrapped lines reads as STRIKETHROUGH — struck-out "wipe,
+                // erase" is exactly the wrong signal. The arrow + hover
+                // carry the clickability.
+                class: "tw:cursor-pointer tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-xs tw:text-muted-foreground tw:hover:text-strong-foreground tw:hover:underline",
                 r#type: "button",
                 onclick: {
                     let card_key = card_key.clone();
@@ -261,7 +265,7 @@ fn RecoveryFace(card_key: String, on_action: EventHandler<UiAction>) -> Element 
                         })));
                     }
                 },
-                "More options — wipe, erase, or troubleshoot…"
+                "More options — wipe, erase, or troubleshoot →"
             }
         }
     }
