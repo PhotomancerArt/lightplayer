@@ -989,6 +989,9 @@ mod tests {
 
     #[test]
     fn project_format_probe_reads_top_level_format() {
+        // Deliberately not PROJECT_FORMAT_VERSION: the probe reports whatever
+        // the file says, and the gate compares — the probe must not know the
+        // current version.
         let probe = read_project_format_json(r#"{ "kind": "Project", "format": 1, "nodes": {} }"#)
             .expect("probe");
         assert_eq!(probe, ProjectFormatProbe::Project { format: Some(1) });
