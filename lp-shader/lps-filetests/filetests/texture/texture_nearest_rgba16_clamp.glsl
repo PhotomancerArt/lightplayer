@@ -21,13 +21,9 @@ vec4 sample_right_edge() {
 // u<0 → column 0; u>1 → column 1
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: sample_left_edge() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0003)
 // interp.f32: no guest memory to bind texture fixtures into
 // wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: sample_right_edge() ~= vec4(0.0, 1.0, 0.0, 1.0) (tolerance: 0.0003)

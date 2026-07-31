@@ -14,9 +14,6 @@ float test_asinh_zero() {
     return asinh(rt(0.0));
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_asinh_zero() ~= 0.0
 
 float test_asinh_one() {
@@ -24,7 +21,6 @@ float test_asinh_one() {
     return asinh(rt(1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_asinh_one() ~= 0.881373587019543
 
 float test_asinh_neg_one() {
@@ -32,7 +28,6 @@ float test_asinh_neg_one() {
     return asinh(rt(-1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_asinh_neg_one() ~= -0.881373587019543
 
 float test_asinh_two() {
@@ -40,7 +35,6 @@ float test_asinh_two() {
     return asinh(rt(2.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_asinh_two() ~= 1.4436354751788103
 
 float test_asinh_neg_two() {
@@ -48,7 +42,6 @@ float test_asinh_neg_two() {
     return asinh(rt(-2.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_asinh_neg_two() ~= -1.4436354751788103
 
 float test_asinh_sinh_one() {
@@ -56,7 +49,6 @@ float test_asinh_sinh_one() {
     return asinh(rt(sinh(1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_asinh_sinh_one() ~= 1.0
 
 vec2 test_asinh_vec2() {
@@ -64,7 +56,6 @@ vec2 test_asinh_vec2() {
     return asinh(vec2(rt(0.0), rt(1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_asinh_vec2() ~= vec2(0.0, 0.881373587019543)
 
 vec3 test_asinh_vec3() {
@@ -72,7 +63,6 @@ vec3 test_asinh_vec3() {
     return asinh(vec3(rt(0.0), rt(1.0), rt(-1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_asinh_vec3() ~= vec3(0.0, 0.881373587019543, -0.881373587019543)
 
 vec4 test_asinh_vec4() {
@@ -80,7 +70,6 @@ vec4 test_asinh_vec4() {
     return asinh(vec4(rt(0.0), rt(0.5), rt(1.0), rt(-0.5)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_asinh_vec4() ~= vec4(0.0, 0.48121182505960347, 0.881373587019543, -0.48121182505960347)
 
 
