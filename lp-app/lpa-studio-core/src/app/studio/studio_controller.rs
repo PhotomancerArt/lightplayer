@@ -4222,7 +4222,8 @@ impl StudioController {
                 reconnect_detail: if from_recovery {
                     "Unplug the board and plug it back in to start it"
                 } else {
-                    "Restarting in safe mode"
+                    "Restarting in safe mode — if it doesn't reconnect in a \
+                     few seconds, unplug the board and plug it back in"
                 },
                 failed_exit_label: "Back to device",
                 record_captured_logs_on_success: false,
@@ -4233,9 +4234,17 @@ impl StudioController {
                      it will start dim, or with nothing loaded on older \
                      firmware."
                 } else {
-                    "Safe mode armed; reconnect after the device finishes booting"
+                    "Safe mode armed. If the board doesn't reconnect on its \
+                     own, unplug it and plug it back in."
                 },
-                awaits_manual_replug: from_recovery,
+                // ALWAYS the awaiting ending, both modes (bench 2026-07-31):
+                // from app mode the board normally returns by itself and a
+                // successful reattach clears the op — but when the reattach
+                // misses (USB re-enumeration races the rebuild), a bare
+                // "Not seen yet" offline card with no guidance is the worst
+                // of the endings. An instruction that self-clears on success
+                // costs nothing when the happy path lands.
+                awaits_manual_replug: true,
                 // Nothing is erased — the project is still on the device and
                 // the editor's lens stays valid.
                 severs_lens: false,
