@@ -104,13 +104,12 @@ impl DeviceSession {
     pub fn snapshot(&self) -> DeviceSnapshot {
         let state = self.shared.state();
         let session = self.shared.session.borrow().clone();
-        let classifier = self.shared.classifier.borrow();
-        let link_mode = DeviceLinkMode::from_boot_lines(&classifier, state.is_ready());
+        let link_mode = self.shared.passive_link_mode();
         DeviceSnapshot {
             endpoint_status: DeviceSnapshot::derive_endpoint_status(&state, &session),
             state,
             session,
-            recent_lines: classifier.recent_lines().to_vec(),
+            recent_lines: self.shared.classifier.borrow().recent_lines().to_vec(),
             link_mode,
         }
     }
@@ -223,6 +222,13 @@ pub(crate) struct DeviceShared {
 }
 
 impl DeviceShared {
+    /// The passive link-mode read: what boot lines and the hello say,
+    /// without probing. See [`DeviceLinkMode::from_boot_lines`].
+    pub(super) fn passive_link_mode(&self) -> DeviceLinkMode {
+        let classifier = self.classifier.borrow();
+        DeviceLinkMode::from_boot_lines(&classifier, self.state().is_ready())
+    }
+
     pub(crate) fn state(&self) -> DeviceState {
         self.state.borrow().clone()
     }

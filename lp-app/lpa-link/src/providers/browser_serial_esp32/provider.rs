@@ -404,6 +404,18 @@ impl BrowserSerialEsp32Provider {
             .map(|state| state.endpoint.id.clone())
     }
 
+    /// Session-scoped [`Self::probe_target`], for the connector's
+    /// mode-detection escalation. Releases the app-protocol port first: the
+    /// SYNC handshake needs the wire to itself and reboots the device.
+    pub async fn probe_target_for_session(
+        &self,
+        session_id: &LinkSessionId,
+    ) -> Result<BrowserEsp32ProbeResult, LinkError> {
+        self.release_protocol_if_open(session_id).await?;
+        let port_id = self.session_port_id(session_id)?;
+        browser_esp32_flash::probe_target(port_id, self.options.esptool_module_path()).await
+    }
+
     fn session_port_id(&self, session_id: &LinkSessionId) -> Result<u32, LinkError> {
         let sessions = self.sessions.borrow();
         Ok(session_state(&sessions, session_id)?.port_id)
