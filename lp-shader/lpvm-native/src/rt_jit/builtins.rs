@@ -20,11 +20,20 @@ impl BuiltinTable {
         }
     }
 
-    /// Insert all builtins (uses the same symbol names as the ELF link path).
+    /// Insert every builtin this image actually links (same symbol names as the
+    /// ELF link path).
+    ///
+    /// Builtins behind a disabled feature — the native-f32 family without
+    /// `float-f32` — have no address and are skipped. A shader that genuinely
+    /// needs one then fails relocation with a named "unknown builtin symbol",
+    /// which is diagnosable; the alternative of asking for the address anyway
+    /// aborts a Fixed-only firmware image at boot, because this loop walks
+    /// every id.
     pub fn populate(&mut self) {
         for bid in BuiltinId::all() {
-            let p = jit_builtin_code_ptr(*bid);
-            self.symbols.insert(String::from(bid.name()), p as usize);
+            if let Some(p) = jit_builtin_code_ptr(*bid) {
+                self.symbols.insert(String::from(bid.name()), p as usize);
+            }
         }
     }
 
