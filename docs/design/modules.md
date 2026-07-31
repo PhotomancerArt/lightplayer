@@ -253,8 +253,9 @@ clearing the corresponding persisted entries (R13).
 
 ### R13 — Persistence
 
-Panel state persists by default in `state.json` beside the project —
-never in authored artifacts. Writes are **throttled (≥ ~10 s apart)** for
+Panel state persists by default in `.lp/state.json` in the project
+folder — never in authored artifacts. Writes are **throttled (≥ ~10 s
+apart)** for
 flash preservation on device. Auto-save is on by default with a user
 toggle; reset clears persisted entries.
 
@@ -421,6 +422,9 @@ state and the reset gesture (R11/R12); the drop-time contention pick (E3).
 
 ## 6. File layout
 
+Two ownership tiers, and only two: everything in the project folder is
+**user-owned content** except the single framework-owned `.lp/` directory.
+
 ```text
 my-project/
 ├─ project.json          # container manifest — NOT a node:
@@ -428,12 +432,15 @@ my-project/
 ├─ module.json           # root module node: nodes{}, bindings, exports,
 │                        #   per-channel meta overrides (R9), optional provenance
 ├─ shader.json …         # child nodes, one file per node (unchanged)
+├─ effect/               # a LOCAL sub-module: any folder with a module.json,
+│                        #   referenced by explicit path — no blessed location
 ├─ modules/
-│  └─ plasma/            # a vendored module: a module folder, nothing more
+│  └─ plasma/            # an IMPORTED module: visible, committed, copy-to-own
 │     ├─ module.json     #   (no project.json, no format — see below)
 │     └─ …
-└─ state.json            # panel state (R13) — unauthored, throttled,
-                         #   never dirty-tracked, safe to delete
+└─ .lp/                  # the ONE framework-owned dir: never authored,
+   └─ state.json         #   always safe to delete (panel state per R13;
+                         #   future caches/locks land here, never beside content)
 ```
 
 - `format` lives **only** in `project.json` — module folders never carry
@@ -441,6 +448,16 @@ my-project/
   folder opened standalone is wrapped in a workbench project
   (starter-project seam) and assumed current — cross-version module
   *sharing* keeps the alpha posture: version + refuse, never migrate.
+- **Imported modules are copy-to-own** (the shadcn model): once vendored,
+  the source is the user's — readable, editable, committed; provenance
+  (R14), not the directory, records origin. `modules/` is Studio's
+  default import target and pure convention — refs are explicit paths, so
+  any folder with a `module.json` is a module wherever it sits. If
+  import-by-reference ever exists, read-only dependency storage goes
+  *outside* the project (shared library + cache), not into a hidden
+  in-tree dir.
+- `.lp/` is a project-folder concept; the device keeps its own filesystem
+  conventions and needs only the panel-state *data*, not the layout.
 - `state.json` shape (proposed, Q3): a versioned map of
   `scope-path / channel → { value, engaged }`. Scope paths are node
   paths, so vendoring/renames invalidate entries gracefully (unknown
