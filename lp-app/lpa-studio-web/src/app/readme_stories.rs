@@ -300,5 +300,6 @@ fn readme_home_view() -> UiHomeView {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     }
 }
