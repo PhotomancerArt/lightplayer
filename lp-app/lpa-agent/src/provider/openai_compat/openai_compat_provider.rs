@@ -26,12 +26,6 @@ use crate::provider::sse_parser::{SseEvent, SseParser};
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 /// The stream's terminator payload.
 const DONE_PAYLOAD: &str = "[DONE]";
-/// Per-turn output ceiling (`max_completion_tokens`). Deliberately
-/// conservative — this dialect serves arbitrary compat servers and local
-/// models, many of which reject or misbehave on large values — so compat
-/// keeps the historic 8k budget instead of following the Anthropic
-/// provider's 32k raise (`ANTHROPIC_MAX_OUTPUT_TOKENS`).
-pub const COMPAT_MAX_COMPLETION_TOKENS: u32 = 8_192;
 /// Backoff before the single retry.
 const RETRY_BACKOFF_MS: u32 = 500;
 /// Cap on how much of a non-2xx response body is read for the error message.
@@ -73,7 +67,16 @@ impl<T: HttpSseTransport> OpenAiCompatProvider<T> {
             stream_options: StreamOptions {
                 include_usage: true,
             },
-            max_completion_tokens: COMPAT_MAX_COMPLETION_TOKENS,
+            // No per-turn output ceiling is sent. This dialect serves
+            // arbitrary servers and local models, so any fixed number is a
+            // guess in both directions: too low silently truncates long
+            // edits mid-tool-call (a full shader payload does not fit in
+            // the 8k this used to send), too high is rejected or clamped by
+            // servers whose model max sits below it. Omitting the field
+            // lets each server apply its own model max, which is the answer
+            // we were trying to guess. Consequence: a runaway turn is
+            // bounded by the run's turn limit rather than a token ceiling.
+            max_completion_tokens: None,
             messages: wire_messages(&req.system, &req.messages),
             tools: req.tools.iter().map(WireTool::from_def).collect(),
         })
@@ -395,7 +398,8 @@ mod tests {
         );
         assert!(reqs[0].body.contains("\"stream\":true"));
         assert!(reqs[0].body.contains("\"include_usage\":true"));
-        assert!(reqs[0].body.contains("\"max_completion_tokens\":8192"));
+        // No output ceiling is sent: each server applies its own model max.
+        assert!(!reqs[0].body.contains("max_completion_tokens"));
     }
 
     #[test]
