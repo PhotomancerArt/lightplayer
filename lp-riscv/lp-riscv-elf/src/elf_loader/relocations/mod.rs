@@ -9,6 +9,8 @@ mod handlers;
 mod phase1;
 mod phase2;
 mod section;
+#[cfg(test)]
+mod tests;
 
 pub use phase1::analyze_relocations;
 pub use phase2::apply_relocations_phase2;
