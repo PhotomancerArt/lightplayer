@@ -1011,6 +1011,7 @@ fn TroubleshootSheet(
 ) -> Element {
     let reconnect = reconnect_device_action(uid);
     let recovery_flash = flash_device_action(false);
+    let boot_safe_once = boot_safe_once_action();
     rsx! {
         CardSheet {
             on_dismiss: {
@@ -1021,6 +1022,10 @@ fn TroubleshootSheet(
             ul { class: "tw:m-0 tw:mb-3 tw:grid tw:list-disc tw:gap-1 tw:pl-4 tw:text-xs tw:leading-normal tw:text-muted-foreground",
                 li { "Check the USB cable — charge-only cables never carry data." }
                 li { "Unplug the device, plug it back in, then Reconnect." }
+                li {
+                    "If it was fine until you changed the project, the project may be "
+                    "stopping it from starting — start it once without loading it."
+                }
                 li { "Still stuck? Hold BOOT while plugging in, then flash the firmware." }
             }
             div { class: "tw:grid tw:justify-end tw:gap-2",
@@ -1032,6 +1037,17 @@ fn TroubleshootSheet(
                         move |_| {
                             on_action.call(close_sheet_action(&card_key));
                             on_action.call(reconnect.clone());
+                        }
+                    },
+                }
+                CardSheetButton {
+                    label: "Start without the project",
+                    tone: SheetButtonTone::Quiet,
+                    onclick: {
+                        let card_key = card_key.clone();
+                        move |_| {
+                            on_action.call(close_sheet_action(&card_key));
+                            on_action.call(boot_safe_once.clone());
                         }
                     },
                 }
@@ -1260,6 +1276,16 @@ pub(crate) fn connect_device_action() -> UiAction {
 /// confirmation renders as the D41 sheet); with nothing connected it
 /// opens the recovery chooser (link-only open, no app attach), after
 /// which the card's own state carries the flow.
+/// Write the boot-control record so the device's next restart skips its
+/// project. Non-destructive and one-shot — see `DeviceOp::BootSafeOnce`.
+pub(crate) fn boot_safe_once_action() -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(DeviceController::NODE_ID),
+        DeviceOp::BootSafeOnce,
+    )
+    .with_label("Start without the project")
+}
+
 pub(crate) fn flash_device_action(device_connected: bool) -> UiAction {
     let action = if device_connected {
         UiAction::from_op(

@@ -51,6 +51,15 @@ pub enum DeviceOp {
     /// stays; the board lands on Connected-empty.
     WipeProject,
     ResetToBlank,
+    /// Write the boot-control record so the device's NEXT restart comes up
+    /// without loading a project (`lp-bootctl`).
+    ///
+    /// The escape for a project that stops its own device from running —
+    /// too bright, too power-hungry, or hanging the watchdog. Nothing is
+    /// erased and the instruction is one-shot: the device consumes it as it
+    /// boots, so the restart after that is normal again. That is why this is
+    /// NOT destructive and does not sever a lens, unlike `ResetToBlank`.
+    BootSafeOnce,
     DisconnectDevice,
     /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
     /// editor when the lens is on the sim, close the provider session
@@ -120,6 +129,12 @@ impl ControllerOp for DeviceOp {
                 "This will write LightPlayer firmware to the selected ESP32. Continue?",
                 "Flash firmware",
             )),
+            Self::BootSafeOnce => ActionMeta::new(
+                "Start without the project",
+                "Have this device start once without loading its project, so a \
+                 project that stops it from running can be fixed.",
+                ActionPriority::Secondary,
+            ),
             Self::WipeProject => ActionMeta::new(
                 "Wipe project",
                 "Delete the device's project storage; firmware stays.",
@@ -186,6 +201,7 @@ impl ControllerOp for DeviceOp {
             | Self::ProvisionFirmware { .. }
             | Self::WipeProject
             | Self::ResetToBlank
+            | Self::BootSafeOnce
             | Self::DisconnectDevice
             | Self::StopSimulator
             | Self::RefreshConnections => ActionClass::Recovery,
