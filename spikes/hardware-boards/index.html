@@ -1300,13 +1300,16 @@ const codeFor = i => {
   for (let d = 0, x = i; d < plan.half; d++) { half.push(PALETTE[x % plan.c]); x = Math.floor(x / plan.c); }
   return Array.from({ length: plan.n }, (_, k) => half[Math.min(k, plan.n - 1 - k)]);
 };
+// displayed pixels: K (off) between digits so runs read unambiguously; no
+// leading/trailing K — a short strip (even 3 LEDs) still shows 1-digit codes.
+const withSeps = code => code.flatMap((k, i) => i ? ["K", k] : [k]);
 const candidates = freePins.map((p, i) => ({ gpio: p.gpio, code: codeFor(i) }));
 
 let found = null;
 function renderDisco() {
   const sw = candidates
     .filter(c => found == null || c.gpio === found)
-    .map(c => ({ gpio: c.gpio, colors: c.code.map(k => COLOR[k]), sel: c.gpio === found }));
+    .map(c => ({ gpio: c.gpio, colors: withSeps(c.code).map(k => COLOR[k]), sel: c.gpio === found }));
   document.getElementById("discoBoard").innerHTML =
     renderBoard(c6, { mode: "swatch", u: 12, scale: 1.15, swatches: sw });
   document.getElementById("mathLine").innerHTML =
@@ -1314,11 +1317,12 @@ function renderDisco() {
      smallest covering <b>palindromic</b> code = <code>${plan.n} px × ${plan.c} colors</code>
      (${PALETTE.slice(0, plan.c).map(k => COLOR_NAME[k]).join(", ")}) =
      <code>${Math.pow(plan.c, plan.half)}</code> codes. Palindromes because the strip's
-     data direction is unknown — a code must read the same from either end. Shown steady on the first
-     ${plan.n === 1 ? "pixel" : plan.n + " pixels"}.</span>`;
+     data direction is unknown — a code must read the same from either end. Off pixels
+     separate the colors (no leading black, so short strips still work): steady on the
+     first <code>${plan.n * 2 - 1}</code> pixels.</span>`;
   document.getElementById("patList").innerHTML = candidates.map(c => `
     <button class="patbtn" data-gpio="${c.gpio}" aria-pressed="${found === c.gpio}">
-      <span class="dots">${c.code.map(k => `<i style="background:${COLOR[k]}"></i>`).join("")}</span>
+      <span class="dots">${withSeps(c.code).map(k => `<i style="background:${COLOR[k]}"></i>`).join("")}</span>
       <span class="pgpio">IO${c.gpio}</span>
     </button>`).join("");
   document.querySelectorAll(".patbtn").forEach(b => b.addEventListener("click", () => {

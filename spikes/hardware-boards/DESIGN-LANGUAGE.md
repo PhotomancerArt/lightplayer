@@ -61,10 +61,15 @@ USB-JTAG), `nc`, power/ctl, and pins already bound or reserved (onboard RGB).
   free pin. K bounds each repeat, W marks the center; palindrome ⇒ direction
   doesn't matter; K/W are permutation-invariant ⇒ the perceived row uniquely
   identifies the strip's color order (RGB/GRB/…).
-- **Code**: a pin's steady color sequence on the first `n` pixels. Codes are
-  **palindromes** — data direction is unknown, so a code and its reverse are
-  indistinguishable; a palindrome reads the same from either end.
-- **Code plan**: smallest `n px × c colors` with `c^ceil(n/2) ≥ free pins`
-  (a length-`n` palindrome has `ceil(n/2)` free digits), colors drawn in order
-  from the palette `R G B C M Y W`. E.g. 20 pins → `3 px × 5 colors` = 25
-  `X-Y-X` codes.
+- **Code**: a pin's steady color sequence. Codes are **palindromes** — data
+  direction is unknown, so a code and its reverse are indistinguishable; a
+  palindrome reads the same from either end. Displayed with **K (off) pixels
+  between digits** so color runs read unambiguously, but no leading/trailing K —
+  short strips (even 3 LEDs) must still show 1-digit codes. A `d`-digit code
+  occupies `2d−1` physical pixels.
+- **Code plan**: smallest `d digits × c colors` with `c^ceil(d/2) ≥ free pins`
+  (a length-`d` palindrome has `ceil(d/2)` free digits), colors drawn in order
+  from the palette `R G B C M Y W` (K is reserved as the separator). Even digit
+  counts are never optimal, so the ladder is 1 digit (1 px) → 3 digits (5 px) →
+  5 digits (9 px). E.g. 20 pins → `3 digits × 5 colors` = 25 `X·Y·X` codes on
+  5 pixels.
