@@ -61,6 +61,15 @@ pub enum DeviceOp {
     /// boots, so the restart after that is normal again. That is why this is
     /// NOT destructive and does not sever a lens, unlike `ResetToBlank`.
     BootSafeOnce,
+    /// Read the device's filesystem partition over the bootloader and hand
+    /// the user a ZIP of it.
+    ///
+    /// The rescue that has to happen BEFORE anything destructive: it works
+    /// on a board that cannot boot, because the bytes come off through the
+    /// ROM/stub bootloader rather than through the running server. Nothing
+    /// is written, so this is not destructive — but it does own the wire and
+    /// reboot the device, like every other management operation.
+    BackUpFilesystem,
     /// Ask the device whether a bootloader is listening, and fold the answer
     /// into the card's open bootloader-entry sheet.
     ///
@@ -152,6 +161,12 @@ impl ControllerOp for DeviceOp {
                  it from running can be fixed.",
                 ActionPriority::Secondary,
             ),
+            Self::BackUpFilesystem => ActionMeta::new(
+                "Download a backup",
+                "Copy everything on this device to a ZIP on your computer — \
+                 works even if the board will not start.",
+                ActionPriority::Secondary,
+            ),
             Self::ProbeBootloaderMode { .. } => ActionMeta::new(
                 "Check the device",
                 "Ask the device whether it is listening in recovery mode.",
@@ -165,8 +180,13 @@ impl ControllerOp for DeviceOp {
             .destructive()
             .with_confirmation(ActionConfirmation::new(
                 "Wipe the project",
-                "Studio can't read this content, so it can't be backed up — \
-                 wiping deletes it for good and leaves the board empty.",
+                // This used to say the content "can't be backed up". Since
+                // M6 that is false: a raw filesystem backup does not need
+                // Studio to understand the content, only to read the bytes.
+                // Pointing at the way out is the honest gate.
+                "Studio can't read this content, and wiping deletes it for \
+                 good. Download a backup first if you might want it — that \
+                 works even on content Studio can't open.",
                 "Wipe",
             )),
             Self::ResetToBlank => ActionMeta::new(
@@ -224,6 +244,7 @@ impl ControllerOp for DeviceOp {
             | Self::WipeProject
             | Self::ResetToBlank
             | Self::BootSafeOnce
+            | Self::BackUpFilesystem
             | Self::ProbeBootloaderMode { .. }
             | Self::DisconnectDevice
             | Self::StopSimulator
@@ -278,6 +299,7 @@ mod tests {
             DeviceOp::ResetDevice,
             DeviceOp::ProvisionFirmware { setup_name: None },
             DeviceOp::ResetToBlank,
+            DeviceOp::BackUpFilesystem,
             DeviceOp::DisconnectDevice,
             DeviceOp::StopSimulator,
             DeviceOp::RefreshConnections,

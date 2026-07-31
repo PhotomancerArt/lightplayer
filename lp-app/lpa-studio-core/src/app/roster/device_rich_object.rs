@@ -37,6 +37,10 @@ use super::roster_card_state::RosterCardState;
 pub enum DeviceDetailAffordance {
     /// A card-grammar affordance (per the direction state table).
     Roster(RosterAffordance),
+    /// Danger zone, live device: download a ZIP of the device's storage,
+    /// read raw over the bootloader. The non-destructive row that belongs
+    /// ABOVE the destructive ones — it is what makes them survivable.
+    BackUpFilesystem,
     /// Danger zone, live device: install/repair firmware.
     FlashFirmware,
     /// Danger zone, live device: wipe the flash (confirmed).
@@ -311,8 +315,27 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
     if affordances.is_empty() {
         return None;
     }
-    // Prepend: it is the non-destructive row, above the destructive verbs.
+    // Backup rides above the destructive verbs wherever a filesystem could
+    // be read (M6): the wire is attached, and the board has LightPlayer
+    // storage on it.
+    //
+    // NOT on a blank or foreign board — their `lpfs` is erased or was never
+    // written, so the row could only ever fail — and not on the offline /
+    // retrying / port-held cards, which have no wire to read over.
+    let can_back_up = !matches!(
+        input.state,
+        RosterCardState::ReadyToSetUp
+            | RosterCardState::OtherFirmware
+            | RosterCardState::Offline { .. }
+            | RosterCardState::ConnectingRetrying { .. }
+            | RosterCardState::InUseElsewhere
+    );
+    let backup = can_back_up.then_some(DeviceDetailAffordance::BackUpFilesystem);
+    // Prepend: these are the non-destructive rows, above the destructive
+    // verbs — and backup in particular is what makes those survivable, so it
+    // must be READ before them, not found after.
     let affordances: Vec<_> = core::iter::once(troubleshoot())
+        .chain(backup)
         .chain(affordances)
         .collect();
     Some(RichSection {
@@ -364,6 +387,9 @@ mod tests {
                 // (2026-07-31) — recovery must not be gated on the ladder
                 // having ended on Not-responding.
                 DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                // Backup is READ before the destructive verbs, because it is
+                // what makes them survivable (M6).
+                DeviceDetailAffordance::BackUpFilesystem,
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
@@ -418,6 +444,47 @@ mod tests {
             "the note explains, not just labels: {}",
             health.lines[1].value
         );
+    }
+
+    /// The state this milestone exists for: a board sitting in ROM download
+    /// mode, whose own project is what stopped it. Backup must be reachable
+    /// from here, and it must be READ before the verbs that destroy the
+    /// thing it saves.
+    #[test]
+    fn a_board_in_recovery_mode_can_back_up_before_it_is_flashed_or_erased() {
+        let mut input = input(&RosterCardState::RecoveryMode);
+        input.project_name = None;
+        input.fw = None;
+
+        let view = device_rich_object(&input);
+
+        assert_eq!(
+            view.sections.last().unwrap().affordances,
+            vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::BackUpFilesystem,
+                DeviceDetailAffordance::FlashFirmware,
+                DeviceDetailAffordance::EraseDevice,
+            ]
+        );
+    }
+
+    /// A blank or foreign board has no `lpfs` to read — the row could only
+    /// ever fail, so it is not offered.
+    #[test]
+    fn a_blank_or_foreign_board_is_offered_no_backup() {
+        for state in [RosterCardState::ReadyToSetUp, RosterCardState::OtherFirmware] {
+            let view = device_rich_object(&input(&state));
+            assert!(
+                !view
+                    .sections
+                    .last()
+                    .unwrap()
+                    .affordances
+                    .contains(&DeviceDetailAffordance::BackUpFilesystem),
+                "{state:?} has nothing to back up"
+            );
+        }
     }
 
     #[test]

@@ -178,6 +178,7 @@ mod tests {
             tabs[4].sections[0].affordances,
             vec![
                 DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::BackUpFilesystem,
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,

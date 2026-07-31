@@ -140,6 +140,14 @@ pub struct StudioController {
     /// card). One slot because the pool holds one hardware session; this
     /// grows into a per-identity map with the pool.
     device_card_op: Option<(Option<String>, Rc<RefCell<crate::CardOp>>)>,
+    /// The most recent finished device filesystem backup, carried on the
+    /// home view until the shell downloads it. Kept (rather than emitted and
+    /// forgotten) because the view is a full snapshot; `device_backup_seq` is
+    /// what stops a re-render from re-downloading it.
+    device_backup: Option<crate::UiDeviceBackup>,
+    /// Session-monotonic backup counter. Never reset — the shell compares it
+    /// against the last one it acted on.
+    device_backup_seq: u64,
     /// When the last sim crash auto-reboot ran (`None` = never). Epoch
     /// seconds on the injected clock; the flap guard: a second crash
     /// within [`SIM_CRASH_REBOOT_GUARD_SECS`] stays Failed for manual
@@ -217,6 +225,8 @@ impl StudioController {
             port_held_retry_at: None,
             card_ui: std::collections::HashMap::new(),
             device_card_op: None,
+            device_backup: None,
+            device_backup_seq: 0,
             sim_crash_reboot_at: None,
             random: Rc::new(clock_fallback_random),
             settings: crate::app::settings::SettingsStore::default(),
@@ -840,6 +850,7 @@ impl StudioController {
             .into_iter()
             .map(|card| self.overlay_card_ui(card))
             .collect();
+        view.backup = self.device_backup.clone();
         Some(view)
     }
 
@@ -2067,6 +2078,7 @@ impl StudioController {
             DeviceOp::WipeProject => self.wipe_project().await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
             DeviceOp::BootSafeOnce => self.boot_safe_once(updates).await,
+            DeviceOp::BackUpFilesystem => self.back_up_filesystem(updates).await,
             DeviceOp::ProbeBootloaderMode { card_key, flow } => {
                 self.probe_bootloader_mode(card_key, flow).await
             }
@@ -4008,6 +4020,7 @@ impl StudioController {
                 // back by itself.
                 awaits_manual_replug: false,
                 severs_lens: false,
+                result_sink: None,
             },
             updates,
         )
@@ -4050,6 +4063,7 @@ impl StudioController {
                     // a flash reboots into new firmware; the stored project
                     // survives and reloads on reattach.
                     severs_lens: false,
+                    result_sink: None,
                 },
                 updates,
             )
@@ -4224,10 +4238,94 @@ impl StudioController {
                 // Nothing is erased — the project is still on the device and
                 // the editor's lens stays valid.
                 severs_lens: false,
+                result_sink: None,
             },
             updates,
         )
         .await
+    }
+
+    /// Read the device's filesystem over the bootloader and publish a ZIP of
+    /// it for the shell to download.
+    ///
+    /// This is the operation that makes the originating failure survivable —
+    /// the user's work comes off the board BEFORE anything destructive
+    /// happens to it — so it deliberately reads like the gentle ops: nothing
+    /// is erased, the lens is not severed, and a device in recovery mode is
+    /// told it needs a replug rather than being reported as a failure.
+    async fn back_up_filesystem(&mut self, updates: UxUpdateSink) -> UiResult {
+        let from_recovery = self.device_is_in_recovery_mode();
+        let device_label = self
+            .device_sync()
+            .and_then(|sync| sync.identity.as_ref())
+            .map(|identity| identity.name.clone());
+        let sink: Rc<RefCell<Option<LinkManagementResult>>> = Rc::new(RefCell::new(None));
+        let mut outcome = self
+            .run_device_management(
+                ManagementFlowSpec {
+                    request: LinkManagementRequest::ReadRawFilesystem,
+                    progress_label: "Backing up",
+                    reconnect_detail: if from_recovery {
+                        "Unplug the board and plug it back in to start it"
+                    } else {
+                        "Waiting for device boot"
+                    },
+                    failed_exit_label: "Back to device",
+                    record_captured_logs_on_success: false,
+                    done_notice: |_| UiNotice::info("Backup read from the device"),
+                    degrade_subject: "device backed up",
+                    server_reconnect_failed_notice: if from_recovery {
+                        "Backup taken. Unplug the board and plug it back in — \
+                         it will not start on its own from recovery mode."
+                    } else {
+                        "Backup taken; reconnect after the device finishes booting"
+                    },
+                    awaits_manual_replug: from_recovery,
+                    // A read writes nothing: the project is still on the
+                    // device and a lens on it stays valid.
+                    severs_lens: false,
+                    result_sink: Some(Rc::clone(&sink)),
+                },
+                updates,
+            )
+            .await?;
+
+        let read = match sink.borrow_mut().take() {
+            Some(LinkManagementResult::ReadRawFilesystem(read)) => read,
+            // The provider answered something else entirely — a dispatch
+            // bug, not a device problem. Say so rather than pretending.
+            _ => {
+                return Err(UiError::Link(
+                    "the filesystem read returned no image".to_string(),
+                ));
+            }
+        };
+        let archive = crate::app::device::filesystem_backup::build_backup_archive(
+            &read.image,
+            &crate::app::device::BackupSource {
+                chip: read.chip_name.clone(),
+                partition_offset: read.region.offset,
+                partition_length: read.region.length,
+                device_label,
+            },
+            (self.now_secs)(),
+        )
+        .map_err(|error| UiError::Link(error.to_string()))?;
+
+        self.device_backup_seq += 1;
+        let file_count = archive.manifest.file_count;
+        outcome = outcome.with_notice(UiNotice::info(format!(
+            "Backed up {file_count} file(s) to {}",
+            archive.file_name
+        )));
+        self.device_backup = Some(crate::UiDeviceBackup {
+            seq: self.device_backup_seq,
+            file_name: archive.file_name,
+            bytes: Rc::from(archive.bytes),
+            file_count,
+        });
+        self.mark_dirty();
+        Ok(outcome)
     }
 
     async fn reset_to_blank(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -4248,6 +4346,7 @@ impl StudioController {
                 // back by itself.
                 awaits_manual_replug: false,
                 severs_lens: true,
+                result_sink: None,
             },
             updates,
         )
@@ -4377,6 +4476,11 @@ impl StudioController {
         self.record_logs(management_result_logs(&management.result));
 
         let mut outcome = UiNotices::new().with_notice((spec.done_notice)(&management.result));
+        // Hand the raw result on AFTER the log replay and the notice, so the
+        // move costs nothing (a filesystem image is ~1 MB).
+        if let Some(sink) = &spec.result_sink {
+            *sink.borrow_mut() = Some(management.result);
+        }
         emit_activity(
             &updates,
             device_section_target(DeviceController::SECTION_DEVICE),
@@ -4837,6 +4941,10 @@ struct ManagementFlowSpec {
     /// project on the device, so its lens only resets its live edit-state
     /// and stays put to reload after the reattach (device-lifecycle P3).
     severs_lens: bool,
+    /// Where the raw management result lands for flows whose outcome is more
+    /// than a notice — the filesystem backup needs the image bytes. `None`
+    /// everywhere else, and the result is MOVED in (it can be a megabyte).
+    result_sink: Option<Rc<RefCell<Option<LinkManagementResult>>>>,
 }
 
 fn provision_notice(result: &LinkManagementResult) -> UiNotice {
@@ -6355,6 +6463,7 @@ mod reattach_failure_tests {
             server_reconnect_failed_notice: "Firmware flashed.",
             awaits_manual_replug,
             severs_lens: false,
+            result_sink: None,
         }
     }
 

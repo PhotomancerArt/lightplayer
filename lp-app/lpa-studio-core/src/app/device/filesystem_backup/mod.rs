@@ -20,6 +20,7 @@
 mod backup_archive;
 mod backup_image;
 mod backup_manifest;
+mod ui_device_backup;
 
 pub use backup_archive::{
     ARCHIVE_FILES_ROOT, ARCHIVE_MANIFEST_NAME, BackupArchive, BackupError, BackupSource,
@@ -27,3 +28,4 @@ pub use backup_archive::{
 };
 pub use backup_image::{BackupFile, read_image_files};
 pub use backup_manifest::{BACKUP_FORMAT_VERSION, BackupManifest};
+pub use ui_device_backup::UiDeviceBackup;
