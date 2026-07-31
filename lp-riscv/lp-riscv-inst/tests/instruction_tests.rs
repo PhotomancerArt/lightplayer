@@ -163,3 +163,92 @@ fn test_unaligned_access() {
     let result = emu.step();
     assert!(result.is_err(), "Unaligned load should fail");
 }
+
+/// `xori rd, rs1, 128` must decode as XORI for **every** immediate, including
+/// 0x080.
+///
+/// The decoder used to carve funct12 == 0x080 out of OP-IMM funct3=100 and
+/// call it `zext.h`. Those two are the same 32 bits, and the base-ISA
+/// instruction is the one that actually occurs: LLVM emits `xori rd, rs, 128`
+/// as the index bias of a large jump table, so the mis-decode turned a
+/// `&'static str` lookup into a read of the wrong table slot. It stayed
+/// invisible because `zext.h` is a no-op on the small values an enum
+/// discriminant takes.
+#[test]
+fn xori_128_is_xori_not_zexth() {
+    let encoded = encode::xori(Gpr::A0, Gpr::A0, 128);
+    assert_eq!(encoded, 0x0805_4513, "xori a0, a0, 128");
+
+    match decode_instruction(encoded).expect("decode xori a0, a0, 128") {
+        Inst::Xori { rd, rs1, imm } => {
+            assert_eq!(rd, Gpr::A0);
+            assert_eq!(rs1, Gpr::A0);
+            assert_eq!(imm, 128);
+        }
+        other => panic!("expected Xori, got {other:?}"),
+    }
+}
+
+/// Executing that instruction must actually flip bit 7.
+#[test]
+fn xori_128_flips_bit_seven() {
+    let code: Vec<u8> = vec![
+        0x13, 0x05, 0x30, 0x00, // addi a0, zero, 3
+        0x13, 0x45, 0x05, 0x08, // xori a0, a0, 128
+        0x73, 0x00, 0x10, 0x00, // ebreak
+    ];
+    let mut emu = Riscv32Emulator::new(code, vec![0u8; 1024]);
+    loop {
+        match emu.step() {
+            Ok(StepResult::Halted) => break,
+            Ok(_) => continue,
+            Err(e) => panic!("Emulator error: {e:?}"),
+        }
+    }
+    assert_eq!(
+        emu.get_register(Gpr::A0),
+        3 ^ 128,
+        "xori a0, a0, 128 must xor, not zero-extend"
+    );
+}
+
+/// `zext.h` belongs to the OP space: RV32 spells it `pack rd, rs1, x0`.
+#[test]
+fn zexth_uses_the_op_encoding() {
+    let encoded = encode::zexth(Gpr::A0, Gpr::A1);
+    assert_eq!(encoded & 0x7f, 0x33, "zext.h is an OP (R-type) encoding");
+    assert_eq!(encoded, 0x0805_C533, "zext.h a0, a1 == pack a0, a1, x0");
+
+    match decode_instruction(encoded).expect("decode zext.h") {
+        Inst::Zexth { rd, rs1 } => {
+            assert_eq!(rd, Gpr::A0);
+            assert_eq!(rs1, Gpr::A1);
+        }
+        other => panic!("expected Zexth, got {other:?}"),
+    }
+}
+
+/// And it must still zero-extend when executed at its real encoding.
+#[test]
+fn zexth_zero_extends_halfword() {
+    let mut code: Vec<u8> = Vec::new();
+    code.extend_from_slice(&encode::lui(Gpr::A1, 0xABCDC).to_le_bytes());
+    code.extend_from_slice(&encode::zexth(Gpr::A0, Gpr::A1).to_le_bytes());
+    code.extend_from_slice(&[0x73, 0x00, 0x10, 0x00]); // ebreak
+
+    let mut emu = Riscv32Emulator::new(code, vec![0u8; 1024]);
+    loop {
+        match emu.step() {
+            Ok(StepResult::Halted) => break,
+            Ok(_) => continue,
+            Err(e) => panic!("Emulator error: {e:?}"),
+        }
+    }
+    let src = emu.get_register(Gpr::A1) as u32;
+    assert!(src > 0xFFFF, "fixture must set bits above the halfword");
+    assert_eq!(
+        emu.get_register(Gpr::A0) as u32,
+        src & 0xFFFF,
+        "zext.h keeps only the low 16 bits"
+    );
+}
