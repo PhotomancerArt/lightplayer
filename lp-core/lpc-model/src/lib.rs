@@ -119,8 +119,9 @@ pub use nodes::{
     ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind,
     ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat,
     TextureState, TextureStateView, generate_compute_shader_header, glsl_type_for_lp_type,
-    read_project_format_json, resolve_artifact_specifier, shader_panel_step, starter_def_for_kind,
-    starter_for_kind, starter_project_files,
+    node_def_asset_ref, read_project_format_json, resolve_artifact_specifier,
+    set_node_def_asset_ref, shader_panel_step, starter_def_for_kind, starter_for_kind,
+    starter_project_files,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,

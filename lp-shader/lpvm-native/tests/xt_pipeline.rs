@@ -109,6 +109,91 @@ fn run_unary(build: impl FnOnce(&mut FunctionBuilder, lpir::VReg), x: i32) -> i3
     expect_ok(compile_link_run(&ir, &sig, "f", &[0, x as u32], false)) as i32
 }
 
+/// One `(i32, i32) -> i32` function named `f`, body built by `build`.
+///
+/// Both operands arrive as **runtime** arguments, which is the point: a
+/// constant divisor could be folded, and the divide-by-zero guard has to hold
+/// for divisors the compiler cannot see.
+fn binary_module(
+    build: impl FnOnce(&mut FunctionBuilder, lpir::VReg, lpir::VReg),
+) -> (LpirModule, LpsModuleSig) {
+    let mut fb = FunctionBuilder::new("f", &[IrType::I32, IrType::I32]);
+    let a = fb.add_param(IrType::I32);
+    let b = fb.add_param(IrType::I32);
+    build(&mut fb, a, b);
+    let func = fb.finish();
+    let module = LpirModule {
+        imports: vec![],
+        functions: VecMap::from([(FuncId(0), func)]),
+    };
+    let sig = LpsModuleSig {
+        functions: vec![LpsFnSig {
+            name: "f".to_string(),
+            parameters: vec![
+                FnParam {
+                    name: "a".to_string(),
+                    ty: LpsType::Int,
+                    qualifier: ParamQualifier::In,
+                },
+                FnParam {
+                    name: "b".to_string(),
+                    ty: LpsType::Int,
+                    qualifier: ParamQualifier::In,
+                },
+            ],
+            return_type: LpsType::Int,
+            kind: LpsFnKind::UserDefined,
+        }],
+        uniforms_type: None,
+        globals_type: None,
+        ..Default::default()
+    };
+    (module, sig)
+}
+
+/// Run the binary function on the pipeline: args = [vmctx=0, a, b].
+fn run_binary(
+    build: impl FnOnce(&mut FunctionBuilder, lpir::VReg, lpir::VReg),
+    a: i32,
+    b: i32,
+) -> u32 {
+    let (ir, sig) = binary_module(build);
+    expect_ok(compile_link_run(
+        &ir,
+        &sig,
+        "f",
+        &[0, a as u32, b as u32],
+        false,
+    ))
+}
+
+/// `a <op> b` for one of the four LPIR integer divide/remainder ops, with both
+/// operands opaque to the compiler.
+fn run_div_op(make: fn(lpir::VReg, lpir::VReg, lpir::VReg) -> LpirOp, a: i32, b: i32) -> u32 {
+    run_binary(
+        |fb, x, y| {
+            let d = fb.alloc_vreg(IrType::I32);
+            fb.push(make(d, x, y));
+            fb.push_return(&[d]);
+        },
+        a,
+        b,
+    )
+}
+
+fn idiv_s(dst: lpir::VReg, lhs: lpir::VReg, rhs: lpir::VReg) -> LpirOp {
+    LpirOp::IdivS { dst, lhs, rhs }
+}
+fn idiv_u(dst: lpir::VReg, lhs: lpir::VReg, rhs: lpir::VReg) -> LpirOp {
+    LpirOp::IdivU { dst, lhs, rhs }
+}
+fn irem_s(dst: lpir::VReg, lhs: lpir::VReg, rhs: lpir::VReg) -> LpirOp {
+    LpirOp::IremS { dst, lhs, rhs }
+}
+fn irem_u(dst: lpir::VReg, lhs: lpir::VReg, rhs: lpir::VReg) -> LpirOp {
+    LpirOp::IremU { dst, lhs, rhs }
+}
+
 #[test]
 fn returns_a_constant_through_entry_retw() {
     let r = run_unary(
@@ -217,6 +302,273 @@ fn mul_div_rem_use_the_mul32_div32_options() {
     );
     let m = 123i32 * 123;
     assert_eq!(r, m / 7 + m % 7);
+}
+
+// ── Integer divide/remainder never trap (docs/design/lpir/02-core-ops.md) ────
+//
+// Xtensa's QUOS/QUOU/REMS/REMU raise EXCCAUSE 6 on a zero divisor, so lowering
+// guards them ([`IsaTarget::integer_div_traps_on_zero`]). Without the guard
+// every zero-divisor case below is a `Trap { Exception, cause: 6 }` and
+// `expect_ok` panics — which is exactly what happens when the guard is removed,
+// and how these tests were negative-controlled.
+
+#[test]
+fn idiv_s_by_zero_is_all_ones_not_a_trap() {
+    assert_eq!(run_div_op(idiv_s, 42, 0) as i32, -1);
+    assert_eq!(run_div_op(idiv_s, -42, 0) as i32, -1);
+    assert_eq!(run_div_op(idiv_s, 0, 0) as i32, -1);
+    assert_eq!(run_div_op(idiv_s, i32::MIN, 0) as i32, -1);
+}
+
+#[test]
+fn idiv_u_by_zero_is_all_ones_not_a_trap() {
+    assert_eq!(run_div_op(idiv_u, 42, 0), u32::MAX);
+    assert_eq!(run_div_op(idiv_u, 0, 0), u32::MAX);
+    assert_eq!(run_div_op(idiv_u, -1, 0), u32::MAX); // 0xFFFF_FFFF / 0
+}
+
+#[test]
+fn irem_s_by_zero_is_the_dividend_not_a_trap() {
+    assert_eq!(run_div_op(irem_s, 42, 0) as i32, 42);
+    assert_eq!(run_div_op(irem_s, -42, 0) as i32, -42);
+    assert_eq!(run_div_op(irem_s, 0, 0) as i32, 0);
+    assert_eq!(run_div_op(irem_s, i32::MIN, 0) as i32, i32::MIN);
+}
+
+#[test]
+fn irem_u_by_zero_is_the_dividend_not_a_trap() {
+    assert_eq!(run_div_op(irem_u, 42, 0), 42);
+    assert_eq!(run_div_op(irem_u, 0, 0), 0);
+    assert_eq!(run_div_op(irem_u, -1, 0), u32::MAX);
+}
+
+/// The control: `i32::MIN / -1` and `i32::MIN % -1` are RV32M edge cases that
+/// Xtensa's divide **already** gets right, so lowering deliberately does not
+/// guard them. These pass before and after the guard exists; if they ever start
+/// failing, the guard grew a case it should not have.
+#[test]
+fn int_min_over_minus_one_needs_no_guard_on_xtensa() {
+    assert_eq!(run_div_op(idiv_s, i32::MIN, -1) as i32, i32::MIN);
+    assert_eq!(run_div_op(irem_s, i32::MIN, -1) as i32, 0);
+    assert_eq!(run_div_op(idiv_s, 42, -1) as i32, -42);
+    assert_eq!(run_div_op(irem_s, 42, -1) as i32, 0);
+}
+
+/// The guard must be invisible on the ordinary path — every non-zero divisor
+/// still produces the plain quotient/remainder, including the signs GLSL
+/// requires (truncation toward zero; remainder takes the dividend's sign).
+#[test]
+fn nonzero_divisors_are_unperturbed_by_the_guard() {
+    assert_eq!(run_div_op(idiv_s, 42, 5) as i32, 8);
+    assert_eq!(run_div_op(idiv_s, -42, 5) as i32, -8);
+    assert_eq!(run_div_op(idiv_s, 42, -5) as i32, -8);
+    assert_eq!(run_div_op(irem_s, 42, 5) as i32, 2);
+    assert_eq!(run_div_op(irem_s, -42, 5) as i32, -2);
+    assert_eq!(run_div_op(irem_s, 42, -5) as i32, 2);
+    assert_eq!(run_div_op(idiv_u, 42, 5), 8);
+    assert_eq!(run_div_op(irem_u, 42, 5), 2);
+    // Unsigned reads the operands as u32: 0xFFFF_FFFF / 2 == 0x7FFF_FFFF,
+    // which a signed divide would answer 0 for.
+    assert_eq!(run_div_op(idiv_u, -1, 2), 0x7FFF_FFFF);
+    assert_eq!(run_div_op(irem_u, -1, 2), 1);
+}
+
+/// `dst` aliasing an operand is the case an emitter-level expansion with
+/// hand-managed scratch registers would get wrong: the guard reads `lhs` again
+/// *after* the divide has been computed, so a lowering that clobbered `dst`
+/// early would return the quotient instead of the dividend here.
+#[test]
+fn div_guard_is_correct_when_dst_aliases_an_operand() {
+    // dst == lhs
+    assert_eq!(
+        run_binary(
+            |fb, x, y| {
+                fb.push(LpirOp::IremS {
+                    dst: x,
+                    lhs: x,
+                    rhs: y,
+                });
+                fb.push_return(&[x]);
+            },
+            -42,
+            0,
+        ) as i32,
+        -42,
+    );
+    // dst == rhs
+    assert_eq!(
+        run_binary(
+            |fb, x, y| {
+                fb.push(LpirOp::IdivS {
+                    dst: y,
+                    lhs: x,
+                    rhs: y,
+                });
+                fb.push_return(&[y]);
+            },
+            42,
+            0,
+        ) as i32,
+        -1,
+    );
+    // dst == lhs == rhs
+    assert_eq!(
+        run_binary(
+            |fb, x, _y| {
+                fb.push(LpirOp::IdivS {
+                    dst: x,
+                    lhs: x,
+                    rhs: x,
+                });
+                fb.push_return(&[x]);
+            },
+            0,
+            0,
+        ) as i32,
+        -1,
+    );
+}
+
+/// The reason the contract exists in practice: GLSL authors write guarded
+/// division, and eager `&&` evaluation runs the divide anyway. `x / i` with
+/// `i == 0` must yield `-1` rather than taking the board down.
+#[test]
+fn guarded_division_idiom_does_not_trap_when_the_guard_is_false() {
+    let build = |fb: &mut FunctionBuilder, x: lpir::VReg, i: lpir::VReg| {
+        let zero = fb.alloc_vreg(IrType::I32);
+        let ne = fb.alloc_vreg(IrType::I32);
+        let q = fb.alloc_vreg(IrType::I32);
+        let gt = fb.alloc_vreg(IrType::I32);
+        let both = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 {
+            dst: zero,
+            value: 0,
+        });
+        fb.push(LpirOp::Ine {
+            dst: ne,
+            lhs: i,
+            rhs: zero,
+        });
+        fb.push(LpirOp::IdivS {
+            dst: q,
+            lhs: x,
+            rhs: i,
+        });
+        fb.push(LpirOp::IgtS {
+            dst: gt,
+            lhs: q,
+            rhs: zero,
+        });
+        fb.push(LpirOp::Iand {
+            dst: both,
+            lhs: ne,
+            rhs: gt,
+        });
+        fb.push_return(&[both]);
+    };
+    assert_eq!(run_binary(build, 10, 0), 0);
+    assert_eq!(run_binary(build, 10, 2), 1);
+    assert_eq!(run_binary(build, -10, 0), 0);
+    assert_eq!(run_binary(build, 10, -2), 0);
+}
+
+/// A divisor that is a single-definition non-zero constant cannot be zero, so
+/// the guard is elided entirely and the bare `QUOS`/`REMS` is emitted. The
+/// values must be unchanged, and the function must be *smaller* than the same
+/// division by a runtime divisor — the size assertion is what proves the
+/// elision actually fired rather than the test merely re-checking arithmetic.
+#[test]
+fn constant_nonzero_divisor_elides_the_guard() {
+    let const_div = |value: i32| {
+        move |fb: &mut FunctionBuilder, x: lpir::VReg, _y: lpir::VReg| {
+            let c = fb.alloc_vreg(IrType::I32);
+            let d = fb.alloc_vreg(IrType::I32);
+            fb.push(LpirOp::IconstI32 { dst: c, value });
+            fb.push(LpirOp::IdivS {
+                dst: d,
+                lhs: x,
+                rhs: c,
+            });
+            fb.push_return(&[d]);
+        }
+    };
+    assert_eq!(run_binary(const_div(7), 42, 0) as i32, 6);
+    assert_eq!(run_binary(const_div(7), -42, 0) as i32, -6);
+    assert_eq!(run_binary(const_div(-1), i32::MIN, 0) as i32, i32::MIN);
+
+    // A zero constant divisor must still be guarded — it is exactly the case
+    // the contract is about, and eliding it would reintroduce the trap.
+    assert_eq!(run_binary(const_div(0), 42, 0) as i32, -1);
+
+    let bytes = |b: fn(&mut FunctionBuilder, lpir::VReg, lpir::VReg)| {
+        let (ir, sig) = binary_module(b);
+        compile_module(
+            &ir,
+            &sig,
+            FloatMode::Q32,
+            NativeCompileOptions {
+                float_mode: FloatMode::Q32,
+                ..Default::default()
+            },
+            IsaTarget::Xtensa,
+        )
+        .expect("compile")
+        .functions[0]
+            .code
+            .len()
+    };
+    let folded = bytes(|fb, x, _y| {
+        let c = fb.alloc_vreg(IrType::I32);
+        let d = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IconstI32 { dst: c, value: 7 });
+        fb.push(LpirOp::IdivS {
+            dst: d,
+            lhs: x,
+            rhs: c,
+        });
+        fb.push_return(&[d]);
+    });
+    let guarded = bytes(|fb, x, y| {
+        let d = fb.alloc_vreg(IrType::I32);
+        fb.push(LpirOp::IdivS {
+            dst: d,
+            lhs: x,
+            rhs: y,
+        });
+        fb.push_return(&[d]);
+    });
+    assert!(
+        folded < guarded,
+        "constant divisor should skip the guard: {folded} B folded vs {guarded} B guarded"
+    );
+}
+
+/// The soundness boundary: a divisor with more than one definition is not
+/// knowable from a linear walk, so the guard must stay even though one of the
+/// definitions is a non-zero constant. Here the second definition makes the
+/// divisor zero at run time — with an unsound elision this traps.
+#[test]
+fn redefined_divisor_keeps_the_guard() {
+    assert_eq!(
+        run_binary(
+            |fb, x, y| {
+                let c = fb.alloc_vreg(IrType::I32);
+                let d = fb.alloc_vreg(IrType::I32);
+                fb.push(LpirOp::IconstI32 { dst: c, value: 7 });
+                // Second definition: c now holds whatever the caller passed.
+                fb.push(LpirOp::Copy { dst: c, src: y });
+                fb.push(LpirOp::IdivS {
+                    dst: d,
+                    lhs: x,
+                    rhs: c,
+                });
+                fb.push_return(&[d]);
+            },
+            42,
+            0,
+        ) as i32,
+        -1,
+    );
 }
 
 #[test]

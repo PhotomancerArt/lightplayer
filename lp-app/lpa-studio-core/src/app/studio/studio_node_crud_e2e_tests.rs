@@ -19,9 +19,9 @@ use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, drive, edit_e2e_files, edit_e2e_server, project_action,
 };
 use crate::{
-    ControllerId, NodeCreateOp, NodeRemoveOp, ProjectController, ProjectOp, StudioActor,
-    StudioCommand, StudioController, StudioServerClient, UiAction, UiAttachTarget,
-    UiPendingEditKind, UiStudioView, UiViewContent,
+    ControllerId, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, ProjectController,
+    ProjectNodeAddress, ProjectOp, StudioActor, StudioCommand, StudioController,
+    StudioServerClient, UiAction, UiAttachTarget, UiPendingEditKind, UiStudioView, UiViewContent,
 };
 
 /// The edit-e2e project's storage dir on the in-process server.
@@ -487,6 +487,219 @@ fn create_records_a_saved_library_event_and_copies_match() {
 
 /// The tests' no-op quiet-gap timer factory, as a nameable fn-pointer type so
 /// the harness helper can return the concrete `StudioActor` generic.
+#[test]
+fn copy_then_paste_round_trips_a_shader_with_its_asset() {
+    let (server, mut actor, handle, clipboard) = connected_actor_with_clipboard();
+    let mut view = handle.view;
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("connect emits a snapshot");
+
+    // Make something worth copying: the shader starter is the two-file
+    // case (def + scaffold GLSL, with the def referencing the scaffold).
+    handle
+        .tx
+        .send(create_action(NodeKind::Shader, UiAttachTarget::ProjectRoot));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("create emits a snapshot");
+    assert!(file_exists(&server, "shader.json"));
+    assert!(file_exists(&server, "shader.glsl"));
+
+    // -- copy ---------------------------------------------------------------
+    handle.tx.send(copy_action("/edit_e2e.show/shader.shader"));
+    drive(actor.run_one_batch_for_test());
+    let envelope = clipboard
+        .borrow()
+        .clone()
+        .expect("copy writes the envelope to the clipboard sink");
+    let decoded = crate::NodeEnvelope::decode(&envelope).expect("a valid lp.node envelope");
+    assert_eq!(decoded.assets.len(), 1, "the .glsl travels with the node");
+    assert!(
+        decoded
+            .body_text()
+            .expect("a def body is text")
+            .contains("shader.glsl"),
+        "the copied def still references its asset: {:?}",
+        decoded.body_text()
+    );
+
+    // -- paste --------------------------------------------------------------
+    // The source name is taken here, so the paste must land under a fresh
+    // name AND repoint the def at the renamed asset.
+    handle
+        .tx
+        .send(paste_action(&envelope, UiAttachTarget::ProjectRoot));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("paste emits a snapshot");
+
+    assert!(
+        file_exists(&server, "shader_2.json"),
+        "the pasted def dodges the taken name"
+    );
+    assert!(
+        file_exists(&server, "shader_2.glsl"),
+        "and so does its asset"
+    );
+    let pasted_def = read_file(&server, "shader_2.json");
+    assert!(
+        pasted_def.contains("shader_2.glsl"),
+        "the pasted def points at the RENAMED asset — a stale reference \
+         would paste a node whose source file does not exist: {pasted_def}"
+    );
+    assert!(
+        !pasted_def.contains("\"./shader.glsl\""),
+        "and no longer at the original: {pasted_def}"
+    );
+    assert!(
+        project_editor(&snapshot)
+            .nodes
+            .iter()
+            .any(|node| node.node_id.ends_with("/shader_2.shader")),
+        "the pasted node is in the tree"
+    );
+    // Both shaders' GLSL is byte-identical: paste copies content, not a
+    // reference to it.
+    assert_eq!(
+        read_file(&server, "shader.glsl"),
+        read_file(&server, "shader_2.glsl")
+    );
+}
+
+#[test]
+fn pasting_a_node_into_a_playlist_lands_as_an_entry() {
+    let (server, mut actor, handle, clipboard) = connected_actor_with_clipboard();
+    let mut view = handle.view;
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("connect emits a snapshot");
+
+    handle.tx.send(create_action(
+        NodeKind::Playlist,
+        UiAttachTarget::ProjectRoot,
+    ));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("create emits a snapshot");
+
+    handle.tx.send(copy_action("/edit_e2e.show/clock.clock"));
+    drive(actor.run_one_batch_for_test());
+    let envelope = clipboard.borrow().clone().expect("copied");
+
+    let playlist = ProjectNodeAddress::parse("/edit_e2e.show/playlist.playlist")
+        .expect("valid playlist address");
+    handle.tx.send(paste_action(
+        &envelope,
+        UiAttachTarget::Playlist { node: playlist },
+    ));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("paste emits a snapshot");
+
+    let playlist_def = read_file(&server, "playlist.json");
+    assert!(
+        playlist_def.contains("entries"),
+        "the pasted node became a playlist entry: {playlist_def}"
+    );
+}
+
+#[test]
+fn pasting_junk_reports_it_and_changes_nothing() {
+    let (server, mut actor, handle) = connected_actor();
+    let mut view = handle.view;
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let before = project_editor(&view.try_recv().expect("connect"))
+        .nodes
+        .len();
+
+    for junk in [
+        "not json",
+        r#"{"kind":"lp.package","format":1,"name":"x","files":{}}"#,
+        r#"{"kind":"lp.node","format":99,"label":"x","file":"./a.json","body":{"text":"{}"},"assets":{}}"#,
+    ] {
+        handle
+            .tx
+            .send(paste_action(junk, UiAttachTarget::ProjectRoot));
+        drive(actor.run_one_batch_for_test());
+        // A refused paste must not write anything or disturb the tree.
+        assert!(!file_exists(&server, "node.json"), "{junk}");
+    }
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let after = project_editor(&view.try_recv().expect("refresh"))
+        .nodes
+        .len();
+    assert_eq!(before, after, "a refused paste leaves the tree alone");
+}
+
+/// Does replace-as-remove-then-paste compose?
+///
+/// The two wire ops are deliberately asymmetric: `RemoveNode` **stages** in
+/// the overlay (revertible until commit) while `CreateNode` **commits
+/// immediately** (`ArtifactOverlay` is slot-XOR-asset, so a staged node body
+/// would vanish on reload). This test is the empirical answer the plan
+/// asked for before building a one-click Replace.
+#[test]
+fn replace_probe_remove_then_paste_at_the_same_key() {
+    let (server, mut actor, handle, clipboard) = connected_actor_with_clipboard();
+    let mut view = handle.view;
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("connect emits a snapshot");
+
+    handle.tx.send(copy_action("/edit_e2e.show/clock.clock"));
+    drive(actor.run_one_batch_for_test());
+    let envelope = clipboard.borrow().clone().expect("copied");
+
+    // Stage the removal of the node we are "replacing".
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        NodeRemoveOp {
+            node: ProjectNodeAddress::parse("/edit_e2e.show/clock.clock").expect("address"),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("remove emits a snapshot");
+    let staged = project_editor(&snapshot).dirty.persisted;
+    assert!(staged > 0, "the removal staged in the overlay");
+
+    // Now paste into the hole. The key `clock` is staged-removed but the
+    // BASE file still holds it until Save.
+    handle
+        .tx
+        .send(paste_action(&envelope, UiAttachTarget::ProjectRoot));
+    drive(actor.run_one_batch_for_test());
+    view.try_recv().expect("paste emits a snapshot");
+
+    // The finding, pinned so a future Replace implementation starts from
+    // fact rather than assumption: the paste does NOT reuse the removed
+    // key. `taken_node_names` counts overlay-staged names as used (the base
+    // file still has them, so the server would reject a create there as
+    // TargetOccupied), so the pasted node lands beside the staged removal
+    // under a fresh name.
+    assert!(
+        file_exists(&server, "clock_2.json"),
+        "paste lands under a FRESH name, not the staged-removed one"
+    );
+    assert!(
+        file_exists(&server, "clock.json"),
+        "the removed node's file is still on disk — removal only staged"
+    );
+    // So a one-click Replace cannot be remove-then-create as-is: it would
+    // leave a committed new node beside a merely-staged removal, and
+    // reverting the removal would resurrect the old node alongside the new
+    // one. See the plan's P6 notes and the ADR follow-ups.
+}
+
 type TestTimer = fn(core::time::Duration) -> core::future::Ready<()>;
 
 fn test_timer(_: core::time::Duration) -> core::future::Ready<()> {
@@ -498,6 +711,19 @@ fn connected_actor() -> (
     StudioActor<TestTimer>,
     crate::StudioHandle,
 ) {
+    let (server, actor, handle, _) = connected_actor_with_clipboard();
+    (server, actor, handle)
+}
+
+/// Same harness plus a capture cell standing in for the browser clipboard,
+/// so a copy's envelope text is inspectable (core hands it to the injected
+/// sink and never touches a real clipboard).
+fn connected_actor_with_clipboard() -> (
+    Rc<RefCell<lpa_server::LpServer>>,
+    StudioActor<TestTimer>,
+    crate::StudioHandle,
+    Rc<RefCell<Option<String>>>,
+) {
     let server = Rc::new(RefCell::new(edit_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -505,9 +731,31 @@ fn connected_actor() -> (
         sent: Rc::new(RefCell::new(Vec::new())),
     };
     let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
+    let mut controller = StudioController::connected_with_client_for_test(client);
+    let clipboard = Rc::new(RefCell::new(None::<String>));
+    let sink = Rc::clone(&clipboard);
+    controller.set_on_copy_text(move |text| *sink.borrow_mut() = Some(text.to_string()));
     let (actor, handle) = StudioActor::new(controller, test_timer as TestTimer);
-    (server, actor, handle)
+    (server, actor, handle, clipboard)
+}
+
+fn copy_action(node: &str) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        NodeCopyOp {
+            node: ProjectNodeAddress::parse(node).expect("valid node address"),
+        },
+    ))
+}
+
+fn paste_action(envelope: &str, attach: UiAttachTarget) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        NodePasteOp {
+            envelope: envelope.to_string(),
+            attach,
+        },
+    ))
 }
 
 fn create_action(kind: NodeKind, attach: UiAttachTarget) -> StudioCommand {
