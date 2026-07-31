@@ -404,6 +404,60 @@ mod tests {
         assert_eq!(module.functions.len(), 1, "expected 1 compiled function");
     }
 
+    /// Phase 0 regression: the caller's [`crate::native_options::NativeCompileOptions`] must
+    /// reach [`compile_module`] *whole*, not just its `float_mode`.
+    /// `rt_jit::compile_module_jit` forwards the same struct into here; if it rebuilt options
+    /// from defaults, every other field would silently revert to its default value.
+    ///
+    /// Keyed on `fuel` because it is the only field outside `float_mode` whose value is visible
+    /// in emitted code. `options.config` ([`lpir::CompilerConfig`]) is not a candidate: its
+    /// `texture.texel_fetch_bounds` is consumed by the GLSL frontend while lowering to LPIR, so
+    /// `compile_module` only ever sees the already-clamped (or already-unclamped) ops, and its
+    /// `inline.*` keys have no consumer anywhere — the inliner never merged. Extend this test to
+    /// cover `config` the moment one of its keys grows a backend consumer.
+    #[test]
+    fn compile_module_respects_non_float_mode_options_in_emitted_code() {
+        let (ir, sig) = simple_iconst_module();
+
+        let opts_fuel = crate::native_options::NativeCompileOptions {
+            fuel: true,
+            ..Default::default()
+        };
+        let opts_no_fuel = crate::native_options::NativeCompileOptions {
+            fuel: false,
+            ..Default::default()
+        };
+
+        let fueled = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            opts_fuel,
+            IsaTarget::Rv32imac,
+        )
+        .expect("fuel: true compile");
+        let unfueled = compile_module(
+            &ir,
+            &sig,
+            lpir::FloatMode::Q32,
+            opts_no_fuel,
+            IsaTarget::Rv32imac,
+        )
+        .expect("fuel: false compile");
+
+        assert_ne!(
+            fueled.functions[0].code, unfueled.functions[0].code,
+            "fuel: true adds a function-entry fuel check — code must differ",
+        );
+        assert!(
+            fueled.functions[0].code.len() > unfueled.functions[0].code.len(),
+            "the fuel check is extra instructions, so the fueled function must be longer \
+             (fuel: true {} bytes, fuel: false {} bytes)",
+            fueled.functions[0].code.len(),
+            unfueled.functions[0].code.len(),
+        );
+    }
+
     fn simple_iconst_module() -> (LpirModule, LpsModuleSig) {
         let ir = LpirModule {
             imports: vec![],
