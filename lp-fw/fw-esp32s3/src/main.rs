@@ -4,17 +4,21 @@
 //! backed by a littlefs filesystem in the `lpfs` partition, with abort-tier
 //! crash recovery live from the first instruction.
 //!
-//! ## What this build deliberately does *not* have
+//! ## What this build has, and what it deliberately does not
 //!
-//! Every `lpa-server` node gate is **off** (see `Cargo.toml`), so a pushed
-//! project loads with every node kind inert. The graphics backend is
-//! `lp_gfx::NullGraphics`, so the on-device shader compiler is not linked at
-//! all. There is no RMT/ws281x driver, no button, and no radio; the output
-//! driver reports frames over serial instead (`output::readout_driver`).
+//! Two of eight `lpa-server` node gates are on (see `Cargo.toml`):
+//! `node-shader`, which is the point, and `node-fixture`, which is the only
+//! runtime that turns the shader's visual product into the control product the
+//! output node consumes. Every other kind loads inert.
 //!
-//! That is the point rather than a shortfall: the next milestone turns on
-//! exactly one thing — the shader node — and a single-variable change is the
-//! only kind whose result is unambiguous.
+//! The graphics backend is the real `TargetLpvmGraphics`, so GLSL pushed to
+//! this board is compiled to **Xtensa machine code on the board** and executed
+//! from RAM.
+//!
+//! Still absent: the RMT/ws281x driver, the button, and the radio. The output
+//! driver reports frames over serial instead (`output::readout_driver`), which
+//! is what makes the render verifiable — a serial hex dump can be diffed
+//! against a host render, and an LED cannot.
 //!
 //! ## Shape versus fw-esp32c6
 //!
@@ -69,6 +73,7 @@ use {
     fw_esp32_common::server_loop::run_server_loop,
     fw_esp32_common::time::Esp32TimeProvider,
     fw_esp32_common::{boot, logger, lp_fs, transport},
+    lp_gfx_lpvm::TargetLpvmGraphics,
     lpa_server::{LpGraphics, LpServer},
     lpc_hardware::{HardwareSystem, HwRegistry},
     lpc_shared::output::OutputProvider,
@@ -82,14 +87,29 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 /// Heap for the allocator.
 ///
-/// Measured on silicon at this size: ~92 KB free idle, ~66 KB free with a small
-/// project loaded. Deliberately far below the C6's 300 KB — this build runs no
-/// shader compiler, and the heap comes straight out of the region the main task
-/// stack occupies, where the C6's own comment warns that over-reserving corrupts
-/// execution before it ever reports OOM. **This is the knob to revisit when the
-/// shader node and a real graphics backend arrive**, with a stack measurement
-/// rather than by guessing upward.
-const HEAP_SIZE: usize = 96 * 1024;
+/// Raised from M3's 96 KB **on a measured failure, not a guess**: with the
+/// shader node on, the first on-device compile died in `handle_alloc_error`
+/// (`memory allocation of 3072 bytes failed`, inside `shader-compile:glsl`),
+/// and the recovery ledger then quarantined the frame after three crashes.
+/// 96 KB was chosen when nothing on this board allocated in anger; compiling
+/// GLSL to Xtensa does.
+///
+/// The size is not free-floating — it is one side of a zero-sum split. esp-hal's
+/// `stack.x` gives `.stack` whatever is left of `dram_seg`
+/// (`0x3FC88000..0x3FCDB700`, 341,760 B), so every byte added here is a byte
+/// taken from the stack. Asking for too much fails at *link* time ("cannot move
+/// location counter backwards") rather than silently, which is the one mercy
+/// here: 300 KB — the C6's figure — does not link on this chip.
+///
+/// This split leaves 52,896 B of stack against fw-esp32c6's proven 35,784 B
+/// (both read off the linked ELFs), which is the margin the Xtensa windowed
+/// ABI's larger frames deserve. The heartbeat's free-heap figure is the number
+/// to watch if a future node kind pushes it.
+///
+/// The next lever, if one is needed, is `dram2_seg`
+/// (`0x3FCDB700..0x3FCED710`, ~72 KB) as a second `esp_alloc` region — not
+/// taking more from the stack.
+const HEAP_SIZE: usize = 240 * 1024;
 
 /// Abort-tier panic handler (ADR 2026-07-29-per-chip-fw-toolchains): stage a
 /// breadcrumb into the `lp-recovery` RTC ledger, then reset, so the next boot
@@ -236,11 +256,16 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // for the hello (missing file → unstamped, `None`).
     let device_uid = lpa_server::device_identity::read_device_uid(base_fs.as_ref());
 
-    // ⚠️ `NullGraphics`, never `TargetLpvmGraphics`. `LpServer` requires a
-    // backend, and the real one links the entire on-device JIT compiler into an
-    // image that would never call it — 743,216 B measured on the C6. See the
-    // `lp-gfx` dependency line.
-    let graphics: Arc<dyn LpGraphics> = Arc::new(lp_gfx::NullGraphics::new());
+    // The on-device JIT. `TargetLpvmGraphics` resolves to `lpvm-native`'s
+    // `NativeJitEngine` on Xtensa, so a shader pushed to this board is compiled
+    // to Xtensa machine code here and executed from RAM — no host step.
+    //
+    // ⚠️ The frontend is passed, never defaulted. `LpGraphics::glsl_frontend`
+    // deliberately has no default impl so that every host states its choice;
+    // the device ships `LpsGlsl`, and silently taking Naga would change what
+    // the shader means without changing a line of it.
+    let graphics: Arc<dyn LpGraphics> =
+        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
 
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
     let mut server = LpServer::new_with_hardware_services(
