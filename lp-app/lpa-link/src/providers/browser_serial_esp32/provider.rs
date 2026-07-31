@@ -14,9 +14,9 @@ use crate::providers::browser_serial_esp32::{
 };
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
-    LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
-    LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkManagementEventSink,
-    LinkManagementProgress, LinkProvider, LinkSession, LinkSessionStatus,
+    LinkBootControlResult, LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic,
+    LinkDiagnosticSeverity, LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel,
+    LinkManagementEventSink, LinkManagementProgress, LinkProvider, LinkSession, LinkSessionStatus,
 };
 
 const RESET_BAUD_RATE: u32 = 115_200;
@@ -71,7 +71,10 @@ impl BrowserSerialEsp32Provider {
 
         let mut capabilities = LinkCapabilities::esp32_serial_base();
         if self.is_flash_supported() {
-            capabilities = capabilities.with_flash().with_device_erase();
+            capabilities = capabilities
+                .with_flash()
+                .with_device_erase()
+                .with_boot_control();
         }
         let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
             .with_capabilities(capabilities);
@@ -310,6 +313,37 @@ impl BrowserSerialEsp32Provider {
                     .collect::<Vec<_>>();
                 self.extend_session_logs(session_id, logs)?;
                 Ok(LinkManagementResult::ResetRuntime)
+            }
+            LinkManagementRequest::SetBootControl { flags } => {
+                let port_id = self.endpoint_port_id(&endpoint_id)?;
+                let result = browser_esp32_flash::write_boot_control_with_events(
+                    port_id,
+                    self.options.esptool_module_path(),
+                    lp_bootctl::BootFlags::from_bits(flags),
+                    events.clone(),
+                )
+                .await?;
+                let logs = result
+                    .logs
+                    .iter()
+                    .map(|message| {
+                        LinkLogEntry::new(
+                            endpoint_id.clone(),
+                            Some(session_id.clone()),
+                            LinkLogLevel::Info,
+                            message.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.extend_session_logs(session_id, logs)?;
+                Ok(LinkManagementResult::SetBootControl(
+                    LinkBootControlResult {
+                        flags,
+                        chip_name: result.chip_name,
+                        logs: result.logs,
+                        progress: map_progress(result.progress),
+                    },
+                ))
             }
             LinkManagementRequest::EraseRawFilesystem => {
                 Err(LinkError::unsupported(format!("{:?}", request.operation())))
