@@ -22,6 +22,14 @@ pub struct FixtureState {
     /// deliberate limiting apart from a project that is simply dim.
     #[slot(produced)]
     pub power_scale: ValueSlot<f32>,
+    /// The budget actually in force, in milliamps, after an unstated one has
+    /// fallen back to the default. Zero when limiting was opted out of.
+    ///
+    /// Published rather than left for readers to re-derive: the defaulting rule
+    /// lives in one place, and a reader that guessed differently would report a
+    /// percentage against a budget nothing is enforcing.
+    #[slot(produced)]
+    pub power_budget_ma: ValueSlot<u32>,
 }
 
 impl Default for FixtureState {
@@ -30,6 +38,7 @@ impl Default for FixtureState {
             output: ControlProductSlot::default(),
             estimated_draw_ma: ValueSlot::new(0),
             power_scale: ValueSlot::new(1.0),
+            power_budget_ma: ValueSlot::new(0),
         }
     }
 }

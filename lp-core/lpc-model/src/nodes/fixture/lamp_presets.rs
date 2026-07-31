@@ -1,5 +1,18 @@
 //! Power numbers for each [`LampType`].
 //!
+//! # What this is, and what it is not
+//!
+//! This is a **guardrail against the common mistake**, not a power model. Its
+//! job is to stop a first-time project from browning out a USB-powered board in
+//! a reboot loop. It is not accurate enough to size a supply, and it is not
+//! trying to be — a real model needs lamps assigned to independent power
+//! domains, since a single strip with power injected every few metres is
+//! already several supplies, and that is its own piece of design work.
+//!
+//! Treat the numbers below as deliberately rough. They will be improved when
+//! there is a bench rig to improve them with; until then, being roughly right
+//! and on by default beats being precisely right and off.
+//!
 //! # These numbers are not measured
 //!
 //! Every preset here is [`PowerProvenance::Estimated`] — assembled from vendor

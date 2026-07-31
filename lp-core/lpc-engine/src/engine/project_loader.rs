@@ -3206,6 +3206,44 @@ mod tests {
         );
     }
 
+    /// The defaulting rule, end to end: `examples/fluid` predates the `power`
+    /// slot and authors none, yet its fixture must still come up limited. The
+    /// budget the node publishes is the one actually enforced, so asserting on
+    /// it also pins that the UI cannot report a percentage against a budget
+    /// nothing is applying.
+    #[test]
+    fn fixture_without_an_authored_power_slot_is_limited_at_the_default_budget() {
+        let fs = examples_fluid_fs();
+        let fs: &dyn LpFs = &fs;
+        let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let root = rt.tree().root();
+        let fixture = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fixture").unwrap())
+            .expect("fixture node");
+
+        let budget = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fixture,
+                    slot: SlotPath::parse("power_budget_ma").expect("power_budget_ma"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve power budget")
+            .0;
+
+        assert_eq!(
+            *budget.value_leaf().expect("value").value(),
+            LpValue::U32(lpc_model::nodes::fixture::FixturePower::DEFAULT_BUDGET_MA),
+            "an unstated budget must fall back to the default guard, not to unlimited"
+        );
+    }
+
     #[test]
     fn fluid_example_loads_compute_fluid_fixture_flow() {
         let fs = examples_fluid_fs();

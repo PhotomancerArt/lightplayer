@@ -102,18 +102,57 @@ The cost is that the estimate does not see the white-point LUT. Its default
 scales down, so the estimate over-states draw and limits slightly early — the
 safe direction.
 
+### Absent means protected, at 1000 mA, with an explicit opt-out
+
+A fixture that states no budget gets WS2812B at 1000 mA rather than no limiting.
+Every project written before the slot existed therefore gains a guard without
+being edited — which is the point, since the author most in need of a current
+limit is the one who has never heard of the setting. A budget of **zero** means
+unlimited, for someone whose supply is genuinely larger than any default.
+
+The failure modes are not symmetric, and that is the whole argument. A budget
+set too low dims the show, says so on the fixture card, and is corrected in
+seconds. No budget at all lets a board brown out in a reboot loop, silently,
+needing bootloader recovery to escape — the failure that prompted this work, and
+one that took a code-reading session to diagnose.
+
+**1000 mA** sits between the two available precedents. WLED ships its limiter on
+by default at 850 mA, and that default being *too low* is item 3 on its own
+top-five mistakes list: dim or dark strips with nothing on screen explaining
+why. FastLED ships no default at all and protects only those who already know
+the feature exists. We can afford to sit near WLED's conservative end precisely
+because the fixture card reports the limiting — a limiter that cannot say what
+it is doing is indistinguishable from a broken renderer, which is exactly WLED's
+reported symptom.
+
+Note the budget is **per fixture** where WLED's is per device, so a project with
+several fixtures can demand a multiple of it. That is deliberate but worth
+knowing: nothing here caps a project's total.
+
 ### A fixture-wide budget is the simple case of a richer model
 
 `FixturePower { lamp_type, budget_ma }` is a struct rather than a bare
-`budget_ma: u32` so that per-group power domains — groups of LEDs assigned to
+`budget_ma: u32` so that per-domain power budgets — groups of lamps assigned to
 their own supplies, owned by the fixture mapper — arrive as an added field
-rather than a replacement. Absent `power` means no limiting; there is no default
-budget, because a wrong guess is worse than none in both directions.
+rather than a replacement.
+
+**A device-level total is not the missing piece and should not be built.** Any
+fixture or sub-fixture can have its own supply; a single strip with power
+injected every few metres is already several domains. Domains cut across
+fixtures and inside them, so lamps→supply is the only unit that models reality.
+A fixture-wide budget is the degenerate one-domain case of that.
+
+This slice is a **guardrail, not a power model**. It stops the common mistake;
+it is not accurate enough to size a supply and does not try to be.
 
 ## Consequences
 
-- Projects authored before this change keep working untouched: no `power` slot
-  means no limiting and no per-channel cost.
+- **Every existing project starts limiting at 1000 mA per fixture.** No file
+  needs editing, which is the intent, but it is a behaviour change to output
+  everywhere: any fixture whose content exceeds one amp is now scaled down, and
+  the fixture card is what explains it. Installations with a genuinely large
+  supply must state their budget (or zero) to get their old brightness back.
+  This also moves rendered output in previews and story baselines.
 - Every project carrying an output-node `brightness` had to drop it in the same
   change (13 example and test project files); unknown fields are rejected, not
   ignored.

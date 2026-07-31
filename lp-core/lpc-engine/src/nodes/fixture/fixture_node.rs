@@ -148,7 +148,7 @@ impl FixtureNode {
             color_order,
             brightness: lpc_model::Brightness::DEFAULT.as_u8(),
             gamma_correction: true,
-            power: None,
+            power: FixturePower::default(),
         });
         self
     }
@@ -282,9 +282,12 @@ impl NodeRuntime for FixtureNode {
         // Read through the option's `some` branch rather than the def view's
         // option reader: `power` is absent from every project authored before
         // it existed, and that reads as an unresolved slot rather than as the
-        // "option slot is none" the view's reader recognises. Absent must mean
-        // unlimited, never a default budget.
-        let power: Option<FixturePower> = try_read_def_value(ctx, "power.some")?;
+        // "option slot is none" the view's reader recognises.
+        //
+        // Absent falls back to the default guard rather than to unlimited — the
+        // fixture most in need of a current limit is the one whose author has
+        // never heard of the setting. Opting out is `budget_ma: 0`.
+        let power: FixturePower = try_read_def_value(ctx, "power.some")?.unwrap_or_default();
         let diagnostic_mode =
             try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
         self.sync_mapping_from_def(ctx)?;
@@ -367,6 +370,9 @@ impl NodeRuntime for FixtureNode {
             ver,
             self.power_scale_q16 as f32 / power_limit::UNITY_SCALE_Q16 as f32,
         );
+        self.state
+            .power_budget_ma
+            .set_with_version(ver, power.budget_ma);
         Ok(ProduceResult::Produced)
     }
 
@@ -550,8 +556,9 @@ struct FixtureRenderSettings {
     color_order: ColorOrder,
     brightness: u8,
     gamma_correction: bool,
-    /// Lamp type and supply budget. `None` means output is never limited.
-    power: Option<FixturePower>,
+    /// Lamp type and the budget in force, after an unstated one has fallen
+    /// back to the default. A zero budget means limiting was opted out of.
+    power: FixturePower,
 }
 
 impl ControlNode for FixtureNode {
@@ -575,9 +582,10 @@ impl ControlNode for FixtureNode {
             );
         }
 
-        let mut power = match settings.power {
-            Some(_) => PowerPass::limited(self.power_scale_q16),
-            None => PowerPass::unlimited(),
+        let mut power = if settings.power.is_limited() {
+            PowerPass::limited(self.power_scale_q16)
+        } else {
+            PowerPass::unlimited()
         };
         let now_seconds = ctx.time_seconds();
         let layout = self.render_control_inner(request, target, settings, ctx, &mut power)?;
@@ -598,21 +606,13 @@ impl FixtureNode {
     /// Roll the current-limit scale forward from the demand this frame asked
     /// for. Runs after the frame is written, because that is when demand is
     /// known — hence the one-frame trail.
-    fn update_power_limit(
-        &mut self,
-        power: Option<FixturePower>,
-        pass: &PowerPass,
-        now_seconds: f32,
-    ) {
+    fn update_power_limit(&mut self, power: FixturePower, pass: &PowerPass, now_seconds: f32) {
         let previous_seconds = self.power_last_time_seconds.replace(now_seconds);
-        let Some(power) = power else {
-            // No budget: reset, so re-adding one starts unlimited rather than
-            // inheriting a stale scale.
+        if !power.is_limited() || !pass.is_enabled() {
+            // Opted out: reset, so restoring a budget starts unlimited rather
+            // than inheriting a stale scale.
             self.power_scale_q16 = power_limit::UNITY_SCALE_Q16;
             self.power_estimate_ma = 0;
-            return;
-        };
-        if !pass.is_enabled() {
             return;
         }
 

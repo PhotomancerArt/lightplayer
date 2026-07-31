@@ -361,6 +361,8 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
             UiSlotFieldState::editable(),
             UiSlotSourceState::Unset,
         ),
+        // Opted out (budget 0) — the only state with no readout now that an
+        // unstated budget falls back to the default guard.
         power: None,
     }
 }
