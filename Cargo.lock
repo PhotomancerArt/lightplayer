@@ -3953,6 +3953,7 @@ dependencies = [
  "log",
  "lp-gfx-lpvm",
  "lp-recovery",
+ "lp-ws281x",
  "lpa-server",
  "lpc-hardware",
  "lpc-shared",
@@ -5514,6 +5515,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-ws281x"
+version = "0.1.0"
+
+[[package]]
 name = "lp-xt-elf"
 version = "40.0.0"
 dependencies = [
@@ -5642,6 +5647,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
+ "lpa-client",
  "lpc-engine",
  "lpc-hardware",
  "lpc-history",
