@@ -209,6 +209,17 @@ impl RosterCardState {
     /// (§3c-3); states without time copy ignore it.
     pub fn sub_line(&self, now_secs: f64) -> Option<String> {
         match self {
+            // §3a again: the label alone leaves the user guessing why a
+            // board they just plugged in is not simply working. Say what
+            // this state IS, and say the part that surprises people — a
+            // device flashed from here does not come back on its own.
+            Self::RecoveryMode => Some(
+                "This board is waiting to be re-flashed instead of running \
+                 its firmware — usually a new board that won't talk normally, \
+                 or one being rescued. Anything you install from here needs \
+                 the board unplugged and plugged back in before it will run."
+                    .to_string(),
+            ),
             // §3a: explain the situation, not just the label — with the
             // honest wall-clock facts when we have them (§3c-3).
             Self::EditedOnDevice {
@@ -368,6 +379,20 @@ mod tests {
         assert_eq!(
             RosterCardState::ConnectedEmpty.status_line(now),
             "Connected — nothing loaded"
+        );
+    }
+
+    #[test]
+    fn recovery_mode_explains_itself_and_warns_about_the_replug() {
+        let note = RosterCardState::RecoveryMode.sub_line(0.0).expect(
+            "recovery mode must explain itself — the label alone \
+                     leaves the user guessing",
+        );
+        // The replug is the part that surprises people: without it a
+        // successful flash looks like a dead board.
+        assert!(
+            note.contains("unplugged") && note.contains("plugged back in"),
+            "the replug requirement must be stated: {note}"
         );
     }
 
