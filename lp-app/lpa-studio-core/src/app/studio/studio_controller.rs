@@ -4004,6 +4004,9 @@ impl StudioController {
                 degrade_subject: "device reset",
                 server_reconnect_failed_notice: "Device reset; reconnect after it finishes booting",
                 // a runtime reset reboots the device; the project survives.
+                // Reset/erase/boot-control all leave the device able to come
+                // back by itself.
+                awaits_manual_replug: false,
                 severs_lens: false,
             },
             updates,
@@ -4016,18 +4019,34 @@ impl StudioController {
         updates: UxUpdateSink,
         setup_name: Option<String>,
     ) -> UiResult {
+        // A flash performed while the chip sits in ROM download mode is a
+        // different flow, and the difference is the ENDING: the board does
+        // not boot the image it was just given until it is physically
+        // replugged. The shape follows the device's actual state rather
+        // than which button was pressed, because that is what determines
+        // whether waiting for a reattach is sensible.
+        let from_recovery = self.device_is_in_recovery_mode();
         let mut outcome = self
             .run_device_management(
                 ManagementFlowSpec {
                     request: LinkManagementRequest::FlashFirmware,
                     progress_label: "Flashing firmware",
-                    reconnect_detail: "Waiting for firmware boot",
+                    reconnect_detail: if from_recovery {
+                        "Unplug the board and plug it back in to start it"
+                    } else {
+                        "Waiting for firmware boot"
+                    },
                     failed_exit_label: "Back to set up",
                     record_captured_logs_on_success: false,
                     done_notice: provision_notice,
                     degrade_subject: "firmware flashed",
-                    server_reconnect_failed_notice:
-                        "Firmware flashed; reconnect the server after the device finishes booting",
+                    server_reconnect_failed_notice: if from_recovery {
+                        "Firmware flashed. Unplug the board and plug it back in — \
+                         it will not start on its own from recovery mode."
+                    } else {
+                        "Firmware flashed; reconnect the server after the device finishes booting"
+                    },
+                    awaits_manual_replug: from_recovery,
                     // a flash reboots into new firmware; the stored project
                     // survives and reloads on reattach.
                     severs_lens: false,
@@ -4159,6 +4178,14 @@ impl StudioController {
         })
     }
 
+    /// Whether the managed device is currently sitting in ROM download
+    /// mode — the state whose flash needs a manual replug to take effect.
+    fn device_is_in_recovery_mode(&self) -> bool {
+        self.hardware_session().is_some_and(|session| {
+            matches!(session.snapshot().state, lpa_link::DeviceState::Bootloader)
+        })
+    }
+
     /// Write the boot-control record so the next restart skips project
     /// auto-load.
     ///
@@ -4180,6 +4207,9 @@ impl StudioController {
                     "Safe start armed; reconnect after the device finishes booting",
                 // Nothing is erased — the project is still on the device and
                 // the editor's lens stays valid.
+                // Reset/erase/boot-control all leave the device able to come
+                // back by itself.
+                awaits_manual_replug: false,
                 severs_lens: false,
             },
             updates,
@@ -4201,6 +4231,9 @@ impl StudioController {
                     "Device wiped; reconnect after the device finishes booting",
                 // a wipe erases the flash — the project is gone; a lens on
                 // this device is severed and the app returns to the gallery.
+                // Reset/erase/boot-control all leave the device able to come
+                // back by itself.
+                awaits_manual_replug: false,
                 severs_lens: true,
             },
             updates,
@@ -4301,7 +4334,9 @@ impl StudioController {
                     ));
                 }
             };
-            session.manage(spec.request, event_sink).await
+            // Cloned so the spec stays whole: the reattach half below still
+            // needs its copy for `reattach_failure_op`.
+            session.manage(spec.request.clone(), event_sink).await
         };
         // The manage half settled (either way): session replaces unblock
         // and the card's operation narration clears.
@@ -4356,6 +4391,22 @@ impl StudioController {
                 // Status tab announces what's next.
                 self.device_card_op = None;
             }
+            // The device was never going to come back by itself. Stay in
+            // the AwaitingDevice phase with the instruction that ends it,
+            // rather than calling a successful flash a failure and marking
+            // the session failed for doing exactly what it must do.
+            Err(_) if spec.awaits_manual_replug => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "{} — waiting for the board to be replugged",
+                        spec.degrade_subject
+                    ),
+                ));
+                *card_op.borrow_mut() = reattach_failure_op(&spec, "");
+                outcome = outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
+            }
             Err(error) => {
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,
@@ -4370,11 +4421,7 @@ impl StudioController {
                 }
                 // Failed reattach renders on the card too (I4) — with the
                 // same single exit, not a silent fall-through.
-                *card_op.borrow_mut() = crate::CardOp::failed(
-                    format!("{} — reconnect failed", spec.degrade_subject),
-                    error.to_string(),
-                    spec.failed_exit_label,
-                );
+                *card_op.borrow_mut() = reattach_failure_op(&spec, &error.to_string());
                 outcome = outcome.with_notice(UiNotice::info(spec.server_reconnect_failed_notice));
             }
         }
@@ -4720,6 +4767,27 @@ fn project_tree_item_actions(
 /// wipe): the link request plus the notice/log wording that differs between
 /// them. Everything else — quiesce, capture, manage, reopen, reattach,
 /// degrade — is shared in `StudioController::run_device_management`.
+/// What the card shows when the post-operation reattach does not land.
+///
+/// Two different situations wear the same error: a device that FAILED to come
+/// back, and a device that was never going to. A board flashed from ROM
+/// download mode does not boot the new image until it is physically
+/// replugged, so treating its non-return as a failure reports a successful
+/// flash as a failure — on the one path a user in recovery actually takes.
+fn reattach_failure_op(spec: &ManagementFlowSpec, error: &str) -> crate::CardOp {
+    if spec.awaits_manual_replug {
+        // Not failed: awaiting the one action that finishes the job, with
+        // the instruction itself as the narration.
+        crate::CardOp::awaiting(spec.reconnect_detail)
+    } else {
+        crate::CardOp::failed(
+            format!("{} — reconnect failed", spec.degrade_subject),
+            error.to_string(),
+            spec.failed_exit_label,
+        )
+    }
+}
+
 struct ManagementFlowSpec {
     request: LinkManagementRequest,
     /// Activity label while the management operation runs.
@@ -4739,6 +4807,16 @@ struct ManagementFlowSpec {
     /// reset" → "device reset but serial reopen failed: …".
     degrade_subject: &'static str,
     server_reconnect_failed_notice: &'static str,
+    /// The device will NOT come back on its own — the user has to unplug
+    /// and replug it — so a failed reattach is the EXPECTED ending, not a
+    /// failure.
+    ///
+    /// True for a flash performed while the chip sits in ROM download mode:
+    /// it does not boot the freshly written image without a power cycle.
+    /// Without this the flow flashes successfully, waits for a device that
+    /// cannot return, and then reports the success as a failure — which is
+    /// exactly the path a user in recovery takes.
+    awaits_manual_replug: bool,
     /// The op takes the project WITH it (a destructive wipe): when the
     /// editor lens sits on the managed device, fully quiesce it — detach
     /// the lens so the app returns to the gallery — and say so, rather than
@@ -6243,5 +6321,55 @@ mod tests {
 
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}
+    }
+}
+
+#[cfg(test)]
+mod reattach_failure_tests {
+    use super::*;
+    use crate::CardOp;
+
+    fn spec(awaits_manual_replug: bool) -> ManagementFlowSpec {
+        ManagementFlowSpec {
+            request: LinkManagementRequest::FlashFirmware,
+            progress_label: "Flashing firmware",
+            reconnect_detail: "Unplug the board and plug it back in to start it",
+            failed_exit_label: "Back to set up",
+            record_captured_logs_on_success: false,
+            done_notice: provision_notice,
+            degrade_subject: "firmware flashed",
+            server_reconnect_failed_notice: "Firmware flashed.",
+            awaits_manual_replug,
+            severs_lens: false,
+        }
+    }
+
+    #[test]
+    fn a_device_that_cannot_return_is_awaited_not_failed() {
+        // The board was flashed from ROM download mode: it does not boot the
+        // new image until a human power-cycles it. Reporting that as a
+        // failure calls a successful flash a failure, on the one path a user
+        // in recovery actually takes.
+        let op = reattach_failure_op(&spec(true), "device did not come back");
+        assert_eq!(
+            op,
+            CardOp::awaiting("Unplug the board and plug it back in to start it"),
+            "the ending must be the instruction that finishes the job"
+        );
+    }
+
+    #[test]
+    fn a_device_that_should_have_returned_still_fails_loudly() {
+        // The ordinary case must keep its Failed render and its single exit
+        // (model §2 I4) — tolerating THIS would hide real breakage.
+        let op = reattach_failure_op(&spec(false), "serial reopen failed");
+        assert_eq!(
+            op,
+            CardOp::failed(
+                "firmware flashed — reconnect failed".to_string(),
+                "serial reopen failed".to_string(),
+                "Back to set up",
+            )
+        );
     }
 }
