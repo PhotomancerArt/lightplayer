@@ -231,11 +231,10 @@ impl std::error::Error for BoardDisplayError {}
 
 impl BoardDisplayFile {
     pub fn read_json(json_text: &str) -> Result<Self, BoardDisplayError> {
-        let file: Self = serde_json::from_str(json_text).map_err(|error| {
-            BoardDisplayError::Parse {
+        let file: Self =
+            serde_json::from_str(json_text).map_err(|error| BoardDisplayError::Parse {
                 message: error.to_string(),
-            }
-        })?;
+            })?;
         file.validate()?;
         Ok(file)
     }
@@ -257,7 +256,10 @@ impl BoardDisplayFile {
             return invalid("display_name must not be empty".into());
         }
         if !self.price_usd.is_finite() || self.price_usd < 0.0 {
-            return invalid(format!("price_usd must be non-negative: {}", self.price_usd));
+            return invalid(format!(
+                "price_usd must be non-negative: {}",
+                self.price_usd
+            ));
         }
         for url in &self.purchase_urls {
             if !(url.href.starts_with("https://") || url.href.starts_with("http://")) {
@@ -290,7 +292,10 @@ impl BoardDisplayFile {
         for terminal in &self.hw.terminals {
             if let Some(gpio) = terminal.gpio {
                 if seen.contains(&gpio) {
-                    return invalid(format!("duplicate gpio {gpio} (terminal {})", terminal.label));
+                    return invalid(format!(
+                        "duplicate gpio {gpio} (terminal {})",
+                        terminal.label
+                    ));
                 }
                 seen.push(gpio);
             }

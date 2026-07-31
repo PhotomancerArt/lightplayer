@@ -13,15 +13,21 @@ use crate::display_manifest::BoardDisplayFile;
 pub const DISPLAY_MANIFEST_SOURCES: &[(&str, &str)] = &[
     (
         "espressif/esp32-c6-devkitc-1",
-        include_str!("../../../lp-core/lpc-hardware/boards/espressif/esp32-c6-devkitc-1.display.json"),
+        include_str!(
+            "../../../lp-core/lpc-hardware/boards/espressif/esp32-c6-devkitc-1.display.json"
+        ),
     ),
     (
         "espressif/esp32-s3-devkitc-1",
-        include_str!("../../../lp-core/lpc-hardware/boards/espressif/esp32-s3-devkitc-1.display.json"),
+        include_str!(
+            "../../../lp-core/lpc-hardware/boards/espressif/esp32-s3-devkitc-1.display.json"
+        ),
     ),
     (
         "espressif/esp32-devkitc-v4",
-        include_str!("../../../lp-core/lpc-hardware/boards/espressif/esp32-devkitc-v4.display.json"),
+        include_str!(
+            "../../../lp-core/lpc-hardware/boards/espressif/esp32-devkitc-v4.display.json"
+        ),
     ),
     (
         "seeed/xiao-esp32-c6",

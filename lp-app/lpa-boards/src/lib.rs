@@ -14,8 +14,8 @@
 mod catalog;
 mod display_manifest;
 
-pub use catalog::{all_boards, board_by_id, DISPLAY_MANIFEST_SOURCES};
+pub use catalog::{DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id};
 pub use display_manifest::{
-    BoardDisplayError, BoardDisplayFile, BoardDrawing, CapKind, DrawnButton, DrawnModule,
-    DrawnPin, DrawnRgb, DrawnTerminal, DrawnUsb, PinCap, PinRole, PurchaseUrl, SupportTier,
+    BoardDisplayError, BoardDisplayFile, BoardDrawing, CapKind, DrawnButton, DrawnModule, DrawnPin,
+    DrawnRgb, DrawnTerminal, DrawnUsb, PinCap, PinRole, PurchaseUrl, SupportTier,
 };
