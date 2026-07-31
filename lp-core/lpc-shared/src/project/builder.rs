@@ -427,6 +427,7 @@ impl FixtureBuilder {
                 .map_or_else(OptionSlot::none, |enabled| {
                     OptionSlot::some(ValueSlot::new(enabled))
                 }),
+            power: OptionSlot::none(),
         };
 
         let json = authored_node_json(&slot_shape_registry(), &NodeDef::Fixture(config));
