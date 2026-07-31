@@ -1,6 +1,6 @@
 //! The fixture card's permanent face.
 
-use crate::{UiAssetEditor, UiPanelControl, UiProducedProduct};
+use crate::{UiAssetEditor, UiFixturePower, UiPanelControl, UiProducedProduct};
 
 /// Permanent face for a fixture node card.
 ///
@@ -19,4 +19,8 @@ pub struct UiFixtureFace {
     /// The mapping document's inline-editor plumbing (fetch/apply/revert
     /// targets), present when the mapping slot resolves to a `Map2d` asset.
     pub mapping_editor: Option<UiAssetEditor>,
+    /// Estimated draw against the declared supply budget. `None` when the
+    /// fixture declares no budget, in which case nothing is ever limited and
+    /// there is nothing worth saying on the face.
+    pub power: Option<UiFixturePower>,
 }

@@ -8,7 +8,9 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::face_story_fixtures::{
-    fixture_node_view, fyeah_presentable_doc, map2d_fixture_face, map2d_fixture_face_editing,
+    fixture_face_limiting, fixture_face_within_budget, fixture_node_view,
+    fixture_node_view_with_face, fyeah_presentable_doc, map2d_fixture_face,
+    map2d_fixture_face_editing,
 };
 use crate::app::node::map_view::MapViewOptions;
 use crate::app::node::{FixtureFace, NodePane};
@@ -29,6 +31,48 @@ fn default() -> Element {
         FixtureCardCanvas {
             NodePane {
                 view: fixture_node_view(),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "No power budget declared: nothing is ever limited, so the face says nothing about power. The `power` slot in the advanced drawer is where a budget gets added."
+)]
+fn power_no_budget() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            NodePane {
+                view: fixture_node_view(),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Inside budget: one quiet line reading estimated draw against the declared supply — a setup number, useful before anything goes wrong. 'Estimated' is literal; no preset here has met a meter."
+)]
+fn power_within_budget() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            NodePane {
+                view: fixture_node_view_with_face(fixture_face_within_budget()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Actively limiting: demand is over budget so output is scaled to stay inside it. Coloured 'attention', not 'warning' — shedding current to honour a declared budget is the feature working, not a fault."
+)]
+fn power_limiting() -> Element {
+    rsx! {
+        FixtureCardCanvas {
+            NodePane {
+                view: fixture_node_view_with_face(fixture_face_limiting()),
                 on_action: move |_| {},
             }
         }
