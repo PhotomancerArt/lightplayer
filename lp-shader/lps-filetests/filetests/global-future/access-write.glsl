@@ -22,13 +22,9 @@ void test_access_write_float() {
     global_float = 42.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_float() == 0.0
 
@@ -37,13 +33,9 @@ void test_access_write_int() {
     global_int = -123;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_int() == 0.0
 
@@ -52,13 +44,9 @@ void test_access_write_uint() {
     global_uint = 987u;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_uint() == 0.0
 
@@ -67,13 +55,9 @@ void test_access_write_bool() {
     global_bool = true;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_bool() == 0.0
 
@@ -82,13 +66,9 @@ void test_access_write_vec2() {
     global_vec2 = vec2(1.0, 2.0);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_vec2() == 0.0
 
@@ -97,13 +77,9 @@ void test_access_write_vec3() {
     global_vec3 = vec3(1.0, 2.0, 3.0);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_vec3() == 0.0
 
@@ -112,13 +88,9 @@ void test_access_write_vec4() {
     global_vec4 = vec4(1.0, 2.0, 3.0, 4.0);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_vec4() == 0.0
 
@@ -127,13 +99,9 @@ void test_access_write_mat2() {
     global_mat2 = mat2(1.0, 2.0, 3.0, 4.0);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_mat2() == 0.0
 
@@ -142,13 +110,9 @@ void test_access_write_out() {
     out_depth = 0.5;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_out() == 0.0
 
@@ -160,13 +124,9 @@ void test_access_write_buffer() {
     buffer_data[3] = 20.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_buffer() == 0.0
 
@@ -175,13 +135,9 @@ void test_access_write_shared() {
     shared_counter = 42.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_shared() == 0.0
 
@@ -195,12 +151,8 @@ float test_access_write_read() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
 // run: test_access_write_read() ~= 157.0
