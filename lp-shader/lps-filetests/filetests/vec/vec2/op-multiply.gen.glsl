@@ -3,7 +3,6 @@
 //   lps-filetests-gen-app vec/vec2/op-multiply --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Multiply: vec2 * vec2 -> vec2 (component-wise)
