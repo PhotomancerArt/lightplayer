@@ -2067,6 +2067,9 @@ impl StudioController {
             DeviceOp::WipeProject => self.wipe_project().await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
             DeviceOp::BootSafeOnce => self.boot_safe_once(updates).await,
+            DeviceOp::ProbeBootloaderMode { card_key, flow } => {
+                self.probe_bootloader_mode(card_key, flow).await
+            }
             DeviceOp::RefreshConnections => {
                 // Drop the session (no provider close) + catalog refresh.
                 self.device.refresh_provider_catalog();
@@ -4092,6 +4095,68 @@ impl StudioController {
         Ok(UiNotices::new().with_notice(UiNotice::info(
             "Wiped — this board is empty now. Pick a project to put on it.",
         )))
+    }
+
+    /// Ask the device whether a bootloader is listening, and fold the answer
+    /// into the card's open bootloader-entry sheet.
+    ///
+    /// This is the step that makes the ritual's confirmation real. Without
+    /// it the sheet can show steps and then never resolve, which is worse
+    /// than showing nothing: the user has no way to tell a failed attempt
+    /// from a dead board, which is the exact confusion the flow exists to
+    /// remove.
+    ///
+    /// The probe REBOOTS the device, so it runs only here — on the user's
+    /// explicit "I've done that", which is itself the signal that a replug
+    /// just happened.
+    async fn probe_bootloader_mode(
+        &mut self,
+        card_key: String,
+        flow: crate::BootloaderEntryFlow,
+    ) -> UiResult {
+        use crate::CardUiOp;
+
+        // Show the waiting state first: the probe takes seconds (reset,
+        // sync, re-enumerate) and a frozen sheet reads as a hang.
+        let waiting = flow.begin_waiting();
+        self.apply_card_ui_op(CardUiOp::OpenSheet {
+            card: card_key.clone(),
+            sheet: crate::CardSheet::BootloaderEntry(waiting.clone()),
+        });
+
+        let Some(session) = self.hardware_session() else {
+            return Err(UiError::MissingSession(
+                "no hardware device session to probe".to_string(),
+            ));
+        };
+        let probed = session
+            .probe_link_mode(lpa_link::DeviceEventSink::noop())
+            .await;
+
+        let settled = match probed {
+            Ok(mode) if mode.is_bootloader() => {
+                let chip_name = match &mode {
+                    lpa_link::DeviceLinkMode::Bootloader { chip_name, .. } => chip_name.clone(),
+                    _ => None,
+                };
+                waiting.on_probe_answered(chip_name)
+            }
+            // Reached the device but it is not in bootloader mode, OR the
+            // probe itself failed. Both mean "that attempt did not land" —
+            // NOT "the device is broken", since an app-mode device ignores
+            // the handshake too.
+            Ok(_) | Err(_) => waiting.on_probe_unanswered(),
+        };
+        self.apply_card_ui_op(CardUiOp::OpenSheet {
+            card: card_key,
+            sheet: crate::CardSheet::BootloaderEntry(settled.clone()),
+        });
+
+        Ok(if settled.is_confirmed() {
+            UiNotices::new().with_notice(UiNotice::info("Device is in recovery mode"))
+        } else {
+            UiNotices::new()
+        })
     }
 
     /// Write the boot-control record so the next restart skips project

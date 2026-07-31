@@ -1134,8 +1134,21 @@ fn BootloaderEntrySheet(
     card_key: String,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let advance = |card_key: &str, next: BootloaderEntryFlow| {
-        open_sheet_action(card_key, CardSheetState::BootloaderEntry(next))
+    // "I've done that" must PROBE, not merely change state. Advancing the
+    // sheet without asking the device would show a waiting spinner that
+    // never resolves — worse than nothing, because the user still cannot
+    // tell a failed attempt from a dead board. The probe reboots the
+    // device, and the button press is exactly the signal that a replug just
+    // happened, so this is the one honest place to run it.
+    let probe = |card_key: &str, flow: BootloaderEntryFlow| {
+        UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::ProbeBootloaderMode {
+                card_key: card_key.to_string(),
+                flow,
+            },
+        )
+        .with_label("Check the device")
     };
     rsx! {
         CardSheet {
@@ -1190,8 +1203,8 @@ fn BootloaderEntrySheet(
                         tone: SheetButtonTone::Primary,
                         onclick: {
                             let card_key = card_key.clone();
-                            let next = flow.clone().begin_waiting();
-                            move |_| on_action.call(advance(&card_key, next.clone()))
+                            let flow = flow.clone();
+                            move |_| on_action.call(probe(&card_key, flow.clone()))
                         },
                     }
                 }
