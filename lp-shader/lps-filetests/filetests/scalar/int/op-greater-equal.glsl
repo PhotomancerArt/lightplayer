@@ -1,5 +1,4 @@
 // test run
-// @ignore(backend=wasm)
 
 // ============================================================================
 // Greater Equal: int >= int -> bool

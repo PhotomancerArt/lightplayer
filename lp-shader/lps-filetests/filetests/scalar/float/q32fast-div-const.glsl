@@ -1,5 +1,4 @@
 // test run
-// @ignore(float_mode=f32)
 //
 // Constant-divisor Q32 fast path: nonzero constants lower as
 // lhs * q32(1.0 / rhs). This is the normal shader-speed path, not a

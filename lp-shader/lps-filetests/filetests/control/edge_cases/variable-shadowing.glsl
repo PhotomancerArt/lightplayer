@@ -1,5 +1,4 @@
 // test run
-// @ignore(backend=wasm)
 
 // ============================================================================
 // Variable shadowing scenarios - comprehensive tests

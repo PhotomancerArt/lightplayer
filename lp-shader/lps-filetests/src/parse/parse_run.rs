@@ -99,13 +99,13 @@ pub fn parse_run_directive(
 
     let mut annotations = Vec::new();
     if legacy_expect_fail {
-        for t in crate::targets::ALL_TARGETS {
-            annotations.push(crate::targets::Annotation {
-                kind: crate::targets::AnnotationKind::Unimplemented,
-                target: t.name(),
-                line_number,
-            });
-        }
+        // Legacy `[expect-fail]` suffix: unimplemented on every target, which is
+        // now one `*` selector instead of one annotation per registered target.
+        annotations.push(crate::targets::Annotation {
+            kind: crate::targets::AnnotationKind::Unimplemented,
+            selector: crate::targets::TargetSelector::All,
+            line_number,
+        });
     }
 
     Ok(RunDirective {
@@ -253,11 +253,18 @@ mod tests {
         let dir = parse_run_directive("test() == 1 [expect-fail]", 5, true).unwrap();
         assert_eq!(dir.expression_str, "test()");
         assert_eq!(dir.expected_str, "1");
-        assert_eq!(dir.annotations.len(), crate::targets::ALL_TARGETS.len());
+        assert_eq!(
+            dir.annotations.len(),
+            1,
+            "one `*` selector, not one per target"
+        );
         assert!(matches!(
             dir.annotations[0].kind,
             crate::targets::AnnotationKind::Unimplemented
         ));
+        for target in crate::targets::ALL_TARGETS {
+            assert!(dir.annotations[0].applies_to(target), "{}", target.name());
+        }
     }
 
     #[test]

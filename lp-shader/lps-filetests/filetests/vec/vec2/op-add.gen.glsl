@@ -3,7 +3,6 @@
 //   lps-filetests-gen-app vec/vec2/op-add --write
 //
 // test run
-// @unimplemented(backend=wasm)
 
 // ============================================================================
 // Add: vec2 + vec2 -> vec2 (component-wise)
