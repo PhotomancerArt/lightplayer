@@ -383,6 +383,41 @@ H (root module): audio-input node (samples → bus:audio.in)
   (silence, R6); its workbench project supplies a test-tone writer. A
   module with no visual is legitimate: its `output` mirrors cleared (R7).
 
+### E7 — Fluid drawing module (gesture input + idle fallback)
+
+The interactive-installation shape: a fluid sim driven by touches — from
+an XY pad on a phone, an IR camera, or, when nobody is playing, a
+generated idle animation of wandering synthetic touches.
+
+```text
+F (module, "fluid-draw"):
+   gate node      in  ← bus:touches.in   (public gesture input; timeout
+                  idle ← bus:touches.idle    param `idle_after`, public)
+                  out → bus:touches
+   friends node   (synthetic wandering touches) → bus:touches.idle
+   emitter        touches → forces/dye        fluid sim → sim state
+   visual shader  sim state → bus:visual.out
+```
+
+- `touches.in` has **no internal writer** — it is the module's inheritable
+  input, exactly E6's pattern. Its panel control is a **multi-XY pad**, a
+  *momentary* control (panel.md P14): touching writes Scope(F), releasing
+  despawns the writer.
+- Resolution while playing: pad engaged → your touches (nearest scope).
+  Pad released → writer gone → walk outward → a host camera node writing
+  `touches.in` in Scope(H), if present (R5). No camera → unwritten →
+  the gate reads an empty set (R6).
+- **Idle is a node, not a resolution feature**: the gate crossfades to
+  the friends-generator's touches after `idle_after` seconds of
+  empty-or-absent input. "Empty" matters — a connected camera seeing
+  nobody is a live writer producing an empty set, which no
+  writer-priority scheme can distinguish from activity; only domain
+  logic can (which is why the timeout is a param, on the panel). Both
+  silence cases collapse into the gate's one code path.
+- In play mode on a phone, F's panel — the pad plus `idle_after`,
+  friend-count, and the sim's public params — *is* the installation
+  controller.
+
 ## 5. UI corollaries (the UX spike owns the shape)
 
 One face, three zoom levels: the **effect author** works inside the module
@@ -450,6 +485,10 @@ down gradually **at the module boundary** — a module's public channels and
 exports are where conventions become contracts. Until then: names above
 are provisional conventions, not schema; new channels cost nothing (R3);
 nothing in this document depends on the vocabulary's final shape.
+
+Known vocabulary pressure beyond scalars: **touch/gesture sets** (E7 —
+multi-point, per-touch identity; shape question tracked as panel.md
+P-Q5) and the `phase` convention (panel.md P3).
 
 ## 8. Provenance (proposed field set — Q7)
 
