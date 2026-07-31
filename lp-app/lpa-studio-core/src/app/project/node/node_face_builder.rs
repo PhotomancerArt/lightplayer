@@ -27,21 +27,29 @@
 //!   preview snapshot, node-select action). Deriving the face ALSO
 //!   enforces the sibling invariant: the children list keeps ONLY the
 //!   active entry's child (see [`kind_face`]).
+//! - **Button** / **Output**: the runtime-poke faces (node-actions P4).
+//!   Their affordance is a command at the LIVE runtime, not a slot edit, so
+//!   they derive from the node's stable ADDRESS and always exist; the
+//!   section DTOs only supply the readouts beside the control (endpoint,
+//!   message id, the control product the output is fed). Every op the
+//!   controls dispatch is built by the face DTO itself (`UiButtonFace`,
+//!   `UiOutputFace`) so the view layer owns only the timing.
 //! - Every other kind returns `None` — the card keeps today's generic
 //!   sections.
 
 use lpc_model::{
-    FixtureDef, LpValue, PlaylistDef, ShaderDef, ShaderValueShapeRef, shader_panel_step,
+    ButtonDef, FixtureDef, LpValue, OutputDef, PlaylistDef, ShaderDef, ShaderValueShapeRef,
+    shader_panel_step,
 };
 
 use crate::app::project::format_lp_value;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
-    UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
-    UiShaderFace, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue,
-    UiSlotValueKind,
+    UiAction, UiAssetEditor, UiAssetEditorKind, UiButtonFace, UiConfigSlot, UiConfigSlotBody,
+    UiFixtureFace, UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiOutputFace,
+    UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
+    UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect, UiSlotAspectKind,
+    UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -82,6 +90,8 @@ pub(in crate::app::project) fn kind_face(
             // ACTIVE placard is the active-ness presentation.
             Some(UiNodeFace::Playlist(face))
         }
+        ButtonDef::KIND => Some(UiNodeFace::Button(button_face(address, sections))),
+        OutputDef::KIND => Some(UiNodeFace::Output(output_face(address, sections))),
         // Unknown kinds stay on the generic fallback permanently.
         _ => None,
     }
@@ -135,6 +145,63 @@ fn fixture_power(sections: &[UiNodeSection]) -> Option<UiFixturePower> {
         budget_ma,
         scale: produced_f32(sections, "power_scale").unwrap_or(1.0),
     })
+}
+
+// -- runtime-poke faces (button, output) --------------------------------------
+
+/// The button card's face: the simulate-press control, plus the button's
+/// hardware identity. Unlike the shader/fixture faces this needs nothing
+/// from the section DTOs to exist — the affordance is a poke at the runtime,
+/// addressed by the node's own stable address — so it always derives and the
+/// endpoint/id readouts degrade to `None` on their own.
+fn button_face(address: &ProjectNodeAddress, sections: &[UiNodeSection]) -> UiButtonFace {
+    UiButtonFace {
+        node: address.clone(),
+        endpoint: top_level_string(sections, "endpoint"),
+        id: top_level_u32(sections, "id"),
+    }
+}
+
+/// The output card's face: the test-pattern toggle, the endpoint, and the
+/// control product the output is being fed (when one is projected). Always
+/// derives, same reasoning as [`button_face`].
+fn output_face(address: &ProjectNodeAddress, sections: &[UiNodeSection]) -> UiOutputFace {
+    UiOutputFace {
+        node: address.clone(),
+        endpoint: top_level_string(sections, "endpoint"),
+        preview: product_of_kind(sections, UiProductKind::Control),
+    }
+}
+
+/// A top-level config row's string reading, keyed EXACTLY (unlike
+/// [`string_field`], which matches a record field by its `.<name>` suffix).
+fn top_level_string(sections: &[UiNodeSection], key: &str) -> Option<String> {
+    match &config_rows(sections)
+        .into_iter()
+        .find(|row| row.key == key)?
+        .body
+    {
+        UiConfigSlotBody::Value(UiSlotValue {
+            kind: UiSlotValueKind::String(value),
+            ..
+        }) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+/// A top-level config row's u32 reading, keyed exactly.
+fn top_level_u32(sections: &[UiNodeSection], key: &str) -> Option<u32> {
+    match &config_rows(sections)
+        .into_iter()
+        .find(|row| row.key == key)?
+        .body
+    {
+        UiConfigSlotBody::Value(UiSlotValue {
+            kind: UiSlotValueKind::U32(value),
+            ..
+        }) => Some(*value),
+        _ => None,
+    }
 }
 
 /// First produced product row of the wanted kind; an `Empty`-kind row (the
@@ -883,6 +950,65 @@ mod tests {
                 .any(|aspect| aspect.kind == UiSlotAspectKind::Optionality),
             "the fader's popover keeps the option row's aspects"
         );
+    }
+
+    #[test]
+    fn button_face_carries_the_nodes_address_and_hardware_identity() {
+        let sections = vec![UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::value(
+                "endpoint",
+                "Endpoint",
+                UiSlotValue::string("button:gpio:D9"),
+            ),
+            UiConfigSlot::value("id", "Id", UiSlotValue::u32(3)),
+            UiConfigSlot::value("stable_ms", "Stable ms", UiSlotValue::u32(30)),
+        ])];
+
+        let Some(UiNodeFace::Button(face)) =
+            kind_face("button", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected a button face");
+        };
+        assert_eq!(face.node, test_address(), "the poke is address-addressed");
+        assert_eq!(face.endpoint.as_deref(), Some("button:gpio:D9"));
+        assert_eq!(face.id, Some(3));
+    }
+
+    #[test]
+    fn output_face_carries_the_address_endpoint_and_fed_product() {
+        let sections = vec![
+            UiNodeSection::ProducedProducts(vec![UiProducedProduct::control("Output")]),
+            UiNodeSection::ConfigSlots(vec![UiConfigSlot::value(
+                "endpoint",
+                "Endpoint",
+                UiSlotValue::string("ws281x:rmt:D10"),
+            )]),
+        ];
+
+        let Some(UiNodeFace::Output(face)) =
+            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        else {
+            panic!("expected an output face");
+        };
+        assert_eq!(face.node, test_address());
+        assert_eq!(face.endpoint.as_deref(), Some("ws281x:rmt:D10"));
+        assert_eq!(
+            face.preview.as_ref().map(|product| product.kind),
+            Some(UiProductKind::Control)
+        );
+    }
+
+    #[test]
+    fn poke_faces_derive_even_with_nothing_to_read_out() {
+        // The affordance is a runtime command addressed by the node's own
+        // address: a def whose rows have not projected yet still gets its
+        // control (unlike shader/fixture, which need their preview row).
+        for kind in ["button", "output"] {
+            assert!(
+                kind_face(kind, &test_address(), &[], &mut Vec::new()).is_some(),
+                "{kind} face derives from the address alone"
+            );
+        }
     }
 
     #[test]

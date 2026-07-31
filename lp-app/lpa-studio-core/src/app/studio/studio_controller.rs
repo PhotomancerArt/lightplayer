@@ -22,14 +22,14 @@ use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
-    AssetContentFetchOp, AssetEditOp, ConnectFlowState, Controller, ControllerContext,
-    DeviceController, DeviceOp, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
-    PlaylistActivateOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
-    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePayload, RuntimePool,
-    ServerFailureKind, ServerSnapshot, ServerState, SlotEditOp, StudioSnapshot, UiAction,
-    UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
-    UiPaneView, UiProgress, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
-    UxUpdate, UxUpdateSink,
+    AssetContentFetchOp, AssetEditOp, ButtonEventOp, ConnectFlowState, Controller,
+    ControllerContext, DeviceController, DeviceOp, NodeCopyOp, NodeCreateOp, NodePasteOp,
+    NodeRemoveOp, NodeRevertOp, OutputTestPatternOp, PlaylistActivateOp, ProjectConnectResult,
+    ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome, ProjectState,
+    ProjectSyncRun, RuntimePayload, RuntimePool, ServerFailureKind, ServerSnapshot, ServerState,
+    SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiPaneView, UiProgress, UiResult, UiStatus,
+    UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 /// How often the quiet PortHeld retry re-attempts the granted attach
@@ -2003,6 +2003,14 @@ impl StudioController {
                 let op = action.into_op::<PlaylistActivateOp>()?;
                 return self.execute_playlist_activate_op(op).await;
             }
+            if action.op_as::<ButtonEventOp>().is_some() {
+                let op = action.into_op::<ButtonEventOp>()?;
+                return self.execute_button_event_op(op).await;
+            }
+            if action.op_as::<OutputTestPatternOp>().is_some() {
+                let op = action.into_op::<OutputTestPatternOp>()?;
+                return self.execute_output_test_pattern_op(op).await;
+            }
             if action.op_as::<NodeCreateOp>().is_some() {
                 let op = action.into_op::<NodeCreateOp>()?;
                 return self.execute_node_create_op(op).await;
@@ -3130,6 +3138,28 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.activate_playlist_entry(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Button face simulate-press: dispatch a synthetic button event to the
+    /// node's live runtime. Quiet on acceptance (the button's own produced
+    /// state follows via the tightened refresh ticks); a rejection comes
+    /// back as a warning notice.
+    async fn execute_button_event_op(&mut self, op: ButtonEventOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.send_button_event(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Output face test-pattern toggle: dispatch (or clear) the diagnostic
+    /// pattern on the output's live runtime.
+    async fn execute_output_test_pattern_op(&mut self, op: OutputTestPatternOp) -> UiResult {
+        let run = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project.send_output_test_pattern(server, op).await
         };
         self.record_project_edit_run(run)
     }

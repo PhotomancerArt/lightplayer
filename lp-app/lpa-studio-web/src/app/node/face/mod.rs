@@ -13,17 +13,21 @@
 
 use lpa_studio_core::{NodeUiOp, ProjectEditorOp, ProjectEditorTarget, UiAction};
 
+mod button_face;
 mod fixture_face;
 mod node_card_drawers;
 mod node_card_section;
 mod node_face_body;
+mod output_face;
 mod playlist_face;
 mod shader_face;
 
+pub use button_face::ButtonFace;
 pub use fixture_face::FixtureFace;
 pub use node_card_drawers::NodeCardDrawers;
 pub use node_card_section::NodeCardSection;
 pub use node_face_body::NodeFaceBody;
+pub use output_face::OutputFace;
 pub use playlist_face::PlaylistFace;
 pub use shader_face::ShaderFace;
 

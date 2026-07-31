@@ -15,17 +15,18 @@ use crate::app::project::slot::{
 use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS};
 use crate::core::notice::UiNotices;
 use crate::{
-    AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeCardUiState, NodeUiOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
-    PlaylistActivateOp, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotEditOp, StudioOverlayMutation, StudioProjectReadOutcome,
-    StudioServerClient, UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError,
-    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction,
-    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
-    UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
+    AssetEditOp, ButtonEventOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice,
+    MAX_ASSET_BODY_BYTES, NodeCardUiState, NodeUiOp, OutputTestPatternOp, PendingAssetEdit,
+    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProgressState,
+    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
+    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
+    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
+    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
+    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
+    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
+    UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -38,8 +39,8 @@ use lpc_model::{
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
-    WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
-    WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WireButtonEvent, WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand,
+    WireNodeCommandResponse, WireOutputTestPattern, WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 
 use super::node::node_naming::{file_stem, node_kind_slug, sanitize_node_name, unique_node_name};
@@ -2574,6 +2575,95 @@ impl ProjectController {
             WireNodeCommandResponse::Rejected { reason } => UiNotices::new().with_notice(
                 UiNotice::warning(format!("Couldn't activate entry {}: {reason}", op.entry)),
             ),
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: run.logs,
+        })
+    }
+
+    /// Execute a [`ButtonEventOp`]: dispatch a synthetic button event to the
+    /// button's live runtime (simulate-press on the button card's face).
+    ///
+    /// A hold is a repeated op, not a long-running one — the face re-sends
+    /// the same `press_id` on its renewal cadence and the device-side TTL
+    /// cleans up if the renewals stop — so every event takes the same
+    /// foreground path as the playlist activate poke.
+    pub async fn send_button_event(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: ButtonEventOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let what = match op.event {
+            WireButtonEvent::Click => "simulate a button press",
+            WireButtonEvent::Press { .. } => "hold the button",
+            WireButtonEvent::Release { .. } => "release the button",
+        };
+        self.dispatch_node_command(
+            server,
+            &op.node,
+            what,
+            WireNodeCommand::ButtonEvent { event: op.event },
+        )
+        .await
+    }
+
+    /// Execute an [`OutputTestPatternOp`]: drive (or stop driving) an output
+    /// node's runtime with a diagnostic pattern instead of the graph's
+    /// frames.
+    ///
+    /// A sustained pattern is a repeated op — the face re-sends it while the
+    /// toggle is on and the device-side TTL restores normal output if the
+    /// renewals stop — so it takes the same foreground path as the playlist
+    /// activate poke.
+    pub async fn send_output_test_pattern(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: OutputTestPatternOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let what = match op.pattern {
+            WireOutputTestPattern::Clear => "clear the test pattern",
+            WireOutputTestPattern::Solid { .. } => "start the test pattern",
+        };
+        self.dispatch_node_command(
+            server,
+            &op.node,
+            what,
+            WireNodeCommand::OutputTestPattern {
+                pattern: op.pattern,
+                ttl_ms: op.ttl_ms,
+            },
+        )
+        .await
+    }
+
+    /// Shared dispatch for the runtime command channel (the non-overlay
+    /// path): resolve the node's CURRENT runtime `NodeId` from the stable
+    /// authored address HERE, at dispatch time, so a queued poke never
+    /// addresses a stale runtime id across a reload; then map the response
+    /// tiers. Acceptance is quiet but borrows the verdict-chase tightened
+    /// ticks so the effect is visible in UI-time; rejection surfaces as a
+    /// warning notice reading "Couldn't `<what>`: `<reason>`".
+    async fn dispatch_node_command(
+        &mut self,
+        server: &mut StudioServerClient,
+        node: &ProjectNodeAddress,
+        what: &str,
+        command: WireNodeCommand,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let node_id = self
+            .node(node)
+            .map(|node| node.target().node_id)
+            .ok_or_else(|| UiError::Project(format!("no node at {node} to {what} on")))?;
+        let run = server.node_command(handle_id, node_id, command).await?;
+        let notices = match run.response {
+            WireNodeCommandResponse::Accepted => {
+                self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+                UiNotices::new()
+            }
+            WireNodeCommandResponse::Rejected { reason } => UiNotices::new()
+                .with_notice(UiNotice::warning(format!("Couldn't {what}: {reason}"))),
         };
         Ok(ProjectEditRun {
             notices,

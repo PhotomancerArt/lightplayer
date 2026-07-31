@@ -44,16 +44,16 @@ pub use app::home::{
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
-    UiBindingEndpoint, UiChannelChoice, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
-    UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiNodeChild, UiNodeDirtyState,
-    UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPanelControl,
-    UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings,
-    UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame,
-    UiProductRef, UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance,
-    UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite,
-    UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind,
-    UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
-    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
+    UiBindingEndpoint, UiButtonFace, UiChannelChoice, UiConfigSlot, UiConfigSlotBody,
+    UiControlProductPreview, UiControlSampleFormat, UiFixtureFace, UiFixturePower, UiNodeChild,
+    UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
+    UiNodeView, UiOutputFace, UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
+    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiShaderFace,
+    UiShaderUniform, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
+    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
+    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -62,13 +62,14 @@ pub use app::preview_host::{
     PreviewTier,
 };
 pub use app::project::{
-    AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, LoadedProjectChoice,
-    MAX_ASSET_BODY_BYTES, NodeCardDrawer, NodeCardUiState, NodeController, NodeControllerState,
-    NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PendingAssetEdit,
-    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
-    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    AgentEngineStatus, AssetContentFetchOp, AssetEditOp, ButtonEventOp, DirtySummary,
+    LoadedProjectChoice, MAX_ASSET_BODY_BYTES, NodeCardDrawer, NodeCardUiState, NodeController,
+    NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
+    NodeUiOp, OutputTestPatternOp, PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase,
+    PlaylistActivateOp, ProjectAssetContentRun, ProjectConnectResult, ProjectController,
+    ProjectEditRun, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
+    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
     ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
