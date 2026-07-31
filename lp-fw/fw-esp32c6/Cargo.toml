@@ -105,6 +105,7 @@ lpc-model = { path = "../../lp-core/lpc-model", default-features = false, option
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
+lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }

@@ -115,6 +115,10 @@ holds the full context.
 | Packed base64 geometry encoding (`points_packed`-style additive field) | `2026-07-27-map2d-document-architecture` | An imported mapping document approaches the 10 KiB asset body budget |
 | Legacy `MappingConfig` variant retirement (`PathPoints`/`RingArray`/`PointList`/`SvgPath`) | `2026-07-27-map2d-document-architecture` | M5 one-home mapping editing lands and shipped projects are migrated |
 | CLA / DCO-with-explicit-grant mechanism (recorded as intent only) | `2026-07-29-license-provenance-discipline` | The first outside contribution to relicensing-sensitive code is proposed |
+| Firmware as a *writer* of the boot-control sector (latch degraded state across a power cycle; today it only reads and consumes) | `2026-07-30-boot-control-sector` | The boot-complete redefinition and brownout blame policy land |
+| Graduated output clamp using boot-control flag bits `8..16` (reserved, unassigned) | `2026-07-30-boot-control-sector` | The safe-clamp / fixture mA-limiter work begins |
+| Last-crash summary mirrored into the boot-control sector (the RTC crash record is unreadable from a board that never boots) | `2026-07-30-boot-control-sector` | Post-mortem from a non-booting board is needed |
+| `lpfs` partition subtype is `spiffs` but the filesystem is littlefs (`esp-idf-part` supports `littlefs`) | `2026-07-30-boot-control-sector` | The partition table is being changed for another reason anyway |
 
 ## Relationship To Shared Planning
 

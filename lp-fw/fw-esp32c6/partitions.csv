@@ -1,5 +1,11 @@
 # Name,   Type,  SubType, Offset,   Size,     Flags
-nvs,      data,  nvs,     0x9000,   0x6000,
+# bootctl carries a flash-persisted instruction to the next boot (lp-bootctl).
+# Its 4 KB came out of nvs, which nothing reads: no LightPlayer code touches
+# NVS, and esp-radio's "NVS" is a RAM array, not this partition. Taking it
+# from nvs keeps every other offset fixed, so existing lpfs images stay valid.
+# See docs/adr/2026-07-30-boot-control-sector.md.
+nvs,      data,  nvs,     0x9000,   0x5000,
+bootctl,  data,  undefined, 0xe000, 0x1000,
 phy_init, data,  phy,     0xf000,   0x1000,
 factory,  app,   factory, 0x10000,  0x300000,
 lpfs,     data,  spiffs,  0x310000, 0xF0000,
