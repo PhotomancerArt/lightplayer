@@ -112,6 +112,32 @@ pub fn import_zip(
     )
 }
 
+/// Install a package from a pasted `lp.package` share envelope.
+///
+/// Same identity semantics as [`import_zip`] — fresh uid, source uid kept
+/// on the provenance — because envelopes are shared the same way archives
+/// are. See `docs/adr/2026-07-28-share-envelopes.md`.
+pub fn import_json(
+    store: &LibraryStore,
+    text: &str,
+    now: f64,
+) -> Result<PackageSummary, LibraryError> {
+    let envelope = crate::app::share::PackageEnvelope::decode(text)
+        .map_err(|error| LibraryError::Manifest(error.to_string()))?;
+    let original_uid = envelope.original_uid();
+    let name = envelope.name.clone();
+    let files = envelope
+        .into_files()
+        .map_err(|error| LibraryError::Manifest(error.to_string()))?;
+
+    store.install_files_with_fresh_uid(
+        &name,
+        &files,
+        PackageProvenance::ImportedJson { original_uid },
+        now,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

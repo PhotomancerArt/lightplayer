@@ -488,11 +488,17 @@ jobs:
       #     about Xtensa no matter how many others passed.
       #   - plus a floor on the total, which only trips when tests DISAPPEAR;
       #     adding tests never requires touching it.
+      # ANSI escapes are stripped before the log is written. The job sets
+      # CARGO_TERM_COLOR=always and cargo colors its status headers, so the
+      # doctest header arrives as `\e[1m\e[92m   Doc-tests lpvm_native` and no
+      # `^ *Doc-tests` pattern can match it. Every assertion below anchors at
+      # start-of-line, so stripping once here is what makes them all mean what
+      # they read as — not just the one that has already misfired.
       - name: Xtensa host tests
         run: |
           cd lp2025
           set -o pipefail
-          just test-xt-host 2>&1 | tee /tmp/xt-tests.log
+          just test-xt-host 2>&1 | sed -E 's/\x1b\[[0-9;]*[mGKHF]//g' | tee /tmp/xt-tests.log
 
       - name: Assert the tests actually ran
         run: |
