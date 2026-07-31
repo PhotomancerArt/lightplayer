@@ -105,3 +105,122 @@ pub fn run_compile_test(
         any_compile_failed,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse::parse_test_file;
+
+    fn write_temp(name: &str, contents: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "lps_ft_compile_{name}_{}.glsl",
+            std::process::id()
+        ));
+        std::fs::write(&p, contents).unwrap();
+        p
+    }
+
+    /// A `// test compile` file has no `// run:` to hang annotations off, so
+    /// they land at file level — this is the mechanism that makes compile-only
+    /// files triageable per target at all.
+    #[test]
+    fn compile_file_annotations_are_file_level() {
+        let p = write_temp(
+            "filelevel",
+            "// test compile\n// @unsupported(*)\n\nfloat f() { return 1.0; }\n",
+        );
+        let tf = parse_test_file(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(tf.file_annotations.len(), 1);
+        assert!(tf.run_directives.is_empty());
+        for target in crate::targets::ALL_TARGETS {
+            assert_eq!(
+                directive_disposition(&tf.file_annotations, target),
+                Disposition::Skip,
+                "{}",
+                target.name()
+            );
+        }
+    }
+
+    /// A `// test run` file keeps the old behaviour: annotations attach to the
+    /// next `// run:` and nothing lands at file level.
+    #[test]
+    fn run_file_annotations_stay_on_their_directive() {
+        let p = write_temp(
+            "runlevel",
+            "// test run\nfloat f() { return 1.0; }\n// @unsupported(wasm.q32)\n// run: f() ~= 1.0\n",
+        );
+        let tf = parse_test_file(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert!(tf.file_annotations.is_empty());
+        assert_eq!(tf.run_directives[0].annotations.len(), 1);
+    }
+
+    /// An unsupported target is skipped without compiling — the file counts one
+    /// unsupported case for it, not a pass and not a failure.
+    #[test]
+    fn unsupported_compile_target_is_skipped_not_compiled() {
+        let p = write_temp(
+            "skip",
+            "// test compile\n// @unsupported(backend=wasm)\n\nthis is not glsl at all\n",
+        );
+        let tf = parse_test_file(&p).unwrap();
+        let wasm = crate::targets::Target::from_name("wasm.q32").unwrap();
+        let (result, per_target, stats, _, any_failed) =
+            run_compile_test(&tf, &p, &[wasm]).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert!(result.is_ok(), "skipped target must not report an error");
+        assert!(!any_failed);
+        assert_eq!(stats.unsupported, 1);
+        assert_eq!(stats.passed, 0);
+        assert_eq!(stats.failed, 0);
+        assert_eq!(per_target["wasm.q32"].unsupported, 1);
+    }
+
+    /// `@unimplemented` on a file that really does not compile is an expected
+    /// failure, exactly as it is for a `// run:` directive.
+    #[test]
+    fn unimplemented_compile_failure_is_expected() {
+        let p = write_temp(
+            "unimpl",
+            "// test compile\n// @unimplemented(*)\n\nthis is not glsl at all\n",
+        );
+        let tf = parse_test_file(&p).unwrap();
+        let wasm = crate::targets::Target::from_name("wasm.q32").unwrap();
+        let (result, _, stats, _, _) = run_compile_test(&tf, &p, &[wasm]).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert!(result.is_ok());
+        assert_eq!(stats.unimplemented, 1);
+        assert_eq!(stats.failed, 0);
+    }
+
+    /// A stale annotation on a file that now compiles is reported, not ignored.
+    #[test]
+    fn unimplemented_that_compiles_is_an_unexpected_pass() {
+        let p = write_temp(
+            "stale",
+            "// test compile\n// @unimplemented(*)\n\nfloat f() { return 1.0; }\n",
+        );
+        let tf = parse_test_file(&p).unwrap();
+        let wasm = crate::targets::Target::from_name("wasm.q32").unwrap();
+        let (result, _, stats, _, _) = run_compile_test(&tf, &p, &[wasm]).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(stats.unexpected_pass, 1);
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("unimplemented"), "{err}");
+    }
+
+    /// Unannotated compile files behave exactly as before.
+    #[test]
+    fn unannotated_compile_file_passes() {
+        let p = write_temp("plain", "// test compile\n\nfloat f() { return 1.0; }\n");
+        let tf = parse_test_file(&p).unwrap();
+        let wasm = crate::targets::Target::from_name("wasm.q32").unwrap();
+        let (result, _, stats, _, any_failed) = run_compile_test(&tf, &p, &[wasm]).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert!(result.is_ok());
+        assert!(!any_failed);
+        assert_eq!(stats.passed, 1);
+    }
+}
