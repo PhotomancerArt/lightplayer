@@ -29,8 +29,6 @@ float test_intrin_round_store(int count) {
     return s;
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
 // @unimplemented(wasm.f32)
 // run: test_intrin_round_store(0) ~= 0.000000
 // @unimplemented(wasm.f32)
