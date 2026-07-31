@@ -13,7 +13,11 @@ lps-builtin-ids = { path = "../lps-builtin-ids" }
 lpir = { path = "../lpir" }
 lps-q32 = { path = "../lps-q32" }
 lps-shared = { path = "../lps-shared" }
-lps-builtins = { path = "../lps-builtins" }
+# `float-f32`: the wasmtime host dispatch trampoline calls every builtin by
+# `BuiltinId`, including the native-f32 family, so this crate always needs the
+# implementations linked. Device firmware depends on `lps-builtins` directly and
+# decides the gate for itself.
+lps-builtins = { path = "../lps-builtins", features = ["float-f32"] }
 lpvm = { path = "../lpvm" }
 wasm-encoder = "0.245"
 wasmparser = "0.245"

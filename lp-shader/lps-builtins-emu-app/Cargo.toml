@@ -14,6 +14,15 @@ test = false
 std = []
 test = []
 
+# The native-f32 builtin family. `src/builtin_refs.rs` is generated with
+# `#[cfg(feature = "float-f32")]` on the f32 entries, and those `cfg`s are
+# evaluated against *this* crate's features — so the flag has to exist here and
+# forward, or the generated file references symbols that were never linked.
+#
+# Off by default: this image is the rv32 Q32 emulation oracle, and the f32
+# family would be dead weight in it.
+float-f32 = ["lps-builtins/float-f32"]
+
 [dependencies]
 lps-builtins = { path = "../lps-builtins" }
 lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
