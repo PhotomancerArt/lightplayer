@@ -34,6 +34,7 @@ fn guest_pointer_out_plan(fn_name: &str) -> Option<Vec<(usize, usize, &'static s
         "__lp_texture1d_rgba16_unorm_q32" => Some(vec![(0, 4, "i32")]),
         "__lp_texture2d_r16_unorm_q32" => Some(vec![(0, 4, "i32")]),
         "__lp_texture2d_rgba16_unorm_q32" => Some(vec![(0, 4, "i32")]),
+        "__lps_sincos_f32" => Some(vec![(1, 1, "f32"), (2, 1, "f32")]),
         "__lps_sincos_q32" => Some(vec![(1, 1, "i32"), (2, 1, "i32")]),
         _ => None,
     }
@@ -373,7 +374,7 @@ pub(super) fn dispatch_native_builtin(
     let mut body = String::from(header);
     for b in sorted {
         body.push_str(&format!("        BuiltinId::{} => {{\n", b.enum_variant));
-        if b.symbol_name == "__lp_vm_get_fuel_q32" {
+        if b.symbol_name == "__lp_vm_get_fuel" {
             body.push_str(emit_get_fuel_arm());
             body.push('\n');
         } else if guest_pointer_out_plan(&b.function_name).is_some()

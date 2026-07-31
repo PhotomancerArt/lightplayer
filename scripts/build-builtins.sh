@@ -76,12 +76,28 @@ RUSTFLAGS="-C opt-level=1 \
   --target $TARGET \
   --package lps-builtins-emu-app \
   --release \
-  --bin lps-builtins-emu-app
+  --bin lps-builtins-emu-app \
+  --features float-f32
 
 # Count symbols
 LP_SYMBOLS=$(nm "$BINARY" 2>/dev/null | grep "__lp_" | wc -l | xargs)
+F32_SYMBOLS=$(nm "$BINARY" 2>/dev/null | grep -c "_f32$" | xargs)
+
+# The image exists to carry builtin symbols; one that lost them to dead-code
+# elimination links "successfully" and then calls a null pointer at run time.
+# `lpvm-cranelift`'s linker additionally asserts that *every* `BuiltinId` symbol
+# is present, so a missing f32 family fails 800+ filetests with one opaque
+# message — cheaper to catch here, by name.
+if [ "$LP_SYMBOLS" -eq 0 ]; then
+  echo "error: $BINARY contains no __lp_ symbols (dead-code elimination?)" >&2
+  exit 1
+fi
+if [ "$F32_SYMBOLS" -eq 0 ]; then
+  echo "error: $BINARY contains no native-f32 builtins (is --features float-f32 set?)" >&2
+  exit 1
+fi
 
 # Output formatted results
 GREEN='\033[0;32m'
 NC='\033[0m' # No Color
-echo -e "${GREEN}lps-builtins-emu-app:${NC} built with $LP_SYMBOLS built-ins"
+echo -e "${GREEN}lps-builtins-emu-app:${NC} built with $LP_SYMBOLS built-ins ($F32_SYMBOLS native-f32)"

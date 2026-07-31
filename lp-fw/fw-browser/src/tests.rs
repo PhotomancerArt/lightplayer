@@ -383,7 +383,7 @@ fn infinite_loop_shader_reports_fuel_error_and_keeps_ticking() {
 #[wasm_bindgen_test]
 fn get_fuel_builtin_links_and_reads_nonzero_on_browser_path() {
     // `__lp_get_fuel()` resolves to the fw-browser host module's own
-    // `__lp_vm_get_fuel_q32` export; with the shared-memory arrangement the
+    // `__lp_vm_get_fuel` export; with the shared-memory arrangement the
     // vmctx word is offset 0 of this module's linear memory (a VALID vmctx
     // address there, not a null pointer). A shader gating its output on a
     // nonzero fuel read proves both linking and that the builtin reads the

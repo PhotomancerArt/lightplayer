@@ -9,8 +9,8 @@ use alloc::vec::Vec;
 use lpir::FloatMode;
 use lpir::{CalleeRef, ImportDecl, ImportId, IrFunction, IrType, LpirModule, LpirOp};
 use lps_builtin_ids::{
-    BuiltinId, GlslParamKind, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
-    lpir_q32_builtin_id, texture_q32_builtin_id, vm_q32_builtin_id,
+    BuiltinId, GlslParamKind, Mode, glsl_lpfn_builtin_id, glsl_math_builtin_id, lpir_builtin_id,
+    texture_builtin_id, vm_builtin_id,
 };
 
 /// After pruning: WASM import function index `i` corresponds to `filtered[i]`.
@@ -29,7 +29,7 @@ fn collect_used_import_indices(ir: &LpirModule, mode: FloatMode) -> BTreeSet<u32
             if let LpirOp::Call { callee, .. } = op {
                 if let CalleeRef::Import(ImportId(i)) = callee {
                     // Inline-lowered builtins never become wasm imports.
-                    if (*i as u32) < n && !import_is_inline_get_fuel(ir, *i as usize) {
+                    if (*i as u32) < n && !import_is_inline_get_fuel(ir, *i as usize, mode) {
                         used.insert(*i as u32);
                     }
                 }
@@ -64,26 +64,34 @@ fn collect_used_import_indices(ir: &LpirModule, mode: FloatMode) -> BTreeSet<u32
     used
 }
 
-/// True if the import resolves to [`BuiltinId::LpVmGetFuelQ32`].
+/// True if the import resolves to [`BuiltinId::LpVmGetFuel`].
 ///
 /// The wasm emitter inlines this builtin as a direct load of the vmctx fuel
 /// low word (see the `LpirOp::Call` arm in `ops.rs`) instead of calling an
-/// import: the native `__lp_vm_get_fuel_q32` reads the header through a
+/// import: the native `__lp_vm_get_fuel` reads the header through a
 /// pointer, which can never work on the wasm hosts — there the vmctx block
 /// sits at linear-memory offset 0, and Rust rejects address-0 dereferences
 /// (a hard "null pointer dereference" trap in debug builds, UB in release).
 /// Inlined calls are not "used" imports, so the import section omits the
 /// entry entirely.
-pub(crate) fn import_is_inline_get_fuel(ir: &LpirModule, import_idx: usize) -> bool {
-    ir.imports
-        .get(import_idx)
-        .is_some_and(|d| resolve_builtin_id(d).is_ok_and(|id| id == BuiltinId::LpVmGetFuelQ32))
+///
+/// `mode` is threaded rather than assumed: every resolution in this module is
+/// mode-scoped, and a call site that quietly picks one mode is how the f32 path
+/// broke the first time.
+pub(crate) fn import_is_inline_get_fuel(
+    ir: &LpirModule,
+    import_idx: usize,
+    mode: FloatMode,
+) -> bool {
+    ir.imports.get(import_idx).is_some_and(|d| {
+        resolve_builtin_id_for_mode(d, mode).is_ok_and(|id| id == BuiltinId::LpVmGetFuel)
+    })
 }
 
 /// True if any function calls the inline-lowered `__lp_get_fuel` builtin —
 /// the emitted load touches linear memory, so the module needs `env.memory`
 /// even when nothing else does.
-pub(crate) fn module_inlines_get_fuel(ir: &LpirModule) -> bool {
+pub(crate) fn module_inlines_get_fuel(ir: &LpirModule, mode: FloatMode) -> bool {
     for f in ir.functions.values() {
         for op in &f.body {
             if let LpirOp::Call {
@@ -91,7 +99,7 @@ pub(crate) fn module_inlines_get_fuel(ir: &LpirModule) -> bool {
                 ..
             } = op
             {
-                if import_is_inline_get_fuel(ir, *i as usize) {
+                if import_is_inline_get_fuel(ir, *i as usize, mode) {
                     return true;
                 }
             }
@@ -206,95 +214,73 @@ fn parse_lpfn_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
         .collect()
 }
 
-/// True if `decl` can cross the builtin ABI boundary without any float
-/// representation being implied — every parameter and result is a plain `i32`.
-///
-/// A `Pointer` parameter does **not** qualify: the pointee is shader memory the
-/// builtin reads and writes with its own float encoding, so a Q32 builtin handed
-/// a pointer into an f32 module's memory reinterprets f32 bits as Q16.16 and
-/// silently returns garbage. That is precisely the failure mode this gate exists
-/// to prevent, and it is invisible to wasm validation because both sides are
-/// `i32`.
-fn decl_is_float_agnostic(decl: &ImportDecl) -> bool {
-    decl.param_types
-        .iter()
-        .chain(decl.return_types.iter())
-        .all(|t| matches!(t, IrType::I32))
+/// `FloatMode` → the builtin table's own mode enum.
+fn builtin_mode(mode: FloatMode) -> Mode {
+    match mode {
+        FloatMode::Q32 => Mode::Q32,
+        FloatMode::F32 => Mode::F32,
+    }
 }
 
 /// Resolve a builtin import for `mode`.
 ///
-/// **There is no f32 builtin resolution yet.** `lps-builtin-ids` exposes
-/// `*_q32_builtin_id` resolvers only; the `BuiltinId` enum does carry `*F32`
-/// variants, but nothing maps a GLSL/lpfn name onto them, and the `_f32` bodies
-/// behind them are stubs that round-trip through `Q32::from_f32_wrapping`.
+/// **The mode is not advisory.** Every resolver is mode-total: in Float mode
+/// only f32 (and genuinely mode-independent) ids resolve, and there is no
+/// fallback to the Q32 id. That fallback is the bug this signature exists to
+/// make impossible, and it has two distinct failure shapes:
 ///
-/// So under [`FloatMode::F32`] any import that touches a float is refused here,
-/// with a diagnostic naming the import. Before this gate existed the Q32 id was
-/// used unconditionally, which emitted an import declared `(i32) -> i32` against
-/// call sites pushing `f32` locals: the module was invalid, and the only symptom
-/// was wasmtime's `failed to compile: wasm[0]::function[N]`. Failing at the
-/// import with a name is the difference between a triage-able corpus and 41
-/// identical opaque errors.
+/// 1. *Loud.* A float-typed import declared `(i32) -> i32` against call sites
+///    pushing `f32` locals produces an invalid module whose only symptom is
+///    wasmtime's `failed to compile: wasm[0]::function[N]` — 41 corpus files,
+///    one indistinguishable error.
+/// 2. *Silent, and worse.* A builtin taking a vector receives an
+///    `IrType::Pointer`. Both sides are `i32`, so the module validates, links,
+///    and runs — while a Q32 builtin reinterprets the f32 bit patterns in
+///    shader memory as Q16.16. Nine corpus files "passed" through exactly this
+///    hole during the wasm f32 bring-up.
+///
+/// Shape 2 is why the rule is stated as a property of the *resolver* rather
+/// than a check on the signature: no inspection of the ABI can tell you a
+/// pointer is safe. See `docs/design/float.md` §6.
 fn resolve_builtin_id_for_mode(decl: &ImportDecl, mode: FloatMode) -> Result<BuiltinId, String> {
-    if mode == FloatMode::F32 && !decl_is_float_agnostic(decl) {
-        return Err(format!(
-            "builtin import `@{}::{}` has no f32 implementation: only Q32 builtin \
-             ids are resolvable, so this import cannot be lowered in f32 mode",
-            decl.module_name, decl.func_name
-        ));
-    }
-    resolve_builtin_id(decl)
-}
+    let m = builtin_mode(mode);
+    let unsupported = |detail: alloc::string::String| {
+        format!(
+            "builtin import `@{}::{}` has no {} implementation ({detail})",
+            decl.module_name,
+            decl.func_name,
+            match mode {
+                FloatMode::Q32 => "q32",
+                FloatMode::F32 => "f32",
+            }
+        )
+    };
 
-fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
     match decl.module_name.as_str() {
         "glsl" => {
             let ac = decl.param_types.len();
-            glsl_q32_math_builtin_id(decl.func_name.as_str(), ac).ok_or_else(|| {
-                format!(
-                    "unsupported glsl import `{}` (arg count {ac})",
-                    decl.func_name
-                )
-            })
+            glsl_math_builtin_id(decl.func_name.as_str(), ac, m)
+                .ok_or_else(|| unsupported(format!("arg count {ac}")))
         }
         "lpir" => {
             let ac = decl.param_types.len();
-            lpir_q32_builtin_id(decl.func_name.as_str(), ac).ok_or_else(|| {
-                format!(
-                    "unsupported lpir import `{}` (arg count {ac})",
-                    decl.func_name
-                )
-            })
+            lpir_builtin_id(decl.func_name.as_str(), ac, m)
+                .ok_or_else(|| unsupported(format!("arg count {ac}")))
         }
         "lpfn" => {
             let base = lpfn_strip_suffix(&decl.func_name)?;
             let kinds = lpfn_glsl_kinds_from_decl(decl)?;
-            glsl_lpfn_q32_builtin_id(base, &kinds).ok_or_else(|| {
-                format!(
-                    "unsupported lpfn import `{}` with {:?}",
-                    decl.func_name, kinds
-                )
-            })
+            glsl_lpfn_builtin_id(base, &kinds, m).ok_or_else(|| unsupported(format!("{kinds:?}")))
         }
         "vm" => {
             let ac = decl.param_types.len();
-            vm_q32_builtin_id(decl.func_name.as_str(), ac).ok_or_else(|| {
-                format!(
-                    "unsupported vm import `{}` (arg count {ac})",
-                    decl.func_name
-                )
-            })
+            vm_builtin_id(decl.func_name.as_str(), ac, m)
+                .ok_or_else(|| unsupported(format!("arg count {ac}")))
         }
         "texture" => {
             let base = texture_strip_suffix(&decl.func_name)?;
             let ac = decl.param_types.len();
-            texture_q32_builtin_id(base, ac).ok_or_else(|| {
-                format!(
-                    "unsupported texture import `{}` (arg count {ac})",
-                    decl.func_name
-                )
-            })
+            texture_builtin_id(base, ac, m).ok_or_else(|| unsupported(format!("arg count {ac}")))
         }
         m => Err(format!("unsupported import module `{m}`")),
     }
@@ -354,13 +340,13 @@ pub(crate) fn build_filtered_imports(
 
 /// True if any user function calls an import that uses the result-pointer WASM ABI
 /// (non-scalar return via hidden pointer; callee has zero WASM results).
-pub(crate) fn module_needs_result_ptr_calls(ir: &LpirModule) -> bool {
+pub(crate) fn module_needs_result_ptr_calls(ir: &LpirModule, mode: FloatMode) -> bool {
     let n = ir.imports.len() as u32;
     for f in ir.functions.values() {
         for op in &f.body {
             if let LpirOp::Call { callee, .. } = op {
                 if let CalleeRef::Import(ImportId(i)) = callee {
-                    if (*i as u32) < n && import_uses_result_pointer_abi(ir, *i as usize) {
+                    if (*i as u32) < n && import_uses_result_pointer_abi(ir, *i as usize, mode) {
                         return true;
                     }
                 }
@@ -371,7 +357,15 @@ pub(crate) fn module_needs_result_ptr_calls(ir: &LpirModule) -> bool {
 }
 
 /// Whether `ir.imports[import_idx]` uses result-pointer calling convention in WASM.
-pub(crate) fn import_uses_result_pointer_abi(ir: &LpirModule, import_idx: usize) -> bool {
+///
+/// Mode-dependent by nature: the q32 and f32 builtins behind one import name
+/// are separate symbols with separately generated wasm signatures, so which one
+/// returns via a hidden pointer is a per-mode fact.
+pub(crate) fn import_uses_result_pointer_abi(
+    ir: &LpirModule,
+    import_idx: usize,
+    mode: FloatMode,
+) -> bool {
     let decl = match ir.imports.get(import_idx) {
         Some(d) => d,
         None => return false,
@@ -379,7 +373,7 @@ pub(crate) fn import_uses_result_pointer_abi(ir: &LpirModule, import_idx: usize)
     if decl.return_types.is_empty() {
         return false;
     }
-    let Ok(bid) = resolve_builtin_id(decl) else {
+    let Ok(bid) = resolve_builtin_id_for_mode(decl, mode) else {
         return false;
     };
     let (_params, wasm_results) = super::builtin_wasm_import_types::wasm_import_val_types(bid);
@@ -387,7 +381,7 @@ pub(crate) fn import_uses_result_pointer_abi(ir: &LpirModule, import_idx: usize)
 }
 
 /// Max byte size of temporary result buffer needed for result-pointer builtin calls in `f`.
-pub(crate) fn max_result_ptr_buffer_bytes(ir: &LpirModule, f: &IrFunction) -> u32 {
+pub(crate) fn max_result_ptr_buffer_bytes(ir: &LpirModule, f: &IrFunction, mode: FloatMode) -> u32 {
     let n = ir.imports.len() as u32;
     let mut max_b = 0u32;
     for op in &f.body {
@@ -396,7 +390,7 @@ pub(crate) fn max_result_ptr_buffer_bytes(ir: &LpirModule, f: &IrFunction) -> u3
         } = op
         {
             if let CalleeRef::Import(ImportId(i)) = callee {
-                if (*i as u32) < n && import_uses_result_pointer_abi(ir, *i as usize) {
+                if (*i as u32) < n && import_uses_result_pointer_abi(ir, *i as usize, mode) {
                     let count = f.pool_slice(*results).len() as u32;
                     max_b = max_b.max(count.saturating_mul(4));
                 }
@@ -439,48 +433,121 @@ mod tests {
     use super::*;
     use alloc::string::ToString;
 
+    use lps_builtin_ids::Mode as BMode;
+
     #[test]
     fn q32_mode_resolves_a_float_import() {
         let d = decl("glsl", "sin", &[IrType::F32], &[IrType::F32]);
-        assert!(resolve_builtin_id_for_mode(&d, FloatMode::Q32).is_ok());
+        let id = resolve_builtin_id_for_mode(&d, FloatMode::Q32).unwrap();
+        assert_eq!(id.mode(), Some(BMode::Q32));
     }
 
-    /// The whole point of the gate: an f32 module must not silently import a
-    /// Q32-signature builtin. Before this, the Q32 id was used regardless and
-    /// the module failed much later as an opaque wasm validation error.
+    /// The f32 half of the same import. Before f32 builtins existed this was a
+    /// refusal; the property being defended never changed — an f32 module must
+    /// not import a Q32-signature builtin — only the remedy did, from "fail"
+    /// to "resolve to the f32 symbol".
     #[test]
-    fn f32_mode_refuses_a_float_import_and_names_it() {
-        let d = decl("glsl", "sin", &[IrType::F32], &[IrType::F32]);
-        let err = resolve_builtin_id_for_mode(&d, FloatMode::F32).unwrap_err();
-        assert!(err.contains("@glsl::sin"), "{err}");
-        assert!(err.contains("no f32 implementation"), "{err}");
-    }
-
-    /// A pointer parameter is **not** float-agnostic even though it is an `i32`
-    /// on both sides. The pointee is shader memory the builtin decodes with its
-    /// own float encoding, so a Q32 builtin reading an f32 module's memory
-    /// reinterprets f32 bits as Q16.16 and returns garbage — with no type error
-    /// anywhere, because both sides really are `i32`. Wasm validation cannot
-    /// catch this, so the gate has to.
-    #[test]
-    fn f32_mode_refuses_pointer_params_despite_the_i32_abi() {
-        let d = decl(
-            "lpfn",
-            "lpfn_worley_2",
-            &[IrType::Pointer, IrType::I32],
-            &[],
+    fn f32_mode_resolves_a_float_import_to_the_f32_builtin() {
+        let d = lpfn_decl(
+            "lpfn_random_2",
+            "Vec2,UInt",
+            &[IrType::F32; 3],
+            &[IrType::F32],
         );
-        assert!(!decl_is_float_agnostic(&d));
-        assert!(resolve_builtin_id_for_mode(&d, FloatMode::F32).is_err());
+        let id = resolve_builtin_id_for_mode(&d, FloatMode::F32).unwrap();
+        assert_eq!(id.mode(), Some(BMode::F32));
+        assert!(id.name().ends_with("_f32"), "{}", id.name());
     }
 
-    /// Integer-only builtins carry no float representation either way, so they
-    /// stay resolvable in f32 mode rather than becoming collateral damage.
+    /// **The load-bearing one.** A pointer parameter is an `i32` on both sides,
+    /// so nothing in the type system distinguishes the two modes here: the
+    /// pointee is shader memory the builtin decodes with its own float
+    /// encoding, and a Q32 builtin reading an f32 module's memory reinterprets
+    /// f32 bits as Q16.16 and returns garbage with no error anywhere. Wasm
+    /// validation cannot catch it; nine corpus files "passed" through this hole
+    /// during the wasm f32 bring-up.
+    ///
+    /// So the invariant is about the *resolver*, not the signature: a
+    /// pointer-carrying import must still come back as the f32 symbol.
     #[test]
-    fn f32_mode_allows_integer_only_imports() {
+    fn f32_mode_resolves_pointer_params_to_the_f32_builtin() {
+        // `lpfn_saturate(vec3)` returns through a result pointer: the wasm ABI
+        // is `(i32 out, f32, f32, f32) -> ()`, and the out-pointer is the lane
+        // a Q32 builtin would fill with Q16.16 words.
+        let d = lpfn_decl(
+            "lpfn_saturate_3",
+            "Vec3",
+            &[IrType::Pointer, IrType::F32, IrType::F32, IrType::F32],
+            &[IrType::F32],
+        );
+        let id = resolve_builtin_id_for_mode(&d, FloatMode::F32).unwrap();
+        assert_eq!(
+            id.mode(),
+            Some(BMode::F32),
+            "a pointer-carrying import resolved to {id:?} in f32 mode — the \
+             pointee would be reinterpreted as Q16.16"
+        );
+    }
+
+    /// Generalization of the above over every import this emitter can see:
+    /// nothing, in either direction, ever resolves across modes.
+    #[test]
+    fn no_import_ever_resolves_to_the_other_modes_builtin() {
+        let cases = [
+            decl("glsl", "sin", &[IrType::F32], &[IrType::F32]),
+            decl("glsl", "pow", &[IrType::F32, IrType::F32], &[IrType::F32]),
+            decl("lpir", "sqrt", &[IrType::F32], &[IrType::F32]),
+            decl("vm", "__lp_get_fuel", &[], &[IrType::I32]),
+            lpfn_decl(
+                "lpfn_saturate_3",
+                "Vec3",
+                &[IrType::Pointer, IrType::F32, IrType::F32, IrType::F32],
+                &[IrType::F32],
+            ),
+            lpfn_decl(
+                "lpfn_random_2",
+                "Vec2,UInt",
+                &[IrType::F32; 3],
+                &[IrType::F32],
+            ),
+        ];
+        for d in &cases {
+            for (mode, forbidden) in [(FloatMode::Q32, BMode::F32), (FloatMode::F32, BMode::Q32)] {
+                if let Ok(id) = resolve_builtin_id_for_mode(d, mode) {
+                    assert_ne!(
+                        id.mode(),
+                        Some(forbidden),
+                        "@{}::{} resolved to {id:?} under {mode:?}",
+                        d.module_name,
+                        d.func_name
+                    );
+                }
+            }
+        }
+    }
+
+    /// Integer-only builtins carry no float representation either way, so one
+    /// implementation serves both modes. `__lp_get_fuel` is `(i32) -> u32`; it
+    /// used to be named `*_q32`, which made the f32 resolver miss it entirely
+    /// and would have dropped fuel metering from every Float-mode shader.
+    #[test]
+    fn mode_independent_imports_resolve_in_both_modes() {
         let d = decl("vm", "__lp_get_fuel", &[], &[IrType::I32]);
-        assert!(decl_is_float_agnostic(&d));
-        assert!(resolve_builtin_id_for_mode(&d, FloatMode::F32).is_ok());
+        let q = resolve_builtin_id_for_mode(&d, FloatMode::Q32).unwrap();
+        let f = resolve_builtin_id_for_mode(&d, FloatMode::F32).unwrap();
+        assert_eq!(q, f);
+        assert_eq!(q, BuiltinId::LpVmGetFuel);
+        assert_eq!(q.mode(), None);
+    }
+
+    /// A name with no implementation still fails by name — the difference
+    /// between a triage-able corpus and N identical opaque wasm errors.
+    #[test]
+    fn an_unknown_import_errors_by_name_rather_than_resolving() {
+        let d = decl("glsl", "frexp", &[IrType::F32], &[IrType::F32]);
+        let err = resolve_builtin_id_for_mode(&d, FloatMode::F32).unwrap_err();
+        assert!(err.contains("@glsl::frexp"), "{err}");
+        assert!(err.contains("no f32 implementation"), "{err}");
     }
 
     fn decl(module: &str, func: &str, params: &[IrType], returns: &[IrType]) -> ImportDecl {
@@ -493,5 +560,19 @@ mod tests {
             needs_vmctx: false,
             sret: false,
         }
+    }
+
+    /// An `@lpfn::` import. Overload resolution is keyed by the *GLSL*
+    /// parameter list, not the flattened wasm one, so the encoded kinds carry
+    /// the real signature.
+    fn lpfn_decl(
+        func: &str,
+        glsl_params: &str,
+        params: &[IrType],
+        returns: &[IrType],
+    ) -> ImportDecl {
+        let mut d = decl("lpfn", func, params, returns);
+        d.lpfn_glsl_params = Some(glsl_params.to_string());
+        d
     }
 }

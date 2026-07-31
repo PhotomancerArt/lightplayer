@@ -8,4 +8,4 @@
 
 //! VMContext-aware builtins (fixed-point Q32).
 
-pub mod get_fuel_q32;
+pub mod get_fuel;
