@@ -30,21 +30,42 @@ struct OutputSinkBinding {
     last_byte_count: Option<u32>,
 }
 
-/// Failure while flushing registered output sinks.
+/// Failure while flushing one registered output sink.
+///
+/// A flush attempts every sink, so this always names the endpoint that failed:
+/// on a multi-channel board an unnamed error is unactionable, and the frame's
+/// other channels were flushed regardless.
 #[derive(Debug)]
 pub enum OutputFlushError {
-    MisalignedPayload { buffer_id: RuntimeBufferId },
-    Provider(OutputError),
+    MisalignedPayload {
+        endpoint: HwEndpointSpec,
+        buffer_id: RuntimeBufferId,
+    },
+    Provider {
+        endpoint: HwEndpointSpec,
+        error: OutputError,
+    },
+}
+
+impl OutputFlushError {
+    fn endpoint(&self) -> &HwEndpointSpec {
+        match self {
+            Self::MisalignedPayload { endpoint, .. } | Self::Provider { endpoint, .. } => endpoint,
+        }
+    }
 }
 
 impl fmt::Display for OutputFlushError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MisalignedPayload { buffer_id } => write!(
+            Self::MisalignedPayload {
+                endpoint,
+                buffer_id,
+            } => write!(
                 f,
-                "output buffer {buffer_id:?}: payload must be whole u16 RGB triplets (multiple of 6 bytes)",
+                "output {endpoint} (buffer {buffer_id:?}): payload must be whole u16 RGB triplets (multiple of 6 bytes)",
             ),
-            Self::Provider(e) => write!(f, "{e}"),
+            Self::Provider { endpoint, error } => write!(f, "output {endpoint}: {error}"),
         }
     }
 }
@@ -285,12 +306,23 @@ fn output_options_eq(
     }
 }
 
+/// Flush every dirty sink, then report the first failure.
+///
+/// Sinks are independent hardware channels and this map has no meaningful
+/// order, so a sink that fails to open or write must not cost the frame its
+/// other channels: returning early here made one unavailable endpoint look
+/// like a whole-project blackout, and which channels survived depended on hash
+/// order. Every failure is logged with its endpoint; the first is returned so
+/// the tick still reports an error.
 fn flush_registered_sinks(
     provider: &mut dyn OutputProvider,
     revision: Revision,
     buffers: &RuntimeBufferStore,
     sinks: &mut HashMap<RuntimeBufferId, OutputSinkBinding>,
 ) -> Result<(), OutputFlushError> {
+    let mut first_error: Option<OutputFlushError> = None;
+    let mut failed = 0usize;
+
     for (buffer_id, sink) in sinks.iter_mut() {
         let Some(versioned) = buffers.get(*buffer_id) else {
             continue;
@@ -304,29 +336,67 @@ fn flush_registered_sinks(
             continue;
         }
 
-        if bytes.len() % 6 != 0 {
-            return Err(OutputFlushError::MisalignedPayload {
-                buffer_id: *buffer_id,
-            });
+        if let Err(error) = flush_one_sink(provider, sink, *buffer_id, bytes) {
+            failed += 1;
+            log::warn!("EngineServices: {error}");
+            first_error.get_or_insert(error);
         }
+    }
 
-        let u16_payload = decode_bytes_as_u16_le(bytes);
-        let led_triplets = u16_payload.len() / 3;
-        let byte_count = (led_triplets as u32).saturating_mul(3).max(3);
+    match first_error {
+        None => Ok(()),
+        Some(error) => {
+            if failed > 1 {
+                log::warn!(
+                    "EngineServices: {failed} output sinks failed this frame; reporting {}",
+                    error.endpoint()
+                );
+            }
+            Err(error)
+        }
+    }
+}
 
-        ensure_channel_open(provider, sink, byte_count)?;
+fn flush_one_sink(
+    provider: &mut dyn OutputProvider,
+    sink: &mut OutputSinkBinding,
+    buffer_id: RuntimeBufferId,
+    bytes: &[u8],
+) -> Result<(), OutputFlushError> {
+    if bytes.len() % 6 != 0 {
+        return Err(OutputFlushError::MisalignedPayload {
+            endpoint: sink.endpoint.clone(),
+            buffer_id,
+        });
+    }
 
-        let handle = sink.channel_handle.ok_or_else(|| {
-            OutputFlushError::Provider(OutputError::InvalidConfig {
+    let u16_payload = decode_bytes_as_u16_le(bytes);
+    let led_triplets = u16_payload.len() / 3;
+    let byte_count = (led_triplets as u32).saturating_mul(3).max(3);
+
+    ensure_channel_open(provider, sink, byte_count).map_err(|error| {
+        OutputFlushError::Provider {
+            endpoint: sink.endpoint.clone(),
+            error,
+        }
+    })?;
+
+    let handle = sink
+        .channel_handle
+        .ok_or_else(|| OutputFlushError::Provider {
+            endpoint: sink.endpoint.clone(),
+            error: OutputError::InvalidConfig {
                 reason: String::from("internal: missing output handle after open"),
-            })
+            },
         })?;
 
-        provider
-            .write(handle, &u16_payload)
-            .map_err(OutputFlushError::Provider)?;
-        sink.last_byte_count = Some(byte_count.max(sink.last_byte_count.unwrap_or(3)));
-    }
+    provider
+        .write(handle, &u16_payload)
+        .map_err(|error| OutputFlushError::Provider {
+            endpoint: sink.endpoint.clone(),
+            error,
+        })?;
+    sink.last_byte_count = Some(byte_count.max(sink.last_byte_count.unwrap_or(3)));
     Ok(())
 }
 
@@ -342,20 +412,18 @@ fn ensure_channel_open(
     provider: &dyn OutputProvider,
     sink: &mut OutputSinkBinding,
     byte_count: u32,
-) -> Result<(), OutputFlushError> {
+) -> Result<(), OutputError> {
     if sink.channel_handle.is_some() {
         return Ok(());
     }
 
     let bc = sink.last_byte_count.unwrap_or(3).max(byte_count).max(3);
-    let handle = provider
-        .open(
-            &sink.endpoint,
-            bc,
-            OutputFormat::Ws2811,
-            sink.display_options.clone(),
-        )
-        .map_err(OutputFlushError::Provider)?;
+    let handle = provider.open(
+        &sink.endpoint,
+        bc,
+        OutputFormat::Ws2811,
+        sink.display_options.clone(),
+    )?;
     sink.channel_handle = Some(handle);
     sink.last_byte_count = Some(bc);
     Ok(())
@@ -492,7 +560,10 @@ mod tests {
 
         assert!(matches!(
             err,
-            super::OutputFlushError::Provider(OutputError::Hardware { .. })
+            super::OutputFlushError::Provider {
+                error: OutputError::Hardware { .. },
+                ..
+            }
         ));
         assert_eq!(provider.open_channel_count(), 1);
         assert!(provider.is_endpoint_open(&endpoint));
@@ -526,6 +597,55 @@ mod tests {
             provider.is_endpoint_open(&second_endpoint)
         );
         assert_ne!(provider.is_pin_open(18), provider.is_pin_open(19));
+    }
+
+    /// One unopenable sink must not cost the frame its other channels.
+    ///
+    /// `output_sinks` is a `HashMap`, so before flushing was made per-sink the
+    /// surviving channels depended on where the bad one landed in hash order —
+    /// a four-strip project could go dark except for one strip, and a
+    /// different strip on the next run.
+    #[test]
+    fn a_failing_output_sink_does_not_suppress_the_others() {
+        let provider = Rc::new(MemoryOutputProvider::with_hardware_manifest(
+            lpc_hardware::default_esp32s3_hardware_manifest(),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        // The board has no such pin, so this sink can never open — unlike a
+        // contention failure, it stays failed however the map is ordered.
+        let unknown = endpoint("ws281x:rmt:NOT-A-PIN");
+        let good = [
+            endpoint("ws281x:rmt:D10"),
+            endpoint("ws281x:rmt:D9"),
+            endpoint("ws281x:rmt:D8"),
+        ];
+        let bad_buffer = output_buffer(&mut buffers, Revision::new(1));
+        services.register_output_sink(bad_buffer, &OutputDef::new(unknown.clone()));
+        for spec in &good {
+            let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+            services.register_output_sink(buffer_id, &OutputDef::new(spec.clone()));
+        }
+
+        let err = services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect_err("the unknown endpoint must still be reported");
+
+        assert!(
+            err.to_string().contains("ws281x:rmt:NOT-A-PIN"),
+            "the flush error must name the sink that failed, got: {err}"
+        );
+        for spec in &good {
+            assert!(
+                provider.is_endpoint_open(spec),
+                "{spec} was skipped because another sink failed"
+            );
+        }
+        assert_eq!(provider.open_channel_count(), good.len());
     }
 
     fn endpoint(spec: &'static str) -> HwEndpointSpec {

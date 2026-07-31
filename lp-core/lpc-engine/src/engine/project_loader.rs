@@ -242,6 +242,11 @@ impl ProjectLoader {
                     reason: String::from("project tree references missing definition entry"),
                 }
             })?;
+            // A definition that failed to parse has no kind to report, so the
+            // node is projected as a container and matches none of the
+            // per-kind attach loops below — it is present in the tree but
+            // drives nothing. `mark_node_load_error` is what makes that
+            // visible; do not read this fallback as "it is a project".
             let kind = def_entry.state.kind().unwrap_or(NodeKind::Project);
             let state_error = def_entry
                 .state
@@ -333,7 +338,13 @@ impl ProjectLoader {
                 );
             }
             if let Some(message) = state_error {
-                mark_node_load_error(runtime, node_id, frame, message);
+                mark_node_load_error(
+                    runtime,
+                    node_id,
+                    frame,
+                    &def_location_label(&project_node.def_location),
+                    message,
+                );
             }
 
             projected_nodes.push(ProjectedNode {
@@ -783,7 +794,7 @@ impl ProjectLoader {
                     }
                     Err(error) => {
                         let message = error.to_string();
-                        mark_node_load_error(runtime, node.id, frame, message);
+                        mark_node_load_error(runtime, node.id, frame, &node_label(node), message);
                     }
                 }
             }
@@ -830,7 +841,21 @@ fn should_attach_projected_node(
     targets.is_none_or(|targets| targets.contains(&node.use_location))
 }
 
-fn mark_node_load_error(runtime: &mut Engine, node_id: NodeId, frame: Revision, message: String) {
+/// Record a per-node load failure without failing the project load.
+///
+/// A broken definition stays in inventory so Studio can show it, and the load
+/// deliberately continues — but a headless device has no Studio, and until this
+/// logged, a node with an unparseable file simply never appeared: no error, no
+/// output, nothing in 150 s of serial. The warning is what makes the drop
+/// observable on a device.
+fn mark_node_load_error(
+    runtime: &mut Engine,
+    node_id: NodeId,
+    frame: Revision,
+    label: &str,
+    message: String,
+) {
+    log::warn!("ProjectLoader: node {label} did not load: {message}");
     if let Some(entry) = runtime.tree_mut().get_mut(node_id) {
         entry.set_status(NodeRuntimeStatus::Error(message.clone()), frame);
         entry.set_state(NodeEntryState::Failed { reason: message }, frame);
@@ -2110,6 +2135,30 @@ mod tests {
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
         assert_fixture_node_error(&rt, "unsupported map2d format 99");
+    }
+
+    /// A node whose *definition file* will not parse must be reported, not
+    /// dropped.
+    ///
+    /// Such a node has no kind, so it is projected as a container and matches
+    /// none of the per-kind attach loops — it never runs, and the load still
+    /// succeeds. On the desk this looked like one of four LED strips simply
+    /// not existing: no error, no output, nothing in 150 s of serial. The
+    /// failed status here (and the warning `mark_node_load_error` logs beside
+    /// it) is the only trace such a node leaves.
+    #[test]
+    fn a_node_whose_definition_does_not_parse_is_marked_failed() {
+        let fs = char_project(&[(
+            "output",
+            // Endpoint specs are `capability:driver:config`; the config part
+            // is empty here, exactly as a mis-edited `outputN.json` had it.
+            r#"{ "kind": "Output", "endpoint": "ws281x:rmt:",
+                 "bindings": { "input": { "source": "bus:control.out" } } }"#,
+        )]);
+
+        let rt = load_project(&fs);
+
+        assert_node_for_def_error(&rt, "/output.json", "empty part");
     }
 
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {
