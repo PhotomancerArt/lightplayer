@@ -473,7 +473,10 @@ mod tests {
     /// ever fail, so it is not offered.
     #[test]
     fn a_blank_or_foreign_board_is_offered_no_backup() {
-        for state in [RosterCardState::ReadyToSetUp, RosterCardState::OtherFirmware] {
+        for state in [
+            RosterCardState::ReadyToSetUp,
+            RosterCardState::OtherFirmware,
+        ] {
             let view = device_rich_object(&input(&state));
             assert!(
                 !view

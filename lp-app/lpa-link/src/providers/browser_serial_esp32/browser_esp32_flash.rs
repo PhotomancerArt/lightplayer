@@ -207,8 +207,16 @@ pub async fn read_raw_filesystem_with_events(
             return JsValue::NULL;
         };
         let out = js_sys::Object::new();
-        let _ = Reflect::set(&out, &"offset".into(), &JsValue::from_f64(region.offset.into()));
-        let _ = Reflect::set(&out, &"length".into(), &JsValue::from_f64(region.length.into()));
+        let _ = Reflect::set(
+            &out,
+            &"offset".into(),
+            &JsValue::from_f64(region.offset.into()),
+        );
+        let _ = Reflect::set(
+            &out,
+            &"length".into(),
+            &JsValue::from_f64(region.length.into()),
+        );
         out.into()
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
 

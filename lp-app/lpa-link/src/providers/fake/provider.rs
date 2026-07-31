@@ -550,20 +550,12 @@ fn fake_device_files(
     let mut files: Vec<(String, Vec<u8>)> = state
         .project_files
         .iter()
-        .map(|(relative, bytes)| {
-            (
-                format!("{}/{relative}", state.project_dir),
-                bytes.clone(),
-            )
-        })
+        .map(|(relative, bytes)| (format!("{}/{relative}", state.project_dir), bytes.clone()))
         .collect();
     if let Some(identity) = &state.identity
         && let Ok(json) = lpc_wire::json::to_string(identity)
     {
-        files.push((
-            fw_host::DEVICE_IDENTITY_PATH.to_string(),
-            json.into_bytes(),
-        ));
+        files.push((fw_host::DEVICE_IDENTITY_PATH.to_string(), json.into_bytes()));
     }
     files
 }

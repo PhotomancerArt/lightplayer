@@ -92,8 +92,14 @@ mod tests {
     #[test]
     fn lpfs_regions_match_every_boards_partition_table() {
         for (board, csv) in [
-            ("esp32c6", include_str!("../../../../lp-fw/fw-esp32c6/partitions.csv")),
-            ("esp32s3", include_str!("../../../../lp-fw/fw-esp32s3/partitions.csv")),
+            (
+                "esp32c6",
+                include_str!("../../../../lp-fw/fw-esp32c6/partitions.csv"),
+            ),
+            (
+                "esp32s3",
+                include_str!("../../../../lp-fw/fw-esp32s3/partitions.csv"),
+            ),
         ] {
             let (offset, size) = lpfs_row(csv);
             let region = LinkFlashRegion::lpfs_for_chip(board)
