@@ -14,6 +14,9 @@ float test_tanh_zero() {
     return tanh(rt(0.0));
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_tanh_zero() ~= 0.0
 
 float test_tanh_one() {
@@ -21,6 +24,7 @@ float test_tanh_one() {
     return tanh(rt(1.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_tanh_one() ~= 0.7615941559557649
 
 float test_tanh_neg_one() {
@@ -28,6 +32,7 @@ float test_tanh_neg_one() {
     return tanh(rt(-1.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_tanh_neg_one() ~= -0.7615941559557649
 
 float test_tanh_two() {
@@ -35,6 +40,7 @@ float test_tanh_two() {
     return tanh(rt(2.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_tanh_two() ~= 0.9640275800758169
 
 float test_tanh_neg_two() {
@@ -42,6 +48,7 @@ float test_tanh_neg_two() {
     return tanh(rt(-2.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_tanh_neg_two() ~= -0.9640275800758169
 
 float test_tanh_half() {
@@ -49,6 +56,7 @@ float test_tanh_half() {
     return tanh(rt(0.5));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_tanh_half() ~= 0.46211715726000974
 
 vec2 test_tanh_vec2() {
@@ -56,6 +64,7 @@ vec2 test_tanh_vec2() {
     return tanh(vec2(rt(0.0), rt(1.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_tanh_vec2() ~= vec2(0.0, 0.7615941559557649)
 
 vec3 test_tanh_vec3() {
@@ -63,6 +72,7 @@ vec3 test_tanh_vec3() {
     return tanh(vec3(rt(0.0), rt(1.0), rt(-1.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_tanh_vec3() ~= vec3(0.0, 0.7615941559557649, -0.7615941559557649)
 
 vec4 test_tanh_vec4() {
@@ -70,6 +80,7 @@ vec4 test_tanh_vec4() {
     return tanh(vec4(rt(0.0), rt(0.5), rt(1.0), rt(-0.5)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_tanh_vec4() ~= vec4(0.0, 0.46211715726000974, 0.7615941559557649, -0.46211715726000974)
 
 

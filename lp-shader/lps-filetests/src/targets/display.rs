@@ -284,12 +284,14 @@ mod tests {
         assert!(err.contains("xtlpn.q32"));
     }
 
+    /// A bare backend token selects **every** float mode that backend has, in
+    /// `ALL_TARGETS` order — so `wasm` is three targets once `wasm.f32` exists,
+    /// not two. Callers that mean one mode must spell it out.
     #[test]
     fn test_parse_target_filters_comma_and_shorthand() {
         let v = parse_target_filters("rv32n,wasm").expect("parse");
-        assert_eq!(v.len(), 2);
-        assert_eq!(v[0].name(), "rv32n.q32");
-        assert_eq!(v[1].name(), "wasm.q32");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["rv32n.q32", "wasm.q32", "wasm.f32"]);
     }
 
     #[test]
@@ -297,6 +299,24 @@ mod tests {
         let v = parse_target_filters("rv32c").expect("parse");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].name(), "rv32c.q32");
+    }
+
+    #[test]
+    fn test_target_name_wasm_f32() {
+        let t = Target::from_name("wasm.f32").expect("wasm.f32 registered");
+        assert_eq!(t.name(), "wasm.f32");
+        assert_eq!(t.float_mode, FloatMode::F32);
+        assert_eq!(t.backend, Backend::Wasm);
+        assert_eq!(t.isa, super::super::Isa::Wasm32);
+    }
+
+    /// The `wasm` shorthand now selects **both** float modes. A test run that
+    /// meant only the Q32 wasm target must say `wasm.q32`.
+    #[test]
+    fn test_parse_target_filters_wasm_shorthand_covers_both_modes() {
+        let v = parse_target_filters("wasm").expect("parse");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["wasm.q32", "wasm.f32"]);
     }
 
     #[test]

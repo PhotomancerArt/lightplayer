@@ -14,6 +14,9 @@ float test_acosh_one() {
     return acosh(rt(1.0));
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_acosh_one() ~= 0.0
 
 float test_acosh_cosh_one() {
@@ -21,6 +24,7 @@ float test_acosh_cosh_one() {
     return acosh(rt(cosh(1.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_acosh_cosh_one() ~= 1.0
 
 float test_acosh_two() {
@@ -28,6 +32,7 @@ float test_acosh_two() {
     return acosh(rt(2.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_acosh_two() ~= 1.3169578969248166
 
 float test_acosh_five() {
@@ -35,6 +40,7 @@ float test_acosh_five() {
     return acosh(rt(5.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_acosh_five() ~= 2.2924316695611777
 
 float test_acosh_large() {
@@ -42,6 +48,7 @@ float test_acosh_large() {
     return acosh(rt(10.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_acosh_large() ~= 2.993222846126381
 
 vec2 test_acosh_vec2() {
@@ -49,6 +56,7 @@ vec2 test_acosh_vec2() {
     return acosh(vec2(rt(1.0), rt(2.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_acosh_vec2() ~= vec2(0.0, 1.3169578969248166)
 
 vec3 test_acosh_vec3() {
@@ -56,6 +64,7 @@ vec3 test_acosh_vec3() {
     return acosh(vec3(rt(1.0), rt(2.0), rt(5.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_acosh_vec3() ~= vec3(0.0, 1.3169578969248166, 2.2924316695611777)
 
 vec4 test_acosh_vec4() {
@@ -63,6 +72,7 @@ vec4 test_acosh_vec4() {
     return acosh(vec4(rt(1.0), rt(1.5), rt(2.0), rt(3.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_acosh_vec4() ~= vec4(0.0, 0.9624236501192069, 1.3169578969248166, 1.762747174039086)
 
 

@@ -26,6 +26,9 @@ void test_access_write_float() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_access_write_float() == 0.0
 
 void test_access_write_int() {
@@ -37,6 +40,7 @@ void test_access_write_int() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_int() == 0.0
 
 void test_access_write_uint() {
@@ -48,6 +52,7 @@ void test_access_write_uint() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_uint() == 0.0
 
 void test_access_write_bool() {
@@ -59,6 +64,7 @@ void test_access_write_bool() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_bool() == 0.0
 
 void test_access_write_vec2() {
@@ -70,6 +76,7 @@ void test_access_write_vec2() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_vec2() == 0.0
 
 void test_access_write_vec3() {
@@ -81,6 +88,7 @@ void test_access_write_vec3() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_vec3() == 0.0
 
 void test_access_write_vec4() {
@@ -92,6 +100,7 @@ void test_access_write_vec4() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_vec4() == 0.0
 
 void test_access_write_mat2() {
@@ -103,6 +112,7 @@ void test_access_write_mat2() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_mat2() == 0.0
 
 void test_access_write_out() {
@@ -114,6 +124,7 @@ void test_access_write_out() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_out() == 0.0
 
 void test_access_write_buffer() {
@@ -128,6 +139,7 @@ void test_access_write_buffer() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_buffer() == 0.0
 
 void test_access_write_shared() {
@@ -139,6 +151,7 @@ void test_access_write_shared() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_shared() == 0.0
 
 float test_access_write_read() {
@@ -155,4 +168,5 @@ float test_access_write_read() {
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_access_write_read() ~= 157.0

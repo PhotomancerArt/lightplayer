@@ -68,7 +68,7 @@ pub(crate) fn emit_module(
     debug_assert_eq!(export_names.len(), ir.functions.len());
     let augmented = imports::with_missing_helper_imports(ir, options.float_mode);
     let ir = augmented.as_ref().unwrap_or(ir);
-    let filtered = imports::build_filtered_imports(ir)?;
+    let filtered = imports::build_filtered_imports(ir, options.float_mode)?;
     let filtered_fn_count = filtered.decls.len() as u32;
 
     let mut types = TypeSection::new();
@@ -135,7 +135,7 @@ pub(crate) fn emit_module(
         None
     };
     for (decl, &ty_idx) in filtered.decls.iter().zip(import_fn_types.iter()) {
-        let wasm_name = imports::builtins_wasm_name(decl)?;
+        let wasm_name = imports::builtins_wasm_name(decl, options.float_mode)?;
         import_section.import("builtins", wasm_name, EntityType::Function(ty_idx));
     }
 

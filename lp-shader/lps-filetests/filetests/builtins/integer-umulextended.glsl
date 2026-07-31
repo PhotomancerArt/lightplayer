@@ -16,6 +16,9 @@ uvec4 test_umulextended_uint_small() {
 // naga lowers umulExtended to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_umulextended_uint_small() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_umulextended_uint_medium() {
@@ -28,6 +31,7 @@ uvec4 test_umulextended_uint_medium() {
 // naga lowers umulExtended to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_umulextended_uint_medium() == uvec4(1410065408u, 2u, 0u, 0u)
 
 uvec4 test_umulextended_uint_large() {
@@ -40,6 +44,7 @@ uvec4 test_umulextended_uint_large() {
 // naga lowers umulExtended to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_umulextended_uint_large() == uvec4(0u, 1u, 0u, 0u)
 
 uvec4 test_umulextended_uint_max() {
@@ -52,6 +57,7 @@ uvec4 test_umulextended_uint_max() {
 // naga lowers umulExtended to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_umulextended_uint_max() == uvec4(1u, 4294967294u, 0u, 0u)
 
 struct U64Parts {
@@ -69,6 +75,7 @@ uvec2 test_umulextended_struct_field_out() {
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_umulextended_struct_field_out() == uvec2(0u, 1u)
 
 

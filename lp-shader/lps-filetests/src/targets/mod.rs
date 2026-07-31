@@ -89,12 +89,18 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
-/// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu, xtn, xtlpn — used for error
-/// messages and CLI.
+/// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu, xtn, xtlpn, wasm.f32 — used
+/// for error messages and CLI.
 ///
-/// The Xtensa pair is **appended**, deliberately: [`DEFAULT_TARGETS`] indexes into
-/// this list, so inserting anywhere else would silently repoint the defaults.
-/// `test_default_targets_order_matches_const` is the guard.
+/// Everything after `rv32lpn.q32` is **appended**, deliberately: [`DEFAULT_TARGETS`]
+/// indexes into this list, so inserting anywhere else would silently repoint the
+/// defaults. `test_default_targets_order_matches_const` is the guard.
+///
+/// `wasm.f32` is the first *native-code* f32 target: the `lpvm-wasm` backend has
+/// always had a `FloatMode::F32` emit path, but nothing ever executed it. It is
+/// deliberately **not** in [`DEFAULT_TARGETS`] — see the corpus findings from the
+/// run that first exercised it (`@lpfn`/`@glsl` builtin imports still resolve to
+/// the Q32 builtin ids, so any file calling one produces an invalid module).
 pub const ALL_TARGETS: &[Target] = &[
     Target {
         frontend: Frontend::Naga,
@@ -150,6 +156,13 @@ pub const ALL_TARGETS: &[Target] = &[
         backend: Backend::Xtfa,
         float_mode: FloatMode::Q32,
         isa: Isa::Xtensa,
+        exec_mode: ExecMode::Emulator,
+    },
+    Target {
+        frontend: Frontend::Naga,
+        backend: Backend::Wasm,
+        float_mode: FloatMode::F32,
+        isa: Isa::Wasm32,
         exec_mode: ExecMode::Emulator,
     },
 ];

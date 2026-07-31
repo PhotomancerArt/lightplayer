@@ -31,12 +31,17 @@ vec4 sample_via_ivec2_conversion() {
 
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: fetch_r_via_vec2_conversion() ~= 1.0 (tolerance: 0.0002)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unimplemented(wasm.f32)
 // run: fetch_texel0_via_vec2_conversion() ~= vec4(0.125, 0.25, 0.375, 1.0) (tolerance: 0.0002)
 // interp.f32: no guest memory to bind texture fixtures into
 // wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unimplemented(wasm.f32)
 // run: sample_via_ivec2_conversion() ~= vec4(1.0, 0.75, 0.5, 0.25) (tolerance: 0.0003)
