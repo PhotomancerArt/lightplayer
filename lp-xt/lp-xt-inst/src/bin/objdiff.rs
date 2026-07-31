@@ -19,7 +19,13 @@ const DEFAULT_OBJDUMP: &str = "/Users/yona/.rustup/toolchains/esp/xtensa-esp-elf
 
 #[derive(Clone, PartialEq, Debug)]
 enum Operand {
+    /// An address register, rendered `a3`.
     Reg(u8),
+    /// A float register, rendered `f3`. A separate kind so an operand-order
+    /// mistake between the AR and FR files cannot compare equal.
+    FReg(u8),
+    /// A boolean register, rendered `b3`.
+    BReg(u8),
     Imm(i64),
     Addr(u32),
 }
@@ -205,6 +211,8 @@ fn canonical(inst: &Inst, pc: u32) -> (String, Vec<Operand>) {
 fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
     use lp_xt_inst::Inst::*;
     let reg = |r: lp_xt_inst::Reg| Operand::Reg(r.num());
+    let freg = |r: lp_xt_inst::FReg| Operand::FReg(r.num());
+    let breg = |r: lp_xt_inst::BReg| Operand::BReg(r.num());
     let br = |off: i32| Operand::Addr(pc.wrapping_add(4).wrapping_add(off as u32));
     match *inst {
         Rrr(_, a, b, c) => vec![reg(a), reg(b), reg(c)],
@@ -245,6 +253,27 @@ fn typed_operands(inst: &Inst, pc: u32) -> Vec<Operand> {
         Callx(_, a) => vec![reg(a)],
         Entry(a, imm) => vec![reg(a), Operand::Imm(imm as i64)],
         Nullary(_) | NullaryN(_) => vec![],
+
+        // --- floating point ---
+        FpRrr(_, a, b, c) => vec![freg(a), freg(b), freg(c)],
+        FpRr(_, a, b) => vec![freg(a), freg(b)],
+        ConstS(a, imm) => vec![freg(a), Operand::Imm(imm as i64)],
+        Rfr(a, b) => vec![reg(a), freg(b)],
+        Wfr(a, b) => vec![freg(a), reg(b)],
+        FpMovAr(_, a, b, c) => vec![freg(a), freg(b), reg(c)],
+        FpMovBr(_, a, b, c) => vec![freg(a), freg(b), breg(c)],
+        FpCmp(_, a, b, c) => vec![breg(a), freg(b), freg(c)],
+        FpToInt(_, a, b, imm) => vec![reg(a), freg(b), Operand::Imm(imm as i64)],
+        IntToFp(_, a, b, imm) => vec![freg(a), reg(b), Operand::Imm(imm as i64)],
+        FpLsx(_, a, b, c) => vec![freg(a), reg(b), reg(c)],
+        FpLsi(_, a, b, off) => vec![freg(a), reg(b), Operand::Imm(off as i64)],
+
+        // --- boolean register file ---
+        MovBool(_, a, b, c) => vec![reg(a), reg(b), breg(c)],
+        BranchBool(_, a, off) => vec![breg(a), br(off)],
+
+        // --- special / user registers: the register is part of the mnemonic ---
+        Sr(_, _, a) | Ur(_, _, a) => vec![reg(a)],
     }
 }
 
@@ -271,6 +300,14 @@ fn parse_operands(text: &str, hints: &[Operand]) -> Option<Vec<Operand>> {
             Operand::Reg(_) => {
                 let n = tok.strip_prefix('a')?;
                 Operand::Reg(n.parse().ok()?)
+            }
+            Operand::FReg(_) => {
+                let n = tok.strip_prefix('f')?;
+                Operand::FReg(n.parse().ok()?)
+            }
+            Operand::BReg(_) => {
+                let n = tok.strip_prefix('b')?;
+                Operand::BReg(n.parse().ok()?)
             }
             Operand::Imm(_) => Operand::Imm(parse_int(tok)? & 0xffff_ffff),
             Operand::Addr(_) => {
