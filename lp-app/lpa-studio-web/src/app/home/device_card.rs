@@ -1669,16 +1669,28 @@ fn wire_card_affordance(
             .with_icon("edit");
             Some(CardRowAction::Sheet(CardSheetState::Name, display))
         }
-        // M6: the Not-responding card's affordance opens the
-        // troubleshooting sheet (display action is meta-only).
+        // Opens the troubleshooting sheet. The action here is meta-only —
+        // it supplies the row's label/summary/icon and is never dispatched;
+        // the sheet is the effect.
+        //
+        // `strip_confirmation` is load-bearing, not tidiness. This row
+        // borrowed ProvisionFirmware purely as a carrier, and inherited its
+        // DESTRUCTIVE confirmation with it — so opening a read-only help
+        // sheet asked "This will write LightPlayer firmware to the selected
+        // ESP32. Continue?" (reported from the bench 2026-07-31; latent
+        // since M6, and exposed once Troubleshoot became reachable from
+        // every state). A meta-only carrier must never inherit a gate for
+        // an effect it does not have.
         DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot) => {
-            let display = UiAction::from_op(
-                ControllerId::new(DeviceController::NODE_ID),
-                DeviceOp::ProvisionFirmware { setup_name: None },
-            )
-            .with_label(RosterAffordance::Troubleshoot.label())
-            .with_summary("Steps to try when the device is not responding.")
-            .with_icon("zap");
+            let display = strip_confirmation(
+                UiAction::from_op(
+                    ControllerId::new(DeviceController::NODE_ID),
+                    DeviceOp::ProvisionFirmware { setup_name: None },
+                )
+                .with_label(RosterAffordance::Troubleshoot.label())
+                .with_summary("Steps to try when the device is not responding.")
+                .with_icon("zap"),
+            );
             Some(CardRowAction::Sheet(CardSheetState::Troubleshoot, display))
         }
         // The unreadable card's wipe: destructive → the D41 confirm sheet
