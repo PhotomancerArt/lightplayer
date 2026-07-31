@@ -17,7 +17,9 @@ composite-effects spike, is recorded in
 > public face) presented one way at every nesting depth. Where this
 > document and an implementation convenience disagree, this document wins.
 >
-> **Related:** `docs/glossary.md` (terms),
+> **Related:** `docs/design/panel.md` (control behavior — the normative
+> panel treatment; R9–R13 below are summaries of its rules),
+> `docs/glossary.md` (terms),
 > `docs/adr/2026-07-26-node-card-faces.md` (face grammar),
 > `docs/adr/2026-07-09-declarative-default-bindings.md` (default binds),
 > `docs/adr/2026-07-27-node-authoring-operations.md` (create/vendor seam).
@@ -200,70 +202,43 @@ promoted between levels.
   Channels driven by authored writers (an LFO, a clock) render as live
   readouts that can be *grabbed* (R11).
 
-### R9 — Control meta follows the binding
+### R9 — Control meta follows the binding *(summary — normative: panel.md P6/P7)*
 
-A panel control's display meta (label, unit, min/max, step, widget)
-derives from the slot(s) **currently bound** to the channel in that scope
-— it is re-derived whenever bindings change. This is what makes E2 work:
-when a playlist switches entries, the panel control's range switches with
-it, because a different slot is now behind the channel.
+A control's display meta derives from the slot(s) **currently bound** to
+the channel in that scope, re-derived whenever bindings change — a
+playlist switch re-derives the control (E2). Ranges union on conflict; a
+module-level authored per-channel override (label/unit/min/max, **no
+value**) beats derivation — the curation escape hatch, and the only
+module-side declaration in the model.
 
-Merge rule when several slots in one scope bind the same channel with
-conflicting meta: **numeric ranges union (widest wins)**; on label/unit
-conflict the channel name wins. A module-level authored meta override
-(label/unit/min/max on the module node, per channel) beats derivation —
-this is the curation escape hatch, and the only module-side declaration
-in the model. It carries no value — an override that carried one would
-create a second source of truth beside the bound slot.
+### R10 — Panel state: lazy, unauthored runtime writers *(summary — normative: panel.md P1–P3)*
 
-### R10 — Panel state: lazy, stateful, unauthored runtime writers
+Panel controls write through runtime writer state per `(scope, channel)`:
+**unauthored** (never dirties the project — authored artifacts are
+defaults and wiring; panel state is performance state) and **lazy** (the
+writer materializes on first touch, in the scope where touched). Laziness
+is load-bearing for R5: if every public slot self-shadowed, an outer
+scope could never drive an inner channel. Writers hold values — they
+shape, never integrate (panel.md P3).
 
-Panel controls write through **runtime writer state**, per
-`(scope, channel)`:
+### R11 — Precedence: an engaged panel writer wins its scope *(summary — normative: panel.md P2/P4/P5)*
 
-- **Unauthored.** Touching a control never edits an artifact and never
-  dirties the project. Authored artifacts define *defaults and wiring*;
-  panel state is live performance state.
-- **Lazy.** The writer materializes on **first touch**, in the scope
-  where the control was touched. Untouched channels have no panel writer
-  — this is load-bearing: if every public slot self-shadowed, an outer
-  scope could never drive an inner channel (R5 would always stop at the
-  inner scope) and inheritance would be dead on arrival.
-- **Stateful.** A panel writer is a data *source*, not a stored scalar —
-  it may integrate (the phasor knob: changing speed without phase
-  discontinuity), which is why it lives engine-side, identically on sim
-  and device, and Studio talks to it via runtime commands (the
-  playlist-activate precedent: a poke, nothing staged).
+Within a scope, an engaged panel writer outranks authored writers for the
+same channel until cleared; across scopes, plain R5 applies — an engaged
+inner writer shadows outer control for that subtree (touching detaches,
+clearing re-attaches). The panel is latch-mode capture: values hold until
+an explicit clear.
 
-### R11 — Precedence: an engaged panel writer wins its scope
+### R12 — Reset *(summary — normative: panel.md P2)*
 
-Within a scope, an **engaged** panel writer takes precedence over
-authored writers for the same channel, until reset — grabbing a knob
-overrides the LFO driving it. Across scopes, plain R5 applies: an engaged
-writer in an inner scope shadows outer writers for that subtree.
-Corollary: **touching a control detaches that scope from outer control**
-until reset — the UI must show engaged/overridden state distinctly from
-inheriting state.
+Clear removes panel writers — per control, per module, or whole panel —
+restoring R5/R6 resolution and dropping the persisted entries.
 
-### R12 — Reset
+### R13 — Persistence *(summary — normative: panel.md P10/P11)*
 
-Reset removes panel writers — per control, per module (scope), or whole
-panel — restoring authored / inherited / default resolution (R5/R6) and
-clearing the corresponding persisted entries (R13).
-
-### R13 — Persistence
-
-Panel state persists by default in `.lp/state.json` in the project
-folder — never in authored artifacts. Writes are **throttled (≥ ~10 s
-apart)** for
-flash preservation on device. Auto-save is on by default with a user
-toggle; reset clears persisted entries.
-
-The motivating case (verbatim requirement): *4 a.m., Burning Man, LED
-scarf dimmed from a phone. Unplug for a minute, replug — it must come
-back dim, not blinding. Next night, brighter conditions — connect, hit
-reset.* Persist by default; throttle writes; make reset one obvious
-gesture.
+Panel state persists by default to `.lp/state.json` (§6) with throttled
+writes (≥ ~10 s, flash preservation), auto-save on by default, and
+restore **before first render** on boot. Never in authored artifacts.
 
 ### R14 — Provenance is a node capability; extraction copies it
 
@@ -484,20 +459,19 @@ Copy-on-extract per R14.
 
 ## 9. Open questions (G1 redline register)
 
-- **Q3 (spec proposed):** panel runtime commands `PanelWrite { scope,
-  channel, value }` / `PanelReset { scope?, channel? }`; "touched" =
-  first `PanelWrite`; state keyed `(scope-path, channel)`; `engaged`
-  flag round-trips through `state.json`. Ratify or bend.
+- **Q3:** → specced as `panel.md` P8/P11 (wire ops, state file shape);
+  ratify there.
 - **Q7:** provenance field set (§8) — enough? (`description`/`homepage`
   deferred?)
 - **Q10:** bare-module-folder open assumes current format (§6) — fine for
   alpha?
-- **Q11:** R9 tiebreak (channel name wins on label conflict) — fine, or
-  prefer first-bound-slot-wins?
-- **Q12:** grabbing an authored-driven channel (R8/R11 "grab the LFO")
-  — in scope for the first implementation, or panel-writers-only-on-
-  otherwise-unwritten-channels initially?
+- **Q11:** → moved to `panel.md` P6 (merge/tiebreak rules); ratify there.
+- **Q12:** → resolved by the latch model: grabbing authored-driven
+  channels is core behavior (`panel.md` P2/P5), not an increment.
 - **Q13:** R8 subsumes the `panel: bool` slot flag under publicity — a
   leaf node's knobs are exactly its bound slots, and "add to panel" is
   the binding gesture. Confirm the flag (and `ShaderSlotDef.panel`) is
   deleted rather than kept as a parallel card-local mechanism.
+- `panel.md` carries its own register (P-Q1–P-Q4: slew defaults,
+  three-state affordance requirement, state-file versioning/flush,
+  clear-all vs sink scopes).
