@@ -1,5 +1,4 @@
 // test run
-// @ignore(backend=wasm)
 
 // ============================================================================
 // Control flow: for (init; bool; update) - condition must evaluate to bool

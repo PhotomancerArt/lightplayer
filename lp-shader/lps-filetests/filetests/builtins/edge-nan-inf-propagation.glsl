@@ -42,14 +42,7 @@ bool test_isinf_inf() {
     return isinf(1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_isinf_inf() == true
 
 bool test_isinf_neg_inf() {
@@ -57,14 +50,7 @@ bool test_isinf_neg_inf() {
     return isinf(-1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_isinf_neg_inf() == true
 
 float test_sin_inf() {
@@ -72,14 +58,7 @@ float test_sin_inf() {
     return sin(1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_sin_inf() ~= 0.0
 
 float test_cos_inf() {
@@ -87,14 +66,7 @@ float test_cos_inf() {
     return cos(1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_cos_inf() ~= 0.0
 
 float test_log_inf() {
@@ -102,14 +74,7 @@ float test_log_inf() {
     return log(1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_log_inf() ~= 0.0
 
 float test_exp_inf() {
@@ -117,14 +82,7 @@ float test_exp_inf() {
     return exp(1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_exp_inf() ~= 0.0
 
 float test_sqrt_inf() {
@@ -132,14 +90,7 @@ float test_sqrt_inf() {
     return sqrt(1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_sqrt_inf() ~= 0.0
 
 vec2 test_nan_propagation() {
@@ -148,14 +99,7 @@ vec2 test_nan_propagation() {
     return vec2(nan_val + 1.0, nan_val * 2.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_nan_propagation() ~= vec2(0.0, 0.0)
 
 vec2 test_inf_propagation() {
@@ -165,14 +109,7 @@ vec2 test_inf_propagation() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(*)
 // run: test_inf_propagation() ~= vec2(0.0, 0.0)
 
 

@@ -33,11 +33,8 @@ float test_overload_scalar_vs_vector() {
     return pick(2.0) + pick(vec3(1.0, 2.0, 3.0)).y + pick(vec4(1.0, 2.0, 3.0, 4.0)).z;
 }
 
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(rv32lpn.q32)
-// @broken(xtlpn.q32)
+// genuine overloads work only on the wasm backend (see the header for each backend)
+// @broken(float_mode=q32, backend!=wasm)
 // run: test_overload_scalar_vs_vector() ~= 22.0
 
 float combine(float a) {
@@ -54,9 +51,6 @@ float test_overload_arity_and_nested_call() {
     return combine(1.0) + combine(2.0, 3.0);
 }
 
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(rv32lpn.q32)
-// @broken(xtlpn.q32)
+// genuine overloads work only on the wasm backend (see the header for each backend)
+// @broken(float_mode=q32, backend!=wasm)
 // run: test_overload_arity_and_nested_call() ~= 8.0
