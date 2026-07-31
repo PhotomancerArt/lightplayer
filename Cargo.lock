@@ -5901,7 +5901,6 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "lp-collection 1.0.0",
- "lps-q32",
 ]
 
 [[package]]

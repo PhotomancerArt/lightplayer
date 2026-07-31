@@ -9,11 +9,7 @@
       "source": "bus:time"
     }
   },
-  "glsl_opts": {
-    "add_sub": "wrapping",
-    "mul": "wrapping",
-    "div": "reciprocal"
-  },
+  "float_mode": "fixed",
   "consumed": {
     "time": {
       "kind": "value",

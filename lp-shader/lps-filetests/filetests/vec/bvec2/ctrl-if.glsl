@@ -1,5 +1,4 @@
 // test run
-// @ignore(backend=wasm)
 
 // ============================================================================
 // Control If: if (any(bvec2)), if (all(bvec2)) - control flow with bvec2

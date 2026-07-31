@@ -106,89 +106,6 @@ fn emit_q32_fdiv_const_zero(sink: &mut InstructionSink<'_>, lhs: u32, dst: u32) 
     sink.local_set(dst);
 }
 
-pub(crate) fn emit_q32_fadd(
-    sink: &mut InstructionSink<'_>,
-    lhs: u32,
-    rhs: u32,
-    dst: u32,
-    scratch: u32,
-) {
-    sink.local_get(lhs)
-        .i64_extend_i32_s()
-        .local_get(rhs)
-        .i64_extend_i32_s()
-        .i64_add();
-    emit_q32_sat_from_i64(sink, scratch);
-    sink.local_set(dst);
-}
-
-pub(crate) fn emit_q32_fsub(
-    sink: &mut InstructionSink<'_>,
-    lhs: u32,
-    rhs: u32,
-    dst: u32,
-    scratch: u32,
-) {
-    sink.local_get(lhs)
-        .i64_extend_i32_s()
-        .local_get(rhs)
-        .i64_extend_i32_s()
-        .i64_sub();
-    emit_q32_sat_from_i64(sink, scratch);
-    sink.local_set(dst);
-}
-
-pub(crate) fn emit_q32_fmul(
-    sink: &mut InstructionSink<'_>,
-    lhs: u32,
-    rhs: u32,
-    dst: u32,
-    scratch: u32,
-) {
-    sink.local_get(lhs)
-        .i64_extend_i32_s()
-        .local_get(rhs)
-        .i64_extend_i32_s()
-        .i64_mul()
-        .i64_const(16)
-        .i64_shr_s();
-    emit_q32_sat_from_i64(sink, scratch);
-    sink.local_set(dst);
-}
-
-pub(crate) fn emit_q32_fdiv(sink: &mut InstructionSink<'_>, lhs: u32, rhs: u32, dst: u32) {
-    let t = BlockType::Result(ValType::I32);
-
-    // Check if divisor is zero
-    sink.local_get(rhs).i32_const(0).i32_eq().if_(t);
-    // Divisor is zero - handle saturation based on dividend sign
-    sink.local_get(lhs).i32_const(0).i32_eq().if_(t);
-    // 0 / 0 = 0
-    sink.i32_const(0);
-    sink.else_();
-    // nonzero / 0 - saturate based on sign
-    sink.local_get(lhs).i32_const(0).i32_lt_s().if_(t);
-    // negative / 0 = MIN_FIXED
-    sink.i32_const(MIN_FIXED);
-    sink.else_();
-    // positive / 0 = MAX_FIXED
-    sink.i32_const(MAX_FIXED);
-    sink.end();
-    sink.end();
-    sink.else_();
-    // Divisor is non-zero - perform normal division
-    sink.local_get(lhs)
-        .i64_extend_i32_s()
-        .i64_const(16)
-        .i64_shl()
-        .local_get(rhs)
-        .i64_extend_i32_s()
-        .i64_div_s()
-        .i32_wrap_i64();
-    sink.end();
-    sink.local_set(dst);
-}
-
 /// Reciprocal fast divide — matches `__lp_lpir_fdiv_recip_q32` (phase 2 helper) bit-for-bit.
 pub(crate) fn emit_q32_fdiv_recip(
     sink: &mut InstructionSink<'_>,
@@ -469,10 +386,6 @@ mod tests {
             ("emit_q32_fadd_wrap", |s| emit_q32_fadd_wrap(s, 0, 1, 2)),
             ("emit_q32_fsub_wrap", |s| emit_q32_fsub_wrap(s, 0, 1, 2)),
             ("emit_q32_fmul_wrap", |s| emit_q32_fmul_wrap(s, 0, 1, 2)),
-            ("emit_q32_fadd", |s| emit_q32_fadd(s, 0, 1, 2, I64_SCRATCH)),
-            ("emit_q32_fsub", |s| emit_q32_fsub(s, 0, 1, 2, I64_SCRATCH)),
-            ("emit_q32_fmul", |s| emit_q32_fmul(s, 0, 1, 2, I64_SCRATCH)),
-            ("emit_q32_fdiv", |s| emit_q32_fdiv(s, 0, 1, 2)),
             ("emit_q32_fdiv_recip", |s| {
                 emit_q32_fdiv_recip(s, 0, 1, 7, &FDIV_RECIP_LOCALS);
             }),

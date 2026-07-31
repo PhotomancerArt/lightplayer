@@ -1,11 +1,12 @@
 //! Convert RGB color space to HSV (float implementation - stub).
 //!
-//! This is a stub implementation that will be replaced with a proper float implementation later.
-//! For now, it calls the q32 version with conversion.
-
-use crate::builtins::lpfn::color::space::rgb2hsv_q32::__lp_lpfn_rgb2hsv_q32;
-use crate::builtins::lpfn::color::space::rgb2hsv_q32::__lp_lpfn_rgb2hsv_vec4_q32;
-use lps_q32::q32::Q32;
+//! **Unimplemented.** Every function here traps via
+//! [`crate::f32_unimplemented::f32_unimplemented`]. These
+//! are placeholders whose signatures, `lpfn_impl` annotations and builtin-table
+//! wiring are correct; only the bodies are missing. They previously round-tripped
+//! through Q32 via `Q32::from_f32_wrapping`, which silently returned
+//! Q32-precision results with wrapped range — the exact property native f32 is
+//! being added for. Failing loudly is deliberate: see the f32 roadmap, M5.
 
 /// Convert RGB color to HSV color (extern C wrapper for compiler).
 ///
@@ -19,22 +20,8 @@ use lps_q32::q32::Q32;
 #[lpfn_impl_macro::lpfn_impl(f32, "vec3 lpfn_rgb2hsv(vec3 rgb)")]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_rgb2hsv_f32(result_ptr: *mut f32, x: f32, y: f32, z: f32) {
-    // Convert raw pointer to safe array reference at boundary
-    let result = unsafe { &mut *result_ptr.cast::<[f32; 3]>() };
-    // Stub: convert to q32, call q32 version, convert back
-    let x_q32 = Q32::from_f32_wrapping(x);
-    let y_q32 = Q32::from_f32_wrapping(y);
-    let z_q32 = Q32::from_f32_wrapping(z);
-    let mut result_q32 = [0i32; 3];
-    __lp_lpfn_rgb2hsv_q32(
-        result_q32.as_mut_ptr(),
-        x_q32.to_fixed(),
-        y_q32.to_fixed(),
-        z_q32.to_fixed(),
-    );
-    result[0] = Q32::from_fixed(result_q32[0]).to_f32();
-    result[1] = Q32::from_fixed(result_q32[1]).to_f32();
-    result[2] = Q32::from_fixed(result_q32[2]).to_f32();
+    let _ = (result_ptr, x, y, z);
+    crate::f32_unimplemented::f32_unimplemented()
 }
 
 /// Convert RGB color to HSV color with alpha (extern C wrapper for compiler).
@@ -50,23 +37,6 @@ pub extern "C" fn __lp_lpfn_rgb2hsv_f32(result_ptr: *mut f32, x: f32, y: f32, z:
 #[lpfn_impl_macro::lpfn_impl(f32, "vec4 lpfn_rgb2hsv(vec4 rgb)")]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_rgb2hsv_vec4_f32(result_ptr: *mut f32, x: f32, y: f32, z: f32, w: f32) {
-    // Convert raw pointer to safe array reference at boundary
-    let result = unsafe { &mut *result_ptr.cast::<[f32; 4]>() };
-    // Stub: convert to q32, call q32 version, convert back
-    let x_q32 = Q32::from_f32_wrapping(x);
-    let y_q32 = Q32::from_f32_wrapping(y);
-    let z_q32 = Q32::from_f32_wrapping(z);
-    let w_q32 = Q32::from_f32_wrapping(w);
-    let mut result_q32 = [0i32; 4];
-    __lp_lpfn_rgb2hsv_vec4_q32(
-        result_q32.as_mut_ptr(),
-        x_q32.to_fixed(),
-        y_q32.to_fixed(),
-        z_q32.to_fixed(),
-        w_q32.to_fixed(),
-    );
-    result[0] = Q32::from_fixed(result_q32[0]).to_f32();
-    result[1] = Q32::from_fixed(result_q32[1]).to_f32();
-    result[2] = Q32::from_fixed(result_q32[2]).to_f32();
-    result[3] = Q32::from_fixed(result_q32[3]).to_f32();
+    let _ = (result_ptr, x, y, z, w);
+    crate::f32_unimplemented::f32_unimplemented()
 }
