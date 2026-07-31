@@ -5,6 +5,8 @@
 //! controls and `base` primitives into app-specific workflows.
 
 pub(crate) mod affordance;
+#[cfg(feature = "stories")]
+pub(crate) mod board_diagram_stories;
 pub mod bus;
 pub mod device;
 pub mod home;
