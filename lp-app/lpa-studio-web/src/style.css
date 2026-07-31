@@ -278,9 +278,25 @@ label:has(> input:not(:disabled)) {
    stays visible — you always know whose sheet this is) and spares the
    tint edge. One at a time; clicking the backdrop dismisses. */
 
+/* Grid stack (2026-07-31): the below-the-header wrapper stacks the tab
+   content, the sheet, and the op overlay in ONE grid cell, so the region
+   is as tall as the tallest of them and a sheet can grow the card. The
+   old absolute overlays needed a hand-maintained per-sheet min-height
+   table — a recurring clipping-bug class, now deleted. */
+
+.ux-card-stack {
+    position: relative;
+    display: grid;
+}
+
+.ux-card-stack > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+}
+
 .ux-card-sheet {
-    position: absolute;
-    inset: 0;
+    /* In-flow grid item: contributes height instead of clipping. The
+       z-index still layers it over the content cell. */
     z-index: 6;
     display: grid;
     place-items: center;
@@ -401,8 +417,7 @@ label:has(> input:not(:disabled)) {
    and the same console tail, shown as a technical terminal. */
 
 .ux-card-op {
-    position: absolute;
-    inset: 0;
+    /* In-flow grid-stack item, same as .ux-card-sheet above. */
     z-index: 5;
     display: flex;
     flex-direction: column;

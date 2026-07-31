@@ -4194,22 +4194,34 @@ impl StudioController {
     /// device consumes the record as it boots, so this affects exactly one
     /// restart.
     async fn boot_safe_once(&mut self, updates: UxUpdateSink) -> UiResult {
+        // From app mode the record is written and the device reboots into
+        // its firmware by itself. From RECOVERY mode it cannot: the
+        // manually-entered download mode latches until power-on reset
+        // (bench-confirmed 2026-07-31), so the ending is the replug
+        // instruction — the same physics as the recovery flash.
+        let from_recovery = self.device_is_in_recovery_mode();
         self.run_device_management(
             ManagementFlowSpec {
                 request: LinkManagementRequest::boot_safe_once(),
                 progress_label: "Arming safe start",
-                reconnect_detail: "Restarting without the project",
+                reconnect_detail: if from_recovery {
+                    "Unplug the board and plug it back in to start it"
+                } else {
+                    "Restarting without the project"
+                },
                 failed_exit_label: "Back to device",
                 record_captured_logs_on_success: false,
                 done_notice: boot_safe_once_notice,
                 degrade_subject: "safe start armed",
-                server_reconnect_failed_notice:
-                    "Safe start armed; reconnect after the device finishes booting",
+                server_reconnect_failed_notice: if from_recovery {
+                    "Safe start armed. Unplug the board and plug it back in — \
+                     it will start without its project."
+                } else {
+                    "Safe start armed; reconnect after the device finishes booting"
+                },
+                awaits_manual_replug: from_recovery,
                 // Nothing is erased — the project is still on the device and
                 // the editor's lens stays valid.
-                // Reset/erase/boot-control all leave the device able to come
-                // back by itself.
-                awaits_manual_replug: false,
                 severs_lens: false,
             },
             updates,
