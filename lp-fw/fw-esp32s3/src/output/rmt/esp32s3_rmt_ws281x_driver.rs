@@ -53,6 +53,8 @@ use lpc_hardware::{
     Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
 
+#[cfg(feature = "frame-dump")]
+use crate::output::rmt::frame_dump::{self, FrameDump};
 use crate::output::rmt::s3_rmt::{self, BLOCKS_PER_CHANNEL, TX_BLOCKS, TX_CHANNELS};
 use crate::output::rmt::shared_driver::{DRIVER, FRAME_TIMEOUT, install_isr};
 
@@ -335,6 +337,8 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             gpio_address.as_str(),
             config.byte_count(),
         );
+        #[cfg(feature = "frame-dump")]
+        frame_dump::log_open(endpoint_id, config.byte_count());
 
         Ok(Box::new(Esp32S3RmtWs281xOutput {
             registry: Rc::clone(&self.registry),
@@ -342,6 +346,8 @@ impl Ws281xDriver for Esp32S3RmtWs281xDriver {
             lease: Some(lease),
             channel: ch,
             byte_count: config.byte_count(),
+            #[cfg(feature = "frame-dump")]
+            dump: FrameDump::new(),
         }))
     }
 }
@@ -356,6 +362,11 @@ struct Esp32S3RmtWs281xOutput {
     lease: Option<HardwareLease>,
     channel: u8,
     byte_count: u32,
+    /// Serial transcript of the frames this channel transmitted. Present only
+    /// in a `frame-dump` build — see [`super::frame_dump`] for why the gate is
+    /// compile-time rather than a runtime flag.
+    #[cfg(feature = "frame-dump")]
+    dump: FrameDump,
 }
 
 impl Ws281xOutput for Esp32S3RmtWs281xOutput {
@@ -395,12 +406,20 @@ impl Ws281xOutput for Esp32S3RmtWs281xOutput {
                 ),
             });
         }
+
+        // Reported after the send, not before it: the transcript is evidence
+        // about bytes that reached the wire, and a frame that timed out or was
+        // refused is not one of them.
+        #[cfg(feature = "frame-dump")]
+        self.dump.on_write(data);
         Ok(())
     }
 
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError> {
         validate_byte_count(config.byte_count()).map_err(endpoint_error_to_output_error)?;
         self.byte_count = config.byte_count();
+        #[cfg(feature = "frame-dump")]
+        self.dump.on_resize(config.byte_count());
         Ok(())
     }
 }
