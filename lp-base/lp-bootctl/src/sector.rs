@@ -40,9 +40,16 @@ const CRC_COVERED: core::ops::Range<usize> = 0..12;
 /// Erased NOR flash reads as all-ones.
 const ERASED_BYTE: u8 = 0xFF;
 
-/// Encode a record. The bytes are laid out in final form; use
-/// [`encode_write_order`] to write them safely.
-pub(crate) fn encode_record(flags: BootFlags) -> [u8; RECORD_LEN] {
+/// Encode a record for writing to an **erased** sector.
+///
+/// Write it in a single operation. Do not split it into multiple writes:
+/// every flash-write API that can reach this sector (the ESP ROM/stub
+/// `FLASH_BEGIN`, and therefore both `espflash` and `esptool-js`) **erases
+/// the sectors it is about to write**, so a second write to the same sector
+/// destroys the first. Integrity comes from the magic and CRC, not from
+/// write ordering: any partial or interrupted write fails one of those two
+/// checks and decodes as "no record", which boots normally.
+pub fn encode_record(flags: BootFlags) -> [u8; RECORD_LEN] {
     let mut record = [0u8; RECORD_LEN];
     record[MAGIC_RANGE].copy_from_slice(&SECTOR_MAGIC);
     record[VERSION_RANGE].copy_from_slice(&SECTOR_VERSION.to_le_bytes());
@@ -98,46 +105,6 @@ pub(crate) fn decode_record(bytes: &[u8]) -> DecodeOutcome {
             .expect("FLAGS_RANGE is exactly 4 bytes"),
     ));
     DecodeOutcome::Valid(BootControl::new(flags))
-}
-
-/// A record split into the two writes that must happen **in this order**.
-///
-/// NOR flash only clears bits, so a record cannot be made visible with a
-/// single atomic word flip the way an RTC-RAM structure can. Instead the
-/// magic goes last: an interrupted write leaves either no magic (blank) or
-/// a magic over a payload whose CRC will not match. Both are safe.
-pub struct WriteOrder {
-    record: [u8; RECORD_LEN],
-}
-
-impl WriteOrder {
-    /// Everything except the magic. **Write this first**, at
-    /// `BOOTCTL_PARTITION_OFFSET + offset`.
-    pub fn payload(&self) -> (usize, &[u8]) {
-        (MAGIC_RANGE.end, &self.record[MAGIC_RANGE.end..])
-    }
-
-    /// The magic. **Write this last**, at `BOOTCTL_PARTITION_OFFSET + 0`.
-    /// Until it lands the record does not exist.
-    pub fn magic(&self) -> (usize, &[u8]) {
-        (MAGIC_RANGE.start, &self.record[MAGIC_RANGE])
-    }
-
-    /// The whole record, for writers that can guarantee the sector is
-    /// programmed in one shot and verified afterwards.
-    pub fn whole_record(&self) -> &[u8; RECORD_LEN] {
-        &self.record
-    }
-}
-
-/// Encode `flags` and expose the two writes in their required order.
-///
-/// The sector must be **erased** before either write; NOR flash cannot turn
-/// a `0` back into a `1`.
-pub fn encode_write_order(flags: BootFlags) -> WriteOrder {
-    WriteOrder {
-        record: encode_record(flags),
-    }
 }
 
 #[cfg(test)]
@@ -248,23 +215,23 @@ mod tests {
         assert!(!decode_record(&record).skip_project_autoload());
     }
 
+    /// Every prefix of a record — what a write interrupted partway through
+    /// leaves behind — must decode as "no record". This is the property that
+    /// replaces write-ordering: the sector cannot be published in two steps,
+    /// because every flash API that writes it also erases it first.
     #[test]
-    fn write_order_puts_the_magic_last() {
-        let order = encode_write_order(BootFlags::SKIP_PROJECT_AUTOLOAD);
-        let (payload_offset, payload) = order.payload();
-        let (magic_offset, magic) = order.magic();
-
-        assert_eq!(magic_offset, 0);
-        assert_eq!(magic, SECTOR_MAGIC);
-        assert_eq!(payload_offset, SECTOR_MAGIC.len());
-        assert_eq!(payload.len(), RECORD_LEN - SECTOR_MAGIC.len());
-
-        // Applying them in order reconstructs the record exactly.
-        let mut assembled = [ERASED_BYTE; RECORD_LEN];
-        assembled[payload_offset..payload_offset + payload.len()].copy_from_slice(payload);
-        assembled[magic_offset..magic_offset + magic.len()].copy_from_slice(magic);
-        assert_eq!(&assembled, order.whole_record());
-        assert!(decode_record(&assembled).skip_project_autoload());
+    fn no_partial_write_is_ever_honored() {
+        let record = valid_record();
+        for written in 0..RECORD_LEN {
+            let mut partial = [ERASED_BYTE; RECORD_LEN];
+            partial[..written].copy_from_slice(&record[..written]);
+            assert!(
+                !decode_record(&partial).skip_project_autoload(),
+                "a write interrupted after {written} bytes must not be honored"
+            );
+        }
+        // ...and the complete record still is.
+        assert!(decode_record(&record).skip_project_autoload());
     }
 
     #[test]

@@ -35,15 +35,21 @@
 //! non-default boot: a fully valid record that says so. Every other state,
 //! including every corruption state, falls back to normal operation.
 //!
-//! # Torn-write discipline
+//! # Torn writes
 //!
-//! NOR flash only clears bits; making a byte `1` again requires erasing the
-//! whole sector. So the ordering discipline here is the flash-native mirror
-//! of [`lp_recovery`]'s: **the payload is written first and the magic
-//! last**. A write interrupted by a reset therefore leaves either no magic
-//! (blank → normal boot) or a magic whose CRC does not match (invalid →
-//! normal boot). See [`sector`] for the byte layout and
-//! [`encode_write_order`] for the ordering contract.
+//! The record is written to an erased sector in **one** operation, and its
+//! integrity rests on the magic and the CRC rather than on write ordering.
+//!
+//! This is not the discipline [`lp_recovery`] uses — it publishes RTC-RAM
+//! structures by flipping a single visibility word last. That trick is
+//! unavailable here: every flash-write API that can reach this sector (the
+//! ESP ROM/stub `FLASH_BEGIN`, hence both `espflash` and `esptool-js`)
+//! **erases the sectors it is about to write**, so a second write meant to
+//! publish a first one erases it instead.
+//!
+//! The CRC covers the magic, so any interrupted write fails either the magic
+//! check or the checksum, and decodes as "no record". `encode_record` is the
+//! whole API; see [`sector`] for the byte layout.
 
 #![no_std]
 
@@ -56,5 +62,5 @@ pub use boot_control::{BootControl, DecodeOutcome, decode};
 pub use boot_flags::BootFlags;
 pub use sector::{
     BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, RECORD_LEN, SECTOR_MAGIC, SECTOR_VERSION,
-    encode_write_order,
+    encode_record,
 };

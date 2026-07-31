@@ -22,7 +22,7 @@ use espflash::targets::Chip;
 use serde::Deserialize;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 
-use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, BootFlags, encode_write_order};
+use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, BootFlags, encode_record};
 
 use crate::{
     LinkBootControlResult, LinkEraseDeviceResult, LinkError, LinkFirmwareFlashResult,
@@ -119,12 +119,12 @@ pub(super) fn erase_device_flash(
 
 /// Write the boot-control sector, instructing the device's next boot.
 ///
-/// The sector is erased and then written **payload first, magic last** —
-/// NOR flash cannot publish a record with one atomic word flip, so the
-/// ordering is what makes an interrupted write safe: the device sees either
-/// no magic (blank) or a magic whose CRC fails, and boots normally either
-/// way. `lp_bootctl::encode_write_order` owns that ordering; do not
-/// reassemble the record here.
+/// **One write, not several.** `write_bin_to_flash` issues `FLASH_BEGIN`,
+/// which erases the sectors it is about to write — so splitting the 16-byte
+/// record across two writes would have the second erase the first, leaving a
+/// record that always fails its CRC and a feature that silently never works.
+/// The explicit `erase_region` below is belt-and-braces for the rest of the
+/// sector; integrity of the record itself comes from its magic and CRC.
 pub(super) fn write_boot_control(
     port_name: &str,
     flags: BootFlags,
@@ -144,15 +144,10 @@ pub(super) fn write_boot_control(
         .erase_region(BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE)
         .map_err(|error| LinkError::other(format!("boot-control erase failed: {error}")))?;
 
-    let order = encode_write_order(flags);
     recorder.progress(LinkManagementProgress::new("Writing boot-control record"));
-    for (label, (offset, bytes)) in [("payload", order.payload()), ("magic", order.magic())] {
-        flasher
-            .write_bin_to_flash(BOOTCTL_PARTITION_OFFSET + offset as u32, bytes, None)
-            .map_err(|error| {
-                LinkError::other(format!("boot-control {label} write failed: {error}"))
-            })?;
-    }
+    flasher
+        .write_bin_to_flash(BOOTCTL_PARTITION_OFFSET, &encode_record(flags), None)
+        .map_err(|error| LinkError::other(format!("boot-control write failed: {error}")))?;
     recorder.progress(LinkManagementProgress::new("Writing boot-control record").with_percent(100));
 
     reset_into_app(&mut flasher, &mut recorder);

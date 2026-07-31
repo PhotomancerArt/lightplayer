@@ -64,12 +64,23 @@ and a torn write all decode to "boot normally". There is exactly one way to
 get a non-default boot: a fully valid record that asks for one. A corrupt
 sector can never *cause* a degraded boot — only fail to prevent one.
 
-**Torn-write discipline: magic last.** NOR flash only clears bits, so a
-record cannot be made visible by flipping one word the way `lp-recovery`'s
-RTC-RAM structures can. Instead the payload is written first and the 4-byte
-magic last. An interrupted write therefore leaves either no magic (blank) or
-a magic over a payload whose CRC will not match. `encode_write_order()`
-exposes this ordering as the API rather than leaving it to writer discipline.
+**Torn writes: one write, integrity by checksum.** The record is written to
+an erased sector in a single operation, and its integrity rests on the magic
+and CRC rather than on write ordering.
+
+This is deliberately *not* the discipline `lp-recovery` uses. That crate
+publishes RTC-RAM structures by flipping one visibility word last, and the
+flash-native mirror — write the payload, then the magic — was the original
+design here. **It does not work.** Every flash-write API that can reach this
+sector issues the ESP ROM/stub `FLASH_BEGIN`, which *erases the sectors it is
+about to write*; that is true of `espflash::write_bin_to_flash` and of
+`esptool-js`'s `writeFlash` alike. A second write publishing a first would
+erase it instead, leaving a valid magic over an erased payload — which fails
+the CRC, boots normally, and makes the feature silently inoperative.
+
+The CRC covers the magic, so every prefix of a partial write fails one of the
+two checks. `no_partial_write_is_ever_honored` asserts that for all 16
+truncation points.
 
 **Consume on read, not on use.** The firmware erases a valid record the
 moment it reads it, before anything acts on it. That makes the instruction
