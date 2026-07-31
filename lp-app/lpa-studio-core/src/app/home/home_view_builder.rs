@@ -101,6 +101,14 @@ pub struct HomeDeviceEvidence {
     pub pending_uid: Option<String>,
     /// The session's console tail (D42), oldest first.
     pub console_tail: Vec<crate::UiLogEntry>,
+    /// A card-owned op flow is mid-flight on this device (model §2, I1).
+    ///
+    /// Load-bearing for the card's EXISTENCE, not just its overlay: an
+    /// identity-less recovery board whose session lands `Gone` mid-op would
+    /// otherwise derive Offline and be dropped — which erased the card at
+    /// the exact moment its op was showing "unplug the board and plug it
+    /// back in" (bench, 2026-07-31). An op in flight pins the card.
+    pub op_in_flight: bool,
 }
 
 /// Hydrate [`HomeInputs`] from a library snapshot fs. `open_elsewhere`
@@ -363,7 +371,11 @@ pub(crate) fn live_device_card(live: &HomeDeviceEvidence) -> Option<UiDeviceCard
         registry: None,
         connect: live.connect.clone(),
     });
-    if matches!(state, RosterCardState::Offline { .. }) {
+    if matches!(state, RosterCardState::Offline { .. }) && !live.op_in_flight {
+        // A Gone/idle anonymous session has nothing to show — EXCEPT while a
+        // card-owned op flow is narrating (awaiting the replug that finishes
+        // a recovery write). Dropping the card then takes the instruction
+        // with it.
         return None;
     }
     let identity = live.sync.as_ref().and_then(|sync| sync.identity.as_ref());
@@ -565,6 +577,32 @@ mod tests {
                 device_uid: Some("dev_aaaaaaaaaaaaaaaa".to_string()),
             },
         }
+    }
+
+    #[test]
+    fn an_in_flight_op_pins_the_card_through_gone() {
+        // The bench bug (2026-07-31): "Start in safe mode" resets the board,
+        // the anonymous recovery session lands Gone, the state derives
+        // Offline, and the card VANISHED — taking the "unplug the board and
+        // plug it back in" instruction with it. An op in flight must pin the
+        // card; without one, a Gone anonymous session stays invisible.
+        let evidence = HomeDeviceEvidence {
+            link: Some(DeviceState::Gone),
+            op_in_flight: true,
+            ..HomeDeviceEvidence::default()
+        };
+        let card = live_device_card(&evidence).expect("op in flight pins the card");
+        assert!(matches!(card.state, RosterCardState::Offline { .. }));
+
+        let without_op = HomeDeviceEvidence {
+            link: Some(DeviceState::Gone),
+            op_in_flight: false,
+            ..HomeDeviceEvidence::default()
+        };
+        assert!(
+            live_device_card(&without_op).is_none(),
+            "a Gone anonymous session with no op stays invisible"
+        );
     }
 
     /// Evidence for a live, Ready device carrying `sync`.

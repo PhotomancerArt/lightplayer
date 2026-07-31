@@ -901,6 +901,7 @@ impl StudioController {
                 .device_session()
                 .map(|session| session.console_tail().iter().cloned().collect())
                 .unwrap_or_default(),
+            op_in_flight: self.device_card_op.is_some(),
         };
         let sim = self
             .pool
