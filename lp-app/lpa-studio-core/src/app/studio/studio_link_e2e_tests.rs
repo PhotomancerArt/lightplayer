@@ -2578,7 +2578,9 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
         .expect("a finished backup rides the view");
     assert_eq!(backup.seq, 1, "the first backup of the session");
     assert!(
-        backup.file_name.starts_with("lightplayer-backup-bench-board-"),
+        backup
+            .file_name
+            .starts_with("lightplayer-backup-bench-board-"),
         "the file names itself after the device: {}",
         backup.file_name
     );

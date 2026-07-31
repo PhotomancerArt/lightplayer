@@ -53,10 +53,9 @@ pub fn HomeGallery(
         && downloaded_backup_seq.get() < backup.seq
     {
         downloaded_backup_seq.set(backup.seq);
-        if let Err(error) = crate::app::home::package_export::trigger_zip_download(
-            &backup.file_name,
-            &backup.bytes,
-        ) {
+        if let Err(error) =
+            crate::app::home::package_export::trigger_zip_download(&backup.file_name, &backup.bytes)
+        {
             log::warn!("device backup download failed: {error:?}");
         }
     }

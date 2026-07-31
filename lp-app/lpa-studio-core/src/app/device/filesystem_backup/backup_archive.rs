@@ -215,7 +215,10 @@ mod tests {
                 br#"{"kind":"Project","name":"porch"}"#.to_vec(),
             ),
             ("/projects/porch/shader.glsl", b"void main() {}".to_vec()),
-            ("/lightplayer.json", br#"{"startupProject":"porch"}"#.to_vec()),
+            (
+                "/lightplayer.json",
+                br#"{"startupProject":"porch"}"#.to_vec(),
+            ),
         ]);
 
         let archive = build_backup_archive(&image, &source(), NOW).expect("archive builds");
@@ -307,7 +310,10 @@ mod tests {
 
         let archive = build_backup_archive(&image, &source, NOW).expect("archive builds");
 
-        assert_eq!(archive.file_name, "lightplayer-backup-porch-sign-2027-01-15.zip");
+        assert_eq!(
+            archive.file_name,
+            "lightplayer-backup-porch-sign-2027-01-15.zip"
+        );
     }
 
     #[test]
