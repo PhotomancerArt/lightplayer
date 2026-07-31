@@ -1,0 +1,28 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "output",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2014621053
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

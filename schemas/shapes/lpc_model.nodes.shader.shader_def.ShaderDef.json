@@ -52,10 +52,28 @@
         }
       },
       {
-        "name": "glsl_opts",
+        "name": "float_mode",
         "shape": {
-          "ref": {
-            "id": 4084892601
+          "value": {
+            "shape": {
+              "editor": {
+                "dropdown": {
+                  "options": [
+                    {
+                      "label": "Float",
+                      "value": "float"
+                    },
+                    {
+                      "label": "Fixed",
+                      "value": "fixed"
+                    }
+                  ]
+                }
+              },
+              "id": 4255570002,
+              "meta": {},
+              "ty": "string"
+            }
           }
         }
       },

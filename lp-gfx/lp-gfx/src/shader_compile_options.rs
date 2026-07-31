@@ -6,12 +6,9 @@ use crate::shader_semantics::ShaderSemantics;
 pub struct ShaderCompileOptions {
     /// Numeric semantics tier this shader must be compiled with.
     ///
-    /// Explicit so no backend can silently ignore `q32_options`: a backend
-    /// that does not implement the requested tier must fail compilation.
+    /// Explicit so no backend can silently pick its own: a backend that does
+    /// not implement the requested tier must fail compilation.
     pub semantics: ShaderSemantics,
-    /// Q32 arithmetic options (saturating/wrapping add/sub/mul/div).
-    /// Only meaningful for [`ShaderSemantics::Q32`].
-    pub q32_options: lps_q32::q32_options::Q32Options,
     /// Maximum semantic errors from the GLSL → LPIR front-end.
     pub max_errors: Option<usize>,
     /// GLSL frontend used before LPIR lowering.
@@ -27,8 +24,8 @@ pub struct ShaderCompileOptions {
 
 impl ShaderCompileOptions {
     /// Build options from the two per-backend product decisions — semantics
-    /// tier and GLSL frontend — with neutral defaults for the rest (default
-    /// Q32 options, 20 max errors, no texture bindings).
+    /// tier and GLSL frontend — with neutral defaults for the rest (20 max
+    /// errors, no texture bindings).
     ///
     /// There is deliberately no `Default`: `frontend` used to fall back to a
     /// `cfg!(feature = "naga")` default, which let Cargo feature unification
@@ -40,18 +37,18 @@ impl ShaderCompileOptions {
     pub fn new(semantics: ShaderSemantics, frontend: lp_shader::ShaderFrontend) -> Self {
         Self {
             semantics,
-            q32_options: lps_q32::q32_options::Q32Options::default(),
             max_errors: Some(20),
             frontend,
             textures: lp_shader::TextureBindingSpecs::new(),
         }
     }
 
-    /// LPIR compiler configuration for the Q32 tier.
+    /// LPIR compiler configuration for this compile.
+    ///
+    /// The Q32 arithmetic configuration is no longer selectable per shader —
+    /// the compiler hard-codes the shader-speed expansion (wrapping add/sub/mul,
+    /// reciprocal divide). See `docs/design/q32.md`.
     pub fn to_compiler_config(&self) -> lpir::CompilerConfig {
-        lpir::CompilerConfig {
-            q32: self.q32_options,
-            ..Default::default()
-        }
+        lpir::CompilerConfig::default()
     }
 }

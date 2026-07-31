@@ -1,6 +1,6 @@
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "name": "perf-baseline",
   "nodes": {
     "clock": {

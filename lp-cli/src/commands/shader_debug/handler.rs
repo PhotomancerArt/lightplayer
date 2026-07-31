@@ -97,9 +97,7 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
 
     for target in &targets {
         let backend_data = match target {
-            BackendTarget::Rv32fa => {
-                collect_fa_data(&ir, &sig, float_mode, func_filter, &compiler_config)?
-            }
+            BackendTarget::Rv32fa => collect_fa_data(&ir, &sig, float_mode, func_filter)?,
             BackendTarget::Rv32 => {
                 collect_cranelift_data(&ir, &sig, float_mode, func_filter, false, &compiler_config)?
             }
