@@ -37,6 +37,19 @@ pub struct LinkRawFilesystemEraseResult {
     pub progress: Vec<LinkManagementProgress>,
 }
 
+/// Result of writing the boot-control sector.
+///
+/// `flags` echoes what was written so callers can report the instruction
+/// that actually landed rather than the one they asked for. The device does
+/// not act on it until it next restarts.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct LinkBootControlResult {
+    pub flags: u32,
+    pub chip_name: Option<String>,
+    pub logs: Vec<String>,
+    pub progress: Vec<LinkManagementProgress>,
+}
+
 /// Provider-neutral result from a link management operation.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LinkManagementResult {
@@ -44,4 +57,5 @@ pub enum LinkManagementResult {
     FlashFirmware(LinkFirmwareFlashResult),
     EraseDeviceFlash(LinkEraseDeviceResult),
     EraseRawFilesystem(LinkRawFilesystemEraseResult),
+    SetBootControl(LinkBootControlResult),
 }

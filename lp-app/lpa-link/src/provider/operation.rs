@@ -19,6 +19,10 @@ pub enum LinkOperation {
     ReadRawFilesystem,
     /// Write the raw filesystem image below the running server.
     WriteRawFilesystem,
+    /// Write the boot-control sector: an instruction to the device's next
+    /// boot, delivered through flash because a device that cannot boot has no
+    /// other channel. See `lp-bootctl`.
+    WriteBootControl,
     /// Read low-level logs from the endpoint/link.
     ReadLogs,
     /// Read low-level diagnostics from the endpoint/link.
@@ -79,6 +83,11 @@ impl LinkCapabilities {
     pub fn with_raw_filesystem(mut self) -> Self {
         self.operations.insert(LinkOperation::ReadRawFilesystem);
         self.operations.insert(LinkOperation::WriteRawFilesystem);
+        self
+    }
+
+    pub fn with_boot_control(mut self) -> Self {
+        self.operations.insert(LinkOperation::WriteBootControl);
         self
     }
 }

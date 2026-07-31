@@ -256,6 +256,15 @@ impl HostSerialEsp32Provider {
                 self.extend_session_logs(session_id, &logs)?;
                 Ok(LinkManagementResult::ResetRuntime)
             }
+            LinkManagementRequest::SetBootControl { flags } => {
+                let result = host_esp32_flash::write_boot_control(
+                    &port_name,
+                    lp_bootctl::BootFlags::from_bits(flags),
+                    &events,
+                )?;
+                self.extend_session_logs(session_id, &result.logs)?;
+                Ok(LinkManagementResult::SetBootControl(result))
+            }
             LinkManagementRequest::EraseRawFilesystem => {
                 Err(LinkError::unsupported(format!("{:?}", request.operation())))
             }
@@ -473,7 +482,8 @@ fn upsert_port_endpoint(
     let endpoint = LinkEndpoint::new(endpoint_id.clone(), kind, label).with_capabilities(
         LinkCapabilities::esp32_serial_base()
             .with_flash()
-            .with_device_erase(),
+            .with_device_erase()
+            .with_boot_control(),
     );
 
     if let Some(existing) = state

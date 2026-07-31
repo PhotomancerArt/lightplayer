@@ -15,6 +15,11 @@ espflash = { version = "3.3", default-features = false, features = [
     "serialport",
 ], optional = true }
 fw-host = { path = "../../lp-fw/fw-host", optional = true }
+# Not optional: the boot-control record's format is shared vocabulary between
+# every provider that writes it and the firmware that reads it, and
+# `LinkManagementRequest::boot_safe_once` needs it in every build. `no_std`,
+# no dependencies of its own, so wasm builds pay nothing for it.
+lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 lpa-client = { path = "../lpa-client", optional = true, default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", optional = true }

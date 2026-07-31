@@ -5591,6 +5591,7 @@ dependencies = [
  "espflash",
  "fw-host",
  "js-sys",
+ "lp-bootctl",
  "lpa-client",
  "lpc-model",
  "lpc-wire",
