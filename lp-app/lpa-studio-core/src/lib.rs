@@ -45,15 +45,16 @@ pub use app::home::{
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiChannelChoice, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
-    UiControlSampleFormat, UiFixtureFace, UiNodeChild, UiNodeDirtyState, UiNodeFace, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPanelControl, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings, UiProducedProduct,
-    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance, UiSlotAspect,
-    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
-    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption,
-    UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit,
-    UiSlotValue, UiSlotValueKind,
+    UiControlSampleFormat, UiFixtureFace, UiModuleChild, UiModuleFace, UiNodeChild,
+    UiNodeDirtyState, UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
+    UiNodeView, UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelGroup,
+    UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedBinding, UiProducedBindings,
+    UiProducedProduct, UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame,
+    UiProductRef, UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotAffordance,
+    UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite,
+    UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind,
+    UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape, UiSlotShapeField,
+    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
