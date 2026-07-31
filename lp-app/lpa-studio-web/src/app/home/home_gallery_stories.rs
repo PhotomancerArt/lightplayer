@@ -110,6 +110,7 @@ fn first_run() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -137,6 +138,7 @@ fn gallery_chooser_buttons() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -159,6 +161,7 @@ fn populated() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -207,6 +210,7 @@ fn connected_device_and_project_chip() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -233,6 +237,7 @@ fn project_open_in_another_tab() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
@@ -255,6 +260,7 @@ fn opening_a_project() -> Element {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     };
     home.opening = Some(home.projects[0].uid.clone());
     rsx! {
@@ -363,6 +369,7 @@ fn sim_and_live_device_home() -> UiHomeView {
         library_available: true,
         opening: None,
         issue: None,
+        backup: None,
     }
 }
 
@@ -394,6 +401,7 @@ fn sim_running_only() -> Element {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         },
         None,
     )
@@ -431,6 +439,7 @@ fn project_live_in_two_places() -> Element {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         },
         None,
     )
@@ -451,6 +460,7 @@ fn sim_and_offline_device() -> Element {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         },
         None,
     )
@@ -486,6 +496,7 @@ fn store_unavailable_with_issue() -> Element {
         library_available: false,
         opening: None,
         issue: Some(UiIssue::new("Failed to open serial port.")),
+        backup: None,
     };
     rsx! {
         section { class: "tw:p-4",
