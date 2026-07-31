@@ -2,7 +2,7 @@ use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
 use crate::nodes::fixture::{
-    Brightness, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig,
+    Brightness, FixtureDiagnosticMode, FixturePower, FixtureSamplingConfig, MappingConfig,
 };
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
@@ -39,6 +39,8 @@ pub struct FixtureDef {
     pub brightness: OptionSlot<ValueSlot<Brightness>>,
     /// Enable gamma correction.
     pub gamma_correction: OptionSlot<ValueSlot<bool>>,
+    /// Lamp type and supply budget. Absent means output is never limited.
+    pub power: OptionSlot<ValueSlot<FixturePower>>,
 }
 
 impl Default for FixtureDef {
@@ -54,6 +56,7 @@ impl Default for FixtureDef {
             transform: Affine2dSlot::default(),
             brightness: default_brightness(),
             gamma_correction: default_gamma_correction(),
+            power: OptionSlot::none(),
         }
     }
 }
@@ -344,6 +347,7 @@ mod tests {
             transform: Affine2dSlot::new(Affine2d::identity()),
             brightness: OptionSlot::none(),
             gamma_correction: OptionSlot::none(),
+            power: OptionSlot::none(),
         };
         assert_eq!(def.kind(), NodeKind::Fixture);
     }
