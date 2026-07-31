@@ -38,9 +38,10 @@ use crate::app::project::format_lp_value;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
     UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget, UiPlaylistEntry,
-    UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect,
-    UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
+    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiPanelControl, UiPanelWidget,
+    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductKind, UiProductPreview,
+    UiShaderFace, UiSlotAspect, UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue,
+    UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -112,7 +113,47 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
         preview,
         brightness,
         mapping_editor: inline_editor_of_kind(sections, UiAssetEditorKind::Map2d),
+        power: fixture_power(sections),
     })
+}
+
+/// The fixture's power readout, present only when it declares a budget.
+///
+/// The budget is authored (a config row); the estimate and scale are produced
+/// runtime state. No budget means nothing is ever limited, so there is nothing
+/// to report and no row is built.
+fn fixture_power(sections: &[UiNodeSection]) -> Option<UiFixturePower> {
+    let power_row = config_rows(sections)
+        .into_iter()
+        .find(|row| row.key == "power")?;
+    // Searched rather than path-indexed: a present option row renders its
+    // interior inline, so `budget_ma` sits one or two levels down depending on
+    // how the option projects, and neither depth is this readout's business.
+    let budget_ma = find_value_field(&power_row.body, "budget_ma")?
+        .parse()
+        .ok()?;
+    Some(UiFixturePower {
+        estimated_draw_ma: produced_u32(sections, "estimated_draw_ma").unwrap_or(0),
+        budget_ma,
+        scale: produced_f32(sections, "power_scale").unwrap_or(1.0),
+    })
+}
+
+/// Depth-first search for a named value field's display string.
+///
+/// Matches strictly on the field key at each level, so an unrelated scalar can
+/// never stand in for the field being looked for.
+fn find_value_field<'a>(body: &'a UiConfigSlotBody, key: &str) -> Option<&'a str> {
+    let UiConfigSlotBody::Record(record) = body else {
+        return None;
+    };
+    record
+        .fields
+        .iter()
+        .find_map(|field| match (&field.body, field.key == key) {
+            (UiConfigSlotBody::Value(value), true) => Some(value.display.as_str()),
+            (nested, _) => find_value_field(nested, key),
+        })
 }
 
 /// First produced product row of the wanted kind; an `Empty`-kind row (the
@@ -485,6 +526,20 @@ fn playlist_entry(
 
 /// A produced-value row's u32 reading, keyed by the produced slot's path.
 fn produced_u32(sections: &[UiNodeSection], key: &str) -> Option<u32> {
+    sections
+        .iter()
+        .find_map(|section| match section {
+            UiNodeSection::ProducedValues(values) => Some(values),
+            _ => None,
+        })?
+        .iter()
+        .find(|value| value.key == key)?
+        .value
+        .parse()
+        .ok()
+}
+
+fn produced_f32(sections: &[UiNodeSection], key: &str) -> Option<f32> {
     sections
         .iter()
         .find_map(|section| match section {

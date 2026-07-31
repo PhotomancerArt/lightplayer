@@ -358,6 +358,15 @@ impl NodeRuntime for FixtureNode {
             ver,
             ControlProduct::new(ctx.node_id(), 0, fixture_control_extent(&self.mapping)),
         );
+        // Published from the last completed render, so these trail the frame
+        // they describe by one — the same trail the scale itself carries.
+        self.state
+            .estimated_draw_ma
+            .set_with_version(ver, self.power_estimate_ma);
+        self.state.power_scale.set_with_version(
+            ver,
+            self.power_scale_q16 as f32 / power_limit::UNITY_SCALE_Q16 as f32,
+        );
         Ok(ProduceResult::Produced)
     }
 
