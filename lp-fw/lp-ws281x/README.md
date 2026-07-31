@@ -9,7 +9,7 @@ anywhere in it.
 Part of the WS281x driver work (plan `2026-07-28-ws281x-rmt-driver`, phase P1).
 The `lp-` prefix means it is destined for the `lp2025` monorepo — it replaces
 that repo's single-channel ESP32-C6 driver at
-`lp-fw/fw-esp32/src/output/rmt/`, which is this crate's ancestor.
+`lp-fw/fw-esp32c6/src/output/rmt/`, which is this crate's ancestor.
 
 ## Why a driver at all
 
@@ -220,7 +220,7 @@ cannot masquerade as a working guard.
 ## Provenance
 
 **Original code.** It descends from the author's own single-channel ESP32-C6
-driver in `lp2025` (`lp-fw/fw-esp32/src/output/rmt/`), reworked here for
+driver in `lp2025` (`lp-fw/fw-esp32c6/src/output/rmt/`), reworked here for
 multiple channels, arbitrary half sizes, per-channel configurable timing and
 byte order, and without that driver's start-of-frame guard race. Protocol
 timings come from the WS2811/WS2812B datasheets; the RMT item format from the
