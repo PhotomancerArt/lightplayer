@@ -122,6 +122,8 @@ holds the full context.
 | Classic-ESP32 (LX6) address windows for the Xtensa backtrace walk (the ABI is shared, the memory map is not) | `2026-07-30-xtensa-backtrace-window-spill` | A classic-ESP32 firmware target needs frames in its crash reports |
 | Xtensa exception-frame walking (crashes arriving through the exception vector rather than `panic!`; `walk_frames_from` already takes an explicit `(ra, sp)` for it) | `2026-07-30-xtensa-backtrace-window-spill` | The S3 needs backtraces for hardware faults, not just panics |
 | Emitter peephole for the Xtensa integer-div-by-zero guard (`Movi`+`BranchRr` → a single `BranchZ(Beqz)`; `MOVEQZ`/`MOVNEZ` fusion, both already encoded/decoded/emulated in `lp-xt-inst`/`lp-xt-emu`) | `2026-07-30-integer-division-never-traps` | Xtensa code-size or instruction-count pressure makes trimming the guard worth it |
+| C6 migration to `lp-ws281x` (`docs/debt/c6-on-legacy-ws281x-driver.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A second C6 channel is wanted, a `lp-ws281x` fix needs to reach the C6, or maintaining two drivers becomes its own tax |
+| `MAX_LEDS` silent truncation and duplication (`docs/debt/output-channel-led-cap-silent-truncation.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A long strip is authored and the cap bites with no diagnostic |
 
 ## Relationship To Shared Planning
 
