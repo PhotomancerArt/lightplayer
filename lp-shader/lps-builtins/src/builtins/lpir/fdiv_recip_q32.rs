@@ -5,8 +5,8 @@
 //! ~0.01% typical error, up to ~2-3% at edges (saturated dividends, very
 //! small divisors).
 //!
-//! Selected when the shader opts into `Q32Options { div: Reciprocal, .. }`.
-//! See `docs/plans-old/2026-04-18-q32-options-dispatch/00-design.md`.
+//! This is the shipped lowering for `LpirOp::Fdiv` on both `lpvm-native` and
+//! `lpvm-wasm` — it is not opt-in. See `docs/design/q32.md`.
 //!
 //! ## Algorithm
 //!

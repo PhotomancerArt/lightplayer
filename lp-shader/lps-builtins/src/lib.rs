@@ -9,6 +9,7 @@
 pub mod builtin_refs;
 pub mod builtins;
 pub mod canonical_glsl;
+pub mod f32_unimplemented;
 pub mod host;
 pub mod jit_builtin_ptr;
 pub mod mem;

@@ -2,12 +2,11 @@
 
 use lpir::FloatMode;
 
-/// Per-call lowering options. Threaded through [`crate::lower::lower_lpir_op`] and its
-/// callees so that fast-math dispatch can read the active [`lps_q32::q32_options::Q32Options`].
+/// Per-call lowering options. Threaded through [`crate::lower::lower_lpir_op`]
+/// and its callees.
 #[derive(Clone, Copy)]
-pub struct LowerOpts<'a> {
+pub struct LowerOpts {
     pub float_mode: FloatMode,
-    pub q32: &'a lps_q32::q32_options::Q32Options,
     /// Insert fuel checks ([`crate::vinst::VInst::FuelCheck`]) at function
     /// entry and loop back-edges (see
     /// [`crate::native_options::NativeCompileOptions::fuel`]).

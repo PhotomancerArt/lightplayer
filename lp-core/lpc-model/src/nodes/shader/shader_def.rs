@@ -1,7 +1,7 @@
 use alloc::string::String;
 
-use crate::nodes::shader::{GlslOpts, ShaderParamDef, ShaderSlotDef};
-use crate::{AssetSlot, BindingDefs, MapSlot, RenderOrderSlot, Slotted};
+use crate::nodes::shader::{FloatMode, ShaderParamDef, ShaderSlotDef};
+use crate::{AssetSlot, BindingDefs, MapSlot, RenderOrderSlot, Slotted, ValueSlot};
 
 /// Authored shader node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
@@ -12,8 +12,8 @@ pub struct ShaderDef {
     pub render_order: RenderOrderSlot,
     /// Authored slot bindings for shader inputs and outputs.
     pub bindings: BindingDefs,
-    /// GLSL compilation options
-    pub glsl_opts: GlslOpts,
+    /// Numeric mode this shader is authored and compiled in.
+    pub float_mode: ValueSlot<FloatMode>,
     pub param_defs: MapSlot<String, ShaderParamDef>,
     /// Shader-consumed slots exposed to the resolver and GLSL uniform block.
     #[slot(name = "consumed")]
@@ -26,7 +26,7 @@ impl Default for ShaderDef {
             source: AssetSlot::path("main.glsl"),
             render_order: RenderOrderSlot::default(),
             bindings: BindingDefs::default(),
-            glsl_opts: GlslOpts::default(),
+            float_mode: ValueSlot::default(),
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
         }
@@ -52,7 +52,6 @@ impl ShaderDef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
     use crate::{
         NodeDef, NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotRecordShape, SlotShape,
         SlotShapeRegistry, StaticSlotShape, StaticSlotShapeDescriptor,
@@ -65,7 +64,7 @@ mod tests {
             source: AssetSlot::path("main.glsl"),
             render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
-            glsl_opts: GlslOpts::default(),
+            float_mode: ValueSlot::default(),
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
         };
@@ -80,9 +79,7 @@ mod tests {
             "main.glsl"
         );
         assert_eq!(def.render_order(), 0);
-        assert_eq!(*def.glsl_opts.add_sub.value(), AddSubMode::Wrapping);
-        assert_eq!(*def.glsl_opts.mul.value(), MulMode::Wrapping);
-        assert_eq!(*def.glsl_opts.div.value(), DivMode::Reciprocal);
+        assert_eq!(*def.float_mode.value(), FloatMode::Fixed);
     }
 
     #[test]
@@ -99,8 +96,8 @@ mod tests {
             &SlotPath::parse("render_order").unwrap()
         );
         assert_eq!(
-            view.glsl_opts().path(),
-            &SlotPath::parse("glsl_opts").unwrap()
+            view.float_mode().path(),
+            &SlotPath::parse("float_mode").unwrap()
         );
     }
 
@@ -117,17 +114,6 @@ mod tests {
         // Nested static records are referenced by shape id, not re-inlined, so
         // the registry describes each record exactly once. See the `FieldSlot`
         // derive in lpc-slot-macros.
-        let glsl_opts = shader_fields
-            .iter()
-            .find(|field| field.name.as_str() == "glsl_opts")
-            .expect("glsl_opts field");
-        assert_eq!(
-            &glsl_opts.shape,
-            &SlotShape::Ref {
-                id: GlslOpts::SHAPE_ID
-            }
-        );
-
         let param_defs = shader_fields
             .iter()
             .find(|field| field.name.as_str() == "param_defs")
@@ -161,16 +147,6 @@ mod tests {
         let StaticSlotShapeDescriptor::Record { fields, .. } = *static_shape else {
             panic!("static shader shape");
         };
-        let glsl_opts = fields
-            .iter()
-            .find(|field| field.name == "glsl_opts")
-            .expect("static glsl_opts field");
-        assert_eq!(
-            glsl_opts.shape,
-            &StaticSlotShapeDescriptor::Ref {
-                id: GlslOpts::SHAPE_ID
-            }
-        );
         let param_defs = fields
             .iter()
             .find(|field| field.name == "param_defs")
