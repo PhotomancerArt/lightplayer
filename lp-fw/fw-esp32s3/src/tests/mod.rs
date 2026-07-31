@@ -5,5 +5,7 @@
 pub mod backtrace_oracle;
 #[cfg(feature = "test_loopback")]
 pub mod loopback;
+#[cfg(feature = "test_button")]
+pub mod test_button;
 #[cfg(feature = "test_xt_jit_corpus")]
 pub mod xt_jit_corpus;

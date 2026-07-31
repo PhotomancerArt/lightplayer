@@ -58,6 +58,11 @@ test_backtrace_oracle = []
 # this feature rather than off the dependency line.
 test_loopback = ["lp-ws281x/test_hooks"]
 
+# GPIO button diagnostic mode: D9/GPIO8 with an internal pull-up, mirroring
+# fw-esp32c6's `test_button` feature. Needs `server` for the hardware
+# registry/manifest and driver types the button driver is built on.
+test_button = ["server"]
+
 test_xt_jit_corpus = [
     "dep:lpvm-native",
     "dep:lpvm",
