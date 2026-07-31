@@ -58,7 +58,12 @@ pub fn emit_management_result_events(
 }
 
 impl LinkManagementResult {
-    fn logs(&self) -> &[String] {
+    /// The operation's log lines, uniformly across variants.
+    ///
+    /// Public so consumers can replay a result without matching every
+    /// variant — a match that has to be extended for each new operation is a
+    /// build break waiting to happen, and each copy of it drifts.
+    pub fn logs(&self) -> &[String] {
         match self {
             Self::ResetRuntime => &[],
             Self::FlashFirmware(result) => &result.logs,
@@ -68,7 +73,8 @@ impl LinkManagementResult {
         }
     }
 
-    fn progress(&self) -> &[LinkManagementProgress] {
+    /// The operation's progress steps, uniformly across variants.
+    pub fn progress(&self) -> &[LinkManagementProgress] {
         match self {
             Self::ResetRuntime => &[],
             Self::FlashFirmware(result) => &result.progress,

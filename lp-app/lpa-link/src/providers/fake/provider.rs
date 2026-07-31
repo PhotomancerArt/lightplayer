@@ -5,9 +5,8 @@ use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::provider::session::LinkSessionId;
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
-    LinkBootControlResult, LinkConnection, LinkConnectionKind, LinkDiagnostic,
-    LinkDiagnosticSeverity, LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkProvider,
-    LinkSession, LinkSessionStatus,
+    LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity, LinkEndpoint,
+    LinkError, LinkLogEntry, LinkLogLevel, LinkProvider, LinkSession, LinkSessionStatus,
 };
 
 pub fn descriptor() -> LinkProviderDescriptor {
@@ -413,8 +412,8 @@ fn manage_fake_device(
 ) -> Result<crate::LinkManagementResult, LinkError> {
     use crate::providers::fake_device::FAKE_IMAGE_IDENTITY;
     use crate::{
-        LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest,
-        LinkManagementProgress, LinkManagementRequest, LinkManagementResult,
+        LinkBootControlResult, LinkEraseDeviceResult, LinkFirmwareFlashResult,
+        LinkFirmwareManifest, LinkManagementProgress, LinkManagementRequest, LinkManagementResult,
     };
 
     match request {
