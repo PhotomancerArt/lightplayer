@@ -8,7 +8,18 @@ use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::targets::{AnnotationKind, Target};
+use crate::targets::{Annotation, AnnotationKind, Target, TargetSelector};
+
+/// True if `ann` names exactly this one target.
+///
+/// The `--fix` path deletes annotations for targets that started passing, and it
+/// may only delete the exact-name form. A predicate annotation such as
+/// `@unimplemented(float_mode=f32)` speaks for a whole family, so removing it
+/// because one member went green would silently un-annotate the others; the
+/// author has to narrow it by hand.
+fn names_exactly(ann: &Annotation, target_name: &str) -> bool {
+    matches!(&ann.selector, TargetSelector::Name(n) if n == target_name)
+}
 
 /// A helper struct to update a file in-place as test expectations are
 /// automatically updated.
@@ -141,7 +152,7 @@ impl FileUpdate {
             if !prev.starts_with("// @") {
                 break;
             }
-            if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1) {
+            if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1, true) {
                 if ann.kind == AnnotationKind::Unimplemented && ann.applies_to(target) {
                     return Ok(true);
                 }
@@ -305,8 +316,8 @@ impl FileUpdate {
             let line = all_lines[j];
             let prev = line.trim();
             if prev.starts_with("// @") {
-                if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1) {
-                    if ann.target == want {
+                if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1, true) {
+                    if names_exactly(&ann, &want) {
                         indices_to_remove.push(j);
                     }
                 }
@@ -389,8 +400,8 @@ impl FileUpdate {
             let line = all_lines[j];
             let prev = line.trim();
             if prev.starts_with("// @") {
-                if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1) {
-                    if target_names.contains(ann.target.as_str()) {
+                if let Ok(Some(ann)) = parse_annotation::parse_annotation_line(line, j + 1, true) {
+                    if target_names.iter().any(|n| names_exactly(&ann, n)) {
                         indices_to_remove.push(j);
                     }
                 }

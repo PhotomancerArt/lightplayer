@@ -188,4 +188,11 @@ pub struct TestFile {
     pub texture_specs: TextureSpecs,
     /// `// texture-data:` blocks (runtime pixel fixtures).
     pub texture_fixtures: TextureFixtures,
+    /// Annotations that no `// run:` directive claimed.
+    ///
+    /// A `// test compile` file has no run directives, so every annotation in it
+    /// lands here and gives the file a per-target disposition — without this a
+    /// compile-only file could not be triaged at all. `// test run` files attach
+    /// their annotations to directives as before and leave this empty.
+    pub file_annotations: Vec<Annotation>,
 }

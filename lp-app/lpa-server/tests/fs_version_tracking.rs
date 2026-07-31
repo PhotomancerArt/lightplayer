@@ -34,7 +34,7 @@ fn test_fs_changes_not_repeated() {
         .base_fs_mut()
         .write_file(
             project_path.join("project.json").as_path(),
-            b"{ \"kind\": \"Project\", \"format\": 1, \"name\": \"test\" }\n",
+            b"{ \"kind\": \"Project\", \"format\": 2, \"name\": \"test\" }\n",
         )
         .unwrap();
 

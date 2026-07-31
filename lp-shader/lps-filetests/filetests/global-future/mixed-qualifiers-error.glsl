@@ -24,14 +24,13 @@ float test_edge_multiple_qualifiers_error_const() {
     return valid_const * 2.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_edge_multiple_qualifiers_error_const() ~= 6.28
 
 float test_edge_multiple_qualifiers_error_uniform() {
@@ -39,14 +38,11 @@ float test_edge_multiple_qualifiers_error_uniform() {
     return valid_uniform + 1.0;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_edge_multiple_qualifiers_error_uniform() ~= 1.0
 
 vec2 test_edge_multiple_qualifiers_error_in() {
@@ -54,14 +50,11 @@ vec2 test_edge_multiple_qualifiers_error_in() {
     return valid_in + vec2(1.0, 1.0);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_edge_multiple_qualifiers_error_in() ~= vec2(1.0, 1.0)
 
 void test_edge_multiple_qualifiers_error_out() {
@@ -69,14 +62,11 @@ void test_edge_multiple_qualifiers_error_out() {
     valid_out = vec3(1.0, 0.0, 0.0);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_edge_multiple_qualifiers_error_out() == 0.0
 
 float test_edge_multiple_qualifiers_error_buffer() {
@@ -85,14 +75,11 @@ float test_edge_multiple_qualifiers_error_buffer() {
     return valid_buffer;
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_edge_multiple_qualifiers_error_buffer() ~= 42.0
 
 float test_edge_multiple_qualifiers_error_combined() {
@@ -108,12 +95,9 @@ float test_edge_multiple_qualifiers_error_combined() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
+// @unimplemented(frontend!=lp, backend!=wgpu)
 // @unsupported(rv32lpn.q32)
 // @unsupported(xtlpn.q32)
-// @unimplemented(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_edge_multiple_qualifiers_error_combined() ~= 8.28

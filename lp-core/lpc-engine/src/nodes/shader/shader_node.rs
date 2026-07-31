@@ -17,10 +17,9 @@ use alloc::vec::Vec;
 
 use lp_gfx::{GfxError, LpShader, ShaderCompileOptions, ShaderCompileStats, TextureHandle};
 use lpc_model::{
-    AddSubMode, AssetLocation, DivMode, GlslOpts, MapSlot, MulMode, NodeId, NodeRuntimeStatus,
-    Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState,
-    ShaderValueShapeRef, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
-    StaticSlotShape, ValueSlot,
+    AssetLocation, FloatMode, MapSlot, NodeId, NodeRuntimeStatus, Revision, ShaderMapKeyDef,
+    ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
+    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
 use lpc_registry::AssetText;
@@ -48,7 +47,10 @@ pub struct ShaderNode {
     source_revision: Revision,
     glsl_source: String,
     consumed_slots: MapSlot<String, ShaderSlotDef>,
-    glsl_opts: GlslOpts,
+    /// Authored numeric mode. Stored so a change flips `needs_compile`; the
+    /// compiler does not consume it yet — native f32 codegen lands in the
+    /// f32 roadmap's M7/M9.
+    float_mode: ValueSlot<FloatMode>,
     visual_uniforms: Vec<VisualUniform>,
     config_accessors: Option<ShaderConfigAccessors>,
     /// The last successfully compiled program. Kept through source/config
@@ -75,7 +77,7 @@ impl ShaderNode {
             source_revision: source.revision,
             glsl_source: source.text,
             consumed_slots: def.consumed_slots,
-            glsl_opts: def.glsl_opts,
+            float_mode: def.float_mode,
             visual_uniforms,
             config_accessors: None,
             shader: None,
@@ -147,10 +149,8 @@ impl ShaderNode {
         let compile_opts = ShaderCompileOptions {
             // Visual shaders run on the tier and GLSL frontend the host
             // selected when it constructed the backend (fidelity-tiers ADR)
-            // — Q32 on CPU backends, F32Gpu on the GPU tier. `q32_options`
-            // only applies to the Q32 tier; GPU backends never see it.
+            // — Q32 on CPU backends, F32Gpu on the GPU tier.
             semantics: graphics.native_semantics(),
-            q32_options: map_model_q32_options(&self.glsl_opts),
             max_errors: Some(SHADER_COMPILE_MAX_ERRORS),
             ..ShaderCompileOptions::new(graphics.native_semantics(), graphics.glsl_frontend())
         };
@@ -204,18 +204,9 @@ impl ShaderNode {
         let accessors =
             ShaderConfigAccessors::get_or_compile(&mut self.config_accessors, ctx.slot_shapes())
                 .map_err(err_ctx("compile shader config view"))?;
-        let next_add_sub = accessors.add_sub.get(ctx)?;
-        let next_mul = accessors.mul.get(ctx)?;
-        let next_div = accessors.div.get(ctx)?;
-        if *self.glsl_opts.add_sub.value() != next_add_sub
-            || *self.glsl_opts.mul.value() != next_mul
-            || *self.glsl_opts.div.value() != next_div
-        {
-            self.glsl_opts = GlslOpts {
-                add_sub: lpc_model::ValueSlot::with_version(ctx.revision(), next_add_sub),
-                mul: lpc_model::ValueSlot::with_version(ctx.revision(), next_mul),
-                div: lpc_model::ValueSlot::with_version(ctx.revision(), next_div),
-            };
+        let next_float_mode = accessors.float_mode.get(ctx)?;
+        if *self.float_mode.value() != next_float_mode {
+            self.float_mode = ValueSlot::with_version(ctx.revision(), next_float_mode);
             self.needs_compile = true;
             self.compilation_error = None;
         }
@@ -380,8 +371,11 @@ pub(super) fn format_compile_stats(
         .unwrap_or_else(|| String::from("unknown"));
 
     format!(
-        "elapsed={elapsed}, lpir_inst_count={}, lpir_func_count={}, lpir_import_count={}, final_inst_count={final_inst_count}, final_code_size={final_code_size}",
-        stats.lpir_inst_count, stats.lpir_function_count, stats.lpir_import_count,
+        "elapsed={elapsed}, lpir_inst_count={}, lpir_func_count={}, lpir_import_count={}, final_inst_count={final_inst_count}, final_code_size={final_code_size}, float={}",
+        stats.lpir_inst_count,
+        stats.lpir_function_count,
+        stats.lpir_import_count,
+        stats.float_impl.as_str(),
     )
 }
 
@@ -536,18 +530,14 @@ where
 
 struct ShaderConfigAccessors {
     registry_revision: lpc_model::Revision,
-    add_sub: SlotAccessor,
-    mul: SlotAccessor,
-    div: SlotAccessor,
+    float_mode: SlotAccessor,
 }
 
 impl ShaderConfigAccessors {
     fn compile(registry: &SlotShapeRegistry) -> Result<Self, lpc_model::SlotAccessorError> {
         Ok(Self {
             registry_revision: registry.revision(),
-            add_sub: compile_shader_config_value_accessor("glsl_opts.add_sub", registry)?,
-            mul: compile_shader_config_value_accessor("glsl_opts.mul", registry)?,
-            div: compile_shader_config_value_accessor("glsl_opts.div", registry)?,
+            float_mode: compile_shader_config_value_accessor("float_mode", registry)?,
         })
     }
 
@@ -812,23 +802,6 @@ fn validate_shader_visual_product(
         )));
     }
     Ok(())
-}
-
-pub(super) fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
-    lps_q32::q32_options::Q32Options {
-        add_sub: match opts.add_sub.value() {
-            AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,
-            AddSubMode::Wrapping => lps_q32::q32_options::AddSubMode::Wrapping,
-        },
-        mul: match opts.mul.value() {
-            MulMode::Saturating => lps_q32::q32_options::MulMode::Saturating,
-            MulMode::Wrapping => lps_q32::q32_options::MulMode::Wrapping,
-        },
-        div: match opts.div.value() {
-            DivMode::Saturating => lps_q32::q32_options::DivMode::Saturating,
-            DivMode::Reciprocal => lps_q32::q32_options::DivMode::Reciprocal,
-        },
-    }
 }
 
 #[cfg(test)]

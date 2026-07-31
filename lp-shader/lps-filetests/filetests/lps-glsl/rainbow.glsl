@@ -2,6 +2,11 @@
 //
 // Compile-only gate for the basic rainbow demo shader. This intentionally avoids numeric
 // expectations so rv32lpn can prove frontend coverage before render-accuracy work catches up.
+//
+// wasm.f32: calls @lpfn builtins, which have no f32 implementation — only Q32
+// builtin ids resolve, so the imports cannot be lowered in f32 mode. Unblocks
+// with the f32 builtin family (M5).
+// @unimplemented(wasm.f32)
 
 const bool CYCLE_PALETTE = true;
 

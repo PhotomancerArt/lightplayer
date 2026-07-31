@@ -13,6 +13,7 @@
 //! fallback, also always available inside the advanced drawer.
 
 mod ui_fixture_face;
+mod ui_fixture_power;
 mod ui_node_face;
 mod ui_panel_control;
 mod ui_panel_widget;
@@ -21,6 +22,7 @@ mod ui_playlist_face;
 mod ui_shader_face;
 
 pub use ui_fixture_face::UiFixtureFace;
+pub use ui_fixture_power::UiFixturePower;
 pub use ui_node_face::UiNodeFace;
 pub use ui_panel_control::UiPanelControl;
 pub use ui_panel_widget::UiPanelWidget;

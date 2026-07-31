@@ -14,6 +14,16 @@ fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp3
 # fw-esp32s3 builds on Espressif's Rust fork (see lp-fw/fw-esp32s3/rust-toolchain.toml)
 xt_s3_target := "xtensa-esp32s3-none-elf"
 fw_esp32s3_elf := "target/" + xt_s3_target + "/release/fw-esp32s3"
+
+# The S3's 8 MB flash floor (docs/adr/2026-07-30-esp32s3-partition-floor.md).
+# This MUST be passed to every `espflash flash` for this chip and MUST match
+# partitions.csv: espflash writes a flash-size field into the image header and
+# defaults it to 4MB, and the bootloader validates the partition table against
+# that header — not against the physical chip. Omit it and a board with 16 MB
+# soldered on still boot-loops with "partition N invalid ... exceeds flash chip
+# size 0x400000". The same value is duplicated in
+# lp-fw/fw-esp32s3/.cargo/config.toml's runner, which cannot read this var.
+s3_flash_size := "8mb"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -587,13 +597,16 @@ clippy-fw-esp32s3:
       export PATH="$GCC_BIN:$PATH"
     fi
     cd lp-fw/fw-esp32s3
-    # The app path.
+    # The app path. `server` joined the defaults in M3 P5, so this one command
+    # now covers the whole app — entrypoint, transport, storage, output readout
+    # and the server-gated half of serial/io_task.rs — and the separate
+    # `--features server` pass it used to need is gone.
     cargo clippy --release -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -633,7 +646,7 @@ _xt-gcc-dir:
 # usually are on the desk, and auto-detection picks the first match, not
 # necessarily the S3:
 #
-#   just flash-fw-esp32s3 /dev/cu.usbmodem1101
+#   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX
 #
 # The S3 speaks USB-Serial-JTAG, not a UART bridge, so it enumerates as
 # /dev/cu.usbmodem* and its port number CHANGES whenever the chip
@@ -645,7 +658,7 @@ _xt-gcc-dir:
 flash-fw-esp32s3 port="": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -659,7 +672,7 @@ flash-fw-esp32s3 port="": build-fw-esp32s3
 # established without the device. A failure here is a finding to triage, never
 # a reason to edit a golden.
 #
-#   just fwtest-xt-jit-esp32s3 /dev/cu.usbmodem1101
+#   just fwtest-xt-jit-esp32s3 /dev/cu.usbmodemXXXX
 
 # Run the Xtensa JIT corpus on a connected ESP32-S3 (PASS/FAIL per case).
 fwtest-xt-jit-esp32s3 port="":
@@ -671,7 +684,36 @@ fwtest-xt-jit-esp32s3 port="":
     fi
     cd lp-fw/fw-esp32s3 && cargo build --release --features test_xt_jit_corpus
     cd - >/dev/null
-    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --monitor --after hard-reset)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Prove the Xtensa windowed backtrace walk on silicon (PASS/FAIL per check).
+#
+# The oracle is a known-depth recursive call chain: every one of its `n` frames
+# returns to the same call site, so a correct walk contains a run of exactly `n`
+# identical PCs. `run == depth` is asserted at three depths, all past the point
+# where the register-window ring wraps and the frames stop being reachable
+# without a forced spill. Corrupt save-area chains must terminate at exact
+# counts, mirroring `cargo test -p lpc-shared`'s host-side synthetic stacks.
+#
+# Run the host tests first — a device result only means something against an
+# oracle that was established without the device.
+#
+#   cargo test -p lpc-shared
+#   just fwtest-backtrace-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-backtrace-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --release --features test_backtrace_oracle
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -688,22 +730,22 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
     # Keep `partition` in sync with the `factory` app partition in
     # lp-fw/fw-esp32c6/partitions.csv.
-    just _fw-size-check esp32c6 esp32c6 {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
+    just _fw-size-check esp32c6 esp32c6 4mb {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
         "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
 
-# Fail when the esp32s3 app image gets too close to its 3 MB partition.
-# Same cliff and the same reasoning as the C6 above — this crate is budgeted
-# for the identical 4 MB layout (lp-fw/fw-esp32s3/partitions.csv), and the S3
-# is the chip whose app-layer port is still ahead of it, so the number is worth
-# trending from the start rather than from the first overrun.
-
-# Fail when the esp32s3 app image gets too close to its 3 MB partition.
+# Fail when the esp32s3 app image gets too close to its 6 MB partition.
+#
+# Unlike the C6, this number is a TREND, not a budget gate. The S3 moved to an
+# 8 MB partition floor (docs/adr/2026-07-30-esp32s3-partition-floor.md), which
+# removed the pressure the C6 still lives under — the check exists so Xtensa
+# code density stays a tracked number, not so anyone has to fight for space.
+# Do not tighten the margin to manufacture pressure.
 fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
     # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32s3/partitions.csv.
-    just _fw-size-check esp32s3 esp32s3 {{ fw_esp32s3_elf }} 3145728 {{ margin }} \
+    # lp-fw/fw-esp32s3/partitions.csv (0x600000).
+    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and
@@ -713,7 +755,7 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
 #
 # Callers build the ELF first; the build differs per chip (target, profile,
 # features, toolchain) but the measurement does not.
-_fw-size-check name chip elf partition margin doc:
+_fw-size-check name chip flash_size elf partition margin doc:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v espflash >/dev/null 2>&1; then
@@ -722,9 +764,19 @@ _fw-size-check name chip elf partition margin doc:
     fi
     # No --partition-table here on purpose: espflash errors out when the image
     # overruns the real table, and we want to report *how far* over it is.
+    #
+    # `--flash-size` is what keeps that true. Without it espflash falls back to
+    # a chip-dependent default table, and the ESP32-S3's is a 1 MB app
+    # partition — so an S3 image over 1 MB made this recipe die inside
+    # `save-image` with `image_too_big` against a partition nobody flashes,
+    # reporting nothing. It went unnoticed because the S3 image was 1,007,760 B
+    # at the time, 40 KB under that invisible cliff; the first shader build
+    # crossed it. Passing the real flash size also makes the measured image the
+    # same one the flash recipes produce, since the size lands in the image
+    # header.
     img="$(mktemp)"
     trap 'rm -f "${img}"' EXIT
-    espflash save-image --chip {{ chip }} {{ elf }} "${img}" >/dev/null
+    espflash save-image --chip {{ chip }} --flash-size {{ flash_size }} {{ elf }} "${img}" >/dev/null
     size="$(wc -c < "${img}" | tr -d ' ')"
     headroom=$(( {{ partition }} - size ))
     echo "fw-{{ name }} image ${size} B / {{ partition }} B — headroom ${headroom} B (margin {{ margin }} B)"
@@ -1349,6 +1401,39 @@ decode-backtrace *addrs:
         riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6 $ADDRS
     else
         addr2line -e target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6 -f -a $ADDRS
+    fi
+
+# Decode ESP32-S3 backtrace addresses.
+#
+# A separate recipe rather than a flag on the one above because the two chips
+# cannot be told apart from the addresses: both put flash text at 0x42xxxxxx,
+# so a shared recipe would silently symbolize S3 frames against the C6 image
+# and produce confident nonsense. The S3 panic path prints this recipe by name.
+#
+# Build first: just build-fw-esp32s3
+# Usage: just decode-backtrace-esp32s3 0x42010d2a ...
+#        pbpaste | just decode-backtrace-esp32s3
+decode-backtrace-esp32s3 *addrs:
+    #!/usr/bin/env bash
+    set -e
+    test -f {{ fw_esp32s3_elf }}
+    if [ -n "{{ addrs }}" ]; then
+        ADDRS="{{ addrs }}"
+    else
+        ADDRS=$(grep -oE '0x[0-9a-fA-F]+' | tr '\n' ' ')
+    fi
+    if [ -z "$ADDRS" ]; then
+        echo "No addresses. Usage: just decode-backtrace-esp32s3 0x420... or: pbpaste | just decode-backtrace-esp32s3"
+        exit 1
+    fi
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    if command -v xtensa-esp32s3-elf-addr2line >/dev/null 2>&1; then
+        xtensa-esp32s3-elf-addr2line -pfiaC -e {{ fw_esp32s3_elf }} $ADDRS
+    else
+        addr2line -e {{ fw_esp32s3_elf }} -f -a $ADDRS
     fi
 
 # ============================================================================

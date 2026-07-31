@@ -1,6 +1,5 @@
 // test run
 // Q32 div-by-zero saturation (docs/design/q32.md). Native f32 uses IEEE Inf/NaN instead.
-// @ignore(float_mode=f32)
 
 // ============================================================================
 // Division by zero — Q32 only

@@ -16,13 +16,22 @@ use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, RECORD_LEN};
 const C6_PARTITIONS: &str = include_str!("../../../lp-fw/fw-esp32c6/partitions.csv");
 const S3_PARTITIONS: &str = include_str!("../../../lp-fw/fw-esp32s3/partitions.csv");
 
-/// Offsets that existed before `bootctl` and must not have shifted — an
-/// existing device's `lpfs` image stays valid only if `lpfs` stays put.
-const PRE_EXISTING_OFFSETS: &[(&str, u32)] = &[
-    ("nvs", 0x9000),
-    ("phy_init", 0xf000),
-    ("factory", 0x10000),
-    ("lpfs", 0x310000),
+/// Per-board expectations. The boards' tables legitimately DIVERGE above
+/// `0x10000` — the S3 has an 8 MB partition floor
+/// (`2026-07-30-esp32s3-partition-floor.md`) — so the invariant lp-bootctl
+/// actually needs is narrower than whole-table identity: the LOW region
+/// (nvs, bootctl, phy_init, factory start) is identical everywhere, which is
+/// what lets `BOOTCTL_PARTITION_OFFSET` be a constant instead of a
+/// partition-table lookup.
+const COMMON_LOW_REGION: &[(&str, u32)] =
+    &[("nvs", 0x9000), ("phy_init", 0xf000), ("factory", 0x10000)];
+
+/// `lpfs` must not move on either board — an existing device's filesystem
+/// image stays valid only if its partition stays put. The expected offset is
+/// per-board because the S3's 8 MB floor placed it differently.
+const LPFS_OFFSETS: &[(&str, u32, u32)] = &[
+    ("esp32c6", 0x310000, 0x40_0000),
+    ("esp32s3", 0x610000, 0x80_0000),
 ];
 
 #[test]
@@ -50,16 +59,31 @@ fn the_record_fits_the_sector() {
 }
 
 #[test]
-fn adding_bootctl_did_not_move_any_pre_existing_partition() {
+fn the_low_region_is_identical_on_every_board() {
     for (board, csv) in [("esp32c6", C6_PARTITIONS), ("esp32s3", S3_PARTITIONS)] {
-        for &(name, expected) in PRE_EXISTING_OFFSETS {
+        for &(name, expected) in COMMON_LOW_REGION {
             let found = partition(csv, name)
                 .unwrap_or_else(|| panic!("{board} partitions.csv still declares {name}"));
             assert_eq!(
                 found.offset, expected,
-                "{board}: {name} moved — existing devices' flash layout must not shift"
+                "{board}: {name} moved — the shared low region is what lets \
+                 lp-bootctl hardcode its offset"
             );
         }
+    }
+}
+
+#[test]
+fn lpfs_stays_put_on_each_board() {
+    for &(board, expected_offset, _) in LPFS_OFFSETS {
+        let csv = csv_for(board);
+        let lpfs = partition(csv, "lpfs")
+            .unwrap_or_else(|| panic!("{board} partitions.csv still declares lpfs"));
+        assert_eq!(
+            lpfs.offset, expected_offset,
+            "{board}: lpfs moved — existing devices' filesystem images would \
+             be invalidated"
+        );
     }
 }
 
@@ -80,8 +104,9 @@ fn bootctl_came_out_of_nvs() {
 }
 
 #[test]
-fn no_partitions_overlap_and_the_image_still_fits_4mb() {
-    for (board, csv) in [("esp32c6", C6_PARTITIONS), ("esp32s3", S3_PARTITIONS)] {
+fn no_partitions_overlap_and_each_board_fits_its_flash() {
+    for &(board, _, flash_size) in LPFS_OFFSETS {
+        let csv = csv_for(board);
         let mut parts = partitions(csv);
         parts.sort_by_key(|p| p.offset);
         for pair in parts.windows(2) {
@@ -95,21 +120,18 @@ fn no_partitions_overlap_and_the_image_still_fits_4mb() {
         }
         let last = parts.last().expect("at least one partition");
         assert!(
-            last.offset + last.size <= 0x40_0000,
-            "{board}: layout exceeds the 4 MB image"
+            last.offset + last.size <= flash_size,
+            "{board}: layout exceeds its {flash_size:#x} flash floor"
         );
     }
 }
 
-#[test]
-fn both_boards_declare_byte_identical_layouts() {
-    // lp-bootctl hardcodes one offset for every board; that is only sound
-    // while the boards agree.
-    assert_eq!(
-        partitions(C6_PARTITIONS),
-        partitions(S3_PARTITIONS),
-        "the C6 and S3 partition layouts must stay identical"
-    );
+fn csv_for(board: &str) -> &'static str {
+    match board {
+        "esp32c6" => C6_PARTITIONS,
+        "esp32s3" => S3_PARTITIONS,
+        other => panic!("unknown board {other}"),
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]

@@ -16,6 +16,7 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 | `wgpu.f32` | IEEE f32 (GPU) | per-directive fragment probe on a wgpu device | no — explicit `--target wgpu.f32`; needs a GPU adapter |
 | `xtn.q32` | Q32 fixed-point | `lpvm-native` → **Xtensa** emulator + linked builtins (ESP32-S3 board profile) | no — explicit `--target xtn.q32`; needs the Xtensa builtins image |
 | `xtlpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → Xtensa emulator | no — as above |
+| `wasm.f32` | IEEE f32 | `lpvm-wasm`'s f32 emit path → wasmtime | no — explicit `--target wasm.f32`; see below |
 
 **Q32 is the primary tier**: the four Q32 targets assert exact on-device
 semantics and their expectations are the ground truth. `interp.f32` asserts
@@ -24,6 +25,45 @@ tiers legitimately diverge, directives split into `run[q32]:` / `run[f32]:`
 channels. `wgpu.f32` re-runs the f32 expectations on real GPU hardware —
 adapter-gated and slower (one GPU pipeline per directive), so it is not in the
 default set; run it explicitly when touching the GPU tier.
+
+### `wasm.f32` — the first compiled f32 target
+
+`interp.f32` interprets LPIR; `wasm.f32` is the first target that **compiles** f32
+and executes the result, through `lpvm-wasm`'s `FloatMode::F32` emit path. That
+path existed for a long time with no target pointed at it, so it had never run.
+
+It is **not in `DEFAULT_TARGETS` and not in CI** pending review gate G1. Run it
+explicitly:
+
+```bash
+scripts/filetests.sh --target wasm.f32
+```
+
+Note that the `wasm` shorthand now expands to **both** `wasm.q32` and `wasm.f32`.
+Say `wasm.q32` when you mean only the Q32 one.
+
+Its known dispositions, and what unblocks them:
+
+- **52 files: `@unimplemented(wasm.f32)`** — the shader calls a builtin
+  (`@glsl::sin`, `@lpfn::*`, `@texture::*`, `@lpir::*`). There is no f32 builtin
+  resolution: `lps-builtin-ids` exposes `*_q32_builtin_id` resolvers only, and the
+  `_f32` bodies that exist are stubs that round-trip through
+  `Q32::from_f32_wrapping`. `lpvm-wasm` refuses these imports by name in f32 mode
+  rather than emitting a Q32-typed import into an f32 module. Unblocks with the
+  f32 builtin family.
+- **27 files: `@unsupported`** — the shader does not compile on any target (naga
+  gaps, GLSL parse errors). Not f32-specific, so most of these are already
+  covered by the axis-scoped `@unsupported(*)` / `@unsupported(frontend!=lp)`
+  the file carries for every other target; only the blocks that stop short of
+  `wasm.f32` name it explicitly.
+- **1 file: `@broken(wasm.f32)`** (`uniform/struct.glsl`) — `wasm.f32` and
+  `interp.f32` genuinely disagree, on `normalize(vec3(0))` and NaN propagation
+  through `max`.
+
+`lps-glsl/rainbow.glsl` is a `// test compile` file and was un-annotatable when
+this target first ran; file-level dispositions for compile-only files landed
+with the axis selectors, so it now carries `@unimplemented(wasm.f32)` like any
+other builtin-blocked file.
 
 ### The Xtensa pair
 
@@ -173,20 +213,109 @@ uniform Params params;
 Semantics and supported `texture()` / `texelFetch` formats:
 [`docs/design/lp-shader-texture-access.md`](../../docs/design/lp-shader-texture-access.md).
 
-## Unsupported vs failed (especially `wasm.q32`)
+## Dispositions: `@unsupported`, `@unimplemented`, `@broken`, `@ignore`
 
-Summary lines like `0/10 … (10 unsupported)` mean the file or directive has
-`// @unsupported(wasm.q32)` (or another target name): the test is **not run** for that
-target because the case is **not applicable by design** on that backend (e.g. NaN semantics on
-Q32, or a path we do not intend to implement there). This is not an assertion failure.
+An annotation says *what a target is expected to do with a test*. Four kinds:
 
-- **`@unimplemented(...)`** — temporary gap; we expect the test to **pass** once the feature is
-  implemented (failure is expected until then).
-- **`@broken(...)`** — known bug or wrong expectation until fixed.
-- **`@unsupported(...)`** — permanent “not on this target” (skip; does not count as pass or fail).
+| kind | disposition | meaning |
+|---|---|---|
+| `@unimplemented(...)` | expect failure | temporary gap; expected to **pass** once implemented |
+| `@broken(...)` | expect failure | known bug or wrong expectation, until fixed |
+| `@unsupported(...)` | skip | permanent "not on this target" — a backend property |
+| `@ignore(...)` | skip | the **test** does not apply here (e.g. Q32-only semantics) |
 
-Failures are reported with expected vs actual values. Use
-`scripts/filetests.sh --target wasm.q32` (or `rv32n.q32` / `rv32c.q32`) to focus one backend.
+Summary lines like `0/10 … (10 unsupported)` mean the directive was **not run**
+for that target because the case is not applicable by design. That is not an
+assertion failure. Failures are reported with expected vs actual values; use
+`scripts/filetests.sh --target wasm.q32` to focus one backend.
+
+An annotation binds to the **next `// run:` directive only** — repeat it before
+each directive it applies to. In a `// test compile` file, which has no run
+directives, annotations apply to the file's single compile case per target.
+
+### Selectors: what an annotation applies to
+
+```glsl
+// @unsupported(*)                            every target, present and future
+// @broken(wasm.q32)                          one target, by canonical name
+// @unimplemented(float_mode=f32)             an axis family
+// @unsupported(frontend!=lp, backend!=wgpu)  a conjunction
+```
+
+The five axes are the fields of the `Target` struct, and their values are those
+enums' display names — so the vocabulary is derived from the target model rather
+than a parallel table that can drift out of date:
+
+| axis | values |
+|---|---|
+| `frontend` | `naga` `lp` |
+| `backend` | `rv32c` `rv32n` `xtn` `wasm` `interp` `wgpu` |
+| `float_mode` | `q32` `f32` |
+| `isa` | `riscv32` `xtensa` `wasm32` `host` |
+| `exec_mode` | `emulator` `interpreter` `gpu` |
+
+A conjunction may exclude the same axis more than once
+(`backend!=interp, backend!=wgpu` subtracts two targets from a family), but it
+may not contradict itself.
+
+**An unknown axis or value is a parse error naming the line** — never a selector
+that quietly matches nothing. A typo that matched nothing would silently disable
+a test and only surface months later as a mysterious red.
+
+**`@broken` requires a reason**: a plain comment line immediately above it (other
+annotations in the block are transparent, so one reason covers a stacked block).
+An unexplained `@broken` cannot be told apart from an abandoned one.
+
+```glsl
+// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
+// @unsupported(wgpu.f32)
+// run: test_bitfieldextract_int_simple() == 15
+```
+
+### Precedence: most specific wins
+
+When several annotations match the same target:
+
+1. An **exact target name** beats any predicate.
+2. Among predicates, **more axis terms beats fewer**.
+3. `*` loses to everything.
+4. **Tie-break: the first annotation in the file wins.** Equal specificity keeps
+   the original first-match-wins rule, which is why a file full of exact-name
+   annotations resolves exactly as it always did.
+
+Rule 1 is what the example above relies on: `@broken(frontend!=lp, …)` covers
+every naga target, and the exact `@unsupported(wgpu.f32)` carves the GPU tier
+back out. It is also how a file says "the whole f32 family is unimplemented"
+(`@unimplemented(float_mode=f32)`) *and* "this one member is differently wrong"
+(`@broken(wasm.f32)`) at the same time.
+
+Annotations of the same kind simply union — which one matched cannot change the
+answer.
+
+### Which form to use
+
+- **Exact name** when the fact is about that one target: a specific backend's
+  bug, a divergence only it shows. This is most of the corpus and stays right.
+- **Predicate** when the fact is about a *property*: "no f32 target implements
+  this builtin", "the naga frontend cannot parse this". A predicate is correct
+  for targets that do not exist yet, which is the whole point — registering a new
+  f32 backend should not mean re-annotating 51 files.
+- **`*`** when the shader compiles nowhere. `builtins/pack-half.glsl` used to
+  spend nine lines per directive listing every target to say exactly that.
+
+Do not reach for a predicate to compress an accident. If five targets fail for
+five different reasons, five annotations with five reasons is the honest record.
+
+### Generated files
+
+`.gen.glsl` (from `lps-filetests-gen-app`) and `control/torture/` (from
+`lp-shader/scripts/gen-control-torture.py`) are **generated**: an annotation
+written into them is reverted by the next `--write`. Put the disposition in the
+generator instead — the torture generator's `INTRINS` table has an
+`unimplemented` field that accepts any selector. `--mark-unimplemented` refuses
+to edit these files and tells you where the disposition belongs, and
+`just lint-torture-corpus` catches drift.
 
 ## Test file format
 
@@ -215,12 +344,16 @@ int add_int(int a, int b) {
 
 - `// test run` — marks an execution test file (required for run tests).
 - `// target <backend>.<format>` — file-level default target (e.g. `wasm.q32`, `rv32c.q32`).
-- Per-directive filters: `// @wasm`, `// @rv32c` (see parser / plan docs).
+- `// @<kind>(<selector>)` — per-directive disposition; see
+  [Dispositions](#dispositions-unsupported-unimplemented-broken-ignore).
+
+A file whose directives do not parse **fails**. There is no "skip the line I
+could not read" path — that is how a malformed selector stays visible.
 
 **`DEFAULT_TARGETS`** (when the runner does not pass `--target`): `rv32n.q32`,
 `rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`. CI runs this list via
-`just test-filetests`; `wgpu.f32`, `xtn.q32` and `xtlpn.q32` are explicit-only
-(see Targets above).
+`just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32` and `wasm.f32` are
+explicit-only (see Targets above).
 
 ### Run directives
 
@@ -281,10 +414,16 @@ cargo run -p lps-filetests-app -- test --target wasm.q32 --mark-unimplemented --
 # or: LP_MARK_UNIMPLEMENTED=1 with the same binary (still requires single target)
 ```
 
-Whole-file compile failures in **summary** mode get one file-level
-`// @unimplemented(backend=wasm)` before the first `// run:`. Per-directive failures get a marker
-line immediately before each failing `// run:`. Re-run the suite after marking; use `--fix` /
-`LP_FIX_XFAIL=1` to remove markers when a test starts passing.
+Markers are written before each failing `// run:`, one per target, using the
+**exact target name**. If the resulting block is really one axis-shaped fact,
+collapse it by hand — the marker cannot tell the difference. Re-run the suite
+after marking; use `--fix` / `LP_FIX_XFAIL=1` to remove markers when a test
+starts passing.
+
+`--fix` only removes **exact-name** annotations. A predicate speaks for a whole
+family, so removing it because one member went green would silently un-annotate
+the others; narrow it by hand instead. Generated files are refused outright (see
+"Generated files" above).
 
 ## BLESS mode
 

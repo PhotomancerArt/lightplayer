@@ -12,12 +12,12 @@ int test_bitfieldextract_int_simple() {
     return bitfieldExtract(240, 4, 4);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_bitfieldextract_int_simple() == 15
 
 int test_bitfieldextract_int_lsb() {
@@ -25,12 +25,10 @@ int test_bitfieldextract_int_lsb() {
     return bitfieldExtract(170, 0, 4);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldextract_int_lsb() == 10
 
 int test_bitfieldextract_int_msb() {
@@ -38,12 +36,10 @@ int test_bitfieldextract_int_msb() {
     return bitfieldExtract(170, 4, 4);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldextract_int_msb() == 10
 
 uint test_bitfieldextract_uint_simple() {
@@ -51,12 +47,10 @@ uint test_bitfieldextract_uint_simple() {
     return bitfieldExtract(240u, 4, 4);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldextract_uint_simple() == 15u
 
 uint test_bitfieldextract_uint_single_bit() {
@@ -64,12 +58,10 @@ uint test_bitfieldextract_uint_single_bit() {
     return bitfieldExtract(4u, 2, 1);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldextract_uint_single_bit() == 1u
 
 ivec2 test_bitfieldextract_ivec2() {
@@ -78,12 +70,9 @@ ivec2 test_bitfieldextract_ivec2() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldextract_ivec2() == ivec2(15, 10)
 
 
