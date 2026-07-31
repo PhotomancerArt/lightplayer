@@ -730,14 +730,8 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
     # Keep `partition` in sync with the `factory` app partition in
     # lp-fw/fw-esp32c6/partitions.csv.
-    just _fw-size-check esp32c6 esp32c6 {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
+    just _fw-size-check esp32c6 esp32c6 4mb {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
         "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
-
-# Fail when the esp32s3 app image gets too close to its 3 MB partition.
-# Same cliff and the same reasoning as the C6 above — this crate is budgeted
-# for the identical 4 MB layout (lp-fw/fw-esp32s3/partitions.csv), and the S3
-# is the chip whose app-layer port is still ahead of it, so the number is worth
-# trending from the start rather than from the first overrun.
 
 # Fail when the esp32s3 app image gets too close to its 6 MB partition.
 #
@@ -751,7 +745,7 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     set -euo pipefail
     # Keep `partition` in sync with the `factory` app partition in
     # lp-fw/fw-esp32s3/partitions.csv (0x600000).
-    just _fw-size-check esp32s3 esp32s3 {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
+    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and
@@ -761,7 +755,7 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
 #
 # Callers build the ELF first; the build differs per chip (target, profile,
 # features, toolchain) but the measurement does not.
-_fw-size-check name chip elf partition margin doc:
+_fw-size-check name chip flash_size elf partition margin doc:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v espflash >/dev/null 2>&1; then
@@ -770,9 +764,19 @@ _fw-size-check name chip elf partition margin doc:
     fi
     # No --partition-table here on purpose: espflash errors out when the image
     # overruns the real table, and we want to report *how far* over it is.
+    #
+    # `--flash-size` is what keeps that true. Without it espflash falls back to
+    # a chip-dependent default table, and the ESP32-S3's is a 1 MB app
+    # partition — so an S3 image over 1 MB made this recipe die inside
+    # `save-image` with `image_too_big` against a partition nobody flashes,
+    # reporting nothing. It went unnoticed because the S3 image was 1,007,760 B
+    # at the time, 40 KB under that invisible cliff; the first shader build
+    # crossed it. Passing the real flash size also makes the measured image the
+    # same one the flash recipes produce, since the size lands in the image
+    # header.
     img="$(mktemp)"
     trap 'rm -f "${img}"' EXIT
-    espflash save-image --chip {{ chip }} {{ elf }} "${img}" >/dev/null
+    espflash save-image --chip {{ chip }} --flash-size {{ flash_size }} {{ elf }} "${img}" >/dev/null
     size="$(wc -c < "${img}" | tr -d ' ')"
     headroom=$(( {{ partition }} - size ))
     echo "fw-{{ name }} image ${size} B / {{ partition }} B — headroom ${headroom} B (margin {{ margin }} B)"
