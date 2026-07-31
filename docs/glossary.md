@@ -90,6 +90,10 @@ of implementation — code can lag these names during the transition.
 - **Takeover** — the policy for grabbing a channel authored dataflow is
   moving: jump (default for touch controls), pickup/scaled reserved for
   absolute hardware inputs. (module model)
+- **Momentary** — the control class for gesture channels (touch sets,
+  buttons): writes while the gesture is active, despawns on release —
+  which is itself the fallback mechanism — never latches, never
+  persists. (module model)
 - **Play mode** — rendering only the root module's panel: the end-user
   view. (module model)
 - **Bound (violet)** — the UI state family for "this value comes from a

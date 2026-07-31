@@ -41,6 +41,7 @@ from* (publicity, channels, scopes); this document defines how controls
 | **Clear (reset)** | Removing panel writers — per control, per module, or whole panel — restoring Read. | An edit; an undo of authored values |
 | **Slew** | Optional shaping of a writer's output *toward* its held value (anti-zipper). | Integration; a signal generator |
 | **Takeover** | The policy for how a grab of a moving (automated) channel acquires it. | Needed for Read channels at rest (grab is trivial) |
+| **Momentary** | The control class for gesture channels (touch sets, buttons): writes while active, despawns on release, never latches or persists. | A user-selectable mode; Touch automation |
 
 ## 2. Control rules (normative)
 
@@ -65,7 +66,9 @@ are views; two phones showing the same control show the same state (P9).
   is always one obvious gesture on every panel surface.
 
 There is no Touch mode (release-returns-to-automation) and no Write mode
-(recording into authored artifacts). Panel gestures never author.
+(recording into authored artifacts). Panel gestures never author. The
+Read → Latch → Clear machinery governs **value controls**; gesture-natured
+controls are **momentary** and follow P14 instead.
 
 ### P3 — Shape, don't integrate
 
@@ -172,9 +175,33 @@ play mode can do, an end user is allowed to do.
 ### P13 — External inputs (future, seam only)
 
 MIDI, OSC, and hardware encoders enter as **panel writers through P8's
-ops** — same identity, same latch semantics, same persistence — with
-per-input takeover policy (P5). No second control path will be added for
-them.
+ops** — same identity, same latch or momentary semantics, same
+persistence rules — with per-input takeover policy (P5). No second
+control path will be added for them.
+
+### P14 — Momentary controls: the gesture class
+
+Some channels carry **live gestures**, not settings: multi-touch sets
+(an XY pad), momentary buttons. Their controls are **momentary**, and
+the class is intrinsic to the channel/widget kind — never a user-facing
+mode switch.
+
+- A momentary writer streams values while the gesture is active and
+  **despawns on gesture end**. There is no held value, no Latch, and
+  Clear is a no-op on them.
+- **The despawn is the fallback mechanism.** Releasing the pad removes
+  the writer, and resolution immediately falls through (modules.md
+  R5/R6) to whatever is next — an inherited input in an outer scope, or
+  nothing, letting an idle-generator *node* take over (see modules.md
+  E7). No arbitration machinery exists beyond the writer lifecycle
+  value controls already use.
+- Momentary state is **never persisted** — P11 does not apply.
+- Takeover is trivially jump (P5): a gesture *is* the value.
+- Semantic emptiness is not the panel's problem: a connected input
+  producing an *empty* gesture set (a camera seeing nobody) is a live
+  writer writing "empty". Deciding that empty-for-N-seconds means idle
+  is domain logic and belongs to a node (a gate with a timeout param),
+  never to writer resolution.
 
 ## 3. Worked walkthroughs
 
@@ -215,3 +242,8 @@ this document never specifies resolution.
 - **P-Q4:** does Clear-all also clear *sink-scope* (playlist entry)
   state, or only visible panels? Lean: everything under the cleared
   scope, sinks included — "reset means reset".
+- **P-Q5:** the touch-set value shape (per-touch id, position,
+  pressure/z, velocity — carried or derived?) and the multi-XY pad
+  widget spec. Prior art: old lightPlayer's `MultiTouchInput.Touch`
+  (id, initial/current x·y, z, velocity, interpolation). Vocabulary
+  item — modules.md §7.
