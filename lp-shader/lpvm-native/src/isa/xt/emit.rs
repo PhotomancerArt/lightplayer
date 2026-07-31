@@ -66,7 +66,7 @@ use lp_xt_inst::{
     encode,
 };
 
-use crate::abi::FrameLayout;
+use crate::abi::{FrameLayout, RegClass};
 use crate::isa::shared::{IsaEmitOutput, NativeReloc};
 use crate::isa::xt::gpr::{self, SCRATCH, SCRATCH2, SP_REG};
 use crate::isa::xt::imm::{self, ImmOp};
@@ -422,11 +422,22 @@ impl<'a> EmitContext<'a> {
         )
     }
 
-    fn hw(preg: u8) -> Result<Reg, AllocError> {
-        if preg < 16 {
-            Ok(Reg::new(preg))
-        } else {
-            Err(crate::emit_err!("allocation names non-GPR a{preg}"))
+    /// The `a`-register named by a register allocation.
+    ///
+    /// The single gate between the allocator's class-aware `Alloc` and this
+    /// emitter's `Reg`. Rejects a float-class allocation outright rather than
+    /// unwrapping the hardware index: the Xtensa FPU backend is a later
+    /// milestone, and `a0..a15` and `f0..f15` are different register files, so
+    /// an integer instruction against a float index would be silently wrong
+    /// rather than merely unimplemented.
+    fn hw(preg: crate::abi::PackedPReg) -> Result<Reg, AllocError> {
+        match preg.class() {
+            RegClass::Float => Err(crate::emit_err!(
+                "allocation names float register f{} — Xtensa has no FPU backend",
+                preg.hw()
+            )),
+            RegClass::Int if preg.hw() < 16 => Ok(Reg::new(preg.hw())),
+            RegClass::Int => Err(crate::emit_err!("allocation names non-GPR a{}", preg.hw())),
         }
     }
 
@@ -954,7 +965,9 @@ impl<'a> EmitContext<'a> {
                     "register-pass arg {i} has no staging slot"
                 ));
             };
-            let dest = Self::hw(dest)?;
+            // `call_arg_staging_hw` names an `a`-register directly, so the
+            // class is integer by construction.
+            let dest = Self::hw(crate::abi::PackedPReg::int(dest))?;
             match Self::operand_alloc(output, inst_idx, n_rets + i) {
                 Alloc::Reg(src) => {
                     let src = Self::hw(src)?;
@@ -1700,7 +1713,7 @@ mod tests {
         edits: Vec<(EditPoint, Edit)>,
         spills: u32,
     ) -> AllocOutput {
-        let (inst_alloc_offsets, total) = build_operand_layout(vinsts, pool);
+        let (inst_alloc_offsets, total, _classes) = build_operand_layout(vinsts, pool);
         let mut allocs = vec![Alloc::None; total];
         for (idx, inst) in vinsts.iter().enumerate() {
             let mut ops: Vec<VReg> = Vec::new();
@@ -1763,7 +1776,7 @@ mod tests {
                 src_op: NONE,
             },
         ];
-        let out = alloc_output(&vinsts, &pool, &[(0, Alloc::Reg(3))], vec![], 0);
+        let out = alloc_output(&vinsts, &pool, &[(0, Alloc::int_reg(3))], vec![], 0);
         let e = emit(&vinsts, &pool, &out, frame(0, &[], true, 0));
         assert!(e.relocs.is_empty());
         assert_eq!(run(&e.code, 0), 42);
@@ -1795,7 +1808,11 @@ mod tests {
         let out = alloc_output(
             &vinsts,
             &pool,
-            &[(0, Alloc::Reg(2)), (1, Alloc::Reg(3)), (2, Alloc::Reg(4))],
+            &[
+                (0, Alloc::int_reg(2)),
+                (1, Alloc::int_reg(3)),
+                (2, Alloc::int_reg(4)),
+            ],
             vec![],
             0,
         );
@@ -1858,10 +1875,10 @@ mod tests {
             &vinsts,
             &pool,
             &[
-                (0, Alloc::Reg(2)),
-                (1, Alloc::Reg(3)),
-                (2, Alloc::Reg(4)),
-                (3, Alloc::Reg(5)),
+                (0, Alloc::int_reg(2)),
+                (1, Alloc::int_reg(3)),
+                (2, Alloc::int_reg(4)),
+                (3, Alloc::int_reg(5)),
             ],
             vec![],
             0,
@@ -1892,7 +1909,7 @@ mod tests {
         let out = alloc_output(
             &vinsts,
             &pool,
-            &[(0, Alloc::Reg(2)), (1, Alloc::Reg(3))],
+            &[(0, Alloc::int_reg(2)), (1, Alloc::int_reg(3))],
             vec![],
             0,
         );
@@ -1931,7 +1948,11 @@ mod tests {
         let out = alloc_output(
             &vinsts,
             &pool,
-            &[(0, Alloc::Reg(2)), (1, Alloc::Reg(3)), (2, Alloc::Reg(4))],
+            &[
+                (0, Alloc::int_reg(2)),
+                (1, Alloc::int_reg(3)),
+                (2, Alloc::int_reg(4)),
+            ],
             vec![],
             0,
         );
@@ -1951,7 +1972,7 @@ mod tests {
         let edits = vec![(
             EditPoint::Before(0),
             Edit::Move {
-                from: Alloc::Reg(2),
+                from: Alloc::int_reg(2),
                 to: Alloc::Stack(0),
             },
         )];
@@ -1973,10 +1994,10 @@ mod tests {
             EditPoint::Before(0),
             Edit::LoadIncomingArg {
                 fp_offset: 0,
-                to: Alloc::Reg(3),
+                to: Alloc::int_reg(3),
             },
         )];
-        let out = alloc_output(&vinsts, &pool, &[(0, Alloc::Reg(3))], edits, 0);
+        let out = alloc_output(&vinsts, &pool, &[(0, Alloc::int_reg(3))], edits, 0);
         let e = emit(&vinsts, &pool, &out, frame(0, &[], true, 0));
 
         let mut emu = Emulator::new();
@@ -2012,7 +2033,7 @@ mod tests {
         let sq_out = alloc_output(
             &sq_vinsts,
             &sq_pool,
-            &[(0, Alloc::Reg(2)), (1, Alloc::Reg(3))],
+            &[(0, Alloc::int_reg(2)), (1, Alloc::int_reg(3))],
             vec![],
             0,
         );
@@ -2054,7 +2075,11 @@ mod tests {
         let out = alloc_output(
             &vinsts,
             &pool,
-            &[(0, Alloc::Reg(2)), (1, Alloc::Reg(3)), (2, Alloc::Reg(4))],
+            &[
+                (0, Alloc::int_reg(2)),
+                (1, Alloc::int_reg(3)),
+                (2, Alloc::int_reg(4)),
+            ],
             vec![],
             0,
         );
@@ -2146,7 +2171,11 @@ mod tests {
         let out = alloc_output(
             &vinsts,
             &pool,
-            &[(1, Alloc::Reg(3)), (2, Alloc::Reg(4)), (3, Alloc::Reg(5))],
+            &[
+                (1, Alloc::int_reg(3)),
+                (2, Alloc::int_reg(4)),
+                (3, Alloc::int_reg(5)),
+            ],
             vec![],
             0,
         );
@@ -2192,11 +2221,11 @@ mod tests {
             &vinsts,
             &pool,
             &[
-                (0, Alloc::Reg(2)),
-                (1, Alloc::Reg(3)),
-                (2, Alloc::Reg(4)),
-                (3, Alloc::Reg(5)),
-                (4, Alloc::Reg(6)),
+                (0, Alloc::int_reg(2)),
+                (1, Alloc::int_reg(3)),
+                (2, Alloc::int_reg(4)),
+                (3, Alloc::int_reg(5)),
+                (4, Alloc::int_reg(6)),
             ],
             vec![],
             0,
@@ -2246,7 +2275,11 @@ mod tests {
         let out = alloc_output(
             &vinsts,
             &pool,
-            &[(0, Alloc::Reg(2)), (1, Alloc::Reg(3)), (2, Alloc::Reg(4))],
+            &[
+                (0, Alloc::int_reg(2)),
+                (1, Alloc::int_reg(3)),
+                (2, Alloc::int_reg(4)),
+            ],
             vec![],
             0,
         );
@@ -2310,11 +2343,11 @@ mod tests {
             &vinsts,
             &pool,
             &[
-                (0, Alloc::Reg(2)),
-                (1, Alloc::Reg(3)),
-                (2, Alloc::Reg(4)),
-                (3, Alloc::Reg(5)),
-                (4, Alloc::Reg(6)),
+                (0, Alloc::int_reg(2)),
+                (1, Alloc::int_reg(3)),
+                (2, Alloc::int_reg(4)),
+                (3, Alloc::int_reg(5)),
+                (4, Alloc::int_reg(6)),
             ],
             vec![],
             0,
@@ -2332,7 +2365,7 @@ mod tests {
             vals: slice(0, 1),
             src_op: NONE,
         }];
-        let out = alloc_output(&vinsts, &pool, &[(0, Alloc::Reg(2))], vec![], 0);
+        let out = alloc_output(&vinsts, &pool, &[(0, Alloc::int_reg(2))], vec![], 0);
         let big = frame(0, &[(0, 40_000)], true, 0);
         let symbols = ModuleSymbols::default();
         let r = emit_function(&vinsts, &pool, &out, big, &symbols, false, false);
