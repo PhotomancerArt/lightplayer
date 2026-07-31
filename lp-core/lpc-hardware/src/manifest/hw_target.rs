@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum HardwareTarget {
     Esp32c6,
+    Esp32s3,
     Rv32imacEmu,
 }
 
@@ -13,6 +14,7 @@ impl HardwareTarget {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Esp32c6 => "esp32c6",
+            Self::Esp32s3 => "esp32s3",
             Self::Rv32imacEmu => "rv32imac_emu",
         }
     }

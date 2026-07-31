@@ -32,8 +32,8 @@
 //! reaches a pin.
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 use lpc_hardware::{
     HardwareEndpointError, HwDriver, HwEndpoint, HwEndpointId, HwRegistry, OutputError,
@@ -41,7 +41,7 @@ use lpc_hardware::{
 };
 
 /// RMT timing channel the endpoints claim. Matches the board manifest's
-/// `/rmt/ws281x/0` resource; nothing is programmed on it.
+/// `/rmt/ws281x0` resource; nothing is programmed on it.
 const RMT_CHANNEL: u8 = 0;
 
 /// How many frames pass between summary lines. ~1 s at 60 fps.

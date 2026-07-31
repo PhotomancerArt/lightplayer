@@ -205,14 +205,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     let base_fs = mount_filesystem(flash);
 
-    // ⚠️ The compiled-in fallback is the C6's XIAO profile: there is no S3 board
-    // manifest in `lpc-hardware` yet. It is inert rather than wrong here —
-    // nothing on this board drives a pin (see `output::readout_driver`) — but a
-    // real S3 output driver must not inherit it. An `/hardware.json` on the
-    // device overrides it.
+    // The compiled-in fallback is the XIAO ESP32-S3 Plus profile — the desk
+    // board. It is deliberately partial (no user LED, no castellated pads); see
+    // `default_esp32s3_hardware_manifest`. An `/hardware.json` on the device
+    // overrides it, which is how a different S3 carrier gets described.
     let hardware_manifest = load_hardware_manifest(
         base_fs.as_ref(),
-        lpc_hardware::default_esp32c6_hardware_manifest,
+        lpc_hardware::default_esp32s3_hardware_manifest,
     );
     log::info!(
         "[fw-esp32s3] hardware manifest: {} ({})",
