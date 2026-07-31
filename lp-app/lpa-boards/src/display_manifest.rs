@@ -68,8 +68,7 @@ pub struct PurchaseUrl {
 /// The drawing block the row-engine diagram renderer consumes.
 ///
 /// Geometry is in board-local units; the renderer derives every other size
-/// from the pin pitch (`u`). See `spikes/hardware-boards/DESIGN-LANGUAGE.md`
-/// (moving to `docs/design/board-diagrams.md` with the renderer milestone).
+/// from the pin pitch (`u`). See `docs/design/board-diagrams.md`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct BoardDrawing {
