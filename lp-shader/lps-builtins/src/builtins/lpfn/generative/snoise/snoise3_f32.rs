@@ -16,8 +16,9 @@
 use crate::builtins::lpfn::hash::lpfn_hash3;
 use crate::f32_math::floor;
 
-const D: f32 = 0.707_106_78; // 1/sqrt(2)
-const E: f32 = 0.577_350_26; // 1/sqrt(3)
+const D: f32 = core::f32::consts::FRAC_1_SQRT_2;
+/// 1/sqrt(3) — no `core` constant for this one.
+const E: f32 = 0.577_350_26;
 
 /// 32-entry gradient LUT: 0-11 edge gradients, 12-23 duplicates,
 /// 24-31 corner gradients.

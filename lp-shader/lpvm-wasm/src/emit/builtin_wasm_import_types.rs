@@ -476,6 +476,18 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             vec![ValType::I32],
         ),
         BuiltinId::LpVmGetFuel => (vec![ValType::I32], vec![ValType::I32]),
+        BuiltinId::LpTexTexture1dR16UnormF32 => (
+            vec![
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::F32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            Vec::new(),
+        ),
         BuiltinId::LpTexTexture1dR16UnormQ32 => (
             vec![
                 ValType::I32,
@@ -483,6 +495,18 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
                 ValType::I32,
                 ValType::I32,
                 ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            Vec::new(),
+        ),
+        BuiltinId::LpTexTexture1dRgba16UnormF32 => (
+            vec![
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::F32,
                 ValType::I32,
                 ValType::I32,
             ],
@@ -500,6 +524,21 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
             ],
             Vec::new(),
         ),
+        BuiltinId::LpTexTexture2dR16UnormF32 => (
+            vec![
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::F32,
+                ValType::F32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            Vec::new(),
+        ),
         BuiltinId::LpTexTexture2dR16UnormQ32 => (
             vec![
                 ValType::I32,
@@ -509,6 +548,21 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
                 ValType::I32,
                 ValType::I32,
                 ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            Vec::new(),
+        ),
+        BuiltinId::LpTexTexture2dRgba16UnormF32 => (
+            vec![
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::F32,
+                ValType::F32,
                 ValType::I32,
                 ValType::I32,
                 ValType::I32,

@@ -24,7 +24,7 @@ pub(crate) fn worley2_point(index: u32, cell_x: i32, cell_y: i32) -> [f32; 2] {
     // length in [0, 0.5] from bits 3-7 of the hash.
     let length_bits = ((index & 0xF8) >> 3) as f32;
     let len = length_bits * 0.5 / 31.0;
-    let diag = len * 0.707_106_78; // 1/sqrt(2)
+    let diag = len * core::f32::consts::FRAC_1_SQRT_2;
 
     let offset = match index & 0x07 {
         0 => [diag, diag],

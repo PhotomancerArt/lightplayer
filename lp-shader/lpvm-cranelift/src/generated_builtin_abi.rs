@@ -403,12 +403,35 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::I32));
             sig.returns.push(AbiParam::new(types::F32));
         }
+        BuiltinId::LpTexTexture1dR16UnormF32 | BuiltinId::LpTexTexture1dRgba16UnormF32 => {
+            // unsafe extern "C" fn(*mut f32, u32, u32, u32, f32, u32, u32) -> ()
+            sig.params.push(AbiParam::new(pointer_type));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+        }
         BuiltinId::LpTexTexture1dR16UnormQ32 | BuiltinId::LpTexTexture1dRgba16UnormQ32 => {
             // unsafe extern "C" fn(*mut i32, u32, u32, u32, i32, u32, u32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+        }
+        BuiltinId::LpTexTexture2dR16UnormF32 | BuiltinId::LpTexTexture2dRgba16UnormF32 => {
+            // unsafe extern "C" fn(*mut f32, u32, u32, u32, u32, f32, f32, u32, u32, u32) -> ()
+            sig.params.push(AbiParam::new(pointer_type));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::I32));
+            sig.params.push(AbiParam::new(types::F32));
+            sig.params.push(AbiParam::new(types::F32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));
             sig.params.push(AbiParam::new(types::I32));

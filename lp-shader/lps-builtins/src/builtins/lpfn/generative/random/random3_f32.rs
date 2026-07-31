@@ -14,7 +14,7 @@
 //! **Tolerance:** chaotic sin-hash — statistical, not pointwise. See
 //! `random1_f32`.
 
-use super::random1_f32::{seed_phase, sin_hash};
+use super::random1_f32::{SIN_HASH_K3, seed_phase, sin_hash};
 
 /// 3D Random function (float version).
 ///
@@ -30,7 +30,7 @@ use super::random1_f32::{seed_phase, sin_hash};
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_random3_f32(x: f32, y: f32, z: f32, seed: u32) -> f32 {
     let d = x * 70.9898 + y * 78.233 + z * 32.4355;
-    sin_hash(d + seed_phase(seed), 43758.5453123)
+    sin_hash(d + seed_phase(seed), SIN_HASH_K3)
 }
 
 #[cfg(test)]
