@@ -19,6 +19,9 @@ vec2 test_modf_positive() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_modf_positive() ~= vec2(0.7, 3.0)
 
 vec2 test_modf_negative() {
@@ -34,6 +37,7 @@ vec2 test_modf_negative() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_modf_negative() ~= vec2(-0.3, -2.0)
 
 vec2 test_modf_integer() {
@@ -49,6 +53,7 @@ vec2 test_modf_integer() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_modf_integer() ~= vec2(0.0, 5.0)
 
 vec2 test_modf_zero() {
@@ -64,6 +69,7 @@ vec2 test_modf_zero() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_modf_zero() ~= vec2(0.0, 0.0)
 
 vec2 test_modf_small() {
@@ -79,6 +85,7 @@ vec2 test_modf_small() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_modf_small() ~= vec2(0.1, 0.0)
 
 vec4 test_modf_vec2() {
@@ -94,6 +101,7 @@ vec4 test_modf_vec2() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_modf_vec2() ~= vec4(0.7, -0.3, 3.0, -2.0)
 
 vec4 test_modf_vec3() {
@@ -110,6 +118,7 @@ vec4 test_modf_vec3() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_modf_vec3() ~= vec4(0.5, -0.8, 0.0, 1.0)
 
 

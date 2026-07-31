@@ -18,6 +18,9 @@ uvec2 test_packdouble2x32_zeros() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_packdouble2x32_zeros() == uvec2(0u, 0u)
 
 uvec2 test_packdouble2x32_ones() {
@@ -33,6 +36,7 @@ uvec2 test_packdouble2x32_ones() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packdouble2x32_ones() == uvec2(0u, 1072693248u)
 
 uvec2 test_packdouble2x32_half() {
@@ -48,6 +52,7 @@ uvec2 test_packdouble2x32_half() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packdouble2x32_half() == uvec2(0u, 1071644672u)
 
 uvec2 test_packdouble2x32_neg_one() {
@@ -63,6 +68,7 @@ uvec2 test_packdouble2x32_neg_one() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packdouble2x32_neg_one() == uvec2(0u, 1072693248u)
 
 uvec2 test_packdouble2x32_two() {
@@ -78,6 +84,7 @@ uvec2 test_packdouble2x32_two() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packdouble2x32_two() == uvec2(0u, 1073741824u)
 
 uvec2 test_packdouble2x32_small() {
@@ -94,6 +101,7 @@ uvec2 test_packdouble2x32_small() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_packdouble2x32_small() == uvec2(0u, 1069128089u)
 
 

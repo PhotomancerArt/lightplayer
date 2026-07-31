@@ -13,6 +13,9 @@ float test_lpfn_fbm_2d() {
     return (n >= -5.0 && n <= 5.0) ? 1.0 : 0.0;
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_lpfn_fbm_2d() == 1.0
 
 float test_lpfn_fbm_3d() {
@@ -24,6 +27,7 @@ float test_lpfn_fbm_3d() {
     return (n >= -5.0 && n <= 5.0) ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_fbm_3d() == 1.0
 
 float test_lpfn_fbm_3d_tile() {
@@ -36,6 +40,7 @@ float test_lpfn_fbm_3d_tile() {
     return (n >= -5.0 && n <= 5.0) ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_fbm_3d_tile() == 1.0
 
 float test_lpfn_fbm_deterministic() {
@@ -45,6 +50,7 @@ float test_lpfn_fbm_deterministic() {
     return abs(n1 - n2) < 0.0001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_fbm_deterministic() == 1.0
 
 float test_lpfn_fbm_different_seeds() {
@@ -55,6 +61,7 @@ float test_lpfn_fbm_different_seeds() {
     return has_diff ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_fbm_different_seeds() == 1.0
 
 float test_lpfn_fbm_octaves_effect() {
@@ -67,6 +74,7 @@ float test_lpfn_fbm_octaves_effect() {
     return diff > 0.001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_fbm_octaves_effect() == 1.0
 
 float test_lpfn_fbm_smoothness() {
@@ -78,4 +86,5 @@ float test_lpfn_fbm_smoothness() {
     return diff < 2.0 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_fbm_smoothness() == 1.0

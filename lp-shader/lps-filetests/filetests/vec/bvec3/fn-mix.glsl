@@ -21,6 +21,9 @@ bvec3 test_bvec3_mix_all_false_selector() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_bvec3_mix_all_false_selector() == bvec3(true, false, true)
 
 bvec3 test_bvec3_mix_all_true_selector() {
@@ -36,6 +39,7 @@ bvec3 test_bvec3_mix_all_true_selector() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bvec3_mix_all_true_selector() == bvec3(false, true, false)
 
 bvec3 test_bvec3_mix_mixed_selector() {
@@ -51,6 +55,7 @@ bvec3 test_bvec3_mix_mixed_selector() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bvec3_mix_mixed_selector() == bvec3(true, true, true)
 
 bvec3 test_bvec3_mix_other_mixed_selector() {
@@ -66,6 +71,7 @@ bvec3 test_bvec3_mix_other_mixed_selector() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bvec3_mix_other_mixed_selector() == bvec3(true, true, true)
 
 bvec3 test_bvec3_mix_same_vectors() {
@@ -80,6 +86,7 @@ bvec3 test_bvec3_mix_same_vectors() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bvec3_mix_same_vectors() == bvec3(true, true, true)
 
 bvec3 test_bvec3_mix_in_expression() {
@@ -99,4 +106,5 @@ bvec3 test_bvec3_mix_in_expression() {
 // @unsupported(xtn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bvec3_mix_in_expression() == bvec3(true, true, true)

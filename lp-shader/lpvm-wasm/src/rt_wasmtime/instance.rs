@@ -343,11 +343,18 @@ impl LpvmInstance for WasmLpvmInstance {
             WasmError::runtime(format!("function '{name}' not found in WASM export table"))
         })?;
 
-        if matches!(export.return_type, LpsType::Void) {
-            return Err(WasmError::runtime(
-                "void return is not represented as LpsValue; use a typed return",
-            ));
-        }
+        // A `void` export still has to *run* — the corpus is full of
+        // `// run: some_void_fn() == 0.0` directives that exist to prove the
+        // call executes and does not trap. `LpsValueF32` has no void variant, so
+        // every runtime that can answer an f32 call reports `0.0`:
+        // `InterpInstance::call` and the wgpu probe already do, and the Q32
+        // filetest path does it one layer up in `test_run/execution.rs`.
+        //
+        // Refusing here instead made every void-returning file fail on the
+        // `wasm.f32` target while passing on `wasm.q32` (which routes through
+        // `call_q32` and never reaches this method) — a target asymmetry in the
+        // harness, not a shader defect.
+        let returns_void = matches!(export.return_type, LpsType::Void);
 
         let return_ty = export.return_type.clone();
         let needs_shadow = export_needs_shadow_marshal(&export);
@@ -410,6 +417,10 @@ impl LpvmInstance for WasmLpvmInstance {
 
         if let Some(frame) = shadow_frame {
             shadow_stack_frame_close(&self.instance, store, frame)?;
+        }
+
+        if returns_void {
+            return Ok(LpsValueF32::F32(0.0));
         }
 
         if export.uses_sret {

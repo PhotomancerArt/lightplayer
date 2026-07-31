@@ -70,10 +70,17 @@ pub struct WasmLpvmModule {
 
 impl WasmLpvmModule {
     /// Ensure the shader parses under this engine (validates once at compile time).
+    ///
+    /// The error is formatted with `{e:#}` (anyhow's alternate form, the whole
+    /// `source` chain) rather than `{e}`. wasmtime's top-level message is only
+    /// `failed to compile: wasm[0]::function[N]` — the actual reason, e.g. a
+    /// type mismatch between a call site and an import signature, lives one
+    /// link down. Printing just the head makes every validation failure look
+    /// identical and undebuggable.
     pub(crate) fn validate_shader(engine: &Engine, bytes: &[u8]) -> Result<(), WasmError> {
         Module::new(engine, bytes)
             .map(|_| ())
-            .map_err(|e| WasmError::runtime(format!("shader WASM parse/validate failed: {e}")))
+            .map_err(|e| WasmError::runtime(format!("shader WASM parse/validate failed: {e:#}")))
     }
 
     pub(crate) fn validate_memory_import(engine: &Engine, bytes: &[u8]) -> Result<(), WasmError> {

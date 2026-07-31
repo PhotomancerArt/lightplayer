@@ -282,11 +282,11 @@ impl LpvmInstance for BrowserLpvmInstance {
             WasmError::runtime(format!("function '{name}' not found in WASM export table"))
         })?;
 
-        if matches!(export.return_type, LpsType::Void) {
-            return Err(WasmError::runtime(
-                "void return is not represented as LpsValue; use a typed return",
-            ));
-        }
+        // Void exports run and report `0.0` — see the matching comment in
+        // `rt_wasmtime::instance`. The two wasm runtimes must agree, or the
+        // browser firmware answers an f32 shader call differently from the
+        // host one the filetests gate on.
+        let returns_void = matches!(export.return_type, LpsType::Void);
 
         let return_ty = export.return_type.clone();
         let needs_shadow = export_needs_shadow_marshal(&export);
@@ -341,6 +341,10 @@ impl LpvmInstance for BrowserLpvmInstance {
 
         if let Some(frame) = shadow_frame {
             browser_shadow_frame_close(&self.exports_obj, frame)?;
+        }
+
+        if returns_void {
+            return Ok(LpsValueF32::F32(0.0));
         }
 
         if export.uses_sret {

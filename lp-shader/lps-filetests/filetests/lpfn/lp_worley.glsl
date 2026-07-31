@@ -10,6 +10,9 @@ float test_lpfn_worley2_basic_range() {
     return (n >= -1.5 && n <= 1.5) ? 1.0 : 0.0;
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley2_basic_range() == 1.0
 
 float test_lpfn_worley3_basic_range() {
@@ -18,6 +21,7 @@ float test_lpfn_worley3_basic_range() {
     return (n >= -1.5 && n <= 1.5) ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley3_basic_range() == 1.0
 
 float test_lpfn_worley2_determinism() {
@@ -27,6 +31,7 @@ float test_lpfn_worley2_determinism() {
     return abs(n1 - n2) < 0.0001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley2_determinism() == 1.0
 
 float test_lpfn_worley3_determinism() {
@@ -36,6 +41,7 @@ float test_lpfn_worley3_determinism() {
     return abs(n1 - n2) < 0.0001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley3_determinism() == 1.0
 
 float test_lpfn_worley2_different_inputs() {
@@ -45,6 +51,7 @@ float test_lpfn_worley2_different_inputs() {
     return abs(n1 - n2) > 0.001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley2_different_inputs() == 1.0
 
 float test_lpfn_worley3_different_inputs() {
@@ -54,6 +61,7 @@ float test_lpfn_worley3_different_inputs() {
     return abs(n1 - n2) > 0.001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley3_different_inputs() == 1.0
 
 float test_lpfn_worley2_different_seeds() {
@@ -63,6 +71,7 @@ float test_lpfn_worley2_different_seeds() {
     return abs(n1 - n2) > 0.001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley2_different_seeds() == 1.0
 
 float test_lpfn_worley3_different_seeds() {
@@ -72,6 +81,7 @@ float test_lpfn_worley3_different_seeds() {
     return abs(n1 - n2) > 0.001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley3_different_seeds() == 1.0
 
 // ============================================================================
@@ -84,6 +94,7 @@ float test_lpfn_worley2_value_basic_range() {
     return (n >= -1.5 && n <= 1.5) ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley2_value_basic_range() == 1.0
 
 float test_lpfn_worley3_value_basic_range() {
@@ -92,6 +103,7 @@ float test_lpfn_worley3_value_basic_range() {
     return (n >= -1.5 && n <= 1.5) ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley3_value_basic_range() == 1.0
 
 float test_lpfn_worley2_value_determinism() {
@@ -101,6 +113,7 @@ float test_lpfn_worley2_value_determinism() {
     return abs(n1 - n2) < 0.0001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley2_value_determinism() == 1.0
 
 float test_lpfn_worley3_value_determinism() {
@@ -110,4 +123,5 @@ float test_lpfn_worley3_value_determinism() {
     return abs(n1 - n2) < 0.0001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_worley3_value_determinism() == 1.0
