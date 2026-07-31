@@ -90,6 +90,14 @@ applies on the frame *after* the demand that produced it. That trailing frame
 is a real trade-off: a single frame can exceed budget, which suits a supply with
 capacitance and does not suit a hard current limit.
 
+**The trailing frame is also a startup transient.** Frame 0 has no prior demand
+to work from, so it renders unlimited and frame 1 is the first one clamped. At
+frame rate this is invisible and harmless — a supply's capacitance covers 16 ms
+comfortably — but it means output is *not* frame-invariant while the scale
+settles. Golden-frame comparisons must therefore opt out: `examples/shader-oracle`
+exists to prove the JIT renders identically on host and device, and sets
+`budget_ma: 0` so that current limiting cannot vary what it is measuring.
+
 ### The limiter lives in the fixture node
 
 Not in `DisplayPipeline`, which was the first design. Gamma and brightness are
