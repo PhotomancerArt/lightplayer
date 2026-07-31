@@ -262,7 +262,7 @@ wrong GPIO number is a short circuit:
 
 | Absent | Why |
 |---|---|
-| User LED | Seeed says GPIO21 for the plain XIAO ESP32-S3; espboards.dev says GPIO22 for the *Plus*, which is impossible (the ESP32-S3 numbers GPIO0-21 and GPIO26-48). Unverified on this board. |
+| User LED | **Tested and not found on GPIO21.** Seeed documents GPIO21 for the plain XIAO ESP32-S3, and espboards.dev says GPIO22 for the *Plus*, which is impossible (the ESP32-S3 numbers GPIO0-21 and GPIO26-48). Driving GPIO21 in a 3-blink/pause pattern for 20 s on the desk board produced **no visible change**, so GPIO21 is ruled out for this variant. The pin stays out of the profile. Settling it properly wants the Seeed schematic or an S3 `test_gpio_calibrate` harness (see "Not yet ported"), not another guess — the yellow LED on this board appears to be a power/charge indicator unrelated to any GPIO we drive. |
 | The nine 1.27 mm castellated pads | No published GPIO map. |
 | GPIO26-37 | In-package flash and octal PSRAM. Never claimable. |
 | `/radio/0` | No radio driver is registered here, so the resource would never open. |
