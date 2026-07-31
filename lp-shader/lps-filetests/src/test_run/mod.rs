@@ -70,8 +70,8 @@ pub fn record_result(
         (Disposition::Skip, _) => {
             stats.unsupported += 1;
         }
-        (Disposition::ExpectFailure(AnnotationKind::Unsupported), _) => {
-            // Defensive: Unsupported normally maps to Skip in directive_disposition.
+        (Disposition::ExpectFailure(AnnotationKind::Unsupported | AnnotationKind::Ignore), _) => {
+            // Defensive: both kinds normally map to Skip in directive_disposition.
             stats.unsupported += 1;
         }
         (Disposition::ExpectFailure(_), true) => {
