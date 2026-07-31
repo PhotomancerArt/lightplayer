@@ -14,9 +14,6 @@ float test_exp_zero() {
     return exp(rt(0.0));
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_exp_zero() ~= 1.0
 
 float test_exp_one() {
@@ -24,7 +21,6 @@ float test_exp_one() {
     return exp(rt(1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_exp_one() ~= 2.718281828459045
 
 float test_exp_neg_one() {
@@ -32,7 +28,6 @@ float test_exp_neg_one() {
     return exp(rt(-1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_exp_neg_one() ~= 0.36787944117144233
 
 float test_exp_two() {
@@ -40,7 +35,6 @@ float test_exp_two() {
     return exp(rt(2.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_exp_two() ~= 7.38905609893065 (tolerance: 0.001)
 
 float test_exp_neg_two() {
@@ -48,7 +42,6 @@ float test_exp_neg_two() {
     return exp(rt(-2.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_exp_neg_two() ~= 0.1353352832366127
 
 float test_exp_half() {
@@ -56,7 +49,6 @@ float test_exp_half() {
     return exp(rt(0.5));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_exp_half() ~= 1.6487212711532444
 
 vec2 test_exp_vec2() {
@@ -64,7 +56,6 @@ vec2 test_exp_vec2() {
     return exp(vec2(rt(0.0), rt(1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_exp_vec2() ~= vec2(1.0, 2.718281828459045)
 
 vec3 test_exp_vec3() {
@@ -72,7 +63,6 @@ vec3 test_exp_vec3() {
     return exp(vec3(rt(0.0), rt(1.0), rt(-1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_exp_vec3() ~= vec3(1.0, 2.718281828459045, 0.36787944117144233)
 
 vec4 test_exp_vec4() {
@@ -80,7 +70,6 @@ vec4 test_exp_vec4() {
     return exp(vec4(rt(0.0), rt(0.5), rt(1.0), rt(-0.5)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_exp_vec4() ~= vec4(1.0, 1.6487212711532444, 2.718281828459045, 0.6065306597126334)
 
 

@@ -13,9 +13,6 @@ float test_sin_zero() {
     return sin(rt(0.0));
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_sin_zero() ~= 0.0
 
 float test_sin_pi_half() {
@@ -23,7 +20,6 @@ float test_sin_pi_half() {
     return sin(rt(1.5707963267948966));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_pi_half() ~= 1.0
 
 float test_sin_pi() {
@@ -31,7 +27,6 @@ float test_sin_pi() {
     return sin(rt(3.141592653589793));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_pi() ~= 0.0 (tolerance: 0.01)
 
 float test_sin_three_pi_half() {
@@ -39,7 +34,6 @@ float test_sin_three_pi_half() {
     return sin(rt(4.71238898038469));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_three_pi_half() ~= -1.0
 
 float test_sin_two_pi() {
@@ -47,7 +41,6 @@ float test_sin_two_pi() {
     return sin(rt(6.283185307179586));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_two_pi() ~= 0.0
 
 float test_sin_negative() {
@@ -55,7 +48,6 @@ float test_sin_negative() {
     return sin(rt(-1.5707963267948966));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_negative() ~= -1.0
 
 float test_sin_fraction() {
@@ -63,7 +55,6 @@ float test_sin_fraction() {
     return sin(rt(0.7853981633974483));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_fraction() ~= 0.7071067811865476
 
 vec2 test_sin_vec2() {
@@ -71,7 +62,6 @@ vec2 test_sin_vec2() {
     return sin(vec2(rt(0.0), rt(1.5707963267948966)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_vec2() ~= vec2(0.0, 1.0)
 
 vec3 test_sin_vec3() {
@@ -79,7 +69,6 @@ vec3 test_sin_vec3() {
     return sin(vec3(rt(0.0), rt(1.5707963267948966), rt(3.141592653589793)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_vec3() ~= vec3(0.0, 1.0, 0.0) (tolerance: 0.01)
 
 vec4 test_sin_vec4() {
@@ -87,7 +76,6 @@ vec4 test_sin_vec4() {
     return sin(vec4(rt(0.0), rt(1.5707963267948966), rt(3.141592653589793), rt(4.71238898038469)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_sin_vec4() ~= vec4(0.0, 1.0, 0.0, -1.0) (tolerance: 0.01)
 
 

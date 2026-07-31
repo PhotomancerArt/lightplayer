@@ -29,13 +29,9 @@ float test_intrin_sqrt_store(int count) {
     return s;
 }
 
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_store(0) ~= 0.000000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_store(1) ~= 0.500000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_store(3) ~= 2.484059
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_store(8) ~= 10.704515
 
 float test_intrin_sqrt_unused(int count) {
@@ -55,13 +51,9 @@ float test_intrin_sqrt_unused(int count) {
     return s;
 }
 
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_unused(0) ~= 0.000000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_unused(1) ~= 0.250000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_unused(3) ~= 2.250000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_unused(8) ~= 16.000000
 
 float test_intrin_sqrt_swizzle(int count) {
@@ -82,13 +74,9 @@ float test_intrin_sqrt_swizzle(int count) {
     return a[0] + a[1] + a[2] + a[3];
 }
 
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_swizzle(0) ~= 0.000000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_swizzle(1) ~= 0.500000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_swizzle(3) ~= 2.484059
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_swizzle(8) ~= 3.806935
 
 float test_intrin_sqrt_nested(int count) {
@@ -112,11 +100,7 @@ float test_intrin_sqrt_nested(int count) {
     return s;
 }
 
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_nested(0) ~= 0.000000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_nested(1) ~= 1.500000
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_nested(3) ~= 3.752009
-// @unimplemented(wasm.f32)
 // run: test_intrin_sqrt_nested(8) ~= 7.137104

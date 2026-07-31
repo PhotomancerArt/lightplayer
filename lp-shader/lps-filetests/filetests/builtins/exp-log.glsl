@@ -15,9 +15,6 @@ float test_log_one() {
     return log(rt(1.0));
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_log_one() ~= 0.0
 
 float test_log_e() {
@@ -25,7 +22,6 @@ float test_log_e() {
     return log(rt(2.718281828459045));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_log_e() ~= 1.0
 
 float test_log_two() {
@@ -33,7 +29,6 @@ float test_log_two() {
     return log(rt(2.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_log_two() ~= 0.6931471805599453
 
 float test_log_ten() {
@@ -41,7 +36,6 @@ float test_log_ten() {
     return log(rt(10.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_log_ten() ~= 2.302585092994046
 
 float test_log_half() {
@@ -49,7 +43,6 @@ float test_log_half() {
     return log(rt(0.5));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_log_half() ~= -0.6931471805599453
 
 float test_log_sqrt_e() {
@@ -57,7 +50,6 @@ float test_log_sqrt_e() {
     return log(rt(1.6487212711532444));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_log_sqrt_e() ~= 0.5
 
 vec2 test_log_vec2() {
@@ -65,7 +57,6 @@ vec2 test_log_vec2() {
     return log(vec2(rt(1.0), rt(2.718281828459045)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_log_vec2() ~= vec2(0.0, 1.0)
 
 vec3 test_log_vec3() {
@@ -73,7 +64,6 @@ vec3 test_log_vec3() {
     return log(vec3(rt(1.0), rt(2.0), rt(10.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_log_vec3() ~= vec3(0.0, 0.6931471805599453, 2.302585092994046)
 
 vec4 test_log_vec4() {
@@ -81,7 +71,6 @@ vec4 test_log_vec4() {
     return log(vec4(rt(1.0), rt(2.0), rt(0.5), rt(0.1)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_log_vec4() ~= vec4(0.0, 0.6931471805599453, -0.6931471805599453, -2.302585092994046)
 
 

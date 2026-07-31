@@ -14,9 +14,6 @@ float test_cosh_zero() {
     return cosh(rt(0.0));
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_cosh_zero() ~= 1.0
 
 float test_cosh_one() {
@@ -24,7 +21,6 @@ float test_cosh_one() {
     return cosh(rt(1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_cosh_one() ~= 1.5430806348152437
 
 float test_cosh_neg_one() {
@@ -32,7 +28,6 @@ float test_cosh_neg_one() {
     return cosh(rt(-1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_cosh_neg_one() ~= 1.5430806348152437
 
 float test_cosh_two() {
@@ -40,7 +35,6 @@ float test_cosh_two() {
     return cosh(rt(2.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_cosh_two() ~= 3.7621956910836314
 
 float test_cosh_neg_two() {
@@ -48,7 +42,6 @@ float test_cosh_neg_two() {
     return cosh(rt(-2.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_cosh_neg_two() ~= 3.7621956910836314
 
 float test_cosh_half() {
@@ -56,7 +49,6 @@ float test_cosh_half() {
     return cosh(rt(0.5));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_cosh_half() ~= 1.1276259652063807
 
 vec2 test_cosh_vec2() {
@@ -64,7 +56,6 @@ vec2 test_cosh_vec2() {
     return cosh(vec2(rt(0.0), rt(1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_cosh_vec2() ~= vec2(1.0, 1.5430806348152437)
 
 vec3 test_cosh_vec3() {
@@ -72,7 +63,6 @@ vec3 test_cosh_vec3() {
     return cosh(vec3(rt(0.0), rt(1.0), rt(-1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_cosh_vec3() ~= vec3(1.0, 1.5430806348152437, 1.5430806348152437)
 
 vec4 test_cosh_vec4() {
@@ -80,7 +70,6 @@ vec4 test_cosh_vec4() {
     return cosh(vec4(rt(0.0), rt(0.5), rt(1.0), rt(-0.5)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_cosh_vec4() ~= vec4(1.0, 1.1276259652063807, 1.5430806348152437, 1.1276259652063807)
 
 

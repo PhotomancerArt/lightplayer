@@ -13,9 +13,6 @@ float test_tan_zero() {
     return tan(rt(0.0));
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_tan_zero() ~= 0.0
 
 float test_tan_pi_fourth() {
@@ -23,7 +20,6 @@ float test_tan_pi_fourth() {
     return tan(rt(0.7853981633974483));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_tan_pi_fourth() ~= 1.0
 
 float test_tan_pi_half() {
@@ -33,7 +29,6 @@ float test_tan_pi_half() {
 
 // wgpu.f32: f32 GPU result diverges (undefined/edge-domain semantics)
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_tan_pi_half() ~= 1.6331778728383844e16 (tolerance: 1e17)
 
 float test_tan_pi() {
@@ -41,7 +36,6 @@ float test_tan_pi() {
     return tan(rt(3.141592653589793));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_tan_pi() ~= 0.0 (tolerance: 0.01)
 
 float test_tan_negative() {
@@ -49,7 +43,6 @@ float test_tan_negative() {
     return tan(rt(-0.7853981633974483));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_tan_negative() ~= -1.0
 
 float test_tan_small() {
@@ -57,7 +50,6 @@ float test_tan_small() {
     return tan(rt(0.1));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_tan_small() ~= 0.10033467208545055
 
 vec2 test_tan_vec2() {
@@ -65,7 +57,6 @@ vec2 test_tan_vec2() {
     return tan(vec2(rt(0.0), rt(0.7853981633974483)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_tan_vec2() ~= vec2(0.0, 1.0)
 
 vec3 test_tan_vec3() {
@@ -73,7 +64,6 @@ vec3 test_tan_vec3() {
     return tan(vec3(rt(0.0), rt(0.7853981633974483), rt(3.141592653589793)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_tan_vec3() ~= vec3(0.0, 1.0, 0.0) (tolerance: 0.01)
 
 vec4 test_tan_vec4() {
@@ -81,7 +71,6 @@ vec4 test_tan_vec4() {
     return tan(vec4(rt(0.0), rt(0.7853981633974483), rt(3.141592653589793), rt(-0.7853981633974483)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_tan_vec4() ~= vec4(0.0, 1.0, 0.0, -1.0) (tolerance: 0.01)
 
 
