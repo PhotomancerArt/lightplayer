@@ -114,15 +114,28 @@ a week is an argument for a conformance suite. When a class accumulates
 entries, say so out loud — that is an architecture finding, not a
 bookkeeping fact.
 
-Saying it out loud: **`config-masked-defect` took three entries on
-2026-07-30**, all in `lpvm-native`'s shared register allocator, all
-latent for the entire life of the rv32-only era, and all made
-observable within hours of the Xtensa corpus landing. The finding is not
-"the allocator had bugs" — it is that a single-configuration test suite
-cannot falsify configuration-dependent code, however large it is
-(31,587 rv32 cases did not). The mitigation is a second configuration
-that overlaps where the first is disjoint, which is what the Xtensa
-targets now are.
+Saying it out loud: **`config-masked-defect` took five entries on
+2026-07-30**, all in `lpvm-native`, all latent for the entire life of the
+rv32-only era, and all made observable within hours of the Xtensa corpus
+landing. The finding is not "the allocator had bugs" — it is that a
+single-configuration test suite cannot falsify configuration-dependent
+code, however large it is (31,587 rv32 cases did not). The mitigation is
+a second configuration that overlaps where the first is disjoint, which
+is what the Xtensa targets now are.
+
+Four of the five are in the shared register allocator. The fifth — the
+integer div-by-zero trap — is worth separating, because it says the class
+is not confined to `regalloc/`. That one is in *lowering*, and the
+incidental property it leaned on was not a register layout but a
+**hardware semantic**: RV32M defines `x / 0` and `x % 0`, so emitting the
+bare divide was correct on rv32 for free. Its falsifying test also already
+existed — the corpus has pinned that contract for as long as it has
+existed; what was missing was a backend to run it against, plus
+documentation that told the backend author the guard obligation was
+somebody else's. The generalizable rule: when a contract is satisfied for
+free on the reference target, that is exactly when it must be stated as an
+obligation behind a named capability hook, because nothing in the code
+will ever remind you it was a choice.
 
 Saying it out loud again, one axis over: **`split-source-of-truth` and
 `config-masked-defect` are describing the same 2026-07-30 defects from two
@@ -140,12 +153,21 @@ worth keeping — but it splits a recurrence across buckets, which defeats the
 point of grouping. If a fourth of these lands, collapse the axes: class by the
 disagreement, record the masking mechanism as a field.
 
+A sharper sub-lesson from the fourth: three of the four were the *same
+invariant* — a call-boundary register transfer must behave as a parallel
+move — applied at three of its four sites. Each fix was correct and
+under-scoped. When a fix establishes an invariant, enumerate every place
+it applies before closing the entry; here that enumeration was one
+sentence (arguments in, returns out; registers and stack).
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
 | split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-two-value-return-clobber](2026-07-30-xtensa-two-value-return-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
+| config-masked-defect | 2026-07-30 | [xtensa-integer-div-by-zero-trap](2026-07-30-xtensa-integer-div-by-zero-trap.md) | fixed | lpvm-native lowering (lower.rs) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
 | backend-contract-divergence | 2026-07-27 | [created-package-unloadable](2026-07-27-created-package-unloadable.md) | fixed | lpa-studio-core/library |
@@ -157,9 +179,11 @@ disagreement, record the masking mechanism as a field.
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
 | state-conflation | 2026-07-26 | [worker-poisoned-instance-reuse](2026-07-26-worker-poisoned-instance-reuse.md) | fixed | fw-browser + lpa-link/browser-worker |
+| state-conflation | 2026-07-28 | [playlist-entry-selection](2026-07-28-playlist-entry-selection.md) | fixed | lpa-studio-core/project (node face derivation) |
 | assumed-context | 2026-07-17 | [storage-slot-assumed](2026-07-17-storage-slot-assumed.md) | fixed | lpa-studio-core/places |
 | assumed-context | 2026-07-23 | [deploy-dialog-ignores-running-project](2026-07-23-deploy-dialog-ignores-running-project.md) | fixed | lpa-studio-core/device |
 | assumed-context | 2026-07-27 | [launch-json-pinned-port](2026-07-27-launch-json-pinned-port.md) | fixed | dev tooling (launch.json + dev-port.sh) |
+| assumed-context | 2026-07-30 | [vacuity-guard-tripped-on-color](2026-07-30-vacuity-guard-tripped-on-color.md) | fixed | .github/workflows/pre-merge.yml (Xtensa gate) |
 | partial-knowledge-loss | 2026-07-22 | [identity-lost-on-failed-read](2026-07-22-identity-lost-on-failed-read.md) | fixed | lpa-studio-core/places+studio |
 | partial-knowledge-loss | 2026-07-23 | [reconnect-transient-twin-card](2026-07-23-reconnect-transient-twin-card.md) | fixed | lpa-studio-core/home + device |
 | policy-leak | 2026-07-17 | [hardware-attach-opened-editor](2026-07-17-hardware-attach-opened-editor.md) | fixed | lpa-studio-core/studio |

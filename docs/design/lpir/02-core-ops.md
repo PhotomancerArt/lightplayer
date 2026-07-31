@@ -39,7 +39,11 @@ Integer division and remainder never trap and follow RISC-V (RV32M) semantics fo
 - `irem_s` / `irem_u` with divisor `0` → the dividend
 - `idiv_s` of `i32::MIN` by `-1` (unrepresentable quotient) → `i32::MIN`; `irem_s` of `i32::MIN` by `-1` → `0`
 
-Backends whose native division traps on these inputs (WebAssembly, Cranelift) must emit guards to produce these results.
+Any backend whose native divide or remainder traps, faults, or produces a different value on these inputs must emit guards so the LPIR-level result matches. This currently applies to WebAssembly (`i32.div_s` traps), Cranelift (`sdiv` traps on both zero and `i32::MIN / -1`), and Xtensa (`QUOS`/`QUOU`/`REMS`/`REMU` raise `EXCCAUSE 6` on a zero divisor). The guard set differs per backend: Xtensa needs only the zero-divisor guard, since its divide already yields `i32::MIN` for `i32::MIN / -1` directly. RV32M hardware provides these results directly and needs no guard.
+
+This is a permanent contract, not specific to Q32: GLSL `int / int` is integer division in every float mode, so it holds unchanged under a future F32 mode. It is distinct from the Q32 *float* division-by-zero saturation rules in [`../q32.md`](../q32.md), which are Q32-scoped and do not apply under IEEE f32.
+
+See [`docs/adr/2026-07-30-integer-division-never-traps.md`](../../adr/2026-07-30-integer-division-never-traps.md) for why this contract was chosen and what it costs per backend.
 
 `fmod` is not a core operation; it is provided via import (for example `@std.math::fmod`).
 

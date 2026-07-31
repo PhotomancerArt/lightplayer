@@ -13,13 +13,15 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::core::status::UiStatusKind;
-use lpa_studio_core::{UiAction, UiNodeHeader, UiPendingEdit};
+use lpa_studio_core::{
+    NodeCopyOp, ProjectController, ProjectNodeAddress, UiAction, UiNodeHeader, UiPendingEdit,
+};
 
 use crate::app::affordance::affordance_trigger_style;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
 };
-use crate::base::{DetailPopover, DetailSection};
+use crate::base::{DetailPopover, DetailSection, StudioIcon, StudioIconName};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -43,6 +45,10 @@ pub(crate) fn NodeDetailPopover(
     let unsaved_entries = entries_in(&own_edits, PendingEditBucket::Persisted);
     let live_entries = entries_in(&own_edits, PendingEditBucket::Live);
     let failed_entries = entries_in(&own_edits, PendingEditBucket::Failed);
+    // The header path is the node address the copy op needs; a header
+    // whose path does not parse (never in production) simply offers no
+    // share row rather than dispatching a malformed op.
+    let copy_target = ProjectNodeAddress::parse(&header.path).ok();
     let forward = EventHandler::new(move |action: UiAction| {
         if let Some(handler) = on_action {
             handler.call(action);
@@ -103,6 +109,34 @@ pub(crate) fn NodeDetailPopover(
                     meta: dirty.failed.to_string(),
                     tint: bucket_section_tint(PendingEditBucket::Failed, dirty.failed),
                     PendingEditList { entries: failed_entries, on_action: forward }
+                }
+            }
+            // Sharing: copy this node (def + assets) as an `lp.node`
+            // envelope. Needs the node's address to read its files, so a
+            // header without a parseable path renders no share section.
+            if let Some(node) = copy_target {
+                DetailSection { title: "Share",
+                    button {
+                        class: "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-0 tw:py-0.5 tw:text-left tw:text-xs tw:text-muted-foreground tw:transition-colors tw:hover:text-strong-foreground",
+                        r#type: "button",
+                        title: "Copy this node and its assets to the clipboard.",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            forward.call(UiAction::from_op(
+                                ProjectController::NODE_ID,
+                                NodeCopyOp { node: node.clone() },
+                            ));
+                        },
+                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:flex-none tw:items-center tw:justify-center", aria_hidden: "true",
+                            StudioIcon { name: StudioIconName::Copy, size: 14 }
+                        }
+                        span { class: "tw:min-w-0 tw:truncate", "Copy JSON" }
+                    }
+                    if dirty.persisted > 0 {
+                        p { class: "tw:m-0 tw:pt-1 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
+                            "Copies the last saved version — this node has unsaved edits."
+                        }
+                    }
                 }
             }
         }

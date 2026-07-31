@@ -181,6 +181,32 @@ impl IsaTarget {
         }
     }
 
+    /// Whether this ISA's native integer divide/remainder **traps** when the
+    /// divisor is zero.
+    ///
+    /// LPIR requires integer division and remainder to never trap and to
+    /// follow RV32M semantics on the edge cases (`x / 0 == -1`, `x % 0 == x`) —
+    /// see `docs/design/lpir/02-core-ops.md` and
+    /// `docs/adr/2026-07-30-integer-division-never-traps.md`. RV32M defines
+    /// those results in hardware, so `Rv32imac` emits the bare instruction and
+    /// answers `false`.
+    ///
+    /// Xtensa's `QUOS`/`QUOU`/`REMS`/`REMU` raise `EXCCAUSE 6`
+    /// (`IntegerDivideByZero`) instead, so lowering must guard them
+    /// ([`crate::lower`]). Only the **zero divisor** needs guarding there:
+    /// Xtensa's divide already yields `i32::MIN` for `i32::MIN / -1` and `0`
+    /// for `i32::MIN % -1`, matching RV32M. Cranelift, by contrast, traps on
+    /// both and guards both — the guard set is per-ISA, which is why this is a
+    /// named property rather than an assumption baked into shared lowering.
+    pub fn integer_div_traps_on_zero(self) -> bool {
+        match self {
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac => false,
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => true,
+        }
+    }
+
     /// `object` crate Architecture for ELF emission.
     pub fn elf_architecture(self) -> Architecture {
         match self {
