@@ -1,6 +1,10 @@
 //! ESP32-S3 chip constants.
 
 /// Highest usable GPIO number on the ESP32-S3 (GPIO0..=GPIO48).
+///
+/// Gated like its only consumer, `crate::hardware` (the GPIO button driver):
+/// harness builds that compile neither would otherwise fail `-D dead_code`.
+#[cfg(any(not(fw_harness), feature = "test_button"))]
 pub const MAX_GPIO: u8 = 48;
 
 /// CPU clock as explicitly configured by every entrypoint, in Hz.
