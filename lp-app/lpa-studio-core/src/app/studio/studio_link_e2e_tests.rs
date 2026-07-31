@@ -2538,6 +2538,87 @@ fn coexisting_fixture(
 
 /// A studio whose link registry holds one fake provider with one scripted
 /// device endpoint. Returns the device handle for injection/assertions.
+/// M6, the whole point: a device's storage comes off as a ZIP through the
+/// REAL provider path — read raw, mounted in-process, archived — and the
+/// archive holds the files the board actually has.
+///
+/// The fake answers the raw read with a genuine littlefs image, so this
+/// exercises every step the hardware path takes except the serial bytes:
+/// dispatch, capability gate, mount, walk, manifest, zip, and the seq-gated
+/// hand-off to the shell.
+#[test]
+fn backing_up_a_device_publishes_a_zip_of_its_files() {
+    use std::io::Read;
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(vec![
+                (
+                    "project.json".to_string(),
+                    br#"{"kind":"Project","name":"sign","nodes":{}}"#.to_vec(),
+                ),
+                ("shader.glsl".to_string(), b"void main() {}".to_vec()),
+            ])
+            .with_identity(FakeDeviceIdentity::new(
+                "dev_bbbbbbbbbbbbbbbb",
+                "Bench board",
+            )),
+    ));
+    let (_store, host) = library();
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+    drive(studio.dispatch(device_action(DeviceOp::BackUpFilesystem))).expect("the backup succeeds");
+
+    let backup = studio
+        .view()
+        .home
+        .expect("the gallery is showing")
+        .backup
+        .expect("a finished backup rides the view");
+    assert_eq!(backup.seq, 1, "the first backup of the session");
+    assert!(
+        backup.file_name.starts_with("lightplayer-backup-bench-board-"),
+        "the file names itself after the device: {}",
+        backup.file_name
+    );
+
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(backup.bytes.as_ref())).expect("a zip archive");
+    let names: Vec<String> = (0..archive.len())
+        .map(|index| archive.by_index(index).unwrap().name().to_string())
+        .collect();
+    assert!(
+        names.contains(&"manifest.json".to_string()),
+        "the manifest is at the archive root: {names:?}"
+    );
+    assert!(
+        names.contains(&"files/projects/studio/shader.glsl".to_string()),
+        "device paths mirror verbatim under files/: {names:?}"
+    );
+    let mut shader = String::new();
+    archive
+        .by_name("files/projects/studio/shader.glsl")
+        .expect("the shader entry")
+        .read_to_string(&mut shader)
+        .expect("shader bytes");
+    assert_eq!(shader, "void main() {}");
+
+    // The identity hazard M7 has to detect: the captured uid is recorded, so
+    // a restore can tell it is about to clone a device.
+    let mut manifest_json = String::new();
+    archive
+        .by_name("manifest.json")
+        .expect("the manifest entry")
+        .read_to_string(&mut manifest_json)
+        .expect("manifest bytes");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_json).expect("the manifest parses");
+    assert_eq!(manifest["deviceUid"], "dev_bbbbbbbbbbbbbbbb");
+    assert_eq!(manifest["formatVersion"], 1);
+    assert_eq!(manifest["partitionOffset"], 0x0031_0000);
+}
+
 fn studio_with_fake_device(
     script: FakeDeviceScript,
 ) -> (StudioController, FakeEsp32Device, LinkEndpointId) {
