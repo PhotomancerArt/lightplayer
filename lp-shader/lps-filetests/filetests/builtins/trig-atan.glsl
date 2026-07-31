@@ -16,9 +16,6 @@ float test_atan_zero() {
     return atan(rt(0.0));
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_atan_zero() ~= 0.0
 
 float test_atan_one() {
@@ -26,7 +23,6 @@ float test_atan_one() {
     return atan(rt(1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan_one() ~= 0.7853981633974483
 
 float test_atan_neg_one() {
@@ -34,7 +30,6 @@ float test_atan_neg_one() {
     return atan(rt(-1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan_neg_one() ~= -0.7853981633974483
 
 float test_atan_large() {
@@ -42,7 +37,6 @@ float test_atan_large() {
     return atan(rt(1e10));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan_large() ~= 1.5707963267948966 (tolerance: 1.6)
 
 float test_atan_neg_large() {
@@ -50,7 +44,6 @@ float test_atan_neg_large() {
     return atan(rt(-1e10));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan_neg_large() ~= -1.5707963267948966 (tolerance: 1.6)
 
 // Two-argument versions
@@ -59,7 +52,6 @@ float test_atan2_first_quadrant() {
     return atan(rt(1.0), rt(1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan2_first_quadrant() ~= 0.7853981633974483
 
 float test_atan2_second_quadrant() {
@@ -67,7 +59,6 @@ float test_atan2_second_quadrant() {
     return atan(rt(1.0), rt(-1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan2_second_quadrant() ~= 2.356194490192345
 
 float test_atan2_third_quadrant() {
@@ -75,7 +66,6 @@ float test_atan2_third_quadrant() {
     return atan(rt(-1.0), rt(-1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan2_third_quadrant() ~= -2.356194490192345
 
 float test_atan2_fourth_quadrant() {
@@ -83,7 +73,6 @@ float test_atan2_fourth_quadrant() {
     return atan(rt(-1.0), rt(1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan2_fourth_quadrant() ~= -0.7853981633974483
 
 // Q32: atan2(0,0) must not use the div(0,0) fast-path (would saturate and
@@ -94,7 +83,6 @@ float test_atan2_both_zero_q32_stable() {
 
 // wgpu.f32: f32 GPU result diverges (undefined/edge-domain semantics)
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_atan2_both_zero_q32_stable() ~= 0.0
 
 vec2 test_atan_vec2() {
@@ -102,7 +90,6 @@ vec2 test_atan_vec2() {
     return atan(vec2(rt(0.0), rt(1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan_vec2() ~= vec2(0.0, 0.7853981633974483)
 
 vec3 test_atan_vec3() {
@@ -110,7 +97,6 @@ vec3 test_atan_vec3() {
     return atan(vec3(rt(0.0), rt(1.0), rt(-1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_atan_vec3() ~= vec3(0.0, 0.7853981633974483, -0.7853981633974483)
 
 

@@ -5936,6 +5936,7 @@ version = "40.0.0"
 name = "lps-builtins"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "log",
  "lpfn-impl-macro",
  "lps-builtin-ids",

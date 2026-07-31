@@ -530,13 +530,29 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> VecMap<String, CalleeRef> {
 }
 
 /// `@texture::*` sampler builtins (result pointer ABI; [`ImportDecl::sret`]).
+///
+/// The normalized coordinate lanes are declared `IrType::F32`; every other lane
+/// is an integer descriptor (extent, stride, filter/wrap ABI) or the texture
+/// pointer. Declaring the coordinates as `I32` — which they are *represented*
+/// as under Q32 — happened to work only because `IrType::F32` also lowers to a
+/// wasm `i32` in Fixed mode. In Float mode the call site pushes a real `f32`
+/// against an `(i32, …)` import and the module fails validation, which is how
+/// the texture family showed up as nine mysteriously-broken corpus files.
+/// Q32 lowering is unchanged: `F32` still maps to a Q16.16 `i32` word there.
 fn register_texture_imports(mb: &mut ModuleBuilder) -> VecMap<String, CalleeRef> {
     let mut m = VecMap::new();
-    let mut reg = |func_name: &str, user_param_count: usize| {
+    // Parameter indices of the normalized coordinates, per arity:
+    // 2D: (out, ptr, width, height, stride, u, v, filter, wrap_x, wrap_y)
+    // 1D: (out, ptr, width, stride, u, filter, wrap_x)
+    let mut reg = |func_name: &str, user_param_count: usize, coord_lanes: &[usize]| {
         let mut param_types = Vec::with_capacity(user_param_count);
         param_types.push(IrType::Pointer);
-        for _ in 1..user_param_count {
-            param_types.push(IrType::I32);
+        for i in 1..user_param_count {
+            param_types.push(if coord_lanes.contains(&i) {
+                IrType::F32
+            } else {
+                IrType::I32
+            });
         }
         let r = mb.add_import(ImportDecl {
             module_name: String::from("texture"),
@@ -549,10 +565,10 @@ fn register_texture_imports(mb: &mut ModuleBuilder) -> VecMap<String, CalleeRef>
         });
         m.insert(format!("texture::{func_name}"), r);
     };
-    reg("texture2d_rgba16_unorm", 10);
-    reg("texture1d_rgba16_unorm", 7);
-    reg("texture2d_r16_unorm", 10);
-    reg("texture1d_r16_unorm", 7);
+    reg("texture2d_rgba16_unorm", 10, &[5, 6]);
+    reg("texture1d_rgba16_unorm", 7, &[4]);
+    reg("texture2d_r16_unorm", 10, &[5, 6]);
+    reg("texture1d_r16_unorm", 7, &[4]);
     m
 }
 

@@ -5,11 +5,15 @@
 //!
 //! Reference: noise-rs library (https://github.com/Razaekel/noise-rs)
 
+#[cfg(feature = "float-f32")]
 pub mod worley2_f32;
 pub mod worley2_q32;
+#[cfg(feature = "float-f32")]
 pub mod worley2_value_f32;
 pub mod worley2_value_q32;
+#[cfg(feature = "float-f32")]
 pub mod worley3_f32;
 pub mod worley3_q32;
+#[cfg(feature = "float-f32")]
 pub mod worley3_value_f32;
 pub mod worley3_value_q32;

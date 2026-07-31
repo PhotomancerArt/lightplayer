@@ -114,7 +114,7 @@ pub(crate) fn encode_ir_function(
 
     func_ctx.slot_offsets = memory::slot_offsets(f);
     let slot_frame = memory::aligned_frame_size(f);
-    let result_buf = imports::max_result_ptr_buffer_bytes(ir, f);
+    let result_buf = imports::max_result_ptr_buffer_bytes(ir, f, mode);
     let (frame_size, result_buffer_base_offset) = if result_buf > 0 {
         (
             memory::align_up(slot_frame.saturating_add(result_buf), memory::FRAME_ALIGN),
