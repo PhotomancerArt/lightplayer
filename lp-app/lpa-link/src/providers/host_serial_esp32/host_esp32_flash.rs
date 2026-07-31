@@ -22,9 +22,11 @@ use espflash::targets::Chip;
 use serde::Deserialize;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 
+use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, BootFlags, encode_write_order};
+
 use crate::{
-    LinkEraseDeviceResult, LinkError, LinkFirmwareFlashResult, LinkFirmwareManifest,
-    LinkManagementEvent, LinkManagementEventSink, LinkManagementProgress,
+    LinkBootControlResult, LinkEraseDeviceResult, LinkError, LinkFirmwareFlashResult,
+    LinkFirmwareManifest, LinkManagementEvent, LinkManagementEventSink, LinkManagementProgress,
 };
 
 /// Chip this provider flashes. The firmware package targets the ESP32-C6
@@ -109,6 +111,55 @@ pub(super) fn erase_device_flash(
     recorder.log("Erase complete");
 
     Ok(LinkEraseDeviceResult {
+        chip_name,
+        logs: recorder.logs.clone(),
+        progress: recorder.progress.clone(),
+    })
+}
+
+/// Write the boot-control sector, instructing the device's next boot.
+///
+/// The sector is erased and then written **payload first, magic last** —
+/// NOR flash cannot publish a record with one atomic word flip, so the
+/// ordering is what makes an interrupted write safe: the device sees either
+/// no magic (blank) or a magic whose CRC fails, and boots normally either
+/// way. `lp_bootctl::encode_write_order` owns that ordering; do not
+/// reassemble the record here.
+pub(super) fn write_boot_control(
+    port_name: &str,
+    flags: BootFlags,
+    events: &LinkManagementEventSink,
+) -> Result<LinkBootControlResult, LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    recorder.log(format!(
+        "Writing boot-control record (flags {:#010x})",
+        flags.bits()
+    ));
+
+    let mut flasher = connect(port_name, &mut recorder)?;
+    let chip_name = chip_name(&mut flasher);
+
+    recorder.progress(LinkManagementProgress::new("Erasing boot-control sector"));
+    flasher
+        .erase_region(BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE)
+        .map_err(|error| LinkError::other(format!("boot-control erase failed: {error}")))?;
+
+    let order = encode_write_order(flags);
+    recorder.progress(LinkManagementProgress::new("Writing boot-control record"));
+    for (label, (offset, bytes)) in [("payload", order.payload()), ("magic", order.magic())] {
+        flasher
+            .write_bin_to_flash(BOOTCTL_PARTITION_OFFSET + offset as u32, bytes, None)
+            .map_err(|error| {
+                LinkError::other(format!("boot-control {label} write failed: {error}"))
+            })?;
+    }
+    recorder.progress(LinkManagementProgress::new("Writing boot-control record").with_percent(100));
+
+    reset_into_app(&mut flasher, &mut recorder);
+    recorder.log("Boot-control record written; it applies on the next restart");
+
+    Ok(LinkBootControlResult {
+        flags: flags.bits(),
         chip_name,
         logs: recorder.logs.clone(),
         progress: recorder.progress.clone(),

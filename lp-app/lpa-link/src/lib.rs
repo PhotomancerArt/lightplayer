@@ -32,8 +32,8 @@ pub use provider::management_event::{
 pub use provider::management_progress::LinkManagementProgress;
 pub use provider::management_request::LinkManagementRequest;
 pub use provider::management_result::{
-    LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest, LinkManagementResult,
-    LinkRawFilesystemEraseResult,
+    LinkBootControlResult, LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest,
+    LinkManagementResult, LinkRawFilesystemEraseResult,
 };
 pub use provider::operation::{LinkCapabilities, LinkOperation};
 pub use provider::provider::LinkProvider;

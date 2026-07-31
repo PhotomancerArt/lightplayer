@@ -5,8 +5,9 @@ use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::provider::session::LinkSessionId;
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
-    LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity, LinkEndpoint,
-    LinkError, LinkLogEntry, LinkLogLevel, LinkProvider, LinkSession, LinkSessionStatus,
+    LinkBootControlResult, LinkConnection, LinkConnectionKind, LinkDiagnostic,
+    LinkDiagnosticSeverity, LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkProvider,
+    LinkSession, LinkSessionStatus,
 };
 
 pub fn descriptor() -> LinkProviderDescriptor {
@@ -121,7 +122,8 @@ impl FakeProvider {
                 .with_capabilities(
                     LinkCapabilities::esp32_serial_base()
                         .with_flash()
-                        .with_device_erase(),
+                        .with_device_erase()
+                        .with_boot_control(),
                 ),
         );
         self.devices.insert(
@@ -448,6 +450,25 @@ fn manage_fake_device(
                     chip_name: Some("ESP32-C6 (fake)".to_string()),
                     logs: vec!["fake erase: scripted transition to blank flash".to_string()],
                     progress: vec![LinkManagementProgress::new("Erasing flash").with_percent(100)],
+                },
+            ))
+        }
+        LinkManagementRequest::SetBootControl { flags } => {
+            // The fake device has no flash; echoing the flags is enough to
+            // exercise dispatch, capability gating, and the UX arm without
+            // hardware. The record's *encoding* is covered by lp-bootctl's
+            // golden vector, not here.
+            Ok(LinkManagementResult::SetBootControl(
+                LinkBootControlResult {
+                    flags,
+                    chip_name: Some("ESP32-C6 (fake)".to_string()),
+                    logs: vec![format!(
+                        "fake boot-control: recorded flags {flags:#010x} for the next boot"
+                    )],
+                    progress: vec![
+                        LinkManagementProgress::new("Writing boot-control record")
+                            .with_percent(100),
+                    ],
                 },
             ))
         }
