@@ -191,8 +191,12 @@ fn PowerReadout(power: lpa_studio_core::UiFixturePower) -> Element {
         div {
             class: "tw:mt-2 tw:flex tw:items-baseline tw:gap-2 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
             title,
-            span { "≈{power.estimated_draw_ma} mA" }
-            span { class: "tw:text-dim-foreground", "of {power.budget_ma} mA · {percent}%" }
+            // Nested so the row's gap falls only before the limiting chip —
+            // the slash has to butt against the estimate to read as one figure.
+            span {
+                span { "≈{power.estimated_draw_ma}" }
+                span { class: "tw:text-dim-foreground", "/{power.budget_ma} mA ({percent}%)" }
+            }
             if limiting {
                 span { class: "tw:text-status-attention-foreground",
                     "limiting to {(power.scale * 100.0).round() as u32}%"
