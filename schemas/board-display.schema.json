@@ -1,0 +1,424 @@
+{
+  "$defs": {
+    "BoardDrawing": {
+      "description": "The drawing block the row-engine diagram renderer consumes.\n\nGeometry is in board-local units; the renderer derives every other size\nfrom the pin pitch (`u`). See `spikes/hardware-boards/DESIGN-LANGUAGE.md`\n(moving to `docs/design/board-diagrams.md` with the renderer milestone).",
+      "properties": {
+        "buttons": {
+          "items": {
+            "$ref": "#/$defs/DrawnButton"
+          },
+          "type": "array"
+        },
+        "left": {
+          "items": {
+            "$ref": "#/$defs/DrawnPin"
+          },
+          "type": "array"
+        },
+        "module": {
+          "$ref": "#/$defs/DrawnModule"
+        },
+        "rgb": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DrawnRgb"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "right": {
+          "items": {
+            "$ref": "#/$defs/DrawnPin"
+          },
+          "type": "array"
+        },
+        "terminals": {
+          "description": "Top-edge screw terminals (band rows + leader lines).",
+          "items": {
+            "$ref": "#/$defs/DrawnTerminal"
+          },
+          "type": "array"
+        },
+        "usb": {
+          "items": {
+            "$ref": "#/$defs/DrawnUsb"
+          },
+          "type": "array"
+        },
+        "width": {
+          "description": "Board width in drawing units. Height derives from pin counts.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "module",
+        "left",
+        "right"
+      ],
+      "type": "object"
+    },
+    "CapKind": {
+      "description": "Cell type: drives the capability cell's color family.",
+      "oneOf": [
+        {
+          "enum": [
+            "adc",
+            "dac",
+            "touch",
+            "spi",
+            "i2c",
+            "uart",
+            "usb",
+            "strap",
+            "pwr",
+            "note"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "warn",
+          "description": "Caution: input-only, XTAL, PSRAM-reserved, JTAG, onboard LED.",
+          "type": "string"
+        }
+      ]
+    },
+    "DrawnButton": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        },
+        "y": {
+          "description": "Negative y = offset from the board's bottom edge.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "label"
+      ],
+      "type": "object"
+    },
+    "DrawnModule": {
+      "description": "The SoC module / can outline.",
+      "properties": {
+        "antenna": {
+          "default": false,
+          "type": "boolean"
+        },
+        "h": {
+          "format": "float",
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "w": {
+          "format": "float",
+          "type": "number"
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        },
+        "y": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h",
+        "label"
+      ],
+      "type": "object"
+    },
+    "DrawnPin": {
+      "description": "One header pin on a left/right rail.",
+      "properties": {
+        "caps": {
+          "items": {
+            "$ref": "#/$defs/PinCap"
+          },
+          "type": "array"
+        },
+        "gpio": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "label": {
+          "description": "Silkscreen label (\"4\", \"3V3\", \"D10\", \"RST\").",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/PinRole"
+        }
+      },
+      "required": [
+        "label",
+        "role"
+      ],
+      "type": "object"
+    },
+    "DrawnRgb": {
+      "properties": {
+        "gpio": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        },
+        "y": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "DrawnTerminal": {
+      "description": "A top-edge screw terminal. Terminal rows keep a leading name cell because\nthere is no inside-the-board space for their labels.",
+      "properties": {
+        "caps": {
+          "items": {
+            "$ref": "#/$defs/PinCap"
+          },
+          "type": "array"
+        },
+        "gpio": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/PinRole"
+        }
+      },
+      "required": [
+        "label",
+        "role"
+      ],
+      "type": "object"
+    },
+    "DrawnUsb": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "label"
+      ],
+      "type": "object"
+    },
+    "PinCap": {
+      "description": "A capability cell in the pin's row (\"ADC1_3\", \"Touch4\", \"U0_TXD\").",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/CapKind"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PinRole": {
+      "description": "Pin role: drives pad/label color and output eligibility.\n\nOutput-eligible for LED discovery: `io` and `strap` only.",
+      "oneOf": [
+        {
+          "enum": [
+            "pwr5",
+            "pwr3",
+            "gnd",
+            "io",
+            "nc"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "io-in",
+          "description": "Input-only (classic ESP32 34-39).",
+          "type": "string"
+        },
+        {
+          "const": "strap",
+          "description": "Boot-strap pin: usable, with care.",
+          "type": "string"
+        },
+        {
+          "const": "usb",
+          "description": "USB D+/D- — driving it drops the link.",
+          "type": "string"
+        },
+        {
+          "const": "ctl",
+          "description": "EN / RST.",
+          "type": "string"
+        },
+        {
+          "const": "rsvd",
+          "description": "Connected but reserved (in-package flash/PSRAM pins on boards that\nexpose them). Never claimable, never discovery-eligible.",
+          "type": "string"
+        }
+      ]
+    },
+    "PurchaseUrl": {
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "href"
+      ],
+      "type": "object"
+    },
+    "SupportTier": {
+      "description": "Support tier shown on the catalog. Definitions live in\n`lp-core/lpc-hardware/boards/README.md`.",
+      "oneOf": [
+        {
+          "const": "gold",
+          "description": "First-class: tested every release.",
+          "type": "string"
+        },
+        {
+          "const": "silver",
+          "description": "Supported: tested occasionally.",
+          "type": "string"
+        },
+        {
+          "const": "bronze",
+          "description": "Community-verified: should work.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/board-display.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One board's display sidecar (`<vendor>/<product>.display.json`).",
+  "properties": {
+    "blurb": {
+      "type": "string"
+    },
+    "board_id": {
+      "description": "Must equal the sibling runtime manifest id and the `vendor/product`\nfile path stem.",
+      "type": "string"
+    },
+    "capabilities": {
+      "description": "Catalog capability chips (\"Wi-Fi 6\", \"level shifter\", ...).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "family": {
+      "description": "Filter family for the provisioning picker: \"esp32\", \"esp32s3\",\n\"esp32c6\". Kept a plain string so display data never gates on firmware\ntarget enums.",
+      "type": "string"
+    },
+    "flash": {
+      "type": "string"
+    },
+    "hw": {
+      "$ref": "#/$defs/BoardDrawing"
+    },
+    "manufacturer": {
+      "type": "string"
+    },
+    "price_usd": {
+      "description": "Approximate street price, USD, for catalog sorting.",
+      "format": "double",
+      "type": "number"
+    },
+    "psram": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "purchase_urls": {
+      "items": {
+        "$ref": "#/$defs/PurchaseUrl"
+      },
+      "type": "array"
+    },
+    "soc": {
+      "description": "Human SoC name, e.g. \"ESP32-C6\".",
+      "type": "string"
+    },
+    "support_note": {
+      "description": "Honest support caveat shown with the tier, e.g. \"runs when classic\nESP32 firmware lands\".",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tier": {
+      "$ref": "#/$defs/SupportTier"
+    }
+  },
+  "required": [
+    "board_id",
+    "display_name",
+    "manufacturer",
+    "soc",
+    "family",
+    "flash",
+    "price_usd",
+    "tier",
+    "blurb",
+    "hw"
+  ],
+  "title": "BoardDisplayFile",
+  "type": "object"
+}

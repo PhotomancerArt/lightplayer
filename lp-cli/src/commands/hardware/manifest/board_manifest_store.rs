@@ -40,6 +40,15 @@ impl BoardManifestStore {
                 if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                     continue;
                 }
+                // `<product>.display.json` sidecars are catalog metadata owned
+                // by lpa-boards, not runtime manifests.
+                if path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.ends_with(".display.json"))
+                {
+                    continue;
+                }
                 let manifest = self.load_path(&path)?;
                 out.push(BoardManifestSummary {
                     id: manifest.id,

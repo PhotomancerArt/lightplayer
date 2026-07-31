@@ -5290,6 +5290,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lp-shader",
+ "lpa-boards",
  "lpa-client",
  "lpa-link",
  "lpa-server",
@@ -5555,6 +5556,16 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "lpa-boards"
+version = "40.0.0"
+dependencies = [
+ "lpc-hardware",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
