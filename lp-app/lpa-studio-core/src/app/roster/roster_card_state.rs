@@ -65,9 +65,27 @@ pub enum RosterCardState {
         /// Why the content didn't parse (manifest error detail).
         detail: String,
     },
-    /// Blank/erased flash (or ROM download mode): provisioning turns it
-    /// into a Device. Amber solid.
+    /// Blank/erased flash: provisioning turns it into a Device. Amber
+    /// solid.
     ReadyToSetUp,
+    /// The chip is sitting in ROM download mode. Amber solid.
+    ///
+    /// Split out of [`Self::ReadyToSetUp`] 2026-07-31 (bench report): the
+    /// two were collapsed, so Studio detected download mode and then threw
+    /// the fact away. They are not the same situation and they do not want
+    /// the same verbs.
+    ///
+    /// Users arrive here three ways — a new board that will not talk
+    /// normally, a board whose existing firmware interferes with flashing,
+    /// or a device they are trying to rescue — but the verbs are the same
+    /// for all three, so this presents ONE flow rather than branching.
+    ///
+    /// The load-bearing difference from `ReadyToSetUp`: **a device flashed
+    /// from here does not boot the new firmware on its own.** It has to be
+    /// physically unplugged and replugged. So the recovery flash ends on an
+    /// instruction, not on an auto-reconnect that would fail and report a
+    /// successful flash as a failure.
+    RecoveryMode,
     /// Recognized non-LightPlayer firmware, safe to replace. Amber solid.
     OtherFirmware,
     /// Speaks the wire framing but not this build's protocol: reflash is
@@ -120,6 +138,7 @@ impl RosterCardState {
             | Self::EditedOnDevice { .. }
             | Self::Degraded { .. }
             | Self::ReadyToSetUp
+            | Self::RecoveryMode
             | Self::OtherFirmware
             | Self::NeedsFirmwareUpdate
             | Self::NeedsAName
@@ -169,6 +188,9 @@ impl RosterCardState {
             Self::ConnectedEmpty => "Connected — nothing loaded".to_string(),
             Self::HoldsUnreadableData { .. } => "Holds unreadable data".to_string(),
             Self::ReadyToSetUp => "Ready to set up".to_string(),
+            // "Bootloader" is our word, not the user's; the technical term
+            // stays available on the rich object.
+            Self::RecoveryMode => "Recovery mode".to_string(),
             Self::OtherFirmware => "Other firmware detected".to_string(),
             Self::NeedsFirmwareUpdate => "Needs a firmware update".to_string(),
             Self::NeedsAName => "Needs a name".to_string(),
@@ -231,6 +253,11 @@ impl RosterCardState {
             // wipe the unreadable content, land on "nothing loaded".
             Self::HoldsUnreadableData { .. } => Some(RosterAffordance::WipeProject),
             Self::ReadyToSetUp | Self::OtherFirmware => Some(RosterAffordance::SetUp),
+            // Not SetUp: this is not a normal provisioning. The recovery
+            // flash has a different ending (replug), and a device here may
+            // hold data the user came to rescue — so the headline verb must
+            // not be the one that erases it.
+            Self::RecoveryMode => Some(RosterAffordance::Troubleshoot),
             Self::NeedsFirmwareUpdate => Some(RosterAffordance::UpdateFirmware),
             Self::NeedsAName => Some(RosterAffordance::NameDevice),
             Self::Offline { .. } => Some(RosterAffordance::Reconnect),

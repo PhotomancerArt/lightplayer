@@ -265,6 +265,14 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
             .is_some()
             .then_some(DeviceDetailAffordance::ForgetDevice)
     };
+    // Troubleshoot is offered in EVERY state (2026-07-31). It used to hang
+    // off NotResponding alone, which is the wrong gate: the states where a
+    // user most needs the recovery flow are the ones where the ladder ended
+    // somewhere else — a board in download mode presents as Recovery mode,
+    // not as Not-responding, and had no path to it at all. The danger zone
+    // is already present in every state, so it is the natural permanent
+    // home for the recovery verbs.
+    let troubleshoot = || DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot);
     let affordances = match input.state {
         RosterCardState::Offline { .. }
         | RosterCardState::ConnectingRetrying { .. }
@@ -296,9 +304,17 @@ fn danger_section(input: &DeviceRichInput<'_>) -> Option<RichSection<DeviceDetai
             rows
         }
     };
+    // "Always available" means "wherever the danger zone exists". Working
+    // states deliberately have no danger zone at all — and troubleshooting
+    // mid-operation would want the wire the operation is already holding —
+    // so an empty list still means no section, not a section with one row.
     if affordances.is_empty() {
         return None;
     }
+    // Prepend: it is the non-destructive row, above the destructive verbs.
+    let affordances: Vec<_> = core::iter::once(troubleshoot())
+        .chain(affordances)
+        .collect();
     Some(RichSection {
         title: "Danger zone".to_string(),
         // Neutral by construction: Danger weight never colors the rollup;
@@ -344,6 +360,10 @@ mod tests {
         assert_eq!(
             danger.affordances,
             vec![
+                // Troubleshoot leads the danger zone in EVERY state
+                // (2026-07-31) — recovery must not be gated on the ladder
+                // having ended on Not-responding.
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
                 DeviceDetailAffordance::Roster(RosterAffordance::WipeProject),
                 DeviceDetailAffordance::FlashFirmware,
                 DeviceDetailAffordance::EraseDevice,
@@ -372,7 +392,10 @@ mod tests {
         );
         assert_eq!(
             view.sections.last().unwrap().affordances,
-            vec![DeviceDetailAffordance::ForgetDevice]
+            vec![
+                DeviceDetailAffordance::Roster(RosterAffordance::Troubleshoot),
+                DeviceDetailAffordance::ForgetDevice
+            ]
         );
     }
 
