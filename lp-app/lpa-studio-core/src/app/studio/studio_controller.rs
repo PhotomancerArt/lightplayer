@@ -2066,6 +2066,7 @@ impl StudioController {
             }
             DeviceOp::WipeProject => self.wipe_project().await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
+            DeviceOp::BootSafeOnce => self.boot_safe_once(updates).await,
             DeviceOp::RefreshConnections => {
                 // Drop the session (no provider close) + catalog refresh.
                 self.device.refresh_provider_catalog();
@@ -4093,6 +4094,34 @@ impl StudioController {
         )))
     }
 
+    /// Write the boot-control record so the next restart skips project
+    /// auto-load.
+    ///
+    /// Deliberately gentler than [`Self::reset_to_blank`]: nothing is erased,
+    /// so the lens is not severed and the user keeps their project. The
+    /// device consumes the record as it boots, so this affects exactly one
+    /// restart.
+    async fn boot_safe_once(&mut self, updates: UxUpdateSink) -> UiResult {
+        self.run_device_management(
+            ManagementFlowSpec {
+                request: LinkManagementRequest::boot_safe_once(),
+                progress_label: "Arming safe start",
+                reconnect_detail: "Restarting without the project",
+                failed_exit_label: "Back to device",
+                record_captured_logs_on_success: false,
+                done_notice: boot_safe_once_notice,
+                degrade_subject: "safe start armed",
+                server_reconnect_failed_notice:
+                    "Safe start armed; reconnect after the device finishes booting",
+                // Nothing is erased — the project is still on the device and
+                // the editor's lens stays valid.
+                severs_lens: false,
+            },
+            updates,
+        )
+        .await
+    }
+
     async fn reset_to_blank(&mut self, updates: UxUpdateSink) -> UiResult {
         self.run_device_management(
             ManagementFlowSpec {
@@ -4661,6 +4690,18 @@ fn provision_notice(result: &LinkManagementResult) -> UiNotice {
         }
         _ => UiNotice::info("Firmware flashed"),
     }
+}
+
+fn boot_safe_once_notice(result: &LinkManagementResult) -> UiNotice {
+    let label = match result {
+        LinkManagementResult::SetBootControl(result) => {
+            result.chip_name.as_deref().unwrap_or("This device")
+        }
+        _ => "This device",
+    };
+    UiNotice::info(format!(
+        "{label} will start once without its project. The restart after that is normal."
+    ))
 }
 
 fn reset_notice(result: &LinkManagementResult) -> UiNotice {
