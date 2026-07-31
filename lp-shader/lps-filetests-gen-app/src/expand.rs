@@ -331,7 +331,11 @@ fn generate_all_specs_for_type_and_dimension(
 }
 
 /// Find the filetests directory.
-fn find_filetests_dir() -> Result<PathBuf> {
+///
+/// Single source of truth for the corpus location: the generator resolves its
+/// output paths through this too, so expansion and writing can never disagree
+/// about which checkout they are operating on.
+pub fn find_filetests_dir() -> Result<PathBuf> {
     let candidates = vec![
         PathBuf::from("../../lps-filetests/filetests"),
         PathBuf::from("lps-filetests/filetests"),
