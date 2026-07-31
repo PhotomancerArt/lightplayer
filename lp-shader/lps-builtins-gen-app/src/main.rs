@@ -1574,43 +1574,50 @@ fn generate_jit_builtin_ptr(path: &Path, builtins: &[BuiltinInfo]) {
 
 //! Machine code pointers for builtins (JIT / native link).
 //!
-//! The native-f32 family is behind the `float-f32` feature. With the feature
-//! off those ids have no implementation linked, and asking for one is a
-//! programming error in the caller (it compiled an f32 module against a
-//! Fixed-only builtin image), so the lookup aborts rather than handing back a
-//! null pointer for the JIT to call.
+//! Returns `Option` rather than a raw address because the native-f32 family is
+//! behind the `float-f32` feature: with the feature off those ids have no
+//! implementation linked, and there is no address to hand back.
+//!
+//! It must not panic on a missing one. Callers populate their symbol table by
+//! walking `BuiltinId::all()`, so a Fixed-only firmware image asks for every
+//! f32 id on the way past — aborting there took down `fw-emu` at boot, from a
+//! feature gate that was supposed to be invisible to it. Skipping the entry
+//! instead turns a shader that genuinely needs an f32 builtin into a named
+//! "unknown builtin symbol" relocation failure.
 
 use lps_builtin_ids::BuiltinId;
 
-/// Address of the `extern "C"` implementation for `builtin` (for auipc+jalr relocation targets).
+/// Address of the `extern "C"` implementation for `builtin` (for auipc+jalr
+/// relocation targets), or `None` when that builtin is not linked into this
+/// image.
 #[must_use]
-pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> *const u8 {
+pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> Option<*const u8> {
     match builtin {
 "#,
     );
 
+    // Every variant gets an explicit arm in **both** feature configurations —
+    // an f32 arm that resolves and an f32 arm that answers `None` — rather than
+    // gating the resolving arms and mopping up with `_ => None`. A wildcard here
+    // is one `#[cfg]` mistake away from silently swallowing Q32 ids too, and the
+    // symptom of that is a firmware whose shaders all fail to link.
     for b in builtins {
+        let resolved = format!(
+            "        BuiltinId::{} => Some(crate::builtins::{}::{} as *const u8),\n",
+            b.enum_variant, b.module_path, b.function_name
+        );
         if b.builtin_mode.as_deref() == Some("f32") {
             output.push_str("        #[cfg(feature = \"float-f32\")]\n");
+            output.push_str(&resolved);
+            output.push_str("        #[cfg(not(feature = \"float-f32\"))]\n");
+            output.push_str(&format!("        BuiltinId::{} => None,\n", b.enum_variant));
+        } else {
+            output.push_str(&resolved);
         }
-        output.push_str(&format!(
-            "        BuiltinId::{} => crate::builtins::{}::{} as *const u8,\n",
-            b.enum_variant, b.module_path, b.function_name
-        ));
     }
 
     output.push_str(
-        r#"        #[cfg(not(feature = "float-f32"))]
-        _ => f32_family_not_linked(),
-    }
-}
-
-/// A native-f32 builtin was requested from an image built without `float-f32`.
-#[cfg(not(feature = "float-f32"))]
-#[cold]
-#[inline(never)]
-fn f32_family_not_linked() -> ! {
-    panic!("native-f32 builtin requested but the `float-f32` feature is off")
+        r#"    }
 }
 "#,
     );
