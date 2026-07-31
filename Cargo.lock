@@ -5642,6 +5642,7 @@ dependencies = [
  "lp-gfx-lpvm",
  "lp-perf",
  "lp-recovery",
+ "lpa-client",
  "lpc-engine",
  "lpc-hardware",
  "lpc-history",
