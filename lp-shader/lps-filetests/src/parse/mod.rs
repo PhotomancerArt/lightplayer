@@ -59,6 +59,53 @@ fn strip_block_comment_fragments(line: &str, in_block_comment: &mut bool) -> Str
     out
 }
 
+/// Directive comments that can never serve as a `@broken` reason.
+const DIRECTIVE_COMMENT_PREFIXES: &[&str] = &[
+    "test ",
+    "target ",
+    "run:",
+    "run[",
+    "#run:",
+    "#compile:",
+    "#transform:",
+    "set_uniform:",
+    "compile-opt",
+    "texture-spec:",
+    "texture-data:",
+    "expected-error",
+    "EXPECT_TRAP",
+    "EXPECT_SETUP_FAILURE",
+];
+
+/// True if a plain prose comment sits immediately above line index `idx`.
+///
+/// This is the `@broken` reason rule: `// <why>` on the line above (other
+/// annotations in the same block are transparent, so one reason covers a whole
+/// stacked block). A blank line, a code line, a directive comment, or a
+/// decorative rule such as `// =====` ends the block and leaves the annotation
+/// unexplained.
+fn has_reason_above(lines: &[String], idx: usize) -> bool {
+    let mut j = idx;
+    while j > 0 {
+        j -= 1;
+        let trimmed = lines[j].trim();
+        if trimmed.starts_with("// @") {
+            continue;
+        }
+        let Some(body) = trimmed.strip_prefix("//") else {
+            return false;
+        };
+        let body = body.trim();
+        if body.is_empty() || !body.chars().any(|c| c.is_alphanumeric()) {
+            return false;
+        }
+        return !DIRECTIVE_COMMENT_PREFIXES
+            .iter()
+            .any(|p| body.starts_with(p));
+    }
+    false
+}
+
 /// Parse a test file and extract all directives and source code.
 pub fn parse_test_file(path: &Path) -> Result<TestFile> {
     let contents = std::fs::read_to_string(path)
@@ -136,7 +183,15 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
             continue;
         }
 
-        if let Ok(Some(annotation)) = parse_annotation::parse_annotation_line(&logical, line_number)
+        // A malformed annotation is an error, never a skipped line: a selector
+        // that silently matched nothing is how a disposition rots into a
+        // surprise red months later.
+        if let Some(annotation) = parse_annotation::parse_annotation_line(
+            &logical,
+            line_number,
+            has_reason_above(&lines, i),
+        )
+        .with_context(|| format!("{}", path.display()))?
         {
             pending_annotations.push(annotation);
             i += 1;
@@ -249,6 +304,12 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         config_overrides,
         texture_specs,
         texture_fixtures,
+        // Annotations no `// run:` claimed. In a `// test compile` file there
+        // are no run directives at all, so this is the file's whole disposition
+        // set — the mechanism that makes compile-only files triageable per
+        // target. In a `// test run` file it is normally empty, and nothing
+        // consults it.
+        file_annotations: pending_annotations,
     })
 }
 
@@ -357,6 +418,94 @@ float f() { return 1.0; }
         let _ = std::fs::remove_file(&p2);
         let err = r.err().expect("unknown mode must error").to_string();
         assert!(err.contains("bogus"), "unexpected error: {err}");
+    }
+
+    fn parse_source(name: &str, contents: &str) -> Result<TestFile> {
+        let p = std::env::temp_dir().join(format!("lps_ft_{name}_{}.glsl", std::process::id()));
+        std::fs::write(&p, contents).unwrap();
+        let r = parse_test_file(&p);
+        let _ = std::fs::remove_file(&p);
+        r
+    }
+
+    /// The whole point of the selector vocabulary: a typo must be loud. Before
+    /// this, `parse_test_file` swallowed the error and the annotation silently
+    /// did nothing — which is how 37 `@ignore(...)` lines sat inert for months.
+    #[test]
+    fn unknown_axis_value_fails_the_file() {
+        let err = parse_source(
+            "bad_axis",
+            "// test run\n// @unsupported(float_mode=f64)\nfloat f() { return 1.0; }\n// run: f() ~= 1.0\n",
+        )
+        .err()
+        .expect("unknown value must fail the file")
+        .chain()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(": ");
+        assert!(err.contains("line 2"), "{err}");
+    }
+
+    #[test]
+    fn valid_predicate_parses_and_binds_to_the_next_run() {
+        let tf = parse_source(
+            "good_pred",
+            "// test run\nfloat f() { return 1.0; }\n// @unsupported(frontend!=lp)\n// run: f() ~= 1.0\n",
+        )
+        .unwrap();
+        assert_eq!(tf.run_directives[0].annotations.len(), 1);
+        assert!(tf.file_annotations.is_empty());
+    }
+
+    #[test]
+    fn broken_needs_a_reason_line_above_it() {
+        let err = parse_source(
+            "no_reason",
+            "// test run\nfloat f() { return 1.0; }\n\n// @broken(wasm.q32)\n// run: f() ~= 1.0\n",
+        )
+        .err()
+        .expect("unexplained @broken must fail")
+        .chain()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(": ");
+        assert!(err.contains("line 4"), "{err}");
+        assert!(err.contains("no reason"), "{err}");
+
+        let tf = parse_source(
+            "with_reason",
+            "// test run\nfloat f() { return 1.0; }\n\n// wasm rounds the wrong way here\n// @broken(wasm.q32)\n// run: f() ~= 1.0\n",
+        )
+        .unwrap();
+        assert_eq!(tf.run_directives[0].annotations.len(), 1);
+    }
+
+    /// One reason covers a whole stacked block — other annotations between the
+    /// reason and the `@broken` are transparent.
+    #[test]
+    fn reason_carries_through_a_stacked_block() {
+        let tf = parse_source(
+            "stacked",
+            "// test run\nfloat f() { return 1.0; }\n\n// naga miscompiles this builtin\n// @unsupported(wgpu.f32)\n// @broken(frontend!=lp)\n// run: f() ~= 1.0\n",
+        )
+        .unwrap();
+        assert_eq!(tf.run_directives[0].annotations.len(), 2);
+    }
+
+    /// A directive comment is not prose and must not satisfy the reason rule.
+    #[test]
+    fn a_directive_comment_is_not_a_reason() {
+        let err = parse_source(
+            "fake_reason",
+            "// test run\nfloat f() { return 1.0; }\n// run: f() ~= 1.0\n// @broken(wasm.q32)\n// run: f() ~= 1.0\n",
+        )
+        .err()
+        .expect("a `// run:` line above is not an explanation")
+        .chain()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(": ");
+        assert!(err.contains("no reason"), "{err}");
     }
 
     #[test]
