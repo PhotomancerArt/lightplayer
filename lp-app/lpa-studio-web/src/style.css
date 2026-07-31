@@ -594,6 +594,16 @@ label:has(> input:not(:disabled)) {
     border-color: var(--studio-status-bound-border);
 }
 
+/* Engaged (panel.md P2 latch): a panel writer holds this channel. Amber,
+   never the bound violet — bound means "wired", engaged means "captured". */
+.ux-hfader.is-engaged::-webkit-slider-thumb {
+    border-color: var(--studio-status-attention-border);
+}
+
+.ux-hfader.is-engaged::-moz-range-thumb {
+    border-color: var(--studio-status-attention-border);
+}
+
 /* Transitional CSS for story-only editor and exploration surfaces.
    Production Studio components should prefer semantic Tailwind classes. */
 
