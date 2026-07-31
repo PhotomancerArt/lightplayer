@@ -77,7 +77,6 @@ float test_atan2_fourth_quadrant() {
 
 // Q32: atan2(0,0) must not use the div(0,0) fast-path (would saturate and
 // trash the polynomial). Native f32 path uses libm; skip there.
-// @ignore(float_mode=f32)
 float test_atan2_both_zero_q32_stable() {
     return atan(rt(0.0), rt(0.0));
 }

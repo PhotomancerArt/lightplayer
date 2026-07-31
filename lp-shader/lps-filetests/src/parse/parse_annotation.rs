@@ -92,13 +92,30 @@ pub fn parse_selector(inner: &str, line_number: usize) -> Result<TargetSelector>
         terms.push(parse_axis_predicate(term, line_number)?);
     }
 
+    // An axis may be excluded several times (`backend!=interp, backend!=wgpu`
+    // is how you subtract two targets from a family), but it may not be
+    // constrained in a way no target can satisfy.
     for (i, term) in terms.iter().enumerate() {
-        if let Some(prev) = terms[..i].iter().find(|p| p.axis() == term.axis()) {
-            return Err(anyhow!(
-                "line {line_number}: selector constrains {} twice ('{prev}' and '{term}'), \
-                 expected each axis at most once",
-                term.axis().key()
-            ));
+        for prev in &terms[..i] {
+            if prev.axis() != term.axis() {
+                continue;
+            }
+            let unsatisfiable = match (prev.negated, term.negated) {
+                (false, false) => prev.value != term.value,
+                (false, true) | (true, false) => prev.value == term.value,
+                (true, true) => false,
+            };
+            if unsatisfiable {
+                return Err(anyhow!(
+                    "line {line_number}: selector '{inner}' can never match — '{prev}' and \
+                     '{term}' contradict"
+                ));
+            }
+            if prev == term {
+                return Err(anyhow!(
+                    "line {line_number}: selector '{inner}' repeats '{term}'"
+                ));
+            }
         }
     }
 
@@ -250,12 +267,43 @@ mod tests {
         assert!(parse("// @unsupported(float_mode=wgpu)").is_err());
     }
 
+    /// Subtracting several targets from a family needs the same axis twice.
     #[test]
-    fn test_repeated_axis_errors() {
+    fn test_repeated_negated_axis_is_allowed() {
+        let ann = parse("// @unimplemented(float_mode=f32, backend!=interp, backend!=wgpu)")
+            .unwrap()
+            .unwrap();
+        assert_eq!(ann.selector.specificity(), 3);
+        let matched: Vec<String> = crate::targets::ALL_TARGETS
+            .iter()
+            .filter(|t| ann.selector.matches(t))
+            .map(|t| t.name())
+            .collect();
+        // On this tree the only f32 targets are interp and wgpu, so both
+        // exclusions bite and nothing is left — the selector is still legal,
+        // and it starts matching the moment a compiled f32 target registers.
+        assert!(matched.is_empty(), "{matched:?}");
+    }
+
+    #[test]
+    fn test_contradictory_terms_error() {
         let err = parse("// @unsupported(backend=wasm, backend=interp)")
             .unwrap_err()
             .to_string();
-        assert!(err.contains("constrains backend twice"), "{err}");
+        assert!(err.contains("can never match"), "{err}");
+
+        let err = parse("// @unsupported(backend=wasm, backend!=wasm)")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("can never match"), "{err}");
+    }
+
+    #[test]
+    fn test_repeated_identical_term_errors() {
+        let err = parse("// @unsupported(backend!=wasm, backend!=wasm)")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("repeats"), "{err}");
     }
 
     #[test]
