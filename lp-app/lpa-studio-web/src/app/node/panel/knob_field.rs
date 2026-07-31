@@ -61,6 +61,13 @@ pub fn KnobField(
     /// Violet bound treatment on the arc, pointer, and body ring.
     #[props(default = false)]
     bound: bool,
+    /// Amber ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
+    /// writer has captured this channel and holds it. Deliberately NOT the
+    /// violet bound family — bound means "wired", engaged means "captured"
+    /// — and it outranks violet, because a captured control has stopped
+    /// following whatever it is wired to.
+    #[props(default = false)]
+    engaged: bool,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
     /// Value family the drag dispatches (`F32` default; integer slots
     /// round).
@@ -78,8 +85,10 @@ pub fn KnobField(
     let frac = knob_fraction(shown, min, max);
     let arc_len = frac * 100.0;
     let pointer_deg = knob_pointer_deg(frac);
-    let stroke = knob_value_stroke(&state, bound, editable);
-    let body_stroke = if bound {
+    let stroke = knob_value_stroke(&state, bound, engaged, editable);
+    let body_stroke = if engaged {
+        "var(--studio-status-attention-border)"
+    } else if bound {
         "var(--studio-status-bound-border)"
     } else {
         "var(--studio-color-border-strong)"
@@ -439,10 +448,22 @@ pub(crate) fn knob_key_value(
     Some(knob_snap(raw, min, step).clamp(min, max))
 }
 
-/// Stroke for the value arc and pointer: violet when bound, error when
-/// invalid, subtle when read-only, accent otherwise (green stays valid-only).
-fn knob_value_stroke(state: &UiSlotFieldState, bound: bool, editable: bool) -> &'static str {
-    if bound {
+/// Stroke for the value arc and pointer: amber when a panel writer has it
+/// engaged, violet when bound, error when invalid, subtle when read-only,
+/// accent otherwise (green stays valid-only).
+///
+/// Engaged outranks bound: a captured control is no longer following the
+/// thing it is wired to, and the panel's whole point is that you can see
+/// that at a glance (panel.md P-Q2).
+fn knob_value_stroke(
+    state: &UiSlotFieldState,
+    bound: bool,
+    engaged: bool,
+    editable: bool,
+) -> &'static str {
+    if engaged {
+        "var(--studio-status-attention-text)"
+    } else if bound {
         "var(--studio-status-bound-text)"
     } else if state.invalid.is_some() {
         "var(--studio-status-error-text)"
@@ -675,20 +696,30 @@ mod tests {
     fn bound_wins_the_stroke_even_over_invalid() {
         let invalid = UiSlotFieldState::editable().with_invalid("out of range");
         assert_eq!(
-            knob_value_stroke(&invalid, true, true),
+            knob_value_stroke(&invalid, true, false, true),
             "var(--studio-status-bound-text)"
         );
         assert_eq!(
-            knob_value_stroke(&invalid, false, true),
+            knob_value_stroke(&invalid, false, false, true),
             "var(--studio-status-error-text)"
         );
         assert_eq!(
-            knob_value_stroke(&UiSlotFieldState::editable(), false, true),
+            knob_value_stroke(&UiSlotFieldState::editable(), false, false, true),
             "var(--studio-color-accent)"
         );
         assert_eq!(
-            knob_value_stroke(&UiSlotFieldState::readonly(), false, false),
+            knob_value_stroke(&UiSlotFieldState::readonly(), false, false, false),
             "var(--studio-color-text-subtle)"
         );
+    }
+
+    #[test]
+    fn engaged_outranks_bound_and_never_reuses_violet() {
+        // A captured control has stopped following its binding, so the
+        // amber engaged family wins over the violet bound family — the
+        // three panel states must stay visibly distinct (panel.md P-Q2).
+        let stroke = knob_value_stroke(&UiSlotFieldState::editable(), true, true, true);
+        assert_eq!(stroke, "var(--studio-status-attention-text)");
+        assert!(!stroke.contains("bound"));
     }
 }
