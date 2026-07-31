@@ -1,6 +1,7 @@
 //! Saturate function - clamp values between 0 and 1 (float implementation - stub).
 //!
-//! **Unimplemented.** Every function here traps with `unimplemented!`. These
+//! **Unimplemented.** Every function here traps via
+//! [`crate::f32_unimplemented::f32_unimplemented`]. These
 //! are placeholders whose signatures, `lpfn_impl` annotations and builtin-table
 //! wiring are correct; only the bodies are missing. They previously round-tripped
 //! through Q32 via `Q32::from_f32_wrapping`, which silently returned
@@ -21,9 +22,7 @@
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_saturate_f32(value: f32) -> f32 {
     let _ = (value,);
-    unimplemented!(
-        "__lp_lpfn_saturate_f32: native f32 builtins are not implemented (f32 roadmap M5)"
-    )
+    crate::f32_unimplemented::f32_unimplemented()
 }
 
 /// Saturate function for vec3 (extern C wrapper for compiler).
@@ -39,9 +38,7 @@ pub extern "C" fn __lp_lpfn_saturate_f32(value: f32) -> f32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_saturate_vec3_f32(result_ptr: *mut f32, x: f32, y: f32, z: f32) {
     let _ = (result_ptr, x, y, z);
-    unimplemented!(
-        "__lp_lpfn_saturate_vec3_f32: native f32 builtins are not implemented (f32 roadmap M5)"
-    )
+    crate::f32_unimplemented::f32_unimplemented()
 }
 
 /// Saturate function for vec4 (extern C wrapper for compiler).
@@ -64,7 +61,5 @@ pub extern "C" fn __lp_lpfn_saturate_vec4_f32(
     w: f32,
 ) {
     let _ = (result_ptr, x, y, z, w);
-    unimplemented!(
-        "__lp_lpfn_saturate_vec4_f32: native f32 builtins are not implemented (f32 roadmap M5)"
-    )
+    crate::f32_unimplemented::f32_unimplemented()
 }
