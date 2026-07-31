@@ -464,7 +464,12 @@ mod tests {
     /// catch this, so the gate has to.
     #[test]
     fn f32_mode_refuses_pointer_params_despite_the_i32_abi() {
-        let d = decl("lpfn", "lpfn_worley_2", &[IrType::Pointer, IrType::I32], &[]);
+        let d = decl(
+            "lpfn",
+            "lpfn_worley_2",
+            &[IrType::Pointer, IrType::I32],
+            &[],
+        );
         assert!(!decl_is_float_agnostic(&d));
         assert!(resolve_builtin_id_for_mode(&d, FloatMode::F32).is_err());
     }
