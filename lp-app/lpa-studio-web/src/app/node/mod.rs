@@ -89,9 +89,9 @@ pub use face::{
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
-pub use panel::{HFaderField, KnobField, PanelControl, ToggleField};
+pub use panel::{HFaderField, KnobField, PanelControl, PanelEmit, ToggleField};
 pub use produced_product_view::ProducedProductView;
-pub(crate) use produced_product_view::ProductPreviewCanvas;
+pub(crate) use produced_product_view::{ProductPreview, ProductPreviewCanvas};
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;

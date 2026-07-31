@@ -42,6 +42,10 @@ pub fn NodePane(
     /// for deterministic captures.
     #[props(default = None)]
     face_platform: Option<Platform>,
+    /// M2 UX spike: panel gestures raised by a module face (reset,
+    /// auto-save, nested-group disclosure).
+    #[props(default = None)]
+    module_panel: Option<EventHandler<crate::app::module::PanelGesture>>,
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
@@ -144,6 +148,7 @@ pub fn NodePane(
                                 add_node_menu: add_node_menu.clone(),
                                 pending_edits: pending_edits.clone(),
                                 dirty_tint,
+                                module_panel,
                                 on_action,
                             }
                         } else {
