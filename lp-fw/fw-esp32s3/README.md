@@ -84,6 +84,64 @@ built inside the real S3 DRAM window:
 cargo test -p lpc-shared
 ```
 
+### `test_loopback`
+
+```bash
+just fwtest-loopback-esp32s3 /dev/cu.usbmodemXXXX
+```
+
+The WS281x timing oracle, with no oscilloscope and no strips: each of the four
+RMT TX channels (GPIO4-7) is routed into its own RX channel through the GPIO
+matrix, so the firmware captures its own waveform at 12.5 ns resolution and
+asserts it numerically while all four transmit at once — decode against the
+sent bytes, per-bit high time and period within **±25 ns** of that channel's
+own configuration, no cross-talk, the 300 µs latch, a 100-frame concurrent
+soak with zero guard trips, and a guard-word truncation on one channel that
+must leave the other three's frames intact.
+
+It also probes the RMT RAM address on-chip (`E1:` lines) by making the
+peripheral itself deposit a word through its APB FIFO port: the S3's RAM is at
+`RMT_BASE + 0x800`, not the C6's `+0x400`, and getting that wrong transmits the
+tail of the register file.
+
+The `E4: MEASURE golden_*` block is the re-derivation of the committed
+hardware golden `lp-fw/lp-ws281x/tests/golden/ws2812_grb_esp32s3.txt`. As
+everywhere else here, **a device mismatch is a finding to triage, never a
+reason to edit the golden.** Run the host oracle first — it drives the same
+sequencing against a mock and the same classifier against that capture:
+
+```bash
+cargo test -p lp-ws281x
+```
+
+## Output
+
+`src/output/rmt/` drives WS281x strips from the RMT peripheral on **up to four
+channels at once**, over `lp-fw/lp-ws281x` — the portable transmitter whose
+sequencing (ping-pong refill, bit cursor, guard word) is tested on the host and
+shared with every chip. Three layers:
+
+| File | Owns |
+|---|---|
+| `rmt/s3_rmt.rs` | the chip: seven register operations, the `0x800` RAM offset, the S3's by-event-then-channel interrupt layout |
+| `rmt/shared_driver.rs` | the single `Ws281xDriver` static and the IRAM interrupt trampoline that feeds it |
+| `rmt/esp32s3_rmt_ws281x_driver.rs` | the `lpc-hardware` seam: endpoints, leases, open-time pin binding |
+
+The number of channels offered comes from the **manifest** — one per
+`/rmt/ws281xK` resource, four on this board — never from a literal in driver
+logic. Each channel gets one 48-word memory block, which is what makes four
+outputs possible at all: a 48-word window halves into exactly one LED, the
+tightest refill deadline the hardware can pose.
+
+Pins are bound at `open`, not at boot. An endpoint is a board label
+(`ws281x:rmt:D10`) and which one a project drives is authored data, so the
+channel is configured up front and its pad connected when the endpoint opens,
+under the registry lease that grants exclusive use of that GPIO.
+
+Timing is WS2812-class (GRB, 300 µs latch) on every channel. A strip wired in
+another colour order is the fixture node's `color_order`, above this boundary —
+the driver stays GRB, exactly like the C6's.
+
 ## Building
 
 ```bash
@@ -248,10 +306,12 @@ compiles GLSL on the board.
 
 ### Verifying the render without LEDs
 
-The serial readout driver (`src/output/readout_driver.rs`) prints the frame
-bytes instead of driving LEDs: one full hex dump when a channel opens or
-resizes, then a checksum and lit-LED count once a second. That makes the render
-path *comparable*, which an LED never is.
+> **The serial readout driver is gone.** `src/output/readout_driver.rs` printed
+> the frame bytes instead of driving LEDs, and it was replaced by the real RMT
+> driver (above) when four-channel output landed. `scripts/m4-hardware-walk.sh`
+> and `lp-app/lpa-server/tests/shader_oracle_frame.rs` still describe its
+> `[OUT] dump` lines; that comparison needs a new source of frame bytes before
+> the walk can be re-run.
 
 `examples/shader-oracle` is the project built for that comparison. It is
 deliberately clock-free, so every frame is identical and no time

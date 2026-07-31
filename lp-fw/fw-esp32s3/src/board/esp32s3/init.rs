@@ -1,9 +1,9 @@
 //! ESP32-S3 board initialization.
 //!
 //! Ported from `fw-esp32c6/src/board/esp32c6/init.rs`. The shape is the C6's;
-//! the peripheral list is not, because this milestone does not bring up the
-//! RMT output driver, the button GPIO, or the radio (see M3 P2 scope). Those
-//! return values are added when the drivers that consume them are.
+//! the peripheral list is not, because this board brings up no button GPIO and
+//! no radio. Those return values are added when the drivers that consume them
+//! are.
 //!
 //! ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it twice
 //! panics. It is the app path's **only** call to `esp_hal::init`: `main.rs`'s
@@ -21,9 +21,12 @@ use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
 /// Sets up the CPU clock and returns the runtime components the app layer
 /// needs: the software-interrupt control and timer group for the executor, the
 /// USB-Serial-JTAG peripheral for `serial::io_task`, the FLASH peripheral for
-/// `flash_storage`, and the RTC watchdog.
+/// `flash_storage`, the RTC watchdog, and the RMT peripheral for the WS281x
+/// output driver.
 ///
 /// The RTC watchdog is returned unarmed; the recovery subsystem (P3) arms it.
+/// The RMT peripheral is returned raw — `Rmt::new` needs the clock rate, which
+/// is the output driver's fact, not the board's.
 ///
 /// Unlike the C6, the heap is **not** allocated here — `main.rs` owns it. See
 /// the module doc.
@@ -33,6 +36,7 @@ pub fn init_board() -> (
     esp_hal::peripherals::USB_DEVICE<'static>,
     esp_hal::peripherals::FLASH<'static>,
     Rwdt,
+    esp_hal::peripherals::RMT<'static>,
 ) {
     // Configure CPU clock to maximum speed (240 MHz for ESP32-S3).
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -41,6 +45,7 @@ pub fn init_board() -> (
     // Extract peripherals we need before moving others.
     let usb_device = peripherals.USB_DEVICE;
     let flash = peripherals.FLASH;
+    let rmt = peripherals.RMT;
 
     // Set up software interrupt and timer for the Embassy runtime.
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
@@ -50,7 +55,7 @@ pub fn init_board() -> (
     let rtc = Rtc::new(peripherals.LPWR);
     let rwdt = rtc.rwdt;
 
-    (sw_int, timg0, usb_device, flash, rwdt)
+    (sw_int, timg0, usb_device, flash, rwdt, rmt)
 }
 
 /// Start the Embassy runtime with the given timer and software interrupt.

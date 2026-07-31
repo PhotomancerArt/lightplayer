@@ -606,7 +606,7 @@ clippy-fw-esp32s3:
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus test_backtrace_oracle; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -712,6 +712,39 @@ fwtest-backtrace-esp32s3 port="":
       export PATH="$GCC_BIN:$PATH"
     fi
     cd lp-fw/fw-esp32s3 && cargo build --release --features test_backtrace_oracle
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Run the four-channel RMT loopback self-test on a connected ESP32-S3.
+#
+# No wires and no LED strips: each TX channel is routed into its own RX channel
+# through the GPIO matrix, so the harness measures its own waveform at 12.5 ns
+# resolution and asserts it numerically — decode, per-bit timing within ±25 ns,
+# cross-talk, latch, a 100-frame concurrent soak, and guard-word truncation on
+# one channel while the other three keep running.
+#
+# `E1:` lines cover the RMT RAM address probe, `E4:` the wire assertions; the
+# last line repeats the verdict forever. The `E4: MEASURE golden_*` block is
+# the re-derivation of `lp-fw/lp-ws281x/tests/golden/ws2812_grb_esp32s3.txt` —
+# a mismatch there is a finding to triage, never a reason to edit the golden.
+#
+# Run the host oracle first; it drives the same sequencing against a mock and
+# the same classifier against the committed capture:
+#
+#   cargo test -p lp-ws281x
+#   just fwtest-loopback-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-loopback-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --release --features test_loopback
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
