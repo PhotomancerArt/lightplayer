@@ -27,7 +27,16 @@ pub struct ProjectDef {
     /// Stable project identity (`prj_…`, base-62), minted by the library
     /// when a project enters it. Travels with the files: parity checks,
     /// history, and device associations key off it (PM roadmap M1/M3).
+    ///
+    /// Read-only through mutations: identity is minted by the library on
+    /// entry (and re-minted on import, so a shared copy never collides
+    /// with its source). Editing it in place would silently reassign a
+    /// project's history and device associations, so no surface may offer
+    /// it — the constraint lives here rather than in each view.
+    #[slot(policy = "read_only_persisted")]
     pub uid: OptionSlot<ValueSlot<String>>,
+    /// Human-readable project name — the one authored field of the root's
+    /// identity, and the Studio project pane's title.
     pub name: OptionSlot<ValueSlot<String>>,
     /// Named child node positions owned by this project.
     ///

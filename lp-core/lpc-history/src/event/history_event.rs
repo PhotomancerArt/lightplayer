@@ -4,7 +4,7 @@
 //! and variant names are deliberate and stable. Timestamps are f64 epoch
 //! seconds, always caller-supplied — this crate never reads a clock.
 //!
-//! Exactly one origin event (`Created`, `ImportedZip`, `RemixedFrom`,
+//! Exactly one origin event (`Created`, `ImportedZip`, `ImportedJson`, `RemixedFrom`,
 //! `ForkedFrom`, or `PulledFromDevice`) appears in a project's history, and
 //! it is the first event — enforced by
 //! [`crate::lineage::project_history::ProjectHistory`].
@@ -31,6 +31,11 @@ pub enum EventKind {
     Created,
     /// Origin: the project was imported from a zip archive.
     ImportedZip,
+    /// Origin: the project was pasted as an `lp.package` share envelope.
+    /// Distinct from [`Self::ImportedZip`] because the origin event is a
+    /// permanent record — labelling a paste as a zip import would be a
+    /// lie the user can never correct.
+    ImportedJson,
     /// Origin: the project was remixed from a package at some place
     /// (e.g. an example on the examples site).
     RemixedFrom {
@@ -69,6 +74,7 @@ impl EventKind {
             self,
             EventKind::Created
                 | EventKind::ImportedZip
+                | EventKind::ImportedJson
                 | EventKind::RemixedFrom { .. }
                 | EventKind::ForkedFrom { .. }
                 | EventKind::PulledFromDevice { .. }
@@ -101,6 +107,7 @@ mod tests {
         let events = [
             EventKind::Created,
             EventKind::ImportedZip,
+            EventKind::ImportedJson,
             EventKind::RemixedFrom {
                 source: "examples:rainbow".to_string(),
                 source_version: Some(hash),
@@ -171,6 +178,7 @@ mod tests {
         let hash = ContentHash::of(b"v");
         assert!(EventKind::Created.is_origin());
         assert!(EventKind::ImportedZip.is_origin());
+        assert!(EventKind::ImportedJson.is_origin());
         assert!(
             EventKind::PulledFromDevice {
                 device: uid(crate::uid::uid_prefix::UidPrefix::Device)
