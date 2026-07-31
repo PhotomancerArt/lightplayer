@@ -52,8 +52,9 @@ impl LinkFlashRegion {
 /// The `lpfs` partition of every board LightPlayer ships a partition table
 /// for. Guarded against the tables themselves by the tests below.
 ///
-/// Longest key first: `esp32c6` must not be matched by a prefix of another
-/// entry, and `contains` is order-sensitive when keys nest.
+/// Keys are matched by substring against the normalized chip name, so a new
+/// entry must not be a substring of another one (`esp32` alone would swallow
+/// every board); today's keys are disjoint.
 const LPFS_PARTITIONS: &[(&str, LinkFlashRegion)] = &[
     (
         "esp32c6",
