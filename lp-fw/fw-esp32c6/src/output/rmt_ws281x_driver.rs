@@ -16,14 +16,14 @@ use esp_hal::rmt::Rmt;
 use lpc_hardware::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
     HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, OutputError,
-    Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    Ws281xConfig, Ws281xDriver, Ws281xOutput, ws281x_capped_byte_count,
+    WS281X_MAX_LEDS_PER_CHANNEL,
 };
 
 use crate::output::{LedChannel, LedTransaction};
 
 const DRIVER_ID: &str = "esp32-rmt-ws281x0";
 const DISPLAY_LABEL: &str = "ESP32 RMT WS281x 0";
-const MAX_LEDS: usize = 256;
 
 // Unsafe static to store the currently initialized LED channel.
 // This is needed because LedChannel has lifetime constraints that do not fit the
@@ -239,18 +239,24 @@ impl Ws281xDriver for Esp32RmtWs281xDriver {
             vec![gpio_address.clone(), self.timing_address.clone()],
         ))?;
 
-        if let Err(error) = self.ensure_rmt_initialized(
-            &gpio_address,
-            capped_byte_count(config.byte_count()) as usize / 3,
-        ) {
+        let (byte_count, truncated) = ws281x_capped_byte_count(config.byte_count());
+        if truncated {
+            log::warn!(
+                "Esp32RmtWs281xDriver: open asked for more than \
+                 {WS281X_MAX_LEDS_PER_CHANNEL} LEDs; truncating to {byte_count} bytes"
+            );
+        }
+        if let Err(error) = self.ensure_rmt_initialized(&gpio_address, byte_count as usize / 3) {
             let _ = self.registry.release(&lease);
             return Err(error);
         }
 
+        // `byte_count` is the capped value: `write` sizes its expected frame from
+        // this, and the RMT buffer above was sized from the same number.
         Ok(Box::new(Esp32RmtWs281xOutput {
             registry: Rc::clone(&self.registry),
             lease: Some(lease),
-            byte_count: config.byte_count(),
+            byte_count,
         }))
     }
 }
@@ -276,7 +282,14 @@ impl Ws281xOutput for Esp32RmtWs281xOutput {
 
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError> {
         validate_byte_count(config.byte_count()).map_err(endpoint_error_to_output_error)?;
-        self.byte_count = capped_byte_count(config.byte_count());
+        let (byte_count, truncated) = ws281x_capped_byte_count(config.byte_count());
+        if truncated && byte_count != self.byte_count {
+            log::warn!(
+                "Esp32RmtWs281xOutput: resize asked for more than \
+                 {WS281X_MAX_LEDS_PER_CHANNEL} LEDs; truncating to {byte_count} bytes"
+            );
+        }
+        self.byte_count = byte_count;
         Ok(())
     }
 }
@@ -340,11 +353,6 @@ fn validate_byte_count(byte_count: u32) -> Result<(), HardwareEndpointError> {
         });
     }
     Ok(())
-}
-
-fn capped_byte_count(byte_count: u32) -> u32 {
-    let max_byte_count = (MAX_LEDS * 3) as u32;
-    byte_count.min(max_byte_count)
 }
 
 fn byte_len_for_byte_count(byte_count: u32) -> usize {
