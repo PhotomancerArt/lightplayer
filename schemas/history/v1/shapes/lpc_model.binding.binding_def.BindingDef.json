@@ -1,0 +1,61 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "value",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 3678527952,
+                  "meta": {},
+                  "ty": "any"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "source",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "path",
+                  "id": 1364391883,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "target",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "path",
+                  "id": 1364391883,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

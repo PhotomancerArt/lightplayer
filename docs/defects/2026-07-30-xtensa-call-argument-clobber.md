@@ -1,7 +1,7 @@
 # Defect: call-argument staging was not a parallel move (Xtensa)
 
 - **Date:** 2026-07-30
-- **Status:** fixed (one known gap remains, below)
+- **Status:** fixed
 - **Area:** `lpvm-native` register allocation (`regalloc/walk.rs`) — **shared**, not ISA-specific
 - **Found by:** the Xtensa filetest corpus, on its first run
 
@@ -70,18 +70,23 @@ rv32 corpus is byte-identical across the change.
 ## Regression test
 
 `lpvm-native/tests/xt_pipeline.rs::multi_arg_call_passes_every_argument`, one
-case per arity 1..=11, arguments being distinct powers of two so any dropped,
-duplicated or misplaced argument changes the sum.
+case per arity 1..=20 (1..=11 for this defect), arguments being distinct powers
+of two so any dropped, duplicated or misplaced argument changes the sum.
 
-## Known gap
+## Closed gap (was: 12 user arguments still fails)
 
-**12 user arguments still fails** (expected 4095, got 2063) — at that arity
-register pressure forces spilling around the call, which is a *different*
-mechanism, not yet diagnosed. Its corpus face is
-`lpvm/native/perf/stack-args-outgoing.glsl`,
-`lpvm/native/spill_pressure_call.glsl`,
-`lpvm/native/perf/call-clobber-correctness.glsl`, `function/param-many.glsl` and
-`function/param-mixed.glsl`.
+This entry originally left 12 arguments open — expected 4095, got 2063 — and
+guessed the cause was spilling around the call. It was not spilling: the fix
+here made the *register* half of the argument transfer a parallel move and left
+the *stack* half out of the graph, and the emitter stores the stack half after
+every one of these moves has run. Diagnosed and fixed the same day in
+`2026-07-30-xtensa-stack-arg-staged-over.md`, which also lifted seven
+`vec/*/from-scalar.glsl` files.
+
+One file named here was misattributed:
+`lpvm/native/perf/call-clobber-correctness.glsl` scored 6/7 both before and
+after that fix. Its remaining directive is a return-path failure, not an
+argument-path one — see the companion entry.
 
 ## Lesson
 

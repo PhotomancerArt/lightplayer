@@ -114,7 +114,14 @@ holds the full context.
 | Sim "non-collapsed" probe scope becomes real (collapse is view-local today, so sim probes ALL nodes) | `2026-07-27-completion-based-refresh-pacing` | The ui-state-audit plan moves live collapse state into core |
 | Packed base64 geometry encoding (`points_packed`-style additive field) | `2026-07-27-map2d-document-architecture` | An imported mapping document approaches the 10 KiB asset body budget |
 | Legacy `MappingConfig` variant retirement (`PathPoints`/`RingArray`/`PointList`/`SvgPath`) | `2026-07-27-map2d-document-architecture` | M5 one-home mapping editing lands and shipped projects are migrated |
+| Share-envelope format migration (`format` mismatches are refused outright during alpha, never migrated) | `2026-07-28-share-envelopes`; `../debt/library-format-migration-gap.md` | The authored formats settle enough that migration is written once, not weekly |
+| Wire-read (`FsRequest`) export for device-hosted projects absent from the local library (editor-popup export is library-backed only) | `2026-07-28-share-envelopes` | Someone needs to export a project that only exists on a device |
+| Size guard on node share envelopes (a large binary asset base64s into something no clipboard should carry) | `2026-07-28-share-envelopes` | A real shader-with-texture share hits a clipboard limit |
 | CLA / DCO-with-explicit-grant mechanism (recorded as intent only) | `2026-07-29-license-provenance-discipline` | The first outside contribution to relicensing-sensitive code is proposed |
+| Per-board partition table selection (4/8/16 MB chosen at build time, so no board assumption is baked into `partitions.csv`) | `2026-07-30-esp32s3-partition-floor` | A second ESP32-S3 board with a different flash size actually exists |
+| Classic-ESP32 (LX6) address windows for the Xtensa backtrace walk (the ABI is shared, the memory map is not) | `2026-07-30-xtensa-backtrace-window-spill` | A classic-ESP32 firmware target needs frames in its crash reports |
+| Xtensa exception-frame walking (crashes arriving through the exception vector rather than `panic!`; `walk_frames_from` already takes an explicit `(ra, sp)` for it) | `2026-07-30-xtensa-backtrace-window-spill` | The S3 needs backtraces for hardware faults, not just panics |
+| Emitter peephole for the Xtensa integer-div-by-zero guard (`Movi`+`BranchRr` → a single `BranchZ(Beqz)`; `MOVEQZ`/`MOVNEZ` fusion, both already encoded/decoded/emulated in `lp-xt-inst`/`lp-xt-emu`) | `2026-07-30-integer-division-never-traps` | Xtensa code-size or instruction-count pressure makes trimming the guard worth it |
 
 ## Relationship To Shared Planning
 

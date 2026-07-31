@@ -1,7 +1,12 @@
 //! 3D Signed Random function returning Vec3Q32 (float implementation - stub).
-
-use crate::builtins::lpfn::generative::srandom::srandom3_vec_q32::__lp_lpfn_srandom3_vec_q32;
-use lps_q32::q32::Q32;
+//!
+//! **Unimplemented.** Every function here traps via
+//! [`crate::f32_unimplemented::f32_unimplemented`]. These
+//! are placeholders whose signatures, `lpfn_impl` annotations and builtin-table
+//! wiring are correct; only the bodies are missing. They previously round-tripped
+//! through Q32 via `Q32::from_f32_wrapping`, which silently returned
+//! Q32-precision results with wrapped range — the exact property native f32 is
+//! being added for. Failing loudly is deliberate: see the f32 roadmap, M5.
 
 #[lpfn_impl_macro::lpfn_impl(f32, "vec3 lpfn_srandom3_vec(vec3 p, uint seed)")]
 #[allow(
@@ -10,22 +15,6 @@ use lps_q32::q32::Q32;
 )]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_srandom3_vec_f32(out: *mut f32, x: f32, y: f32, z: f32, seed: u32) {
-    let x_q32 = Q32::from_f32_wrapping(x);
-    let y_q32 = Q32::from_f32_wrapping(y);
-    let z_q32 = Q32::from_f32_wrapping(z);
-
-    let mut result_q32 = [0i32; 3];
-    __lp_lpfn_srandom3_vec_q32(
-        result_q32.as_mut_ptr(),
-        x_q32.to_fixed(),
-        y_q32.to_fixed(),
-        z_q32.to_fixed(),
-        seed,
-    );
-
-    unsafe {
-        *out = Q32::from_fixed(result_q32[0]).to_f32();
-        *out.add(1) = Q32::from_fixed(result_q32[1]).to_f32();
-        *out.add(2) = Q32::from_fixed(result_q32[2]).to_f32();
-    }
+    let _ = (out, x, y, z, seed);
+    crate::f32_unimplemented::f32_unimplemented()
 }

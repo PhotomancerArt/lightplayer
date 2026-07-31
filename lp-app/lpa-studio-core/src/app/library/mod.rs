@@ -26,7 +26,7 @@ pub use library_host::{
 };
 pub use library_store::{LibraryError, LibraryStore, PackageHandle, PackageSummary};
 pub use package_meta::{PackageMeta, PackageProvenance};
-pub use package_zip::{export_package, import_zip};
+pub use package_zip::{export_package, import_json, import_zip};
 
 /// Package directories live here (absolute path inside the store).
 pub const PACKAGES_DIR: &str = "/packages";

@@ -22,9 +22,16 @@ pub struct ProjectEditorView {
     /// every bindable row in the workspace (M4).
     pub channel_choices: Vec<crate::UiChannelChoice>,
     /// The workspace root's own config slot rows (`name` / `format` /
-    /// `nodes` for a project root), rendered as the "Project settings"
-    /// section of the project pane's detail popup.
+    /// `uid` / `nodes` for a project root), rendered as the "Project
+    /// settings" section of the project pane's detail popup.
     pub root_slots: Vec<UiConfigSlot>,
+    /// The open project's library identity (`prj_…` uid, slug), when a
+    /// library package backs it. Drives the popup's share affordances,
+    /// which read the library snapshot rather than the runtime. `None` for
+    /// the storeless demo path and for a device-hosted project this
+    /// library does not know — those surfaces render no share section
+    /// rather than a broken one.
+    pub library_identity: Option<(String, String)>,
     /// Project-level aggregate of the per-node dirty summaries (persisted /
     /// transient / failed) driving the save affordances; derived from the
     /// same edit-state join as the per-field dirty affordances.
@@ -70,6 +77,7 @@ impl ProjectEditorView {
             nodes,
             channel_choices: Vec::new(),
             root_slots: Vec::new(),
+            library_identity: None,
             dirty: DirtySummary::clean(),
             pending_edits: Vec::new(),
             header_actions: Vec::new(),
@@ -94,6 +102,12 @@ impl ProjectEditorView {
 
     pub fn with_root_slots(mut self, root_slots: Vec<UiConfigSlot>) -> Self {
         self.root_slots = root_slots;
+        self
+    }
+
+    /// Attach the open project's library identity for the share section.
+    pub fn with_library_identity(mut self, identity: Option<(String, String)>) -> Self {
+        self.library_identity = identity;
         self
     }
 

@@ -48,7 +48,6 @@ pub use object_module::object_bytes_from_ir;
 pub type GlslParamQualifier = ParamQualifier;
 /// Back-compat alias for a single formal parameter; prefer [`FnParam`].
 pub type LpsSig = FnParam;
-pub use lps_q32::q32_options::{AddSubMode, DivMode, MulMode, Q32Options};
 pub use lpvm::{
     CallError, CallResult, GlslReturn, LpsValueQ32, decode_q32_return, flatten_q32_arg,
 };
@@ -58,24 +57,13 @@ pub use object_link::link_object_with_builtins;
 /// Options-only tests: run under `--no-default-features`.
 #[cfg(test)]
 mod tests_options {
-    use super::{
-        AddSubMode, CompileOptions, DivMode, FloatMode, MemoryStrategy, MulMode, Q32Options,
-    };
+    use super::{CompileOptions, FloatMode, MemoryStrategy};
 
     #[test]
     fn compile_options_default() {
         let opts = CompileOptions::default();
         assert_eq!(opts.float_mode, FloatMode::Q32);
-        assert_eq!(opts.q32_options, Q32Options::default());
         assert_eq!(opts.memory_strategy, MemoryStrategy::Default);
         assert_eq!(opts.max_errors, None);
-    }
-
-    #[test]
-    fn q32_options_default_is_fast() {
-        let q = Q32Options::default();
-        assert_eq!(q.add_sub, AddSubMode::Wrapping);
-        assert_eq!(q.mul, MulMode::Wrapping);
-        assert_eq!(q.div, DivMode::Reciprocal);
     }
 }

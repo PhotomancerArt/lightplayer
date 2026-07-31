@@ -79,7 +79,25 @@ libm = "0.2"
 # Graphics backend is selected automatically by target architecture
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
-lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"], optional = true }
+# fw-esp32c6 deliberately opts into every node kind it has today — all
+# eight `lpa-server` node-* gates (which forward to the matching
+# `lpc-engine` gate), plus `panic-recovery` — on top of the real
+# `lp-gfx-lpvm` compiler backend selected below by target architecture.
+# This is not a constrained build; it exists so a genuinely constrained
+# firmware (the S3 app layer, M3) can list fewer of these gates on its own
+# `lpa-server` dependency and link only the node kinds it runs. See
+# `lpc-engine/README.md` for what each gate is worth in flash.
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
+    "panic-recovery",
+    "node-button",
+    "node-radio",
+    "node-fluid",
+    "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
+], optional = true }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }

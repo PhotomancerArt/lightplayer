@@ -28,6 +28,7 @@ pub mod studio_snapshot;
 pub mod studio_view_channel;
 pub mod ui_console_view;
 pub mod ui_studio_view;
+pub mod unsaved_changes;
 pub mod ux_update;
 pub mod ux_update_sink;
 
@@ -53,5 +54,6 @@ pub use studio_view_channel::{
 };
 pub use ui_console_view::UiConsoleView;
 pub use ui_studio_view::{UiLensRuntime, UiStudioView};
+pub use unsaved_changes::has_unsaved_work;
 pub use ux_update::{UxActivityTarget, UxUpdate};
 pub use ux_update_sink::UxUpdateSink;

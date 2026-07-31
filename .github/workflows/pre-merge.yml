@@ -470,8 +470,63 @@ jobs:
           done
           exit $rc
 
+      # Run and then CHECK THAT IT RAN. A file-level `#![cfg(feature = "…")]`
+      # turns a wrong feature set into **zero tests and no compile error**, and
+      # `just test-xt-host` names its test targets explicitly, so a new file that
+      # nobody adds there is silently never run. Both have already happened in
+      # this repo (the `stories` feature on test-studio-host carries the same
+      # warning), and both look identical to success.
+      #
+      # Two assertions, each self-maintaining in the safe direction:
+      #   - no suite may report `running 0 tests` — the signature of a file that
+      #     compiled to nothing. Doc-test sections are excluded: having no
+      #     doctests is legitimate.
+      #   - the canary must have run by name. `sin_matches_rv32_through_the_…`
+      #     is the test that compiles a shader for Xtensa, links it against the
+      #     cross-compiled builtins image, executes it on the emulator, and
+      #     diffs against rv32. If that one did not run, this job proved nothing
+      #     about Xtensa no matter how many others passed.
+      #   - plus a floor on the total, which only trips when tests DISAPPEAR;
+      #     adding tests never requires touching it.
+      # ANSI escapes are stripped before the log is written. The job sets
+      # CARGO_TERM_COLOR=always and cargo colors its status headers, so the
+      # doctest header arrives as `\e[1m\e[92m   Doc-tests lpvm_native` and no
+      # `^ *Doc-tests` pattern can match it. Every assertion below anchors at
+      # start-of-line, so stripping once here is what makes them all mean what
+      # they read as — not just the one that has already misfired.
       - name: Xtensa host tests
-        run: cd lp2025 && just test-xt-host
+        run: |
+          cd lp2025
+          set -o pipefail
+          just test-xt-host 2>&1 | sed -E 's/\x1b\[[0-9;]*[mGKHF]//g' | tee /tmp/xt-tests.log
+
+      - name: Assert the tests actually ran
+        run: |
+          log=/tmp/xt-tests.log
+          canary=sin_matches_rv32_through_the_builtins_image
+          rc=0
+
+          # "running 0 tests" from a test binary means its file compiled to
+          # nothing. Doc-test sections legitimately have none, so ignore
+          # anything after a Doc-tests header.
+          if awk '/^ *Doc-tests/ {doc=1} /^running 0 tests/ && !doc {found=1} END {exit !found}' "$log"; then
+            echo "::error::a test binary reported 'running 0 tests' — a file-level #![cfg] almost certainly emptied it"
+            rc=1
+          fi
+
+          if ! grep -qF "test $canary ... ok" "$log"; then
+            echo "::error::canary '$canary' did not run — this job proved nothing about Xtensa"
+            rc=1
+          fi
+
+          total=$(awk '/^test result: ok\./ {s+=$4} END {print s+0}' "$log")
+          echo "total tests passed: $total"
+          if [ "$total" -lt 40 ]; then
+            echo "::error::only $total tests ran (floor 40) — tests disappeared rather than were added"
+            rc=1
+          fi
+
+          exit $rc
 
   # The esp32c6 app image must fit a 3 MB partition. It has overrun twice, and
   # both times the signal was a red Deploy Studio Pages run *after* the merge,
