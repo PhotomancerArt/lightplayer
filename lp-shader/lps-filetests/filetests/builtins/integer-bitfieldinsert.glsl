@@ -12,11 +12,8 @@ int test_bitfieldinsert_int_simple() {
     return bitfieldInsert(15, 10, 4, 4);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldInsert to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // wasm.f32: shader does not compile on any target (frontend gap) — same cause
 // as the @unsupported entries above, not an f32-specific failure.
@@ -28,11 +25,8 @@ int test_bitfieldinsert_int_lsb() {
     return bitfieldInsert(240, 3, 0, 4);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldInsert to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_bitfieldinsert_int_lsb() == 243
@@ -42,11 +36,8 @@ int test_bitfieldinsert_int_msb() {
     return bitfieldInsert(15, 12, 4, 4);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldInsert to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_bitfieldinsert_int_msb() == 207
@@ -56,11 +47,8 @@ uint test_bitfieldinsert_uint_simple() {
     return bitfieldInsert(15u, 10u, 4, 4);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldInsert to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_bitfieldinsert_uint_simple() == 175u
@@ -70,11 +58,8 @@ uint test_bitfieldinsert_uint_single_bit() {
     return bitfieldInsert(0u, 1u, 2, 1);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers bitfieldInsert to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_bitfieldinsert_uint_single_bit() == 4u
@@ -85,11 +70,7 @@ ivec2 test_bitfieldinsert_ivec2() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // @unsupported(wasm.f32)
 // run: test_bitfieldinsert_ivec2() == ivec2(175, 48)

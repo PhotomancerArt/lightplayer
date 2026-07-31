@@ -46,15 +46,7 @@ float test_acos_domain_over() {
     return acos(1.5);
 }
 
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(wasm.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(*)
 // run: test_acos_domain_over() ~= 0.0
 
 float test_acos_domain_under() {
@@ -62,15 +54,7 @@ float test_acos_domain_under() {
     return acos(-1.5);
 }
 
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(wasm.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(*)
 // run: test_acos_domain_under() ~= 0.0
 
 float test_atan2_zero_zero() {
