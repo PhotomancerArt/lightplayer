@@ -7,6 +7,7 @@ use lp_emu_core::{CycleModel, LogLevel};
 use crate::board::BoardProfile;
 use crate::cpu::Cpu;
 use crate::error::{Trap, TrapKind};
+use crate::fp_policy::FpPolicy;
 use crate::memory::Memory;
 use crate::trace::{TraceEvent, Tracer};
 
@@ -129,6 +130,10 @@ pub struct Emulator {
     pub step_budget: u64,
     /// The board memory map this emulator was built on.
     pub profile: BoardProfile,
+    /// The behaviors of the FPU that IEEE-754 does not fix. Mostly
+    /// [`crate::fp_policy::Unknown`] until the M6 P6 campaign measures them;
+    /// reading an unresolved field panics rather than defaulting.
+    pub fp_policy: FpPolicy,
     /// Instruction-log verbosity ([`LogLevel::Instructions`] fills the ring
     /// log read back through [`format_debug_info`](Self::format_debug_info)).
     log_level: LogLevel,
@@ -159,6 +164,7 @@ impl Emulator {
             mem,
             step_budget: DEFAULT_STEP_BUDGET,
             profile,
+            fp_policy: FpPolicy::m6(),
             log_level: LogLevel::None,
             // No measured Xtensa cycle model yet — instruction counting is the
             // honest default (rv32 defaults to its measured Esp32C6 model).
@@ -167,6 +173,15 @@ impl Emulator {
             cycle_count: 0,
             inst_log: VecDeque::new(),
         }
+    }
+
+    /// Install a floating-point policy (builder form). P6 uses this to hand the
+    /// emulator the constants it measured on silicon; nothing else should need
+    /// it, and nothing may use it to paper over an unresolved field.
+    #[must_use]
+    pub fn with_fp_policy(mut self, policy: FpPolicy) -> Self {
+        self.fp_policy = policy;
+        self
     }
 
     /// Set the instruction-log verbosity (builder form).
@@ -518,10 +533,7 @@ impl Emulator {
     /// Write boolean register `b{i}` and emit a trace event.
     pub(crate) fn wbreg(&mut self, i: u8, v: bool, tracer: &mut dyn Tracer) {
         self.cpu.set_b(i, v);
-        tracer.event(TraceEvent::BRegWrite {
-            index: i,
-            value: v,
-        });
+        tracer.event(TraceEvent::BRegWrite { index: i, value: v });
     }
 
     // --- debug dumps (the consumer-facing shape of lp-riscv-emu's debug.rs) ---
