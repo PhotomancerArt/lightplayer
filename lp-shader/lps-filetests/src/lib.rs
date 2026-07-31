@@ -259,24 +259,13 @@ pub fn run_filetest_with_line_filter(
         ));
     }
 
-    // Count test cases early, even if parsing fails later
-    let early_stats = count_test_cases(path, line_filter);
-
-    let test_file = match parse::parse_test_file(path) {
-        Ok(tf) => tf,
-        Err(e) => {
-            // Return error but preserve the test case count we already computed
-            return Ok((
-                Err(e),
-                BTreeMap::new(),
-                early_stats,
-                BTreeMap::new(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-                false,
-            ));
-        }
-    };
+    // A file whose directives do not parse is a harness failure, not a test
+    // result: returning `Ok((Err(..), stats))` here left `stats.failed == 0`, so
+    // the file reported zero failures and silently dropped out of the counts.
+    // Propagating puts the runner on its `harness_completed = false` path (it
+    // recounts the cases itself), which is what makes a malformed annotation a
+    // red instead of a disappearance.
+    let test_file = parse::parse_test_file(path)?;
 
     // Validate line number if provided (only for run tests; error tests ignore line filter)
     if let Some(line_number) = line_filter {

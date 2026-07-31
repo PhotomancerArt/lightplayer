@@ -59,6 +59,53 @@ fn strip_block_comment_fragments(line: &str, in_block_comment: &mut bool) -> Str
     out
 }
 
+/// Directive comments that can never serve as a `@broken` reason.
+const DIRECTIVE_COMMENT_PREFIXES: &[&str] = &[
+    "test ",
+    "target ",
+    "run:",
+    "run[",
+    "#run:",
+    "#compile:",
+    "#transform:",
+    "set_uniform:",
+    "compile-opt",
+    "texture-spec:",
+    "texture-data:",
+    "expected-error",
+    "EXPECT_TRAP",
+    "EXPECT_SETUP_FAILURE",
+];
+
+/// True if a plain prose comment sits immediately above line index `idx`.
+///
+/// This is the `@broken` reason rule: `// <why>` on the line above (other
+/// annotations in the same block are transparent, so one reason covers a whole
+/// stacked block). A blank line, a code line, a directive comment, or a
+/// decorative rule such as `// =====` ends the block and leaves the annotation
+/// unexplained.
+fn has_reason_above(lines: &[String], idx: usize) -> bool {
+    let mut j = idx;
+    while j > 0 {
+        j -= 1;
+        let trimmed = lines[j].trim();
+        if trimmed.starts_with("// @") {
+            continue;
+        }
+        let Some(body) = trimmed.strip_prefix("//") else {
+            return false;
+        };
+        let body = body.trim();
+        if body.is_empty() || !body.chars().any(|c| c.is_alphanumeric()) {
+            return false;
+        }
+        return !DIRECTIVE_COMMENT_PREFIXES
+            .iter()
+            .any(|p| body.starts_with(p));
+    }
+    false
+}
+
 /// Parse a test file and extract all directives and source code.
 pub fn parse_test_file(path: &Path) -> Result<TestFile> {
     let contents = std::fs::read_to_string(path)
@@ -136,7 +183,15 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
             continue;
         }
 
-        if let Ok(Some(annotation)) = parse_annotation::parse_annotation_line(&logical, line_number)
+        // A malformed annotation is an error, never a skipped line: a selector
+        // that silently matched nothing is how a disposition rots into a
+        // surprise red months later.
+        if let Some(annotation) = parse_annotation::parse_annotation_line(
+            &logical,
+            line_number,
+            has_reason_above(&lines, i),
+        )
+        .with_context(|| format!("{}", path.display()))?
         {
             pending_annotations.push(annotation);
             i += 1;
@@ -249,6 +304,12 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
         config_overrides,
         texture_specs,
         texture_fixtures,
+        // Annotations no `// run:` claimed. In a `// test compile` file there
+        // are no run directives at all, so this is the file's whole disposition
+        // set — the mechanism that makes compile-only files triageable per
+        // target. In a `// test run` file it is normally empty, and nothing
+        // consults it.
+        file_annotations: pending_annotations,
     })
 }
 

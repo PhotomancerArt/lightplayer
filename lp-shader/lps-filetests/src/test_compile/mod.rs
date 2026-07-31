@@ -1,7 +1,7 @@
 //! Compile test implementation.
 
 use crate::parse::TestFile;
-use crate::targets::Target;
+use crate::targets::{Disposition, Target, directive_disposition};
 use crate::test_run::compile::{build_compiler_config, compile_for_target};
 use crate::test_run::{PerTargetStats, TestCaseStats};
 use anyhow::Result;
@@ -14,6 +14,11 @@ use std::path::Path;
 /// Compile tests stop after frontend/backend compilation and do not execute any exported shader
 /// function. They are useful for broad language-coverage gates where numeric backend differences
 /// would make `// test run` too strong.
+///
+/// Dispositions come from the file's annotations
+/// ([`TestFile::file_annotations`]) — a compile-only file has no `// run:` line
+/// to hang them off, so `@unsupported(*)` and friends are written at file level
+/// and apply to the single compile "case" per target.
 pub fn run_compile_test(
     test_file: &TestFile,
     path: &Path,
@@ -39,27 +44,46 @@ pub fn run_compile_test(
             ..TestCaseStats::default()
         };
 
-        match compile_for_target(
+        let disposition = directive_disposition(&test_file.file_annotations, target);
+        if disposition == Disposition::Skip {
+            stats.unsupported = 1;
+            combined_stats.add(&stats);
+            per_target.insert(target_name, stats);
+            continue;
+        }
+
+        let compiled = compile_for_target(
             &test_file.glsl_source,
             target,
             &relative_path,
             LogLevel::None,
             &compiler_config,
             &test_file.texture_specs,
-        ) {
-            Ok(_) => {
-                stats.passed = 1;
-                compile_failed_by_target.insert(target_name.clone(), false);
-            }
-            Err(err) => {
+        );
+        let compile_error = compiled.err();
+        compile_failed_by_target.insert(target_name.clone(), compile_error.is_some());
+
+        match (disposition, compile_error) {
+            (Disposition::ExpectSuccess, None) => stats.passed = 1,
+            (Disposition::ExpectSuccess, Some(err)) => {
                 stats.failed = 1;
-                compile_failed_by_target.insert(target_name.clone(), true);
                 errors.push(format!(
                     "{}: compile failed for {}:\n\n{err:#}",
                     path.display(),
                     target_name
                 ));
             }
+            (Disposition::ExpectFailure(_), Some(_)) => stats.unimplemented = 1,
+            (Disposition::ExpectFailure(kind), None) => {
+                stats.unexpected_pass = 1;
+                errors.push(format!(
+                    "{}: compiles for {} but is annotated @{} — remove the annotation",
+                    path.display(),
+                    target_name,
+                    kind.keyword()
+                ));
+            }
+            (Disposition::Skip, _) => unreachable!("skip returns above"),
         }
 
         combined_stats.add(&stats);
