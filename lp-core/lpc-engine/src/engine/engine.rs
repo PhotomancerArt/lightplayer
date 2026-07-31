@@ -61,6 +61,14 @@ pub struct Engine {
     services: EngineServices,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
+    /// Device-level safe-mode output ceiling, Q16 (`None` = no clamp).
+    ///
+    /// DEVICE state, not project data: set by the embedder (firmware, from a
+    /// consumed boot-control record), never by anything a project can touch.
+    /// That separation is the point — the mechanism that saves a device must
+    /// not be editable by the thing that broke it. Composed into every
+    /// fixture's power scale via `min` in the fixture render.
+    safe_output_clamp_q16: Option<u32>,
 }
 
 impl Engine {
@@ -83,6 +91,7 @@ impl Engine {
             services,
             demand_roots: Vec::new(),
             graphics: None,
+            safe_output_clamp_q16: None,
         }
     }
 
@@ -247,6 +256,16 @@ impl Engine {
     /// Optional graphics backend for core shader nodes; clone is cheap (`Arc`).
     pub fn set_graphics(&mut self, graphics: Option<Arc<dyn LpGraphics>>) {
         self.graphics = graphics;
+    }
+
+    /// Set (or clear) the device-level safe-mode output ceiling.
+    ///
+    /// `level` is a brightness ceiling out of 255, from the boot-control
+    /// record's clamp bits. Applies to EVERY fixture — including ones with
+    /// no power model — because the clamped project may predate the power
+    /// feature entirely.
+    pub fn set_safe_output_clamp(&mut self, level: Option<u8>) {
+        self.safe_output_clamp_q16 = level.map(|level| (u32::from(level) << 16) / 255);
     }
 
     pub fn graphics(&self) -> Option<&Arc<dyn LpGraphics>> {
@@ -441,6 +460,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
 
         {
@@ -480,6 +500,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         host.render_node_texture(product, request)
     }
@@ -522,6 +543,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         let result = session.resolve(&mut host, key);
         self.resolver = resolver_tmp;
@@ -574,6 +596,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         host.render_node_control(product, request, target)
     }
@@ -610,6 +633,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         let result = session.resolve(&mut host, QueryKey::Bus(channel.clone()));
         self.resolver = resolver;
@@ -640,6 +664,7 @@ impl Engine {
             button_service,
             radio_service,
             frame_time_seconds: time_s,
+            safe_output_clamp_q16: self.safe_output_clamp_q16,
         };
         host.render_node_control_probe(product, request, target, display_layout)
     }
@@ -657,6 +682,7 @@ struct EngineResolveHost<'a> {
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
+    safe_output_clamp_q16: Option<u32>,
 }
 
 impl EngineResolveHost<'_> {
@@ -1353,6 +1379,7 @@ impl EngineResolveHost<'_> {
                 revision,
                 self.graphics.clone(),
                 self.frame_time_seconds,
+                self.safe_output_clamp_q16,
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
@@ -1448,6 +1475,7 @@ impl EngineResolveHost<'_> {
                 revision,
                 self.graphics.clone(),
                 self.frame_time_seconds,
+                self.safe_output_clamp_q16,
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
@@ -1862,6 +1890,7 @@ pub(crate) fn resolve_with_engine_host(
         button_service,
         radio_service,
         frame_time_seconds: time_s,
+        safe_output_clamp_q16: eng.safe_output_clamp_q16,
     };
     let result = session
         .resolve(&mut host, key)
@@ -1900,6 +1929,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         button_service,
         radio_service,
         frame_time_seconds: time_s,
+        safe_output_clamp_q16: eng.safe_output_clamp_q16,
     };
     let result = session.resolve(&mut host, key.clone()).and_then(|first| {
         session

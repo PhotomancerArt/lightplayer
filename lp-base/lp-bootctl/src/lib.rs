@@ -58,7 +58,7 @@ mod boot_flags;
 mod crc32;
 mod sector;
 
-pub use boot_control::{BootControl, DecodeOutcome, decode};
+pub use boot_control::{BootAction, BootControl, DecodeOutcome, decode};
 pub use boot_flags::BootFlags;
 pub use sector::{
     BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, RECORD_LEN, SECTOR_MAGIC, SECTOR_VERSION,
