@@ -354,7 +354,7 @@ impl Engine {
                 .map_err(|e| e.to_string())?;
         }
         let project =
-            format!("{{ \"kind\": \"Project\", \"format\": 1, \"nodes\": {{ {node_lines} }} }}");
+            format!("{{ \"kind\": \"Project\", \"format\": 2, \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/project.json".as_path(), project.as_bytes())
             .map_err(|e| e.to_string())?;
 

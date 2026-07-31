@@ -189,21 +189,6 @@
       },
       "type": "object"
     },
-    "lpc_model::nodes::shader::glsl_opts::GlslOpts": {
-      "additionalProperties": false,
-      "properties": {
-        "add_sub": {
-          "type": "string"
-        },
-        "div": {
-          "type": "string"
-        },
-        "mul": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "lpc_model::nodes::shader::shader_param_def::ScalarHint": {
       "additionalProperties": false,
       "properties": {
@@ -480,8 +465,8 @@
           },
           "type": "object"
         },
-        "glsl_opts": {
-          "$ref": "#/$defs/lpc_model::nodes::shader::glsl_opts::GlslOpts"
+        "float_mode": {
+          "type": "string"
         },
         "kind": {
           "const": "Shader"
@@ -551,8 +536,8 @@
           },
           "type": "object"
         },
-        "glsl_opts": {
-          "$ref": "#/$defs/lpc_model::nodes::shader::glsl_opts::GlslOpts"
+        "float_mode": {
+          "type": "string"
         },
         "kind": {
           "const": "ComputeShader"
