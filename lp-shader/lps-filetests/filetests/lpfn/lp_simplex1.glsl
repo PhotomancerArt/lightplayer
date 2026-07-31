@@ -12,6 +12,9 @@ float test_lpfn_snoise1_basic() {
     return (n >= -1.0 && n <= 1.0) ? 1.0 : 0.0;
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_lpfn_snoise1_basic() == 1.0
 
 float test_lpfn_snoise1_zero() {
@@ -22,6 +25,7 @@ float test_lpfn_snoise1_zero() {
     return (n >= -1.0 && n <= 1.0) ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_snoise1_zero() == 1.0
 
 float test_lpfn_snoise1_deterministic() {
@@ -31,6 +35,7 @@ float test_lpfn_snoise1_deterministic() {
     return abs(n1 - n2);
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_snoise1_deterministic() ~= 0.0
 
 float test_lpfn_snoise1_different_seeds() {
@@ -48,6 +53,7 @@ float test_lpfn_snoise1_different_seeds() {
     return has_diff ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_snoise1_different_seeds() == 1.0
 
 float test_lpfn_snoise1_range() {
@@ -65,4 +71,5 @@ float test_lpfn_snoise1_range() {
     return valid ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_snoise1_range() == 1.0

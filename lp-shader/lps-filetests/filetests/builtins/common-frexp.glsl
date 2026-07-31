@@ -21,6 +21,9 @@ vec2 test_frexp_one() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_frexp_one() ~= vec2(0.5, 1.0)
 
 vec2 test_frexp_two() {
@@ -38,6 +41,7 @@ vec2 test_frexp_two() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_frexp_two() ~= vec2(0.5, 2.0)
 
 vec2 test_frexp_half() {
@@ -55,6 +59,7 @@ vec2 test_frexp_half() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_frexp_half() ~= vec2(0.5, 0.0)
 
 vec2 test_frexp_four() {
@@ -72,6 +77,7 @@ vec2 test_frexp_four() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_frexp_four() ~= vec2(0.5, 3.0)
 
 vec2 test_frexp_eight() {
@@ -89,6 +95,7 @@ vec2 test_frexp_eight() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_frexp_eight() ~= vec2(0.5, 4.0)
 
 vec4 test_frexp_vec2() {
@@ -107,6 +114,7 @@ vec4 test_frexp_vec2() {
 // @unsupported(xtlpn.q32)
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_frexp_vec2() ~= vec4(0.5, 0.5, 1.0, 2.0)
 
 

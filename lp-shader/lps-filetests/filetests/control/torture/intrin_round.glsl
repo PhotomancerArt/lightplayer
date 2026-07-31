@@ -29,9 +29,15 @@ float test_intrin_round_store(int count) {
     return s;
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_store(0) ~= 0.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_store(1) ~= -1.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_store(3) ~= -2.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_store(8) ~= 1.000000
 
 float test_intrin_round_unused(int count) {
@@ -51,9 +57,13 @@ float test_intrin_round_unused(int count) {
     return s;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_unused(0) ~= 0.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_unused(1) ~= -1.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_unused(3) ~= -2.062500
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_unused(8) ~= 0.750000
 
 float test_intrin_round_swizzle(int count) {
@@ -74,9 +84,13 @@ float test_intrin_round_swizzle(int count) {
     return a[0] + a[1] + a[2] + a[3];
 }
 
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_swizzle(0) ~= 0.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_swizzle(1) ~= -1.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_swizzle(3) ~= -2.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_swizzle(8) ~= -2.000000
 
 float test_intrin_round_nested(int count) {
@@ -100,7 +114,11 @@ float test_intrin_round_nested(int count) {
     return s;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_nested(0) ~= 0.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_nested(1) ~= 0.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_nested(3) ~= 3.000000
+// @unimplemented(wasm.f32)
 // run: test_intrin_round_nested(8) ~= 7.000000

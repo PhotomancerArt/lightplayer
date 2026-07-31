@@ -18,6 +18,9 @@ int test_bitfieldinsert_int_simple() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_bitfieldinsert_int_simple() == 175
 
 int test_bitfieldinsert_int_lsb() {
@@ -31,6 +34,7 @@ int test_bitfieldinsert_int_lsb() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldinsert_int_lsb() == 243
 
 int test_bitfieldinsert_int_msb() {
@@ -44,6 +48,7 @@ int test_bitfieldinsert_int_msb() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldinsert_int_msb() == 207
 
 uint test_bitfieldinsert_uint_simple() {
@@ -57,6 +62,7 @@ uint test_bitfieldinsert_uint_simple() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldinsert_uint_simple() == 175u
 
 uint test_bitfieldinsert_uint_single_bit() {
@@ -70,6 +76,7 @@ uint test_bitfieldinsert_uint_single_bit() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldinsert_uint_single_bit() == 4u
 
 ivec2 test_bitfieldinsert_ivec2() {
@@ -84,6 +91,7 @@ ivec2 test_bitfieldinsert_ivec2() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_bitfieldinsert_ivec2() == ivec2(175, 48)
 
 

@@ -12,6 +12,9 @@ float test_lpfn_srandom_1d() {
     return (n >= -1.0 && n <= 1.0) ? 1.0 : 0.0;
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_lpfn_srandom_1d() == 1.0
 
 float test_lpfn_srandom_2d() {
@@ -22,6 +25,7 @@ float test_lpfn_srandom_2d() {
     return (n >= -1.0 && n <= 1.0) ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_srandom_2d() == 1.0
 
 float test_lpfn_srandom_3d() {
@@ -32,6 +36,7 @@ float test_lpfn_srandom_3d() {
     return (n >= -1.0 && n <= 1.0) ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_srandom_3d() == 1.0
 
 float test_lpfn_srandom_3d_vec() {
@@ -45,6 +50,7 @@ float test_lpfn_srandom_3d_vec() {
     return valid ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_srandom_3d_vec() == 1.0
 
 float test_lpfn_srandom_3d_tile() {
@@ -59,6 +65,7 @@ float test_lpfn_srandom_3d_tile() {
     return valid ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_srandom_3d_tile() == 1.0
 
 float test_lpfn_srandom_deterministic() {
@@ -68,6 +75,7 @@ float test_lpfn_srandom_deterministic() {
     return abs(n1 - n2) < 0.0001 ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_srandom_deterministic() == 1.0
 
 float test_lpfn_srandom_different_seeds() {
@@ -78,4 +86,5 @@ float test_lpfn_srandom_different_seeds() {
     return has_diff ? 1.0 : 0.0;
 }
 
+// @unimplemented(wasm.f32)
 // run: test_lpfn_srandom_different_seeds() == 1.0

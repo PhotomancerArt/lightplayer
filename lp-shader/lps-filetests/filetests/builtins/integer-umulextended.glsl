@@ -19,6 +19,9 @@ uvec4 test_umulextended_uint_small() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_umulextended_uint_small() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_umulextended_uint_medium() {
@@ -34,6 +37,7 @@ uvec4 test_umulextended_uint_medium() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_umulextended_uint_medium() == uvec4(1410065408u, 2u, 0u, 0u)
 
 uvec4 test_umulextended_uint_large() {
@@ -49,6 +53,7 @@ uvec4 test_umulextended_uint_large() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_umulextended_uint_large() == uvec4(0u, 1u, 0u, 0u)
 
 uvec4 test_umulextended_uint_max() {
@@ -64,6 +69,7 @@ uvec4 test_umulextended_uint_max() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_umulextended_uint_max() == uvec4(1u, 4294967294u, 0u, 0u)
 
 struct U64Parts {
@@ -85,6 +91,7 @@ uvec2 test_umulextended_struct_field_out() {
 // @broken(xtn.q32)
 // @broken(interp.f32)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_umulextended_struct_field_out() == uvec2(0u, 1u)
 
 
