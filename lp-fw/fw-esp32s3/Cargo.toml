@@ -9,11 +9,30 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3"]
+default = ["esp32s3", "server"]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
     "esp-hal/esp32s3",
+    "esp-rtos/esp32s3",
+]
+
+# The LightPlayer app: `LpServer` over the USB-Serial-JTAG transport, plus the
+# wire-protocol serialization inside `serial::io_task`.
+#
+# ⚠️ Still NARROWER than fw-esp32c6's feature of the same name: this one takes
+# `lpa-server` with **two** of the eight node gates rather than all of them.
+# The graphics backend is no longer the difference — both crates now link
+# `lp-gfx-lpvm`. See the dependency section for why each of those is
+# load-bearing.
+server = [
+    "fw-esp32-common/server",
+    "dep:lpa-server",
+    "dep:lp-gfx-lpvm",
+    "dep:lpc-hardware",
+    "dep:lpfs",
+    "dep:lpc-wire",
+    "dep:ser-write-json",
 ]
 
 # Hardware harnesses. Any `test_*` feature makes build.rs set the `fw_harness`
@@ -24,6 +43,12 @@ esp32s3 = [
 # on-device JIT and prints PASS/FAIL per case against goldens confirmed on
 # lp-xt-emu. The corpus is shared with the host golden test precisely so the
 # two cannot drift.
+# The silicon oracle for `lpc_shared::backtrace`'s Xtensa windowed walk: a
+# known-depth call chain whose frame count must match exactly, plus corrupt
+# save-area chains that must terminate. Needs no extra dependencies —
+# `lpc-shared` is already unconditional for the panic path.
+test_backtrace_oracle = []
+
 test_xt_jit_corpus = [
     "dep:lpvm-native",
     "dep:lpvm",
@@ -38,7 +63,99 @@ esp-backtrace = { version = "0.19.0", features = ["println"] }
 esp-bootloader-esp-idf = { version = "0.5.0" }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32s3", "jtag-serial", "log-04"] }
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
+
+# Abort-tier crash recovery (ADR 2026-07-29-per-chip-fw-toolchains): the
+# arch-neutral ledger, plus the backtrace capture the panic path stages. Both
+# are unconditional — the crash path must exist in every app build, not just
+# ones that happen to enable the server. `lpc-shared`'s reachable surface here
+# is `backtrace::capture_frames` alone (M3 P4 gives it an Xtensa walker); the
+# rest of the crate is stripped at link time.
+lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
+
+# Async runtime for `serial::io_task`. Mirrors fw-esp32c6's set; the S3 runs the
+# same embassy executor through esp-rtos.
+embassy-executor = "0.10.0"
+embassy-time = "0.5.0"
+embassy-sync = "0.8.0"
+embassy-futures = "0.1"
+embedded-io-async = "0.6"
+
+# MessageRouter + the SerialIo trait the USB-Serial-JTAG adapter implements.
+# NOTE: fw-core depends unconditionally on lpa-server, so this is the edge at
+# which fw-esp32s3 starts linking the LightPlayer stack. It arrives with
+# `default-features = false` (no node runtimes, no std) — P5 is what opts into
+# gates deliberately.
+fw-core = { path = "../fw-core", default-features = false }
+
+# Flash-backed filesystem. The lpfs partition is located by label at runtime
+# (see src/flash_storage.rs), not transcribed from partitions.csv.
+embedded-storage = "0.3"
+# `critical-section` is esp-storage's own default and is added back
+# deliberately: it wraps every flash operation so an interrupt cannot run from
+# a disabled cache mid-write. `default-features = false` without it compiles
+# fine and corrupts silently — exactly the trap M2 hit twice.
+esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32s3", "panic-unaligned-buffer"] }
+littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
+
+# io_task's wire-serialization path plus the boot-time `ServerHello`.
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
+ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
+
+# Chip-generic firmware layer: logger, time provider, output provider, and —
+# behind `server` — the server loop, transport, littlefs `LpFs`, project
+# auto-load, and hardware-manifest loader. Consumed, never reimplemented; this
+# crate must stay free of chip code (ADR 2026-07-29-per-chip-fw-toolchains).
+fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
+
+# ⚠️ Two of eight node gates. `default-features = false` means no gate is
+# implied — a kind not listed here loads as an inert placeholder (see
+# lpc-engine/README.md) — so this list is the exact set of node kinds the board
+# can run. Contrast fw-esp32c6, which lists all eight.
+#
+# `node-shader` is what M4 exists to turn on. **`node-fixture` is not optional
+# for it**: `OutputNode::consume` requires a *control* product, `ShaderNode`
+# produces a *visual* one, and `FixtureNode` is the only runtime that converts
+# between them. With the fixture gated off the shader renders into a bus
+# nothing reads and the output node reports a resolve failure every frame —
+# which is precisely the M3 symptom this milestone had to clear. Turning the
+# shader on without the fixture would produce a build that compiles a shader on
+# device and still cannot show it.
+#
+# Nothing else belongs here. Every further gate costs flash and blurs the
+# reading of what the shader path is worth.
+#
+# `panic-recovery` is absent on purpose: the S3 is abort tier (`panic = "abort"`
+# + the lp-recovery RTC ledger), and that feature pulls `unwinding`, which is
+# the C6's tier. See src/recovery/.
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
+    "node-shader",
+    "node-fixture",
+], optional = true }
+
+# The graphics backend, and the single biggest lever in the image. Through M3
+# this was `lp-gfx` with `null-backend`, which linked no compiler at all;
+# M4 replaces it with the real thing, and the difference is the headline flash
+# number of this milestone.
+#
+# There is no ISA feature to get wrong here, and that is deliberate:
+# `lp-gfx-lpvm` selects the LPVM engine by `target_arch`, so an
+# `xtensa-esp32s3-none-elf` build takes `lpvm-native` with `isa-xt` and nothing
+# else. Naming an ISA on this line would be the way to silently pay for a
+# backend the chip cannot execute (+26,448 B measured on the C6).
+#
+# `lp-gfx` itself arrives transitively and **without** `null-backend`: that
+# feature exists so a shader-less firmware pays nothing, and leaving it on here
+# would compile a `NullGraphics` nothing constructs. When it was unconditional
+# the unused module still cost 512 B of LTO perturbation.
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
+
+# Hardware registry/manifest for the output readout driver, and the filesystem
+# traits the server is handed.
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
+lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
 
 # Shader/JIT stack — harness-only for now, so the boot path stays dependency-free.
 # `default-features = false` + explicit `isa-xt` is load-bearing: pulling the

@@ -11,6 +11,7 @@ use crate::texture_handle::TextureHandle;
 
 /// Compile statistics reported by a backend.
 pub type ShaderCompileStats = lp_shader::LpsCompileStats;
+pub use lp_shader::FloatImpl as ShaderFloatImpl;
 
 /// A compiled, runnable visual shader.
 ///
