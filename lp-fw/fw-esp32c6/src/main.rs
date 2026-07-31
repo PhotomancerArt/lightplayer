@@ -246,6 +246,8 @@ use fw_esp32_common::time;
 use fw_esp32_common::transport;
 
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
+mod bootctl;
+#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod flash_storage;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 use fw_esp32_common::lp_fs;
@@ -408,11 +410,24 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         .expect("Failed to initialize RMT");
     esp_println::println!("[INIT] RMT peripheral initialized");
 
+    // Boot-control sector: a flash-persisted instruction from a previous run
+    // or from the host over esptool. Read (and consumed) before the
+    // filesystem mounts, because it must survive the power cycle that wipes
+    // the RTC recovery region — see docs/adr/2026-07-30-boot-control-sector.md.
+    #[cfg(not(feature = "memory_fs"))]
+    let (boot_control, flash) = {
+        let mut flash_storage = esp_storage::FlashStorage::new(flash);
+        let outcome = crate::bootctl::read_and_consume(&mut flash_storage);
+        (outcome, flash_storage)
+    };
+    #[cfg(feature = "memory_fs")]
+    let boot_control = lp_bootctl::DecodeOutcome::Blank;
+
     // Create filesystem before hardware providers so /hardware.json can override board policy.
     let base_fs: Box<dyn lpfs::LpFs> = {
         #[cfg(not(feature = "memory_fs"))]
         {
-            let flash_storage = esp_storage::FlashStorage::new(flash);
+            let flash_storage = flash;
             match lp_fs::LpFsFlash::init(
                 crate::flash_storage::LpFlashStorage::new(flash_storage),
                 crate::flash_storage::lpfs_config,
@@ -524,9 +539,20 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless
-    // repeated incomplete boots put us in safe mode: then the server comes
-    // up reachable but nothing crash-prone is loaded.
-    if boot_assessment.safe_mode {
+    // something asks us not to. Two independent reasons can skip it, and the
+    // log always says which one applied:
+    //
+    // - the boot-control sector (a host wrote "start once without loading a
+    //   project", or a previous run latched it), which survives a power cycle;
+    // - repeated incomplete boots, tracked in the RTC recovery region, which
+    //   does not.
+    //
+    // The boot-control record was already consumed by the read, so this is a
+    // one-shot: the next boot loads normally unless something says otherwise
+    // again.
+    if boot_control.skip_project_autoload() {
+        log::error!("[BOOTCTL] SAFE BOOT: boot-control record — skipping project auto-load");
+    } else if boot_assessment.safe_mode {
         let incomplete_boots = lp_recovery::snapshot()
             .map(|s| s.consecutive_incomplete_boots)
             .unwrap_or(0);

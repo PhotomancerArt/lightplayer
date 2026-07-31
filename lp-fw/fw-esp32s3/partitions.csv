@@ -1,5 +1,10 @@
 # Name,   Type,  SubType, Offset,   Size,     Flags
-nvs,      data,  nvs,     0x9000,   0x6000,
+# Kept byte-identical to lp-fw/fw-esp32c6/partitions.csv on purpose:
+# lp-bootctl hardcodes BOOTCTL_PARTITION_OFFSET for every supported board so
+# host writers and firmware readers agree without parsing a partition table.
+# See docs/adr/2026-07-30-boot-control-sector.md.
+nvs,      data,  nvs,     0x9000,   0x5000,
+bootctl,  data,  undefined, 0xe000, 0x1000,
 phy_init, data,  phy,     0xf000,   0x1000,
 factory,  app,   factory, 0x10000,  0x300000,
 lpfs,     data,  spiffs,  0x310000, 0xF0000,

@@ -3908,6 +3908,7 @@ dependencies = [
  "libm",
  "littlefs-rust",
  "log",
+ "lp-bootctl",
  "lp-collection 1.0.0",
  "lp-gfx-lpvm",
  "lp-perf",
@@ -5245,6 +5246,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "lp-bootctl"
+version = "1.0.0"
 
 [[package]]
 name = "lp-cli"
