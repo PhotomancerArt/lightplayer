@@ -5,12 +5,23 @@
 //! These fail when a builtin is added/removed/renamed without regenerating
 //! (`cargo run -p lps-builtins-gen-app`), when the manifest contains a phantom
 //! name the compiler does not accept, or when a builtin has no completion.
+//!
+//! **Modes are invisible to the user, so they are invisible to the manifest.**
+//! A q32/f32 twin pair shares one GLSL name and one signature — `acos` is
+//! `acos` whichever float mode the shader compiles in, and the compiler picks
+//! the variant (see `lps-builtin-ids`' mapping docs and `docs/design/float.md`).
+//! Emitting an entry per mode would put a duplicate `acos` in the editor's
+//! completion list. So each entry is resolved through **both** the q32 and the
+//! f32 resolver, and the reachability sweeps below still range over every
+//! `BuiltinId::all()` id in the module — a twin that the name+arity keys do not
+//! reach is still a failure.
 
 use std::collections::HashSet;
 
 use lps_builtin_completions::{COMPLETIONS, CompletionEntry};
 use lps_builtin_ids::{
-    BuiltinId, GlslParamKind, Mode, Module, glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id,
+    BuiltinId, GlslParamKind, Module, glsl_f32_math_builtin_id, glsl_lpfn_f32_builtin_id,
+    glsl_lpfn_q32_builtin_id, glsl_q32_math_builtin_id, texture_f32_builtin_id,
     texture_q32_builtin_id,
 };
 use lps_glsl::builtin_inventory::INLINED_BUILTINS;
@@ -141,12 +152,22 @@ fn lpfn_entries_match_builtin_ids() {
             "duplicate LPFN completion for {id:?}: {:?}",
             entry.detail
         );
+        // The f32 twin, where one exists, answers to the same signature.
+        // Mode-independent builtins (`lpfn_hash` and friends) resolve to the
+        // same id in both modes — that is not a duplicate entry.
+        if let Some(f32_id) = glsl_lpfn_f32_builtin_id(&name, &kinds)
+            && f32_id != id
+        {
+            assert!(
+                covered.insert(f32_id),
+                "duplicate LPFN completion for {f32_id:?}: {:?}",
+                entry.detail
+            );
+        }
     }
-    // Every LPFN builtin is reachable from a manifest entry. F32 twins share
-    // their Q32 twin's signature (validated as decimal pairs), so checking the
-    // Q32/variant-less ids covers the whole module.
+    // Every LPFN builtin — both modes — is reachable from a manifest entry.
     for id in BuiltinId::all() {
-        if id.module() != Module::Lpfn || id.mode() == Some(Mode::F32) {
+        if id.module() != Module::Lpfn {
             continue;
         }
         assert!(
@@ -166,14 +187,15 @@ fn glsl_entries_match_mapping_table_or_inlined_inventory() {
     let mut seen_keys: HashSet<(&str, usize)> = HashSet::new();
     for entry in entries("glsl") {
         let arity = snippet_arity(entry);
-        let import_id = glsl_q32_math_builtin_id(entry.name, arity);
+        let q32_id = glsl_q32_math_builtin_id(entry.name, arity);
+        let f32_id = glsl_f32_math_builtin_id(entry.name, arity);
         assert!(
-            import_id.is_some() || inlined.contains(&(entry.name, arity)),
+            q32_id.is_some() || f32_id.is_some() || inlined.contains(&(entry.name, arity)),
             "phantom glsl completion (neither import table nor inlined \
              inventory): {}/{arity} args",
             entry.name
         );
-        if let Some(id) = import_id {
+        for id in [q32_id, f32_id].into_iter().flatten() {
             covered.insert(id);
         }
         assert!(
@@ -220,6 +242,13 @@ fn texture_entries_match_mapping_table() {
             covered.insert(id),
             "duplicate texture completion for {id:?}"
         );
+        // The f32 twin, where one exists, answers to the same name and arity.
+        if let Some(f32_id) = texture_f32_builtin_id(entry.name, arity) {
+            assert!(
+                covered.insert(f32_id),
+                "duplicate texture completion for {f32_id:?}"
+            );
+        }
     }
     for id in BuiltinId::all() {
         if id.module() != Module::Texture {
