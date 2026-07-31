@@ -1,3 +1,4 @@
+use super::bootloader_entry_flow::BootloaderEntryFlow;
 use core::any::Any;
 use core::time::Duration;
 
@@ -60,6 +61,21 @@ pub enum DeviceOp {
     /// boots, so the restart after that is normal again. That is why this is
     /// NOT destructive and does not sever a lens, unlike `ResetToBlank`.
     BootSafeOnce,
+    /// Ask the device whether a bootloader is listening, and fold the answer
+    /// into the card's open bootloader-entry sheet.
+    ///
+    /// This is what makes the ritual's confirmation real. The passive
+    /// classifier CANNOT answer it: a board already in download mode printed
+    /// its ROM banner before Studio ever attached, so silence is the normal
+    /// case rather than evidence. Only the SYNC handshake can say.
+    ///
+    /// User-triggered, never automatic — the handshake reboots the device.
+    /// The user pressing "I've done that" IS the edge signal that a replug
+    /// happened, which is exactly when probing is worth its cost.
+    ProbeBootloaderMode {
+        card_key: String,
+        flow: BootloaderEntryFlow,
+    },
     DisconnectDevice,
     /// Destroy THE simulator session (runtime-pool P3, Q5): quiesce the
     /// editor when the lens is on the sim, close the provider session
@@ -135,6 +151,11 @@ impl ControllerOp for DeviceOp {
                  project that stops it from running can be fixed.",
                 ActionPriority::Secondary,
             ),
+            Self::ProbeBootloaderMode { .. } => ActionMeta::new(
+                "Check the device",
+                "Ask the device whether it is listening in recovery mode.",
+                ActionPriority::Primary,
+            ),
             Self::WipeProject => ActionMeta::new(
                 "Wipe project",
                 "Delete the device's project storage; firmware stays.",
@@ -202,6 +223,7 @@ impl ControllerOp for DeviceOp {
             | Self::WipeProject
             | Self::ResetToBlank
             | Self::BootSafeOnce
+            | Self::ProbeBootloaderMode { .. }
             | Self::DisconnectDevice
             | Self::StopSimulator
             | Self::RefreshConnections => ActionClass::Recovery,

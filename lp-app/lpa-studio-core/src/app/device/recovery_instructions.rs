@@ -108,11 +108,15 @@ impl ChipFamily {
         // Both families use the same USB-Serial-JTAG strap sequence; they are
         // separate variants so the heading can name the chip and so a family
         // that diverges later has somewhere to go.
+        // Knowing the CHIP does not tell us the silkscreen: the button label
+        // is a board property. Boards routinely shorten it to "B" for space,
+        // so even the chip-specific path hedges the label — it just does not
+        // have to hedge the sequence.
         vec![
             RecoveryStep::new("Unplug the USB cable."),
-            RecoveryStep::new("Hold the BOOT button down — keep holding it."),
-            RecoveryStep::new("Plug the cable back in while still holding BOOT."),
-            RecoveryStep::new("Let go of BOOT after a second or two."),
+            RecoveryStep::new("Hold the BOOT button — often labelled just \"B\". Keep holding it."),
+            RecoveryStep::new("Plug the cable back in while still holding it."),
+            RecoveryStep::new("Let go after a second or two."),
         ]
     }
 
@@ -120,8 +124,8 @@ impl ChipFamily {
         vec![
             RecoveryStep::new("Unplug the USB cable."),
             RecoveryStep::new(
-                "Hold the button marked BOOT (some boards label it IO0 or FLASH) \
-                 and keep holding it.",
+                "Hold the BOOT button — many boards shorten the label to just \
+                 \"B\", and some use IO0 or FLASH. Keep holding it.",
             ),
             RecoveryStep::new("Plug the cable back in while still holding that button."),
             RecoveryStep::new("Let go after a second or two."),
@@ -208,10 +212,33 @@ mod tests {
             .map(|step| step.text.as_str())
             .collect::<Vec<_>>()
             .join(" ");
+        // "B" is the one that actually bites: boards routinely shorten the
+        // silkscreen for space, and a user hunting for a button labelled
+        // "BOOT" on a board that says "B" concludes they have the wrong
+        // board. Reported from a real bench, 2026-07-31.
         assert!(
-            joined.contains("IO0") || joined.contains("FLASH"),
-            "generic copy must not assert a single button name: {joined}"
+            joined.contains("\"B\"") && joined.contains("IO0") && joined.contains("FLASH"),
+            "generic copy must cover the abbreviated silkscreens: {joined}"
         );
+    }
+
+    #[test]
+    fn no_sequence_asserts_an_unhedged_button_label() {
+        // Knowing the chip does not tell us the silkscreen — that is a board
+        // property, and boards shorten it to "B". Every sequence, specific or
+        // generic, must allow for that.
+        for chip in [Some("ESP32-C6"), Some("ESP32-S3"), None] {
+            let joined = RecoveryInstructions::for_chip(chip)
+                .steps
+                .iter()
+                .map(|step| step.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(
+                joined.contains("\"B\""),
+                "{chip:?} must allow for the abbreviated label: {joined}"
+            );
+        }
     }
 
     #[test]
