@@ -9,20 +9,35 @@ LightPlayer-owned code is licensed under the GNU Affero General Public License
 version 3 or later (`AGPL-3.0-or-later`). Third-party code, vendored forks, and
 dependencies remain under their own licenses.
 
-## Contribution Terms
+## Contributor License Agreement
 
-By submitting a contribution to LightPlayer, you agree that:
+LightPlayer is dual-licensed: the code is published under `AGPL-3.0-or-later`,
+and the maintainer separately offers it under commercial terms. To keep that
+possible, outside contributions require a signed Contributor License
+Agreement.
 
-- You have the right to submit the contribution.
-- Your contribution is licensed under `AGPL-3.0-or-later`.
-- You grant the LightPlayer maintainer a perpetual, worldwide, non-exclusive,
-  royalty-free license to use, modify, distribute, sublicense, and relicense
-  your contribution as part of LightPlayer, including under alternative
-  commercial license terms.
+The deal, in plain terms: **you keep ownership of your work**, it will always
+remain available under an OSI-approved open-source license, and you grant the
+maintainer the right to also license it commercially. The full text is short
+and worth reading: [docs/cla/individual-cla.md](docs/cla/individual-cla.md).
 
-This is intended as lightweight project hygiene, not a heavyweight legal
-process. If the project grows to need a formal CLA, these terms can be replaced
-with a more explicit agreement before accepting larger outside contributions.
+Signing is automatic — on your first pull request, the CLA bot will prompt
+you, and you sign by posting a comment. The signature is recorded once against
+your GitHub account and covers future contributions.
+
+If you are contributing as part of your job (your employer owns the rights to
+your work), your employer needs to execute the
+[Corporate CLA](docs/cla/corporate-cla.md) instead — contact
+<photomancerart@gmail.com>.
+
+Additionally, sign off each commit (`git commit -s`) to certify, per the
+[Developer Certificate of Origin](https://developercertificate.org/), that you
+have the right to submit it. If any part of a contribution is not your
+original work, say so in the PR, with its source and license — see
+[docs/adr/2026-07-29-license-provenance-discipline.md](docs/adr/2026-07-29-license-provenance-discipline.md)
+for the project's provenance rules. See
+[docs/adr/2026-07-31-contributor-license-agreement.md](docs/adr/2026-07-31-contributor-license-agreement.md)
+for why this process exists.
 
 ## Development
 
