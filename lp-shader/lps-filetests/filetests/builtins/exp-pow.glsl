@@ -16,9 +16,6 @@ float test_pow_two_two() {
     return pow(rt(2.0), rt(2.0));
 }
 
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_pow_two_two() ~= 4.0
 
 float test_pow_three_two() {
@@ -26,7 +23,6 @@ float test_pow_three_two() {
     return pow(rt(3.0), rt(2.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_pow_three_two() ~= 9.0
 
 float test_pow_two_half() {
@@ -34,7 +30,6 @@ float test_pow_two_half() {
     return pow(rt(2.0), rt(0.5));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_pow_two_half() ~= 1.4142135623730951
 
 float test_pow_four_third() {
@@ -42,7 +37,6 @@ float test_pow_four_third() {
     return pow(rt(4.0), rt(0.3333333333333333));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_pow_four_third() ~= 1.5874010519681994
 
 float test_pow_e_one() {
@@ -50,7 +44,6 @@ float test_pow_e_one() {
     return pow(rt(2.718281828459045), rt(1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_pow_e_one() ~= 2.718281828459045
 
 float test_pow_two_neg_one() {
@@ -58,7 +51,6 @@ float test_pow_two_neg_one() {
     return pow(rt(2.0), rt(-1.0));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_pow_two_neg_one() ~= 0.5
 
 vec2 test_pow_vec2() {
@@ -66,7 +58,6 @@ vec2 test_pow_vec2() {
     return pow(vec2(rt(2.0), rt(3.0)), vec2(rt(2.0), rt(2.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_pow_vec2() ~= vec2(4.0, 9.0)
 
 vec3 test_pow_vec3() {
@@ -74,7 +65,6 @@ vec3 test_pow_vec3() {
     return pow(vec3(rt(2.0), rt(3.0), rt(4.0)), vec3(rt(0.5), rt(0.5), rt(0.5)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_pow_vec3() ~= vec3(1.4142135623730951, 1.7320508075688772, 2.0)
 
 vec4 test_pow_vec4() {
@@ -82,7 +72,6 @@ vec4 test_pow_vec4() {
     return pow(vec4(rt(2.0), rt(3.0), rt(4.0), rt(5.0)), vec4(rt(1.0), rt(1.0), rt(1.0), rt(1.0)));
 }
 
-// @unimplemented(wasm.f32)
 // run: test_pow_vec4() ~= vec4(2.0, 3.0, 4.0, 5.0)
 
 

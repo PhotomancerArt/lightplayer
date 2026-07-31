@@ -22,9 +22,6 @@ float test_edge_const_out_error() {
 
 // wgpu.f32: naga glsl-in rejects the `const in` parameter qualifier ("Expected Void, Struct or a type, found In"); the probe compiles the whole file per directive, so every directive fails (tracked follow-up)
 // @unsupported(wgpu.f32)
-// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
-// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
-// @unimplemented(wasm.f32)
 // run: test_edge_const_out_error() ~= 1.0
 
 /*
@@ -54,7 +51,6 @@ float test_edge_const_only_with_in() {
 }
 
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_edge_const_only_with_in() ~= 2.0
 
 void explicit_const_in(const in float x) {
@@ -68,7 +64,6 @@ float test_edge_const_in_explicit() {
 }
 
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_edge_const_in_explicit() ~= 3.0
 
 /*
@@ -101,7 +96,6 @@ float test_edge_const_array() {
 }
 
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_edge_const_array() ~= 4.0
 
 struct Point {
@@ -121,5 +115,4 @@ float test_edge_const_struct() {
 }
 
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
 // run: test_edge_const_struct() ~= 5.0
