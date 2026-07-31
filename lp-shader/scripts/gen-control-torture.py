@@ -2448,7 +2448,18 @@ class Intrin:
     fn: object
     voff: float = -1.0
     vstep: float = 0.3125
-    # Targets whose frontend does not implement this builtin yet.
+    # Selectors for targets that do not implement this builtin yet, emitted as
+    # `// @unimplemented(<selector>)` before every generated `// run:`.
+    #
+    # These files are GENERATED: a disposition hand-written into the .glsl is
+    # reverted by the next `--write`, which is why the marker tool refuses to
+    # edit this corpus and `lint-torture-corpus` gates it. Put it here instead.
+    #
+    # Any selector the filetest parser accepts works, so prefer the axis-scoped
+    # form over a list of names — `("float_mode=f32",)` covers every future f32
+    # target, where `("wasm.f32", "xtn.f32")` has to be revisited per target:
+    #
+    #     Intrin("round", ..., unimplemented=("float_mode=f32",))
     unimplemented: tuple = ()
 
     def v(self, i: int) -> float:
@@ -2659,8 +2670,8 @@ class IntrinFile:
             lines.append("")
             for count, expected in runs:
                 # Annotations bind to the next `// run:` only, so repeat them.
-                for target in self.intr.unimplemented:
-                    lines.append(f"// @unimplemented({target})")
+                for selector in self.intr.unimplemented:
+                    lines.append(f"// @unimplemented({selector})")
                 lines.append(f"// run: {fname}({count}) ~= {expected:.6f}")
             lines.append("")
         return "\n".join(lines).rstrip() + "\n"
