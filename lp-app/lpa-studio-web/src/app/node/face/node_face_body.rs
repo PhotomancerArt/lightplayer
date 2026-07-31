@@ -2,8 +2,8 @@
 //! plus the drawers under it.
 //!
 //! [`super::super::NodePane`] renders this when `UiNodeView.face` is `Some`
-//! (shader/fixture/playlist today); nodes without a face keep the generic
-//! tab/section body. The body owns the full-bleed container: faces and
+//! (shader/fixture/playlist/button/output today); nodes without a face keep
+//! the generic tab/section body. The body owns the full-bleed container: faces and
 //! drawers emit flat
 //! [`super::NodeCardSection`]s that span the card edge-to-edge, divided by
 //! 1px hairlines — one surface, no inner boxes. Children (the playlist's
@@ -22,7 +22,7 @@ use lpa_studio_core::{
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
 
-use super::{FixtureFace, NodeCardDrawers, PlaylistFace, ShaderFace};
+use super::{ButtonFace, FixtureFace, NodeCardDrawers, OutputFace, PlaylistFace, ShaderFace};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -95,6 +95,30 @@ pub fn NodeFaceBody(
                 },
                 UiNodeFace::Playlist(playlist) => rsx! {
                     PlaylistFace { face: playlist, add_node_menu, on_action }
+                    NodeCardDrawers {
+                        node,
+                        sections,
+                        advanced_open: card_ui.advanced_open,
+                        platform,
+                        pending_edits,
+                        dirty_tint,
+                        on_action,
+                    }
+                },
+                UiNodeFace::Button(button) => rsx! {
+                    ButtonFace { face: button, on_action }
+                    NodeCardDrawers {
+                        node,
+                        sections,
+                        advanced_open: card_ui.advanced_open,
+                        platform,
+                        pending_edits,
+                        dirty_tint,
+                        on_action,
+                    }
+                },
+                UiNodeFace::Output(output) => rsx! {
+                    OutputFace { face: output, on_action }
                     NodeCardDrawers {
                         node,
                         sections,

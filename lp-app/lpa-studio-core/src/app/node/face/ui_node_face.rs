@@ -1,6 +1,6 @@
 //! The kind-specific face variants a node card can render.
 
-use crate::{UiFixtureFace, UiPlaylistFace, UiShaderFace};
+use crate::{UiButtonFace, UiFixtureFace, UiOutputFace, UiPlaylistFace, UiShaderFace};
 
 /// Kind-specific permanent face for a node card.
 ///
@@ -16,4 +16,9 @@ pub enum UiNodeFace {
     /// Playlist card: entry strip; the active child's real card renders
     /// below via the existing [`crate::UiNodeChild`].
     Playlist(UiPlaylistFace),
+    /// Button card: the simulate-press control (a runtime poke, not an
+    /// edit).
+    Button(UiButtonFace),
+    /// Output card: the test-pattern toggle (a runtime poke, not an edit).
+    Output(UiOutputFace),
 }

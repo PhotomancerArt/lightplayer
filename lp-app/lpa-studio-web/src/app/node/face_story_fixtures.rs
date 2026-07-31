@@ -10,11 +10,11 @@ use lpa_studio_core::{
     ArtifactLocation, ControllerId, ProjectEditorOp, ProjectNodeAddress, ProjectSlotAddress,
     ProjectSlotRoot, SlotPath, UiAction, UiAgentAvailability, UiAgentStatus, UiAgentToolRow,
     UiAgentTurn, UiAgentUsage, UiAgentView, UiAssetContent, UiAssetEditor, UiAssetEditorKind,
-    UiBindingEndpoint, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState, UiNodeFace,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPanelControl, UiPanelWidget,
-    UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview, UiProductPreviewFrame,
-    UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotFieldState, UiSlotSourceState,
-    UiSlotUnit, UiSlotValue, UiStatus,
+    UiBindingEndpoint, UiButtonFace, UiConfigSlot, UiFixtureFace, UiNodeChild, UiNodeDirtyState,
+    UiNodeFace, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiOutputFace, UiPanelControl,
+    UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct, UiProductPreview,
+    UiProductPreviewFrame, UiProductTrackingState, UiShaderFace, UiShaderUniform, UiSlotFieldState,
+    UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
 
 use crate::app::node::node_story_fixtures::{
@@ -445,6 +445,79 @@ pub(crate) fn fixture_node_view() -> UiNodeView {
 pub(crate) fn fixture_node_view_with_face(face: UiFixtureFace) -> UiNodeView {
     let mut view = fixture_node_view();
     view.face = Some(UiNodeFace::Fixture(face));
+    view
+}
+
+/// The button face: the simulate-press control plus the button's hardware
+/// identity.
+pub(crate) fn button_face() -> UiButtonFace {
+    UiButtonFace {
+        node: ProjectNodeAddress::parse("/fyeah_sign.show/mode.button")
+            .expect("valid story node address"),
+        endpoint: Some("button:gpio:D9".to_string()),
+        id: Some(1),
+    }
+}
+
+/// Advanced-drawer sections for the button card.
+pub(crate) fn button_sections() -> Vec<UiNodeSection> {
+    vec![UiNodeSection::ConfigSlots(vec![
+        UiConfigSlot::value(
+            "endpoint",
+            "Endpoint",
+            UiSlotValue::string("button:gpio:D9"),
+        ),
+        UiConfigSlot::value("id", "Id", UiSlotValue::u32(1)),
+        UiConfigSlot::value("stable_ms", "Stable ms", UiSlotValue::u32(30)),
+    ])]
+}
+
+/// A full button node card view with the face installed.
+pub(crate) fn button_node_view() -> UiNodeView {
+    let header = UiNodeHeader::new("Mode", "Button", "/fyeah_sign.show/mode.button")
+        .with_source("mode.json")
+        .with_status(UiStatus::good("Running"))
+        .with_summary("D9");
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(button_sections())])
+        .with_node_id("button-mode");
+    view.face = Some(UiNodeFace::Button(button_face()));
+    view
+}
+
+/// The output face: the test-pattern toggle, the endpoint, and the control
+/// product the output is currently being fed.
+pub(crate) fn output_face() -> UiOutputFace {
+    UiOutputFace {
+        node: ProjectNodeAddress::parse("/fyeah_sign.show/strip.output")
+            .expect("valid story node address"),
+        endpoint: Some("ws281x:rmt:D10".to_string()),
+        preview: Some(control_preview_product("output")),
+    }
+}
+
+/// Advanced-drawer sections for the output card.
+pub(crate) fn output_sections() -> Vec<UiNodeSection> {
+    vec![UiNodeSection::ConfigSlots(vec![
+        UiConfigSlot::value(
+            "endpoint",
+            "Endpoint",
+            UiSlotValue::string("ws281x:rmt:D10"),
+        ),
+        UiConfigSlot::value("input", "Input", UiSlotValue::string("Halo ring")).with_source(
+            UiSlotSourceState::Bound(UiBindingEndpoint::new("bus:control.out")),
+        ),
+    ])]
+}
+
+/// A full output node card view with the face installed.
+pub(crate) fn output_node_view() -> UiNodeView {
+    let header = UiNodeHeader::new("Strip", "Output", "/fyeah_sign.show/strip.output")
+        .with_source("strip.json")
+        .with_status(UiStatus::good("Running"))
+        .with_summary("241 LEDs");
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(output_sections())])
+        .with_node_id("output-strip");
+    view.face = Some(UiNodeFace::Output(output_face()));
     view
 }
 
