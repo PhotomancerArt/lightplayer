@@ -21,10 +21,15 @@ pub fn default_esp32c6_hardware_manifest() -> HwManifest {
 /// purpose, and pinned by
 /// [`tests::default_esp32s3_manifest_omits_unverified_and_in_package_pins`]:
 ///
-/// - **The user LED.** The Seeed wiki gives GPIO21 for the plain XIAO
-///   ESP32-S3; espboards.dev gives GPIO22 for the *Plus*, which cannot be
-///   right — the ESP32-S3 has no GPIO22 (it numbers GPIO0-21 and GPIO26-48).
-///   Neither claim has been checked against this board, so neither is here.
+/// - **The user LED — tested, and GPIO21 is ruled out.** The Seeed wiki gives
+///   GPIO21 for the plain XIAO ESP32-S3; espboards.dev gives GPIO22 for the
+///   *Plus*, which cannot be right — the ESP32-S3 has no GPIO22 (it numbers
+///   GPIO0-21 and GPIO26-48). GPIO21 was then driven on the desk board in a
+///   3-blink/pause pattern for 20 s (2026-07-30) with **no visible change**,
+///   so it is not the user LED on this variant either. The board's yellow LED
+///   appears to be a power/charge indicator on no GPIO we drive. Settling it
+///   wants the Seeed schematic or an S3 `test_gpio_calibrate` harness, not a
+///   third guess.
 /// - **The nine 1.27 mm castellated pads** the Plus adds over the plain XIAO.
 ///   No source publishes their GPIO numbers.
 /// - **In-package flash and PSRAM (GPIO26-GPIO37).** Not header pins and never
