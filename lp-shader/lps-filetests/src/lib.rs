@@ -45,10 +45,37 @@ fn directive_has_unimplemented_for(directive: &RunDirective, for_target: &Target
         .any(|a| a.kind == AnnotationKind::Unimplemented && a.applies_to(for_target))
 }
 
+/// True if this filetest is emitted by a generator, so hand edits do not survive.
+///
+/// Two generators write into `filetests/`: `lps-filetests-gen-app` (the
+/// `.gen.glsl` vector suite) and `scripts/gen-control-torture.py` (the 82-file
+/// control corpus). Both stamp a header. A marker written into their output is
+/// reverted by the next `--write` — that is how the per-directive
+/// `@unsupported(wgpu.f32)` markers were nearly lost, and why
+/// `lint-torture-corpus` exists.
+fn generated_filetest_source(path: &Path) -> Option<&'static str> {
+    let head = std::fs::read_to_string(path).ok()?;
+    // The torture generator writes its banner under a boxed title comment, so
+    // the marker is not on line 1.
+    let head: String = head.lines().take(16).collect::<Vec<_>>().join("\n");
+    if !head.contains("GENERATED") {
+        return None;
+    }
+    if head.contains("gen-control-torture") {
+        Some("lp-shader/scripts/gen-control-torture.py (the INTRINS table's `unimplemented` field)")
+    } else {
+        Some("lp-shader/lps-filetests-gen-app/src/ (the generator for this file)")
+    }
+}
+
 /// Plans annotation additions for a file based on test failures.
 ///
 /// Returns a Vec of MutationAction to add annotations (e.g., `// @unimplemented(target)`)
 /// before failing `// run:` lines.
+///
+/// Generated files are refused rather than edited: the marker cannot know that
+/// its edit will be reverted by the next regeneration, so it says where the
+/// disposition belongs instead of relying on a later lint to notice.
 fn plan_mark_annotations_for_file(
     path: &Path,
     failed_lines: &[usize],
@@ -57,6 +84,16 @@ fn plan_mark_annotations_for_file(
     only_if_unimplemented_for: Option<&Target>,
     annotation_kind: &str,
 ) -> anyhow::Result<Vec<MutationAction>> {
+    if let Some(generator) = generated_filetest_source(path) {
+        eprintln!(
+            "  Skipping {} — generated file. Put the @{annotation_kind} for {} in\n    {generator}\n\
+             \x20   and regenerate; a marker written here is reverted by the next --write.",
+            path.display(),
+            target.name(),
+        );
+        return Ok(Vec::new());
+    }
+
     let ann = format!("// @{}({})", annotation_kind, target.name());
     let mut actions = Vec::new();
 
@@ -2153,5 +2190,71 @@ mod format_summary_tests {
         assert!(table.contains("246"));
         assert!(table.contains("1.00×"));
         assert!(table.contains("1.38×"));
+    }
+}
+
+#[cfg(test)]
+mod generated_filetest_tests {
+    use super::*;
+
+    fn write_temp(name: &str, contents: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "lps_ft_gen_{}_{name}_{}.glsl",
+            std::process::id(),
+            name.len()
+        ));
+        std::fs::write(&p, contents).unwrap();
+        p
+    }
+
+    #[test]
+    fn plain_filetest_is_not_generated() {
+        let p = write_temp("plain", "// test run\nfloat f() { return 1.0; }\n");
+        assert_eq!(generated_filetest_source(&p), None);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn gen_app_output_points_at_the_generator_crate() {
+        let p = write_temp(
+            "genapp",
+            "// This file is GENERATED. Do not edit manually.\n\
+             // To regenerate, run:\n\
+             //   lps-filetests-gen-app vec/vec3/op-add --write\n\
+             //\n// test run\n",
+        );
+        let src = generated_filetest_source(&p).expect("recognised as generated");
+        assert!(src.contains("lps-filetests-gen-app"), "{src}");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn torture_output_points_at_the_intrins_table() {
+        let p = write_temp(
+            "torture",
+            "// test run\n//\n// ============\n// Control-flow torture: break/continue\n//\n\
+             // GENERATED FILE - do not edit by hand.\n\
+             // Regenerate: python3 lp-shader/scripts/gen-control-torture.py --write\n",
+        );
+        let src = generated_filetest_source(&p).expect("recognised as generated");
+        assert!(src.contains("gen-control-torture.py"), "{src}");
+        assert!(src.contains("unimplemented"), "names the field: {src}");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// The marker must refuse rather than write an edit the next `--write` eats.
+    #[test]
+    fn marking_a_generated_file_plans_nothing() {
+        let p = write_temp(
+            "refuse",
+            "// This file is GENERATED. Do not edit manually.\n\
+             // To regenerate, run:\n//   lps-filetests-gen-app vec/vec3/op-add --write\n\
+             //\n// test run\nfloat f() { return 1.0; }\n// run: f() ~= 1.0\n",
+        );
+        let target = Target::from_name("wasm.q32").unwrap();
+        let actions =
+            plan_mark_annotations_for_file(&p, &[7], false, target, None, "unimplemented").unwrap();
+        assert!(actions.is_empty(), "{actions:?}");
+        let _ = std::fs::remove_file(&p);
     }
 }
