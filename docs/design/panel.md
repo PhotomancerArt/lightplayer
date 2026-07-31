@@ -6,8 +6,10 @@ sibling of [`modules.md`](./modules.md), which defines where panels *come
 from* (publicity, channels, scopes); this document defines how controls
 *behave*. The seam between the two is deliberately narrow (§4).
 
-> **Status: DRAFT — awaiting ratification** (gate G1 of
-> `planning/2026-07-31-1002-modules-buses-panels`).
+> **Status: Ratified 2026-07-31** (gate G1 of
+> `planning/2026-07-31-1002-modules-buses-panels`). The open-question
+> register (§5) records accepted leans — revisit at implementation, not
+> before.
 >
 > **Posture.** The panel is the product surface — persona 3 ("end users
 > control the art") lives entirely here. Two commitments shape every rule

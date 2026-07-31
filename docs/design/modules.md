@@ -8,8 +8,10 @@ context that produced it, including its relationship to the
 composite-effects spike, is recorded in
 `docs/adr/2026-07-31-module-model-supersedes-composite-effects-spike.md`.
 
-> **Status: DRAFT — awaiting ratification** (gate G1 of
-> `planning/2026-07-31-1002-modules-buses-panels`).
+> **Status: Ratified 2026-07-31** (gate G1 of
+> `planning/2026-07-31-1002-modules-buses-panels`). The open-question
+> register (§9) records accepted leans — revisit at implementation, not
+> before.
 >
 > **Posture.** Alpha: no wire or artifact compatibility obligations; the
 > rename below is one-shot with no migration. The architecture is required
