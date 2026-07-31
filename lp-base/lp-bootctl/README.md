@@ -41,12 +41,12 @@ There is exactly one way to get a non-default boot: a fully valid record that
 asks for one. A corrupt sector can never *cause* a degraded boot — only fail
 to prevent one.
 
-**Magic last.** NOR flash only clears bits, so a record cannot be made visible
-by flipping a single word the way an RTC-RAM structure can. The payload is
-written first and the magic last, so an interrupted write leaves either no
-magic (blank) or a magic over a payload whose CRC will not match. Use
-[`encode_write_order`] rather than writing the record yourself — the ordering
-*is* the API.
+**One write.** Write the whole 16-byte record to an erased sector in a single
+operation. Do **not** split it: every flash-write API that can reach this
+sector issues the ESP ROM/stub `FLASH_BEGIN`, which erases the sectors it is
+about to write, so a second write meant to publish a first erases it instead.
+Integrity comes from the magic and CRC — every prefix of a partial write fails
+one of the two checks and decodes as "no record".
 
 **Consume on read.** The firmware erases a valid record the moment it reads
 it, before acting on it. The instruction is one-shot; a crash during the
@@ -71,12 +71,11 @@ The rest of the sector is left erased.
 ## Usage
 
 ```rust
-use lp_bootctl::{BootFlags, decode, encode_write_order};
+use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BootFlags, decode, encode_record};
 
 // Host side: ask the device to come up once without loading a project.
-let order = encode_write_order(BootFlags::SKIP_PROJECT_AUTOLOAD);
-let (payload_offset, payload) = order.payload(); // write FIRST
-let (magic_offset, magic) = order.magic();       // write LAST
+let record = encode_record(BootFlags::SKIP_PROJECT_AUTOLOAD);
+// erase the sector, then write `record` at BOOTCTL_PARTITION_OFFSET in one go
 
 // Device side, at boot:
 let outcome = decode(&sector_bytes);
@@ -85,7 +84,7 @@ if outcome.skip_project_autoload() {
 }
 ```
 
-The sector must be **erased** before either write; NOR flash cannot turn a `0`
+The sector must be **erased** before the write; NOR flash cannot turn a `0`
 back into a `1`.
 
 ## Tests
