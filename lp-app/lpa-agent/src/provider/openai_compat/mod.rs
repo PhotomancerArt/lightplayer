@@ -6,6 +6,4 @@
 pub mod openai_compat_provider;
 pub mod openai_compat_wire;
 
-pub use openai_compat_provider::{
-    COMPAT_MAX_COMPLETION_TOKENS, DEFAULT_BASE_URL, OpenAiCompatConfig, OpenAiCompatProvider,
-};
+pub use openai_compat_provider::{DEFAULT_BASE_URL, OpenAiCompatConfig, OpenAiCompatProvider};

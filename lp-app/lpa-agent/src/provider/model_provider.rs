@@ -34,8 +34,9 @@ impl ModelProvider for Box<dyn ModelProvider> {
 
 /// Everything a provider needs for one turn. The per-turn output-token
 /// ceiling is provider-owned (each provider knows what its API and servers
-/// accept — see `ANTHROPIC_MAX_OUTPUT_TOKENS` and
-/// `COMPAT_MAX_COMPLETION_TOKENS`), so no budget rides the request.
+/// accept — Anthropic sends `ANTHROPIC_MAX_OUTPUT_TOKENS`, while the compat
+/// dialect sends none and defers to each server's model max), so no budget
+/// rides the request.
 #[derive(Clone, Debug)]
 pub struct TurnRequest {
     pub system: String,
