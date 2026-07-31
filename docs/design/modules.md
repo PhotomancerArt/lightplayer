@@ -2,12 +2,11 @@
 
 This document is the single source of truth for the **module container
 model**: what a module is, how bus scoping works, how slots become public,
-and how the panel — the end-user control surface — derives from the bus. It
-supersedes the direction of the composite-effects spike (PR #218) and, at
-implementation time, its two ADRs (`2026-07-28-scoped-buses.md`,
-`2026-07-28-effects-are-projects.md`, both on the spike branch) — the
-spike's writer-shadowing model survives here; its promoted-control aliasing
-and transient scope implementation do not.
+and how the panel — the control surface — derives from the bus. It
+describes what *is* (once implemented, what the system does); the decision
+context that produced it, including its relationship to the
+composite-effects spike, is recorded in
+`docs/adr/2026-07-31-module-model-supersedes-composite-effects-spike.md`.
 
 > **Status: DRAFT — awaiting ratification** (gate G1 of
 > `planning/2026-07-31-1002-modules-buses-panels`).
@@ -18,7 +17,8 @@ and transient scope implementation do not.
 > public face) presented one way at every nesting depth. Where this
 > document and an implementation convenience disagree, this document wins.
 >
-> **Related:** `docs/adr/2026-07-26-node-card-faces.md` (face grammar),
+> **Related:** `docs/glossary.md` (terms),
+> `docs/adr/2026-07-26-node-card-faces.md` (face grammar),
 > `docs/adr/2026-07-09-declarative-default-bindings.md` (default binds),
 > `docs/adr/2026-07-27-node-authoring-operations.md` (create/vendor seam).
 
@@ -32,7 +32,8 @@ and transient scope implementation do not.
 | **Scope** | The bus namespace a module introduces around its children. | Global; a display prefix |
 | **Channel** | A named value stream within a scope. Exists iff some binding names it. | A declared registry entry; a place values are stored |
 | **Public slot** | A slot with a bus binding. Its channel appears in its scope. | A slot copied, aliased, or mirrored anywhere |
-| **Panel** | A *presentation* of a scope's channel list. The root module's panel is the end-user surface. | A place values live; a dataflow construct |
+| **Panel** | A node's *control surface*: the presentation of its public surface (R8). Every node has one; the root module's is the end-user surface. | A place values live; a dataflow construct; face-specific |
+| **Face** | A node's kind-specific card presentation in the workspace — the authoring/monitoring instrument. A face *hosts* the node's panel plus authoring-only surfaces (drawers, code, entries strip). | The panel itself; anything play mode renders |
 | **Panel state** | Unauthored runtime writer state (per scope + channel), persisted separately. | Part of the project's authored artifacts; dirty-tracked |
 
 The project/module split ("mitosis") is deliberate: the project carries the
@@ -70,9 +71,9 @@ introduction is a property of the module kind, not the invocation site.
 
 Scope identity is **structural engine state**: after load, the engine can
 answer "which scope contains node X" and "which scope does module M
-introduce" (the spike's throwaway loader side-table is explicitly
-rejected). The scope is engine-owned runtime structure hung off the module
-node; authored artifacts never name scopes.
+introduce" — a transient load-time-only scope table is non-conforming.
+The scope is engine-owned runtime structure hung off the module node;
+authored artifacts never name scopes.
 
 ### R2 — Sink scopes (isolating invocation sites)
 
@@ -86,9 +87,10 @@ honored by construction rather than by per-layer filters:
    through the isolating node's own face (the playlist face presents the
    *active* entry's panel — see E2).
 2. **No demand:** listing a panel or probe must never force resolution of
-   an inactive sink child's channels (the spike violated this and every
-   inactive playlist entry rendered every frame; the fix must live in the
-   model, not in the probe).
+   an inactive sink child's channels — otherwise every inactive playlist
+   entry renders on every listing (an observed failure class; see the
+   companion ADR). The property lives in the model, never as a per-layer
+   filter.
 
 Entries are *alternatives* (isolated from one another); module children
 are *collaborators* (share one scope). That is why there are exactly two
@@ -140,8 +142,7 @@ If no enclosing scope has a writer, the consuming slot uses its **own
 authored default value**, and the channel **still lists** in the
 consumer's scope. Listing is what makes the channel appear on the panel,
 where touching the control materializes a writer (R10) — an unfilled
-public input is an *invitation*, not an error. This replaces the spike's
-"resolve to root, surface unfilled".
+public input is an *invitation*, not an error.
 
 ### R7 — Module output interface: one automatic publish + authored exports
 
@@ -170,19 +171,30 @@ public input is an *invitation*, not an error. This replaces the spike's
 Inputs need no counterpart: consumed inheritance (R5) already lets a host
 feed a module's inner consumers with zero authoring (see E6).
 
-### R8 — The panel is a view of the scope's channels
+### R8 — The panel: one concept, every node, derived from publicity
 
-The panel of a scope **is its channel list, presented**. No dataflow
-construct exists behind a panel; nothing is promoted between levels.
+The **panel** is a first-class per-node concept, not a feature of
+particular faces: every node has a panel, and it presents the node's
+*public surface*. No dataflow construct exists behind a panel; nothing is
+promoted between levels.
 
-- A module's face renders its own scope's panel.
-- An enclosing module's panel additionally presents each child module's
-  panel as a **nested group** (presentation recursion — the same shape as
-  the card grammar). Two embedded instances of the same effect present
-  two independent groups.
-- The **root module's face is the end-user panel**. Play mode is "render
-  only the root module's face".
-- Sink scopes surface only per R2 (through the isolating node's face).
+- A **leaf node's** panel presents its public (bound) slots. Publicity
+  (R3) is the one gesture that puts a control on a panel — this
+  **subsumes the legacy `panel: bool` slot flag**: "add to panel" *means*
+  "bind to a channel". (Widget choice, step, unit remain slot meta.)
+- A **module's** panel presents its scope's channel list — which is the
+  aggregate of its children's publicity — plus each child module's panel
+  as a **nested group** (presentation recursion). Two embedded instances
+  of the same effect present two independent groups.
+- An **isolating node's** panel (playlist) presents the *active* sink
+  child's panel (R2); inactive siblings surface nowhere.
+- The **root module's panel is the end-user surface**. Play mode renders
+  panels only — no faces.
+- A **face** is a different concept: the kind-specific card presentation
+  in the workspace (preview hero, code drawers, entries strip — the
+  authoring instrument). A face *hosts* its node's panel; it is never
+  itself the panel. Faces appear in the workspace; panels appear on faces
+  *and* stand alone in play mode.
 - Presentation is kind-dependent: scalar channels render as knobs/faders,
   bools as toggles, visuals as preview tiles, streams as readouts.
   Channels driven by authored writers (an LFO, a clock) render as live
@@ -201,8 +213,8 @@ conflicting meta: **numeric ranges union (widest wins)**; on label/unit
 conflict the channel name wins. A module-level authored meta override
 (label/unit/min/max on the module node, per channel) beats derivation —
 this is the curation escape hatch, and the only module-side declaration
-in the model. It carries no value (that would recreate the alias problem
-the spike had).
+in the model. It carries no value — an override that carried one would
+create a second source of truth beside the bound slot.
 
 ### R10 — Panel state: lazy, stateful, unauthored runtime writers
 
@@ -349,7 +361,7 @@ H (root module): control K (value → bus:speed, authored)
   still follows K. The UI shows plasma₁'s control as *engaged/overridden*
   (R11). Reset plasma₁ (R12) → re-inherits K.
 
-### E5 — Depth 2 (module inside a module) — the spike's latent-bug case
+### E5 — Depth 2 (module inside a module)
 
 ```text
 H (root module): clock, …
@@ -360,10 +372,11 @@ H (root module): clock, …
 
 - `C.vis` resolves: Scope(M_outer) **has** a `visual.out` writer —
   M_inner's publish — so it resolves to the **sibling effect's visual**,
-  never walking to root (R5). The spike got this wrong (its writer table
-  omitted module publishes; depth 1 worked only because the fallback also
-  landed on root). **Implementation must pin this exact shape with a
-  test.**
+  never walking to root (R5). Module publishes and exports (R7) count as
+  writers in resolution exactly like any other producer; an
+  implementation whose writer accounting omits them fails only at depth
+  ≥ 2, so **this exact shape must be pinned with a test** (see the
+  companion ADR for the observed failure).
 - M_outer's own `output` mirrors Scope(M_outer)'s `visual.out` = M_inner's
   visual (R7), and publishes it up into Scope(H) — nesting composes.
 - Feedback loops via the bus are not a supported idiom: a node that both
@@ -394,7 +407,7 @@ H (root module): audio-input node (samples → bus:audio.in)
   (silence, R6); its workbench project supplies a test-tone writer. A
   module with no visual is legitimate: its `output` mirrors cleared (R7).
 
-## 5. UI corollaries (spike M2 owns the shape)
+## 5. UI corollaries (the UX spike owns the shape)
 
 One face, three zoom levels: the **effect author** works inside the module
 (children expanded); the **artist** sees the module face as a card
@@ -423,9 +436,8 @@ my-project/
                          #   never dirty-tracked, safe to delete
 ```
 
-- `format` lives **only** in `project.json`. Vendored module folders carry
-  none — the spike's "format tolerated-but-ignored at non-root" rule is
-  deleted. A vendored module's format is its host project's; a bare module
+- `format` lives **only** in `project.json` — module folders never carry
+  one. A vendored module's format is its host project's; a bare module
   folder opened standalone is wrapped in a workbench project
   (starter-project seam) and assumed current — cross-version module
   *sharing* keeps the alpha posture: version + refuse, never migrate.
@@ -434,7 +446,8 @@ my-project/
   paths, so vendoring/renames invalidate entries gracefully (unknown
   paths are dropped on load).
 - Relative `node:` refs and file-relative artifact refs survive vendoring
-  by construction (unchanged from the spike's analysis).
+  by construction — a module folder's internal wiring is
+  location-independent.
 
 ## 7. Bus vocabulary — under discovery
 
@@ -450,31 +463,9 @@ nothing in this document depends on the vocabulary's final shape.
 
 `author`, `version`, `license`, `created` (ISO date). Optional on any
 node and on `project.json`; skip-if-default; no semver semantics yet.
-Copy-on-extract per R14. (The spike's `ProjectDef.author/version/license`
-survive as this, relocated.)
+Copy-on-extract per R14.
 
-## 9. Relationship to the #218 spike
-
-| Spike piece | Fate |
-|---|---|
-| Writer-shadowing resolution (rules 3/4 of its ADR) | **Kept** → R4/R5 |
-| Anonymous playlist-entry scopes | **Kept, promoted** → sink scopes as modeled property (R2) |
-| Output mirror + non-root fallback publish | **Kept, generalized** → R7 (exports added) |
-| `ScopedChannel` key through `QueryKey`/index/resolver | **Kept** as mechanism (resolver stays dumb) |
-| Effect-face component, knob/panel widget reuse | **Kept** as M2 starting point |
-| plasma / meteor content | **Kept** as future example modules |
-| `PromotedControlDef` value-less aliasing | **Dropped** → R3 (binding is publicity); meta-override vocabulary survives in R9 |
-| Transient `BusScopes` loader side-table | **Dropped** → R1 (structural scope state) |
-| Scope flattened to display strings on the wire; entry scopes probe-filtered | **Dropped** → structured scope on the wire; R2 by construction |
-| "Resolve to root, surface unfilled" | **Replaced** → R6 |
-| Root special-casing (~7 sites, incl. Studio's `"visual.out"` string test) | **Deleted** — root is not special (R1) |
-
-Defects the implementation must pin with tests: the depth-2 resolution
-shape (E5); sink-scope no-demand (R2.2 — the inactive-entry render
-regression); and note the spike branch carries a silently-disabled probe
-test (duplicated `#[test]`) — do not inherit it.
-
-## 10. Open questions (G1 redline register)
+## 9. Open questions (G1 redline register)
 
 - **Q3 (spec proposed):** panel runtime commands `PanelWrite { scope,
   channel, value }` / `PanelReset { scope?, channel? }`; "touched" =
@@ -489,3 +480,7 @@ test (duplicated `#[test]`) — do not inherit it.
 - **Q12:** grabbing an authored-driven channel (R8/R11 "grab the LFO")
   — in scope for the first implementation, or panel-writers-only-on-
   otherwise-unwritten-channels initially?
+- **Q13:** R8 subsumes the `panel: bool` slot flag under publicity — a
+  leaf node's knobs are exactly its bound slots, and "add to panel" is
+  the binding gesture. Confirm the flag (and `ShaderSlotDef.panel`) is
+  deleted rather than kept as a parallel card-local mechanism.
