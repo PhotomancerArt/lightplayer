@@ -21,15 +21,6 @@ const REFRESH_MANIFEST_FILE = ".refresh-manifest.json";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../../..");
 
-const freshDir = path.resolve(process.argv[2] ?? "");
-const baselineDir = path.resolve(
-  process.argv[3] ?? path.join(repoRoot, "lp-app/lpa-studio-web/story-images"),
-);
-if (!process.argv[2]) {
-  console.error("Usage: story-apply-refresh.mjs <fresh-capture-dir> [baseline-dir]");
-  process.exit(2);
-}
-
 export async function applyRefresh(freshDir, baselineDir) {
   let manifest;
   try {
@@ -71,7 +62,19 @@ export async function applyRefresh(freshDir, baselineDir) {
   return { replaced: replace.length, removed: remove.length };
 }
 
+// CLI entry only. Argument parsing MUST stay inside this guard: `story-pull.mjs`
+// imports `applyRefresh`, and a module-scope `process.exit(2)` for missing argv
+// made that import — and therefore `just studio-story-pull`, the documented
+// manual fallback for drift — exit 2 before it did anything.
 if (import.meta.url === `file://${process.argv[1]}`) {
+  const freshDir = path.resolve(process.argv[2] ?? "");
+  const baselineDir = path.resolve(
+    process.argv[3] ?? path.join(repoRoot, "lp-app/lpa-studio-web/story-images"),
+  );
+  if (!process.argv[2]) {
+    console.error("Usage: story-apply-refresh.mjs <fresh-capture-dir> [baseline-dir]");
+    process.exit(2);
+  }
   try {
     const { replaced, removed } = await applyRefresh(freshDir, baselineDir);
     console.log(
