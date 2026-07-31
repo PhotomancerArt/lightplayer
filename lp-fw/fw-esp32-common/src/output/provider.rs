@@ -13,8 +13,8 @@ use lp_collection::VecMap;
 
 use lpc_hardware::OutputError;
 use lpc_hardware::{
-    HardwareEndpointError, HardwareSystem, HwEndpointSpec, Ws281xConfig, Ws281xOutput,
-    ws281x_capped_byte_count, WS281X_MAX_LEDS_PER_CHANNEL,
+    HardwareEndpointError, HardwareSystem, HwEndpointSpec, WS281X_MAX_LEDS_PER_CHANNEL,
+    Ws281xConfig, Ws281xOutput, ws281x_capped_byte_count,
 };
 use lpc_shared::DisplayPipeline;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};

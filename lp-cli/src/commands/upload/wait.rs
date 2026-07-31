@@ -213,7 +213,10 @@ mod tests {
     fn shader_compile_error_is_terminal_even_before_a_frame_renders() {
         let events = vec![
             runtime_event(3, 0),
-            node_status_event(1, NodeRuntimeStatus::Error("shader compile: bad glsl".into())),
+            node_status_event(
+                1,
+                NodeRuntimeStatus::Error("shader compile: bad glsl".into()),
+            ),
         ];
         assert_eq!(
             evaluate_run_evidence(&events),

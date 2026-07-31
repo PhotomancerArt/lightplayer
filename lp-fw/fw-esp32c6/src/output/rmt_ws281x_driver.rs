@@ -16,8 +16,8 @@ use esp_hal::rmt::Rmt;
 use lpc_hardware::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
     HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, OutputError,
-    Ws281xConfig, Ws281xDriver, Ws281xOutput, ws281x_capped_byte_count,
-    WS281X_MAX_LEDS_PER_CHANNEL,
+    WS281X_MAX_LEDS_PER_CHANNEL, Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    ws281x_capped_byte_count,
 };
 
 use crate::output::{LedChannel, LedTransaction};

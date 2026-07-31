@@ -50,7 +50,11 @@
 // `test_backtrace_oracle` is the exception — it is deliberately
 // allocation-free, because it exercises a walk the panic path takes, and the
 // panic path must not allocate.
-#[cfg(any(not(fw_harness), feature = "test_xt_jit_corpus", feature = "test_button"))]
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_xt_jit_corpus",
+    feature = "test_button"
+))]
 extern crate alloc;
 
 mod board;
