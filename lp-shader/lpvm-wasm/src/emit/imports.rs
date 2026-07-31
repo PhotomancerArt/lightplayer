@@ -433,3 +433,60 @@ pub(crate) fn import_callee(
         .map(|(i, _)| CalleeRef::Import(ImportId(i as u16)))
         .ok_or_else(|| format!("missing import @{module}::{func_name}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::ToString;
+
+    #[test]
+    fn q32_mode_resolves_a_float_import() {
+        let d = decl("glsl", "sin", &[IrType::F32], &[IrType::F32]);
+        assert!(resolve_builtin_id_for_mode(&d, FloatMode::Q32).is_ok());
+    }
+
+    /// The whole point of the gate: an f32 module must not silently import a
+    /// Q32-signature builtin. Before this, the Q32 id was used regardless and
+    /// the module failed much later as an opaque wasm validation error.
+    #[test]
+    fn f32_mode_refuses_a_float_import_and_names_it() {
+        let d = decl("glsl", "sin", &[IrType::F32], &[IrType::F32]);
+        let err = resolve_builtin_id_for_mode(&d, FloatMode::F32).unwrap_err();
+        assert!(err.contains("@glsl::sin"), "{err}");
+        assert!(err.contains("no f32 implementation"), "{err}");
+    }
+
+    /// A pointer parameter is **not** float-agnostic even though it is an `i32`
+    /// on both sides. The pointee is shader memory the builtin decodes with its
+    /// own float encoding, so a Q32 builtin reading an f32 module's memory
+    /// reinterprets f32 bits as Q16.16 and returns garbage — with no type error
+    /// anywhere, because both sides really are `i32`. Wasm validation cannot
+    /// catch this, so the gate has to.
+    #[test]
+    fn f32_mode_refuses_pointer_params_despite_the_i32_abi() {
+        let d = decl("lpfn", "lpfn_worley_2", &[IrType::Pointer, IrType::I32], &[]);
+        assert!(!decl_is_float_agnostic(&d));
+        assert!(resolve_builtin_id_for_mode(&d, FloatMode::F32).is_err());
+    }
+
+    /// Integer-only builtins carry no float representation either way, so they
+    /// stay resolvable in f32 mode rather than becoming collateral damage.
+    #[test]
+    fn f32_mode_allows_integer_only_imports() {
+        let d = decl("vm", "__lp_get_fuel", &[], &[IrType::I32]);
+        assert!(decl_is_float_agnostic(&d));
+        assert!(resolve_builtin_id_for_mode(&d, FloatMode::F32).is_ok());
+    }
+
+    fn decl(module: &str, func: &str, params: &[IrType], returns: &[IrType]) -> ImportDecl {
+        ImportDecl {
+            module_name: module.to_string(),
+            func_name: func.to_string(),
+            param_types: params.to_vec(),
+            return_types: returns.to_vec(),
+            lpfn_glsl_params: None,
+            needs_vmctx: false,
+            sret: false,
+        }
+    }
+}
