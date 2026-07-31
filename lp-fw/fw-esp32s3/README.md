@@ -30,7 +30,7 @@ the boot path's park loop with a harness runner — the same mechanism
 ### `test_xt_jit_corpus`
 
 ```bash
-just fwtest-xt-jit-esp32s3 /dev/cu.usbmodem1101
+just fwtest-xt-jit-esp32s3 /dev/cu.usbmodemXXXX
 ```
 
 Compiles shaders on-device through `lpvm-native`'s JIT (`isa/xt`) and prints
@@ -55,6 +55,35 @@ Run the host oracle first:
 cargo test -p lpvm-native --features xt-corpus,emu-xt
 ```
 
+### `test_backtrace_oracle`
+
+```bash
+just fwtest-backtrace-esp32s3 /dev/cu.usbmodemXXXX
+```
+
+Proves `lpc_shared::backtrace`'s Xtensa windowed walk on silicon. A backtrace
+walker that returns plausible-looking garbage is worse than one that returns
+nothing, so this asserts an **exact** frame count rather than eyeballing
+output: a recursive `chain(n)` produces `n` frames that all return to the same
+call site, so a correct walk contains a run of exactly `n` identical PCs. That
+is checked at depths 5, 15 and 25 — all well past the point where the register
+window ring wraps and the frames stop being reachable without a forced spill.
+Corrupt save-area chains (cyclic, descending, torn, off-stack, unaligned) must
+terminate at exact counts.
+
+The harness also prints a **control** that runs the same walk with the window
+spill skipped. On the run that established this it reported 19 frames where 25
+were expected — six believable, correctly-typed, wrong addresses. That is the
+failure mode the spill exists to prevent, and it is why the control is in the
+transcript.
+
+Run the host oracle first — it drives the same walk against synthetic stacks
+built inside the real S3 DRAM window:
+
+```bash
+cargo test -p lpc-shared
+```
+
 ## Building
 
 ```bash
@@ -76,7 +105,7 @@ the Rust target spec links through `xtensa-esp32s3-elf-gcc`.
 ## Flashing
 
 ```bash
-just flash-fw-esp32s3 /dev/cu.usbmodem1101
+just flash-fw-esp32s3 /dev/cu.usbmodemXXXX
 ```
 
 The port argument is optional but usually wanted: several boards are typically
@@ -84,6 +113,19 @@ on the desk bus and auto-detection picks the first match, not necessarily the
 S3. The S3 speaks **USB-Serial-JTAG**, not a UART bridge, so it enumerates as
 `/dev/cu.usbmodem*` and **its port number changes** each time the chip
 re-enumerates after a reset.
+
+**Never hardcode the port — identify it.** Ask each candidate what it is:
+
+```bash
+for p in /dev/cu.usbmodem*; do echo "-- $p"; espflash board-info --port "$p"; done
+```
+
+`Chip type: esp32s3` is the one you want. This is not hypothetical: during M3
+the S3 sat on `usbmodem1101`, was unplugged and replugged, and came back on
+`usbmodem1301` — with a **C6** now answering to `1101`. espflash refuses a
+chip mismatch, so the failure is safe rather than silent, but the confusing
+error costs more time than the loop above. Docs here use `usbmodemXXXX` as a
+placeholder for that reason.
 
 Before concluding a board is dead: a stray `espflash` holding this port wedges
 it *uninterruptibly* (`ps` STAT `Us+`; `kill -9` does not land, because the

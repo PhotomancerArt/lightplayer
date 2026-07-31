@@ -116,6 +116,8 @@ holds the full context.
 | Legacy `MappingConfig` variant retirement (`PathPoints`/`RingArray`/`PointList`/`SvgPath`) | `2026-07-27-map2d-document-architecture` | M5 one-home mapping editing lands and shipped projects are migrated |
 | CLA / DCO-with-explicit-grant mechanism (recorded as intent only) | `2026-07-29-license-provenance-discipline` | The first outside contribution to relicensing-sensitive code is proposed |
 | Per-board partition table selection (4/8/16 MB chosen at build time, so no board assumption is baked into `partitions.csv`) | `2026-07-30-esp32s3-partition-floor` | A second ESP32-S3 board with a different flash size actually exists |
+| Classic-ESP32 (LX6) address windows for the Xtensa backtrace walk (the ABI is shared, the memory map is not) | `2026-07-30-xtensa-backtrace-window-spill` | A classic-ESP32 firmware target needs frames in its crash reports |
+| Xtensa exception-frame walking (crashes arriving through the exception vector rather than `panic!`; `walk_frames_from` already takes an explicit `(ra, sp)` for it) | `2026-07-30-xtensa-backtrace-window-spill` | The S3 needs backtraces for hardware faults, not just panics |
 
 ## Relationship To Shared Planning
 
