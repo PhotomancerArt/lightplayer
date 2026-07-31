@@ -1172,7 +1172,7 @@ test-glsl-filetests:
 # was measured at ~18 min for the pair on a 4-core runner). Local `check`
 # keeps the full meaning.
 [parallel]
-check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus
+check-lint: fmt-check clippy lint-serde-content lint-schemars-fw lint-torture-corpus lint-vec-corpus
 
 [parallel]
 check: check-lint schema-check
@@ -1187,6 +1187,14 @@ lint-serde-content:
 # per-directive @unsupported(wgpu.f32) markers were nearly lost).
 lint-torture-corpus:
     python3 lp-shader/scripts/gen-control-torture.py --check
+
+# Same story for the vec corpus (filetests/vec/**/*.gen.glsl): hand edits are
+# silently reverted by the next `--write`. Without this gate the generator had
+# drifted 2,700 lines of body indentation away from the checked-in files, and a
+# regeneration would have silently dropped the run[f32] channels that the M6 P2
+# triage hand-added to the float op-add/op-multiply large-numbers cases.
+lint-vec-corpus:
+    cargo run -p lps-filetests-gen-app -- --check
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
