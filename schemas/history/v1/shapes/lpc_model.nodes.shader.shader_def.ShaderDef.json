@@ -1,0 +1,93 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "source",
+        "shape": {
+          "custom": {
+            "codec": 2355797192,
+            "meta": {},
+            "shape": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 177956922,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "render_order",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "number": {
+                  "step": 1.0
+                }
+              },
+              "id": 1231123999,
+              "meta": {},
+              "ty": "i32"
+            }
+          }
+        }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "glsl_opts",
+        "shape": {
+          "ref": {
+            "id": 4084892601
+          }
+        }
+      },
+      {
+        "name": "param_defs",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 3712581622
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "consumed",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 90603770
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}
