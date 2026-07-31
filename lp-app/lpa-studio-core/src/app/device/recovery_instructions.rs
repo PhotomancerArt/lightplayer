@@ -152,6 +152,21 @@ mod tests {
     }
 
     #[test]
+    fn a_firmware_package_name_identifies_the_chip() {
+        // `UiDeviceCard.fw.package` is "fw-esp32c6" — the package names the
+        // chip it was built for, so a device Studio reached earlier can get
+        // specific instructions even though it is unreachable NOW. This is
+        // the only chip source available before the user gets into bootloader
+        // mode.
+        let instructions = RecoveryInstructions::for_chip(Some("fw-esp32c6"));
+        assert_eq!(instructions.subject, "ESP32-C6");
+        assert!(!instructions.is_generic);
+
+        let instructions = RecoveryInstructions::for_chip(Some("fw-esp32s3"));
+        assert_eq!(instructions.subject, "ESP32-S3");
+    }
+
+    #[test]
     fn chip_matching_is_case_insensitive() {
         assert_eq!(
             RecoveryInstructions::for_chip(Some("esp32s3")).subject,

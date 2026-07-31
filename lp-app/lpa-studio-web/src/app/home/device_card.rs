@@ -26,10 +26,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     BundledFirmware, CardSheet as CardSheetState, CardTabView, CardUiOp, CardVerb, ControllerId,
     DEPLOY_NODE_ID, DeployOp, DeviceCardTab, DeviceController, DeviceDetailAffordance, DeviceOp,
-    DeviceRichInput, HomeOp, LinkProviderKind, ProjectController, ProjectOp, RichObjectView,
-    RichSection, RosterAffordance, RosterCardState, RosterTreatment, SimDetailAffordance,
-    SimRichInput, UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind, device_card_tabs,
-    device_rich_object, sim_rich_object,
+    DeviceRichInput, HomeOp, LinkProviderKind, ProjectController, ProjectOp, RecoveryInstructions,
+    RichObjectView, RichSection, RosterAffordance, RosterCardState, RosterTreatment,
+    SimDetailAffordance, SimRichInput, UiAction, UiDeviceCard, UiDeviceProjectChip, UiStatusKind,
+    device_card_tabs, device_rich_object, sim_rich_object,
 };
 use lpa_studio_core::{UiLogEntry, UiLogLevel};
 
@@ -982,7 +982,12 @@ fn device_card_sheet_view(
             NameDeviceSheet { card_key, on_action }
         },
         DeviceCardSheet::Troubleshoot => rsx! {
-            TroubleshootSheet { uid: card.uid.clone(), card_key, on_action }
+            TroubleshootSheet {
+                uid: card.uid.clone(),
+                card_key,
+                firmware_package: card.fw.as_ref().map(|fw| fw.package.clone()),
+                on_action,
+            }
         },
     }
 }
@@ -1007,11 +1012,17 @@ fn strip_confirmation(action: UiAction) -> UiAction {
 fn TroubleshootSheet(
     uid: Option<String>,
     card_key: String,
+    firmware_package: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let reconnect = reconnect_device_action(uid);
     let recovery_flash = flash_device_action(false);
     let boot_safe_once = boot_safe_once_action();
+    // The firmware package names the chip it was built for ("fw-esp32c6"),
+    // which is the only chip source available before the user reaches
+    // bootloader mode — a device that will not boot cannot tell us its board.
+    // `None` yields generic steps that say they are generic.
+    let instructions = RecoveryInstructions::for_chip(firmware_package.as_deref());
     rsx! {
         CardSheet {
             on_dismiss: {
@@ -1026,7 +1037,21 @@ fn TroubleshootSheet(
                     "If it was fine until you changed the project, the project may be "
                     "stopping it from starting — start it once without loading it."
                 }
-                li { "Still stuck? Hold BOOT while plugging in, then flash the firmware." }
+            }
+            div { class: "tw:mb-3 tw:rounded tw:border tw:border-line tw:p-2",
+                div { class: "tw:mb-1 tw:text-xs tw:font-medium",
+                    "Still stuck? Put {instructions.subject} into recovery mode:"
+                }
+                ol { class: "tw:m-0 tw:grid tw:list-decimal tw:gap-1 tw:pl-4 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                    for step in instructions.steps.iter() {
+                        li { "{step.text}" }
+                    }
+                }
+                if instructions.is_generic {
+                    div { class: "tw:mt-1 tw:text-xs tw:text-muted-foreground",
+                        "These are the usual ESP32 steps — this board may differ."
+                    }
+                }
             }
             div { class: "tw:grid tw:justify-end tw:gap-2",
                 CardSheetButton {
