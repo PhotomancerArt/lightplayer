@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hardware &amp; board selection — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio-ish palette ---------------------------------------- */
+  :root {
+    --bg: #0b0c0e;
+    --card: #14161a;
+    --terminal: #0e1013;
+    --border: #262a31;
+    --border-strong: #3a3f48;
+    --text: #e8e6e1;
+    --strong: #f4f2ec;
+    --muted: #9a978f;
+    --dim: #6f6d66;
+    --name: #e4c065;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+    --good: #3fd68e;       --good-bg: rgba(63,214,142,.08);
+    --attn: #f0913b;       --attn-bg: rgba(240,145,59,.09);
+    --error: #ef5350;      --error-bg: rgba(239,83,80,.09);
+    --neutral: #8a8f98;    --neutral-bg: rgba(138,143,152,.06);
+    --bound: #a78bfa;      --bound-bg: rgba(167,139,250,.10);
+
+    --gold: #e4c065;   --gold-bg: rgba(228,192,101,.10);
+    --silver: #b9c0cc; --silver-bg: rgba(185,192,204,.09);
+    --bronze: #c98d5c; --bronze-bg: rgba(201,141,92,.10);
+
+    /* board drawing */
+    --pcb: #101418;
+    --pcb-edge: #2c3440;
+    --silk: #8b93a0;
+    --pad: #4a5260;
+    --module: #1a2027;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 140px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 720px; }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 44px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 720px; }
+
+  .controls {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 16px;
+  }
+  .controls label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .controls .group { display: inline-flex; gap: 10px; align-items: center; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .controls select {
+    background: var(--terminal); color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: 6px; font-size: 12px; padding: 3px 6px;
+  }
+
+  .chiprow { display: inline-flex; gap: 4px; }
+  .fchip {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--muted); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer;
+  }
+  .fchip:hover { color: var(--text); }
+  .fchip[aria-pressed=true] { color: var(--bound); border-color: var(--bound); background: var(--bound-bg); }
+
+  /* ---- tier badges ------------------------------------------------ */
+  .tier {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    border-radius: 999px; padding: 2px 9px 2px 7px; border: 1px solid transparent;
+  }
+  .tier::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor; box-shadow: 0 0 6px currentColor; }
+  .tier.gold   { color: var(--gold);   background: var(--gold-bg);   border-color: rgba(228,192,101,.35); }
+  .tier.silver { color: var(--silver); background: var(--silver-bg); border-color: rgba(185,192,204,.3); }
+  .tier.bronze { color: var(--bronze); background: var(--bronze-bg); border-color: rgba(201,141,92,.35); }
+
+  .tier-legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+    font-size: 11.5px; color: var(--dim); margin: 0 0 16px; }
+  .tier-legend span.def { display: inline-flex; gap: 7px; align-items: center; }
+
+  /* ---- board catalog cards ---------------------------------------- */
+  .bgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px; align-items: stretch; max-width: 1340px; }
+  .bcard {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; display: flex; flex-direction: column;
+    transition: border-color .2s, transform .2s;
+  }
+  .bcard:hover { border-color: var(--border-strong); }
+  .bcard .figure {
+    background:
+      radial-gradient(120% 90% at 50% 0%, rgba(167,139,250,.05), transparent 60%),
+      var(--terminal);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    height: 170px; padding: 12px; position: relative;
+  }
+  .bcard .figure svg { max-height: 100%; max-width: 100%; }
+  .bcard .figure .tier { position: absolute; top: 8px; left: 8px; }
+  .bcard .figure .price { position: absolute; top: 8px; right: 8px;
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    background: rgba(0,0,0,.35); border: 1px solid var(--border); border-radius: 6px;
+    padding: 2px 7px; }
+  .bcard .info { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .bcard .title { display: flex; align-items: baseline; gap: 8px; }
+  .bcard .bname { font-weight: 700; color: var(--strong); font-size: 14px; }
+  .bcard .mfr { color: var(--dim); font-size: 11.5px; }
+  .bcard .specs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .spec {
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;
+    background: rgba(255,255,255,.02);
+  }
+  .spec.soc { color: var(--name); border-color: rgba(228,192,101,.3); }
+  .bcard .blurb { color: var(--muted); font-size: 12px; flex: 1; }
+  .bcard .links { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .buy {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 600; color: var(--muted);
+    border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 9px;
+    text-decoration: none; cursor: pointer; background: transparent;
+  }
+  .buy:hover { color: var(--strong); border-color: var(--bound); }
+  .buy svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+  /* ---- provisioning ----------------------------------------------- */
+  .provision {
+    max-width: 860px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .provision .phead {
+    padding: 12px 16px; background: var(--terminal); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .provision .phead .step { font-size: 10.5px; font-weight: 800; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--dim); }
+  .provision .phead .q { font-size: 14px; font-weight: 700; color: var(--strong); }
+  .detected {
+    display: flex; align-items: center; gap: 10px; margin: 14px 16px 4px;
+    padding: 9px 12px; border-radius: 8px;
+    background: var(--good-bg); border: 1px solid rgba(63,214,142,.3);
+    font-size: 12.5px; color: var(--text);
+  }
+  .detected.unknown { background: var(--attn-bg); border-color: rgba(240,145,59,.35); }
+  .detected .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good);
+    box-shadow: 0 0 8px var(--good); flex: none; }
+  .detected.unknown .dot { background: var(--attn); box-shadow: 0 0 8px var(--attn); }
+  .detected code { font-family: var(--mono); color: var(--good); font-size: 12px; }
+  .detected.unknown code { color: var(--attn); }
+
+  .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 10px; padding: 14px 16px 8px; }
+  .pick {
+    position: relative; text-align: left;
+    background: var(--terminal); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; cursor: pointer; color: var(--text);
+    display: flex; flex-direction: column; gap: 8px; appearance: none;
+  }
+  .pick:hover { border-color: var(--border-strong); }
+  .pick[aria-pressed=true] { border-color: var(--bound); background: var(--bound-bg);
+    box-shadow: 0 0 0 1px var(--bound); }
+  .pick .thumb { height: 84px; display: flex; align-items: center; justify-content: center; }
+  .pick .thumb svg { max-height: 100%; max-width: 100%; }
+  .pick .pl { display: flex; flex-direction: column; gap: 2px; }
+  .pick .pl b { font-size: 12.5px; color: var(--strong); }
+  .pick .pl span { font-size: 10.5px; color: var(--dim); font-family: var(--mono); }
+  .pick .tier { position: absolute; top: 6px; right: 6px; transform: scale(.9); transform-origin: top right; }
+  .pick.generic { border-style: dashed; }
+  .pick.generic .thumb { color: var(--dim); }
+  .pick .match { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--good); }
+
+  .mismatch {
+    margin: 2px 16px 14px; border-top: 1px dashed var(--border); padding-top: 10px;
+  }
+  .mismatch > button {
+    appearance: none; background: none; border: 0; color: var(--dim); font-size: 11.5px;
+    cursor: pointer; padding: 2px 0; display: inline-flex; gap: 6px; align-items: center;
+  }
+  .mismatch > button:hover { color: var(--text); }
+  .mismatch .pick-grid { padding: 10px 0 0; opacity: .75; }
+  .pfoot { display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 16px 14px; }
+  .pfoot .why { font-size: 11.5px; color: var(--dim); max-width: 420px; }
+  .action {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border-strong); border-radius: 7px;
+    background: transparent; color: var(--text); font-size: 12.5px; font-weight: 600;
+    padding: 6px 14px; cursor: pointer;
+  }
+  .action.primary { border-color: var(--bound); color: var(--bound); }
+  .action.primary:hover { background: var(--bound-bg); }
+  .action:disabled { opacity: .4; cursor: default; }
+
+  /* ---- device card hardware pane ----------------------------------- */
+  .dcard {
+    width: 560px; border-radius: 10px; overflow: hidden;
+    background: var(--card); border: 1px solid var(--border);
+    border-left: 3px solid var(--good);
+  }
+  .dcard header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; background: linear-gradient(to bottom, var(--good-bg), transparent), var(--terminal);
+    border-bottom: 1px solid var(--border); min-height: 38px;
+  }
+  .dcard .name { font-weight: 700; color: var(--name); font-size: 14.5px; }
+  .dcard .statusline { color: var(--good); font-size: 12px; font-weight: 600; }
+  .dcard .transport { margin-left: auto; font-size: 10.5px; font-weight: 700;
+    letter-spacing: .09em; color: var(--dim); text-transform: uppercase; }
+  .tabs-row { display: flex; gap: 2px; padding: 4px 8px;
+    background: var(--terminal); border-bottom: 1px solid var(--border); }
+  .tab {
+    appearance: none; border: 0; background: transparent; color: var(--dim);
+    flex: 1; height: 26px; border-radius: 6px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  }
+  .tab[aria-selected=true] { color: var(--good); background: var(--good-bg); }
+  .hwpane { display: flex; gap: 0; }
+  .hwpane .boardside {
+    flex: 1; padding: 12px; display: flex; align-items: center; justify-content: center;
+    min-height: 300px;
+  }
+  .hwpane .boardside svg { max-width: 100%; }
+  .hwmeta {
+    border-top: 1px solid var(--border); padding: 8px 12px; display: flex; gap: 14px;
+    font-size: 11px; color: var(--dim); font-family: var(--mono); flex-wrap: wrap;
+  }
+  .hwmeta b { color: var(--muted); font-weight: 600; }
+
+  /* board svg shared bits */
+  .pinlabel { font: 600 6.5px var(--mono); fill: var(--silk); }
+  .pinlabel.gpio { fill: #aab3c0; }
+  svg .callout-box { fill: #171b21; stroke: var(--border-strong); }
+  svg .callout-box.bound { stroke: var(--bound); }
+  svg .callout-title { font: 700 8px -apple-system, sans-serif; fill: var(--strong); }
+  svg .callout-sub { font: 500 7px var(--mono); fill: var(--dim); }
+  svg .callout-gpio { font: 700 7px var(--mono); fill: var(--bound); }
+  svg .wire { stroke: var(--bound); stroke-width: 1.2; fill: none; opacity: .8; }
+  svg .wire.dim { stroke: var(--border-strong); }
+  svg .pad-ring { fill: none; stroke: var(--bound); stroke-width: 1.6; }
+  svg .hl .callout-box { stroke: var(--strong); }
+  .hover-hint { font-size: 11px; color: var(--dim); padding: 0 12px 10px; }
+
+  /* ---- discovery ---------------------------------------------------- */
+  .disco-wrap { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+  .disco-board {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; display: flex; align-items: center; justify-content: center;
+  }
+  .disco-side { flex: 1; min-width: 320px; max-width: 460px; display: flex;
+    flex-direction: column; gap: 10px; }
+  .disco-side .prompt { font-size: 14px; font-weight: 700; color: var(--strong); }
+  .disco-side .explain { font-size: 12px; color: var(--muted); }
+  .patlist { display: flex; flex-direction: column; gap: 6px; }
+  .patbtn {
+    display: flex; align-items: center; gap: 12px;
+    appearance: none; text-align: left; cursor: pointer;
+    background: var(--terminal); border: 1px solid var(--border); border-radius: 9px;
+    padding: 9px 12px; color: var(--text);
+  }
+  .patbtn:hover { border-color: var(--border-strong); }
+  .patbtn[aria-pressed=true] { border-color: var(--bound); background: var(--bound-bg);
+    box-shadow: 0 0 0 1px var(--bound); }
+  .patbtn .dots { display: inline-flex; gap: 4px; flex: none; width: 46px; }
+  .patbtn .plabel { font-size: 12.5px; font-weight: 600; flex: 1; }
+  .patbtn .pgpio { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .patbtn[aria-pressed=true] .pgpio { color: var(--bound); }
+  .led { width: 10px; height: 10px; border-radius: 50%; background: #22262d; }
+  .skipnote { font-size: 11px; color: var(--dim); border-top: 1px dashed var(--border);
+    padding-top: 9px; }
+  .skipnote code { font-family: var(--mono); color: var(--muted); font-size: 10.5px; }
+  .disco-result {
+    display: none; align-items: center; gap: 10px; padding: 10px 12px;
+    background: var(--good-bg); border: 1px solid rgba(63,214,142,.35); border-radius: 9px;
+    font-size: 12.5px;
+  }
+  .disco-result.on { display: flex; }
+  .disco-result b { color: var(--good); font-family: var(--mono); }
+
+  /* pattern animations: color set via --pc; rhythm via keyframes.
+     every pattern = color + rhythm so it survives colorblindness. */
+  @keyframes blink1 { 0%,55% { background: var(--pc); box-shadow: 0 0 7px var(--pc); }
+                      60%,100% { background: #22262d; box-shadow: none; } }
+  @keyframes blink2 { 0%,20%,40%,60% { background: #22262d; box-shadow: none; }
+                      25%,35% { background: var(--pc); box-shadow: 0 0 7px var(--pc); }
+                      45%,55% { background: var(--pc); box-shadow: 0 0 7px var(--pc); }
+                      65%,100% { background: #22262d; box-shadow: none; } }
+  @keyframes solidp { 0%,100% { background: var(--pc); box-shadow: 0 0 7px var(--pc); } }
+  @keyframes chase  { 0%,15% { background: var(--pc); box-shadow: 0 0 7px var(--pc); }
+                      25%,100% { background: #22262d; box-shadow: none; } }
+  .led.m-solid  { animation: solidp 1.6s infinite; }
+  .led.m-blink  { animation: blink1 1.6s infinite; }
+  .led.m-blink2 { animation: blink2 1.6s infinite; }
+  .led.m-chase  { animation: chase 1.2s infinite; }
+  .led.d1 { animation-delay: .12s; } .led.d2 { animation-delay: .24s; }
+  .led.m-blink.d1, .led.m-blink.d2, .led.m-blink2.d1, .led.m-blink2.d2 { animation-delay: 0s; }
+
+  /* svg pattern swatches (same keyframes apply to svg rects via fill? no —
+     svg circles animate via CSS background not allowed; use opacity instead) */
+  @keyframes sblink1 { 0%,55% { opacity: 1; } 60%,100% { opacity: .12; } }
+  @keyframes sblink2 { 0%,20%,40%,60% { opacity: .12; } 25%,35% { opacity: 1; }
+                       45%,55% { opacity: 1; } 65%,100% { opacity: .12; } }
+  @keyframes ssolid  { 0%,100% { opacity: 1; } }
+  @keyframes schase  { 0%,15% { opacity: 1; } 25%,100% { opacity: .12; } }
+  svg .sled.m-solid  { animation: ssolid 1.6s infinite; }
+  svg .sled.m-blink  { animation: sblink1 1.6s infinite; }
+  svg .sled.m-blink2 { animation: sblink2 1.6s infinite; }
+  svg .sled.m-chase  { animation: schase 1.2s infinite; }
+  svg .sled.d1 { animation-delay: .12s; } svg .sled.d2 { animation-delay: .24s; }
+  svg .sled.m-blink.d1, svg .sled.m-blink.d2,
+  svg .sled.m-blink2.d1, svg .sled.m-blink2.d2 { animation-delay: 0s; }
+
+  details.schema { max-width: 860px; margin-top: 14px; }
+  details.schema summary { font-size: 11.5px; color: var(--dim); cursor: pointer; }
+  details.schema pre {
+    background: var(--terminal); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; font: 11px/1.5 var(--mono); color: var(--muted); overflow-x: auto;
+  }
+</style>
+</head>
+<body>
+
+<h1>Hardware &amp; board selection — design spike</h1>
+<p class="hint">
+  One board-metadata schema drives four surfaces: the public boards catalog, the
+  provisioning picker, the device card's hardware pane, and pin discovery.
+  Everything below renders from the same <code>BOARDS</code> objects — no
+  hand-drawn images.
+</p>
+
+<h2><span class="n">1</span> Boards catalog</h2>
+<p class="sub">
+  The "what should I buy" page — also our shop window. Cards are metadata-driven;
+  the SVG wireframe is generated from the same pin table used everywhere else.
+</p>
+<div class="tier-legend">
+  <span class="def"><span class="tier gold">Gold</span> first-class, tested every release</span>
+  <span class="def"><span class="tier silver">Silver</span> supported, tested occasionally</span>
+  <span class="def"><span class="tier bronze">Bronze</span> community-verified, should work</span>
+</div>
+<div class="controls">
+  <span class="group"><b>Sort</b>
+    <select id="sortSel">
+      <option value="rec">Recommended</option>
+      <option value="price">Price ↑</option>
+      <option value="name">Name</option>
+    </select>
+  </span>
+  <span class="group"><b>SoC</b>
+    <span class="chiprow" id="socFilter">
+      <button class="fchip" data-soc="all" aria-pressed="true">All</button>
+      <button class="fchip" data-soc="esp32" aria-pressed="false">ESP32</button>
+      <button class="fchip" data-soc="s3" aria-pressed="false">ESP32-S3</button>
+      <button class="fchip" data-soc="c6" aria-pressed="false">ESP32-C6</button>
+    </span>
+  </span>
+</div>
+<div class="bgrid" id="catalog"></div>
+
+<details class="schema">
+  <summary>proposed board metadata (one entry, verbatim from this page's data)</summary>
+  <pre id="schemaDump"></pre>
+</details>
+
+<h2><span class="n">2</span> Provisioning — pick your board</h2>
+<p class="sub">
+  During device setup we already know the SoC from the flasher. Matching boards
+  lead; everything else collapses under a mismatch row. A dashed "generic" card
+  is the escape hatch for unlisted hardware.
+</p>
+<div class="controls">
+  <span class="group"><b>Detected SoC</b>
+    <span class="chiprow" id="detectSel">
+      <button class="fchip" data-det="s3" aria-pressed="true">ESP32-S3</button>
+      <button class="fchip" data-det="c6" aria-pressed="false">ESP32-C6</button>
+      <button class="fchip" data-det="esp32" aria-pressed="false">ESP32 v3</button>
+      <button class="fchip" data-det="unknown" aria-pressed="false">unknown</button>
+    </span>
+  </span>
+</div>
+<div class="provision" id="provision"></div>
+
+<h2><span class="n">3</span> Device card — hardware pane</h2>
+<p class="sub">
+  The wiring view: the project's outputs and controls, drawn as callout boxes next
+  to the pins they occupy. Violet = bound (studio convention). Hover a callout or
+  a pin to link them.
+</p>
+<div class="dcard">
+  <header>
+    <span class="name">porch-lights</span>
+    <span class="statusline">running · 57.7 fps</span>
+    <span class="transport">USB</span>
+  </header>
+  <div class="tabs-row">
+    <button class="tab">STATUS</button>
+    <button class="tab" aria-selected="true">HARDWARE</button>
+    <button class="tab">OUTPUTS</button>
+    <button class="tab">CONSOLE</button>
+  </div>
+  <div class="hwpane">
+    <div class="boardside" id="hwBoard"></div>
+  </div>
+  <div class="hover-hint">hover a pin or a box — the pair lights up</div>
+  <div class="hwmeta">
+    <span><b>ESP32-S3-DevKitC-1</b></span>
+    <span>flash <b>8 MB</b> · image <b>1.6 MB</b></span>
+    <span>psram <b>8 MB</b></span>
+    <span>outputs <b>2</b> · 450 px</span>
+  </div>
+</div>
+
+<h2><span class="n">4</span> Pin discovery — "which pin are my LEDs on?"</h2>
+<p class="sub">
+  We drive a distinct color × rhythm pattern on every free, output-capable pin.
+  The user looks at their strip and clicks the pattern they see. Rhythm (solid /
+  1-blink / 2-blink / chase) disambiguates for colorblind users; input-only and
+  USB pins are skipped automatically.
+</p>
+<div class="disco-wrap">
+  <div class="disco-board" id="discoBoard"></div>
+  <div class="disco-side">
+    <div class="prompt">What are your LEDs doing right now?</div>
+    <div class="explain">
+      Every free pin is playing a different pattern. Find the one that matches
+      your strip — that's your data pin.
+    </div>
+    <div class="patlist" id="patList"></div>
+    <div class="disco-result" id="discoResult">
+      Found it — your LEDs are on <b id="discoPin"></b>.
+      <button class="action primary" style="margin-left:auto">Use this pin</button>
+    </div>
+    <div class="skipnote" id="skipNote"></div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   Board metadata. This IS the proposed schema: identity/commerce info +
+   a `hw` drawing block (module, usb, buttons, headers with per-pin role).
+   Roles: pwr5 pwr3 gnd io ioin(strap-free input-only) strap usb ctl nc
+   ===================================================================== */
+const P = (label, role, gpio=null) => ({ label, role, gpio });
+
+const BOARDS = [
+  {
+    id: "esp32-s3-devkitc-1",
+    name: "ESP32-S3-DevKitC-1",
+    mfr: "Espressif",
+    soc: "ESP32-S3", family: "s3",
+    flash: "8 MB", psram: "8 MB",
+    price: 15,
+    tier: "gold",
+    caps: ["Wi-Fi", "BLE 5", "USB-OTG", "36 free GPIO"],
+    blurb: "The reference S3 devkit. Big pin headers, onboard RGB pixel, easiest board to start with.",
+    urls: [
+      { label: "Espressif", href: "https://www.espressif.com/en/products/devkits" },
+      { label: "Adafruit", href: "https://www.adafruit.com/product/5312" },
+    ],
+    hw: {
+      w: 120, h: 236, usb: [{ x: 32, label: "USB" }, { x: 82, label: "UART" }],
+      module: { x: 18, y: 8, w: 84, h: 74, label: "ESP32-S3", ant: true },
+      buttons: [{ x: 26, y: -20, label: "RST" }, { x: 94, y: -20, label: "BOOT" }],
+      rgb: { x: 60, y: 130, gpio: 48 },
+      pitch: 9.4,
+      left: [
+        P("3V3","pwr3"), P("3V3","pwr3"), P("RST","ctl"),
+        P("4","io",4), P("5","io",5), P("6","io",6), P("7","io",7),
+        P("15","io",15), P("16","io",16), P("17","io",17), P("18","io",18),
+        P("8","io",8), P("3","strap",3), P("46","strap",46), P("9","io",9),
+        P("10","io",10), P("11","io",11), P("12","io",12), P("13","io",13),
+        P("14","io",14), P("5V","pwr5"), P("GND","gnd"),
+      ],
+      right: [
+        P("GND","gnd"), P("43","io",43), P("44","io",44), P("1","io",1),
+        P("2","io",2), P("42","io",42), P("41","io",41), P("40","io",40),
+        P("39","io",39), P("38","io",38), P("37","io",37), P("36","io",36),
+        P("35","io",35), P("0","strap",0), P("45","strap",45), P("48","io",48),
+        P("47","io",47), P("21","io",21), P("20","io",20), P("19","io",19),
+        P("GND","gnd"), P("GND","gnd"),
+      ],
+    },
+  },
+  {
+    id: "esp32-c6-devkitc-1",
+    name: "ESP32-C6-DevKitC-1",
+    mfr: "Espressif",
+    soc: "ESP32-C6", family: "c6",
+    flash: "8 MB", psram: "—",
+    price: 9,
+    tier: "gold",
+    caps: ["Wi-Fi 6", "BLE 5", "802.15.4", "22 free GPIO"],
+    blurb: "RISC-V, Wi-Fi 6, cheap. Our best-tested board — the one on the bench every day.",
+    urls: [
+      { label: "Espressif", href: "https://www.espressif.com/en/products/devkits" },
+      { label: "DigiKey", href: "https://www.digikey.com/" },
+    ],
+    hw: {
+      w: 112, h: 190, usb: [{ x: 30, label: "USB" }, { x: 76, label: "UART" }],
+      module: { x: 16, y: 8, w: 80, h: 66, label: "ESP32-C6", ant: true },
+      buttons: [{ x: 24, y: -20, label: "RST" }, { x: 88, y: -20, label: "BOOT" }],
+      rgb: { x: 56, y: 110, gpio: 8 },
+      pitch: 9.4,
+      left: [
+        P("3V3","pwr3"), P("RST","ctl"), P("0","io",0), P("1","io",1),
+        P("2","io",2), P("3","io",3), P("4","strap",4), P("5","strap",5),
+        P("6","io",6), P("7","io",7), P("8","strap",8), P("9","strap",9),
+        P("5V","pwr5"), P("GND","gnd"), P("NC","nc"), P("NC","nc"),
+      ],
+      right: [
+        P("GND","gnd"), P("23","io",23), P("22","io",22), P("21","io",21),
+        P("20","io",20), P("19","io",19), P("18","io",18), P("17","io",17),
+        P("16","io",16), P("15","io",15), P("13","usb",13), P("12","usb",12),
+        P("11","io",11), P("10","io",10), P("GND","gnd"), P("GND","gnd"),
+      ],
+    },
+  },
+  {
+    id: "xiao-esp32s3",
+    name: "XIAO ESP32S3",
+    mfr: "Seeed Studio",
+    soc: "ESP32-S3", family: "s3",
+    flash: "8 MB", psram: "8 MB",
+    price: 7.5,
+    tier: "silver",
+    caps: ["Wi-Fi", "BLE 5", "thumb-sized", "9 free GPIO"],
+    blurb: "Tiny. Perfect for wearables and props where the controller must disappear.",
+    urls: [{ label: "Seeed", href: "https://www.seeedstudio.com/" }],
+    hw: {
+      w: 76, h: 92, usb: [{ x: 24, label: "USB" }],
+      module: { x: 14, y: 6, w: 48, h: 30, label: "S3", ant: false },
+      buttons: [{ x: 64, y: -14, label: "B" }],
+      rgb: null,
+      pitch: 8,
+      left: [
+        P("1","io",1), P("2","io",2), P("3","io",3), P("4","io",4),
+        P("5","io",5), P("6","io",6), P("43","io",43),
+      ],
+      right: [
+        P("5V","pwr5"), P("GND","gnd"), P("3V3","pwr3"), P("9","io",9),
+        P("8","io",8), P("7","io",7), P("44","io",44),
+      ],
+    },
+  },
+  {
+    id: "quinled-dig-uno",
+    name: "QuinLED-Dig-Uno",
+    mfr: "QuinLED",
+    soc: "ESP32", family: "esp32",
+    flash: "4 MB", psram: "—",
+    price: 30,
+    tier: "gold",
+    caps: ["level shifter", "fuse", "screw terminals", "2 LED ports"],
+    blurb: "Purpose-built LED controller: 5–24 V input, fused, level-shifted. The clean install choice.",
+    urls: [{ label: "quinled.info", href: "https://quinled.info/" }],
+    hw: {
+      w: 150, h: 150, usb: [{ x: 64, label: "USB" }],
+      module: { x: 44, y: 10, w: 62, h: 58, label: "ESP32", ant: true },
+      buttons: [],
+      rgb: null,
+      pitch: 11,
+      terminals: [
+        { label: "V+", role: "pwr5" }, { label: "GND", role: "gnd" },
+        { label: "LED1", role: "io", gpio: 16 }, { label: "LED2", role: "io", gpio: 3 },
+      ],
+      left: [ P("Q1","io",1), P("Q2","io",2), P("Q4","io",4), P("GND","gnd") ],
+      right: [ P("3V3","pwr3"), P("15","io",15), P("12","io",12), P("GND","gnd") ],
+    },
+  },
+  {
+    id: "esp32-devkitc-v4",
+    name: "ESP32 DevKitC v4",
+    mfr: "Espressif (and clones)",
+    soc: "ESP32", family: "esp32",
+    flash: "4 MB", psram: "—",
+    price: 6,
+    tier: "silver",
+    caps: ["Wi-Fi", "BT classic", "everywhere", "25 free GPIO"],
+    blurb: "The classic WROOM-32 board. Millions exist; clones vary. Fine for v3 silicon.",
+    urls: [{ label: "AliExpress", href: "https://www.aliexpress.com/" }],
+    hw: {
+      w: 116, h: 210, usb: [{ x: 42, label: "USB" }],
+      module: { x: 18, y: 8, w: 80, h: 70, label: "WROOM-32", ant: true },
+      buttons: [{ x: 26, y: -20, label: "EN" }, { x: 90, y: -20, label: "BOOT" }],
+      rgb: null,
+      pitch: 9.4,
+      left: [
+        P("3V3","pwr3"), P("EN","ctl"), P("36","ioin",36), P("39","ioin",39),
+        P("34","ioin",34), P("35","ioin",35), P("32","io",32), P("33","io",33),
+        P("25","io",25), P("26","io",26), P("27","io",27), P("14","io",14),
+        P("12","strap",12), P("GND","gnd"), P("13","io",13), P("5V","pwr5"),
+      ],
+      right: [
+        P("GND","gnd"), P("23","io",23), P("22","io",22), P("1","io",1),
+        P("3","io",3), P("21","io",21), P("19","io",19), P("18","io",18),
+        P("5","strap",5), P("17","io",17), P("16","io",16), P("4","io",4),
+        P("2","strap",2), P("15","strap",15), P("GND","gnd"), P("GND","gnd"),
+      ],
+    },
+  },
+  {
+    id: "m5stamp-c6",
+    name: "M5Stamp C6 (NanoC6)",
+    mfr: "M5Stack",
+    soc: "ESP32-C6", family: "c6",
+    flash: "4 MB", psram: "—",
+    price: 6.5,
+    tier: "bronze",
+    caps: ["Wi-Fi 6", "BLE 5", "postage-stamp", "grove port"],
+    blurb: "Stamp-sized C6 with a case. Community-verified; light on exposed pins.",
+    urls: [{ label: "M5Stack", href: "https://shop.m5stack.com/" }],
+    hw: {
+      w: 70, h: 86, usb: [{ x: 22, label: "USB" }],
+      module: { x: 12, y: 6, w: 46, h: 28, label: "C6", ant: false },
+      buttons: [{ x: 58, y: -14, label: "B" }],
+      rgb: { x: 35, y: 46, gpio: 20 },
+      pitch: 8,
+      left: [ P("1","io",1), P("2","io",2), P("3","io",3), P("4","io",4), P("5V","pwr5") ],
+      right: [ P("GND","gnd"), P("3V3","pwr3"), P("6","io",6), P("7","io",7), P("8","io",8) ],
+    },
+  },
+];
+
+/* =====================================================================
+   SVG board renderer. One function, four surfaces.
+   opts: { scale, labels, annotations: [{gpio, title, sub}], hoverLink,
+           discovery: [{gpio, color, mode}] }
+   ===================================================================== */
+const ROLE_FILL = {
+  pwr5: "#b3564f", pwr3: "#a3703f", gnd: "#3a3f48", io: "#4a5260",
+  ioin: "#3d4854", strap: "#8a6d3a", usb: "#8a6d3a", ctl: "#556070", nc: "#2a2e35",
+};
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function renderBoard(b, opts = {}) {
+  const { scale = 1, labels = true, annotations = null, discovery = null } = opts;
+  const hw = b.hw;
+  const pitch = hw.pitch, padW = 7, padH = 5.6;
+  const headerTop = (hw.module.y + hw.module.h) + 8;
+  const nMax = Math.max(hw.left.length, hw.right.length);
+  const need = headerTop + nMax * pitch + (hw.buttons?.length ? 26 : 8) + (hw.terminals ? 26 : 0);
+  const H = Math.max(hw.h, need);
+  const W = hw.w;
+
+  // side gutters for callouts / discovery swatches
+  const cw = annotations ? 126 : discovery ? 118 : 6;
+  const vb = { x: -cw, y: -4, w: W + cw * 2, h: H + 20 };
+
+  let out = [];
+  const A = (s) => out.push(s);
+
+  // pcb
+  A(`<rect x="0" y="0" width="${W}" height="${H}" rx="7" fill="var(--pcb)" stroke="var(--pcb-edge)" stroke-width="1.5"/>`);
+  // mounting holes
+  for (const [hx, hy] of [[8,8],[W-8,8],[8,H-8],[W-8,H-8]])
+    A(`<circle cx="${hx}" cy="${hy}" r="2.6" fill="var(--bg)" stroke="var(--pcb-edge)"/>`);
+
+  // module + antenna
+  const m = hw.module;
+  if (m.ant) {
+    A(`<rect x="${m.x}" y="${m.y}" width="${m.w}" height="12" fill="none" stroke="var(--pcb-edge)" stroke-width="1" stroke-dasharray="2 2"/>`);
+    let zig = `M ${m.x + 6} ${m.y + 6}`;
+    for (let i = 1; i <= 8; i++) zig += ` L ${m.x + 6 + i * (m.w - 12) / 8} ${m.y + (i % 2 ? 2.5 : 9.5)}`;
+    A(`<path d="${zig}" fill="none" stroke="var(--silk)" stroke-width="1" opacity=".7"/>`);
+  }
+  const my = m.ant ? m.y + 14 : m.y;
+  A(`<rect x="${m.x}" y="${my}" width="${m.w}" height="${m.h - (m.ant ? 14 : 0)}" rx="2" fill="var(--module)" stroke="#39414d" stroke-width="1.2"/>`);
+  A(`<text x="${m.x + m.w / 2}" y="${my + (m.h - (m.ant ? 14 : 0)) / 2 + 3}" text-anchor="middle" style="font:700 ${m.w > 60 ? 9 : 7.5}px var(--mono);fill:#8d96a4">${esc(m.label)}</text>`);
+
+  // usb connectors (bottom edge)
+  for (const u of hw.usb || []) {
+    A(`<rect x="${u.x - 11}" y="${H - 9}" width="22" height="13" rx="3" fill="#2b313a" stroke="#454d59" stroke-width="1"/>`);
+    if (labels) A(`<text x="${u.x}" y="${H + 12}" text-anchor="middle" class="pinlabel">${esc(u.label)}</text>`);
+  }
+  // buttons (negative y = offset from board bottom)
+  for (const bt of hw.buttons || []) {
+    const by = bt.y < 0 ? H + bt.y : bt.y;
+    A(`<rect x="${bt.x - 7}" y="${by - 5}" width="14" height="10" rx="2" fill="#232830" stroke="#454d59"/>`);
+    A(`<circle cx="${bt.x}" cy="${by}" r="2.6" fill="#3a414c"/>`);
+    if (labels) {
+      const inner = bt.x < W / 2;
+      A(`<text x="${inner ? bt.x + 10 : bt.x - 10}" y="${by + 2.5}" text-anchor="${inner ? "start" : "end"}" class="pinlabel">${esc(bt.label)}</text>`);
+    }
+  }
+  // onboard rgb
+  if (hw.rgb) {
+    A(`<rect x="${hw.rgb.x - 4}" y="${hw.rgb.y - 4}" width="8" height="8" rx="1.5" fill="#20262e" stroke="#454d59"/>`);
+    A(`<circle cx="${hw.rgb.x}" cy="${hw.rgb.y}" r="2" fill="#5a5470"/>`);
+    if (labels) A(`<text x="${hw.rgb.x}" y="${hw.rgb.y + 12}" text-anchor="middle" class="pinlabel">RGB</text>`);
+  }
+  // screw terminals (quinled-style), top edge
+  if (hw.terminals) {
+    const tw = 20, t0 = (W - hw.terminals.length * tw) / 2;
+    hw.terminals.forEach((t, i) => {
+      const tx = t0 + i * tw;
+      A(`<rect x="${tx}" y="-2" width="${tw - 2}" height="16" rx="2" fill="#1d232b" stroke="#454d59"/>`);
+      A(`<circle cx="${tx + (tw - 2) / 2}" cy="6" r="4.4" fill="none" stroke="#5a6270" stroke-width="1.6"/>`);
+      if (labels) A(`<text x="${tx + (tw - 2) / 2}" y="23" text-anchor="middle" class="pinlabel">${esc(t.label)}</text>`);
+    });
+  }
+
+  // pins — collect positions for annotation pass
+  const pinPos = {}; // gpio -> {x, y, side}
+  const drawSide = (pins, side) => {
+    pins.forEach((p, i) => {
+      const y = headerTop + i * pitch;
+      const x = side === "left" ? 1 : W - 1 - padW;
+      const cx = side === "left" ? x + padW / 2 : x + padW / 2;
+      A(`<rect x="${x}" y="${y - padH / 2}" width="${padW}" height="${padH}" rx="1.4" fill="${ROLE_FILL[p.role] || ROLE_FILL.io}" data-pin="${p.gpio ?? ""}" class="pad"/>`);
+      if (labels) {
+        const lx = side === "left" ? x + padW + 3 : x - 3;
+        const anch = side === "left" ? "start" : "end";
+        A(`<text x="${lx}" y="${y + 2.3}" text-anchor="${anch}" class="pinlabel ${p.role === "io" || p.role === "strap" ? "gpio" : ""}">${esc(p.label)}</text>`);
+      }
+      if (p.gpio != null) pinPos[p.gpio] = { x: side === "left" ? 0 : W, y, side, cx, cy: y };
+    });
+  };
+  drawSide(hw.left, "left");
+  drawSide(hw.right, "right");
+  if (hw.terminals) {
+    const tw = 20, t0 = (W - hw.terminals.length * tw) / 2;
+    hw.terminals.forEach((t, i) => {
+      if (t.gpio != null) pinPos[t.gpio] = { x: t0 + i * tw + (tw - 2) / 2, y: 0, side: "top", cx: t0 + i * tw + (tw - 2) / 2, cy: 4 };
+    });
+  }
+
+  // annotations: callout boxes in side gutters, wire to pad
+  if (annotations) {
+    // stack per side avoiding overlap
+    const bh = 24, gap = 5;
+    for (const side of ["left", "right", "top"]) {
+      const anns = annotations.filter(a => pinPos[a.gpio]?.side === side)
+        .sort((a, b) => pinPos[a.gpio].y - pinPos[b.gpio].y);
+      let lastBottom = -1e9;
+      anns.forEach(a => {
+        const pp = pinPos[a.gpio];
+        let by = side === "top" ? -2 : pp.y - bh / 2;
+        if (by < lastBottom + gap) by = lastBottom + gap;
+        lastBottom = by + bh;
+        const bw = 106;
+        const bx = side === "left" ? -cw + 4 : side === "right" ? W + cw - 4 - bw : pp.x - bw - 14;
+        const wireX1 = side === "left" ? bx + bw : bx;
+        const wireTx = side === "left" ? pp.x - 1 : side === "right" ? pp.x + 1 : pp.cx;
+        A(`<g class="ann" data-gpio="${a.gpio}">
+          <path class="wire" d="M ${wireX1} ${by + bh / 2} C ${(wireX1 + wireTx) / 2} ${by + bh / 2}, ${(wireX1 + wireTx) / 2} ${pp.cy}, ${wireTx} ${pp.cy}"/>
+          <circle class="pad-ring" cx="${pp.cx}" cy="${pp.cy}" r="5.2"/>
+          <rect class="callout-box bound" x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="5"/>
+          <text class="callout-gpio" x="${bx + 7}" y="${by + 10}">GPIO${a.gpio}</text>
+          <text class="callout-title" x="${bx + 7}" y="${by + 19.5}">${esc(a.title)}</text>
+          <text class="callout-sub" x="${bx + bw - 7}" y="${by + 10}" text-anchor="end">${esc(a.sub || "")}</text>
+        </g>`);
+      });
+    }
+  }
+
+  // discovery swatches: animated 3-dot pattern next to each candidate pin
+  if (discovery) {
+    const bh = 17, gap = 4;
+    for (const side of ["left", "right"]) {
+      const ds = discovery.filter(d => pinPos[d.gpio]?.side === side)
+        .sort((a, b) => pinPos[a.gpio].y - pinPos[b.gpio].y);
+      let lastBottom = -1e9;
+      ds.forEach(d => {
+        const pp = pinPos[d.gpio];
+        let by = pp.y - bh / 2;
+        if (by < lastBottom + gap) by = lastBottom + gap;
+        lastBottom = by + bh;
+        const bw = 66;
+        const bx = side === "left" ? -cw + 30 : W + cw - 30 - bw;
+        const wireX1 = side === "left" ? bx + bw : bx;
+        const wireTx = side === "left" ? pp.x - 1 : pp.x + 1;
+        const dotsX = side === "left" ? bx + 8 : bx + 8;
+        A(`<g class="disco" data-gpio="${d.gpio}">
+          <path class="wire dim" d="M ${wireX1} ${by + bh / 2} C ${(wireX1 + wireTx) / 2} ${by + bh / 2}, ${(wireX1 + wireTx) / 2} ${pp.cy}, ${wireTx} ${pp.cy}"/>
+          <rect class="callout-box" x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="8.5"/>
+          ${[0, 1, 2].map(i =>
+            `<circle class="sled m-${d.mode} d${i}" cx="${dotsX + 5 + i * 11}" cy="${by + bh / 2}" r="3.6" fill="${d.color}"/>`).join("")}
+          <text class="callout-sub" x="${bx + bw - 7}" y="${by + bh / 2 + 2.5}" text-anchor="end">${d.gpio}</text>
+        </g>`);
+      });
+    }
+  }
+
+  const sw = Math.round(vb.w * scale), sh = Math.round(vb.h * scale);
+  return `<svg viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="${sw}" height="${sh}" xmlns="http://www.w3.org/2000/svg">${out.join("")}</svg>`;
+}
+
+/* ===================== 1. catalog ===================== */
+const linkIcon = `<svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`;
+const TIER_RANK = { gold: 0, silver: 1, bronze: 2 };
+let sortBy = "rec", socFilter = "all";
+
+function catalogCard(b) {
+  return `<article class="bcard" data-id="${b.id}">
+    <div class="figure">
+      <span class="tier ${b.tier}">${b.tier}</span>
+      <span class="price">$${b.price.toFixed(b.price % 1 ? 2 : 0)}</span>
+      ${renderBoard(b, { scale: 0.62, labels: false })}
+    </div>
+    <div class="info">
+      <div class="title"><span class="bname">${esc(b.name)}</span><span class="mfr">${esc(b.mfr)}</span></div>
+      <div class="specs">
+        <span class="spec soc">${esc(b.soc)}</span>
+        <span class="spec">${esc(b.flash)} flash</span>
+        ${b.psram !== "—" ? `<span class="spec">${esc(b.psram)} psram</span>` : ""}
+        ${b.caps.map(c => `<span class="spec">${esc(c)}</span>`).join("")}
+      </div>
+      <div class="blurb">${esc(b.blurb)}</div>
+      <div class="links">
+        ${b.urls.map(u => `<a class="buy" href="${esc(u.href)}" target="_blank" rel="noopener">${esc(u.label)} ${linkIcon}</a>`).join("")}
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderCatalog() {
+  let list = BOARDS.filter(b => socFilter === "all" || b.family === socFilter);
+  if (sortBy === "price") list = [...list].sort((a, b) => a.price - b.price);
+  else if (sortBy === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+  else list = [...list].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || a.price - b.price);
+  document.getElementById("catalog").innerHTML = list.map(catalogCard).join("");
+}
+document.getElementById("sortSel").addEventListener("change", e => { sortBy = e.target.value; renderCatalog(); });
+document.getElementById("socFilter").addEventListener("click", e => {
+  const btn = e.target.closest(".fchip"); if (!btn) return;
+  socFilter = btn.dataset.soc;
+  document.querySelectorAll("#socFilter .fchip").forEach(x => x.setAttribute("aria-pressed", x === btn));
+  renderCatalog();
+});
+renderCatalog();
+
+// schema dump (identity fields + truncated hw)
+{
+  const b = structuredClone(BOARDS[1]);
+  b.hw.left = b.hw.left.slice(0, 3).concat(["…"]);
+  b.hw.right = b.hw.right.slice(0, 3).concat(["…"]);
+  document.getElementById("schemaDump").textContent = JSON.stringify(b, null, 2);
+}
+
+/* ===================== 2. provisioning ===================== */
+const SOC_NAME = { s3: "ESP32-S3", c6: "ESP32-C6", esp32: "ESP32 (v3)", unknown: null };
+let detected = "s3", picked = null;
+
+function pickCard(b, match) {
+  return `<button class="pick" data-id="${b.id}" aria-pressed="${picked === b.id}">
+    <span class="tier ${b.tier}">${b.tier}</span>
+    <span class="thumb">${renderBoard(b, { scale: 0.38, labels: false })}</span>
+    <span class="pl"><b>${esc(b.name)}</b><span>${esc(b.soc)} · ${esc(b.flash)}</span>
+    ${match ? `<span class="match">matches detected chip</span>` : ""}</span>
+  </button>`;
+}
+
+function renderProvision() {
+  const el = document.getElementById("provision");
+  const socName = SOC_NAME[detected];
+  const matches = detected === "unknown" ? BOARDS : BOARDS.filter(b => b.family === detected);
+  const others = detected === "unknown" ? [] : BOARDS.filter(b => b.family !== detected);
+  const genericId = "generic-" + detected;
+  el.innerHTML = `
+    <div class="phead"><span class="step">Setup · 2 of 3</span><span class="q">Which board is this?</span></div>
+    ${socName
+      ? `<div class="detected"><span class="dot"></span>Flasher found a <code>${esc(socName)}</code> on <code>/dev/cu.usbmodem14201</code> — showing boards with that chip.</div>`
+      : `<div class="detected unknown"><span class="dot"></span>Couldn't identify the chip — pick your board manually, or choose generic.</div>`}
+    <div class="pick-grid">
+      ${matches.map(b => pickCard(b, detected !== "unknown")).join("")}
+      <button class="pick generic" data-id="${genericId}" aria-pressed="${picked === genericId}">
+        <span class="thumb"><svg viewBox="0 0 90 60" width="90" height="60"><rect x="10" y="4" width="70" height="52" rx="6" fill="none" stroke="var(--border-strong)" stroke-dasharray="4 3" stroke-width="1.5"/><text x="45" y="34" text-anchor="middle" style="font:700 9px var(--mono);fill:var(--dim)">?</text></svg></span>
+        <span class="pl"><b>Generic ${socName ? esc(socName) : "board"}</b><span>my board isn't listed</span></span>
+      </button>
+    </div>
+    ${others.length && socName ? `
+    <div class="mismatch">
+      <button id="mmToggle"><span id="mmChev">▸</span> ${others.length} other boards (different chip)</button>
+      <div class="pick-grid" id="mmGrid" hidden>${others.map(b => pickCard(b, false)).join("")}</div>
+    </div>` : ""}
+    <div class="pfoot">
+      <span class="why">The board picture shows up on your device card, and drives pin
+        suggestions + the LED finder in the next step.</span>
+      <button class="action primary" ${picked ? "" : "disabled"}>Continue</button>
+    </div>`;
+  el.querySelectorAll(".pick").forEach(p => p.addEventListener("click", () => {
+    picked = p.dataset.id; renderProvision();
+  }));
+  const mm = el.querySelector("#mmToggle");
+  if (mm) mm.addEventListener("click", () => {
+    const g = el.querySelector("#mmGrid");
+    g.hidden = !g.hidden;
+    el.querySelector("#mmChev").textContent = g.hidden ? "▸" : "▾";
+  });
+}
+document.getElementById("detectSel").addEventListener("click", e => {
+  const btn = e.target.closest(".fchip"); if (!btn) return;
+  detected = btn.dataset.det; picked = null;
+  document.querySelectorAll("#detectSel .fchip").forEach(x => x.setAttribute("aria-pressed", x === btn));
+  renderProvision();
+});
+renderProvision();
+
+/* ===================== 3. hardware pane ===================== */
+const s3 = BOARDS[0];
+const WIRED = [
+  { gpio: 16, title: "porch strip", sub: "WS2812 ×300" },
+  { gpio: 4, title: "eave strip", sub: "WS2811 ×150" },
+  { gpio: 6, title: "mode button", sub: "pull-up" },
+  { gpio: 48, title: "status pixel", sub: "onboard" },
+];
+const hwEl = document.getElementById("hwBoard");
+hwEl.innerHTML = renderBoard(s3, { scale: 1.18, labels: true, annotations: WIRED });
+function annFor(t) {
+  const g = t.closest(".ann"); if (g) return g;
+  const pin = t.closest(".pad")?.dataset.pin;
+  return pin ? hwEl.querySelector(`.ann[data-gpio="${pin}"]`) : null;
+}
+hwEl.addEventListener("mouseover", e => annFor(e.target)?.classList.add("hl"));
+hwEl.addEventListener("mouseout", e => annFor(e.target)?.classList.remove("hl"));
+
+/* ===================== 4. discovery ===================== */
+const PATTERNS = [
+  { color: "#ef5350", cname: "red", mode: "solid", mlabel: "solid" },
+  { color: "#3fd68e", cname: "green", mode: "blink", mlabel: "blinking" },
+  { color: "#4f9cf0", cname: "blue", mode: "blink2", mlabel: "double-blink" },
+  { color: "#f0913b", cname: "amber", mode: "chase", mlabel: "chasing" },
+  { color: "#2fd4c9", cname: "cyan", mode: "blink", mlabel: "blinking" },
+  { color: "#d06bd6", cname: "magenta", mode: "solid", mlabel: "solid" },
+  { color: "#f0e04b", cname: "yellow", mode: "chase", mlabel: "chasing" },
+  { color: "#f078a8", cname: "pink", mode: "blink2", mlabel: "double-blink" },
+];
+// candidates = free io pins on the C6 devkit not already wired / reserved
+const c6 = BOARDS[1];
+const RESERVED = new Set([8 /* onboard rgb */]);
+const SKIP_ROLES = new Set(["usb", "ioin"]);
+const allPins = [...c6.hw.left, ...c6.hw.right];
+const skipped = allPins.filter(p => p.gpio != null && SKIP_ROLES.has(p.role));
+const freeOf = pins => pins.filter(p =>
+  p.gpio != null && (p.role === "io" || p.role === "strap") && !RESERVED.has(p.gpio));
+const freeL = freeOf(c6.hw.left), freeR = freeOf(c6.hw.right);
+const candidates = [...freeL.slice(0, PATTERNS.length / 2), ...freeR.slice(0, PATTERNS.length / 2)]
+  .map((p, i) => ({ gpio: p.gpio, ...PATTERNS[i] }));
+
+let found = null;
+function renderDisco() {
+  document.getElementById("discoBoard").innerHTML =
+    renderBoard(c6, { scale: 1.35, labels: true, discovery: found == null ? candidates : candidates.filter(c => c.gpio === found) });
+  document.getElementById("patList").innerHTML = candidates.map(c => `
+    <button class="patbtn" data-gpio="${c.gpio}" aria-pressed="${found === c.gpio}" style="--pc:${c.color}">
+      <span class="dots">
+        <span class="led m-${c.mode}"></span>
+        <span class="led m-${c.mode} d1"></span>
+        <span class="led m-${c.mode} d2"></span>
+      </span>
+      <span class="plabel">${c.mlabel} ${c.cname}</span>
+      <span class="pgpio">GPIO${c.gpio}</span>
+    </button>`).join("");
+  document.querySelectorAll(".patbtn").forEach(b => b.addEventListener("click", () => {
+    found = found === +b.dataset.gpio ? null : +b.dataset.gpio;
+    renderDisco();
+  }));
+  const res = document.getElementById("discoResult");
+  res.classList.toggle("on", found != null);
+  if (found != null) document.getElementById("discoPin").textContent = "GPIO" + found;
+  document.getElementById("skipNote").innerHTML =
+    `Skipped automatically: ${skipped.map(p => `<code>GPIO${p.gpio} (${p.role === "usb" ? "USB-JTAG" : "input-only"})</code>`).join(" · ")}
+     — and <code>GPIO8 (status pixel)</code>, already in use.`;
+}
+renderDisco();
+</script>
+</body>
+</html>
