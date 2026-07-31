@@ -10,17 +10,7 @@ dvec2 test_unpackdouble2x32_zero() {
     return unpackDouble2x32(uvec2(0u, 0u));
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// wasm.f32: shader does not compile on any target (frontend gap) — same cause
-// as the @unsupported entries above, not an f32-specific failure.
-// @unsupported(wasm.f32)
+// @unsupported(*)
 // run: test_unpackdouble2x32_zero() ~= dvec2(0.0, 0.0)
 
 dvec2 test_unpackdouble2x32_ones() {
@@ -28,15 +18,7 @@ dvec2 test_unpackdouble2x32_ones() {
     return unpackDouble2x32(uvec2(0u, 1072693248u));
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(*)
 // run: test_unpackdouble2x32_ones() ~= dvec2(1.0, 1.0)
 
 dvec2 test_unpackdouble2x32_half() {
@@ -44,15 +26,7 @@ dvec2 test_unpackdouble2x32_half() {
     return unpackDouble2x32(uvec2(0u, 1071644672u));
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(*)
 // run: test_unpackdouble2x32_half() ~= dvec2(0.5, 0.5)
 
 dvec2 test_unpackdouble2x32_neg_one() {
@@ -60,15 +34,7 @@ dvec2 test_unpackdouble2x32_neg_one() {
     return unpackDouble2x32(uvec2(0u, 1072693248u));
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(*)
 // run: test_unpackdouble2x32_neg_one() ~= dvec2(-1.0, 1.0)
 
 dvec2 test_unpackdouble2x32_two() {
@@ -76,15 +42,7 @@ dvec2 test_unpackdouble2x32_two() {
     return unpackDouble2x32(uvec2(0u, 1073741824u));
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(*)
 // run: test_unpackdouble2x32_two() ~= dvec2(2.0, 2.0)
 
 dvec2 test_unpackdouble2x32_small() {
@@ -93,15 +51,7 @@ dvec2 test_unpackdouble2x32_small() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(*)
 // run: test_unpackdouble2x32_small() ~= dvec2(0.1, 0.1)
 
 

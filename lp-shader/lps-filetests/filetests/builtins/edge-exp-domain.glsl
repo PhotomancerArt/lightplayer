@@ -14,15 +14,7 @@ float test_pow_negative_base() {
     return pow(-2.0, 3.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// wasm.f32: shader does not compile on any target (frontend gap) — same cause
-// as the @unsupported entries above, not an f32-specific failure.
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_pow_negative_base() ~= 0.0
 
 float test_pow_zero_negative_exponent() {
@@ -30,13 +22,7 @@ float test_pow_zero_negative_exponent() {
     return pow(0.0, -1.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_pow_zero_negative_exponent() ~= 0.0
 
 float test_pow_zero_zero() {
@@ -44,13 +30,7 @@ float test_pow_zero_zero() {
     return pow(0.0, 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_pow_zero_zero() ~= 0.0
 
 float test_log_zero() {
@@ -58,13 +38,7 @@ float test_log_zero() {
     return log(0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_log_zero() ~= 0.0
 
 float test_log_negative() {
@@ -72,13 +46,7 @@ float test_log_negative() {
     return log(-1.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_log_negative() ~= 0.0
 
 float test_log2_zero() {
@@ -86,13 +54,7 @@ float test_log2_zero() {
     return log2(0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_log2_zero() ~= 0.0
 
 float test_log2_negative() {
@@ -100,13 +62,7 @@ float test_log2_negative() {
     return log2(-1.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_log2_negative() ~= 0.0
 
 float test_sqrt_negative() {
@@ -114,13 +70,7 @@ float test_sqrt_negative() {
     return sqrt(-1.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_sqrt_negative() ~= 0.0
 
 float test_inversesqrt_zero() {
@@ -128,13 +78,7 @@ float test_inversesqrt_zero() {
     return inversesqrt(0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_inversesqrt_zero() ~= 0.0
 
 float test_inversesqrt_negative() {
@@ -143,13 +87,7 @@ float test_inversesqrt_negative() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
+// @unsupported(frontend!=lp)
 // run: test_inversesqrt_negative() ~= 0.0
 
 
