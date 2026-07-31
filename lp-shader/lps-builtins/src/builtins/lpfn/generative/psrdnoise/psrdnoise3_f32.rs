@@ -1,6 +1,12 @@
 //! 3D Periodic Simplex Rotational Domain noise function (float implementation - stub).
 //!
-//! This is a stub implementation that calls the q32 version with conversion.
+//! **Unimplemented.** Every function here traps via
+//! [`crate::f32_unimplemented::f32_unimplemented`]. These
+//! are placeholders whose signatures, `lpfn_impl` annotations and builtin-table
+//! wiring are correct; only the bodies are missing. They previously round-tripped
+//! through Q32 via `Q32::from_f32_wrapping`, which silently returned
+//! Q32-precision results with wrapped range — the exact property native f32 is
+//! being added for. Failing loudly is deliberate: see the f32 roadmap, M5.
 //!
 //! # Source
 //!
@@ -19,9 +25,6 @@
 //!
 //! This derivative work (Rust/f32 wrapper implementation):
 //! Also published under the terms of the MIT license.
-
-use crate::builtins::lpfn::generative::psrdnoise::psrdnoise3_q32::__lp_lpfn_psrdnoise3_q32;
-use lps_q32::q32::Q32;
 
 /// 3D Periodic Simplex Rotational Domain noise function (float version).
 ///
@@ -58,34 +61,16 @@ pub extern "C" fn __lp_lpfn_psrdnoise3_f32(
     gradient_out: *mut f32,
     seed: u32,
 ) -> f32 {
-    // Convert to q32, call q32 version, convert back
-    let x_q32 = Q32::from_f32_wrapping(x);
-    let y_q32 = Q32::from_f32_wrapping(y);
-    let z_q32 = Q32::from_f32_wrapping(z);
-    let period_x_q32 = Q32::from_f32_wrapping(period_x);
-    let period_y_q32 = Q32::from_f32_wrapping(period_y);
-    let period_z_q32 = Q32::from_f32_wrapping(period_z);
-    let alpha_q32 = Q32::from_f32_wrapping(alpha);
-
-    let mut gradient_q32 = [0i32; 3];
-    let result_fixed = __lp_lpfn_psrdnoise3_q32(
-        x_q32.to_fixed(),
-        y_q32.to_fixed(),
-        z_q32.to_fixed(),
-        period_x_q32.to_fixed(),
-        period_y_q32.to_fixed(),
-        period_z_q32.to_fixed(),
-        alpha_q32.to_fixed(),
-        gradient_q32.as_mut_ptr(),
+    let _ = (
+        x,
+        y,
+        z,
+        period_x,
+        period_y,
+        period_z,
+        alpha,
+        gradient_out,
         seed,
     );
-
-    // Convert gradient back to f32
-    unsafe {
-        *gradient_out = Q32::from_fixed(gradient_q32[0]).to_f32();
-        *gradient_out.add(1) = Q32::from_fixed(gradient_q32[1]).to_f32();
-        *gradient_out.add(2) = Q32::from_fixed(gradient_q32[2]).to_f32();
-    }
-
-    Q32::from_fixed(result_fixed).to_f32()
+    crate::f32_unimplemented::f32_unimplemented()
 }

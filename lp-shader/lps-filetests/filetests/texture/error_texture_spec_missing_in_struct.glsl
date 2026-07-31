@@ -1,19 +1,21 @@
-// test compile-error
-// target: wasm.q32
+// test error
 
-// expect-compile-failure: {{missing texture binding spec for `params.gradient`}}
+// expected-error {{texture binding spec}}
 
-// Struct uniforms with texture fields require a matching dotted texture-spec key.
-// This test verifies the compile-time validation catches missing specs for nested textures.
+// A dotted texture-spec must name a sampler field of the struct uniform.
+// `params.amount` is a float, so the spec matches no sampler2D and is rejected —
+// the same rule as error_extra_texture_spec.glsl, reached through a struct.
+//
+// The struct uniform needs `layout(binding = …)`; naga rejects a bare
+// `uniform Params params;` before any texture validation runs.
 
 // texture-spec: params.amount format=r16unorm filter=nearest wrap=clamp shape=2d
 
 struct Params {
     float amount;
 };
-uniform Params params;
+layout(binding = 0) uniform Params params;
 
 float f() {
-    // This would need params.gradient if we had texture support in structs
     return params.amount;
 }

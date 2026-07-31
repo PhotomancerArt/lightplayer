@@ -11,9 +11,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AddSubMode, AssetLocation, ComputeShaderDef, DivMode, MulMode, NodeId, NodeRuntimeStatus,
-    Revision, ShaderHeaderGenError, SlotAccess, SlotPath, SlotShapeRegistry,
-    SlotShapeRegistryError, generate_compute_shader_header,
+    AssetLocation, ComputeShaderDef, FloatMode, NodeId, NodeRuntimeStatus, Revision,
+    ShaderHeaderGenError, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    generate_compute_shader_header,
 };
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
@@ -31,7 +31,7 @@ use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
 use super::shader_input_materialize::materialize_shader_input;
 use super::shader_node::{
-    format_compile_stats, map_model_q32_options, read_authored_value, set_slot_if_changed,
+    format_compile_stats, read_authored_value, set_slot_if_changed,
     sync_shader_slot_def_from_authored,
 };
 
@@ -127,12 +127,9 @@ impl ComputeShaderNode {
             .graphics()
             .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
         // Compute shaders always lower through lps-glsl
-        // (`LpsEngine::compile_compute_desc`); only the Q32 compiler config
-        // reaches the backend — there is no frontend or semantics choice here.
-        let compiler_config = lpir::CompilerConfig {
-            q32: map_model_q32_options(&self.def.glsl_opts),
-            ..Default::default()
-        };
+        // (`LpsEngine::compile_compute_desc`) at the Q32 tier — there is no
+        // frontend or semantics choice here.
+        let compiler_config = lpir::CompilerConfig::default();
         let desc = match compute_desc_from_model_def(
             self.glsl_source.as_str(),
             &self.def,
@@ -241,16 +238,8 @@ impl ComputeShaderNode {
     fn sync_def_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut compile_changed = false;
         compile_changed |= set_slot_if_changed(
-            &mut self.def.glsl_opts.add_sub,
-            read_authored_value::<AddSubMode>(ctx, "glsl_opts.add_sub")?,
-        );
-        compile_changed |= set_slot_if_changed(
-            &mut self.def.glsl_opts.mul,
-            read_authored_value::<MulMode>(ctx, "glsl_opts.mul")?,
-        );
-        compile_changed |= set_slot_if_changed(
-            &mut self.def.glsl_opts.div,
-            read_authored_value::<DivMode>(ctx, "glsl_opts.div")?,
+            &mut self.def.float_mode,
+            read_authored_value::<FloatMode>(ctx, "float_mode")?,
         );
 
         let consumed_keys: Vec<String> = self.def.consumed_slots.entries.keys().cloned().collect();
@@ -652,7 +641,7 @@ void tick() {{
         ComputeShaderDef {
             source: AssetSlot::path("emitters.glsl"),
             bindings: BindingDefs::default(),
-            glsl_opts: lpc_model::GlslOpts::default(),
+            float_mode: lpc_model::ValueSlot::default(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         }

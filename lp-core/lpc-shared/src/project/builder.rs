@@ -3,7 +3,6 @@
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
 use lp_collection::VecMap;
-use lpc_model::GlslOpts;
 use lpc_model::nodes::clock::ClockDef;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
@@ -310,7 +309,7 @@ impl ShaderBuilder {
             source: AssetSlot::path(source_file),
             render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs(&self.visual_bus),
-            glsl_opts: GlslOpts::default(),
+            float_mode: ValueSlot::default(),
             param_defs: MapSlot::default(),
             consumed_slots: default_visual_consumed_slots(),
         };
