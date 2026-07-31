@@ -1,8 +1,47 @@
 //! Target name formatting and CLI parsing.
 
-use super::{ALL_TARGETS, Backend, FloatMode, Frontend, Target};
+use super::{ALL_TARGETS, Backend, ExecMode, FloatMode, Frontend, Isa, Target};
 use std::collections::BTreeSet;
 use std::fmt;
+
+/// The axis-value spellings below are the **annotation vocabulary** as well as
+/// the display form: `@unsupported(backend=wasm)` matches [`Backend::Wasm`]
+/// because `Backend::Wasm` writes itself as `wasm`. Each `ALL` list is what
+/// `Axis::values` enumerates, and `target_axis`'s
+/// `every_registered_target_is_fully_namable` test fails if a variant reaches a
+/// registered target without appearing in its list.
+impl Backend {
+    /// Every backend, in [`super::ALL_TARGETS`] order.
+    pub const ALL: &'static [Backend] = &[
+        Backend::Rv32,
+        Backend::Rv32fa,
+        Backend::Xtfa,
+        Backend::Wasm,
+        Backend::Interp,
+        Backend::Wgpu,
+    ];
+}
+
+impl Frontend {
+    /// Every frontend.
+    pub const ALL: &'static [Frontend] = &[Frontend::Naga, Frontend::Lp];
+}
+
+impl FloatMode {
+    /// Every float mode.
+    pub const ALL: &'static [FloatMode] = &[FloatMode::Q32, FloatMode::F32];
+}
+
+impl Isa {
+    /// Every ISA.
+    pub const ALL: &'static [Isa] = &[Isa::Riscv32, Isa::Xtensa, Isa::Wasm32, Isa::Host];
+}
+
+impl ExecMode {
+    /// Every execution mode.
+    pub const ALL: &'static [ExecMode] =
+        &[ExecMode::Emulator, ExecMode::Interpreter, ExecMode::Gpu];
+}
 
 impl fmt::Display for Backend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -22,6 +61,36 @@ impl fmt::Display for FloatMode {
         match self {
             FloatMode::Q32 => write!(f, "q32"),
             FloatMode::F32 => write!(f, "f32"),
+        }
+    }
+}
+
+impl fmt::Display for Frontend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Frontend::Naga => write!(f, "naga"),
+            Frontend::Lp => write!(f, "lp"),
+        }
+    }
+}
+
+impl fmt::Display for Isa {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Isa::Riscv32 => write!(f, "riscv32"),
+            Isa::Xtensa => write!(f, "xtensa"),
+            Isa::Wasm32 => write!(f, "wasm32"),
+            Isa::Host => write!(f, "host"),
+        }
+    }
+}
+
+impl fmt::Display for ExecMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExecMode::Emulator => write!(f, "emulator"),
+            ExecMode::Interpreter => write!(f, "interpreter"),
+            ExecMode::Gpu => write!(f, "gpu"),
         }
     }
 }
