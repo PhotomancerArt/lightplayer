@@ -219,7 +219,6 @@ impl Emulator {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use lp_xt_inst::{
@@ -519,7 +518,10 @@ mod tests {
         .run_traced(&mut tracer);
         res.expect("no trap");
         let dump = tracer.dump();
-        assert!(dump.contains("f4 <- 0x3f800000"), "missing FRegWrite: {dump}");
+        assert!(
+            dump.contains("f4 <- 0x3f800000"),
+            "missing FRegWrite: {dump}"
+        );
         assert!(dump.contains("b1 <- 1"), "missing BRegWrite: {dump}");
     }
 

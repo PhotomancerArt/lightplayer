@@ -13,13 +13,10 @@ Scope is *core*: executors + memory + the window machinery, plus the
 (`CycleModel::InstructionCount` is the default), and full `InstLog` parity
 remain out of scope.
 
-The **FPU is in scope as of M6** and partially built. What exists today: the
-FR/BR register files, FCR/FSR, `CPENABLE` gating that raises EXCCAUSE 32, and
-the data-movement half of the instruction set (`executor/float.rs`). What does
-*not* yet exist: any of its numeric behavior — that is
-`executor/float_math.rs`, and **none of it is proven against silicon until the
-M6 P6 hardware campaign runs.** Do not trust an FP result out of this emulator
-before then.
+The **FPU is in scope as of M6** and partially built — see
+[Floating point](#floating-point). **None of its numeric behavior is proven
+against silicon until the M6 P6 hardware campaign runs.** Do not trust an FP
+result out of this emulator before then.
 
 ## Architecture
 
@@ -143,6 +140,49 @@ and the on-device JIT never needs one. See
 `docs/adr/2026-07-30-xtensa-host-shared-memory.md`, which also records why it is
 deliberately *not* the rv32 engine's `0x4000_0000` (that address is
 `SENTINEL_PC`).
+
+## Floating point
+
+Modeled since M6, in three pieces:
+
+- **State** (`cpu.rs`): the FR file `f0..f15` as **raw bits**, the BR file
+  `b0..b15`, `FCR`/`FSR`, and `CPENABLE`. The FR file is **flat** — it takes no
+  part in the `WindowBase` rotation, so the AR file's free preservation across a
+  windowed call has *no FR analogue*. A callee that wants an FR value to survive
+  `call8`/`entry` spills it itself. This is the asymmetry M7's frame layout has
+  to answer for.
+- **Data movement** (`executor/float.rs`): `rfr`/`wfr`, FP load/store including
+  the base-updating `p` forms, `mov.s`, `BR`/`CPENABLE`/`FCR`/`FSR` access, and
+  the Boolean branches and moves. Every coprocessor-0 instruction is gated on
+  `CPENABLE` bit 0 and raises **EXCCAUSE 32** when it is clear — `Cpu::new()`
+  leaves it clear on purpose, so firmware that forgets to arm the coprocessor
+  faults on the host rather than on a board.
+- **Numerics** (`executor/float_math.rs`) behind the policy layer in
+  `fp_policy.rs`.
+
+### The policy layer, and what `UNKNOWN` means
+
+Rust's `f32` is IEEE-754 binary32 under round-to-nearest-even, which is what the
+FPU does for nearly the whole input space — and for normal, finite, non-zero
+operands with a normal finite result, `add.s`/`sub.s`/`mul.s` here are
+bit-exact against host `f32` by construction (asserted over a 20 000-case
+randomized sweep). But Rust cannot express *which* NaN propagates, whether
+denormals flush, or a rounding mode.
+
+So each behavior IEEE does not fix is a named field on `FpPolicy`, and each is
+either **measured with a citation** or `Unknown`. **Reading an unresolved field
+panics**, naming the field and the vector family that closes it. That is
+deliberate: a plausible default is indistinguishable from knowledge once it is
+in the code, and an emulator that is 99% right and silently confident about the
+rest is the exact failure M6 exists to prevent.
+
+Today exactly one field is resolved (`fsr_sticky`, from the 2026-07-31 desk
+session). The rest is the row list of the M6 FP-contract ADR's §4, waiting for
+P6. A non-default `FCR` is likewise **refused**, not ignored (D6).
+
+`recip0.s`/`rsqrt0.s`/`sqrt0.s`/`div0.s` return implementation-defined lookup
+ROMs; they sit behind an empty table that P6 extracts exhaustively, so they
+become exact by construction. There is deliberately no polynomial placeholder.
 
 ## Run API
 

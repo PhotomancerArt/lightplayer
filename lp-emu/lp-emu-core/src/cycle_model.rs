@@ -41,6 +41,29 @@ pub enum InstClass {
     System,
     Fence,
     Atomic,
+
+    // --- floating point ---
+    //
+    // Added by M6 for the Xtensa FP coprocessor, and shaped so RV32F (M9) lands
+    // in the same buckets. **None of them carries a measured cost.** There is no
+    // measured Xtensa cycle model at all (`lp-xt-emu` defaults to
+    // `CycleModel::InstructionCount`), and the one model that *is* measured —
+    // `Esp32C6` — is for a core with no FPU, so it can never see these. They
+    // exist so a future measured model has somewhere to land, and so an FP
+    // instruction is not silently miscounted as an `Alu`. Do not read the
+    // numbers in `cycles_for` as a claim about silicon.
+    /// `add.s` / `sub.s` / `mul.s` and their RV32F equivalents.
+    FloatArith,
+    /// `madd.s` / `msub.s` — a distinct bucket because fused multiply-add is
+    /// the one FP op whose cost is routinely *not* the sum of its parts.
+    FloatMulAdd,
+    /// `float.s` / `trunc.s` / `round.s` / `floor.s` / `ceil.s` and friends.
+    FloatConvert,
+    /// The FP compare predicates, which write a boolean register on Xtensa.
+    FloatCompare,
+    /// `recip0.s` / `rsqrt0.s` / `sqrt0.s` / `div0.s` — table lookups, and the
+    /// per-step instructions of a divide or square-root sequence.
+    FloatEstimate,
 }
 
 impl CycleModel {
@@ -59,6 +82,14 @@ impl CycleModel {
                 InstClass::System => 4,
                 InstClass::Fence => 4,
                 InstClass::Atomic => 4,
+                // Unreachable: the C6 is RV32IMAC and decodes no FP
+                // instruction. 1 rather than a plausible-looking FPU latency,
+                // so nothing here can be mistaken for a measurement.
+                InstClass::FloatArith
+                | InstClass::FloatMulAdd
+                | InstClass::FloatConvert
+                | InstClass::FloatCompare
+                | InstClass::FloatEstimate => 1,
             },
         }
     }
