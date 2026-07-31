@@ -88,7 +88,17 @@ impl UiDeviceCard {
         }
         match target_uid {
             Some(uid) => self.uid.as_deref() == Some(uid),
-            None => !matches!(self.state, RosterCardState::Offline { .. }),
+            // A uid-less op belongs to THE anonymous hardware session (there
+            // is at most one), so it rides any uid-less card — including the
+            // Offline card that `op_in_flight` pins when the session dies
+            // mid-op. The offline exclusion only guards uid'd REGISTRY cards
+            // of other devices from adopting a stray anonymous op. Before
+            // pinned anonymous cards existed, "not offline" was equivalent;
+            // once a recovery write killed its own session, the pinned card
+            // was offline, the op refused to ride it, and the user got a
+            // bare "Not seen yet" instead of the replug instruction (bench,
+            // 2026-07-31 — bootloader-mode arm).
+            None => self.uid.is_none() || !matches!(self.state, RosterCardState::Offline { .. }),
         }
     }
 }
