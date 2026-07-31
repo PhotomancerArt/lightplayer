@@ -10,8 +10,9 @@ they are not replacements for on-device shader compilation.
 
 | Crate | Target | Purpose |
 |---|---|---|
-| [`fw-esp32c6`](./fw-esp32c6/) | ESP32-C6 bare metal | Reference embedded firmware target. Runs `lp-server` on device. |
-| [`fw-esp32-common`](./fw-esp32-common/) | chip-generic lib | Chip-generic firmware layer shared by per-SOC ESP32 crates (fw-esp32c6 today; a future Xtensa `fw-esp32s3` plugs in here). Builds under both the pinned nightly and the Espressif fork; no esp-* HAL deps. |
+| [`fw-esp32c6`](./fw-esp32c6/) | ESP32-C6 bare metal (RISC-V) | Reference embedded firmware target. Runs `lp-server` on device, with every node kind and every driver. |
+| [`fw-esp32s3`](./fw-esp32s3/) | ESP32-S3 bare metal (Xtensa LX7) | Second chip. Runs `lp-server` on device and JITs GLSL to **Xtensa** machine code. Deliberately partial: shader + fixture nodes only, and output is a serial readout rather than RMT/ws281x. See its README for what is gated off and why. |
+| [`fw-esp32-common`](./fw-esp32-common/) | chip-generic lib | Chip-generic firmware layer shared by the per-SOC ESP32 crates — both `fw-esp32c6` and `fw-esp32s3` consume it. Builds under both the pinned nightly and the Espressif fork; no esp-* HAL deps. |
 | [`fw-emu`](./fw-emu/) | RV32 bare-metal emulator | Firmware image used by emulator-oriented validation. |
 | [`fw-host`](./fw-host/) | Host OS | Local host runtime that can run an in-memory `LpServer` outside `lp-cli`. Useful for Studio, local services, and host deployments. |
 | [`fw-browser`](./fw-browser/) | `wasm32-unknown-unknown` browser/Web Worker | Browser runtime proof for Studio project simulation and browser-local testing. |
@@ -23,10 +24,15 @@ they are not replacements for on-device shader compilation.
 
 ### Embedded Firmware
 
-`fw-esp32c6` and `fw-emu` preserve the embedded product path. They must keep the
-GLSL compiler and runtime execution available on the target. Do not feature-gate
-the compiler out of these targets to work around build, size, or `no_std`
-issues.
+`fw-esp32c6`, `fw-esp32s3`, and `fw-emu` preserve the embedded product path.
+They must keep the GLSL compiler and runtime execution available on the target.
+Do not feature-gate the compiler out of these targets to work around build,
+size, or `no_std` issues.
+
+The per-node-kind gates on `fw-esp32s3` are **not** an exception to that rule
+and must not be read as precedent for one: they remove *node runtimes*, never
+the compiler. That build compiles and executes GLSL on the board — it is the
+only reason it exists.
 
 ### Host Runtime
 
