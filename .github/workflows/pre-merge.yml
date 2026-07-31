@@ -390,6 +390,8 @@ jobs:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "false"
       CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Checkout lp2025
         uses: actions/checkout@v4
@@ -425,6 +427,14 @@ jobs:
           buildtargets: esp32s3
           default: false
           ldproxy: false
+
+      # Compile cache, mirroring every other compile-heavy job here (see
+      # validate-x64 for the design: cache-targets is off repo-wide, sccache IS
+      # the compile reuse). The wrapper also covers the esp cross-build below —
+      # sccache + Espressif toolchain + build-std is already proven in this
+      # workflow by firmware-size.
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
