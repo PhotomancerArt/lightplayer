@@ -1,9 +1,10 @@
 //! Host oracle for the on-device shader render.
 //!
 //! Renders `examples/shader-oracle` through the host LPVM engine and prints the
-//! exact bytes a device's ws281x driver must receive. `fw-esp32s3`'s serial
-//! readout prints the same bytes, so the two transcripts can be diffed
-//! character for character.
+//! exact bytes a device's ws281x driver must receive. A `fw-esp32s3` built with
+//! its `frame-dump` feature prints the same bytes off its RMT write path
+//! (`output::rmt::frame_dump`), so the two transcripts can be diffed character
+//! for character.
 //!
 //! This is only an oracle because the two sides share *nothing* below the
 //! project file: the host runs LPIR → WASM → wasmtime, the device runs LPIR →
@@ -52,8 +53,10 @@ const PROJECT_NAME: &str = "shader-oracle";
 /// what makes that claim.
 const FRAMES: u32 = 4;
 
-/// Matches `SerialReadoutWs281xDriver`'s cap, so the printed dump lines up with
-/// the device transcript without slicing either by hand.
+/// Matches `fw-esp32s3`'s `output::rmt::frame_dump::MAX_DUMP_LEDS`, so the
+/// printed dump lines up with the device transcript without slicing either by
+/// hand. Two crates that never link to each other, so this is a transcribed
+/// constant: change one and change the other.
 const MAX_DUMP_LEDS: usize = 64;
 
 #[test]
@@ -139,8 +142,12 @@ fn render_project(graphics: Arc<dyn LpGraphics>) -> Vec<u8> {
     first
 }
 
-/// Print the frame in the exact shapes `SerialReadoutWs281xDriver` prints, so
-/// the device transcript can be diffed against this one directly.
+/// Print the frame in the exact shapes `fw-esp32s3`'s `frame-dump` build
+/// prints, so the device transcript can be diffed against this one directly.
+///
+/// Split across two lines on purpose: the `rgb=` token is alone on the second
+/// one, which is what lets `scripts/m4-hardware-walk.sh` pull it out of both
+/// transcripts with the same `cut -d=` and compare the halves.
 fn print_transcript(tag: &str, frame: &[u8]) {
     let leds = frame.len() / 3;
     let shown = leds.min(MAX_DUMP_LEDS);
@@ -206,7 +213,7 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// FNV-1a, matching `SerialReadoutWs281xDriver::frame_checksum`.
+/// FNV-1a, matching `fw-esp32s3`'s `frame_dump::frame_checksum`.
 fn fnv1a(data: &[u8]) -> u32 {
     let mut hash = 0x811c_9dc5u32;
     for byte in data {
