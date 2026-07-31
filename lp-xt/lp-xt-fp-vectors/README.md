@@ -26,6 +26,15 @@ position.
 state, so P6 can re-run one vector alone while bisecting a divergence instead of
 replaying a batch to reach it.
 
+**`no_std`, verified against a bare-metal target:**
+
+```bash
+cargo build -p lp-xt-fp-vectors --target riscv32imac-unknown-none-elf
+```
+
+(M6 P5 compiles it into `fw-esp32s3` for real, on Xtensa. The rv32 build is the
+cheap standing proof that nothing has crept in that needs `std`.)
+
 **Fingerprinted.** `fingerprint()` hashes every vector of every family. Both
 sides print it; the campaign aborts on a mismatch, and
 `lp-xt-emu/tests/fp_conformance.rs` fails if the committed corpus was generated

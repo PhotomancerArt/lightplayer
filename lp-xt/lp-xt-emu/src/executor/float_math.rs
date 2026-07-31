@@ -101,9 +101,11 @@ impl Emulator {
                     FpRrrOp::MsubS => self.fp_madd(self.rfreg(fr.num()), a, b, true),
                     // Divide-sequence steps: architecturally defined, not
                     // sourced here. Fails loudly rather than approximating.
-                    FpRrrOp::MaddnS | FpRrrOp::DivnS => {
-                        self.fp_policy.divide_step_helpers.get();
-                        unreachable!("the policy read above always panics today")
+                    FpRrrOp::MaddnS => {
+                        divide_step("maddn.s", self.fp_policy.divide_step_helpers.get())
+                    }
+                    FpRrrOp::DivnS => {
+                        divide_step("divn.s", self.fp_policy.divide_step_helpers.get())
                     }
                 };
                 self.wfreg(fr.num(), out, tracer);
@@ -118,13 +120,21 @@ impl Emulator {
                     FpRrOp::AbsS => a & !SIGN,
                     FpRrOp::NegS => a ^ SIGN,
                     // Implementation-defined lookup ROMs (D5).
-                    FpRrOp::Recip0S | FpRrOp::Sqrt0S | FpRrOp::Rsqrt0S | FpRrOp::Div0S => {
-                        self.fp_policy.estimates.get();
-                        unreachable!("the policy read above always panics today")
+                    FpRrOp::Recip0S => estimate("recip0.s", self.fp_policy.estimates.get()),
+                    FpRrOp::Sqrt0S => estimate("sqrt0.s", self.fp_policy.estimates.get()),
+                    FpRrOp::Rsqrt0S => estimate("rsqrt0.s", self.fp_policy.estimates.get()),
+                    FpRrOp::Div0S => estimate("div0.s", self.fp_policy.estimates.get()),
+                    FpRrOp::Nexp01S => {
+                        divide_step("nexp01.s", self.fp_policy.divide_step_helpers.get())
                     }
-                    FpRrOp::Nexp01S | FpRrOp::MkdadjS | FpRrOp::AddexpS | FpRrOp::AddexpmS => {
-                        self.fp_policy.divide_step_helpers.get();
-                        unreachable!("the policy read above always panics today")
+                    FpRrOp::MkdadjS => {
+                        divide_step("mkdadj.s", self.fp_policy.divide_step_helpers.get())
+                    }
+                    FpRrOp::AddexpS => {
+                        divide_step("addexp.s", self.fp_policy.divide_step_helpers.get())
+                    }
+                    FpRrOp::AddexpmS => {
+                        divide_step("addexpm.s", self.fp_policy.divide_step_helpers.get())
                     }
                     // `mov.s` is data movement and lives in `float.rs`.
                     FpRrOp::MovS => unreachable!("mov.s is handled by exec_float"),
@@ -369,6 +379,40 @@ impl Emulator {
         }
         r as i32 as u32
     }
+}
+
+/// One of the non-estimate divide/sqrt helper steps, once its semantics exist.
+///
+/// Reaching this means [`crate::fp_policy::FpPolicy::divide_step_helpers`] has
+/// been *resolved* but nobody wrote the executors to go with it — which is the
+/// other half of resolving it. Deliberately a loud panic naming the instruction
+/// rather than a plausible formula: a formula that looked right here would pass
+/// casual tests and hide that the semantics were never actually sourced.
+fn divide_step(mnemonic: &'static str, semantics: &crate::fp_policy::DivideStepSemantics) -> ! {
+    panic!(
+        "`{mnemonic}` semantics are recorded as sourced from {}, but its \
+         executor was never written. Resolving `divide_step_helpers` means \
+         implementing the six helper steps in `executor/float_math.rs`, not \
+         only recording that they are known.",
+        semantics.sourced_from
+    )
+}
+
+/// One of the four implementation-defined estimate instructions, once its table
+/// exists.
+///
+/// Same contract as [`divide_step`]: P6's extraction is not finished until the
+/// lookup that consumes the table is written here. The table's *shape* is fixed
+/// (an index over the leading significand bits, a per-op exponent rule, and a
+/// parity-selected pair for `rsqrt0.s`); the index width and the exponent rule
+/// are confirmed by sweeping, not assumed, so the lookup lands with the data.
+fn estimate(mnemonic: &'static str, tables: &crate::fp_policy::EstimateTables) -> ! {
+    panic!(
+        "`{mnemonic}` has an extracted table ({} index bits) but no lookup. \
+         The M6 P6 extraction is only complete when the exponent rule it \
+         confirmed is implemented here alongside the data.",
+        tables.index_bits
+    )
 }
 
 /// Round half to even, spelled out rather than taken from a Rust intrinsic so
