@@ -375,11 +375,12 @@ jobs:
   # shader-only PR running the suite against an EMPTY image and reporting green
   # — exactly the failure this job is meant to end.)
   #
-  # Scope note: this gates the engine/emitter tests, NOT the xtn/xtlpn filetest
-  # corpus targets. Those are registered and runnable (`-t xtn.q32`) but not yet
-  # green — 46 files still fail, ~31 of them target-independent frontend limits
-  # awaiting annotation. Gating a known-red suite would just train people to
-  # ignore this job. Add the corpus run here once it is green.
+  # Scope note: this gates BOTH halves of the Xtensa host story — the
+  # engine/emitter tests (`just test-xt-host`, differential against rv32) and
+  # the xtn.q32 / xtlpn.q32 filetest corpus targets. The corpus went green on
+  # 2026-07-31 (851/851 files on each target), which is what the earlier
+  # revision of this note was waiting for; gating it before that would only have
+  # trained people to ignore the job.
   validate-xtensa:
     name: Validate Xtensa (host)
     runs-on: ubuntu-24.04
@@ -527,6 +528,34 @@ jobs:
           fi
 
           exit $rc
+
+      # The filetest corpus, compiled and executed for Xtensa. This is the other
+      # half of the job: `test-xt-host` covers the engine and emitter on a
+      # handful of hand-written cases, this runs the full 851-file GLSL corpus
+      # through the Xtensa backend. Both targets were green at 851/851 when they
+      # were added here (2026-07-31).
+      #
+      # Two invocations, not one: `scripts/filetests.sh` keeps a single
+      # `--target` pair, so a second `-t` silently overwrites the first and you
+      # would test one target while believing you tested two. `just
+      # test-glsl-filetests` invokes the script repeatedly for the same reason.
+      # Separate steps rather than one step with two lines so a failure names
+      # its target in the job UI.
+      #
+      # Ordering matters: both steps must come after "Build the Xtensa builtins
+      # image" and its assertion above. Without the image the runner DROPS the
+      # Xtensa targets with a note on stderr — and because each invocation here
+      # requests exactly one target, dropping it empties the target set and the
+      # run bails non-zero rather than reporting a green no-op. (The script also
+      # rebuilds the image itself when an xt target is selected; it is already
+      # warm from the earlier step.) That belt-and-braces is deliberate: silent
+      # skip reported as success is the exact failure mode this job exists to
+      # end.
+      - name: Xtensa filetest corpus (xtn.q32)
+        run: cd lp2025 && scripts/filetests.sh -t xtn.q32 --summary
+
+      - name: Xtensa filetest corpus (xtlpn.q32)
+        run: cd lp2025 && scripts/filetests.sh -t xtlpn.q32 --summary
 
   # The esp32c6 app image must fit a 3 MB partition. It has overrun twice, and
   # both times the signal was a red Deploy Studio Pages run *after* the merge,
