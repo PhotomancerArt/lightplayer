@@ -44,24 +44,26 @@ Say `wasm.q32` when you mean only the Q32 one.
 
 Its known dispositions, and what unblocks them:
 
-- **~51 files: `@unimplemented(wasm.f32)`** — the shader calls a builtin
+- **52 files: `@unimplemented(wasm.f32)`** — the shader calls a builtin
   (`@glsl::sin`, `@lpfn::*`, `@texture::*`, `@lpir::*`). There is no f32 builtin
   resolution: `lps-builtin-ids` exposes `*_q32_builtin_id` resolvers only, and the
   `_f32` bodies that exist are stubs that round-trip through
   `Q32::from_f32_wrapping`. `lpvm-wasm` refuses these imports by name in f32 mode
   rather than emitting a Q32-typed import into an f32 module. Unblocks with the
   f32 builtin family.
-- **~27 files: `@unsupported(wasm.f32)`** — the shader does not compile on any
-  target (naga gaps, GLSL parse errors). Matches the `@unsupported` entries the
-  other targets already carry; not f32-specific.
+- **27 files: `@unsupported`** — the shader does not compile on any target (naga
+  gaps, GLSL parse errors). Not f32-specific, so most of these are already
+  covered by the axis-scoped `@unsupported(*)` / `@unsupported(frontend!=lp)`
+  the file carries for every other target; only the blocks that stop short of
+  `wasm.f32` name it explicitly.
 - **1 file: `@broken(wasm.f32)`** (`uniform/struct.glsl`) — `wasm.f32` and
   `interp.f32` genuinely disagree, on `normalize(vec3(0))` and NaN propagation
   through `max`.
-- **1 file cannot be annotated at all**: `lps-glsl/rainbow.glsl`. It is a
-  `// test compile` file, and `test_compile` does not consult annotations —
-  `run_compile_test` compiles for every requested target and has no
-  `Disposition` path. Per-target triage of compile-only files needs the
-  annotation mechanism to grow that support.
+
+`lps-glsl/rainbow.glsl` is a `// test compile` file and was un-annotatable when
+this target first ran; file-level dispositions for compile-only files landed
+with the axis selectors, so it now carries `@unimplemented(wasm.f32)` like any
+other builtin-blocked file.
 
 ### The Xtensa pair
 
