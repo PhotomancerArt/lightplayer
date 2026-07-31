@@ -59,55 +59,30 @@ pub(crate) fn link_session_logs(
 }
 
 /// A management result's log/progress replay as console drafts.
+///
+/// Variant-agnostic on purpose: it reads the result's uniform `logs()` /
+/// `progress()` accessors instead of matching each operation. This used to
+/// be four near-identical arms, which meant every new link operation broke
+/// the build here and got a fifth copy that could drift from the others.
+/// `ResetRuntime` is the one special case — it carries no logs of its own,
+/// so it supplies its own line.
 pub(crate) fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogDraft> {
-    match result {
-        LinkManagementResult::FlashFirmware(result) => {
-            let mut logs = result
-                .logs
-                .iter()
-                .map(|message| {
-                    UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, message.clone())
-                })
-                .collect::<Vec<_>>();
-            logs.extend(result.progress.iter().map(|progress| {
-                UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, progress.label.clone())
-            }));
-            logs
-        }
-        LinkManagementResult::EraseDeviceFlash(result) => {
-            let mut logs = result
-                .logs
-                .iter()
-                .map(|message| {
-                    UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, message.clone())
-                })
-                .collect::<Vec<_>>();
-            logs.extend(result.progress.iter().map(|progress| {
-                UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, progress.label.clone())
-            }));
-            logs
-        }
-        LinkManagementResult::EraseRawFilesystem(result) => {
-            let mut logs = result
-                .logs
-                .iter()
-                .map(|message| {
-                    UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, message.clone())
-                })
-                .collect::<Vec<_>>();
-            logs.extend(result.progress.iter().map(|progress| {
-                UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, progress.label.clone())
-            }));
-            logs
-        }
-        LinkManagementResult::ResetRuntime => {
-            vec![UiLogDraft::new(
-                UiLogLevel::Info,
-                UiLogOrigin::Link,
-                "runtime reset completed",
-            )]
-        }
+    if matches!(result, LinkManagementResult::ResetRuntime) {
+        return vec![UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Link,
+            "runtime reset completed",
+        )];
     }
+
+    result
+        .logs()
+        .iter()
+        .map(|message| UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, message.clone()))
+        .chain(result.progress().iter().map(|progress| {
+            UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, progress.label.clone())
+        }))
+        .collect()
 }
 
 /// Map a provider log entry to a console draft: origin `Link`, the endpoint
