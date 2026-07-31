@@ -68,6 +68,7 @@ The allocator is optimized for straight-line code regions:
 - **Pool-based register management:** LRU-spill with slot reuse instead of expensive interference graphs
 - **Edit-list emission:** Records spill/reload edits during allocation, applied during code emission
 - **Region tree dispatch:** Structured control flow handling without full SSA reconstruction
+- **Two register classes:** one independent pool per [`RegClass`](src/abi/regset.rs) — see below
 
 **Benefits over traditional allocators:**
 
@@ -77,6 +78,36 @@ The allocator is optimized for straight-line code regions:
 | Spill slots         | Reused via pool         | Greedy eviction         |
 | Compile-time memory | O(vregs) for pool       | O(vregs²) for graph     |
 | Code quality        | Competitive             | Excellent               |
+
+#### Register classes
+
+The allocator runs **one independent pool per register class** —
+`RegClass::{Int, Float}`. A vreg's class decides which pool serves it; the two
+never interact, so a float vreg cannot evict an integer one and an integer
+constraint cannot be satisfied out of the float file. `Alloc::Reg` carries the
+class alongside the hardware index, and `regalloc/verify.rs` rejects any operand
+allocated into the wrong class. That check is deliberately unconditional: a
+wrong-file allocation is not a crash or a bad address, it is a silent bit
+reinterpretation, and there is no cheaper place to catch it.
+
+**No backend has float registers yet.** `RegClass::Float` answers with an empty
+pool on both ISAs, and an empty pool is an `AllocError::OutOfRegisters`, never a
+fallback into the other file. Hardware-float codegen (Xtensa FPU, RV32F) fills
+these in; until then this is *shape without content*, and the Q32 path is
+provably unchanged by it.
+
+Two subtleties worth keeping straight:
+
+- **A vreg's class comes from the instruction that defines it, not from its LPIR
+  type.** In Q16.16 mode a GLSL `float` **is** an integer: fixed point in a GPR,
+  added with `ADD`. The same LPIR `F32` in native-f32 mode lives in an FPR. Class
+  is a function of `(type, float_mode)`, and lowering already evaluated that pair
+  when it chose the VInst — so `regalloc/classes.rs` reads the answer back off
+  the instruction instead of re-deriving it, and the allocator never needs to
+  know which float mode it is running under.
+- **Spill slots are class-*tagged*, not class-*partitioned*.** One index space; a
+  word is a word, and splitting the space would only grow the frame. The tag is
+  what lets the verifier reject a reload that crosses classes.
 
 ### VInst (Virtual Instructions)
 
@@ -122,6 +153,15 @@ arms, not rerouting call sites. The methods added for the seam:
 | `format_instruction`        | One-word disassembly text                                                                                 |
 | `disassemble_function`      | Annotated listing, including line-table construction                                                      |
 | `native()`                  | The ISA of the CPU this crate is compiled *for* (JIT hosts only)                                           |
+
+Every **register** hook is additionally a per-class query — `allocatable_pool_order`,
+`is_in_allocatable_pool`, `reg_name`, `caller_saved_pool_hw`, `direct_ret_reg`,
+`call_arg_reg`, `lpir_call_arg_target`. Register classes are the seam's second
+axis: a hard-float ABI stages float arguments in the float file and returns them
+in a float register, so "which register" and "which register *file*" are separate
+questions each backend answers for itself. Both backends answer empty for
+`RegClass::Float` today (see [Register classes](#register-classes) above), which
+is why adding an FPU backend is adding arms rather than rerouting call sites.
 
 `frame_top_reserved_bytes` is the one that changes frame arithmetic rather than
 just selecting a table — BACKPORT.md calls it the single structural change the

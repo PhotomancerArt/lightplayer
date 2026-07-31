@@ -16,11 +16,9 @@ use alloc::vec::Vec;
 
 use crate::node::kind::NodeKind;
 use crate::nodes::fixture::{FixtureDef, MappingConfig};
-use crate::nodes::shader::{
-    AddSubMode, ComputeShaderDef, DivMode, GlslOpts, MulMode, ShaderDef, ShaderSlotDef,
-};
+use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSlotDef};
 use crate::nodes::texture::TextureDef;
-use crate::{AssetSlot, BindingRef, EnumSlot, MapSlot, NodeDef, ValueSlot};
+use crate::{AssetSlot, BindingRef, EnumSlot, MapSlot, NodeDef};
 
 /// Placeholder in starter asset names and asset references. Callers substitute
 /// the artifact file stem (e.g. `pulse.json` ⇒ stem `pulse`) via
@@ -184,16 +182,6 @@ pub fn starter_def_for_kind(kind: NodeKind) -> NodeDef {
     starter_for_kind(kind).map_or_else(|| NodeDef::default_for_kind(kind), |starter| starter.def)
 }
 
-/// Saturating Q32 arithmetic for starter shaders: reference-accurate output
-/// over speed while a shader is being authored.
-pub fn starter_glsl_opts() -> GlslOpts {
-    GlslOpts {
-        add_sub: ValueSlot::new(AddSubMode::Saturating),
-        mul: ValueSlot::new(MulMode::Saturating),
-        div: ValueSlot::new(DivMode::Saturating),
-    }
-}
-
 /// The `time` consumed slot every starter shader declares, default-bound to
 /// the project clock bus so the scaffold animates without manual wiring.
 pub fn starter_time_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
@@ -209,7 +197,6 @@ pub fn starter_time_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
 fn starter_shader_def() -> ShaderDef {
     ShaderDef {
         source: AssetSlot::path(alloc::format!("{STARTER_STEM_PLACEHOLDER}.glsl")),
-        glsl_opts: starter_glsl_opts(),
         consumed_slots: starter_time_consumed_slots(),
         ..ShaderDef::default()
     }
@@ -223,7 +210,6 @@ fn starter_compute_shader_def() -> ComputeShaderDef {
     );
     ComputeShaderDef {
         source: AssetSlot::path(alloc::format!("{STARTER_STEM_PLACEHOLDER}.glsl")),
-        glsl_opts: starter_glsl_opts(),
         consumed_slots: starter_time_consumed_slots(),
         produced_slots: MapSlot::new(produced),
         ..ComputeShaderDef::default()
@@ -355,9 +341,10 @@ mod tests {
                 .to_string(),
             "bus:time"
         );
-        assert_eq!(*shader.glsl_opts.add_sub.value(), AddSubMode::Saturating);
-        assert_eq!(*shader.glsl_opts.mul.value(), MulMode::Saturating);
-        assert_eq!(*shader.glsl_opts.div.value(), DivMode::Saturating);
+        assert_eq!(
+            *shader.float_mode.value(),
+            crate::nodes::shader::FloatMode::Fixed
+        );
         assert_eq!(
             starter.assets,
             vec![(

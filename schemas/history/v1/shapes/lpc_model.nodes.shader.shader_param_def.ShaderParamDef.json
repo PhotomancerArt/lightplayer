@@ -1,0 +1,78 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "label",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2612013983,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "description",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2612013983,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "value_type",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2612013983,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "default",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "slider": {
+                  "max": 1.0,
+                  "min": 0.0,
+                  "step": 0.009999999776482582
+                }
+              },
+              "id": 1724747812,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "min",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "ref": {
+                "id": 3464771014
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

@@ -2060,7 +2060,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -2185,7 +2185,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "playlist": {
       "ref": "./playlist.json"
@@ -2282,7 +2282,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2461,7 +2461,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2591,7 +2591,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "def": {
@@ -2620,7 +2620,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -2976,7 +2976,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "broken": {
       "ref": "./broken.json"
@@ -3019,7 +3019,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "weird": {
       "ref": "./weird.json"
@@ -3189,7 +3189,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "compute": {
       "ref": "./compute.json"
@@ -3252,6 +3252,44 @@ mod tests {
         assert_eq!(
             *production.value_leaf().expect("value").value(),
             LpValue::F32(2.25)
+        );
+    }
+
+    /// The defaulting rule, end to end: `examples/fluid` predates the `power`
+    /// slot and authors none, yet its fixture must still come up limited. The
+    /// budget the node publishes is the one actually enforced, so asserting on
+    /// it also pins that the UI cannot report a percentage against a budget
+    /// nothing is applying.
+    #[test]
+    fn fixture_without_an_authored_power_slot_is_limited_at_the_default_budget() {
+        let fs = examples_fluid_fs();
+        let fs: &dyn LpFs = &fs;
+        let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let root = rt.tree().root();
+        let fixture = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fixture").unwrap())
+            .expect("fixture node");
+
+        let budget = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fixture,
+                    slot: SlotPath::parse("power_budget_ma").expect("power_budget_ma"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve power budget")
+            .0;
+
+        assert_eq!(
+            *budget.value_leaf().expect("value").value(),
+            LpValue::U32(lpc_model::nodes::fixture::FixturePower::DEFAULT_BUDGET_MA),
+            "an unstated budget must fall back to the default guard, not to unlimited"
         );
     }
 
@@ -3702,7 +3740,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3772,7 +3810,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -4065,7 +4103,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "name": "basic",
   "nodes": {
     "output": {
@@ -4255,7 +4293,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let project = format!(
-            "{{\n  \"kind\": \"Project\",\n  \"format\": 1,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
+            "{{\n  \"kind\": \"Project\",\n  \"format\": 2,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
         );
         fs.write_file("/project.json".as_path(), project.as_bytes())
             .expect("project.json");
@@ -4508,7 +4546,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"

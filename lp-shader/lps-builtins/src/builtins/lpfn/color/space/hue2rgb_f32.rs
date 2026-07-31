@@ -1,10 +1,12 @@
 //! Convert hue value to RGB color (float implementation - stub).
 //!
-//! This is a stub implementation that will be replaced with a proper float implementation later.
-//! For now, it calls the q32 version with conversion.
-
-use crate::builtins::lpfn::color::space::hue2rgb_q32::__lp_lpfn_hue2rgb_q32;
-use lps_q32::q32::Q32;
+//! **Unimplemented.** Every function here traps via
+//! [`crate::f32_unimplemented::f32_unimplemented`]. These
+//! are placeholders whose signatures, `lpfn_impl` annotations and builtin-table
+//! wiring are correct; only the bodies are missing. They previously round-tripped
+//! through Q32 via `Q32::from_f32_wrapping`, which silently returned
+//! Q32-precision results with wrapped range — the exact property native f32 is
+//! being added for. Failing loudly is deliberate: see the f32 roadmap, M5.
 
 /// Convert hue value to RGB color (extern C wrapper for compiler).
 ///
@@ -16,13 +18,6 @@ use lps_q32::q32::Q32;
 #[lpfn_impl_macro::lpfn_impl(f32, "vec3 lpfn_hue2rgb(float hue)")]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_hue2rgb_f32(result_ptr: *mut f32, hue: f32) {
-    // Convert raw pointer to safe array reference at boundary
-    let result = unsafe { &mut *result_ptr.cast::<[f32; 3]>() };
-    // Stub: convert to q32, call q32 version, convert back
-    let hue_q32 = Q32::from_f32_wrapping(hue);
-    let mut result_q32 = [0i32; 3];
-    __lp_lpfn_hue2rgb_q32(result_q32.as_mut_ptr(), hue_q32.to_fixed());
-    result[0] = Q32::from_fixed(result_q32[0]).to_f32();
-    result[1] = Q32::from_fixed(result_q32[1]).to_f32();
-    result[2] = Q32::from_fixed(result_q32[2]).to_f32();
+    let _ = (result_ptr, hue);
+    crate::f32_unimplemented::f32_unimplemented()
 }

@@ -148,7 +148,9 @@ pub fn run(
                 let disposition = directive_disposition(&directive.annotations, target);
                 match &disposition {
                     Disposition::Skip => unsupported_count += 1,
-                    Disposition::ExpectFailure(AnnotationKind::Unsupported) => {
+                    Disposition::ExpectFailure(
+                        AnnotationKind::Unsupported | AnnotationKind::Ignore,
+                    ) => {
                         unsupported_count += 1;
                     }
                     Disposition::ExpectFailure(AnnotationKind::Unimplemented)

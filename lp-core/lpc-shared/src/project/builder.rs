@@ -3,7 +3,6 @@
 use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
 use lp_collection::VecMap;
-use lpc_model::GlslOpts;
 use lpc_model::nodes::clock::ClockDef;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
@@ -13,8 +12,7 @@ use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, ChannelName, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode,
     FixtureSamplingConfig, HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot,
-    OptionSlot, ProjectDef, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, SlotShapeRegistry,
-    ValueSlot,
+    OptionSlot, ProjectDef, RenderOrder, RenderOrderSlot, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -121,13 +119,12 @@ impl ProjectBuilder {
         }
     }
 
-    /// Start building an output node (defaults to `ws281x:rmt:D10`, no interpolation/dithering/LUT, full brightness)
+    /// Start building an output node (defaults to `ws281x:rmt:D10`, no interpolation/dithering/LUT)
     pub fn output(&mut self) -> OutputBuilder {
         OutputBuilder {
             endpoint: OutputDef::default_endpoint(),
             options: OutputDriverOptionsConfig {
                 white_point: ValueSlot::new([1.0, 1.0, 1.0]),
-                brightness: RatioSlot::new(Ratio(1.0)),
                 interpolation_enabled: ValueSlot::new(false),
                 dithering_enabled: ValueSlot::new(false),
                 lut_enabled: ValueSlot::new(false),
@@ -310,7 +307,7 @@ impl ShaderBuilder {
             source: AssetSlot::path(source_file),
             render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs(&self.visual_bus),
-            glsl_opts: GlslOpts::default(),
+            float_mode: ValueSlot::default(),
             param_defs: MapSlot::default(),
             consumed_slots: default_visual_consumed_slots(),
         };
@@ -429,6 +426,7 @@ impl FixtureBuilder {
                 .map_or_else(OptionSlot::none, |enabled| {
                     OptionSlot::some(ValueSlot::new(enabled))
                 }),
+            power: OptionSlot::none(),
         };
 
         let json = authored_node_json(&slot_shape_registry(), &NodeDef::Fixture(config));

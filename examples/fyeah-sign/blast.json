@@ -10,11 +10,7 @@
       "source": "node:..#entry_time"
     }
   },
-  "glsl_opts": {
-    "add_sub": "wrapping",
-    "mul": "wrapping",
-    "div": "reciprocal"
-  },
+  "float_mode": "fixed",
   "consumed": {
     "progress": {
       "kind": "value",
