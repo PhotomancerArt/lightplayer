@@ -46,8 +46,9 @@ pub use project::{
     WireRuntimeBufferPayload, WireTextureFormat,
 };
 pub use project_command::{
-    WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
-    WireProjectCommand, WireProjectCommandResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WireButtonEvent, WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand,
+    WireNodeCommandResponse, WireOutputTestPattern, WireProjectCommand, WireProjectCommandResponse,
+    WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 pub use project_inventory::{
     WireProjectInventoryReadRequest, WireProjectInventoryReadResponse,

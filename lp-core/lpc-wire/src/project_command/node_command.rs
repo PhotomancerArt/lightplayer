@@ -26,6 +26,43 @@ pub enum WireNodeCommand {
     /// same u32 `PlaylistState.active_entry` reports) the active entry,
     /// resetting the entry clock exactly as a trigger switch does.
     PlaylistActivateEntry { entry: u32 },
+    /// Synthetic button event addressed to a button node runtime.
+    ButtonEvent { event: WireButtonEvent },
+    /// Put an output node into (or out of) test-pattern mode. Sustained
+    /// patterns auto-expire at `ttl_ms` unless renewed by re-sending the
+    /// command.
+    OutputTestPattern {
+        pattern: WireOutputTestPattern,
+        ttl_ms: u32,
+    },
+}
+
+/// A synthetic button event addressed to a button node runtime.
+///
+/// Externally tagged, snake_case, like every project-command payload.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireButtonEvent {
+    /// Minimal down-then-up pair (down one produce, up the next).
+    Click,
+    /// Begin/renew a sustained synthetic hold. Auto-releases at `ttl_ms`
+    /// unless renewed by re-sending with the same `press_id`.
+    Press { press_id: u32, ttl_ms: u32 },
+    /// End the synthetic hold started with `press_id`.
+    Release { press_id: u32 },
+}
+
+/// An output node's test-pattern payload.
+///
+/// Externally tagged, snake_case, like every project-command payload.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireOutputTestPattern {
+    /// End test-pattern mode immediately (ignores `ttl_ms`).
+    Clear,
+    /// Fill every pixel with one color. Auto-expires at `ttl_ms` unless
+    /// renewed by re-sending the command.
+    Solid { r: u8, g: u8, b: u8 },
 }
 
 /// Outcome of a node command.
@@ -54,6 +91,75 @@ mod tests {
         let command = WireNodeCommand::PlaylistActivateEntry { entry: 2 };
         let json = serde_json::to_string(&command).unwrap();
         assert!(json.contains("playlist_activate_entry"));
+        let back: WireNodeCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, command);
+    }
+
+    #[test]
+    fn button_event_click_round_trips() {
+        let command = WireNodeCommand::ButtonEvent {
+            event: WireButtonEvent::Click,
+        };
+        let json = serde_json::to_string(&command).unwrap();
+        assert!(json.contains("button_event"));
+        assert!(json.contains("click"));
+        let back: WireNodeCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, command);
+    }
+
+    #[test]
+    fn button_event_press_round_trips() {
+        let command = WireNodeCommand::ButtonEvent {
+            event: WireButtonEvent::Press {
+                press_id: 7,
+                ttl_ms: 500,
+            },
+        };
+        let json = serde_json::to_string(&command).unwrap();
+        assert!(json.contains("button_event"));
+        assert!(json.contains("press"));
+        let back: WireNodeCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, command);
+    }
+
+    #[test]
+    fn button_event_release_round_trips() {
+        let command = WireNodeCommand::ButtonEvent {
+            event: WireButtonEvent::Release { press_id: 7 },
+        };
+        let json = serde_json::to_string(&command).unwrap();
+        assert!(json.contains("button_event"));
+        assert!(json.contains("release"));
+        let back: WireNodeCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, command);
+    }
+
+    #[test]
+    fn output_test_pattern_clear_round_trips() {
+        let command = WireNodeCommand::OutputTestPattern {
+            pattern: WireOutputTestPattern::Clear,
+            ttl_ms: 0,
+        };
+        let json = serde_json::to_string(&command).unwrap();
+        assert!(json.contains("output_test_pattern"));
+        assert!(json.contains("clear"));
+        let back: WireNodeCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, command);
+    }
+
+    #[test]
+    fn output_test_pattern_solid_round_trips() {
+        let command = WireNodeCommand::OutputTestPattern {
+            pattern: WireOutputTestPattern::Solid {
+                r: 255,
+                g: 128,
+                b: 0,
+            },
+            ttl_ms: 2000,
+        };
+        let json = serde_json::to_string(&command).unwrap();
+        assert!(json.contains("output_test_pattern"));
+        assert!(json.contains("solid"));
         let back: WireNodeCommand = serde_json::from_str(&json).unwrap();
         assert_eq!(back, command);
     }
