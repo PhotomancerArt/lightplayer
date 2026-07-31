@@ -7,6 +7,12 @@ pub enum RegClass {
     Float,
 }
 
+impl RegClass {
+    /// Every class, for the sweeps that must cover all of them — a call
+    /// clobbering each class's caller-saved bank, say.
+    pub const ALL: [RegClass; 2] = [RegClass::Int, RegClass::Float];
+}
+
 /// A physical register: hardware encoding plus class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PReg {

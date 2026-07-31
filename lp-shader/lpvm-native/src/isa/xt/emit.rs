@@ -1713,7 +1713,7 @@ mod tests {
         edits: Vec<(EditPoint, Edit)>,
         spills: u32,
     ) -> AllocOutput {
-        let (inst_alloc_offsets, total) = build_operand_layout(vinsts, pool);
+        let (inst_alloc_offsets, total, _classes) = build_operand_layout(vinsts, pool);
         let mut allocs = vec![Alloc::None; total];
         for (idx, inst) in vinsts.iter().enumerate() {
             let mut ops: Vec<VReg> = Vec::new();
