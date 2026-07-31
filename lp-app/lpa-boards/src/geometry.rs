@@ -283,7 +283,11 @@ impl BoardLayout {
         let board_w = hw.width;
         let board_h = header_top
             + n_max * u
-            + if hw.buttons.is_empty() { 0.8 * u } else { 2.2 * u };
+            + if hw.buttons.is_empty() {
+                0.8 * u
+            } else {
+                2.2 * u
+            };
 
         let cell_width = |body: &CellBody| -> f32 {
             match body {
@@ -297,9 +301,10 @@ impl BoardLayout {
             bodies.iter().map(cell_width).sum::<f32>()
                 + gap * (bodies.len().saturating_sub(1)) as f32
         };
-        let cells_for = |label: &str, role: PinRole, gpio: Option<u8>, caps: &[PinCap], with_name: bool| {
-            cell_bodies(opts, label, role, gpio, caps, with_name)
-        };
+        let cells_for =
+            |label: &str, role: PinRole, gpio: Option<u8>, caps: &[PinCap], with_name: bool| {
+                cell_bodies(opts, label, role, gpio, caps, with_name)
+            };
 
         // Rails: rows extend outward from the pads; cells run away from the
         // board so every pin's row can hold cells simultaneously.
@@ -310,7 +315,11 @@ impl BoardLayout {
                 let y = header_top + index as f32 * u + u / 2.0;
                 let bodies = cells_for(&pin.label, pin.role, pin.gpio, &pin.caps, false);
                 rail_extents[side] = rail_extents[side].max(row_width(&bodies) + 8.0);
-                let px = if side == 0 { 1.0 } else { board_w - 1.0 - pad_w };
+                let px = if side == 0 {
+                    1.0
+                } else {
+                    board_w - 1.0 - pad_w
+                };
                 let pad = Rect {
                     x: px,
                     y: y - pad_h / 2.0,
@@ -327,7 +336,11 @@ impl BoardLayout {
                     };
                     RowLabel {
                         text,
-                        x: if side == 0 { px + pad_w + 3.0 } else { px - 3.0 },
+                        x: if side == 0 {
+                            px + pad_w + 3.0
+                        } else {
+                            px - 3.0
+                        },
                         y: y + font * 0.36,
                         start_anchored: side == 0,
                         kind,
@@ -403,8 +416,7 @@ impl BoardLayout {
                     );
                     let pad_x = term_x0 + index as f32 * term_w + (term_w - 2.0) / 2.0;
                     let y = -(1.6 * u) - (hw.terminals.len() - 1 - index) as f32 * u;
-                    let cells =
-                        place_cells(bodies, y, pad_x + 8.0, 1.0, cell_h, gap, &cell_width);
+                    let cells = place_cells(bodies, y, pad_x + 8.0, 1.0, cell_h, gap, &cell_width);
                     BandRow {
                         gpio: terminal.gpio,
                         role: terminal.role,
@@ -539,8 +551,8 @@ fn cell_bodies(
             }));
         }
         DiagramMode::Wired => {
-            if let Some(connection) = gpio
-                .and_then(|gpio| opts.wired.iter().find(|wired| wired.gpio == gpio))
+            if let Some(connection) =
+                gpio.and_then(|gpio| opts.wired.iter().find(|wired| wired.gpio == gpio))
             {
                 bodies.push(CellBody::Text {
                     text: connection.title.clone(),
@@ -555,8 +567,8 @@ fn cell_bodies(
             }
         }
         DiagramMode::Swatch => {
-            if let Some(swatch) = gpio
-                .and_then(|gpio| opts.swatches.iter().find(|swatch| swatch.gpio == gpio))
+            if let Some(swatch) =
+                gpio.and_then(|gpio| opts.swatches.iter().find(|swatch| swatch.gpio == gpio))
             {
                 bodies.push(CellBody::Swatch {
                     colors: swatch.colors.clone(),
@@ -703,7 +715,10 @@ mod tests {
         assert_eq!(wired_row.cells.len(), 2);
         assert!(wired_row.cells.iter().all(|cell| matches!(
             &cell.body,
-            CellBody::Text { kind: CellKind::Conn, .. }
+            CellBody::Text {
+                kind: CellKind::Conn,
+                ..
+            }
         )));
         let unwired = layout.rail_rows().find(|row| row.gpio == Some(5)).unwrap();
         assert!(unwired.cells.is_empty());

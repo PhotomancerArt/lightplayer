@@ -130,9 +130,7 @@ pub(crate) fn plain_u13() -> Element {
     }
 }
 
-#[story(
-    description = "Caps mode at u=12: every pin's capability cells in their rows (C6 devkit)."
-)]
+#[story(description = "Caps mode at u=12: every pin's capability cells in their rows (C6 devkit).")]
 pub(crate) fn caps_u12() -> Element {
     rsx! {
         BoardFigure {
@@ -393,9 +391,8 @@ pub(crate) fn anatomy() -> Element {
     let rail_x = row_x1 + 44.0;
     let rail_y0 = layout.right.first().unwrap().pad.y - 2.0;
     let rail_y1 = layout.right.last().unwrap().pad.bottom() + 2.0;
-    let rail_mid = (layout.right.first().unwrap().pad.y + layout.right.last().unwrap().pad.y)
-        / 2.0
-        + 4.0;
+    let rail_mid =
+        (layout.right.first().unwrap().pad.y + layout.right.last().unwrap().pad.y) / 2.0 + 4.0;
 
     // Band — bracket spanning the terminal band rows above the board.
     let band_x = layout

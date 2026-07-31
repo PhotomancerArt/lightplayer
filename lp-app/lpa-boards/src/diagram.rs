@@ -67,7 +67,11 @@ pub fn BoardDiagram(
 
     // Module body: the antenna keep-out strip occupies the top 14 units.
     let module = &hw.module;
-    let module_y = if module.antenna { module.y + 14.0 } else { module.y };
+    let module_y = if module.antenna {
+        module.y + 14.0
+    } else {
+        module.y
+    };
     let module_h = module.h - if module.antenna { 14.0 } else { 0.0 };
     let module_font = if module.w > 60.0 { 9.0 } else { 7.5 };
     let antenna_zigzag = module.antenna.then(|| {
