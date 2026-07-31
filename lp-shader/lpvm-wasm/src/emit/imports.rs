@@ -20,7 +20,7 @@ pub(crate) struct FilteredImports {
     pub remap: Vec<Option<u32>>,
 }
 
-fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
+fn collect_used_import_indices(ir: &LpirModule, mode: FloatMode) -> BTreeSet<u32> {
     let n = ir.imports.len() as u32;
     let mut used = BTreeSet::new();
 
@@ -37,16 +37,27 @@ fn collect_used_import_indices(ir: &LpirModule) -> BTreeSet<u32> {
         }
     }
 
-    // Add imports for LPIR ops that call builtins in Q32 mode
-    let (needs_lpir_sqrt, needs_glsl_round) = scan_helper_op_needs(ir);
-    if needs_lpir_sqrt {
-        if let Some(idx) = find_import_index(ir, "lpir", "sqrt") {
-            used.insert(idx);
+    // Add imports for LPIR ops that call builtins **in Q32 mode only**.
+    //
+    // `Fsqrt`/`Fnearest` lower to `@lpir::sqrt`/`@glsl::round` calls under Q32,
+    // but under F32 `ops.rs` emits the native `f32.sqrt`/`f32.nearest`
+    // instructions and never calls anything. Marking the helper imports used
+    // anyway declared a Q32 import no call site referenced — dead weight that
+    // additionally made the module unemittable once f32 import resolution
+    // started rejecting Q32-typed float imports. `with_missing_helper_imports`
+    // already had this `mode != Q32` guard; this scan did not, and the two must
+    // agree or the import section and the code section disagree.
+    if mode == FloatMode::Q32 {
+        let (needs_lpir_sqrt, needs_glsl_round) = scan_helper_op_needs(ir);
+        if needs_lpir_sqrt {
+            if let Some(idx) = find_import_index(ir, "lpir", "sqrt") {
+                used.insert(idx);
+            }
         }
-    }
-    if needs_glsl_round {
-        if let Some(idx) = find_import_index(ir, "glsl", "round") {
-            used.insert(idx);
+        if needs_glsl_round {
+            if let Some(idx) = find_import_index(ir, "glsl", "round") {
+                used.insert(idx);
+            }
         }
     }
 
@@ -195,6 +206,47 @@ fn parse_lpfn_glsl_params_csv(enc: &str) -> Result<Vec<GlslParamKind>, String> {
         .collect()
 }
 
+/// True if `decl` can cross the builtin ABI boundary without any float
+/// representation being implied — every parameter and result is a plain `i32`.
+///
+/// A `Pointer` parameter does **not** qualify: the pointee is shader memory the
+/// builtin reads and writes with its own float encoding, so a Q32 builtin handed
+/// a pointer into an f32 module's memory reinterprets f32 bits as Q16.16 and
+/// silently returns garbage. That is precisely the failure mode this gate exists
+/// to prevent, and it is invisible to wasm validation because both sides are
+/// `i32`.
+fn decl_is_float_agnostic(decl: &ImportDecl) -> bool {
+    decl.param_types
+        .iter()
+        .chain(decl.return_types.iter())
+        .all(|t| matches!(t, IrType::I32))
+}
+
+/// Resolve a builtin import for `mode`.
+///
+/// **There is no f32 builtin resolution yet.** `lps-builtin-ids` exposes
+/// `*_q32_builtin_id` resolvers only; the `BuiltinId` enum does carry `*F32`
+/// variants, but nothing maps a GLSL/lpfn name onto them, and the `_f32` bodies
+/// behind them are stubs that round-trip through `Q32::from_f32_wrapping`.
+///
+/// So under [`FloatMode::F32`] any import that touches a float is refused here,
+/// with a diagnostic naming the import. Before this gate existed the Q32 id was
+/// used unconditionally, which emitted an import declared `(i32) -> i32` against
+/// call sites pushing `f32` locals: the module was invalid, and the only symptom
+/// was wasmtime's `failed to compile: wasm[0]::function[N]`. Failing at the
+/// import with a name is the difference between a triage-able corpus and 41
+/// identical opaque errors.
+fn resolve_builtin_id_for_mode(decl: &ImportDecl, mode: FloatMode) -> Result<BuiltinId, String> {
+    if mode == FloatMode::F32 && !decl_is_float_agnostic(decl) {
+        return Err(format!(
+            "builtin import `@{}::{}` has no f32 implementation: only Q32 builtin \
+             ids are resolvable, so this import cannot be lowered in f32 mode",
+            decl.module_name, decl.func_name
+        ));
+    }
+    resolve_builtin_id(decl)
+}
+
 fn resolve_builtin_id(decl: &ImportDecl) -> Result<BuiltinId, String> {
     match decl.module_name.as_str() {
         "glsl" => {
@@ -280,8 +332,11 @@ fn strip_optional_numeric_import_suffix(func_name: &str) -> &str {
     }
 }
 
-pub(crate) fn build_filtered_imports(ir: &LpirModule) -> Result<FilteredImports, String> {
-    let used = collect_used_import_indices(ir);
+pub(crate) fn build_filtered_imports(
+    ir: &LpirModule,
+    mode: FloatMode,
+) -> Result<FilteredImports, String> {
+    let used = collect_used_import_indices(ir, mode);
     let mut remap = vec![None; ir.imports.len()];
     let mut decls = Vec::new();
     let mut next_wasm = 0u32;
@@ -289,7 +344,7 @@ pub(crate) fn build_filtered_imports(ir: &LpirModule) -> Result<FilteredImports,
         if !used.contains(&(i as u32)) {
             continue;
         }
-        let _ = resolve_builtin_id(decl)?;
+        let _ = resolve_builtin_id_for_mode(decl, mode)?;
         remap[i] = Some(next_wasm);
         decls.push(decl.clone());
         next_wasm += 1;
@@ -353,14 +408,17 @@ pub(crate) fn max_result_ptr_buffer_bytes(ir: &LpirModule, f: &IrFunction) -> u3
 
 pub(crate) fn import_decl_val_types(
     decl: &ImportDecl,
-    _mode: FloatMode,
+    mode: FloatMode,
 ) -> Result<(Vec<wasm_encoder::ValType>, Vec<wasm_encoder::ValType>), String> {
-    let bid = resolve_builtin_id(decl)?;
+    let bid = resolve_builtin_id_for_mode(decl, mode)?;
     Ok(super::builtin_wasm_import_types::wasm_import_val_types(bid))
 }
 
-pub(crate) fn builtins_wasm_name(decl: &ImportDecl) -> Result<&'static str, String> {
-    Ok(resolve_builtin_id(decl)?.name())
+pub(crate) fn builtins_wasm_name(
+    decl: &ImportDecl,
+    mode: FloatMode,
+) -> Result<&'static str, String> {
+    Ok(resolve_builtin_id_for_mode(decl, mode)?.name())
 }
 
 pub(crate) fn import_callee(
