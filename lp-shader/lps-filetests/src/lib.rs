@@ -51,8 +51,9 @@ fn directive_has_unimplemented_for(directive: &RunDirective, for_target: &Target
 /// `.gen.glsl` vector suite) and `scripts/gen-control-torture.py` (the 82-file
 /// control corpus). Both stamp a header. A marker written into their output is
 /// reverted by the next `--write` — that is how the per-directive
-/// `@unsupported(wgpu.f32)` markers were nearly lost, and why
-/// `lint-torture-corpus` exists.
+/// `@unsupported(wgpu.f32)` markers were nearly lost, and why both corpora now
+/// have a drift gate in `check-lint`: `lint-torture-corpus` for the control
+/// corpus and `lint-vec-corpus` for the `.gen.glsl` vector suite.
 fn generated_filetest_source(path: &Path) -> Option<&'static str> {
     let head = std::fs::read_to_string(path).ok()?;
     // The torture generator writes its banner under a boxed title comment, so
