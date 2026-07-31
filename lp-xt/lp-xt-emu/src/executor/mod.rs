@@ -10,7 +10,7 @@ use lp_emu_core::InstClass;
 use lp_xt_inst::{AluRrr, Inst, NullaryNarrowOp, NullaryOp};
 
 use crate::emu::{Emulator, Flow};
-use crate::error::{EXC_ILLEGAL_INSTRUCTION, Trap, TrapKind};
+use crate::error::Trap;
 use crate::trace::Tracer;
 
 /// Map a retired instruction (plus its control-flow outcome) onto
@@ -97,6 +97,8 @@ pub(crate) fn inst_class(inst: &Inst, flow: &Flow) -> InstClass {
 mod arith;
 mod branch;
 mod call;
+mod float;
+mod float_math;
 mod imm;
 mod jump;
 mod load_store;
@@ -168,12 +170,6 @@ impl Emulator {
             Inst::Nullary(_) | Inst::NullaryN(_) => self.exec_misc(inst, pc),
 
             // --- floating point, boolean, special registers ---
-            // TODO(M6 P2/P3): `lp-xt-inst` models these (M6 P1) but the machine
-            // state they touch — the FR file, the BR file, FCR/FSR, and the
-            // CPENABLE gate — does not exist yet. Trapping illegal is the honest
-            // answer meanwhile: it is exactly what un-armed hardware would do to
-            // a payload that reached here, and it is loud. P2 and P3 replace
-            // this arm with real executors; this comment goes with them.
             Inst::FpRrr(..)
             | Inst::FpRr(..)
             | Inst::ConstS(..)
@@ -189,12 +185,7 @@ impl Emulator {
             | Inst::MovBool(..)
             | Inst::BranchBool(..)
             | Inst::Sr(..)
-            | Inst::Ur(..) => Err(Trap {
-                kind: TrapKind::Exception,
-                cause: EXC_ILLEGAL_INSTRUCTION,
-                pc,
-                vaddr: 0,
-            }),
+            | Inst::Ur(..) => self.exec_float(inst, pc, tracer),
         }
     }
 }

@@ -9,16 +9,25 @@ repo, landed here per its `BACKPORT.md`.
 Scope is *core*: executors + memory + the window machinery, plus the
 `lp-emu-core` consumer surface (`LogLevel`-gated instruction ring log,
 `CycleModel`/`InstClass` instruction+cycle counters, `dump_state` /
-`format_debug_info`). FPU, peripherals, a *measured* Xtensa cycle model
+`format_debug_info`). Peripherals, a *measured* Xtensa cycle model
 (`CycleModel::InstructionCount` is the default), and full `InstLog` parity
 remain out of scope.
+
+The **FPU is in scope as of M6** and partially built. What exists today: the
+FR/BR register files, FCR/FSR, `CPENABLE` gating that raises EXCCAUSE 32, and
+the data-movement half of the instruction set (`executor/float.rs`). What does
+*not* yet exist: any of its numeric behavior — that is
+`executor/float_math.rs`, and **none of it is proven against silicon until the
+M6 P6 hardware campaign runs.** Do not trust an FP result out of this emulator
+before then.
 
 ## Architecture
 
 ```
 src/
   cpu.rs         CPU state: PC, 64 physical ARs, WindowBase, WindowStart, SAR,
-                 PS.CALLINC, and the live call-stack shadow.
+                 PS.CALLINC, the live call-stack shadow, and the FP coprocessor
+                 state (flat FR file, BR file, FCR/FSR, CPENABLE).
   memory.rs      Vec-backed regions + per-region D-bus/I-bus AliasRule.
   board.rs       BoardProfile: per-board memory maps (esp32s3 / esp32).
   trace.rs       `trait Tracer` (no-op default) + a basic text tracer.
@@ -26,6 +35,8 @@ src/
   emu.rs         Emulator: fetch/decode/execute loop + the windowed-ABI run API.
   executor/      one module per instruction group (the lp-riscv-emu split):
                  arith · imm · load_store · branch · jump · call · window · misc
+                 float       FP/Boolean/SR data movement + the CPENABLE gate
+                 float_math  everything that computes a float value (M6 P3)
 ```
 
 Decoding is delegated to [`lp-xt-inst`](../lp-xt-inst); this crate never
