@@ -21,6 +21,27 @@ pub(super) fn is_logical(op: BinaryOp) -> bool {
     )
 }
 
+/// Source spelling of a binary operator, for diagnostics.
+pub(super) fn binary_op_token(op: BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::Comma => ",",
+        BinaryOp::Add => "+",
+        BinaryOp::Sub => "-",
+        BinaryOp::Mul => "*",
+        BinaryOp::Div => "/",
+        BinaryOp::Mod => "%",
+        BinaryOp::LogicalAnd => "&&",
+        BinaryOp::LogicalOr => "||",
+        BinaryOp::LogicalXor => "^^",
+        BinaryOp::Lt => "<",
+        BinaryOp::Le => "<=",
+        BinaryOp::Gt => ">",
+        BinaryOp::Ge => ">=",
+        BinaryOp::Eq => "==",
+        BinaryOp::Ne => "!=",
+    }
+}
+
 pub(super) fn glsl_param_token(ty: &LpsType, span: Span) -> Result<String, Diagnostic> {
     Ok(match ty {
         LpsType::Float => String::from("Float"),
