@@ -38,9 +38,9 @@ fn default() -> Element {
 }
 
 #[story(
-    description = "No power budget declared: nothing is ever limited, so the face says nothing about power. The `power` slot in the advanced drawer is where a budget gets added."
+    description = "Limiting opted out (budget 0): the only way to get no readout, since an unstated budget now falls back to the 1000 mA default guard. For someone whose supply is genuinely larger than any default."
 )]
-fn power_no_budget() -> Element {
+fn power_opted_out() -> Element {
     rsx! {
         FixtureCardCanvas {
             NodePane {

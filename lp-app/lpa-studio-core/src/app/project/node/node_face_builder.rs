@@ -117,43 +117,24 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
     })
 }
 
-/// The fixture's power readout, present only when it declares a budget.
+/// The fixture's power readout, present only when the fixture is limited.
 ///
-/// The budget is authored (a config row); the estimate and scale are produced
-/// runtime state. No budget means nothing is ever limited, so there is nothing
-/// to report and no row is built.
+/// Every value here is produced runtime state, including the budget: the node
+/// publishes the budget actually in force after an unstated one has fallen back
+/// to the default, so this never re-derives the defaulting rule and can never
+/// report a percentage against a budget nothing is enforcing.
+///
+/// A zero budget is a deliberate opt-out, and gets no readout.
 fn fixture_power(sections: &[UiNodeSection]) -> Option<UiFixturePower> {
-    let power_row = config_rows(sections)
-        .into_iter()
-        .find(|row| row.key == "power")?;
-    // Searched rather than path-indexed: a present option row renders its
-    // interior inline, so `budget_ma` sits one or two levels down depending on
-    // how the option projects, and neither depth is this readout's business.
-    let budget_ma = find_value_field(&power_row.body, "budget_ma")?
-        .parse()
-        .ok()?;
+    let budget_ma = produced_u32(sections, "power_budget_ma")?;
+    if budget_ma == 0 {
+        return None;
+    }
     Some(UiFixturePower {
         estimated_draw_ma: produced_u32(sections, "estimated_draw_ma").unwrap_or(0),
         budget_ma,
         scale: produced_f32(sections, "power_scale").unwrap_or(1.0),
     })
-}
-
-/// Depth-first search for a named value field's display string.
-///
-/// Matches strictly on the field key at each level, so an unrelated scalar can
-/// never stand in for the field being looked for.
-fn find_value_field<'a>(body: &'a UiConfigSlotBody, key: &str) -> Option<&'a str> {
-    let UiConfigSlotBody::Record(record) = body else {
-        return None;
-    };
-    record
-        .fields
-        .iter()
-        .find_map(|field| match (&field.body, field.key == key) {
-            (UiConfigSlotBody::Value(value), true) => Some(value.display.as_str()),
-            (nested, _) => find_value_field(nested, key),
-        })
 }
 
 /// First produced product row of the wanted kind; an `Empty`-kind row (the

@@ -180,9 +180,6 @@
   .tw\:-mx-1 {
     margin-inline: calc(var(--tw-spacing) * -1);
   }
-  .tw\:-mx-3 {
-    margin-inline: calc(var(--tw-spacing) * -3);
-  }
   .tw\:-mx-4 {
     margin-inline: calc(var(--tw-spacing) * -4);
   }

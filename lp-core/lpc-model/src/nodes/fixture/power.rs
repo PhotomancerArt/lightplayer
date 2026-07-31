@@ -7,12 +7,31 @@
 //! model is future work, but it arrives as an added field here rather than as a
 //! replacement for a scalar, which keeps it a non-breaking change.
 //!
-//! # Absent means unlimited
+//! # Absent means protected, not unprotected
 //!
-//! The `power` slot on a fixture is optional, and its absence means no limiting
-//! at all. There is no default budget because a wrong guess is worse than no
-//! guess in both directions: too low throttles a working installation, too high
-//! gives false confidence. Stating a budget is the user's job.
+//! The `power` slot is optional, and its absence applies
+//! [`FixturePower::default`] — WS2812B at [`FixturePower::DEFAULT_BUDGET_MA`].
+//! Every project written before this slot existed therefore gains a guard
+//! without being edited, which is the point: the person who most needs current
+//! limiting is the one who has never heard of it.
+//!
+//! The failure modes are not symmetric. A budget set too low dims the show, says
+//! so on the fixture card, and is corrected in seconds. No budget at all lets a
+//! board brown out in a reboot loop, silently, needing bootloader recovery to
+//! escape. Guarding by default is worth the occasional wrong guess.
+//!
+//! Prior art agrees and shows the trap: WLED ships its limiter on by default at
+//! 850 mA, and that default being *too low* is item 3 on its own top-five
+//! mistakes list — dim or dark strips with nothing on screen explaining why. The
+//! fixture card's readout is the difference; a limiter that cannot say what it
+//! is doing looks like a broken renderer.
+//!
+//! # Opting out
+//!
+//! A budget of **zero means unlimited**. It is a sentinel, but a well-behaved
+//! one: zero milliamps is meaningless as a budget, so the value is free to carry
+//! the meaning, and it keeps the wire shape a flat `u32`. Someone running a
+//! fixture off a supply far larger than any default can say so explicitly.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -31,20 +50,33 @@ use crate::{
 pub struct FixturePower {
     /// The lamp part this fixture drives. Selects the power model.
     pub lamp_type: LampType,
-    /// What the supply can deliver, in milliamps.
+    /// What the supply can deliver, in milliamps. **Zero means unlimited.**
     pub budget_ma: u32,
 }
 
 impl FixturePower {
-    /// Budget used when the slot is added without one being stated.
+    /// Budget applied when a fixture states none.
     ///
-    /// Sized for a common small 5V supply. Erring low is deliberate: an
-    /// under-stated budget dims a fixture until someone corrects it, while an
-    /// over-stated one lets the original failure through.
-    pub const DEFAULT_BUDGET_MA: u32 = 2000;
+    /// One amp: about 50 WS2812B at full white, or 150 at the default 25%
+    /// brightness — enough for a first strip on a USB-powered board, which is
+    /// the setup this guards. Deliberately above WLED's 850 mA, whose
+    /// too-low-ness is a documented support burden, and deliberately below the
+    /// two amps a permissive charger would supply, because brownout usually
+    /// comes from cable and connector sag rather than the charger's rating.
+    ///
+    /// Note this budget is **per fixture**, where WLED's is per device: a
+    /// project with several fixtures can demand a multiple of this.
+    pub const DEFAULT_BUDGET_MA: u32 = 1000;
 
     const FIELD_LAMP_TYPE: &'static str = "lamp_type";
     const FIELD_BUDGET_MA: &'static str = "budget_ma";
+
+    /// Whether this fixture is current-limited at all.
+    ///
+    /// False only when a budget of zero was authored deliberately.
+    pub fn is_limited(self) -> bool {
+        self.budget_ma > 0
+    }
 }
 
 impl Default for FixturePower {
@@ -179,6 +211,27 @@ mod tests {
             serde_json::from_str::<FixturePower>(&json).expect("decodes"),
             power
         );
+    }
+
+    /// The policy this whole feature turns on: state nothing, still be guarded.
+    #[test]
+    fn the_default_is_a_real_guard_not_an_absence() {
+        let default = FixturePower::default();
+        assert!(
+            default.is_limited(),
+            "a fixture that states nothing must still be limited"
+        );
+        assert_eq!(default.budget_ma, 1000);
+        assert_eq!(default.lamp_type, LampType::Ws2812b5v);
+    }
+
+    #[test]
+    fn a_zero_budget_is_the_opt_out() {
+        let opted_out = FixturePower {
+            lamp_type: LampType::Ws2812b5v,
+            budget_ma: 0,
+        };
+        assert!(!opted_out.is_limited());
     }
 
     #[test]
