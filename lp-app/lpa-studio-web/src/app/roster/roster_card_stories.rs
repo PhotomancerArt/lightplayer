@@ -222,6 +222,13 @@ fn troubleshoot_sheet_open() -> Element {
 }
 
 #[story(
+    description = "Amber filled edge: the chip is sitting in ROM download mode. Split out of Ready-to-set-up 2026-07-31 after a bench report — the two were collapsed, so Studio detected download mode and then discarded the fact, showing the blank-board flow instead. The load-bearing difference: a device flashed from here does NOT boot the new firmware on its own; it has to be physically replugged."
+)]
+fn recovery_mode() -> Element {
+    sheet(vec![card(RosterCardState::RecoveryMode, false)])
+}
+
+#[story(
     description = "Bootloader-entry, step 1 (M5): the ritual for a chip Studio KNOWS — the card's firmware provenance named it, so the steps are specific. Every sequence starts by unplugging: the boot strap is sampled at reset, so holding BOOT on a running board does nothing."
 )]
 fn bootloader_entry_instructing() -> Element {
