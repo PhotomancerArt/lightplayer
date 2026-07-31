@@ -106,11 +106,20 @@ fn fp0_three_operand() {
 #[test]
 fn fp1_unary_group() {
     // mov.s    f0, f1
-    assert_eq!(dec(&[0x00, 0x01, 0xfa]), Inst::FpRr(FpRrOp::MovS, f(0), f(1)));
+    assert_eq!(
+        dec(&[0x00, 0x01, 0xfa]),
+        Inst::FpRr(FpRrOp::MovS, f(0), f(1))
+    );
     // abs.s    f0, f1
-    assert_eq!(dec(&[0x10, 0x01, 0xfa]), Inst::FpRr(FpRrOp::AbsS, f(0), f(1)));
+    assert_eq!(
+        dec(&[0x10, 0x01, 0xfa]),
+        Inst::FpRr(FpRrOp::AbsS, f(0), f(1))
+    );
     // neg.s    f0, f1
-    assert_eq!(dec(&[0x60, 0x01, 0xfa]), Inst::FpRr(FpRrOp::NegS, f(0), f(1)));
+    assert_eq!(
+        dec(&[0x60, 0x01, 0xfa]),
+        Inst::FpRr(FpRrOp::NegS, f(0), f(1))
+    );
     // div0.s   f0, f1
     assert_eq!(
         dec(&[0x70, 0x01, 0xfa]),
@@ -334,9 +343,15 @@ fn conversions_carry_a_scale_immediate() {
 #[test]
 fn fp_loads_and_stores() {
     // lsi  f0, a1, 8 — the imm8 field holds offset/4.
-    assert_eq!(dec(&[0x03, 0x01, 0x02]), Inst::FpLsi(FpLsiOp::Lsi, f(0), a(1), 8));
+    assert_eq!(
+        dec(&[0x03, 0x01, 0x02]),
+        Inst::FpLsi(FpLsiOp::Lsi, f(0), a(1), 8)
+    );
     // ssi  f0, a1, 8
-    assert_eq!(dec(&[0x03, 0x41, 0x02]), Inst::FpLsi(FpLsiOp::Ssi, f(0), a(1), 8));
+    assert_eq!(
+        dec(&[0x03, 0x41, 0x02]),
+        Inst::FpLsi(FpLsiOp::Ssi, f(0), a(1), 8)
+    );
     // lsip f0, a1, 8
     assert_eq!(
         dec(&[0x03, 0x81, 0x02]),
