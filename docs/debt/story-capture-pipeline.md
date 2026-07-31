@@ -396,3 +396,23 @@ escalate rather than widening the threshold.
   that has wedged runs since 2026-07-08), and **diff the bytes before
   designing a fix** — this pipeline has now produced several "obviously a
   settling race" diagnoses that the pixels overturned.
+
+- 2026-07-31 — **`just studio-story-pull` was broken, and the guard step's
+  message points at it.** `story-apply-refresh.mjs` parsed `process.argv` and
+  called `process.exit(2)` at *module scope*, so `story-pull.mjs` — which
+  imports `applyRefresh` from it — exited 2 before doing anything. The
+  documented manual fallback for drift has therefore been dead since the two
+  scripts were split, and the CI failure message ("`just studio-story-pull`
+  is the manual fallback") sends you straight into it. Argument parsing now
+  lives inside the `import.meta.url === argv[1]` guard; both the CLI and the
+  import work.
+  Found while chasing a **capture crash** (not drift) on PR #207: `Story
+  check` reported success, every drift/upload step was skipped, and
+  `Capture crash summary` fired — the `.check-complete` sentinel from the
+  2026-07-26 entry doing exactly its job, refusing to let a crashed partial
+  capture masquerade as drift. Worth noting for the lore: the guard step is
+  named "Fail on unresolved story drift" and says "drift" even when the
+  sentinel has positively identified a crash, which cost a round of looking
+  for baseline diffs that were never there. The step conclusions are the
+  reliable signal: skipped upload steps + a fired crash summary means crash,
+  not drift.
