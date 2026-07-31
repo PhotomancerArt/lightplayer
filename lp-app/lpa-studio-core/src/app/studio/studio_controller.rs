@@ -4202,22 +4202,23 @@ impl StudioController {
         let from_recovery = self.device_is_in_recovery_mode();
         self.run_device_management(
             ManagementFlowSpec {
-                request: LinkManagementRequest::boot_safe_once(),
-                progress_label: "Arming safe start",
+                request: LinkManagementRequest::start_safe_mode(),
+                progress_label: "Arming safe mode",
                 reconnect_detail: if from_recovery {
                     "Unplug the board and plug it back in to start it"
                 } else {
-                    "Restarting without the project"
+                    "Restarting in safe mode"
                 },
                 failed_exit_label: "Back to device",
                 record_captured_logs_on_success: false,
                 done_notice: boot_safe_once_notice,
-                degrade_subject: "safe start armed",
+                degrade_subject: "safe mode armed",
                 server_reconnect_failed_notice: if from_recovery {
-                    "Safe start armed. Unplug the board and plug it back in — \
-                     it will start without its project."
+                    "Safe mode armed. Unplug the board and plug it back in — \
+                     it will start dim, or with nothing loaded on older \
+                     firmware."
                 } else {
-                    "Safe start armed; reconnect after the device finishes booting"
+                    "Safe mode armed; reconnect after the device finishes booting"
                 },
                 awaits_manual_replug: from_recovery,
                 // Nothing is erased — the project is still on the device and
@@ -4855,7 +4856,8 @@ fn boot_safe_once_notice(result: &LinkManagementResult) -> UiNotice {
         _ => "This device",
     };
     UiNotice::info(format!(
-        "{label} will start once without its project. The restart after that is normal."
+        "{label} will start once in safe mode — dim, or with nothing loaded \
+         on older firmware. The restart after that is normal."
     ))
 }
 

@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn unknown_flag_bits_still_decode_and_keep_known_instructions() {
-        let flags = BootFlags::from_bits(BootFlags::SKIP_PROJECT_AUTOLOAD.bits() | (0x5 << 8));
+        let flags = BootFlags::from_bits(BootFlags::SKIP_PROJECT_AUTOLOAD.bits() | (0x5 << 24));
         let record = encode_record(flags);
         match decode_record(&record) {
             DecodeOutcome::Valid(control) => {

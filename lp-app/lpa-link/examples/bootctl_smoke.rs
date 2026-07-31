@@ -78,9 +78,9 @@ async fn run(port: String) {
         "expected Ready after connect, got {state:?}"
     );
 
-    println!("\n== manage: SetBootControl (skip project auto-load) ==");
+    println!("\n== manage: SetBootControl (safe mode) ==");
     let outcome = session
-        .manage(LinkManagementRequest::boot_safe_once(), event_printer())
+        .manage(LinkManagementRequest::start_safe_mode(), event_printer())
         .await
         .expect("write boot-control record");
     match &outcome.result {

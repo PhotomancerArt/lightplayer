@@ -52,9 +52,16 @@ one of the two checks and decodes as "no record".
 it, before acting on it. The instruction is one-shot; a crash during the
 recovery boot cannot make it sticky.
 
-**Unknown flag bits are ignored, not rejected.** Bits `8..16` are reserved for
-a future graduated output clamp. A newer host asking for a clamp this firmware
-cannot apply still gets the skip it also asked for.
+**Unknown flag bits are ignored, not rejected.** A newer host asking for
+something this firmware cannot apply still gets the instructions it does
+understand.
+
+**Safe mode is skip + clamp, with clamp winning.** Bits `8..16` carry a
+safe-mode output clamp level (`0` = none, else a brightness ceiling out of
+255). Hosts set both the skip bit and a dim clamp; a firmware that
+implements the clamp loads the project dimmed and ignores the skip, while
+older firmware ignores the clamp bits and honors the skip. Same record,
+best available behavior on each.
 
 ## Layout
 
@@ -73,8 +80,10 @@ The rest of the sector is left erased.
 ```rust
 use lp_bootctl::{BOOTCTL_PARTITION_OFFSET, BootFlags, decode, encode_record};
 
-// Host side: ask the device to come up once without loading a project.
-let record = encode_record(BootFlags::SKIP_PROJECT_AUTOLOAD);
+// Host side: ask the device to start once in safe mode. Skip + clamp
+// together, so the record does the best thing each firmware knows how to.
+let flags = BootFlags::SKIP_PROJECT_AUTOLOAD.with_safe_clamp(BootFlags::DEFAULT_SAFE_CLAMP);
+let record = encode_record(flags);
 // erase the sector, then write `record` at BOOTCTL_PARTITION_OFFSET in one go
 
 // Device side, at boot:
