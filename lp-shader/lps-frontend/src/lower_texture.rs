@@ -170,7 +170,12 @@ pub(crate) fn lower_image_sample_texture(
     let desc = load_texture_descriptor_vregs(ctx, op.descriptor_base_byte_offset)?;
     let uv = lower_texture_vec2_coords(ctx, coordinate, &op.path)?;
 
-    let u_q32 = spill_f32_q32_lane_as_i32_vreg(ctx, uv.x)?;
+    // Pass the coordinate as the `IrType::F32` vreg it already is. It used to be
+    // spilled through a slot to reinterpret it as an `i32` word, matching an
+    // import whose coordinate lanes were declared `I32` — a bit-preserving no-op
+    // under Q32, where `F32` lowers to an i32 word anyway, and a hard type error
+    // under Float mode, where the import really does want an `f32`.
+    let u_coord = uv.x;
 
     let filter_abi = iconst(ctx, spec.filter.to_builtin_abi() as i32)?;
     let wrap_x_abi = iconst(ctx, spec.wrap_x.to_builtin_abi() as i32)?;
@@ -188,12 +193,12 @@ pub(crate) fn lower_image_sample_texture(
     args.push(desc.width);
     match spec.shape_hint {
         TextureShapeHint::General2D => {
-            let v_q32 = spill_f32_q32_lane_as_i32_vreg(ctx, uv.y)?;
+            let v_coord = uv.y;
             let wrap_y_abi = iconst(ctx, spec.wrap_y.to_builtin_abi() as i32)?;
             args.push(desc.height);
             args.push(desc.row_stride);
-            args.push(u_q32);
-            args.push(v_q32);
+            args.push(u_coord);
+            args.push(v_coord);
             args.push(filter_abi);
             args.push(wrap_x_abi);
             args.push(wrap_y_abi);
@@ -201,7 +206,7 @@ pub(crate) fn lower_image_sample_texture(
         TextureShapeHint::HeightOne => {
             // `wrap_y` and the normalized v coordinate are intentionally omitted on the height-one path.
             args.push(desc.row_stride);
-            args.push(u_q32);
+            args.push(u_coord);
             args.push(filter_abi);
             args.push(wrap_x_abi);
         }
@@ -286,25 +291,6 @@ fn lower_texture_vec2_coords(
         x: lanes[0],
         y: lanes[1],
     })
-}
-
-/// Q32 / F32 lane as raw `i32` bits for sampler builtins (spill through stack slot).
-fn spill_f32_q32_lane_as_i32_vreg(ctx: &mut LowerCtx<'_>, f: VReg) -> Result<VReg, LowerError> {
-    let slot = ctx.fb.alloc_slot(4);
-    let addr = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
-    ctx.fb.push(LpirOp::Store {
-        base: addr,
-        offset: 0,
-        value: f,
-    });
-    let raw = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::Load {
-        dst: raw,
-        base: addr,
-        offset: 0,
-    });
-    Ok(raw)
 }
 
 fn iconst(ctx: &mut LowerCtx<'_>, value: i32) -> Result<VReg, LowerError> {

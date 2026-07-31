@@ -64,8 +64,7 @@ ivec2 test_ivec2_add_in_assignment() {
 // run: test_ivec2_add_in_assignment() == ivec2(15, 10)
 
 ivec2 test_ivec2_add_large_numbers() {
-    // Large numbers are clamped to fixed16x16 max (32767.99998, rounds to 32768.0)
-    // Addition saturates to max for each component
+    // Integer vectors use exact arithmetic.
     ivec2 a = ivec2(100000, 50000);
     ivec2 b = ivec2(200000, 30000);
     return a + b;

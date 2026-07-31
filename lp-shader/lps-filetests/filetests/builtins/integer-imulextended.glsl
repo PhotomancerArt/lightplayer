@@ -13,12 +13,12 @@ uvec4 test_imulextended_int_small() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers imulExtended to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_imulextended_int_small() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_imulextended_int_neg_pos() {
@@ -28,12 +28,10 @@ uvec4 test_imulextended_int_neg_pos() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers imulExtended to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_imulextended_int_neg_pos() == uvec4(4294967290u, 4294967295u, 0u, 0u)
 
 uvec4 test_imulextended_int_neg_neg() {
@@ -43,12 +41,10 @@ uvec4 test_imulextended_int_neg_neg() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// naga lowers imulExtended to the wrong value; the lps-glsl frontend is correct
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_imulextended_int_neg_neg() == uvec4(6u, 0u, 0u, 0u)
 
 uvec4 test_imulextended_int_large() {
@@ -59,12 +55,9 @@ uvec4 test_imulextended_int_large() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @broken(wasm.q32)
-// @broken(rv32c.q32)
-// @broken(rv32n.q32)
-// @broken(xtn.q32)
-// @broken(interp.f32)
+// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_imulextended_int_large() == uvec4(1410065408u, 2u, 0u, 0u)
 
 
