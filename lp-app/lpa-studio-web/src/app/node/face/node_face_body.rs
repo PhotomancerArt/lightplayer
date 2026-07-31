@@ -19,6 +19,7 @@ use lpa_studio_core::{
     NodeCardUiState, UiAction, UiAddNodeMenu, UiNodeFace, UiNodeSection, UiPendingEdit,
 };
 
+use crate::app::module::{ModuleFace, PanelGesture};
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
 
@@ -49,6 +50,10 @@ pub fn NodeFaceBody(
     add_node_menu: Option<UiAddNodeMenu>,
     #[props(default)] pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
+    /// M2 UX spike: panel gestures (reset, auto-save, group disclosure)
+    /// raised by a module face. `None` renders the panel display-only.
+    #[props(default = None)]
+    module_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     rsx! {
@@ -104,6 +109,13 @@ pub fn NodeFaceBody(
                         dirty_tint,
                         on_action,
                     }
+                },
+                // M2 UX spike: the module face carries its own drawers
+                // (wiring) and nests its children inside the card, so it
+                // does NOT compose `NodeCardDrawers` — the advanced slot
+                // view lives on the individual child nodes instead.
+                UiNodeFace::Module(module) => rsx! {
+                    ModuleFace { face: module, on_panel: module_panel, on_action }
                 },
             }}
         }

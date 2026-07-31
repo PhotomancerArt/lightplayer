@@ -11,6 +11,8 @@ pub mod home;
 pub mod layout;
 #[cfg(feature = "stories")]
 pub(crate) mod mapping_editor_stories;
+/// M2 UX spike: the module face, panel, and play-mode surfaces.
+pub mod module;
 pub mod node;
 pub mod project;
 #[cfg(feature = "stories")]
