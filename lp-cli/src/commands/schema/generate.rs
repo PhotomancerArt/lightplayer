@@ -12,6 +12,8 @@
 //!   registered node kind, discriminated by top-level `kind`.
 //! - `hardware.schema.json` — the plain-serde board manifest
 //!   ([`lpc_hardware::HardwareManifestFile`]) via `schemars`.
+//! - `board-display.schema.json` — the board display sidecar
+//!   ([`lpa_boards::BoardDisplayFile`], `*.display.json`) via `schemars`.
 //! - `shapes/<shape-name>.json` — the serialized [`SlotShape`] for each
 //!   registered static shape (the source-of-truth dump a future format
 //!   upgrader consumes), plus `shapes/_index.json` mapping registry shape
@@ -78,6 +80,10 @@ fn generate_outputs() -> Result<BTreeMap<String, String>> {
     outputs.insert(
         String::from("hardware.schema.json"),
         render_schema(hardware_schema()?, "hardware.schema.json")?,
+    );
+    outputs.insert(
+        String::from("board-display.schema.json"),
+        render_schema(board_display_schema()?, "board-display.schema.json")?,
     );
 
     let mut index = Map::new();
@@ -200,6 +206,14 @@ fn node_schema(registry: &SlotShapeRegistry) -> Result<Value> {
 fn hardware_schema() -> Result<Value> {
     let schema = schemars::schema_for!(HardwareManifestFile);
     serde_json::to_value(&schema).context("serializing hardware manifest schema")
+}
+
+/// Schema for `*.display.json` board display sidecars. Plain serde like the
+/// hardware manifest; the types live app-side in `lpa-boards` so the runtime
+/// manifest (compiled into firmware) never carries display data.
+fn board_display_schema() -> Result<Value> {
+    let schema = schemars::schema_for!(lpa_boards::BoardDisplayFile);
+    serde_json::to_value(&schema).context("serializing board display schema")
 }
 
 /// File stem for a shape dump: the registry name with Rust path separators
