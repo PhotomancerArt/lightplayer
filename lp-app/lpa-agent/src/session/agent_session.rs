@@ -246,6 +246,20 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
         // now, at end of turn).
         let mut content: Vec<ContentBlock> = blocks.iter().map(Acc::to_content_block).collect();
 
+        // Tool input JSON that does not parse is direct evidence the turn
+        // was cut mid-call, and it outranks the server's self-report: some
+        // compat servers label an output-cap cut `tool_calls` rather than
+        // `length`, which would otherwise walk a torn call straight into
+        // the execution path below and fail deep in the tool layer with a
+        // deserialization error that names neither the cause nor the fix.
+        // Note this reclassifies AFTER `TurnDone`, so the UI's usage row
+        // still reflects what the provider actually reported.
+        let stop_reason = if blocks.iter().any(Acc::has_malformed_tool_input) {
+            StopReason::MaxTokens
+        } else {
+            stop_reason
+        };
+
         if stop_reason != StopReason::ToolUse {
             // Any accumulated tool call will never execute — most often a
             // `MaxTokens` cut mid-input-JSON. Drop such blocks from the
@@ -395,6 +409,21 @@ impl Acc {
         }
     }
 
+    /// Whether this is a tool call whose accumulated input JSON does not
+    /// parse — a call that can never execute. The overwhelmingly common
+    /// cause is the per-turn output cap landing mid-JSON; a genuinely
+    /// malformed emission is indistinguishable here and is treated the
+    /// same way, since neither can be run.
+    fn has_malformed_tool_input(&self) -> bool {
+        match self {
+            Acc::Tool { input_json, .. } => {
+                let raw = input_json.trim();
+                !raw.is_empty() && serde_json::from_str::<serde_json::Value>(raw).is_err()
+            }
+            Acc::Text(_) | Acc::Thinking { .. } | Acc::Redacted { .. } => false,
+        }
+    }
+
     fn to_content_block(&self) -> ContentBlock {
         match self {
             Acc::Text(text) => ContentBlock::Text { text: text.clone() },
@@ -409,15 +438,16 @@ impl Acc {
                 input_json,
             } => {
                 let raw = input_json.trim();
-                // A tool call with no streamed input means `{}`.
+                // A tool call with no streamed input means `{}`. Input that
+                // does not parse means the call was cut mid-JSON: `run_turn`
+                // detects that via `has_malformed_tool_input` and drops the
+                // block before execution, so this placeholder is never read.
+                // (It must not be the raw string — handing that to a tool's
+                // deserializer reports a type mismatch instead of the cut.)
                 let input = if raw.is_empty() {
                     json!({})
                 } else {
-                    serde_json::from_str(raw).unwrap_or_else(|_| {
-                        // Malformed input JSON: preserve it verbatim so the
-                        // tool layer reports it in-band.
-                        serde_json::Value::String(input_json.clone())
-                    })
+                    serde_json::from_str(raw).unwrap_or(serde_json::Value::Null)
                 };
                 ContentBlock::ToolUse {
                     id: id.clone(),
@@ -848,6 +878,90 @@ mod tests {
             events.last(),
             Some(AgentEvent::SessionDone { .. })
         ));
+    }
+
+    #[test]
+    fn torn_tool_input_labelled_tool_calls_is_still_treated_as_a_cut() {
+        // The prod failure: the output cap landed mid-input-JSON but the
+        // server reported `tool_calls` (not `length`), so `stop_reason`
+        // alone says "run this call". The torn JSON is the real evidence.
+        // Before the fix this reached the tool layer and came back as
+        // `invalid type: string ... expected struct IterateInput`.
+        let provider = FakeProvider::new(vec![vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: "{\"note\": \"hearts\", \"source\": \"vec2 pm = p - 0".into(),
+            },
+            turn_done(StopReason::ToolUse, 10, 8192),
+        ]]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("multiple hearts".into(), |e| events.push(e))).expect("run");
+
+        // Reclassified as a cut: reported as truncation, not executed.
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::Truncated {
+                stop_reason: StopReason::MaxTokens,
+                dropped_tool_call: true,
+            }
+        )));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecuted { .. })),
+            "a torn call must never execute"
+        );
+        // The dangling tool_use stays out of the transcript so the next
+        // turn replays a protocol-valid message. Here the torn call was the
+        // turn's only block, so no assistant message is recorded at all.
+        assert!(
+            !session
+                .transcript()
+                .messages
+                .iter()
+                .flat_map(|m| &m.content)
+                .any(|b| matches!(b, ContentBlock::ToolUse { .. })),
+            "no tool_use may survive without a matching tool_result"
+        );
+    }
+
+    #[test]
+    fn well_formed_tool_input_is_unaffected_by_the_cut_check() {
+        // Guard the negative: a complete call on a `tool_calls` turn must
+        // still execute normally.
+        let input = format!("{{\"source\": {}, \"note\": \"go green\"}}", json!(GREEN));
+        let provider = FakeProvider::new(vec![
+            vec![
+                TurnEvent::ToolUseStart {
+                    id: "tu_1".into(),
+                    name: "iterate".into(),
+                },
+                TurnEvent::ToolInputDelta {
+                    id: "tu_1".into(),
+                    json_fragment: input,
+                },
+                turn_done(StopReason::ToolUse, 1, 1),
+            ],
+            vec![turn_done(StopReason::EndTurn, 1, 1)],
+        ]);
+        let mut session = AgentSession::new(&provider, FakeHost::new(RED));
+        let mut events = Vec::new();
+        block_on(session.run("go green".into(), |e| events.push(e))).expect("run");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecuted { .. }))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::Truncated { .. }))
+        );
     }
 
     #[test]
