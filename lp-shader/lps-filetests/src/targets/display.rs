@@ -215,12 +215,14 @@ mod tests {
         assert!(err.contains("xtlpn.q32"));
     }
 
+    /// A bare backend token selects **every** float mode that backend has, in
+    /// `ALL_TARGETS` order — so `wasm` is three targets once `wasm.f32` exists,
+    /// not two. Callers that mean one mode must spell it out.
     #[test]
     fn test_parse_target_filters_comma_and_shorthand() {
         let v = parse_target_filters("rv32n,wasm").expect("parse");
-        assert_eq!(v.len(), 2);
-        assert_eq!(v[0].name(), "rv32n.q32");
-        assert_eq!(v[1].name(), "wasm.q32");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["rv32n.q32", "wasm.q32", "wasm.f32"]);
     }
 
     #[test]
