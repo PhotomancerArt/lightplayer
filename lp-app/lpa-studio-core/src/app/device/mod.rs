@@ -17,5 +17,7 @@ pub use connected_device_summary::ConnectedDeviceSummary;
 pub use deploy_op::{DEPLOY_NODE_ID, DeployOp, DeployTarget};
 pub use device_controller::{DeviceController, DeviceOpenOutcome};
 pub use device_op::DeviceOp;
-pub use filesystem_backup::{BackupArchive, BackupError, BackupManifest, BackupSource};
+pub use filesystem_backup::{
+    BackupArchive, BackupError, BackupManifest, BackupSource, UiDeviceBackup,
+};
 pub use recovery_instructions::{RecoveryInstructions, RecoveryStep};

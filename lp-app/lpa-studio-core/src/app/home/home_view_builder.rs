@@ -185,6 +185,7 @@ pub fn build_home_view(
             library_available: false,
             opening,
             issue,
+            backup: None,
         };
     };
 
@@ -211,6 +212,9 @@ pub fn build_home_view(
         library_available: true,
         opening,
         issue: issue.or_else(|| inputs.issue.clone()),
+        // The controller overlays a finished backup after the build (it is
+        // controller state, not library/roster evidence).
+        backup: None,
     }
 }
 

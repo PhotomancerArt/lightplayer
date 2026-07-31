@@ -294,6 +294,7 @@ mod tests {
             library_available: true,
             opening: None,
             issue: None,
+            backup: None,
         }))
     }
 
