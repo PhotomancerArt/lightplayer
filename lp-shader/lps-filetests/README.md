@@ -360,6 +360,8 @@ int add_int(int a, int b) {
 ### Directives
 
 - `// test run` — marks an execution test file (required for run tests).
+- `// test error` — the file must fail to compile; see
+  [Error tests](#error-tests--test-error-cover-both-frontends).
 - `// target <backend>.<format>` — file-level default target (e.g. `wasm.q32`, `rv32c.q32`).
 - `// @<kind>(<selector>)` — per-directive disposition; see
   [Dispositions](#dispositions-unsupported-unimplemented-broken-ignore).
@@ -371,6 +373,32 @@ could not read" path — that is how a malformed selector stays visible.
 `rv32lpn.q32`, `rv32c.q32`, `wasm.q32`, `interp.f32`. CI runs this list via
 `just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32` and `wasm.f32` are
 explicit-only (see Targets above).
+
+### Error tests (`// test error`) cover **both** frontends
+
+An error test compiles the file through the naga pipeline and matches its
+diagnostics against the inline `// expected-error {{…}}` expectations. It then
+also compiles the file through **`lps-glsl`** — the frontend `rv32lpn.q32` and
+`xtlpn.q32` use, i.e. the on-device one — and requires that to fail too.
+
+Only the *rejection* is asserted for the lp frontend, not the wording: the two
+frontends phrase diagnostics differently and the expectations above are written
+against naga's. `lps-glsl`'s own phrasing belongs in that crate's unit tests.
+
+Without this arm an error test says nothing about the device frontend, and
+invalid GLSL that only naga catches ships. `lps-glsl` accepting `bvec2 + bvec2`
+is exactly how that looked in practice.
+
+The lp arm is dispositioned like any other case, resolved against
+`rv32lpn.q32`, so a check `lps-glsl` has not grown yet is recorded rather than
+silently tolerated — and goes stale loudly once it grows one:
+
+```glsl
+// test error
+
+// lps-glsl does not yet enforce the const qualifier on assignment (naga does).
+// @unimplemented(frontend=lp)
+```
 
 ### Run directives
 
