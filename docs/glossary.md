@@ -76,11 +76,20 @@ of implementation — code can lag these names during the transition.
 - **Panel state** — unauthored runtime writer state per (scope, channel);
   persisted to `.lp/state.json` with throttled writes; never dirties the
   project. (module model)
-- **Engaged** — a panel control whose lazy runtime writer has
-  materialized (it was touched): it overrides authored writers in its
-  scope and shadows outer control until reset. (module model)
-- **Reset** — removing panel writers (per control / module / whole panel),
-  restoring authored, inherited, or default resolution. (module model)
+- **Engaged (Latch)** — a panel control whose lazy runtime writer has
+  materialized (it was touched): it captures the channel, overriding
+  authored writers in its scope and shadowing outer control until
+  cleared — lighting-console programmer / DAW latch semantics.
+  (module model)
+- **Reset (Clear)** — removing panel writers (per control / module /
+  whole panel), restoring authored, inherited, or default resolution.
+  (module model)
+- **Slew** — optional shaping of a panel writer's output toward its held
+  value (anti-zipper); controls shape, they never integrate — anything
+  accumulating state is a node. (module model)
+- **Takeover** — the policy for grabbing a channel authored dataflow is
+  moving: jump (default for touch controls), pickup/scaled reserved for
+  absolute hardware inputs. (module model)
 - **Play mode** — rendering only the root module's panel: the end-user
   view. (module model)
 - **Bound (violet)** — the UI state family for "this value comes from a
