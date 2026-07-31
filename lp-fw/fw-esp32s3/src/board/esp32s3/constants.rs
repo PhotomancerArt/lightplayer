@@ -1,5 +1,8 @@
 //! ESP32-S3 chip constants.
 
+/// Highest usable GPIO number on the ESP32-S3 (GPIO0..=GPIO48).
+pub const MAX_GPIO: u8 = 48;
+
 /// CPU clock as explicitly configured by every entrypoint, in Hz.
 ///
 /// **Not** the default-config clock: esp-hal's `CpuClock::default()` for this
