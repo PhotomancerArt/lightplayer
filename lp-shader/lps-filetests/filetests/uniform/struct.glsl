@@ -92,4 +92,10 @@ vec4 test_shared_struct_match_combined() {
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
 // @unsupported(wgpu.f32)
+// wasm.f32: the two f32 targets disagree. All uniforms default to zero, so this
+// evaluates normalize(vec3(0)) — 0/0 — and then max(NaN, 0.0). wasm.f32 returns
+// vec4(NaN..), interp.f32 returns vec4(0..). IEEE says NaN, so the expectation
+// below (written before any f32 backend ran) and the interp oracle may both be
+// wrong. Which side is authoritative is a G1 question; @broken until answered.
+// @broken(wasm.f32)
 // run: test_shared_struct_match_combined() ~= vec4(0.0, 0.0, 0.0, 0.0)

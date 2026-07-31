@@ -38,4 +38,7 @@ vec3 test_basic_palette_warm_quarter() {
     return paletteWarm(0.25);
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_basic_palette_warm_quarter() ~= vec3(0.5, 0.20611572, 0.024475098) (tolerance: 0.002)
