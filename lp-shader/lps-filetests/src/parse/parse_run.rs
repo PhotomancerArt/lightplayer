@@ -253,7 +253,11 @@ mod tests {
         let dir = parse_run_directive("test() == 1 [expect-fail]", 5, true).unwrap();
         assert_eq!(dir.expression_str, "test()");
         assert_eq!(dir.expected_str, "1");
-        assert_eq!(dir.annotations.len(), 1, "one `*` selector, not one per target");
+        assert_eq!(
+            dir.annotations.len(),
+            1,
+            "one `*` selector, not one per target"
+        );
         assert!(matches!(
             dir.annotations[0].kind,
             crate::targets::AnnotationKind::Unimplemented

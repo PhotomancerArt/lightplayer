@@ -14,9 +14,7 @@
 //! number**, never a selector that quietly matches nothing: a typo that matched
 //! nothing would silently turn a disposition into a surprise red months later.
 
-use crate::targets::{
-    Annotation, AnnotationKind, Axis, AxisPredicate, Target, TargetSelector,
-};
+use crate::targets::{Annotation, AnnotationKind, Axis, AxisPredicate, Target, TargetSelector};
 use anyhow::{Result, anyhow};
 
 /// Try to parse an annotation from a comment line.
