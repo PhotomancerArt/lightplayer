@@ -78,11 +78,12 @@ Scores, all with **zero mismatches**:
 | the experiment repo's spike ELF (2026-esp32s3-experiment) | 10,969 | 329 → see note |
 
 The corpus figure is the one to trend: adding FP/Boolean/SR decode moved it from
-**26,048 matched / 361 unsupported** to **26,063 / 346**. Those fifteen
-instructions are not real FP code — they are literal-pool words that objdump
-disassembles as garbage `ule.s` / `moveqz.s` / `lsx`, which this crate now agrees
-with byte for byte instead of refusing. The spike figure predates the FP work and
-will move the same way when someone re-runs it.
+**26,010 matched / 399 unsupported** to **26,063 / 346**, measured on the same
+fourteen ELFs. Those 53 instructions are not real FP code — the fixtures are
+integer-only by rule — they are literal-pool words that objdump disassembles as
+garbage `ule.s` / `moveqz.s` / `lsx`, which this crate now agrees with byte for
+byte instead of refusing. The spike figure predates the FP work and will move the
+same way when someone re-runs it.
 
 Golden vectors GV1–GV3b (from the spike, `FINDINGS.md`) are decode/encode unit
 tests in `tests/golden_vectors.rs`; the FP/Boolean/SR goldens are in
