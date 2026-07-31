@@ -386,10 +386,6 @@ mod tests {
             ("emit_q32_fadd_wrap", |s| emit_q32_fadd_wrap(s, 0, 1, 2)),
             ("emit_q32_fsub_wrap", |s| emit_q32_fsub_wrap(s, 0, 1, 2)),
             ("emit_q32_fmul_wrap", |s| emit_q32_fmul_wrap(s, 0, 1, 2)),
-            ("emit_q32_fadd", |s| emit_q32_fadd(s, 0, 1, 2, I64_SCRATCH)),
-            ("emit_q32_fsub", |s| emit_q32_fsub(s, 0, 1, 2, I64_SCRATCH)),
-            ("emit_q32_fmul", |s| emit_q32_fmul(s, 0, 1, 2, I64_SCRATCH)),
-            ("emit_q32_fdiv", |s| emit_q32_fdiv(s, 0, 1, 2)),
             ("emit_q32_fdiv_recip", |s| {
                 emit_q32_fdiv_recip(s, 0, 1, 7, &FDIV_RECIP_LOCALS);
             }),

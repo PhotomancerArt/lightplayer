@@ -90,7 +90,7 @@ mod tests {
     fn project_def_deserializes_named_nodes() {
         let json = r#"{
             "kind": "Project",
-            "format": 1,
+            "format": 2,
             "name": "basic",
             "nodes": {
                 "texture": { "ref": "./texture.json" },
@@ -130,7 +130,7 @@ mod tests {
         };
         let text = NodeDef::Project(def).write_json(&registry()).unwrap();
         assert!(
-            text.starts_with("{\n  \"kind\": \"Project\",\n  \"format\": 1"),
+            text.starts_with("{\n  \"kind\": \"Project\",\n  \"format\": 2"),
             "{text}"
         );
     }

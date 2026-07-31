@@ -3443,7 +3443,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -3484,7 +3484,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -3521,7 +3521,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "pixels": { "ref": "./fixture.json" }
   }
@@ -3563,7 +3563,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "pixels": { "ref": "./fixture.json" }
   }
