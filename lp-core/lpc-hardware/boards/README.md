@@ -9,14 +9,18 @@ The default layout is:
 ```text
 boards/
   vendor/
-    product.toml
+    product.json
 ```
 
 The manifest id must match that path, for example:
 
-```toml
-id = "seeed/xiao-esp32-c6"
+```json
+{ "id": "seeed/xiao-esp32-c6" }
 ```
+
+Two profiles are checked in today: `seeed/xiao-esp32-c6.json` (RISC-V) and
+`seeed/xiao-esp32-s3-plus.json` (Xtensa). Read them alongside this document —
+they are the authoritative examples of every shape below.
 
 ## Tooling
 
@@ -47,8 +51,7 @@ interactive manifest manager when stdin/stdout are terminals.
 
 Use `lp-cli hardware calibrate` when a board's silkscreen labels need to be
 mapped to real GPIO numbers. The calibrator edits the manifest in this
-directory and records `[[board_label]]` entries plus matching `[[gpio]]`
-resources.
+directory and records `board_label` entries plus matching `gpio` resources.
 
 Typical workflow:
 
@@ -81,57 +84,98 @@ reserved so normal drivers do not claim it accidentally.
 
 Board metadata lives at the top:
 
-```toml
-id = "vendor/product"
-target = "esp32c6"
-vendor = "Vendor"
-product = "Product"
-description = "Board profile."
-url = "https://example.com/board"
+```json
+{
+  "id": "vendor/product",
+  "target": "esp32c6",
+  "vendor": "Vendor",
+  "product": "Product",
+  "description": "Board profile.",
+  "url": "https://example.com/board"
+}
 ```
+
+`target` must be a `HardwareTarget` variant (`esp32c6`, `esp32s3`,
+`rv32imac_emu`). Adding a new one means adding the variant in
+`lp-core/lpc-hardware/src/manifest/hw_target.rs` **and** regenerating
+`schemas/hardware.schema.json` — the type feeds that schema and CI checks it.
 
 Board-visible labels are optional mapping notes for humans and calibration:
 
-```toml
-[[board_label]]
-label = "D10"
-gpio = "/gpio/18"
-status = "assigned"
+```json
+"board_label": [
+  { "label": "D10", "gpio": "/gpio/18", "status": "assigned" },
+  { "label": "D4", "status": "not-found" }
+]
 ```
+
+Use `"status": "not-found"` for a silkscreen label the variant does not
+actually expose, rather than omitting the entry — the absence is itself a fact
+worth recording.
 
 GPIO resources are claimable hardware resources:
 
-```toml
-[[gpio]]
-address = "/gpio/18"
-display_label = "D10"
-capabilities = [
-    "gpio-output",
-    "gpio-input",
-]
-aliases = [
-    "IO18",
-    "GPIO18",
+```json
+"gpio": [
+  {
+    "address": "/gpio/18",
+    "display_label": "D10",
+    "capabilities": ["gpio-output", "gpio-input"],
+    "aliases": ["IO18", "GPIO18"]
+  }
 ]
 ```
 
 Non-GPIO resources use `[[resource]]`:
 
-```toml
-[[resource]]
-address = "/rmt/ws281x0"
-display_label = "RMT WS281x 0"
-capabilities = [
-    "rmt",
-    "ws281x-output",
+```json
+"resource": [
+  {
+    "address": "/rmt/ws281x0",
+    "display_label": "RMT WS281x 0",
+    "capabilities": ["rmt", "ws281x-output"]
+  }
 ]
 ```
 
+Only declare a resource the firmware actually registers a driver for. The S3
+profile omits `/radio/0` for exactly this reason: `fw-esp32s3` registers no
+radio driver, so the resource could never open.
+
 Use `reserved_reason` for known-dangerous or unavailable resources:
 
-```toml
-reserved_reason = "crashed during manual GPIO scan; keep skipped until recalibrated"
+```json
+{
+  "address": "/gpio/19",
+  "reserved_reason": "USB-Serial-JTAG D- — driving it drops the link the board is flashed over"
+}
 ```
+
+## Omit what you cannot verify
+
+A wrong GPIO number is a physical-damage class of mistake, not a logic error.
+A **missing** manifest entry is a gap someone fills later; a **wrong** one is a
+short circuit. So when a board fact is contested or undocumented, leave it out
+and say why — in the profile, and ideally in a test.
+
+`seeed/xiao-esp32-s3-plus.json` is the worked example. It deliberately omits:
+
+- the **user LED** — one source says GPIO21 (for the non-Plus board), another
+  says GPIO22, which cannot exist on an ESP32-S3 at all;
+- the nine **castellated pads** the Plus adds — no source publishes their GPIO
+  numbers;
+- the **in-package flash/PSRAM pins** (GPIO26-32, plus 33-37 on octal parts) —
+  real, but never claimable.
+
+Those omissions are asserted by
+`default_esp32s3_manifest_omits_unverified_and_in_package_pins`, so a later
+guess fails a test rather than reaching hardware. Prefer that pattern to a
+comment.
+
+Vendor docs are not automatically right. Two claims about this board were
+refuted against Espressif's primary GPIO reference while writing its profile.
+When a vendor page and a primary source disagree, the primary source wins and
+the refutation belongs in the profile's `note`.
 
 ## Validation
 
@@ -142,6 +186,6 @@ cargo run -p lp-cli -- hardware manifest validate
 cargo test -p lpc-hardware
 ```
 
-`hardware manifest validate` checks TOML shape, duplicate addresses, required
+`hardware manifest validate` checks JSON shape, duplicate addresses, required
 metadata, URL format, and manifest ids. `cargo test -p lpc-hardware` also
 exercises the checked-in default ESP32-C6 manifest.

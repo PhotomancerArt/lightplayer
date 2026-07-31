@@ -15,6 +15,9 @@ float test_inversesqrt_one() {
     return inversesqrt(rt(1.0));
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_one() ~= 1.0
 
 float test_inversesqrt_four() {
@@ -22,6 +25,7 @@ float test_inversesqrt_four() {
     return inversesqrt(rt(4.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_four() ~= 0.5
 
 float test_inversesqrt_nine() {
@@ -29,6 +33,7 @@ float test_inversesqrt_nine() {
     return inversesqrt(rt(9.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_nine() ~= 0.3333333333333333
 
 float test_inversesqrt_two() {
@@ -36,6 +41,7 @@ float test_inversesqrt_two() {
     return inversesqrt(rt(2.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_two() ~= 0.7071067811865476
 
 float test_inversesqrt_quarter() {
@@ -43,6 +49,7 @@ float test_inversesqrt_quarter() {
     return inversesqrt(rt(0.25));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_quarter() ~= 2.0
 
 float test_inversesqrt_sixteenth() {
@@ -50,6 +57,7 @@ float test_inversesqrt_sixteenth() {
     return inversesqrt(rt(0.0625));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_sixteenth() ~= 4.0
 
 vec2 test_inversesqrt_vec2() {
@@ -57,6 +65,7 @@ vec2 test_inversesqrt_vec2() {
     return inversesqrt(vec2(rt(1.0), rt(4.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_vec2() ~= vec2(1.0, 0.5)
 
 vec3 test_inversesqrt_vec3() {
@@ -64,6 +73,7 @@ vec3 test_inversesqrt_vec3() {
     return inversesqrt(vec3(rt(1.0), rt(4.0), rt(9.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_vec3() ~= vec3(1.0, 0.5, 0.3333333333333333)
 
 vec4 test_inversesqrt_vec4() {
@@ -71,6 +81,7 @@ vec4 test_inversesqrt_vec4() {
     return inversesqrt(vec4(rt(1.0), rt(0.25), rt(2.0), rt(0.0625)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_inversesqrt_vec4() ~= vec4(1.0, 2.0, 0.7071067811865476, 4.0)
 
 

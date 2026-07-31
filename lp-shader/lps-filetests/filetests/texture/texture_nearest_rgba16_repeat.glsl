@@ -18,4 +18,7 @@ vec4 wraps_to_left() {
 // wgpu.f32: texture fixtures are not bound through the GPU registry yet
 // @unsupported(interp.f32)
 // @unsupported(wgpu.f32)
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: wraps_to_left() ~= vec4(1.0, 0.0, 0.0, 1.0) (tolerance: 0.0003)

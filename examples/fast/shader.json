@@ -7,11 +7,7 @@
       "target": "bus:visual.out"
     }
   },
-  "glsl_opts": {
-    "add_sub": "saturating",
-    "mul": "saturating",
-    "div": "saturating"
-  },
+  "float_mode": "fixed",
   "consumed": {
     "time": {
       "kind": "value",

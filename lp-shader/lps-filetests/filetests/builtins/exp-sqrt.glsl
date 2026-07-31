@@ -15,6 +15,9 @@ float test_sqrt_zero() {
     return sqrt(rt(0.0));
 }
 
+// wasm.f32: builtin import has no f32 implementation — only Q32 builtin ids
+// resolve, so the import cannot be lowered in f32 mode. Unblocks with M5.
+// @unimplemented(wasm.f32)
 // run: test_sqrt_zero() ~= 0.0
 
 float test_sqrt_one() {
@@ -22,6 +25,7 @@ float test_sqrt_one() {
     return sqrt(rt(1.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sqrt_one() ~= 1.0
 
 float test_sqrt_four() {
@@ -29,6 +33,7 @@ float test_sqrt_four() {
     return sqrt(rt(4.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sqrt_four() ~= 2.0
 
 float test_sqrt_nine() {
@@ -36,6 +41,7 @@ float test_sqrt_nine() {
     return sqrt(rt(9.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sqrt_nine() ~= 3.0
 
 float test_sqrt_two() {
@@ -43,6 +49,7 @@ float test_sqrt_two() {
     return sqrt(rt(2.0));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sqrt_two() ~= 1.4142135623730951
 
 float test_sqrt_quarter() {
@@ -50,6 +57,7 @@ float test_sqrt_quarter() {
     return sqrt(rt(0.25));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sqrt_quarter() ~= 0.5
 
 vec2 test_sqrt_vec2() {
@@ -57,6 +65,7 @@ vec2 test_sqrt_vec2() {
     return sqrt(vec2(rt(0.0), rt(1.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sqrt_vec2() ~= vec2(0.0, 1.0)
 
 vec3 test_sqrt_vec3() {
@@ -64,6 +73,7 @@ vec3 test_sqrt_vec3() {
     return sqrt(vec3(rt(1.0), rt(4.0), rt(9.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sqrt_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_sqrt_vec4() {
@@ -71,6 +81,7 @@ vec4 test_sqrt_vec4() {
     return sqrt(vec4(rt(0.0), rt(0.25), rt(1.0), rt(2.0)));
 }
 
+// @unimplemented(wasm.f32)
 // run: test_sqrt_vec4() ~= vec4(0.0, 0.5, 1.0, 1.4142135623730951)
 
 

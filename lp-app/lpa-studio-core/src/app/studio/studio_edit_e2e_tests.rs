@@ -2165,7 +2165,7 @@ pub(crate) fn asset_e2e_server() -> LpServer {
 }"#;
     let project_json = r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -2245,7 +2245,7 @@ pub(crate) fn edit_e2e_files() -> &'static [(&'static str, &'static str)] {
             "project.json",
             r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "pixels": { "ref": "./fixture.json" }

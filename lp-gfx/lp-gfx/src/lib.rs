@@ -69,7 +69,7 @@ pub use lp_shader::{ShaderFuelTrap, ShaderFuelTrapEntry};
 pub use null_graphics::NullGraphics;
 pub use sample_out_handle::SampleOutHandle;
 pub use sample_points_handle::SamplePointsHandle;
-pub use shader::{LpShader, ShaderCompileStats};
+pub use shader::{LpShader, ShaderCompileStats, ShaderFloatImpl};
 pub use shader_compile_options::ShaderCompileOptions;
 pub use shader_semantics::ShaderSemantics;
 pub use texture_data::TextureData;

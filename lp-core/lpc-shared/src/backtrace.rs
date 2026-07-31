@@ -249,18 +249,243 @@ fn capture_frames_arch(_buf: &mut [u32]) -> usize {
     0
 }
 
-/// Xtensa (ESP32-S3 / classic ESP32) sibling — placeholder.
+// ---------------------------------------------------------------------------
+// Xtensa (ESP32-S3 / LX7) windowed-ABI save-area walk
+// ---------------------------------------------------------------------------
+//
+// Split deliberately into a *pure* chain walk ([`walk_save_area_chain`], which
+// takes its memory reader as a parameter) and a tiny target-only prologue
+// ([`capture_frames_arch`]) that forces the spill and supplies the live
+// registers. The pure half is compiled on the host under `cfg(test)`, so the
+// exact-frame-count oracle, the bounds checks, and the corrupt-chain
+// termination are proven mechanically without a device; the prologue is the
+// part only silicon can confirm, which is what
+// `fw-esp32s3 --features test_backtrace_oracle` exists for.
+//
+// The ABI facts this rests on, from the Xtensa ISA Reference Manual's Windowed
+// Register Option and the ESP32-S3 TRM (no GDB/binutils/GCC/QEMU source was
+// read or adapted — see `docs/adr/2026-07-29-license-provenance-discipline.md`):
+//
+//   * `CALLn` writes the return address into the caller's `a(4n)` as *30 bits*
+//     — `a0[31:30]` carries the call increment `n`, not address bits. The full
+//     address is recovered from the 1 GB region the caller executes in.
+//   * A window overflow spills the overflowing frame's `a0..a3` into the
+//     16-byte **base save area** at `[callee_sp - 16, callee_sp)`, where
+//     `callee_sp` is the stack pointer of the frame it called. Read from the
+//     current frame that is the ordinary statement of the ABI: `[sp - 16]`
+//     holds the caller's `a0` (its return address) and `[sp - 12]` holds the
+//     caller's `a1` (its stack pointer). Every overflow width — 4, 8 and 12 —
+//     places `a0..a3` there, so the chain is uniform regardless of whether a
+//     frame was entered by `call4`, `call8` or `call12`.
+//   * `ENTRY` — and only `ENTRY`/`RETW` — performs the overflow/underflow
+//     check. That is what [`force_window_spill`] exploits.
+//
+// The same placement is what `lp-xt-emu`'s window machinery models
+// (`lp-xt/lp-xt-emu/src/executor/window.rs`, `save_slot`), which was dual-run
+// against S3 silicon to depth 100 in the Xtensa backport spike.
+
+/// Internal SRAM as the D-bus sees it — SRAM1 `0x3FC8_8000..0x3FCF_0000` plus
+/// SRAM2 `0x3FCF_0000..0x3FD0_0000` (ESP32-S3 TRM, "System and Memory"). Task
+/// stacks live here. PSRAM (`0x3C00_0000..`) is deliberately **not** accepted:
+/// nothing in this firmware puts a stack there, and widening the window only
+/// buys a larger space in which garbage can look valid.
+#[cfg(any(target_arch = "xtensa", test))]
+const S3_DRAM_START: u32 = 0x3FC8_8000;
+#[cfg(any(target_arch = "xtensa", test))]
+const S3_DRAM_END: u32 = 0x3FD0_0000;
+
+/// Internal SRAM as the I-bus sees it: SRAM0 `0x4037_0000..0x4038_0000` and
+/// SRAM1 `0x4038_0000..0x403E_0000`.
+#[cfg(any(target_arch = "xtensa", test))]
+const S3_IRAM_START: u32 = 0x4037_0000;
+#[cfg(any(target_arch = "xtensa", test))]
+const S3_IRAM_END: u32 = 0x403E_0000;
+
+/// External flash through the instruction cache: `0x4200_0000..0x4400_0000`.
+#[cfg(any(target_arch = "xtensa", test))]
+const S3_FLASH_START: u32 = 0x4200_0000;
+#[cfg(any(target_arch = "xtensa", test))]
+const S3_FLASH_END: u32 = 0x4400_0000;
+
+/// Bytes in a `CALLn`/`CALLXn` instruction. The saved return address points at
+/// the instruction *after* the call, so reporting `ra - 3` makes `addr2line`
+/// land on the call itself rather than on whatever follows it — which for a
+/// call in tail position is the next function entirely.
+#[cfg(any(target_arch = "xtensa", test))]
+const XT_CALL_INST_BYTES: u32 = 3;
+
+/// Is `pc` inside a range the S3 can execute LightPlayer code from?
 ///
-/// A correct windowed-ABI walk must first force the live register windows to
-/// their stack save areas (`_WindowSpill` semantics) and then follow the
-/// `a0`/`sp` chain through the 16-byte base save areas at `[sp-16, sp)`.
-/// Without the spill step the innermost frames are still in the physical
-/// register file and a memory walk reports garbage, so this reports zero
-/// frames until the fw-esp32s3 milestone lands the spill + walk pair (M5 of
-/// the Xtensa backport roadmap).
+/// Internal ROM (`0x4000_0000..0x4008_0000`) is executable but deliberately
+/// **excluded**: no frame in this firmware returns into ROM, and accepting it
+/// would both widen the garbage-looks-valid window by 512 KB and make a zeroed
+/// `a0` (which the region fix-up turns into `0x4000_0000`) look like a real
+/// frame instead of the chain terminator it is.
+#[cfg(any(target_arch = "xtensa", test))]
+fn is_valid_esp32s3_text(pc: u32) -> bool {
+    (S3_IRAM_START..S3_IRAM_END).contains(&pc) || (S3_FLASH_START..S3_FLASH_END).contains(&pc)
+}
+
+/// Is `sp` a stack pointer we are willing to read a base save area from?
+///
+/// Requires 16-byte alignment (the windowed ABI's stack alignment) and leaves
+/// room below for `[sp-16, sp)`, so a caller that passes this check may read
+/// the save area unconditionally.
+#[cfg(any(target_arch = "xtensa", test))]
+fn is_valid_esp32s3_stack(sp: u32) -> bool {
+    sp % 16 == 0 && (S3_DRAM_START + 16..S3_DRAM_END).contains(&sp)
+}
+
+/// Walk the windowed-ABI base-save-area chain, starting from a frame whose
+/// return address is `ra` and whose stack pointer is `sp`.
+///
+/// `read_u32` reads a 4-byte-aligned word; it is only ever called for addresses
+/// that already passed [`is_valid_esp32s3_stack`], so implementations may read
+/// raw memory without further checks. Splitting it out is what lets the host
+/// test suite drive this against a synthetic stack.
+///
+/// Terminates unconditionally: every iteration either breaks or advances `sp`
+/// strictly upward, and `count` is bounded by `buf.len()`.
+#[cfg(any(target_arch = "xtensa", test))]
+fn walk_save_area_chain(buf: &mut [u32], ra: u32, sp: u32, read_u32: impl Fn(u32) -> u32) -> usize {
+    let mut ra = ra;
+    let mut sp = sp;
+    let mut count = 0;
+
+    while count < buf.len() {
+        // Restore the region bits `CALLn` did not store. Everything the S3
+        // executes — internal SRAM's I-bus alias and the flash cache window —
+        // lives in region 1, so this is a constant. A wrong guess cannot leak
+        // through: the result is bounds-checked immediately below.
+        let pc = (ra & 0x3FFF_FFFF) | 0x4000_0000;
+        if !is_valid_esp32s3_text(pc) {
+            break;
+        }
+        buf[count] = pc.saturating_sub(XT_CALL_INST_BYTES);
+        count += 1;
+
+        if !is_valid_esp32s3_stack(sp) {
+            break;
+        }
+        let next_ra = read_u32(sp - 16);
+        let next_sp = read_u32(sp - 12);
+        // The stack grows down, so every caller sits strictly above its
+        // callee — that is what stops a self-referential or corrupt chain from
+        // cycling. Both halves of the save area are validated *before* either
+        // is used: a save area whose stack pointer is garbage is not a save
+        // area, and reporting the return address next to it would be exactly
+        // the plausible-looking-garbage failure this walk exists to avoid.
+        if next_sp <= sp || !is_valid_esp32s3_stack(next_sp) {
+            break;
+        }
+        ra = next_ra;
+        sp = next_sp;
+    }
+    count
+}
+
+/// Walk the chain from an explicit `(ra, sp)` pair, reading real memory.
+///
+/// Exposed for two callers that cannot use [`capture_frames`]: the hardware
+/// oracle in `fw-esp32s3`'s `test_backtrace_oracle` harness, which drives it
+/// with deliberately corrupt stack pointers and with *unspilled* live
+/// registers to prove the spill in [`capture_frames_arch`] is load-bearing;
+/// and any future exception-frame walker, which starts from a saved context
+/// rather than from its own registers.
 #[cfg(target_arch = "xtensa")]
-fn capture_frames_arch(_buf: &mut [u32]) -> usize {
-    0
+pub fn walk_frames_from(buf: &mut [u32], ra: u32, sp: u32) -> usize {
+    // SAFETY: `walk_save_area_chain` only calls this for addresses that passed
+    // `is_valid_esp32s3_stack`, i.e. 16-aligned words inside internal SRAM.
+    walk_save_area_chain(buf, ra, sp, |addr| unsafe {
+        (addr as *const u32).read_volatile()
+    })
+}
+
+/// How many nested windowed calls guarantee every live window has spilled.
+///
+/// The S3 (LX7) has a 64-entry physical register file = 16 `WindowBase` units.
+/// Each nested call advances `WindowBase` by its call increment — 1 for
+/// `call4`, 2 for `call8`, 3 for `call12` — and `ENTRY` spills whichever live
+/// frame still owns the units the new frame claims. Sixteen nested calls
+/// therefore sweep the whole ring even in the worst case where every call is a
+/// `call4`, which is why the depth is 16 rather than the 8 a `call8`-only
+/// chain would need. Measured codegen uses `call8` (48-byte frames), so this
+/// costs about 800 bytes of stack, spent once, on a path that is already
+/// resetting the chip.
+#[cfg(target_arch = "xtensa")]
+const WINDOW_SPILL_DEPTH: u32 = 16;
+
+/// Push `n` nested windowed frames and unwind them again.
+///
+/// `black_box` on both the argument and the result is load-bearing: without it
+/// LLVM turns this accumulator recursion into a loop and no window rotation
+/// happens at all. `#[inline(never)]` keeps it a real call.
+#[cfg(target_arch = "xtensa")]
+#[inline(never)]
+fn spill_step(n: u32) -> u32 {
+    if n == 0 {
+        return 0;
+    }
+    let deeper = spill_step(core::hint::black_box(n - 1));
+    core::hint::black_box(deeper).wrapping_add(1)
+}
+
+/// Force every live register window out to its stack base save area.
+///
+/// This is the step that makes an Xtensa backtrace possible at all. A frame's
+/// `a0`/`a1` are in the *physical register file* until something spills them;
+/// walking memory without spilling reads whatever was last left below those
+/// stack pointers and reports plausible-looking garbage for the innermost
+/// frames.
+///
+/// The mechanism is `ENTRY`'s own overflow check rather than a hand-written
+/// spill loop: nest enough calls to rotate `WindowBase` through all 16 units
+/// and the hardware's window-overflow handler necessarily writes every
+/// previously-live frame to its save area. Unwinding back out reloads the
+/// registers but does **not** erase the memory copies, so the chain is intact
+/// when this returns.
+///
+/// Nothing between here and the walk may make a call that could clobber
+/// `[sp-16, sp)` of the capturing frame — and nothing can: the ABI reserves
+/// those 16 bytes in every frame precisely as a base save area, so a callee's
+/// locals never land there, and the only writer is a re-spill of the same
+/// caller with the same values.
+#[cfg(target_arch = "xtensa")]
+#[inline(never)]
+fn force_window_spill() {
+    let _ = core::hint::black_box(spill_step(WINDOW_SPILL_DEPTH));
+}
+
+/// Xtensa (ESP32-S3 / LX7) windowed-ABI walk.
+///
+/// Spills the register windows, then follows the base save-area chain from
+/// this frame's live `a0`/`a1`. Frame 0 is the return address into *this*
+/// function's caller, matching the riscv32 arm's convention.
+#[cfg(target_arch = "xtensa")]
+fn capture_frames_arch(buf: &mut [u32]) -> usize {
+    if buf.is_empty() {
+        return 0;
+    }
+
+    force_window_spill();
+
+    let ra: u32;
+    let sp: u32;
+    // SAFETY: two register reads with no side effects. `a0` is the windowed
+    // return address and `a1` the stack pointer; both are architecturally
+    // live here because this function is a windowed frame (it just made a
+    // call, so the compiler cannot have elided its `ENTRY`).
+    unsafe {
+        core::arch::asm!(
+            "mov {ra}, a0",
+            "mov {sp}, a1",
+            ra = out(reg) ra,
+            sp = out(reg) sp,
+            options(nomem, nostack, preserves_flags),
+        );
+    }
+
+    walk_frames_from(buf, ra, sp)
 }
 
 /// No frame walker for this target: report zero frames.
@@ -317,5 +542,242 @@ mod tests {
         let text = FixedStr::<5>::from_str("abcdé");
 
         assert_eq!(text.as_str(), "abcd");
+    }
+
+    // -----------------------------------------------------------------------
+    // Xtensa windowed-ABI walk — the mechanical oracle for the memory half.
+    //
+    // Every stack here is synthesized *inside the real ESP32-S3 DRAM window*,
+    // so the walker's bounds checks are exercised rather than bypassed, and
+    // [`SynthStack::read`] panics on any access outside the region it owns —
+    // which makes "the walker read memory it had not validated" a test failure
+    // rather than an undetectable habit.
+    //
+    // The device half (the forced window spill) cannot be proven here; that is
+    // what `fw-esp32s3`'s `test_backtrace_oracle` harness is for.
+    // -----------------------------------------------------------------------
+
+    /// Distinct so a frame's provenance is visible in the assertions: the
+    /// innermost frame's return address, and the one every synthesized caller
+    /// shares (mirroring the on-device recursion, whose callers all return to
+    /// the same call site).
+    const RA_INNER: u32 = 0x4200_1000;
+    const RA_CALLER: u32 = 0x4200_2000;
+    /// Bytes between synthesized frames. Any 16-multiple ≥ 16 works.
+    const SYNTH_FRAME: u32 = 32;
+
+    struct SynthStack {
+        base: u32,
+        words: alloc::vec::Vec<u32>,
+    }
+
+    impl SynthStack {
+        fn new(base: u32, frames: usize) -> Self {
+            assert_eq!(base % 16, 0);
+            Self {
+                base,
+                words: alloc::vec![0; (frames + 4) * SYNTH_FRAME as usize / 4],
+            }
+        }
+
+        fn sp(&self, index: usize) -> u32 {
+            self.base + 2 * SYNTH_FRAME + index as u32 * SYNTH_FRAME
+        }
+
+        fn write(&mut self, addr: u32, value: u32) {
+            let index = (addr - self.base) as usize / 4;
+            self.words[index] = value;
+        }
+
+        fn read(&self, addr: u32) -> u32 {
+            assert!(
+                addr >= self.base && addr % 4 == 0,
+                "walker read {addr:#x}, outside the stack it validated",
+            );
+            let index = (addr - self.base) as usize / 4;
+            assert!(
+                index < self.words.len(),
+                "walker read {addr:#x}, past the stack"
+            );
+            self.words[index]
+        }
+
+        /// Link `depth` frames so a walk seeded with `(RA_INNER, sp(0))`
+        /// reports exactly `depth` frames: `depth - 1` valid hops, then a
+        /// zeroed save area that terminates it.
+        fn chain(depth: usize) -> Self {
+            let mut stack = SynthStack::new(0x3FCC_0000, depth + 2);
+            for i in 0..depth - 1 {
+                let sp = stack.sp(i);
+                let next_sp = stack.sp(i + 1);
+                stack.write(sp - 16, RA_CALLER);
+                stack.write(sp - 12, next_sp);
+            }
+            stack
+        }
+    }
+
+    fn walk(stack: &SynthStack, ra: u32, sp: u32, buf: &mut [u32]) -> usize {
+        walk_save_area_chain(buf, ra, sp, |addr| stack.read(addr))
+    }
+
+    #[test]
+    fn xtensa_walk_reports_the_exact_chain_depth() {
+        // 20 is the depth the Xtensa backport proved forces real window
+        // spills on silicon; the same number the device harness uses.
+        let stack = SynthStack::chain(20);
+        let mut buf = [0u32; 32];
+
+        let count = walk(&stack, RA_INNER, stack.sp(0), &mut buf);
+
+        assert_eq!(count, 20);
+        assert_eq!(buf[0], RA_INNER - XT_CALL_INST_BYTES);
+        for (i, frame) in buf[1..20].iter().enumerate() {
+            assert_eq!(*frame, RA_CALLER - XT_CALL_INST_BYTES, "frame {}", i + 1);
+        }
+        assert_eq!(buf[20], 0, "wrote past the frames it reported");
+    }
+
+    #[test]
+    fn xtensa_walk_reports_every_frame_inside_the_text_windows() {
+        let stack = SynthStack::chain(20);
+        let mut buf = [0u32; 32];
+
+        let count = walk(&stack, RA_INNER, stack.sp(0), &mut buf);
+
+        for frame in &buf[..count] {
+            assert!(
+                is_valid_esp32s3_text(*frame),
+                "reported {frame:#010x}, outside IRAM and the flash cache window",
+            );
+        }
+    }
+
+    #[test]
+    fn xtensa_walk_saturates_at_the_buffer_length() {
+        let stack = SynthStack::chain(20);
+        let mut buf = [0u32; 8];
+
+        assert_eq!(walk(&stack, RA_INNER, stack.sp(0), &mut buf), 8);
+    }
+
+    #[test]
+    fn xtensa_walk_reports_nothing_into_an_empty_buffer() {
+        let stack = SynthStack::chain(20);
+
+        assert_eq!(walk(&stack, RA_INNER, stack.sp(0), &mut []), 0);
+    }
+
+    #[test]
+    fn xtensa_walk_stops_where_a_chain_is_corrupted() {
+        let mut stack = SynthStack::chain(20);
+        // Frame 10's saved caller stack pointer is garbage.
+        let sp = stack.sp(10);
+        stack.write(sp - 12, 0xDEAD_BEEF);
+        let mut buf = [0u32; 32];
+
+        // 11 frames: the seed plus frames 1..=10. The garbage pointer is
+        // rejected on the spot, and the return address sitting next to it in
+        // the same corrupt save area is never reported.
+        assert_eq!(walk(&stack, RA_INNER, stack.sp(0), &mut buf), 11);
+    }
+
+    #[test]
+    fn xtensa_walk_stops_on_a_self_referential_chain() {
+        let mut stack = SynthStack::chain(20);
+        let sp = stack.sp(0);
+        stack.write(sp - 16, RA_CALLER);
+        stack.write(sp - 12, sp);
+        let mut buf = [0u32; 32];
+
+        assert_eq!(walk(&stack, RA_INNER, sp, &mut buf), 1);
+    }
+
+    #[test]
+    fn xtensa_walk_stops_when_the_chain_descends() {
+        let mut stack = SynthStack::chain(20);
+        let sp = stack.sp(4);
+        stack.write(sp - 12, sp - SYNTH_FRAME);
+        let mut buf = [0u32; 32];
+
+        // Frames 0..=4 report, then the backwards hop stops it.
+        assert_eq!(walk(&stack, RA_INNER, stack.sp(0), &mut buf), 5);
+    }
+
+    #[test]
+    fn xtensa_walk_rejects_a_stack_pointer_outside_dram() {
+        let stack = SynthStack::chain(4);
+        let mut buf = [0u32; 32];
+
+        // The seed return address is still reportable; nothing is read.
+        assert_eq!(walk(&stack, RA_INNER, 0x2000_0000, &mut buf), 1);
+        assert_eq!(walk(&stack, RA_INNER, S3_DRAM_END, &mut buf), 1);
+        assert_eq!(walk(&stack, RA_INNER, S3_DRAM_START, &mut buf), 1);
+    }
+
+    #[test]
+    fn xtensa_walk_rejects_an_unaligned_stack_pointer() {
+        let stack = SynthStack::chain(4);
+        let mut buf = [0u32; 32];
+
+        assert_eq!(walk(&stack, RA_INNER, stack.sp(0) + 4, &mut buf), 1);
+    }
+
+    #[test]
+    fn xtensa_walk_reports_nothing_for_a_return_address_outside_text() {
+        let stack = SynthStack::chain(4);
+        let mut buf = [0u32; 32];
+
+        // A zeroed `a0` becomes 0x4000_0000 once the region bits are restored;
+        // it must read as the chain terminator, not as internal ROM.
+        assert_eq!(walk(&stack, 0, stack.sp(0), &mut buf), 0);
+        assert_eq!(walk(&stack, 0x4000_0000, stack.sp(0), &mut buf), 0);
+        // DRAM is not executable.
+        assert_eq!(walk(&stack, 0x3FCC_0000, stack.sp(0), &mut buf), 0);
+    }
+
+    #[test]
+    fn xtensa_walk_strips_the_call_increment_bits() {
+        let stack = SynthStack::chain(4);
+        let mut buf = [0u32; 32];
+
+        // `call12` leaves 0b11 in a0[31:30]; the address underneath is
+        // RA_INNER.
+        let encoded = 0xC000_0000 | (RA_INNER & 0x3FFF_FFFF);
+
+        assert_eq!(walk(&stack, encoded, stack.sp(0), &mut buf), 4);
+        assert_eq!(buf[0], RA_INNER - XT_CALL_INST_BYTES);
+    }
+
+    #[test]
+    fn xtensa_text_window_excludes_rom_dram_and_psram() {
+        assert!(is_valid_esp32s3_text(S3_IRAM_START));
+        assert!(is_valid_esp32s3_text(S3_IRAM_END - 4));
+        assert!(is_valid_esp32s3_text(S3_FLASH_START));
+        assert!(is_valid_esp32s3_text(S3_FLASH_END - 4));
+
+        assert!(!is_valid_esp32s3_text(0x4000_0000), "internal ROM");
+        assert!(!is_valid_esp32s3_text(S3_IRAM_START - 4));
+        assert!(!is_valid_esp32s3_text(S3_IRAM_END));
+        assert!(!is_valid_esp32s3_text(S3_FLASH_END));
+        assert!(!is_valid_esp32s3_text(0x3FCC_0000), "DRAM");
+        assert!(!is_valid_esp32s3_text(0x3C00_0000), "PSRAM");
+    }
+
+    #[test]
+    fn xtensa_stack_window_requires_alignment_and_headroom() {
+        assert!(is_valid_esp32s3_stack(S3_DRAM_START + 16));
+        assert!(is_valid_esp32s3_stack(S3_DRAM_END - 16));
+
+        assert!(
+            !is_valid_esp32s3_stack(S3_DRAM_START),
+            "no room for [sp-16, sp)"
+        );
+        assert!(!is_valid_esp32s3_stack(S3_DRAM_END));
+        assert!(
+            !is_valid_esp32s3_stack(S3_DRAM_START + 20),
+            "not 16-aligned"
+        );
+        assert!(!is_valid_esp32s3_stack(0));
     }
 }
