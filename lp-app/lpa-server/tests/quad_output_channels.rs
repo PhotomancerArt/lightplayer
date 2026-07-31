@@ -171,7 +171,7 @@ fn project_json(chains: &[usize]) -> String {
         ));
     }
     format!(
-        "{{\"kind\": \"Project\", \"format\": 1, \"name\": \"Quad strips\", \"nodes\": {{{nodes}}}}}"
+        "{{\"kind\": \"Project\", \"format\": 2, \"name\": \"Quad strips\", \"nodes\": {{{nodes}}}}}"
     )
 }
 
