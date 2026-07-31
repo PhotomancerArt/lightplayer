@@ -40,7 +40,11 @@ fn manifest_pairs() -> BTreeMap<String, (Option<BoardDisplayFile>, Option<Hardwa
         if !vendor_dir.is_dir() {
             continue;
         }
-        let vendor = vendor_dir.file_name().unwrap().to_string_lossy().to_string();
+        let vendor = vendor_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         for file_entry in fs::read_dir(&vendor_dir).expect("vendor dir") {
             let path = file_entry.expect("file entry").path();
             let name = path.file_name().unwrap().to_string_lossy().to_string();
@@ -86,9 +90,9 @@ fn every_board_has_both_files_or_a_recorded_reason() {
             (None, false) => panic!(
                 "{board_id}: display sidecar has no runtime manifest and no DISPLAY_ONLY reason"
             ),
-            (Some(_), true) => panic!(
-                "{board_id}: has a runtime manifest — remove it from DISPLAY_ONLY"
-            ),
+            (Some(_), true) => {
+                panic!("{board_id}: has a runtime manifest — remove it from DISPLAY_ONLY")
+            }
             _ => {}
         }
     }
@@ -147,9 +151,11 @@ fn display_pins_agree_with_runtime_manifests() {
             })
             .collect();
 
-        let terminals = display.hw.terminals.iter().map(|t| {
-            (t.label.as_str(), t.role, t.gpio, Vec::new())
-        });
+        let terminals = display
+            .hw
+            .terminals
+            .iter()
+            .map(|t| (t.label.as_str(), t.role, t.gpio, Vec::new()));
         let pins = display.pins().map(|p| {
             (
                 p.label.as_str(),
@@ -196,8 +202,7 @@ fn display_pins_agree_with_runtime_manifests() {
                 // Rule 3: a runtime-reserved gpio must not read as a plain io
                 // pin in the catalog.
                 Some(resource) if resource.reserved_reason.is_some() => assert!(
-                    role != PinRole::Io
-                        || cap_kinds.contains(&lpa_boards::CapKind::Warn),
+                    role != PinRole::Io || cap_kinds.contains(&lpa_boards::CapKind::Warn),
                     "{board_id}: pin {label} (gpio {gpio}) is reserved in the runtime manifest \
                      ({:?}) but displays as plain io with no warn cap",
                     resource.reserved_reason
