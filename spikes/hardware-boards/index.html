@@ -153,6 +153,16 @@
   svg .leader { stroke: var(--border-strong); stroke-width: 1; fill: none; }
   svg .pinlabel { font: 600 6.5px var(--mono); fill: var(--silk); }
 
+  .anat-title { font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 8px; }
+  svg .anat-line { stroke: var(--name); stroke-width: .9; stroke-dasharray: 2 2.5;
+    opacity: .65; fill: none; }
+  svg .anat-dot { fill: var(--name); }
+  svg .anat-label { font: 700 8px -apple-system, "Segoe UI", sans-serif;
+    fill: var(--name); }
+  svg .anat-shape { stroke: var(--name); fill: none; stroke-width: 1;
+    stroke-dasharray: 3 2.5; opacity: .8; }
+
   .cell-legend { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
   .cell-legend .lg {
     font-family: var(--mono); font-size: 10px; font-weight: 700;
@@ -387,6 +397,10 @@
 </div>
 <div class="pinout-wrap">
   <div class="pinout-fig" id="pinoutFig"></div>
+  <div class="pinout-fig">
+    <div class="anat-title">Anatomy — the vocab in place</div>
+    <div id="anatomyFig"></div>
+  </div>
   <div class="dlang">
     <h3>Design language (proposed)</h3>
     <dl>
@@ -962,7 +976,7 @@ function renderBoard(b, opts = {}) {
   for (const side of ["left", "right"]) {
     rails[side].forEach(r => {
       const px = side === "left" ? 1 : W - 1 - padW;
-      A(`<rect x="${px}" y="${r.y - padH / 2}" width="${padW}" height="${padH}" rx="1.4" fill="${ROLE_FILL[r.p.role] || ROLE_FILL.io}"/>`);
+      A(`<rect class="pad" x="${px}" y="${r.y - padH / 2}" width="${padW}" height="${padH}" rx="1.4" fill="${ROLE_FILL[r.p.role] || ROLE_FILL.io}"/>`);
       if (labels) {
         const lx = side === "left" ? px + padW + 3 : px - 3;
         const txt = mode === "plain" ? r.p.label : nameCellText(r.p);
@@ -1135,6 +1149,87 @@ document.getElementById("hwBoard2").innerHTML = renderBoard(quin, {
   ],
 });
 
+/* ===================== anatomy figure ===================== */
+// The design language drawn on a real board: render the QuinLED (rails + band +
+// leaders + terminals), then measure the live SVG and pin each vocab term to
+// the element it names. Measured, not hand-positioned, so it tracks the engine.
+function renderAnatomy() {
+  const host = document.getElementById("anatomyFig");
+  const U = 13, SC = 1.35;
+  host.innerHTML = renderBoard(quin, { mode: "caps", u: U, scale: SC });
+  const svg = host.querySelector("svg");
+  const NS = "http://www.w3.org/2000/svg";
+  const add = (tag, attrs, text) => {
+    const el = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (text != null) el.textContent = text;
+    svg.appendChild(el); return el;
+  };
+  const mid = b => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
+  const note = (lx, ly, px, py, text, anchor = "start") => {
+    add("path", { d: `M ${lx} ${ly} L ${px} ${py}`, class: "anat-line" });
+    add("circle", { cx: px, cy: py, r: 1.6, class: "anat-dot" });
+    add("text", { x: lx, y: ly + (ly < py ? -3 : 8), "text-anchor": anchor, class: "anat-label" }, text);
+  };
+  const bracket = (x, y1, y2, dir) =>
+    add("path", { d: `M ${x + 4 * dir} ${y1} L ${x} ${y1} L ${x} ${y2} L ${x + 4 * dir} ${y2}`, class: "anat-shape", "stroke-dasharray": "none" });
+
+  const pads = [...svg.querySelectorAll(".pad")].map(e => e.getBBox());
+  const rowgs = [...svg.querySelectorAll(".rowg")];
+  const leaders = [...svg.querySelectorAll(".leader")].map(e => e.getBBox());
+  const plabels = [...svg.querySelectorAll(".pinlabel")].map(e => e.getBBox());
+  const nL = quin.hw.left.length; // pads: left rail first, then right
+
+  // Pad — right rail, last pin (free space beyond: no cells on that row)
+  const padT = mid(pads[nL + quin.hw.right.length - 1]);
+  note(padT.x + 26, padT.y + 14, padT.x + 3, padT.y + 2, "Pad");
+
+  // Label — inside name of right pin "IO15" (pinlabels: [USB caption, left…, right…])
+  const lblT = mid(plabels[1 + nL + 1]);
+  note(lblT.x - 4, lblT.y + 30, lblT.x, lblT.y + 4, "Label", "middle");
+
+  // Row + Cell — right rail row with cells (IO15 → ADC2_3): outline pad→cells
+  const rowRight = rowgs.find(g => g.dataset.gpio === "15");
+  const rb = rowRight.getBBox();
+  const padRow = pads[nL + 1]; // IO15 is 2nd right pin
+  const rx0 = Math.min(rb.x, padRow.x) - 2, rx1 = Math.max(rb.x + rb.width, padRow.x + padRow.width) + 2;
+  add("rect", { x: rx0, y: padRow.y + padRow.height / 2 - U / 2, width: rx1 - rx0, height: U, rx: 4, class: "anat-shape" });
+  note(rx1 + 26, padRow.y - 12, rx1 + 1, padRow.y + padRow.height / 2 - U / 2 + 2, "Row (1u tall)");
+  const cellT = mid(rowRight.querySelector(".cell-rect").getBBox());
+  note(cellT.x + 10, cellT.y + 26, cellT.x, cellT.y + 4, "Cell");
+
+  // Rail — bracket right of the right rail's pads
+  const railPads = pads.slice(nL);
+  const railX = rx1 + 44;
+  bracket(railX, railPads[0].y - 2, railPads.at(-1).y + railPads.at(-1).height + 2, -1);
+  note(railX + 20, (railPads[0].y + railPads.at(-1).y) / 2 + 4, railX + 1,
+       (railPads[0].y + railPads.at(-1).y) / 2 + 4, "Rail");
+
+  // Band — bracket right of the terminal band rows (they sit above the board)
+  const bandRows = rowgs.filter(g => g.parentNode === svg && g.getBBox().y < 0);
+  const bandBBs = bandRows.map(g => g.getBBox());
+  const bx = Math.max(...bandBBs.map(b => b.x + b.width)) + 6;
+  const by0 = Math.min(...bandBBs.map(b => b.y)) - 2, by1 = Math.max(...bandBBs.map(b => b.y + b.height)) + 2;
+  bracket(bx, by0, by1, -1);
+  note(bx + 18, (by0 + by1) / 2 + 3, bx + 1, (by0 + by1) / 2 + 3, "Band");
+
+  // Leader — the elbow line from the leftmost terminal pad
+  const ldT = leaders[0];
+  note(ldT.x - 28, ldT.y + ldT.height + 16, ldT.x + 1, ldT.y + ldT.height - 4, "Leader");
+
+  // Unit u — dimension between the first two left pads
+  const p0 = mid(pads[0]), p1 = mid(pads[1]);
+  const ux = p0.x - 12;
+  add("path", { d: `M ${ux - 3} ${p0.y} L ${ux + 3} ${p0.y} M ${ux} ${p0.y} L ${ux} ${p1.y} M ${ux - 3} ${p1.y} L ${ux + 3} ${p1.y}`, class: "anat-shape", "stroke-dasharray": "none" });
+  note(ux - 26, p0.y + U / 2 + 3, ux, (p0.y + p1.y) / 2, "u = pitch", "end");
+
+  // expand the viewBox to fit annotations
+  const bb = svg.getBBox();
+  svg.setAttribute("viewBox", `${bb.x - 6} ${bb.y - 6} ${bb.width + 12} ${bb.height + 12}`);
+  svg.setAttribute("width", Math.round((bb.width + 12) * SC));
+  svg.setAttribute("height", Math.round((bb.height + 12) * SC));
+}
+
 /* ===================== 5. discovery ===================== */
 const COLOR = { K: "#15181d", R: "#ef5350", G: "#3fd68e", B: "#4f9cf0",
                 C: "#2fd4c9", M: "#d06bd6", Y: "#f0e04b", W: "#f4f2ec" };
@@ -1187,19 +1282,23 @@ const skipped = allPins.filter(p => p.gpio != null && SKIP_ROLES.has(p.role));
 const freePins = allPins.filter(p =>
   p.gpio != null && (p.role === "io" || p.role === "strap") && !RESERVED.has(p.gpio));
 
-// smallest (pixels n, colors c) covering P pins: prefer fewer pixels, then fewer colors
+// codes must be palindromes: the strip's data direction is unknown, so a code
+// and its reverse are indistinguishable. A length-n palindrome has ceil(n/2)
+// free digits -> coverage c^ceil(n/2). Prefer fewer pixels, then fewer colors.
 const PALETTE = ["R","G","B","C","M","Y","W"];
 function codePlan(P) {
-  for (let n = 1; n <= 3; n++)
+  for (let n = 1; n <= 5; n++) {
+    const half = Math.ceil(n / 2);
     for (let c = 2; c <= PALETTE.length; c++)
-      if (Math.pow(c, n) >= P) return { n, c };
-  return { n: 3, c: PALETTE.length };
+      if (Math.pow(c, half) >= P) return { n, c, half };
+  }
+  return { n: 5, c: PALETTE.length, half: 3 };
 }
 const plan = codePlan(freePins.length);
 const codeFor = i => {
-  const digits = [];
-  for (let d = 0, x = i; d < plan.n; d++) { digits.push(PALETTE[x % plan.c]); x = Math.floor(x / plan.c); }
-  return digits;
+  const half = [];
+  for (let d = 0, x = i; d < plan.half; d++) { half.push(PALETTE[x % plan.c]); x = Math.floor(x / plan.c); }
+  return Array.from({ length: plan.n }, (_, k) => half[Math.min(k, plan.n - 1 - k)]);
 };
 const candidates = freePins.map((p, i) => ({ gpio: p.gpio, code: codeFor(i) }));
 
@@ -1212,10 +1311,11 @@ function renderDisco() {
     renderBoard(c6, { mode: "swatch", u: 12, scale: 1.15, swatches: sw });
   document.getElementById("mathLine").innerHTML =
     `<span class="mathline"><code>${freePins.length}</code> free output-capable pins →
-     smallest covering code = <code>${plan.n} px × ${plan.c} colors</code>
+     smallest covering <b>palindromic</b> code = <code>${plan.n} px × ${plan.c} colors</code>
      (${PALETTE.slice(0, plan.c).map(k => COLOR_NAME[k]).join(", ")}) =
-     <code>${Math.pow(plan.c, plan.n)}</code> codes. Shown on the first
-     ${plan.n === 1 ? "pixel" : plan.n + " pixels"} of the strip, steady.</span>`;
+     <code>${Math.pow(plan.c, plan.half)}</code> codes. Palindromes because the strip's
+     data direction is unknown — a code must read the same from either end. Shown steady on the first
+     ${plan.n === 1 ? "pixel" : plan.n + " pixels"}.</span>`;
   document.getElementById("patList").innerHTML = candidates.map(c => `
     <button class="patbtn" data-gpio="${c.gpio}" aria-pressed="${found === c.gpio}">
       <span class="dots">${c.code.map(k => `<i style="background:${COLOR[k]}"></i>`).join("")}</span>
@@ -1233,6 +1333,7 @@ function renderDisco() {
      — and <code>IO8 (status pixel)</code>, already in use.`;
 }
 renderDisco();
+renderAnatomy();
 
 // demo helper: #grb pre-selects the common color order (used for screenshots)
 if (location.hash.includes("grb"))

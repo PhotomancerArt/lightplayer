@@ -61,6 +61,10 @@ USB-JTAG), `nc`, power/ctl, and pins already bound or reserved (onboard RGB).
   free pin. K bounds each repeat, W marks the center; palindrome ⇒ direction
   doesn't matter; K/W are permutation-invariant ⇒ the perceived row uniquely
   identifies the strip's color order (RGB/GRB/…).
-- **Code**: a pin's steady color sequence on the first `n` pixels.
-- **Code plan**: smallest `n px × c colors` with `c^n ≥ free pins`, colors drawn
-  in order from the palette `R G B C M Y W`.
+- **Code**: a pin's steady color sequence on the first `n` pixels. Codes are
+  **palindromes** — data direction is unknown, so a code and its reverse are
+  indistinguishable; a palindrome reads the same from either end.
+- **Code plan**: smallest `n px × c colors` with `c^ceil(n/2) ≥ free pins`
+  (a length-`n` palindrome has `ceil(n/2)` free digits), colors drawn in order
+  from the palette `R G B C M Y W`. E.g. 20 pins → `3 px × 5 colors` = 25
+  `X-Y-X` codes.
