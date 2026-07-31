@@ -90,6 +90,7 @@
       "description": "Build or runtime target that a board manifest describes.",
       "enum": [
         "esp32c6",
+        "esp32s3",
         "rv32imac_emu"
       ],
       "type": "string"

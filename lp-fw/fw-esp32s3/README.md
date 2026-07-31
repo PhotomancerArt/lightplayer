@@ -248,6 +248,32 @@ serial readout driver (`src/output/readout_driver.rs`) is wired for exactly that
 future — it prints a checksum and lit-LED count per second instead of driving
 LEDs, so a render path can be verified on a board with nothing attached to it.
 
+## Board profile
+
+The compiled-in fallback manifest is
+`lp-core/lpc-hardware/boards/seeed/xiao-esp32-s3-plus.json`
+(`default_esp32s3_hardware_manifest()`), matching the desk board. Until
+2026-07-30 this crate fell back to the **C6's** profile and logged
+`hardware manifest: seeed/xiao-esp32-c6`; the C6 pin map is wrong for this chip
+in every particular, so a real output driver must never inherit it.
+
+The profile is deliberately partial, because a missing entry is a gap and a
+wrong GPIO number is a short circuit:
+
+| Absent | Why |
+|---|---|
+| User LED | Seeed says GPIO21 for the plain XIAO ESP32-S3; espboards.dev says GPIO22 for the *Plus*, which is impossible (the ESP32-S3 numbers GPIO0-21 and GPIO26-48). Unverified on this board. |
+| The nine 1.27 mm castellated pads | No published GPIO map. |
+| GPIO26-37 | In-package flash and octal PSRAM. Never claimable. |
+| `/radio/0` | No radio driver is registered here, so the resource would never open. |
+
+`/gpio/19` and `/gpio/20` **are** listed, reserved: they are USB-Serial-JTAG
+D-/D+, and driving them drops the host link until a physical replug — the S3's
+version of the C6's GPIO12/13 trap.
+
+A `/hardware.json` on the device overrides the compiled-in profile, which is how
+a different S3 carrier board gets described without a rebuild.
+
 ## Workspace notes
 
 A workspace **member** (so it shares workspace dependencies and the lockfile)
