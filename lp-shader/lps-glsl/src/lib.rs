@@ -624,6 +624,117 @@ FluidEmitter emitters[4];
         matches!(op, lpir::LpirOp::Load { .. })
     }
 
+    /// Compile a `render` body and return the diagnostic message it fails with.
+    fn compile_body_error(body: &str) -> alloc::string::String {
+        let source =
+            alloc::format!("vec4 render(vec2 pos) {{\n{body}\n    return vec4(1.0);\n}}\n");
+        match compile(&source, &CompileOptions::default()) {
+            Ok(_) => panic!("expected a compile error for body:\n{body}"),
+            Err(err) => alloc::string::ToString::to_string(&err.message),
+        }
+    }
+
+    #[test]
+    fn arithmetic_on_bool_lanes_is_rejected() {
+        // GLSL defines no arithmetic over bool/bvecN, and no implicit
+        // conversion out of bool. Every other frontend rejects these
+        // ("unsupported bool binary Add"); lps-glsl used to accept them
+        // because `vector_dominant_type`'s neutral element is `Bool`.
+        for (body, expected) in [
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = a + b;",
+                "'+' expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = a - b;",
+                "'-' expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = a * b;",
+                "'*' expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = a / b;",
+                "'/' expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = a % b;",
+                "'%' expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    a += b;",
+                "'+' expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bool s = true;\n    bool t = false;\n    bool c = s + t;",
+                "'+' expects numeric lanes, got Bool and Bool",
+            ),
+            (
+                "    bool s = true;\n    float c = 1.0 + s;",
+                "'+' expects numeric lanes, got Float and Bool",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    vec2 c = vec2(1.0) + a;",
+                "'+' expects numeric lanes, got Vec2 and BVec2",
+            ),
+        ] {
+            assert_eq!(compile_body_error(body), expected);
+        }
+    }
+
+    #[test]
+    fn arithmetic_builtins_reject_bool_lanes() {
+        for (body, expected) in [
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = max(a, b);",
+                "arithmetic expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = min(a, b);",
+                "arithmetic expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bool s = true;\n    bool t = false;\n    bool c = max(s, t);",
+                "arithmetic expects numeric lanes, got Bool and Bool",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = clamp(a, b, a);",
+                "arithmetic expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    bvec2 c = step(a, b);",
+                "arithmetic expects numeric lanes, got BVec2 and BVec2",
+            ),
+            (
+                "    bvec2 a = bvec2(true, false);\n    bvec2 b = bvec2(false, true);\n    float c = dot(a, b);",
+                "arithmetic expects numeric lanes, got BVec2 and BVec2",
+            ),
+        ] {
+            assert_eq!(compile_body_error(body), expected);
+        }
+    }
+
+    #[test]
+    fn bool_logical_and_selection_forms_still_compile() {
+        // Only what GLSL leaves undefined is rejected: logical operators,
+        // comparisons, the bool predicate builtins, and the
+        // `mix(genBType, genBType, genBType)` selection overload all stay.
+        let source = r#"
+vec4 render(vec2 pos) {
+    bvec2 a = bvec2(true, false);
+    bvec2 b = bvec2(false, true);
+    bool ok = (a == b) || !(a != b);
+    ok = ok && any(a) && all(b);
+    bvec2 picked = mix(a, b, not(a));
+    bvec2 cmp = lessThan(vec2(pos.x, pos.y), vec2(0.5));
+    bool eq = equal(a, b).x && notEqual(a, b).y && cmp.x && picked.y;
+    return vec4(float(ok), float(eq), 0.0, 1.0);
+}
+"#;
+        let output = compile(source, &CompileOptions::default()).expect("compile bool forms");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+    }
+
     fn compile_with_single_steps(source: &str) -> CompileOutput {
         let mut job = CompileJob::new(source, CompileOptions::default());
         loop {
