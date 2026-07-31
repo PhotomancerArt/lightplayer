@@ -34,6 +34,12 @@ server = ["dep:lpc-wire", "dep:ser-write-json"]
 # on-device JIT and prints PASS/FAIL per case against goldens confirmed on
 # lp-xt-emu. The corpus is shared with the host golden test precisely so the
 # two cannot drift.
+# The silicon oracle for `lpc_shared::backtrace`'s Xtensa windowed walk: a
+# known-depth call chain whose frame count must match exactly, plus corrupt
+# save-area chains that must terminate. Needs no extra dependencies —
+# `lpc-shared` is already unconditional for the panic path.
+test_backtrace_oracle = []
+
 test_xt_jit_corpus = [
     "dep:lpvm-native",
     "dep:lpvm",

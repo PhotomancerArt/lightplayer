@@ -48,15 +48,15 @@ use lpc_shared::backtrace::{MAX_FRAMES, capture_frames};
 /// Whether `lpc_shared::backtrace::capture_frames` has a real stack walker for
 /// this target.
 ///
-/// Xtensa's arm of `capture_frames_arch` is still the 0-frame placeholder; the
-/// windowed-ABI walk lands in M3 P4. **Flip this to `true` in the same change
-/// that lands the walker** — it exists so the crash report can distinguish "we
-/// cannot see the stack" from "we looked and the stack was empty", which are
-/// very different things to tell someone reading a crash report.
-///
-/// A stale `false` is harmless: [`print_frames`] prints any frames it is given
-/// regardless, and only the *no frames* wording depends on this constant.
-const FRAME_WALKER_PRESENT: bool = false;
+/// `true` since M3 P4: the Xtensa arm of `capture_frames_arch` forces a
+/// register-window spill and then walks the windowed base-save-area chain,
+/// proven on silicon by `--features test_backtrace_oracle` (a known-depth call
+/// chain whose frame count must match exactly). It exists so the crash report
+/// can distinguish "we cannot see the stack" from "we looked and the stack was
+/// empty", which are very different things to tell someone reading a crash
+/// report — so it must go back to `false` if the walker is ever removed for a
+/// new chip, not stay `true` out of habit.
+const FRAME_WALKER_PRESENT: bool = true;
 
 /// Set on entry to the panic path, never cleared. Guards against a panic
 /// raised *by* the panic path (a panicking `Display` impl, most plausibly)
@@ -104,12 +104,13 @@ pub fn stage_and_reset(info: &core::panic::PanicInfo) -> ! {
     esp_hal::system::software_reset()
 }
 
-/// Print captured PCs — or say plainly that we could not look.
+/// Print captured PCs — or say plainly why there are none.
 ///
 /// The wording matters. "0 frames" from a target with no walker reads as "the
 /// stack was empty", which is never true and would send someone hunting the
-/// wrong bug. Until [`FRAME_WALKER_PRESENT`] flips, this says what is actually
-/// the case: nothing looked.
+/// wrong bug. [`FRAME_WALKER_PRESENT`] is what keeps the two apart: with a
+/// walker present, zero frames means the walk ran and rejected everything it
+/// found — a real and reportable outcome.
 fn print_frames(frames: &[u32]) {
     if !frames.is_empty() {
         esp_println::print!("frames:");
@@ -117,16 +118,22 @@ fn print_frames(frames: &[u32]) {
             esp_println::print!(" 0x{frame:08x}");
         }
         esp_println::println!();
-        esp_println::print!("decode: just decode-backtrace");
+        // Chip-specific on purpose: the C6 and the S3 both put flash text at
+        // 0x42xxxxxx, so the generic recipe would symbolize these against the
+        // wrong image and be confidently wrong.
+        esp_println::print!("decode: just decode-backtrace-esp32s3");
         for frame in frames {
             esp_println::print!(" 0x{frame:08x}");
         }
         esp_println::println!();
     } else if FRAME_WALKER_PRESENT {
-        esp_println::println!("frames: walker recovered none");
+        esp_println::println!(
+            "frames: the walk found none — every candidate failed the IRAM/flash \
+             and stack bounds checks. The stack was not empty; it was unreadable."
+        );
     } else {
         esp_println::println!(
-            "frames: unavailable — no Xtensa stack walker in this build (M3 P4). \
+            "frames: unavailable — no Xtensa stack walker in this build. \
              This is NOT an empty stack; nothing looked at it."
         );
     }

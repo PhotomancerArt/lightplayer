@@ -67,11 +67,12 @@ fn log_crash_pcs(count: usize, pcs: &[u32]) {
     let pcs = &pcs[..count.min(pcs.len())];
     if pcs.is_empty() {
         esp_println::println!(
-            "[RECOVERY] no pcs recorded (the crashing build had no Xtensa stack walker)"
+            "[RECOVERY] no pcs recorded — the Xtensa walker ran and every candidate \
+             failed its bounds checks, or the crash predates the walk"
         );
         return;
     }
-    esp_println::print!("[RECOVERY] decode: just decode-backtrace");
+    esp_println::print!("[RECOVERY] decode: just decode-backtrace-esp32s3");
     for pc in pcs {
         esp_println::print!(" 0x{pc:08x}");
     }

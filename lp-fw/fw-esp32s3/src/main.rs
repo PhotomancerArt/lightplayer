@@ -30,8 +30,11 @@
     )
 )]
 
-// The harness runner allocates (JIT buffers, module tables); the app path
-// leaks the recovery instance into a `&'static mut` at boot.
+// The JIT harness allocates (JIT buffers, module tables); the app path leaks
+// the recovery instance into a `&'static mut` at boot. `test_backtrace_oracle`
+// is the exception — it is deliberately allocation-free, because it exercises
+// a walk the panic path takes, and the panic path must not allocate.
+#[cfg(any(not(fw_harness), feature = "test_xt_jit_corpus"))]
 extern crate alloc;
 
 use esp_hal::main;
@@ -113,6 +116,9 @@ fn boot() -> ! {
     // storage, output) is a later milestone; today it parks.
     #[cfg(feature = "test_xt_jit_corpus")]
     tests::xt_jit_corpus::run_all();
+
+    #[cfg(feature = "test_backtrace_oracle")]
+    tests::backtrace_oracle::run_all();
 
     #[cfg(not(fw_harness))]
     {

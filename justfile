@@ -608,7 +608,7 @@ clippy-fw-esp32s3:
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -648,7 +648,7 @@ _xt-gcc-dir:
 # usually are on the desk, and auto-detection picks the first match, not
 # necessarily the S3:
 #
-#   just flash-fw-esp32s3 /dev/cu.usbmodem1101
+#   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX
 #
 # The S3 speaks USB-Serial-JTAG, not a UART bridge, so it enumerates as
 # /dev/cu.usbmodem* and its port number CHANGES whenever the chip
@@ -674,7 +674,7 @@ flash-fw-esp32s3 port="": build-fw-esp32s3
 # established without the device. A failure here is a finding to triage, never
 # a reason to edit a golden.
 #
-#   just fwtest-xt-jit-esp32s3 /dev/cu.usbmodem1101
+#   just fwtest-xt-jit-esp32s3 /dev/cu.usbmodemXXXX
 
 # Run the Xtensa JIT corpus on a connected ESP32-S3 (PASS/FAIL per case).
 fwtest-xt-jit-esp32s3 port="":
@@ -685,6 +685,35 @@ fwtest-xt-jit-esp32s3 port="":
       export PATH="$GCC_BIN:$PATH"
     fi
     cd lp-fw/fw-esp32s3 && cargo build --release --features test_xt_jit_corpus
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Prove the Xtensa windowed backtrace walk on silicon (PASS/FAIL per check).
+#
+# The oracle is a known-depth recursive call chain: every one of its `n` frames
+# returns to the same call site, so a correct walk contains a run of exactly `n`
+# identical PCs. `run == depth` is asserted at three depths, all past the point
+# where the register-window ring wraps and the frames stop being reachable
+# without a forced spill. Corrupt save-area chains must terminate at exact
+# counts, mirroring `cargo test -p lpc-shared`'s host-side synthetic stacks.
+#
+# Run the host tests first — a device result only means something against an
+# oracle that was established without the device.
+#
+#   cargo test -p lpc-shared
+#   just fwtest-backtrace-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-backtrace-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --release --features test_backtrace_oracle
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
@@ -1370,6 +1399,39 @@ decode-backtrace *addrs:
         riscv32-esp-elf-addr2line -pfiaC -e target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6 $ADDRS
     else
         addr2line -e target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6 -f -a $ADDRS
+    fi
+
+# Decode ESP32-S3 backtrace addresses.
+#
+# A separate recipe rather than a flag on the one above because the two chips
+# cannot be told apart from the addresses: both put flash text at 0x42xxxxxx,
+# so a shared recipe would silently symbolize S3 frames against the C6 image
+# and produce confident nonsense. The S3 panic path prints this recipe by name.
+#
+# Build first: just build-fw-esp32s3
+# Usage: just decode-backtrace-esp32s3 0x42010d2a ...
+#        pbpaste | just decode-backtrace-esp32s3
+decode-backtrace-esp32s3 *addrs:
+    #!/usr/bin/env bash
+    set -e
+    test -f {{ fw_esp32s3_elf }}
+    if [ -n "{{ addrs }}" ]; then
+        ADDRS="{{ addrs }}"
+    else
+        ADDRS=$(grep -oE '0x[0-9a-fA-F]+' | tr '\n' ' ')
+    fi
+    if [ -z "$ADDRS" ]; then
+        echo "No addresses. Usage: just decode-backtrace-esp32s3 0x420... or: pbpaste | just decode-backtrace-esp32s3"
+        exit 1
+    fi
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    if command -v xtensa-esp32s3-elf-addr2line >/dev/null 2>&1; then
+        xtensa-esp32s3-elf-addr2line -pfiaC -e {{ fw_esp32s3_elf }} $ADDRS
+    else
+        addr2line -e {{ fw_esp32s3_elf }} -f -a $ADDRS
     fi
 
 # ============================================================================
