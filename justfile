@@ -1416,6 +1416,13 @@ push: check
 merge: check
     scripts/push.sh --merge
 
+# Watch a PR's CI to completion (exit 0 green / 1 failed), diagnosing the
+# "no checks" causes (path filters, stacked base, GITHUB_TOKEN pushes).
+# `just watch-pr --merged <n>` waits for a dependency PR to merge instead.
+# Run it as a background task, not a foreground sleep loop.
+watch-pr *args:
+    scripts/watch-pr.sh {{ args }}
+
 # ============================================================================
 # Hardware discovery
 # ============================================================================
