@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn share_ops_carry_the_editor_foreground_class() {
         let copy = NodeCopyOp {
-            node: ProjectNodeAddress::parse("/main.project/orbit.shader").unwrap(),
+            node: ProjectNodeAddress::parse("/main.module/orbit.shader").unwrap(),
         };
         let paste = NodePasteOp {
             envelope: String::new(),
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn ops_compare_by_value_not_identity() {
-        let node = ProjectNodeAddress::parse("/main.project/orbit.shader").unwrap();
+        let node = ProjectNodeAddress::parse("/main.module/orbit.shader").unwrap();
         let a = NodeCopyOp { node: node.clone() };
         let b = NodeCopyOp { node };
         assert!(a.eq_op(&b));

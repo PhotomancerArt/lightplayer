@@ -404,7 +404,7 @@ mod tests {
     use super::*;
 
     fn node() -> ProjectNodeAddress {
-        ProjectNodeAddress::parse("/demo.project/pixels.fixture").unwrap()
+        ProjectNodeAddress::parse("/demo.module/pixels.fixture").unwrap()
     }
 
     fn at(path: &str) -> ProjectSlotAddress {
@@ -520,7 +520,7 @@ mod tests {
         );
         assert!(
             join.dirty_summary_for_node(
-                &ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap()
+                &ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap()
             )
             .is_clean(),
             "entries only count for their own node"
@@ -573,7 +573,7 @@ mod tests {
         assert_eq!(join.unmapped_asset_dirty_summary(), one_persisted);
         assert!(
             join.dirty_summary_for_node(
-                &ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap()
+                &ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap()
             )
             .is_clean(),
             "asset entries only count for their owning node"

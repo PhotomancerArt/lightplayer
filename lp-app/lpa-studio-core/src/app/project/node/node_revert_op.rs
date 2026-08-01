@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn node_revert_is_editor_foreground_class_with_revert_meta() {
         let op = NodeRevertOp {
-            node: ProjectNodeAddress::parse("/demo.project/pixels.fixture").unwrap(),
+            node: ProjectNodeAddress::parse("/demo.module/pixels.fixture").unwrap(),
         };
 
         assert_eq!(

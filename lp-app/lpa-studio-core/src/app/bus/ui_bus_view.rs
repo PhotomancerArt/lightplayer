@@ -189,7 +189,7 @@ mod tests {
     fn sites_with_focus_carry_clickable_actions() {
         let mut ch = channel();
         ch.writers[0].focus = Some(crate::UiAction::from_op(
-            crate::ControllerId::new("test.project"),
+            crate::ControllerId::new("test.module"),
             crate::ProjectEditorOp::Focus,
         ));
         let aspects = ch.visible_aspects();

@@ -510,7 +510,7 @@ mod tests {
         use lpa_studio_core::{ProjectNodeAddress, ProjectSlotRoot, SlotPath, UiSlotValue};
 
         let address = ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
             ProjectSlotRoot::def(),
             SlotPath::parse("brightness").unwrap(),
         );

@@ -611,7 +611,7 @@ mod tests {
 
     #[test]
     fn event_stream_chunks_runtime_buffer_payloads() {
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let buffer_id = engine.runtime_buffers_mut().insert(WithRevision::new(
             Revision::new(1),
             RuntimeBuffer::raw(vec![42; 5 * 1024]),
@@ -1314,7 +1314,7 @@ mod tests {
 
     fn empty_registry_engine() -> (Engine, ProjectRegistry) {
         (
-            Engine::new(TreePath::parse("/shapes.project").unwrap()),
+            Engine::new(TreePath::parse("/shapes.module").unwrap()),
             ProjectRegistry::new(),
         )
     }
@@ -1433,7 +1433,7 @@ mod tests {
     fn mutating_one_resource_sends_exactly_that_resource() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));
@@ -1476,7 +1476,7 @@ mod tests {
     fn removing_a_resource_emits_membership_without_it() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));
@@ -1522,7 +1522,7 @@ mod tests {
     fn unchanged_resources_send_no_summaries_or_membership() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));
@@ -1545,7 +1545,7 @@ mod tests {
     fn by_refs_payload_bypasses_since() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));
@@ -1581,7 +1581,7 @@ mod tests {
     fn fresh_read_includes_all_resources() {
         use lpc_model::set_current_revision;
 
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let mut engine = Engine::new(TreePath::parse("/basic.module").unwrap());
         let registry = ProjectRegistry::new();
 
         set_current_revision(Revision::new(5));

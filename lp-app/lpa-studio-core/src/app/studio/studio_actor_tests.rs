@@ -208,7 +208,7 @@ impl ClientIo for ScriptedClientIo {
 
 fn single_product_project_view(node_id: u32) -> ProjectView {
     let revision = Revision::new(1);
-    let path = TreePath::parse("/demo.project/orbit.shader").unwrap();
+    let path = TreePath::parse("/demo.module/orbit.shader").unwrap();
     let state_shape = SlotShapeId::new(700);
     let mut view = ProjectView::new();
     view.tree.insert(TreeEntryView::new(
@@ -661,7 +661,7 @@ fn console_commands_are_never_coalesced_and_keep_their_order() {
 
 fn slot_address(path: &str) -> crate::ProjectSlotAddress {
     crate::ProjectSlotAddress::new(
-        crate::ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+        crate::ProjectNodeAddress::parse("/demo.module/clock.clock").unwrap(),
         crate::ProjectSlotRoot::def(),
         lpc_model::SlotPath::parse(path).unwrap(),
     )

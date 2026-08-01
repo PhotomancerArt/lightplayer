@@ -27,7 +27,7 @@ fn bound_aspect(label: &str, endpoint: &str, default_origin: bool) -> UiSlotAspe
 
 fn bindings_map() -> ProjectSlotAddress {
     ProjectSlotAddress::new(
-        ProjectNodeAddress::parse("/demo.project/playlist.playlist")
+        ProjectNodeAddress::parse("/demo.module/playlist.playlist")
             .expect("valid story node address"),
         ProjectSlotRoot::def(),
         SlotPath::parse("bindings").expect("valid story slot path"),

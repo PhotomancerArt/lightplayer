@@ -643,7 +643,7 @@ mod tests {
     /// The stable authored address faces are built for; entry activation
     /// actions carry it (P7's runtime command channel).
     fn test_address() -> ProjectNodeAddress {
-        ProjectNodeAddress::parse("/demo.project/node.playlist").expect("valid address")
+        ProjectNodeAddress::parse("/demo.module/node.playlist").expect("valid address")
     }
 
     #[test]
@@ -1060,7 +1060,7 @@ mod tests {
 
     fn address(path: &str) -> ProjectSlotAddress {
         ProjectSlotAddress::new(
-            ProjectNodeAddress::parse("/demo.project/node.shader").expect("valid address"),
+            ProjectNodeAddress::parse("/demo.module/node.shader").expect("valid address"),
             ProjectSlotRoot::Def,
             SlotPath::parse(path).expect("valid path"),
         )
@@ -1177,10 +1177,10 @@ mod tests {
         let mut child = UiNodeChild::new(
             label,
             "Shader",
-            format!("/main.project/playlist.playlist/{name}.shader"),
+            format!("/main.module/playlist.playlist/{name}.shader"),
         );
         child.action = Some(
-            UiAction::from_op(ControllerId::new("test.project"), ProjectEditorOp::Focus)
+            UiAction::from_op(ControllerId::new("test.module"), ProjectEditorOp::Focus)
                 .with_label(format!("Focus {label}")),
         );
         child
