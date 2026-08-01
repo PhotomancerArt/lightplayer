@@ -100,8 +100,8 @@ where
     pub fn new(engine: &'engine E, desc: CompilePxDesc<'src>) -> Self {
         let state = if !engine.supports_float_mode(desc.float_mode) {
             ShaderCompileState::Rejected(format!(
-                "shader requested float_mode={:?}, which this LPVM engine does not compile",
-                desc.float_mode
+                "shader requested float_mode={}, which this LPVM engine does not compile",
+                desc.float_mode.as_str()
             ))
         } else {
             match desc.frontend {

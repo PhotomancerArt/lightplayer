@@ -35,3 +35,20 @@ pub enum ShaderSemantics {
     /// decision 2).
     F32Cpu,
 }
+
+impl ShaderSemantics {
+    /// Short stable name for messages.
+    ///
+    /// Deliberately used instead of `{:?}` on the paths a firmware image
+    /// links. `Debug` formatting drags `core::fmt` machinery in per call site,
+    /// and the ESP32-C6 pays flash for every byte of it — the same lever that
+    /// made serde the flash problem it was. A `&'static str` costs the string.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Q32 => "q32",
+            Self::F32Gpu => "f32-gpu",
+            Self::F32Cpu => "f32-cpu",
+        }
+    }
+}
