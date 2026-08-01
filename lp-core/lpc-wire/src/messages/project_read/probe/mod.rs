@@ -10,8 +10,8 @@ pub use binding_graph_probe::{
     WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding,
 };
 pub use control_product_probe::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
-    ControlProductProbeResult, ControlProductProbeResultHeader,
+    ControlColorPolicy, ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead,
+    ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
 };
 pub use project_probe::{ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader};
 pub use render_product_probe::{

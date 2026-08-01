@@ -169,7 +169,8 @@ impl Engine {
         };
         let sample_count = extent.sample_count() as usize;
         let mut samples = vec![0u16; sample_count];
-        let render_request = ControlRenderRequest::unorm16(extent);
+        let render_request =
+            ControlRenderRequest::unorm16_with_policy(extent, request.color_policy);
         let target = ControlRenderTarget::new(
             extent,
             crate::products::control::ControlSampleFormat::Unorm16,

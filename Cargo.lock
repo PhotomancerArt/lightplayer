@@ -5239,6 +5239,7 @@ dependencies = [
 name = "lp-gfx"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "lp-shader",
  "lpir",
  "lps-q32",

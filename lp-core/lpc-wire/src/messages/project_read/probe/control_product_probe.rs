@@ -19,6 +19,27 @@ pub struct ControlProductProbeRequest {
     pub product: ControlProduct,
     pub sample_format: WireChannelSampleFormat,
     pub display_layout: ControlDisplayLayoutRead,
+    pub color_policy: ControlColorPolicy,
+}
+
+/// Which color pipeline the probe's control bytes come from (a viewer
+/// property, not a fixture setting).
+///
+/// The producer's wire pipeline is brightness → optional gamma → color-order
+/// permutation. `Display` forks at the producer's processing point —
+/// brightness applied, gamma and color-order skipped — because gamma runs at
+/// u8 precision and cannot be un-applied from wire bytes losslessly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ControlColorPolicy {
+    /// What the eye sees at the artwork: raw sampled color × brightness, no
+    /// gamma, no color-order permutation (bytes are RGB-ordered). The
+    /// default for previews.
+    Display,
+    /// The processed device bytes exactly as the output sink sends them.
+    /// Retained for diagnostics views and parity tests.
+    Wire,
 }
 
 /// Whether and how a control-product probe should include display layout data.

@@ -5,10 +5,10 @@ pub mod project_read;
 pub use crate::message::client::{ClientMessage, ClientRequest};
 pub use crate::message::envelope::{Message, ServerMessage};
 pub use project_read::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, NodeReadQuery, NodeReadResult, NodeReadSelection,
-    PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlColorPolicy,
+    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
+    ControlProductProbeResult, ControlProductProbeResultHeader, NodeReadQuery, NodeReadResult,
+    NodeReadSelection, PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES,
     PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest,
     ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent, ProjectReadNodeEvent,
     ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest,

@@ -13,6 +13,7 @@ default = []
 std = []
 
 [dependencies]
+libm = "0.2"
 lpir = { path = "../../lp-shader/lpir", default-features = false }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }

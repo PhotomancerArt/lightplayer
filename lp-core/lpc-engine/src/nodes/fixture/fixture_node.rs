@@ -29,8 +29,8 @@ use crate::node::{
     PressureLevel, ProduceResult, RuntimeStateShape, TickContext, err_ctx,
 };
 use crate::products::control::{
-    ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
-    ControlSpan,
+    ControlColorPolicy, ControlHint, ControlLayout, ControlPreviewSpec, ControlRenderRequest,
+    ControlRenderTarget, ControlSampleFormat, ControlSpan,
 };
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, TextureSampleBatch, TextureUvSamplePoint,
@@ -50,6 +50,10 @@ pub struct FixtureNode {
     render_target: Option<TextureHandle>,
     sample_points: Option<SamplePointsHandle>,
     sample_target: Option<SampleOutHandle>,
+    /// Sample points for the GPU-resident preview grid (kept apart from the
+    /// native `sample_points` so the preview path never disturbs the
+    /// readback path real output uses).
+    preview_points: Option<SamplePointsHandle>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     direct_points: Option<(Revision, alloc::vec::Vec<DirectSamplePoint>)>,
@@ -75,6 +79,7 @@ impl FixtureNode {
             render_target: None,
             sample_points: None,
             sample_target: None,
+            preview_points: None,
             precomputed: None,
             direct_points: None,
             display_layout_revision: None,
@@ -528,14 +533,7 @@ impl ControlNode for FixtureNode {
             settings.height,
         )?;
 
-        render_fixture_control_target(
-            request,
-            target,
-            &accumulators,
-            settings.color_order,
-            settings.brightness,
-            settings.gamma_correction,
-        )
+        render_fixture_control_target(request, target, &accumulators, settings)
     }
 
     fn control_display_layout(
@@ -546,6 +544,94 @@ impl ControlNode for FixtureNode {
         let settings = self
             .last_settings
             .ok_or_else(|| NodeError::msg("fixture display layout missing cached settings"))?;
+        Ok(Some(ControlDisplayLayout::Layout2d(
+            self.display_layout_2d(settings, ctx),
+        )))
+    }
+
+    fn control_preview_spec(
+        &mut self,
+        _product: ControlProduct,
+        ctx: &mut ControlRenderContext<'_>,
+    ) -> Result<Option<ControlPreviewSpec>, NodeError> {
+        let settings = self
+            .last_settings
+            .ok_or_else(|| NodeError::msg("fixture preview requested before tick"))?;
+        let layout = self.display_layout_2d(settings, ctx);
+        Ok(Some(ControlPreviewSpec {
+            point_count: layout.lamps.len() as u32,
+            // D1: the preview color factor is the fixture's brightness;
+            // gamma and color order are wire corrections and never reach
+            // the display path.
+            color_scale: f32::from(settings.brightness) / 255.0,
+            layout,
+        }))
+    }
+
+    fn render_control_preview_grid(
+        &mut self,
+        _product: ControlProduct,
+        grid: &mut TextureHandle,
+        ctx: &mut ControlRenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        let settings = self
+            .last_settings
+            .ok_or_else(|| NodeError::msg("fixture preview grid requested before tick"))?;
+        if settings.diagnostic_mode != FixtureDiagnosticMode::Off {
+            return Err(NodeError::msg(
+                "fixture diagnostic modes do not sample the shader; no resident preview grid",
+            ));
+        }
+        let visual_product = self
+            .last_visual_product
+            .ok_or_else(|| NodeError::msg("fixture preview grid requested before tick"))?;
+        // Generation order is the grid contract: lamp i of the display
+        // layout (same generator, same order) lands in grid texel i.
+        let points: alloc::vec::Vec<DirectSamplePoint> =
+            crate::nodes::fixture::mapping::generate_mapping_points(
+                &self.mapping,
+                settings.width,
+                settings.height,
+            )
+            .into_iter()
+            .map(|point| DirectSamplePoint {
+                channel: point.channel,
+                x_norm_q16: normalized_f32_to_q16(point.center[0]),
+                y_norm_q16: normalized_f32_to_q16(point.center[1]),
+            })
+            .collect();
+        if points.is_empty() {
+            return Err(NodeError::msg("fixture has no mapped lamps to preview"));
+        }
+        let point_buf = ensure_fixture_sample_points(
+            &mut self.preview_points,
+            &points,
+            settings.width,
+            settings.height,
+            ctx,
+        )?;
+        ctx.sample_visual_to_grid(
+            visual_product,
+            crate::products::visual::VisualSampleBufferRequest {
+                points: point_buf,
+                output_width: settings.width,
+                output_height: settings.height,
+                time_seconds: ctx.time_seconds(),
+            },
+            grid,
+        )
+    }
+}
+
+impl FixtureNode {
+    /// The 2D display layout for the current settings (shared by the
+    /// display-layout probe and the fixture-preview spec so lamp order —
+    /// the resident grid's texel order — cannot diverge between them).
+    fn display_layout_2d(
+        &mut self,
+        settings: FixtureRenderSettings,
+        ctx: &ControlRenderContext<'_>,
+    ) -> ControlLayout2d {
         let revision = self.control_display_layout_revision(settings, ctx);
         let points = crate::nodes::fixture::mapping::generate_mapping_points(
             &self.mapping,
@@ -561,13 +647,7 @@ impl ControlNode for FixtureNode {
                 radius: point.radius,
             })
             .collect();
-
-        Ok(Some(ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-            revision,
-            settings.width,
-            settings.height,
-            lamps,
-        ))))
+        ControlLayout2d::new(revision, settings.width, settings.height, lamps)
     }
 }
 
@@ -721,15 +801,12 @@ fn render_direct_fixture_control(
         if base + 3 > expected_samples {
             continue;
         }
-        let mut r = apply_brightness_unorm16(rgba[0], settings.brightness, brightness);
-        let mut g = apply_brightness_unorm16(rgba[1], settings.brightness, brightness);
-        let mut b = apply_brightness_unorm16(rgba[2], settings.brightness, brightness);
-        if settings.gamma_correction {
-            r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-            g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-            b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
-        }
-        let ordered = ordered_rgb_u16(settings.color_order, r, g, b);
+        let ordered = finalize_fixture_rgb(
+            request.color_policy,
+            &settings,
+            brightness,
+            [rgba[0], rgba[1], rgba[2]],
+        );
         target.samples[base..base + 3].copy_from_slice(&ordered);
         written_samples = written_samples.max(base + 3);
     }
@@ -741,7 +818,7 @@ fn render_direct_fixture_control(
             len: written_samples as u32,
             encoding: ControlHint::RgbPixels {
                 count: (written_samples / 3) as u32,
-                color_order: settings.color_order,
+                color_order: fixture_span_color_order(request.color_policy, settings.color_order),
             },
         }],
     })
@@ -795,15 +872,7 @@ fn render_fixture_diagnostic_control(
                 time_seconds,
             )
         };
-        let ordered = finalize_fixture_rgb(
-            settings.color_order,
-            r,
-            g,
-            b,
-            settings.brightness,
-            brightness,
-            settings.gamma_correction,
-        );
+        let ordered = finalize_fixture_rgb(request.color_policy, &settings, brightness, [r, g, b]);
         let base = lamp * 3;
         target.samples[base..base + 3].copy_from_slice(&ordered);
     }
@@ -815,7 +884,7 @@ fn render_fixture_diagnostic_control(
             len: (rendered_lamps * 3) as u32,
             encoding: ControlHint::RgbPixels {
                 count: rendered_lamps as u32,
-                color_order: settings.color_order,
+                color_order: fixture_span_color_order(request.color_policy, settings.color_order),
             },
         }],
     })
@@ -893,24 +962,56 @@ fn diagnostic_palette(index: usize) -> [u16; 3] {
     PALETTE[index % PALETTE.len()]
 }
 
+/// Take raw sampled RGB through the policy's pipeline (D1/D2 fork):
+/// brightness always applies; gamma and color-order permutation are wire
+/// corrections and run only under [`ControlColorPolicy::Wire`]. The fork
+/// happens here — at the processing point — because `apply_gamma` runs at
+/// u8 precision and cannot be un-applied from wire bytes.
 fn finalize_fixture_rgb(
-    color_order: ColorOrder,
-    r: u16,
-    g: u16,
-    b: u16,
-    brightness_u8: u8,
+    policy: ControlColorPolicy,
+    settings: &FixtureRenderSettings,
     brightness: Q32,
-    gamma_correction: bool,
+    [r, g, b]: [u16; 3],
 ) -> [u16; 3] {
-    let mut r = apply_brightness_unorm16(r, brightness_u8, brightness);
-    let mut g = apply_brightness_unorm16(g, brightness_u8, brightness);
-    let mut b = apply_brightness_unorm16(b, brightness_u8, brightness);
-    if gamma_correction {
-        r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-        g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-        b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
+    let r = apply_brightness_unorm16(r, settings.brightness, brightness);
+    let g = apply_brightness_unorm16(g, settings.brightness, brightness);
+    let b = apply_brightness_unorm16(b, settings.brightness, brightness);
+    finalize_processed_fixture_rgb(policy, settings, [r, g, b])
+}
+
+/// The post-brightness tail of the pipeline (see [`finalize_fixture_rgb`]);
+/// split out for the texture-area path, whose brightness rides its Q32
+/// accumulators.
+fn finalize_processed_fixture_rgb(
+    policy: ControlColorPolicy,
+    settings: &FixtureRenderSettings,
+    [r, g, b]: [u16; 3],
+) -> [u16; 3] {
+    match policy {
+        ControlColorPolicy::Display => [r, g, b],
+        ControlColorPolicy::Wire => {
+            let [r, g, b] = if settings.gamma_correction {
+                [
+                    apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating(),
+                    apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating(),
+                    apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating(),
+                ]
+            } else {
+                [r, g, b]
+            };
+            ordered_rgb_u16(settings.color_order, r, g, b)
+        }
     }
-    ordered_rgb_u16(color_order, r, g, b)
+}
+
+/// The sample-layout hint's color order for a policy: Display bytes are
+/// always RGB (the permutation never ran); Wire bytes carry the fixture's
+/// configured order.
+fn fixture_span_color_order(policy: ControlColorPolicy, color_order: ColorOrder) -> ColorOrder {
+    match policy {
+        ControlColorPolicy::Display => ColorOrder::Rgb,
+        ControlColorPolicy::Wire => color_order,
+    }
 }
 
 fn apply_brightness_unorm16(value: u16, brightness_u8: u8, brightness: Q32) -> u16 {
@@ -1080,9 +1181,7 @@ fn render_fixture_control_target(
     request: &ControlRenderRequest,
     target: ControlRenderTarget<'_>,
     accumulators: &ChannelAccumulators,
-    color_order: ColorOrder,
-    brightness_u8: u8,
-    gamma_correction: bool,
+    settings: FixtureRenderSettings,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
         || target.sample_format != ControlSampleFormat::Unorm16
@@ -1107,7 +1206,7 @@ fn render_fixture_control_target(
     target.samples.fill(0);
 
     let max_channel = accumulators.max_channel as usize;
-    let brightness = brightness_u8.to_q32() / 255.to_q32();
+    let brightness = settings.brightness.to_q32() / 255.to_q32();
     let mut written_samples = 0usize;
 
     for channel_idx in 0usize..=max_channel {
@@ -1120,17 +1219,15 @@ fn render_fixture_control_target(
         let g_q = accumulators.g[channel_idx] * brightness;
         let b_q = accumulators.b[channel_idx] * brightness;
 
-        let mut r = r_q.to_u16_saturating();
-        let mut g = g_q.to_u16_saturating();
-        let mut b = b_q.to_u16_saturating();
-
-        if gamma_correction {
-            r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-            g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-            b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
-        }
-
-        let ordered = ordered_rgb_u16(color_order, r, g, b);
+        let ordered = finalize_processed_fixture_rgb(
+            request.color_policy,
+            &settings,
+            [
+                r_q.to_u16_saturating(),
+                g_q.to_u16_saturating(),
+                b_q.to_u16_saturating(),
+            ],
+        );
         target.samples[base..base + 3].copy_from_slice(&ordered);
         written_samples = base + 3;
     }
@@ -1142,7 +1239,7 @@ fn render_fixture_control_target(
             len: written_samples as u32,
             encoding: ControlHint::RgbPixels {
                 count: (written_samples / 3) as u32,
-                color_order,
+                color_order: fixture_span_color_order(request.color_policy, settings.color_order),
             },
         }],
     })
@@ -1247,6 +1344,7 @@ fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
 mod tests {
     use super::*;
     use alloc::boxed::Box;
+    use alloc::string::ToString;
     use alloc::sync::Arc;
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
@@ -2195,6 +2293,7 @@ mod tests {
                         product,
                         sample_format: WireChannelSampleFormat::U16,
                         display_layout: ControlDisplayLayoutRead::Always,
+                        color_policy: ControlColorPolicy::Wire,
                     },
                 )],
             },
@@ -2236,6 +2335,7 @@ mod tests {
                         display_layout: ControlDisplayLayoutRead::IfChanged {
                             known_revision: Some(known_revision),
                         },
+                        color_policy: ControlColorPolicy::Wire,
                     },
                 )],
             },
@@ -2609,5 +2709,571 @@ mod tests {
             samples[6..36].iter().any(|sample| *sample != 0),
             "lamps beyond the constructor mapping should be lit: {samples:?}"
         );
+    }
+
+    /// D1/D2: Display bytes are raw sampled color × brightness in RGB order —
+    /// gamma and the color-order permutation never run — while Wire bytes
+    /// keep the full device pipeline. Both come from the same fixture in the
+    /// same frame; only the request's policy differs.
+    #[test]
+    fn display_policy_applies_brightness_and_skips_gamma_and_color_order() {
+        let (mut engine, registry, fix_id, _) = build_fixture_project(
+            FixtureProjectSetup {
+                color_order: ColorOrder::Grb,
+                brightness: 128,
+                gamma_correction: true,
+                ..FixtureProjectSetup::default()
+            },
+            |sh_id| {
+                Box::new(FixtureTickCountSolidProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    ticks: Arc::new(AtomicU32::new(0)),
+                    color: [65535, 32768, 0, 65535],
+                })
+            },
+        );
+        let extent = ControlExtent::new(1, 3);
+
+        let (display, display_layout) = render_fixture_policy_bytes(
+            &mut engine,
+            &registry,
+            fix_id,
+            extent,
+            ControlColorPolicy::Display,
+        );
+        let (wire, wire_layout) = render_fixture_policy_bytes(
+            &mut engine,
+            &registry,
+            fix_id,
+            extent,
+            ControlColorPolicy::Wire,
+        );
+
+        // Display: brightness only, RGB order (built from the same
+        // primitives the pipeline uses, so the equality is exact).
+        let brightness = 128u8.to_q32() / 255.to_q32();
+        let bright = |v: u16| apply_brightness_unorm16(v, 128, brightness);
+        assert_eq!(display, vec![bright(65535), bright(32768), bright(0)]);
+        // Brightness genuinely dimmed the raw color.
+        assert!(display[0] < 65535, "brightness must apply: {display:?}");
+        assert_eq!(
+            display_layout.spans[0].encoding,
+            ControlHint::RgbPixels {
+                count: 1,
+                color_order: ColorOrder::Rgb,
+            },
+            "display bytes are RGB-ordered"
+        );
+
+        // Wire: brightness → gamma → GRB permutation (today's device bytes).
+        let gamma = |v: u16| apply_gamma((v >> 8) as u8).to_q32().to_u16_saturating();
+        assert_eq!(
+            wire,
+            vec![gamma(bright(32768)), gamma(bright(65535)), gamma(bright(0))]
+        );
+        assert_eq!(
+            wire_layout.spans[0].encoding,
+            ControlHint::RgbPixels {
+                count: 1,
+                color_order: ColorOrder::Grb,
+            }
+        );
+        assert_ne!(display, wire, "the policies must actually fork");
+    }
+
+    /// The probe request's policy reaches the fixture: Display previews get
+    /// RGB bytes even from a GRB-ordered fixture; Wire keeps the swap.
+    #[test]
+    fn control_probe_color_policy_selects_display_or_wire_bytes() {
+        let (mut engine, registry, fix_id, _) = build_fixture_project(
+            FixtureProjectSetup {
+                color_order: ColorOrder::Grb,
+                ..FixtureProjectSetup::default()
+            },
+            |sh_id| {
+                Box::new(FixtureTickCountSolidProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    ticks: Arc::new(AtomicU32::new(0)),
+                    color: [u16::MAX, 0, 0, u16::MAX],
+                })
+            },
+        );
+        let extent = ControlExtent::new(1, 3);
+        let product = ControlProduct::new(fix_id, 0, extent);
+
+        let probe_bytes = |engine: &mut Engine, color_policy: ControlColorPolicy| {
+            let results = read_probe_results(
+                engine,
+                &registry,
+                ProjectReadRequest {
+                    since: None,
+                    queries: vec![],
+                    probes: vec![ProjectProbeRequest::ControlProduct(
+                        ControlProductProbeRequest {
+                            product,
+                            sample_format: WireChannelSampleFormat::U16,
+                            display_layout: ControlDisplayLayoutRead::None,
+                            color_policy,
+                        },
+                    )],
+                },
+            );
+            let ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
+                bytes,
+                ..
+            }) = results.into_iter().next().expect("one probe result")
+            else {
+                panic!("expected control preview");
+            };
+            bytes
+        };
+
+        // Display: solid red stays red (RGB order).
+        assert_eq!(
+            probe_bytes(&mut engine, ControlColorPolicy::Display),
+            vec![255, 255, 0, 0, 0, 0]
+        );
+        // Wire: the GRB fixture swaps red into the G slot.
+        assert_eq!(
+            probe_bytes(&mut engine, ControlColorPolicy::Wire),
+            vec![0, 0, 255, 255, 0, 0]
+        );
+    }
+
+    #[test]
+    fn resolve_bus_control_product_finds_fixtures_and_rejects_visual_channels() {
+        let (mut engine, registry, fix_id, sh_id) =
+            build_fixture_project(FixtureProjectSetup::default(), |sh_id| {
+                Box::new(FixtureTickCountSolidProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    ticks: Arc::new(AtomicU32::new(0)),
+                    color: [u16::MAX, 0, 0, u16::MAX],
+                })
+            });
+        let frame = Revision::new(2);
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: fix_id,
+                        slot: fixture_output_path(),
+                    },
+                    target: BindingTarget::BusChannel(lpc_model::ChannelName("fixture_out".into())),
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: shader_output_path(),
+                    },
+                    target: BindingTarget::BusChannel(lpc_model::ChannelName("video".into())),
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: sh_id,
+                },
+                frame,
+            )
+            .unwrap();
+
+        let product = engine
+            .resolve_bus_control_product(&registry, "fixture_out")
+            .expect("control channel resolves");
+        assert_eq!(product.node(), fix_id);
+
+        // Visual-only channels error cleanly on the control resolver...
+        let err = engine
+            .resolve_bus_control_product(&registry, "video")
+            .expect_err("visual channel must not resolve as control");
+        assert!(
+            err.to_string().contains("does not carry a control product"),
+            "{err:?}"
+        );
+        // ...and the visual resolver keeps its control-channel error.
+        let err = engine
+            .resolve_bus_visual_product(&registry, "fixture_out")
+            .expect_err("control channel must not resolve as visual");
+        assert!(
+            err.to_string().contains("does not carry a visual product"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_fixture_preview_returns_layout_count_and_brightness_scale() {
+        let (mut engine, registry, fix_id, sh_id) = build_fixture_project(
+            FixtureProjectSetup {
+                ring_lamp_counts: vec![1, 1],
+                brightness: 128,
+                ..FixtureProjectSetup::default()
+            },
+            |sh_id| {
+                Box::new(FixtureTickCountSolidProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    ticks: Arc::new(AtomicU32::new(0)),
+                    color: [u16::MAX, 0, 0, u16::MAX],
+                })
+            },
+        );
+        let extent = ControlExtent::new(1, 6);
+        let product = ControlProduct::new(fix_id, 0, extent);
+
+        let spec = engine
+            .resolve_fixture_preview(&registry, product, ControlColorPolicy::Display)
+            .expect("fixture preview resolves");
+        assert_eq!(spec.point_count, 2);
+        assert_eq!(spec.layout.lamps.len(), 2);
+        // Grid contract: texel i belongs to lamps[i], in generation order.
+        assert_eq!(spec.layout.lamps[0].center, [0.5, 0.5]);
+        assert_eq!(spec.layout.lamps[1].center, [1.0, 0.5]);
+        assert!(spec.layout.lamps.iter().all(|lamp| lamp.radius > 0.0));
+        assert!(
+            (spec.color_scale - 128.0 / 255.0).abs() < 1e-6,
+            "color_scale carries brightness: {}",
+            spec.color_scale
+        );
+
+        // Wire has no GPU-resident path — explicit error, no fallback.
+        let err = engine
+            .resolve_fixture_preview(&registry, product, ControlColorPolicy::Wire)
+            .expect_err("wire policy must error");
+        assert!(err.to_string().contains("wire color policy"), "{err:?}");
+
+        // Visual-only producers error cleanly (a shader has no control node).
+        let err = engine
+            .resolve_fixture_preview(
+                &registry,
+                ControlProduct::new(sh_id, 0, extent),
+                ControlColorPolicy::Display,
+            )
+            .expect_err("shader node has no fixture preview");
+        assert!(err.to_string().contains("control_node"), "{err:?}");
+    }
+
+    /// The per-tick resident-grid fill: the fixture sends its lamp sample
+    /// points (pixel Q16.16, generation order) to the visual producer's
+    /// grid sampler, which lands point i in grid texel i — no readback in
+    /// the engine path.
+    #[test]
+    fn render_fixture_preview_grid_samples_lamp_points_into_the_grid() {
+        let (mut engine, registry, fix_id, _) = build_fixture_project(
+            FixtureProjectSetup {
+                ring_lamp_counts: vec![1, 1],
+                ..FixtureProjectSetup::default()
+            },
+            |sh_id| {
+                Box::new(FixtureGridSampleProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    expected_points: vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
+                    colors: vec![[1000, 2000, 3000, u16::MAX], [4000, 5000, 6000, u16::MAX]],
+                    expected_width: 4,
+                    expected_height: 4,
+                })
+            },
+        );
+        let extent = ControlExtent::new(1, 6);
+        let product = ControlProduct::new(fix_id, 0, extent);
+        let graphics = engine.graphics().expect("test graphics").clone();
+        let mut grid = graphics.create_render_target(2, 1).expect("grid target");
+
+        engine
+            .render_fixture_preview_grid(&registry, product, &mut grid)
+            .expect("preview grid renders");
+
+        let texels: Vec<u16> = graphics
+            .read_back(&grid)
+            .expect("read back grid")
+            .bytes()
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        assert_eq!(
+            texels,
+            vec![1000, 2000, 3000, u16::MAX, 4000, 5000, 6000, u16::MAX]
+        );
+    }
+
+    /// Visual producer mock for the resident-grid path: verifies the request
+    /// and writes per-point colors into the grid texels.
+    struct FixtureGridSampleProducer {
+        state: ShaderState,
+        expected_points: Vec<i32>,
+        colors: Vec<[u16; 4]>,
+        expected_width: u32,
+        expected_height: u32,
+    }
+
+    impl NodeRuntime for FixtureGridSampleProducer {
+        fn produce(
+            &mut self,
+            _slot: &SlotPath,
+            ctx: &mut TickContext<'_>,
+        ) -> Result<ProduceResult, NodeError> {
+            self.state
+                .output
+                .set_with_version(ctx.revision(), VisualProduct::new(ctx.node_id(), 0));
+            Ok(ProduceResult::Produced)
+        }
+
+        fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
+            Ok(())
+        }
+
+        fn handle_memory_pressure(
+            &mut self,
+            _level: PressureLevel,
+            _ctx: &mut MemPressureCtx<'_>,
+        ) -> Result<(), NodeError> {
+            Ok(())
+        }
+
+        fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
+            Some(&self.state)
+        }
+
+        fn register_runtime_state_shapes(
+            &self,
+            registry: &mut SlotShapeRegistry,
+        ) -> Result<(), SlotShapeRegistryError> {
+            ShaderState::register_runtime_state_shape(registry).map(|_| ())
+        }
+
+        fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
+            Some(self)
+        }
+    }
+
+    impl RenderNode for FixtureGridSampleProducer {
+        fn render_texture(
+            &mut self,
+            product: VisualProduct,
+            _request: &RenderTextureRequest,
+            _ctx: &mut RenderContext<'_>,
+        ) -> Result<TextureRenderProduct, NodeError> {
+            Err(NodeError::msg(format!(
+                "unexpected texture render for {product:?}"
+            )))
+        }
+
+        fn sample_visual_to_grid(
+            &mut self,
+            _product: VisualProduct,
+            request: VisualSampleBufferRequest<'_>,
+            grid: &mut lp_gfx::TextureHandle,
+            ctx: &mut RenderContext<'_>,
+        ) -> Result<(), NodeError> {
+            let graphics = ctx.graphics().expect("test graphics");
+            assert_eq!(request.output_width, self.expected_width);
+            assert_eq!(request.output_height, self.expected_height);
+            assert_eq!(
+                graphics
+                    .read_sample_points(request.points)
+                    .expect("read test points"),
+                self.expected_points
+            );
+            assert_eq!(
+                (grid.width() as usize) * (grid.height() as usize),
+                self.colors.len(),
+                "grid must hold one texel per point"
+            );
+            let mut bytes = Vec::with_capacity(self.colors.len() * 8);
+            for color in &self.colors {
+                for channel in color {
+                    bytes.extend_from_slice(&channel.to_le_bytes());
+                }
+            }
+            graphics
+                .write_texture(grid, &bytes)
+                .expect("write test grid");
+            Ok(())
+        }
+    }
+
+    /// One-ring fixture project wired to a caller-supplied visual producer.
+    struct FixtureProjectSetup {
+        ring_lamp_counts: Vec<u32>,
+        sampling: FixtureSamplingConfig,
+        color_order: ColorOrder,
+        brightness: u32,
+        gamma_correction: bool,
+    }
+
+    impl Default for FixtureProjectSetup {
+        fn default() -> Self {
+            Self {
+                ring_lamp_counts: vec![1],
+                sampling: FixtureSamplingConfig::Direct,
+                color_order: ColorOrder::Rgb,
+                brightness: 255,
+                gamma_correction: false,
+            }
+        }
+    }
+
+    fn build_fixture_project(
+        setup: FixtureProjectSetup,
+        producer: impl FnOnce(lpc_model::NodeId) -> Box<dyn NodeRuntime>,
+    ) -> (
+        Engine,
+        ProjectRegistry,
+        lpc_model::NodeId,
+        lpc_model::NodeId,
+    ) {
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let spine = test_placeholder_spine();
+
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").unwrap(),
+                lpc_model::NodeName::parse("shader").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine.clone(),
+                frame,
+            )
+            .unwrap();
+        engine
+            .attach_runtime_node(sh_id, producer(sh_id), frame)
+            .unwrap();
+
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                setup.ring_lamp_counts.len() as u32,
+                &setup.ring_lamp_counts,
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                frame,
+            )
+            .unwrap();
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(fix_id, mapping, setup.sampling, frame)),
+                frame,
+            )
+            .unwrap();
+
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            "render_size",
+            Dim2u {
+                width: 4,
+                height: 4,
+            }
+            .to_lp_value(),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            "color_order",
+            setup.color_order.to_lp_value(),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            "brightness.some",
+            LpValue::U32(setup.brightness),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            "gamma_correction.some",
+            LpValue::Bool(setup.gamma_correction),
+        );
+
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: shader_output_path(),
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+
+        engine.add_demand_root(fix_id);
+        engine.tick(&registry, 10).unwrap();
+        (engine, registry, fix_id, sh_id)
+    }
+
+    fn render_fixture_policy_bytes(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        fix_id: lpc_model::NodeId,
+        extent: ControlExtent,
+        color_policy: ControlColorPolicy,
+    ) -> (Vec<u16>, ControlLayout) {
+        let request = ControlRenderRequest::unorm16_with_policy(extent, color_policy);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        let layout = engine
+            .render_control_for_test(
+                registry,
+                ControlProduct::new(fix_id, 0, extent),
+                &request,
+                target,
+            )
+            .expect("control render");
+        (samples, layout)
     }
 }
