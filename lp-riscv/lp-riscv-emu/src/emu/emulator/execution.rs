@@ -66,10 +66,20 @@ impl Riscv32Emulator {
         // Execute instruction using new executor
         let pc = self.pc;
         let exec_result = match self.log_level {
-            LogLevel::None => {
-                decode_execute::<LoggingDisabled>(inst_word, pc, &mut self.regs, &mut self.memory)?
-            }
-            _ => decode_execute::<LoggingEnabled>(inst_word, pc, &mut self.regs, &mut self.memory)?,
+            LogLevel::None => decode_execute::<LoggingDisabled>(
+                inst_word,
+                pc,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )?,
+            _ => decode_execute::<LoggingEnabled>(
+                inst_word,
+                pc,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )?,
         };
         self.after_execute(pc, &exec_result);
 

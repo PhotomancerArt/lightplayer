@@ -32,6 +32,10 @@ pub(crate) use shared::IsaEmitOutput;
 /// emitter currently produces only base RV32IM instructions. The A and C
 /// extensions appear in the target name because the firmware runtime uses
 /// them, not because we emit them.
+///
+/// Because the name is the *hardware*, an rv32 part that **does** have the F
+/// extension (ESP32-S31, ESP32-P4, any RV32IMAFC core) is a **new variant**,
+/// not a flag on this one. See [`IsaTarget::f32_lowering`].
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IsaTarget {
     #[cfg(feature = "isa-rv32")]
@@ -41,6 +45,39 @@ pub enum IsaTarget {
     /// buffer placement differs per chip, and that lives in `rt_jit`).
     #[cfg(feature = "isa-xt")]
     Xtensa,
+}
+
+/// How a target performs IEEE-754 binary32 arithmetic in
+/// [`lpir::FloatMode::F32`].
+///
+/// This is the **float-capability seam**. It exists because "rv32" is not one
+/// float story: the ESP32-C6 and RP2350's Hazard3 are RV32IMAC with no F
+/// extension at all, while the ESP32-S31 and ESP32-P4 are RV32IMAFC with a
+/// per-core single-precision FPU. Emitting `fadd.s` for a C6 does not produce a
+/// wrong number — it takes an illegal-instruction trap on the first frame. So
+/// the choice has to be a *named property of the target*, checked in one place,
+/// rather than an assumption baked into shared lowering.
+///
+/// Note what makes this safe today: **no variant of [`IsaTarget`] answers
+/// [`F32Lowering::HardwareFpu`]**, so no code path in this crate can emit an
+/// FP-register instruction. The variant is not speculative padding — it is the
+/// thing a new `Rv32imafc` (or the Xtensa FPU backend, roadmap M7) flips, and
+/// having it here means that change is one arm of one match instead of a search
+/// for every place float lowering assumed soft calls.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum F32Lowering {
+    /// This target cannot execute f32 shaders at all; `FloatMode::F32` is a
+    /// compile error naming the target.
+    Unsupported,
+    /// Float ops lower to calls into the platform soft-float library. Values
+    /// live in **integer** registers ([`RegClass::Int`]) — the soft-float ABI
+    /// passes and returns a `float` in `a0`-class registers — so this path
+    /// needs no float register class, no float argument bank, and no new
+    /// emitter instructions.
+    SoftFloatCalls,
+    /// Float ops lower to native FP instructions operating on the float
+    /// register file ([`RegClass::Float`]).
+    HardwareFpu,
 }
 
 impl IsaTarget {
@@ -231,6 +268,37 @@ impl IsaTarget {
             IsaTarget::Rv32imac => false,
             #[cfg(feature = "isa-xt")]
             IsaTarget::Xtensa => true,
+        }
+    }
+
+    /// How this target implements `float` when the shader is compiled in
+    /// [`lpir::FloatMode::F32`] — the float-capability seam.
+    ///
+    /// `Rv32imac` names a part **without** the F extension (ESP32-C6, Hazard3),
+    /// so it answers [`F32Lowering::SoftFloatCalls`]: float ops become direct
+    /// calls to the platform soft-float symbols (`__addsf3`, `__mulsf3`, …).
+    /// Those symbols are present in every rv32 image we build — on the C6 the
+    /// linker resolves them to the chip's **ROM** `rvfplib` routines
+    /// (`esp32c6.rom.rvfp.ld`), and in the host emulator's builtins image to
+    /// Rust's `compiler_builtins`. See
+    /// `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+    ///
+    /// The Xtensa arm is [`F32Lowering::Unsupported`] until the hardware-FPU
+    /// emitter lands (roadmap M7). It is deliberately *not*
+    /// [`F32Lowering::SoftFloatCalls`]: the S3 has a real FPU, and quietly
+    /// giving it the slow path would hide the missing backend behind working
+    /// output.
+    ///
+    /// **Nothing answers [`F32Lowering::HardwareFpu`] yet**, which is what
+    /// makes it impossible for this crate to emit an F-extension instruction
+    /// for a part that would trap on it. `f32_lowering_never_claims_hardware`
+    /// in this module is the guard on that.
+    pub fn f32_lowering(self) -> F32Lowering {
+        match self {
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac => F32Lowering::SoftFloatCalls,
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => F32Lowering::Unsupported,
         }
     }
 
@@ -629,6 +697,62 @@ impl IsaTarget {
                 }
                 out
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn every_isa() -> alloc::vec::Vec<IsaTarget> {
+        alloc::vec![
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac,
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa,
+        ]
+    }
+
+    /// The float-capability seam's whole job: no target may claim a hardware
+    /// FPU while no emitter in this crate can encode one. A backend that gains
+    /// FP instructions flips its [`IsaTarget::f32_lowering`] arm and updates
+    /// this assertion in the same change — which is exactly the review moment
+    /// we want, because that is the change that can start emitting `fadd.s`.
+    #[test]
+    fn f32_lowering_never_claims_hardware() {
+        for isa in every_isa() {
+            assert_ne!(
+                isa.f32_lowering(),
+                F32Lowering::HardwareFpu,
+                "{isa:?} claims a hardware FPU, but no emitter here can encode \
+                 an FP instruction — and a part without the extension traps on one"
+            );
+        }
+    }
+
+    /// The C6 is the reference rv32 part and has no F extension; soft calls are
+    /// the only correct answer for it.
+    #[cfg(feature = "isa-rv32")]
+    #[test]
+    fn rv32imac_is_soft_float() {
+        assert_eq!(
+            IsaTarget::Rv32imac.f32_lowering(),
+            F32Lowering::SoftFloatCalls
+        );
+    }
+
+    /// Soft float keeps every value integer-class, so the float pools stay
+    /// empty. A float vreg reaching the allocator would then fail loudly with
+    /// `OutOfRegisters` rather than quietly landing an f32 bit pattern in a GPR
+    /// that some later pass treats as an integer.
+    #[test]
+    fn no_target_has_a_float_register_pool() {
+        for isa in every_isa() {
+            assert!(isa.allocatable_pool_order(RegClass::Float).is_empty());
+            assert!(isa.caller_saved_pool_hw(RegClass::Float).is_empty());
+            assert_eq!(isa.direct_ret_reg_count(RegClass::Float), 0);
+            assert_eq!(isa.call_arg_reg_count(RegClass::Float), 0);
         }
     }
 }
