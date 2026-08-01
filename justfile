@@ -658,6 +658,13 @@ clippy-fw-esp32v3:
       echo "clippy: --no-default-features --features $feats"
       cargo clippy --profile release-esp32v3 --no-default-features --features "$feats" -- --no-deps -D warnings
     done
+    # `ws281x_telemetry` is ADDITIVE (it turns on a module inside the default
+    # app build), so it needs its own invocation on top of the defaults rather
+    # than a `--no-default-features` one. Linted for the same reason the two
+    # entrypoints above are: a diagnostic build nothing compiles is a
+    # diagnostic build that has rotted by the time someone reaches for it.
+    echo "clippy: --features ws281x_telemetry"
+    cargo clippy --profile release-esp32v3 --features ws281x_telemetry -- --no-deps -D warnings
 
 build-fw-esp32s3:
     #!/usr/bin/env bash

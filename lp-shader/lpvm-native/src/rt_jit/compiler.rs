@@ -68,33 +68,37 @@ pub(crate) fn link_compiled_module_jit(
     // compile job) land here.
     #[cfg(all(feature = "xt-placed-code", target_arch = "xtensa"))]
     {
-        return link_compiled_module_jit_placed_global(compiled, builtin_table, isa);
+        link_compiled_module_jit_placed_global(compiled, builtin_table, isa)
     }
 
-    // 2. Link JIT image with builtin resolution
-    lp_perf::emit_begin!(EVENT_SHADER_LINK);
-    let link_result = link_jit(&compiled, isa, |sym| {
-        // First check builtins
-        if let Some(addr) = builtin_table.lookup(sym) {
-            return Some(addr as u32);
-        }
-        // Functions are resolved during link phase
-        None
-    });
-    lp_perf::emit_end!(EVENT_SHADER_LINK);
-    let linked = link_result.map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
+    #[cfg(not(all(feature = "xt-placed-code", target_arch = "xtensa")))]
+    {
+        // 2. Link JIT image with builtin resolution
+        lp_perf::emit_begin!(EVENT_SHADER_LINK);
+        let link_result = link_jit(&compiled, isa, |sym| {
+            // First check builtins
+            if let Some(addr) = builtin_table.lookup(sym) {
+                return Some(addr as u32);
+            }
+            // Functions are resolved during link phase
+            None
+        });
+        lp_perf::emit_end!(EVENT_SHADER_LINK);
+        let linked =
+            link_result.map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
 
-    // 3. Create JitBuffer from linked code
-    let buffer = JitBuffer::from_code(linked.code);
+        // 3. Create JitBuffer from linked code
+        let buffer = JitBuffer::from_code(linked.code);
 
-    let buffer_len = u32::try_from(buffer.len())
-        .map_err(|_| NativeError::Internal("JIT buffer length does not fit u32".into()))?;
-    // The profiler symbolizes sampled program counters against this base, so it
-    // is an execute address, not the write address of the buffer.
-    let base = unsafe { buffer.exec_ptr(0) } as usize as u32;
-    emit_jit_symbols(base, buffer_len, &linked.entries);
+        let buffer_len = u32::try_from(buffer.len())
+            .map_err(|_| NativeError::Internal("JIT buffer length does not fit u32".into()))?;
+        // The profiler symbolizes sampled program counters against this base,
+        // so it is an execute address, not the write address of the buffer.
+        let base = unsafe { buffer.exec_ptr(0) } as usize as u32;
+        emit_jit_symbols(base, buffer_len, &linked.entries);
 
-    Ok((buffer, linked.entries))
+        Ok((buffer, linked.entries))
+    }
 }
 
 /// The `xt-placed-code` firmware arm of [`link_compiled_module_jit`]: link
