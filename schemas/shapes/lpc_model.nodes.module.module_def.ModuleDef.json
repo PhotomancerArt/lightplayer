@@ -41,6 +41,66 @@
             }
           }
         }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "exports",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "value": {
+                "shape": {
+                  "editor": "path",
+                  "id": 1364391883,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "meta",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1452279109
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "provenance",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "ref": {
+                "id": 718754952
+              }
+            }
+          }
+        }
       }
     ],
     "meta": {}

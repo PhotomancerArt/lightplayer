@@ -6,6 +6,7 @@ pub mod module;
 pub mod node_def;
 pub mod output;
 pub mod playlist;
+pub mod provenance_def;
 pub mod radio;
 pub mod shader;
 pub mod starter;
@@ -19,7 +20,7 @@ pub use fixture::{
     FixtureSamplingConfig, FixtureState, FixtureStateView, MappingConfig, PathSpec,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
-pub use module::{ModuleDef, ModuleDefView};
+pub use module::{ChannelMetaDef, ChannelMetaDefView, ModuleDef, ModuleDefView};
 pub use node_def::{
     ArtifactPathResolutionError, InvocationSite, NodeArtifact, NodeDef, NodeDefParseError,
     NodeDefWriteError, resolve_artifact_specifier,
@@ -31,6 +32,7 @@ pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
     PlaylistStateView,
 };
+pub use provenance_def::ProvenanceDef;
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{
     ComputeShaderDef, ComputeShaderDefView, FloatMode, ScalarHint, ScalarHintView, ShaderDef,

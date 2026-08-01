@@ -213,6 +213,7 @@ impl ProjectBuilder {
             .expect("Failed to write project.json");
         let module = ModuleDef {
             nodes: MapSlot::new(nodes),
+            ..ModuleDef::default()
         };
         let module_json = authored_node_json(&registry, &NodeDef::Module(module));
         self.write_file_helper("/module.json", module_json.as_bytes())

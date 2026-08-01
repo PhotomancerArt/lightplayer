@@ -108,6 +108,7 @@ fn starter_module_def() -> NodeDef {
     }
     NodeDef::Module(ModuleDef {
         nodes: MapSlot::new(nodes),
+        ..ModuleDef::default()
     })
 }
 

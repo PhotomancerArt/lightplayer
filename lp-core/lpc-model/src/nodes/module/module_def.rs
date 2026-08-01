@@ -1,6 +1,9 @@
 use alloc::string::String;
 
-use crate::{MapSlot, NodeInvocationSlot, Slotted};
+use crate::nodes::ProvenanceDef;
+use crate::{BindingDefs, BindingRef, MapSlot, NodeInvocationSlot, OptionSlot, Slotted, ValueSlot};
+
+use super::ChannelMetaDef;
 
 /// Authored root module node definition.
 ///
@@ -21,6 +24,21 @@ pub struct ModuleDef {
     /// project operations, never as raw slot edits under this map.
     #[slot(policy = "read_only_persisted")]
     pub nodes: MapSlot<String, NodeInvocationSlot>,
+    /// Authored slot bindings on the module node itself, like any node —
+    /// this is where R7's contention pick ("two writers on `visual.out` =
+    /// ambiguous until the author picks") becomes authorable, and where an
+    /// export slot publishes outward.
+    pub bindings: BindingDefs,
+    /// Authored exports (R7): local produced-slot name → the inner-scope
+    /// channel it mirrors (`bus:` ref form). The runtime interpretation —
+    /// the slot mirroring the inner channel and publishing per R4 —
+    /// arrives with the module runtime; here the def only carries data.
+    pub exports: MapSlot<String, ValueSlot<BindingRef>>,
+    /// Per-channel authored meta overrides for this module's scope
+    /// (R9 / Q1 curation escape hatch).
+    pub meta: MapSlot<String, ChannelMetaDef>,
+    /// Authorship metadata (R14); normally carried by modules.
+    pub provenance: OptionSlot<ProvenanceDef>,
 }
 
 impl ModuleDef {
@@ -132,6 +150,71 @@ mod tests {
             .find(|field| field.name.as_str() == "nodes")
             .expect("nodes field");
         assert_eq!(nodes.policy, SlotPolicy::read_only_persisted());
+    }
+
+    #[test]
+    fn module_def_capability_fields_round_trip_byte_identically() {
+        // P3: bindings / exports / meta / provenance survive load→save
+        // byte-identically; absent fields serialize to nothing.
+        let registry = registry();
+        let json = r#"{
+  "kind": "Module",
+  "nodes": {
+    "plasma": {
+      "ref": "./modules/plasma/module.json"
+    }
+  },
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    }
+  },
+  "exports": {
+    "energy": "bus:audio.energy"
+  },
+  "meta": {
+    "speed": {
+      "label": "Master speed",
+      "unit": "Hz",
+      "min": 0,
+      "max": 10
+    }
+  },
+  "provenance": {
+    "author": "Yona",
+    "version": "0.1",
+    "license": "CC0-1.0",
+    "created": "2026-08-01"
+  }
+}
+"#;
+        let def = NodeDef::read_json(&registry, json).expect("capability fields parse");
+        let NodeDef::Module(module) = &def else {
+            panic!("expected module def");
+        };
+        assert!(module.bindings.0.entries.contains_key("output"));
+        assert!(module.exports.entries.contains_key("energy"));
+        let meta = module.meta.entries.get("speed").expect("meta entry");
+        assert_eq!(
+            meta.label.data.as_ref().map(|slot| slot.value().as_str()),
+            Some("Master speed")
+        );
+        let provenance = module.provenance.data.as_ref().expect("provenance");
+        assert!(!provenance.is_empty());
+
+        let rewritten = def.write_json(&registry).expect("re-write");
+        assert_eq!(rewritten, json, "capability fields must be byte-stable");
+
+        // Absent capability fields serialize to nothing.
+        let bare = NodeDef::read_json(&registry, r#"{ "kind": "Module", "nodes": {} }"#)
+            .expect("bare module");
+        let text = bare.write_json(&registry).expect("write bare");
+        for key in ["bindings", "exports", "meta", "provenance"] {
+            assert!(
+                !text.contains(key),
+                "{key} must not serialize when absent: {text}"
+            );
+        }
     }
 
     fn registry() -> SlotShapeRegistry {

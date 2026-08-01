@@ -51,6 +51,14 @@ pub struct ProjectManifest {
     pub uid: Option<String>,
     /// Human-readable project name — the Studio project pane's title.
     pub name: Option<String>,
+    /// Provenance (§8, settled Q7): author attribution.
+    pub author: Option<String>,
+    /// Provenance: authored version string; no semver semantics yet.
+    pub version: Option<String>,
+    /// Provenance: license identifier (e.g. `"CC0-1.0"`).
+    pub license: Option<String>,
+    /// Provenance: ISO date the project was created.
+    pub created: Option<String>,
 }
 
 impl ProjectManifest {
@@ -58,8 +66,8 @@ impl ProjectManifest {
     pub fn new_current(name: &str) -> Self {
         Self {
             format: Some(PROJECT_FORMAT_VERSION),
-            uid: None,
             name: Some(String::from(name)),
+            ..Self::default()
         }
     }
 
@@ -100,6 +108,10 @@ impl ProjectManifest {
                     }
                     "uid" => manifest.uid = Some(read_string(&mut source, "uid")?),
                     "name" => manifest.name = Some(read_string(&mut source, "name")?),
+                    "author" => manifest.author = Some(read_string(&mut source, "author")?),
+                    "version" => manifest.version = Some(read_string(&mut source, "version")?),
+                    "license" => manifest.license = Some(read_string(&mut source, "license")?),
+                    "created" => manifest.created = Some(read_string(&mut source, "created")?),
                     other => {
                         return Err(ManifestParseError::UnknownField {
                             field: other.to_string(),
@@ -123,7 +135,8 @@ impl ProjectManifest {
     }
 
     /// Write the manifest as canonical authored JSON: pretty-printed, fixed
-    /// field order (`format`, `uid`, `name`), absent fields omitted,
+    /// field order (`format`, `uid`, `name`, `author`, `version`,
+    /// `license`, `created`), absent fields omitted,
     /// trailing newline. Deterministic so unchanged models produce
     /// byte-identical files.
     pub fn write_json(&self) -> String {
@@ -151,6 +164,18 @@ impl ProjectManifest {
         }
         if let Some(name) = &self.name {
             field("name", name, true, &mut out);
+        }
+        if let Some(author) = &self.author {
+            field("author", author, true, &mut out);
+        }
+        if let Some(version) = &self.version {
+            field("version", version, true, &mut out);
+        }
+        if let Some(license) = &self.license {
+            field("license", license, true, &mut out);
+        }
+        if let Some(created) = &self.created {
+            field("created", created, true, &mut out);
         }
         if first {
             out.push_str("}\n");
@@ -241,11 +266,15 @@ mod tests {
             format: Some(PROJECT_FORMAT_VERSION),
             uid: Some(String::from("prj_0000000000000042")),
             name: Some(String::from("Porch sign")),
+            author: Some(String::from("Yona")),
+            version: Some(String::from("0.1")),
+            license: Some(String::from("CC0-1.0")),
+            created: Some(String::from("2026-08-01")),
         };
         let text = manifest.write_json();
         assert_eq!(
             text,
-            "{\n  \"format\": 3,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\"\n}\n"
+            "{\n  \"format\": 3,\n  \"uid\": \"prj_0000000000000042\",\n  \"name\": \"Porch sign\",\n  \"author\": \"Yona\",\n  \"version\": \"0.1\",\n  \"license\": \"CC0-1.0\",\n  \"created\": \"2026-08-01\"\n}\n"
         );
         let read = ProjectManifest::read_json(&text).expect("read back");
         assert_eq!(read, manifest);
@@ -256,8 +285,7 @@ mod tests {
     fn manifest_absent_fields_serialize_to_nothing() {
         let manifest = ProjectManifest {
             format: Some(3),
-            uid: None,
-            name: None,
+            ..ProjectManifest::default()
         };
         assert_eq!(manifest.write_json(), "{\n  \"format\": 3\n}\n");
         assert_eq!(ProjectManifest::default().write_json(), "{}\n");
@@ -298,8 +326,8 @@ mod tests {
     fn manifest_name_escapes_round_trip() {
         let manifest = ProjectManifest {
             format: Some(3),
-            uid: None,
             name: Some(String::from("a \"b\"\\\n\tc")),
+            ..ProjectManifest::default()
         };
         let text = manifest.write_json();
         let read = ProjectManifest::read_json(&text).expect("read escaped");
