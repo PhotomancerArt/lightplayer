@@ -21,8 +21,29 @@ enum Inner {
     /// Emitted code executing in place out of its own allocation.
     Heap { code: Vec<u8> },
     /// Code installed at a fixed executable address; `exec_base` is already
-    /// an execute (I-bus) address.
+    /// an execute (I-bus) address. The span belongs to an EXTERNAL arena the
+    /// caller owns — dropping the buffer does not free it.
     Placed { exec_base: usize, len: usize },
+    /// As `Placed`, but the span came from `codemem_esp32::global`'s arena
+    /// (the `xt-placed-code` firmware path) and is returned to it on drop —
+    /// without this, every Studio recompile would leak a slice of the 92 KiB
+    /// region until `TooLarge`.
+    #[cfg(feature = "xt-placed-code")]
+    PlacedGlobal { exec_base: usize, len: usize },
+}
+
+#[cfg(feature = "xt-placed-code")]
+impl Drop for JitBuffer {
+    fn drop(&mut self) {
+        if let Inner::PlacedGlobal { exec_base, len } = self.inner {
+            // NotInstalled/Busy cannot free the span; leaking is the safe
+            // failure (a leak is recoverable by reboot, a double-use is
+            // corruption).
+            let _ = crate::codemem_esp32::global::with(|arena| {
+                arena.free(exec_base as u32, len as u32);
+            });
+        }
+    }
 }
 
 /// Holds emitted machine code for one module.
@@ -47,12 +68,24 @@ impl JitBuffer {
         }
     }
 
+    /// [`JitBuffer::from_placed`] for a span owned by the global arena; the
+    /// span is freed back to it when this buffer drops.
+    #[cfg(feature = "xt-placed-code")]
+    pub(crate) fn from_placed_global(exec_base: usize, len: usize) -> Self {
+        debug_assert!(exec_base % 4 == 0);
+        Self {
+            inner: Inner::PlacedGlobal { exec_base, len },
+        }
+    }
+
     /// Byte length of emitted code.
     #[must_use]
     pub fn len(&self) -> usize {
         match &self.inner {
             Inner::Heap { code } => code.len(),
             Inner::Placed { len, .. } => *len,
+            #[cfg(feature = "xt-placed-code")]
+            Inner::PlacedGlobal { len, .. } => *len,
         }
     }
 
@@ -95,6 +128,8 @@ impl JitBuffer {
                 crate::exec_addr::exec_addr(write as usize) as *const u8
             }
             Inner::Placed { exec_base, .. } => (exec_base + offset) as *const u8,
+            #[cfg(feature = "xt-placed-code")]
+            Inner::PlacedGlobal { exec_base, .. } => (exec_base + offset) as *const u8,
         }
     }
 }

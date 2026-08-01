@@ -61,6 +61,16 @@ pub(crate) fn link_compiled_module_jit(
     builtin_table: &BuiltinTable,
     isa: IsaTarget,
 ) -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
+    // Classic-ESP32 firmware (`xt-placed-code`): every module goes through
+    // the fixed-region placed path — the heap this Vec would execute from
+    // in place has no I-bus view on that chip. This is THE chokepoint: all
+    // three engine entry points (compile, compile_with_config, the async
+    // compile job) land here.
+    #[cfg(all(feature = "xt-placed-code", target_arch = "xtensa"))]
+    {
+        return link_compiled_module_jit_placed_global(compiled, builtin_table, isa);
+    }
+
     // 2. Link JIT image with builtin resolution
     lp_perf::emit_begin!(EVENT_SHADER_LINK);
     let link_result = link_jit(&compiled, isa, |sym| {
@@ -85,6 +95,64 @@ pub(crate) fn link_compiled_module_jit(
     emit_jit_symbols(base, buffer_len, &linked.entries);
 
     Ok((buffer, linked.entries))
+}
+
+/// The `xt-placed-code` firmware arm of [`link_compiled_module_jit`]: link
+/// at a span from the boot-installed global arena, install through the
+/// device's mirrored-write sink, and return a buffer that frees its span on
+/// drop. Failing to reserve or install is a clean `NativeError` — on this
+/// chip "code region full" is the real capacity edge, and it must surface
+/// as a compile error, never a wild write.
+#[cfg(all(feature = "xt-placed-code", target_arch = "xtensa"))]
+fn link_compiled_module_jit_placed_global(
+    compiled: CompiledModule,
+    builtin_table: &BuiltinTable,
+    isa: IsaTarget,
+) -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
+    use crate::codemem_esp32::{self, DeviceCodeSink, global};
+
+    let total: usize = compiled.functions.iter().map(|f| f.code.len()).sum();
+    let total_u32 = u32::try_from(total)
+        .map_err(|_| NativeError::Internal("JIT image length does not fit u32".into()))?;
+
+    let placed = global::with(
+        |arena| -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
+            let exec_base = arena
+                .alloc(total_u32)
+                .map_err(|e| NativeError::Internal(format!("JIT code placement failed: {e}")))?;
+
+            let place = |arena: &mut codemem_esp32::CodeArena| {
+                lp_perf::emit_begin!(EVENT_SHADER_LINK);
+                let link_result = crate::link::link_jit_at(&compiled, isa, exec_base, |sym| {
+                    builtin_table.lookup(sym).map(|addr| addr as u32)
+                });
+                lp_perf::emit_end!(EVENT_SHADER_LINK);
+                let linked = link_result
+                    .map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
+
+                let mut sink = DeviceCodeSink;
+                codemem_esp32::install(arena.region(), exec_base, &linked.code, &mut sink)
+                    .map_err(|e| NativeError::Internal(format!("JIT code install failed: {e}")))?;
+                crate::codemem_esp32::CodeSink::sync(&mut sink);
+
+                let buffer = JitBuffer::from_placed_global(exec_base as usize, linked.code.len());
+                let buffer_len = u32::try_from(buffer.len()).map_err(|_| {
+                    NativeError::Internal("JIT buffer length does not fit u32".into())
+                })?;
+                emit_jit_symbols(exec_base, buffer_len, &linked.entries);
+                Ok((buffer, linked.entries))
+            };
+            match place(arena) {
+                Ok(ok) => Ok(ok),
+                Err(e) => {
+                    arena.free(exec_base, total_u32);
+                    Err(e)
+                }
+            }
+        },
+    )
+    .map_err(|e| NativeError::Internal(format!("JIT code placement failed: {e}")))?;
+    placed
 }
 
 /// [`compile_module_jit`] for the classic-ESP32 **fixed-region** placement:

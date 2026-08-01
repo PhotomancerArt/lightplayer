@@ -347,6 +347,78 @@ impl CodeArena {
     }
 }
 
+/// The firmware-installed global arena behind the `xt-placed-code` feature.
+///
+/// The JIT engine is constructed deep inside the graphics backend with no
+/// classic-specific parameters, so the fw crate installs the arena once at
+/// boot and the engine reaches it here. Single-threaded firmware is the
+/// operating assumption; the busy flag turns an accidental concurrent
+/// compile into a clean error instead of an aliased `&mut`.
+#[cfg(feature = "xt-placed-code")]
+pub mod global {
+    use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+
+    use super::{CodeArena, CodeRegion};
+
+    static ARENA: AtomicPtr<CodeArena> = AtomicPtr::new(core::ptr::null_mut());
+    static BUSY: AtomicBool = AtomicBool::new(false);
+
+    /// Install the classic code arena. Call once at boot, before the first
+    /// shader compile; the arena is leaked (it lives for the firmware's
+    /// lifetime by design).
+    pub fn install(region: CodeRegion) {
+        let arena = alloc::boxed::Box::leak(alloc::boxed::Box::new(CodeArena::new(region)));
+        let prev = ARENA.swap(arena, Ordering::SeqCst);
+        assert!(prev.is_null(), "classic JIT code arena installed twice");
+    }
+
+    /// True once [`install`] has run.
+    #[must_use]
+    pub fn installed() -> bool {
+        !ARENA.load(Ordering::SeqCst).is_null()
+    }
+
+    /// Run `f` with exclusive access to the arena.
+    ///
+    /// `Err(NotInstalled)` when boot never installed one; `Err(Busy)` if a
+    /// second use overlaps the first (a reentrancy bug upstream, reported
+    /// rather than aliased).
+    pub(crate) fn with<R>(f: impl FnOnce(&mut CodeArena) -> R) -> Result<R, GlobalArenaError> {
+        let ptr = ARENA.load(Ordering::SeqCst);
+        if ptr.is_null() {
+            return Err(GlobalArenaError::NotInstalled);
+        }
+        if BUSY.swap(true, Ordering::SeqCst) {
+            return Err(GlobalArenaError::Busy);
+        }
+        // SAFETY: BUSY guarantees exclusivity; the pointer is never freed
+        // after install.
+        let result = f(unsafe { &mut *ptr });
+        BUSY.store(false, Ordering::SeqCst);
+        Ok(result)
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub(crate) enum GlobalArenaError {
+        NotInstalled,
+        Busy,
+    }
+
+    impl core::fmt::Display for GlobalArenaError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            match self {
+                GlobalArenaError::NotInstalled => f.write_str(
+                    "classic JIT code arena not installed — firmware boot must call \
+                     codemem_esp32::global::install before the first shader compile",
+                ),
+                GlobalArenaError::Busy => {
+                    f.write_str("classic JIT code arena is busy (reentrant compile?)")
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
