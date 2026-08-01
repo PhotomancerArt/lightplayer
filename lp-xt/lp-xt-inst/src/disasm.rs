@@ -317,6 +317,7 @@ fn fp_rr_mnem(op: FpRrOp) -> &'static str {
         FpRrOp::Sqrt0S => "sqrt0.s",
         FpRrOp::Rsqrt0S => "rsqrt0.s",
         FpRrOp::Nexp01S => "nexp01.s",
+        FpRrOp::MksadjS => "mksadj.s",
         FpRrOp::MkdadjS => "mkdadj.s",
         FpRrOp::AddexpS => "addexp.s",
         FpRrOp::AddexpmS => "addexpm.s",

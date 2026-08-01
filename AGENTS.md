@@ -208,16 +208,26 @@ is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
 targets; it needs a cross-compiled builtins image
 (`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
 
-**Xtensa floating point is a separate, in-flight campaign (M6).** `lp-xt-inst`
-encodes the FP subset and `lp-xt-emu` executes it behind an explicit policy layer
-where every corner IEEE-754 does not fix is either cited to the ISA Reference
-Manual or `Unknown` — and **reading an `Unknown` panics** rather than guessing.
+**Xtensa floating point is proven equal to real ESP32-S3 silicon (M6, G2
+passed 2026-08-01).** `lp-xt-inst` encodes the FP subset and `lp-xt-emu`
+executes it behind an explicit policy layer where every corner IEEE-754 does
+not fix is either measured (cited to the ISA Reference Manual, silicon-
+confirmed, or silicon alone) or `Unknown` — and **reading an `Unknown`
+panics** rather than guessing. All 17 policy fields are now measured; the
+behavior contract, corner by corner with its proving vector family, is
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`.
 `cargo test -p lp-xt-emu --test fp_conformance` replays the whole 5 630-vector
-corpus with no board attached; `just fwtest-xt-fp-esp32s3 <port>` runs the same
-vectors on a desk S3 and `just fp-diff <capture>` classifies the answers. The
-predictions were committed before any hardware ran, so **a device disagreement is
-a finding to triage, never a reason to edit a golden**. Do not resolve a policy
-field without a citation naming a manual page or a dated desk session.
+corpus with no board attached and asserts **zero** `UNKNOWN` rows;
+`cargo test -p lp-xt-emu --test fp_silicon_replay` replays the campaign's own
+silicon captures (ROM sweeps, helper probes, the full family diff) with no
+board attached either — that pair is what makes "the emulator is trusted"
+something CI enforces on every commit. `just fwtest-xt-fp-esp32s3 <port>` runs
+the same vectors on a desk S3 and `just fp-diff <capture>` classifies the
+answers, for the rare case the contract itself needs re-checking. The
+predictions were committed before any hardware ran, so **a device
+disagreement is a finding to triage, never a reason to edit a golden**. Do
+not resolve a policy field without a citation naming a manual page or a dated
+desk session.
 
 > **`regalloc/` is shared by both ISAs, and rv32 passing does not prove it
 > correct.** Two defects landed there in 2026-07 that were correct on rv32 only

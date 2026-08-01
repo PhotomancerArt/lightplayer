@@ -87,6 +87,7 @@ fn fp_rr_sel(op: FpRrOp) -> u32 {
         FpRrOp::Sqrt0S => 0x9,
         FpRrOp::Rsqrt0S => 0xa,
         FpRrOp::Nexp01S => 0xb,
+        FpRrOp::MksadjS => 0xc,
         FpRrOp::MkdadjS => 0xd,
         FpRrOp::AddexpS => 0xe,
         FpRrOp::AddexpmS => 0xf,

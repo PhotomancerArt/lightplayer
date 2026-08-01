@@ -25,7 +25,8 @@ disassembly in traces and tests) sits on this crate.
   worth making impossible): arithmetic (`add.s`/`sub.s`/`mul.s`/`madd.s`/
   `msub.s`/`maddn.s`/`divn.s`), unary and transfer (`mov.s`/`abs.s`/`neg.s`/
   `const.s`/`rfr`/`wfr`), the divide/sqrt helper family (`div0.s`/`recip0.s`/
-  `sqrt0.s`/`rsqrt0.s`/`nexp01.s`/`mkdadj.s`/`addexp.s`/`addexpm.s`), compares
+  `sqrt0.s`/`rsqrt0.s`/`nexp01.s`/`mksadj.s`/`mkdadj.s`/`addexp.s`/
+  `addexpm.s`), compares
   (`oeq.s`/`olt.s`/`ole.s`/`ueq.s`/`ult.s`/`ule.s`/`un.s`), conditional moves
   (`moveqz.s`/`movnez.s`/`movltz.s`/`movgez.s`/`movf.s`/`movt.s`), conversions
   (`round.s`/`trunc.s`/`floor.s`/`ceil.s`/`utrunc.s`/`float.s`/`ufloat.s`), and
@@ -73,7 +74,7 @@ Scores, all with **zero mismatches**:
 
 | ELF | matched | unsupported |
 |---|---|---|
-| `fixtures/fp/obj/fp_subset.elf` — the whole FP/Boolean/SR subset | 134 | 0 |
+| `fixtures/fp/obj/fp_subset.elf` — the whole FP/Boolean/SR subset | 136 | 0 |
 | the 14 `fixtures/elf/*.elf` Rust corpus binaries, summed | 26,063 | 346 |
 | the experiment repo's spike ELF (2026-esp32s3-experiment) | 10,969 | 329 → see note |
 

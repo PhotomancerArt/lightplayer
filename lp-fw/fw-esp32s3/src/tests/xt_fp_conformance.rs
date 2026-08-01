@@ -43,11 +43,14 @@
 //! decided for itself whether it agreed would be the tautology this whole
 //! milestone is arranged to avoid.
 //!
-//! The `<div-sequence>` and `<sqrt-sequence>` pseudo-ops are printed as `skip`:
-//! divide and square root are code sequences over helper instructions whose
-//! semantics no available document states (the ISA RM's Table 4-46 does not
-//! list them), so running "the sequence" here would mean inventing it. P6
-//! measures the helpers first.
+//! The `<div-sequence>` and `<sqrt-sequence>` pseudo-ops run the toolchain's
+//! **real** sequences, transcribed instruction-for-instruction from
+//! `xtensa-esp32s3-elf-objdump` of the esp-14.2.0 toolchain's `__divsf3`
+//! (libgcc) and `__ieee754_sqrtf` (libm). Disassembly output is fact
+//! (AGENTS.md license rule: no library *source* was read), and these are the
+//! sequences M7's codegen will face — so their end-to-end results are both a
+//! conformance surface and the independent oracle that keeps the helper-probe
+//! characterization honest.
 
 use esp_println::println;
 use lp_xt_fp_vectors::{Family, OpCode, Vector, count, fingerprint, vector};
@@ -101,11 +104,45 @@ const fn parse_u32(s: &str) -> u32 {
     n
 }
 
-/// The exponents the estimate-table sweep covers.
+/// The `(sign, exponent)` pairs the estimate-table sweep covers.
 ///
-/// Four adjacent ones so the exponent rule's separability is visible, and two
-/// parities because `rsqrt0.s` keys on the exponent's low bit.
-const TABLE_EXPONENTS: [u32; 4] = [126, 127, 128, 129];
+/// The four adjacent exponents 126..129 are where the exponent rule's
+/// *separability* is confirmed (two parities, because `rsqrt0.s` keys on the
+/// exponent's low bit). The far-flung ones (1, 2, 60, 200, 253, 254) are where
+/// an affine exponent rule would break if it were only locally true — recip0
+/// of 2^127 lands near the bottom of the exponent range, and an
+/// overflow/underflow rule nobody measured would otherwise be an
+/// overflow/underflow rule nobody knows. `0` and `255` are the special
+/// classes: what the estimates do with denormals, infinities and NaNs is not
+/// predictable from the normal-range table at all. The negative-sign sweeps
+/// pin the sign rule rather than assuming odd symmetry.
+const TABLE_SWEEPS: [(u32, u32); 15] = [
+    (0, 0),
+    (0, 1),
+    (0, 2),
+    (0, 60),
+    (0, 126),
+    (0, 127),
+    (0, 128),
+    (0, 129),
+    (0, 200),
+    (0, 253),
+    (0, 254),
+    (0, 255),
+    (1, 0),
+    (1, 127),
+    (1, 255),
+];
+
+/// Give up on a sweep whose output is not actually a step function.
+///
+/// A healthy table is ~106 runs. A payload-passthrough behavior (plausible for
+/// NaN inputs at exponent 255) would be eight million runs of length one, and
+/// printing them would drown the capture. The cap keeps the pathology visible
+/// — the first `RUN_CAP` runs still show the structure — while bounding it,
+/// and the `aborted=1` sentinel keeps a capped sweep from ever being read as a
+/// complete table.
+const RUN_CAP: u32 = 2048;
 
 pub fn run_all() -> ! {
     println!("{TAG} BEGIN");
@@ -163,6 +200,7 @@ pub fn run_all() -> ! {
     match MODE {
         "families" => run_families(),
         "tables" => run_tables(),
+        "helpers" => run_helpers(),
         other => {
             println!("{TAG} FATAL unknown LP_FP_MODE={other}");
         }
@@ -281,8 +319,9 @@ fn dispatch(v: &Vector) -> Option<u32> {
             OpCode::RoundS => return scaled(v, kernels::ROUND_S),
             OpCode::FloorS => return scaled(v, kernels::FLOOR_S),
             OpCode::CeilS => return scaled(v, kernels::CEIL_S),
-            // Not instructions. See the module doc.
-            OpCode::Div | OpCode::Sqrt => return None,
+            // The toolchain's real code sequences — see the module doc.
+            OpCode::Div => k::lp_fp_div_seq(v.a, v.b),
+            OpCode::Sqrt => k::lp_fp_sqrt_seq(v.a),
         }
     };
     Some(r)
@@ -325,25 +364,26 @@ fn run_tables() {
     ];
     let mut tables = 0u32;
     for (name, f) in ops {
-        for exp in TABLE_EXPONENTS {
+        for (sign, exp) in TABLE_SWEEPS {
             tables += 1;
-            sweep_one(name, exp, f);
+            sweep_one(name, sign, exp, f);
         }
     }
     println!(
-        "{TAG} END-ALL tables={tables} exponents={}",
-        TABLE_EXPONENTS.len()
+        "{TAG} END-ALL tables={tables} sweeps={}",
+        TABLE_SWEEPS.len()
     );
 }
 
-fn sweep_one(name: &str, exp: u32, f: unsafe extern "C" fn(u32) -> u32) {
-    println!("{TAG} TABLE op={name} exp={exp} significand-bits=23");
-    let base = exp << 23;
+fn sweep_one(name: &str, sign: u32, exp: u32, f: unsafe extern "C" fn(u32) -> u32) {
+    println!("{TAG} TABLE op={name} exp={exp} sign={sign} significand-bits=23");
+    let base = (sign << 31) | (exp << 23);
     let mut runs = 0u32;
     let mut run_start = 0u32;
     let mut run_value = unsafe { f(base) };
     let mut line = Line::empty();
     let mut cells = 0usize;
+    let mut aborted = false;
 
     // `..=` on the last significand so the final run closes inside the loop
     // rather than needing a duplicate emit after it.
@@ -369,9 +409,138 @@ fn sweep_one(name: &str, exp: u32, f: unsafe extern "C" fn(u32) -> u32) {
         runs += 1;
         run_start = frac;
         run_value = value;
+        if runs >= RUN_CAP {
+            aborted = true;
+            break;
+        }
     }
     line.flush();
-    println!("{TAG} END table={name} exp={exp} runs={runs}");
+    println!(
+        "{TAG} END table={name} exp={exp} sign={sign} runs={runs} aborted={}",
+        u32::from(aborted)
+    );
+}
+
+/// The helper-characterization mode (see `lp_xt_fp_vectors::helpers`).
+///
+/// Prints the sixteen `const.s` outputs, then every probe grid, in the same
+/// `D`/`DIGEST`/`END` row format as the families so the host parser needs no
+/// second shape. There are no predictions to compare against — this is the one
+/// place in the campaign where silicon speaks first — and the derived
+/// semantics are then held to (a) this capture, replayed boardlessly, and
+/// (b) the end-to-end divide/sqrt sequence results in the families capture.
+fn run_helpers() {
+    use lp_xt_fp_vectors::helpers::{self, HelperOp};
+
+    println!(
+        "{TAG} helpers-fingerprint={:#010x} total={}",
+        helpers::fingerprint(),
+        helpers::total()
+    );
+
+    // const.s: sixteen architecturally-defined constants nothing else sources.
+    for (i, f) in kernels::CONST_S.iter().enumerate() {
+        let v = unsafe { f() };
+        println!("{TAG} CONST {i:02} {v:08x}");
+    }
+
+    let mut ops = 0u32;
+    let mut probes = 0u32;
+    for op in HelperOp::ALL {
+        let total = helpers::count(op);
+        let n = if LIMIT == 0 { total } else { LIMIT.min(total) };
+        println!("{TAG} FAMILY {} label=H count={n} of={total}", op.name());
+        let mut digest = 0x811C_9DC5u32;
+        let mut cells = 0usize;
+        let mut line = Line::empty();
+        for i in 0..n {
+            let v = helpers::probe(op, i);
+            if cells % PER_LINE == 0 {
+                line.start_helper(op.name(), i);
+            }
+            unsafe {
+                let _ = kernels::lp_fp_set_fsr(0);
+            }
+            let result = unsafe { helper_kernel(op)(v.r, v.s, v.t) };
+            let fsr = unsafe { kernels::lp_fp_get_fsr() };
+            line.cell(result, fsr);
+            digest = mix(digest ^ i);
+            digest = mix(digest ^ result).wrapping_add(fsr);
+            cells += 1;
+            if cells % PER_LINE == 0 {
+                line.flush();
+            }
+        }
+        line.flush();
+        println!("{TAG} DIGEST {} {digest:#010x} rows={n}", op.name());
+        println!("{TAG} END family={} count={n}", op.name());
+        ops += 1;
+        probes += n;
+    }
+
+    // The second probe round: the divn exponent-plane maps and the
+    // mixed-sign NaN position grids (see lp_xt_fp_vectors::helpers::probe2).
+    use lp_xt_fp_vectors::helpers::probe2;
+    println!(
+        "{TAG} helpers2-fingerprint={:#010x} total={}",
+        probe2::fingerprint(),
+        probe2::total()
+    );
+    for op in probe2::Op2::ALL {
+        let total = probe2::count(op);
+        let n = if LIMIT == 0 { total } else { LIMIT.min(total) };
+        println!("{TAG} FAMILY {} label=H2 count={n} of={total}", op.name());
+        let kern: unsafe extern "C" fn(u32, u32, u32) -> u32 = match op.kernel() {
+            1 => kernels::lp_fp_probe_madd_s,
+            2 => kernels::lp_fp_probe_maddn_s,
+            _ => kernels::lp_fp_probe_divn_s,
+        };
+        let mut digest = 0x811C_9DC5u32;
+        let mut cells = 0usize;
+        let mut line = Line::empty();
+        for i in 0..n {
+            let (r, s, t) = probe2::probe(op, i);
+            if cells % PER_LINE == 0 {
+                line.start_helper(op.name(), i);
+            }
+            unsafe {
+                let _ = kernels::lp_fp_set_fsr(0);
+            }
+            let result = unsafe { kern(r, s, t) };
+            let fsr = unsafe { kernels::lp_fp_get_fsr() };
+            line.cell(result, fsr);
+            digest = mix(digest ^ i);
+            digest = mix(digest ^ result).wrapping_add(fsr);
+            cells += 1;
+            if cells % PER_LINE == 0 {
+                line.flush();
+            }
+        }
+        line.flush();
+        println!("{TAG} DIGEST {} {digest:#010x} rows={n}", op.name());
+        println!("{TAG} END family={} count={n}", op.name());
+        ops += 1;
+        probes += n;
+    }
+    println!("{TAG} END-ALL helpers={ops} vectors={probes}");
+}
+
+/// Every probe kernel has the ternary signature; the unary ones ignore `t`.
+/// One signature keeps the dispatch a table instead of three shapes.
+fn helper_kernel(
+    op: lp_xt_fp_vectors::helpers::HelperOp,
+) -> unsafe extern "C" fn(u32, u32, u32) -> u32 {
+    use lp_xt_fp_vectors::helpers::HelperOp;
+    match op {
+        HelperOp::Nexp01S => kernels::lp_fp_probe_nexp01_s,
+        HelperOp::MksadjS => kernels::lp_fp_probe_mksadj_s,
+        HelperOp::MkdadjS => kernels::lp_fp_probe_mkdadj_s,
+        HelperOp::AddexpS => kernels::lp_fp_probe_addexp_s,
+        HelperOp::AddexpmS => kernels::lp_fp_probe_addexpm_s,
+        HelperOp::MaddnS => kernels::lp_fp_probe_maddn_s,
+        HelperOp::DivnS => kernels::lp_fp_probe_divn_s,
+        HelperOp::MaddS => kernels::lp_fp_probe_madd_s,
+    }
 }
 
 /// One output line, assembled without an allocator.
@@ -396,6 +565,17 @@ impl Line {
         self.buf.clear();
         self.buf.str("D ");
         self.buf.str(family.name());
+        self.buf.byte(b' ');
+        self.buf.dec5(first);
+        self.open = true;
+    }
+
+    /// Same shape as [`Line::start`], for the helper grids, whose keys are
+    /// plain strings rather than [`Family`] values.
+    fn start_helper(&mut self, name: &str, first: u32) {
+        self.buf.clear();
+        self.buf.str("D ");
+        self.buf.str(name);
         self.buf.byte(b' ');
         self.buf.dec5(first);
         self.open = true;
@@ -645,6 +825,164 @@ mod kernels {
     fp_unop!(lp_fp_rsqrt0_s, "rsqrt0.s");
     fp_unop!(lp_fp_sqrt0_s, "sqrt0.s");
     fp_unop!(lp_fp_div0_s, "div0.s");
+
+    // --- the toolchain's divide and square-root sequences -------------------
+    // Transcribed INSTRUCTION FOR INSTRUCTION from `xtensa-esp32s3-elf-objdump`
+    // of the esp-14.2.0_20240906 toolchain: `__divsf3` from libgcc and
+    // `__ieee754_sqrtf` from libm (the raw sequence, not the errno-setting
+    // `sqrtf` wrapper around it). Disassembly output is fact; no library source
+    // was read (AGENTS.md license rule). These are the code shapes M7's
+    // division and square-root lowering will emit, so their end-to-end results
+    // are the campaign's independent oracle for the helper semantics.
+    fp_kernel!(lp_fp_div_seq(a: u32, b: u32) {
+        ["wfr f1, a2"],
+        ["wfr f2, a3"],
+        ["div0.s f3, f2"],
+        ["nexp01.s f4, f2"],
+        ["const.s f5, 1"],
+        ["maddn.s f5, f4, f3"],
+        ["mov.s f6, f3"],
+        ["mov.s f7, f2"],
+        ["nexp01.s f2, f1"],
+        ["maddn.s f6, f5, f6"],
+        ["const.s f5, 1"],
+        ["const.s f0, 0"],
+        ["neg.s f8, f2"],
+        ["maddn.s f5, f4, f6"],
+        ["maddn.s f0, f8, f3"],
+        ["mkdadj.s f7, f1"],
+        ["maddn.s f6, f5, f6"],
+        ["maddn.s f8, f4, f0"],
+        ["const.s f3, 1"],
+        ["maddn.s f3, f4, f6"],
+        ["maddn.s f0, f8, f6"],
+        ["neg.s f2, f2"],
+        ["maddn.s f6, f3, f6"],
+        ["maddn.s f2, f4, f0"],
+        ["addexpm.s f0, f7"],
+        ["addexp.s f6, f7"],
+        ["divn.s f0, f2, f6"],
+        ["rfr a2, f0"],
+    });
+    fp_kernel!(lp_fp_sqrt_seq(a: u32) {
+        ["wfr f1, a2"],
+        ["sqrt0.s f2, f1"],
+        ["const.s f3, 0"],
+        ["maddn.s f3, f2, f2"],
+        ["nexp01.s f4, f1"],
+        ["const.s f0, 3"],
+        ["addexp.s f4, f0"],
+        ["maddn.s f0, f3, f4"],
+        ["nexp01.s f3, f1"],
+        ["neg.s f5, f3"],
+        ["maddn.s f2, f0, f2"],
+        ["const.s f0, 0"],
+        ["const.s f6, 0"],
+        ["const.s f7, 0"],
+        ["maddn.s f0, f5, f2"],
+        ["maddn.s f6, f2, f4"],
+        ["const.s f4, 3"],
+        ["maddn.s f7, f4, f2"],
+        ["maddn.s f3, f0, f0"],
+        ["maddn.s f4, f6, f2"],
+        ["neg.s f2, f7"],
+        ["maddn.s f0, f3, f2"],
+        ["maddn.s f7, f4, f7"],
+        ["mksadj.s f2, f1"],
+        ["nexp01.s f1, f1"],
+        ["maddn.s f1, f0, f0"],
+        ["neg.s f3, f7"],
+        ["addexpm.s f0, f2"],
+        ["addexp.s f3, f2"],
+        ["divn.s f0, f1, f3"],
+        ["rfr a2, f0"],
+    });
+
+    // --- helper-characterization probes (M6 P6) -----------------------------
+    // Every probe stages the DESTINATION register as well as the sources: the
+    // RR-shaped helpers may read `fr` before writing it (the divide sequence's
+    // `mkdadj.s f7, f1` demonstrably combines both), and a probe that assumed
+    // write-only could never discover that. The unary probes still accept and
+    // stage a third operand so all eight share one signature; `f2` simply goes
+    // unread.
+    macro_rules! fp_probe_rr {
+        ($name:ident, $mnemonic:literal) => {
+            fp_kernel!($name(r: u32, s: u32, t: u32) {
+                ["wfr f0, a2"],
+                ["wfr f1, a3"],
+                ["wfr f2, a4"],
+                [$mnemonic, " f0, f1"],
+                ["rfr a2, f0"],
+            });
+        };
+    }
+    macro_rules! fp_probe_rrr {
+        ($name:ident, $mnemonic:literal) => {
+            fp_kernel!($name(r: u32, s: u32, t: u32) {
+                ["wfr f0, a2"],
+                ["wfr f1, a3"],
+                ["wfr f2, a4"],
+                [$mnemonic, " f0, f1, f2"],
+                ["rfr a2, f0"],
+            });
+        };
+    }
+    fp_probe_rr!(lp_fp_probe_nexp01_s, "nexp01.s");
+    fp_probe_rr!(lp_fp_probe_mksadj_s, "mksadj.s");
+    fp_probe_rr!(lp_fp_probe_mkdadj_s, "mkdadj.s");
+    fp_probe_rr!(lp_fp_probe_addexp_s, "addexp.s");
+    fp_probe_rr!(lp_fp_probe_addexpm_s, "addexpm.s");
+    fp_probe_rrr!(lp_fp_probe_maddn_s, "maddn.s");
+    fp_probe_rrr!(lp_fp_probe_divn_s, "divn.s");
+    fp_probe_rrr!(lp_fp_probe_madd_s, "madd.s");
+
+    // --- const.s -------------------------------------------------------------
+    // Sixteen architecturally-defined constants no available document lists.
+    // The selector is an immediate, so: one kernel each.
+    macro_rules! fp_const {
+        ($name:ident, $imm:literal) => {
+            fp_kernel!($name() {
+                ["const.s f0, ", $imm],
+                ["rfr a2, f0"],
+            });
+        };
+    }
+    fp_const!(lp_fp_const_s_0, "0");
+    fp_const!(lp_fp_const_s_1, "1");
+    fp_const!(lp_fp_const_s_2, "2");
+    fp_const!(lp_fp_const_s_3, "3");
+    fp_const!(lp_fp_const_s_4, "4");
+    fp_const!(lp_fp_const_s_5, "5");
+    fp_const!(lp_fp_const_s_6, "6");
+    fp_const!(lp_fp_const_s_7, "7");
+    fp_const!(lp_fp_const_s_8, "8");
+    fp_const!(lp_fp_const_s_9, "9");
+    fp_const!(lp_fp_const_s_10, "10");
+    fp_const!(lp_fp_const_s_11, "11");
+    fp_const!(lp_fp_const_s_12, "12");
+    fp_const!(lp_fp_const_s_13, "13");
+    fp_const!(lp_fp_const_s_14, "14");
+    fp_const!(lp_fp_const_s_15, "15");
+
+    /// The sixteen `const.s` kernels, indexed by the immediate.
+    pub const CONST_S: [unsafe extern "C" fn() -> u32; 16] = [
+        lp_fp_const_s_0,
+        lp_fp_const_s_1,
+        lp_fp_const_s_2,
+        lp_fp_const_s_3,
+        lp_fp_const_s_4,
+        lp_fp_const_s_5,
+        lp_fp_const_s_6,
+        lp_fp_const_s_7,
+        lp_fp_const_s_8,
+        lp_fp_const_s_9,
+        lp_fp_const_s_10,
+        lp_fp_const_s_11,
+        lp_fp_const_s_12,
+        lp_fp_const_s_13,
+        lp_fp_const_s_14,
+        lp_fp_const_s_15,
+    ];
 
     // --- compares -----------------------------------------------------------
     // The result lands in a *boolean* register, never an AR, so it has to be

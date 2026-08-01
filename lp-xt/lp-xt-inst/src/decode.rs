@@ -243,8 +243,10 @@ fn decode_fp0(w: u32) -> Option<Inst> {
 
 /// `op0 = 0, op1 = 0xA, op2 = 0xF`: the FP1 unary group, keyed by `t`.
 ///
-/// `t = 2` and `t = 0xC` are unassigned as far as `xtensa-esp32s3-elf-objdump`
-/// is concerned; they stay unsupported rather than being guessed at.
+/// `t = 2` is unassigned as far as `xtensa-esp32s3-elf-objdump` is concerned;
+/// it stays unsupported rather than being guessed at. (`t = 0xC` was once on
+/// that list too — wrongly: objdump disassembles it as `mksadj.s`, and the
+/// toolchain's `__ieee754_sqrtf` sequence uses it. Found by M6 P6.)
 fn decode_fp1_unary(w: u32) -> Option<Inst> {
     let rr = |op| Some(Inst::FpRr(op, freg_r(w), freg_s(w)));
     match t(w) {
@@ -260,6 +262,7 @@ fn decode_fp1_unary(w: u32) -> Option<Inst> {
         0x9 => rr(FpRrOp::Sqrt0S),
         0xa => rr(FpRrOp::Rsqrt0S),
         0xb => rr(FpRrOp::Nexp01S),
+        0xc => rr(FpRrOp::MksadjS),
         0xd => rr(FpRrOp::MkdadjS),
         0xe => rr(FpRrOp::AddexpS),
         0xf => rr(FpRrOp::AddexpmS),
