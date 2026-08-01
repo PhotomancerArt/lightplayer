@@ -311,11 +311,17 @@ fn capture_frames_arch(_buf: &mut [u32]) -> usize {
 // even though no host build ever selects them. Constants nothing can execute
 // are exactly the kind that rot.
 
-/// The window set this build's walker is calibrated for.
-#[cfg(all(any(target_arch = "xtensa", test), not(feature = "xt-map-esp32-classic")))]
-use esp32s3_map as xt_map;
+// `xt_map` is the window set this build's walker is calibrated for. Plain
+// comments rather than doc comments on purpose: rustfmt sorts these two
+// imports alphabetically, so a `///` here would drift onto whichever arm
+// happens to sort first.
 #[cfg(all(any(target_arch = "xtensa", test), feature = "xt-map-esp32-classic"))]
 use esp32_classic_map as xt_map;
+#[cfg(all(
+    any(target_arch = "xtensa", test),
+    not(feature = "xt-map-esp32-classic")
+))]
+use esp32s3_map as xt_map;
 
 /// ESP32-S3 (LX7) windows — the default.
 #[cfg(any(target_arch = "xtensa", test))]
@@ -403,7 +409,8 @@ const XT_CALL_INST_BYTES: u32 = 3;
 /// real frame instead of the chain terminator it is.
 #[cfg(any(target_arch = "xtensa", test))]
 fn is_valid_xt_text(pc: u32) -> bool {
-    (xt_map::IRAM_START..xt_map::IRAM_END).contains(&pc) || (xt_map::FLASH_START..xt_map::FLASH_END).contains(&pc)
+    (xt_map::IRAM_START..xt_map::IRAM_END).contains(&pc)
+        || (xt_map::FLASH_START..xt_map::FLASH_END).contains(&pc)
 }
 
 /// Is `sp` a stack pointer we are willing to read a base save area from?
