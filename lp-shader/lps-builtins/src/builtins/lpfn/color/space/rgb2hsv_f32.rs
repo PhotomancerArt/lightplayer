@@ -17,16 +17,49 @@
 //!
 //! **Tolerance:** exact against the canonical f32.
 
+// The `p.zw` constants of Hocevar's formulation, as f32 *bit patterns*.
+//
+// **This is an upstream-LLVM workaround, not a preference.** Written the
+// natural way — `if g < b { [b, g, -1.0, 2.0 / 3.0] } else { [g, b, 0.0,
+// -1.0 / 3.0] }` — LLVM materialises the constant lane pair as a
+// `[2 x float]` constant-pool entry, and the esp Xtensa backend cannot select
+// `XtensaISD::PCREL_WRAPPER` over a `TargetConstantPool`, so the whole f32
+// builtins family fails to build for `xtensa-esp32s3-none-elf` at every
+// optimisation level. Selecting the integer bit patterns and bitcasting after
+// the fact keeps the constants out of the float constant pool.
+//
+// Defect: docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
+// Upstream: not yet filed.
+//
+// `f32::to_bits` is const-evaluated, so these are the same floats the literals
+// were; `hocevar_p_is_bit_identical_to_the_literal_form` pins that, and is the
+// test to keep green if this is ever reverted.
+const P_Z_IF: u32 = (-1.0f32).to_bits();
+const P_W_IF: u32 = (2.0f32 / 3.0).to_bits();
+const P_Z_ELSE: u32 = (0.0f32).to_bits();
+const P_W_ELSE: u32 = (-1.0f32 / 3.0).to_bits();
+
+/// Hocevar's `p` term: the green/blue ordering step.
+///
+/// Split out of `rgb2hsv` only so the constant-pool workaround above can be
+/// tested against the literal form it replaced.
+#[inline(always)]
+fn hocevar_p(g: f32, b: f32) -> [f32; 4] {
+    let g_lt_b = g < b;
+    [
+        if g_lt_b { b } else { g },
+        if g_lt_b { g } else { b },
+        f32::from_bits(if g_lt_b { P_Z_IF } else { P_Z_ELSE }),
+        f32::from_bits(if g_lt_b { P_W_IF } else { P_W_ELSE }),
+    ]
+}
+
 /// Rust-facing form.
 #[inline]
 fn rgb2hsv(r: f32, g: f32, b: f32) -> [f32; 3] {
     const EPSILON: f32 = 1.0 / 65536.0;
 
-    let p: [f32; 4] = if g < b {
-        [b, g, -1.0, 2.0 / 3.0]
-    } else {
-        [g, b, 0.0, -1.0 / 3.0]
-    };
+    let p = hocevar_p(g, b);
     let q: [f32; 4] = if r < p[0] {
         [p[0], p[1], p[3], r]
     } else {
@@ -119,6 +152,56 @@ mod tests {
             __lp_lpfn_hsv2rgb_f32(back.as_mut_ptr(), hsv[0], hsv[1], hsv[2]);
             for (got, want) in back.iter().zip([r, g, b]) {
                 assert!((got - want).abs() < 2e-3, "{back:?} vs ({r},{g},{b})");
+            }
+        }
+    }
+
+    /// The pre-workaround form of `hocevar_p`, kept verbatim as the oracle.
+    ///
+    /// This is the code the Xtensa constant-pool workaround replaced. It stays
+    /// here so the rewrite's bit-equivalence is *pinned* rather than argued —
+    /// these builtins are shared with rv32 and wasm, where the original form
+    /// compiles fine and any drift would be a silent behaviour change.
+    fn hocevar_p_literal(g: f32, b: f32) -> [f32; 4] {
+        if g < b {
+            [b, g, -1.0, 2.0 / 3.0]
+        } else {
+            [g, b, 0.0, -1.0 / 3.0]
+        }
+    }
+
+    #[test]
+    fn hocevar_p_is_bit_identical_to_the_literal_form() {
+        // A grid that crosses g == b in both directions, plus the cases where
+        // a sign-of-zero or NaN difference would hide: -0.0/+0.0 must select
+        // the same lanes, and `g < b` is false for any NaN operand.
+        const SAMPLES: [f32; 11] = [
+            -1.0,
+            -0.75,
+            -0.5,
+            -0.25,
+            0.0,
+            0.25,
+            0.5,
+            0.75,
+            1.0,
+            -0.0,
+            f32::NAN,
+        ];
+
+        for &g in SAMPLES.iter() {
+            for &b in SAMPLES.iter() {
+                let got = hocevar_p(g, b);
+                let want = hocevar_p_literal(g, b);
+                for k in 0..4 {
+                    assert_eq!(
+                        got[k].to_bits(),
+                        want[k].to_bits(),
+                        "lane {k} for g={g} b={b}: {:#010x} vs {:#010x}",
+                        got[k].to_bits(),
+                        want[k].to_bits()
+                    );
+                }
             }
         }
     }
