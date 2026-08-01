@@ -140,6 +140,20 @@ out of `.stack`, 504 B.
 | `quad60-v3` (4 × 60 = 240 LEDs) | **7,384 B** | 105,256 B |
 | `quad-equal100-v3` (4 × 100 = 400 LEDs) | — | **OOM** |
 
+> ⚠️ **These numbers are from commit `08779e059` and have already moved.**
+> Re-measured after merging `origin/main` (2026-08-01, same board, same
+> projects): per-project heap grew **8,136 B** — 120 LEDs now leaves 9,992 B
+> free, and **240 LEDs OOMs where it previously ran**. Idle heap is unchanged,
+> so it is per-project allocation, not static growth; `tick` simultaneously
+> dropped 69 ms → 47 ms. The 16-bit gamma fix (#252) is ruled out by direct
+> measurement (4 bytes). See
+> `docs/defects/2026-08-01-classic-heap-regression-after-f32-merge.md`.
+>
+> The **method and the shape of the conclusion stand** — heap binds, flash does
+> not, and LED counts must be quoted from RAM. The **absolute ceiling below is
+> optimistic by roughly 91 LEDs** until that regression is attributed and
+> either accepted or reversed.
+
 A loaded project costs ~79 KB (observed directly: `stop_all_projects` took the
 board from 95 KB used to 16 KB used). Beyond that, **≈89.5 B per LED** — and
 only ~21 B/LED of that is `DisplayPipeline`'s three `Vec<u16>` plus
