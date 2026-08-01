@@ -29,15 +29,10 @@ PROJECT="${PROJECT:-examples/basic}"
 port="${1:-}"
 if [[ -z "$port" ]]; then
     echo "==> identifying the ESP32-S3"
-    for p in /dev/cu.usbmodem*; do
-        [[ -e "$p" ]] || continue
-        if espflash board-info --port "$p" 2>/dev/null | grep -q "esp32s3"; then
-            port="$p"
-            echo "    found: $port"
-            break
-        fi
-        echo "    skipping $p (not an S3, or busy)"
-    done
+    # Probes with per-port timeouts (bare `espflash board-info` can hang on a
+    # wedged port); busy ports are skipped, not reset under their owner.
+    port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32s3)"
+    echo "    found: $port"
 fi
 if [[ -z "$port" ]]; then
     echo "No ESP32-S3 found. Is it plugged in? Is another session holding it?" >&2
