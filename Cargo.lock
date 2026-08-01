@@ -5575,6 +5575,7 @@ dependencies = [
 name = "lpa-boards"
 version = "40.0.0"
 dependencies = [
+ "dioxus",
  "lpc-hardware",
  "schemars",
  "serde",
@@ -5723,6 +5724,7 @@ dependencies = [
  "js-sys",
  "log",
  "lpa-agent",
+ "lpa-boards",
  "lpa-client",
  "lpa-fs-opfs",
  "lpa-link",
