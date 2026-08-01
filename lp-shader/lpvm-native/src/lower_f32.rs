@@ -571,10 +571,14 @@ pub fn vreg_watermark(func: &IrFunction, hardware_fpu: bool) -> u16 {
 /// its own vreg in the shadow block, filled by a `Wfr` at function entry.
 ///
 /// The split is deterministic rather than a lookup table on purpose: it costs
-/// no per-function allocation on the device, and it means "the word view of a
-/// parameter" stays reachable as plain [`fa_vreg`] for the passthrough case
-/// (a float parameter handed straight to another call needs no transfer at
-/// all).
+/// no per-function allocation on the device.
+///
+/// **The shadow is the parameter's only home once the entry `Wfr` has run.**
+/// LPIR is not SSA — a `float` parameter is an ordinary mutable local in GLSL,
+/// and the `lps-glsl` frontend lowers `x = x + 1.0` as a redefinition of the
+/// parameter's own vreg — so a write to a float parameter lands here, in the
+/// shadow, and the incoming address register goes stale the moment it happens.
+/// Nothing may read the AR side after entry; see [`word_operand`].
 pub fn float_vreg(func: &IrFunction, v: lpir::VReg) -> VReg {
     if is_param(func, v) {
         VReg(param_shadow_base(func).saturating_add(v.0 as u16))
@@ -614,9 +618,23 @@ pub fn push_entry_param_transfers(out: &mut Vec<VInst>, func: &IrFunction) -> us
 /// emitting the `Rfr` transfer first when the value currently lives in an FR.
 ///
 /// Boundaries two and four: call arguments and return values. A non-float value
-/// is already a word and passes through untouched, and so does a float
-/// *parameter* — it never left the address register, so re-deriving it from the
-/// shadow would be a pointless round trip.
+/// is already a word and passes through untouched.
+///
+/// A float **parameter** goes through the same `Rfr` as any other float value,
+/// even though its incoming address register still holds the argument bits.
+/// Reading that AR instead would be one instruction cheaper and wrong: LPIR is
+/// not SSA, so a parameter the body assigns to has its current value in the FR
+/// shadow only, and the AR keeps the value the caller passed. That shortcut is
+/// exactly `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`
+/// — `float f(float x) { x = x + 1.0; return x; }` returned the argument
+/// untouched. The rule that replaces it is unconditional and therefore cannot be
+/// wrong about which values it applies to: **after the entry transfer, a float
+/// parameter is read from the float file and nowhere else.**
+///
+/// The AR side losing its only post-entry reader is a small win as well as a
+/// fix: the incoming argument register dies at the entry `Wfr` instead of
+/// staying live to a boundary somewhere down the body, and on Xtensa the
+/// argument bank *is* the caller-saved half of the allocatable pool.
 pub fn word_operand(
     out: &mut Vec<VInst>,
     func: &IrFunction,
@@ -624,7 +642,7 @@ pub fn word_operand(
     temps: &mut TempVRegs,
     po: u16,
 ) -> VReg {
-    if !is_float(func, v) || is_param(func, v) {
+    if !is_float(func, v) {
         return fa_vreg(v);
     }
     let word = temps.mint();
@@ -1974,12 +1992,16 @@ mod tests {
         assert_eq!(vreg_watermark(&func, false), func.vreg_types.len() as u16);
     }
 
-    /// A float parameter handed straight to a call needs **no** transfer: it
-    /// never left the address register. Emitting one would be correct but a
-    /// pointless FR round trip on the hot path.
+    /// A float parameter at a call or return boundary is read from its **FR
+    /// shadow**, never from the address register it arrived in.
+    ///
+    /// The AR shortcut this replaces was
+    /// `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`:
+    /// LPIR is not SSA, so a body that assigns to the parameter leaves the AR
+    /// holding the caller's argument while the shadow holds the current value.
     #[cfg(feature = "isa-xt")]
     #[test]
-    fn a_float_parameter_passed_through_needs_no_transfer() {
+    fn a_float_parameter_at_a_boundary_reads_the_shadow() {
         let func = IrFunction {
             name: String::new(),
             is_entry: true,
@@ -1994,14 +2016,27 @@ mod tests {
         };
         let mut out = Vec::new();
         let mut temps = TempVRegs::new(vreg_watermark(&func, true));
-        let word = word_operand(&mut out, &func, lpir::VReg(1), &mut temps, 0);
-        assert_eq!(word, fa_vreg(lpir::VReg(1)));
-        assert!(out.is_empty(), "no transfer for a parameter: {out:?}");
+        let param = lpir::VReg(1);
+        let word = word_operand(&mut out, &func, param, &mut temps, 0);
+        assert_ne!(word, fa_vreg(param), "must not read the incoming AR");
+        assert!(
+            matches!(out.as_slice(), [VInst::Rfr { dst, src, .. }]
+                if *dst == word && *src == float_vreg(&func, param)),
+            "{out:?}"
+        );
 
-        // A computed float, by contrast, does need one.
+        // A computed float takes the same path — the identity `float_vreg`
+        // makes it the same code.
+        out.clear();
         let word = word_operand(&mut out, &func, lpir::VReg(2), &mut temps, 0);
         assert_ne!(word, fa_vreg(lpir::VReg(2)));
         assert!(matches!(out.as_slice(), [VInst::Rfr { .. }]));
+
+        // A non-float parameter is already a word and still passes through.
+        out.clear();
+        let word = word_operand(&mut out, &func, func.vmctx_vreg, &mut temps, 0);
+        assert_eq!(word, fa_vreg(func.vmctx_vreg));
+        assert!(out.is_empty(), "no transfer for a non-float: {out:?}");
     }
 
     /// The resolver never crosses modes. A missing f32 builtin has to name the
