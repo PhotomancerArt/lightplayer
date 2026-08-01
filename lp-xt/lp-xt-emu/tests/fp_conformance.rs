@@ -214,7 +214,8 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fp")
 }
 
-fn header(family: Family, unknown: usize) -> String {
+fn header(family: Family, unknown: &[(String, usize)]) -> String {
+    let total_unknown: usize = unknown.iter().map(|(_, n)| n).sum();
     let mut s = String::new();
     let _ = writeln!(
         s,
@@ -240,7 +241,14 @@ fn header(family: Family, unknown: usize) -> String {
         s,
         "#             the test into a tautology that passes forever."
     );
-    let _ = writeln!(s, "# unknown:    {unknown} of {}", count(family));
+    let _ = writeln!(
+        s,
+        "# unknown:    {total_unknown} of {}, by the policy field that closes them:",
+        count(family)
+    );
+    for (field, n) in unknown {
+        let _ = writeln!(s, "#             {n:>5}  {field}");
+    }
     let _ = writeln!(s, "#");
     let _ = writeln!(s, "# --- silicon provenance (M6 P6 fills this in) ---");
     let _ = writeln!(s, "# board:      NOT RUN");
@@ -259,11 +267,19 @@ fn header(family: Family, unknown: usize) -> String {
     );
     let _ = writeln!(
         s,
-        "# fsr:     UNKNOWN everywhere — FSR accumulates (measured, M6 P1) but"
+        "# fsr:     UNKNOWN everywhere — FSR accumulates (measured, M6 P1) and its"
     );
     let _ = writeln!(
         s,
-        "#          neither the flag layout nor which op sets which flag is known."
+        "#          bit layout is architectural (ISA RM Table 4-48; see cpu::FSR_*),"
+    );
+    let _ = writeln!(
+        s,
+        "#          but WHICH operation raises WHICH flag is still open. Note the RM"
+    );
+    let _ = writeln!(
+        s,
+        "#          says current implementations raise none, and this silicon does."
     );
     s
 }
@@ -309,11 +325,19 @@ fn read_fixture(family: Family) -> Option<(u32, Vec<(u32, Prediction)>)> {
 }
 
 fn write_fixture(family: Family, rows: &[(Vector, Prediction)]) {
-    let unknown = rows
-        .iter()
-        .filter(|(_, p)| matches!(p, Prediction::Unknown(_)))
-        .count();
-    let mut out = header(family, unknown);
+    // Grouped by field rather than counted in bulk: P6 triages one policy field
+    // at a time, and "3886 unknown" does not tell it where to start.
+    let mut by_field: Vec<(String, usize)> = Vec::new();
+    for (_, p) in rows {
+        if let Prediction::Unknown(f) = p {
+            match by_field.iter_mut().find(|(n, _)| n == f) {
+                Some((_, n)) => *n += 1,
+                None => by_field.push((f.clone(), 1)),
+            }
+        }
+    }
+    by_field.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut out = header(family, &by_field);
     for (v, p) in rows {
         out.push_str(&row(v, p));
         out.push('\n');
