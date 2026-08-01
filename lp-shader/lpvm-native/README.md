@@ -390,6 +390,13 @@ the feature nowhere and is the negative control that proves the gate holds. It
 was 2,874,560 B before and after M7 (P5). The S3 paid +65,680 B for hardware
 float, against 4.4 MB of headroom.
 
+That control covers **this gate only**. Code outside `float-f32` — the
+per-compile mode threading, the capability query, the refusal message — is
+linked on every board and moves the C6 legitimately; it cost +416 B when it
+landed (`docs/adr/2026-08-01-float-mode-reaches-the-device.md`). Read a nonzero
+C6 delta as "did the gate leak, or did always-on code grow?", and answer it by
+building once with the always-on part removed rather than by guessing.
+
 The two device configurations that turn it on today: `fw-esp32c6`'s
 `test_f32_softfloat` harness (soft float, no FPU) and **`fw-esp32s3`, in
 `default`** (hardware FPU).
