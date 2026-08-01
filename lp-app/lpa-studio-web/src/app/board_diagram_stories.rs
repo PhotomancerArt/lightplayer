@@ -90,7 +90,7 @@ fn BoardFigure(children: Element) -> Element {
 }
 
 #[story(
-    description = "All six checked-in boards as plain thumbnails — the catalog/picker rendering. One metadata source, one renderer, no hand-drawn images."
+    description = "Every checked-in board as a plain thumbnail — the catalog/picker rendering. One metadata source, one renderer, no hand-drawn images."
 )]
 pub(crate) fn catalog_thumbnails() -> Element {
     rsx! {
@@ -245,6 +245,44 @@ pub(crate) fn wired_band_quinled() -> Element {
                         gpio: 3,
                         title: "path lights".into(),
                         extra: Some("WS2811 ×100".into()),
+                    },
+                ],
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The DOMRAEM DOM-Z-102 (Ethernet WLED-class controller, screw terminals both sides) wired on all four fused data channels. Its stacked OPT/RST buttons render side by side — the 2D compromise pending the callout milestone."
+)]
+pub(crate) fn wired_domraem_4ch() -> Element {
+    rsx! {
+        BoardFigure {
+            BoardDiagram {
+                board: board("domraem/dom-z-102"),
+                mode: DiagramMode::Wired,
+                u: 12.0,
+                scale: 1.05,
+                wired: vec![
+                    WiredConnection {
+                        gpio: 18,
+                        title: "roofline".into(),
+                        extra: Some("WS2815 ×800".into()),
+                    },
+                    WiredConnection {
+                        gpio: 16,
+                        title: "porch".into(),
+                        extra: Some("WS2812 ×300".into()),
+                    },
+                    WiredConnection {
+                        gpio: 14,
+                        title: "garden".into(),
+                        extra: Some("WS2811 ×150".into()),
+                    },
+                    WiredConnection {
+                        gpio: 2,
+                        title: "path".into(),
+                        extra: None,
                     },
                 ],
             }
