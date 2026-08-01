@@ -7,6 +7,7 @@ use lp_emu_core::{CycleModel, LogLevel};
 use crate::board::BoardProfile;
 use crate::cpu::Cpu;
 use crate::error::{Trap, TrapKind};
+use crate::fp_policy::FpPolicy;
 use crate::memory::Memory;
 use crate::trace::{TraceEvent, Tracer};
 
@@ -44,6 +45,7 @@ pub const OUT_ARG_REG_COUNT: usize = 6;
 pub const DEFAULT_STEP_BUDGET: u64 = 2_000_000;
 
 /// Control-flow outcome of executing one instruction.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Flow {
     /// Advance to `pc + len`.
     Next,
@@ -128,6 +130,10 @@ pub struct Emulator {
     pub step_budget: u64,
     /// The board memory map this emulator was built on.
     pub profile: BoardProfile,
+    /// The behaviors of the FPU that IEEE-754 does not fix. Mostly
+    /// [`crate::fp_policy::Unknown`] until the M6 P6 campaign measures them;
+    /// reading an unresolved field panics rather than defaulting.
+    pub fp_policy: FpPolicy,
     /// Instruction-log verbosity ([`LogLevel::Instructions`] fills the ring
     /// log read back through [`format_debug_info`](Self::format_debug_info)).
     log_level: LogLevel,
@@ -158,6 +164,7 @@ impl Emulator {
             mem,
             step_budget: DEFAULT_STEP_BUDGET,
             profile,
+            fp_policy: FpPolicy::m6(),
             log_level: LogLevel::None,
             // No measured Xtensa cycle model yet — instruction counting is the
             // honest default (rv32 defaults to its measured Esp32C6 model).
@@ -166,6 +173,15 @@ impl Emulator {
             cycle_count: 0,
             inst_log: VecDeque::new(),
         }
+    }
+
+    /// Install a floating-point policy (builder form). P6 uses this to hand the
+    /// emulator the constants it measured on silicon; nothing else should need
+    /// it, and nothing may use it to paper over an unresolved field.
+    #[must_use]
+    pub fn with_fp_policy(mut self, policy: FpPolicy) -> Self {
+        self.fp_policy = policy;
+        self
     }
 
     /// Set the instruction-log verbosity (builder form).
@@ -381,6 +397,48 @@ impl Emulator {
         self.cpu.pc = entry;
     }
 
+    /// Execute one already-decoded instruction against the current state,
+    /// advancing `pc` as the run loop would.
+    ///
+    /// The entry point for single-instruction harnesses — specifically
+    /// `tests/fp_conformance.rs`, which replays tens of thousands of FP vectors
+    /// and has no code image to fetch from. Real runs go through
+    /// [`run`](Self::run) and its siblings; this deliberately skips the fetch,
+    /// the decode, and the instruction log, so it is not a substitute for them.
+    ///
+    /// Instruction and cycle counters advance, so a harness can still read them.
+    pub fn exec_one(&mut self, inst: &lp_xt_inst::Inst) -> Result<(), Trap> {
+        let mut t = crate::trace::NoopTracer;
+        self.exec_one_traced(inst, &mut t)
+    }
+
+    /// As [`exec_one`](Self::exec_one), emitting [`TraceEvent`]s.
+    pub fn exec_one_traced(
+        &mut self,
+        inst: &lp_xt_inst::Inst,
+        tracer: &mut dyn Tracer,
+    ) -> Result<(), Trap> {
+        let pc = self.cpu.pc;
+        let flow = self.execute(inst, pc, tracer).map_err(|mut trap| {
+            if trap.pc == 0 {
+                trap.pc = pc;
+            }
+            trap
+        })?;
+        self.instruction_count += 1;
+        self.cycle_count += u64::from(
+            self.cycle_model
+                .cycles_for(crate::executor::inst_class(inst, &flow)),
+        );
+        match flow {
+            // Width is not known without the encoding; 3 is the wide form and
+            // the only thing a straight-line harness needs it for is progress.
+            Flow::Next | Flow::Syscall => self.cpu.pc = pc.wrapping_add(3),
+            Flow::Jump(addr) => self.cpu.pc = addr,
+        }
+        Ok(())
+    }
+
     fn run_loop(
         &mut self,
         tracer: &mut dyn Tracer,
@@ -498,6 +556,28 @@ impl Emulator {
         self.cpu.a(i)
     }
 
+    /// Write float register `f{i}` (raw bits) and emit a trace event.
+    ///
+    /// Executors go through here rather than touching `cpu.fr` so that every FP
+    /// write is on one traced path — P6 bisects numeric divergences off this
+    /// trace, and an intermediate you cannot see is a bad day.
+    pub(crate) fn wfreg(&mut self, i: u8, bits: u32, tracer: &mut dyn Tracer) {
+        self.cpu.set_f(i, bits);
+        tracer.event(TraceEvent::FRegWrite { index: i, bits });
+    }
+
+    /// Read float register `f{i}` (raw bits).
+    #[inline]
+    pub(crate) fn rfreg(&self, i: u8) -> u32 {
+        self.cpu.f(i)
+    }
+
+    /// Write boolean register `b{i}` and emit a trace event.
+    pub(crate) fn wbreg(&mut self, i: u8, v: bool, tracer: &mut dyn Tracer) {
+        self.cpu.set_b(i, v);
+        tracer.event(TraceEvent::BRegWrite { index: i, value: v });
+    }
+
     // --- debug dumps (the consumer-facing shape of lp-riscv-emu's debug.rs) ---
 
     /// A one-screen dump of the architectural state: pc, window registers,
@@ -526,6 +606,38 @@ impl Emulator {
                 self.cpu.a(base + 1),
                 self.cpu.a(base + 2),
                 self.cpu.a(base + 3)
+            );
+        }
+        // The FP block. `f{i}` is printed as bits *and* as an f32 reading: a raw
+        // NaN payload and a numeric value answer different questions, and the
+        // payload is exactly what M6 measures.
+        let _ = writeln!(
+            s,
+            "cpenable={:#x} ({})  fcr={:#010x}  fsr={:#010x}  br={:#06x}",
+            self.cpu.cpenable,
+            if self.cpu.fpu_enabled() {
+                "FPU armed"
+            } else {
+                "FPU DISABLED"
+            },
+            self.cpu.fcr,
+            self.cpu.fsr,
+            self.cpu.br
+        );
+        for row in 0..4u8 {
+            let base = row * 4;
+            let _ = writeln!(
+                s,
+                "f{:<2}..f{:<2}  {}",
+                base,
+                base + 3,
+                (0..4)
+                    .map(|k| {
+                        let bits = self.cpu.f(base + k);
+                        format!("{bits:#010x}={:e}", f32::from_bits(bits))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
             );
         }
         let _ = writeln!(

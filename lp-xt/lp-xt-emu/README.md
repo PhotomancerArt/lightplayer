@@ -9,16 +9,22 @@ repo, landed here per its `BACKPORT.md`.
 Scope is *core*: executors + memory + the window machinery, plus the
 `lp-emu-core` consumer surface (`LogLevel`-gated instruction ring log,
 `CycleModel`/`InstClass` instruction+cycle counters, `dump_state` /
-`format_debug_info`). FPU, peripherals, a *measured* Xtensa cycle model
+`format_debug_info`). Peripherals, a *measured* Xtensa cycle model
 (`CycleModel::InstructionCount` is the default), and full `InstLog` parity
 remain out of scope.
+
+The **FPU is in scope as of M6** and partially built — see
+[Floating point](#floating-point). **None of its numeric behavior is proven
+against silicon until the M6 P6 hardware campaign runs.** Do not trust an FP
+result out of this emulator before then.
 
 ## Architecture
 
 ```
 src/
   cpu.rs         CPU state: PC, 64 physical ARs, WindowBase, WindowStart, SAR,
-                 PS.CALLINC, and the live call-stack shadow.
+                 PS.CALLINC, the live call-stack shadow, and the FP coprocessor
+                 state (flat FR file, BR file, FCR/FSR, CPENABLE).
   memory.rs      Vec-backed regions + per-region D-bus/I-bus AliasRule.
   board.rs       BoardProfile: per-board memory maps (esp32s3 / esp32).
   trace.rs       `trait Tracer` (no-op default) + a basic text tracer.
@@ -26,6 +32,8 @@ src/
   emu.rs         Emulator: fetch/decode/execute loop + the windowed-ABI run API.
   executor/      one module per instruction group (the lp-riscv-emu split):
                  arith · imm · load_store · branch · jump · call · window · misc
+                 float       FP/Boolean/SR data movement + the CPENABLE gate
+                 float_math  everything that computes a float value (M6 P3)
 ```
 
 Decoding is delegated to [`lp-xt-inst`](../lp-xt-inst); this crate never
@@ -132,6 +140,80 @@ and the on-device JIT never needs one. See
 `docs/adr/2026-07-30-xtensa-host-shared-memory.md`, which also records why it is
 deliberately *not* the rv32 engine's `0x4000_0000` (that address is
 `SENTINEL_PC`).
+
+## Floating point
+
+Modeled since M6, in three pieces:
+
+- **State** (`cpu.rs`): the FR file `f0..f15` as **raw bits**, the BR file
+  `b0..b15`, `FCR`/`FSR`, and `CPENABLE`. The FR file is **flat** — it takes no
+  part in the `WindowBase` rotation, so the AR file's free preservation across a
+  windowed call has *no FR analogue*. A callee that wants an FR value to survive
+  `call8`/`entry` spills it itself. This is the asymmetry M7's frame layout has
+  to answer for.
+- **Data movement** (`executor/float.rs`): `rfr`/`wfr`, FP load/store including
+  the base-updating `p` forms, `mov.s`, `BR`/`CPENABLE`/`FCR`/`FSR` access, and
+  the Boolean branches and moves. Every coprocessor-0 instruction is gated on
+  `CPENABLE` bit 0 and raises **EXCCAUSE 32** when it is clear — `Cpu::new()`
+  leaves it clear on purpose, so firmware that forgets to arm the coprocessor
+  faults on the host rather than on a board.
+- **Numerics** (`executor/float_math.rs`) behind the policy layer in
+  `fp_policy.rs`.
+
+### The policy layer, and what `UNKNOWN` means
+
+Rust's `f32` is IEEE-754 binary32 under round-to-nearest-even, which is what the
+FPU does for nearly the whole input space — and for normal, finite, non-zero
+operands with a normal finite result, `add.s`/`sub.s`/`mul.s` here are
+bit-exact against host `f32` by construction (asserted over a 20 000-case
+randomized sweep). But Rust cannot express *which* NaN propagates, whether
+denormals flush, or a rounding mode.
+
+So each behavior IEEE does not fix is a named field on `FpPolicy`, and each is
+either **measured with a citation** or `Unknown`. **Reading an unresolved field
+panics**, naming the field and the vector family that closes it. That is
+deliberate: a plausible default is indistinguishable from knowledge once it is
+in the code, and an emulator that is 99% right and silently confident about the
+rest is the exact failure M6 exists to prevent.
+
+Today exactly one field is resolved (`fsr_sticky`, from the 2026-07-31 desk
+session). The rest is the row list of the M6 FP-contract ADR's §4, waiting for
+P6. A non-default `FCR` is likewise **refused**, not ignored (D6).
+
+`recip0.s`/`rsqrt0.s`/`sqrt0.s`/`div0.s` return implementation-defined lookup
+ROMs; they sit behind an empty table that P6 extracts exhaustively, so they
+become exact by construction. There is deliberately no polynomial placeholder.
+
+### `tests/fp_conformance.rs` — the replay, with no board
+
+```bash
+cargo test -p lp-xt-emu --test fp_conformance -- --nocapture
+```
+
+Runs every vector of [`lp-xt-fp-vectors`](../lp-xt-fp-vectors)' six families
+through the emulator and compares to the predictions committed under
+`tests/fixtures/fp/`. It needs no feature flag and no hardware: `lp-xt-emu` is in
+`default-members`, so plain `cargo test` (and therefore `just test-rust-core`,
+`just test`, and CI's Validate job) runs it. That is deliberate — a corpus wired
+behind a stale `--test` allowlist has twice in this repo "reported success by
+executing nothing".
+
+**An `UNKNOWN:<field>` row is not a failure.** It is a question addressed to
+silicon, naming the policy field that closes it, and the set is *derived* — the
+harness catches the policy panic and reads the field name out of it, so it
+cannot drift from what the executors actually need. Today: **4305 of 5630 rows
+UNKNOWN (76.5%)**, and the test asserts the count is not zero, because zero
+before the campaign would mean the policy layer had quietly acquired defaults.
+
+To regenerate after a generator or executor change:
+
+```bash
+UPDATE_FP_GOLDENS=1 cargo test -p lp-xt-emu --test fp_conformance
+```
+
+**Never** regenerate a row from device output. That inverts the test into a
+tautology that passes forever, and it is already the repo's stated rule
+(`lpvm-native/src/xt_corpus.rs`).
 
 ## Run API
 

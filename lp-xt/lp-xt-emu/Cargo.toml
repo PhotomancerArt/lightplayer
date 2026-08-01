@@ -12,3 +12,11 @@ workspace = true
 [dependencies]
 lp-emu-core = { path = "../../lp-emu/lp-emu-core" }
 lp-xt-inst = { path = "../lp-xt-inst" }
+
+# The FP conformance corpus generator. A dev-dependency, not a dependency: the
+# emulator does not need it to run, and `tests/fp_conformance.rs` is its only
+# consumer on this side. `fw-esp32s3`'s device harness (M6 P5) will depend on it
+# directly — the same crate on both sides is what makes the vectors identical,
+# and `fingerprint()` is what makes that checkable rather than assumed.
+[dev-dependencies]
+lp-xt-fp-vectors = { path = "../lp-xt-fp-vectors" }

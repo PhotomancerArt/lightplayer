@@ -63,6 +63,60 @@ fn rrr_fields(op: AluRrr) -> (u32, u32) {
     }
 }
 
+/// `op2` for the three-FR-operand FP0 forms.
+fn fp_rrr_op2(op: FpRrrOp) -> u32 {
+    match op {
+        FpRrrOp::AddS => 0x0,
+        FpRrrOp::SubS => 0x1,
+        FpRrrOp::MulS => 0x2,
+        FpRrrOp::MaddS => 0x4,
+        FpRrrOp::MsubS => 0x5,
+        FpRrrOp::MaddnS => 0x6,
+        FpRrrOp::DivnS => 0x7,
+    }
+}
+
+/// The `t`-field selector for the FP1 unary group (`op1 = 0xA`, `op2 = 0xF`).
+fn fp_rr_sel(op: FpRrOp) -> u32 {
+    match op {
+        FpRrOp::MovS => 0x0,
+        FpRrOp::AbsS => 0x1,
+        FpRrOp::NegS => 0x6,
+        FpRrOp::Div0S => 0x7,
+        FpRrOp::Recip0S => 0x8,
+        FpRrOp::Sqrt0S => 0x9,
+        FpRrOp::Rsqrt0S => 0xa,
+        FpRrOp::Nexp01S => 0xb,
+        FpRrOp::MkdadjS => 0xd,
+        FpRrOp::AddexpS => 0xe,
+        FpRrOp::AddexpmS => 0xf,
+    }
+}
+
+/// `op2` for the FP compares (`op1 = 0xB`).
+fn fp_cmp_op2(op: FpCmpOp) -> u32 {
+    match op {
+        FpCmpOp::UnS => 0x1,
+        FpCmpOp::OeqS => 0x2,
+        FpCmpOp::UeqS => 0x3,
+        FpCmpOp::OltS => 0x4,
+        FpCmpOp::UltS => 0x5,
+        FpCmpOp::OleS => 0x6,
+        FpCmpOp::UleS => 0x7,
+    }
+}
+
+/// `op2` for the float→int conversions (`op1 = 0xA`).
+fn fp_to_int_op2(op: FpToIntOp) -> u32 {
+    match op {
+        FpToIntOp::RoundS => 0x8,
+        FpToIntOp::TruncS => 0x9,
+        FpToIntOp::FloorS => 0xa,
+        FpToIntOp::CeilS => 0xb,
+        FpToIntOp::UtruncS => 0xe,
+    }
+}
+
 /// Encode `inst` to little-endian machine bytes.
 pub fn encode(inst: &Inst) -> Vec<u8> {
     let mut out = Vec::with_capacity(3);
@@ -413,6 +467,167 @@ pub fn encode(inst: &Inst) -> Vec<u8> {
                 NullaryNarrowOp::IllN => narrow(0xd, 6, 0, 0xf),
             };
             emit(&mut out, w, 2);
+        }
+
+        // --- floating point ---
+        Inst::FpRrr(op, fr, fs, ft) => {
+            let w = pack(
+                0,
+                ft.num() as u32,
+                fs.num() as u32,
+                fr.num() as u32,
+                0xa,
+                fp_rrr_op2(op),
+            );
+            emit(&mut out, w, 3);
+        }
+        Inst::FpRr(op, fr, fs) => {
+            let w = pack(0, fp_rr_sel(op), fs.num() as u32, fr.num() as u32, 0xa, 0xf);
+            emit(&mut out, w, 3);
+        }
+        Inst::ConstS(fr, imm) => {
+            // FP1 selector t = 3; the constant index rides in `s`.
+            let w = pack(0, 3, imm as u32, fr.num() as u32, 0xa, 0xf);
+            emit(&mut out, w, 3);
+        }
+        Inst::Rfr(ar, fs) => {
+            let w = pack(0, 4, fs.num() as u32, ar.num() as u32, 0xa, 0xf);
+            emit(&mut out, w, 3);
+        }
+        Inst::Wfr(fr, ars) => {
+            let w = pack(0, 5, ars.num() as u32, fr.num() as u32, 0xa, 0xf);
+            emit(&mut out, w, 3);
+        }
+        Inst::FpMovAr(op, fr, fs, at) => {
+            let op2 = match op {
+                FpMovArOp::MoveqzS => 0x8,
+                FpMovArOp::MovnezS => 0x9,
+                FpMovArOp::MovltzS => 0xa,
+                FpMovArOp::MovgezS => 0xb,
+            };
+            let w = pack(
+                0,
+                at.num() as u32,
+                fs.num() as u32,
+                fr.num() as u32,
+                0xb,
+                op2,
+            );
+            emit(&mut out, w, 3);
+        }
+        Inst::FpMovBr(op, fr, fs, bt) => {
+            let op2 = match op {
+                FpMovBrOp::MovfS => 0xc,
+                FpMovBrOp::MovtS => 0xd,
+            };
+            let w = pack(
+                0,
+                bt.num() as u32,
+                fs.num() as u32,
+                fr.num() as u32,
+                0xb,
+                op2,
+            );
+            emit(&mut out, w, 3);
+        }
+        Inst::FpCmp(op, br, fs, ft) => {
+            let w = pack(
+                0,
+                ft.num() as u32,
+                fs.num() as u32,
+                br.num() as u32,
+                0xb,
+                fp_cmp_op2(op),
+            );
+            emit(&mut out, w, 3);
+        }
+        Inst::FpToInt(op, ar, fs, imm) => {
+            let w = pack(
+                0,
+                imm as u32,
+                fs.num() as u32,
+                ar.num() as u32,
+                0xa,
+                fp_to_int_op2(op),
+            );
+            emit(&mut out, w, 3);
+        }
+        Inst::IntToFp(op, fr, ars, imm) => {
+            let op2 = match op {
+                IntToFpOp::FloatS => 0xc,
+                IntToFpOp::UfloatS => 0xd,
+            };
+            let w = pack(0, imm as u32, ars.num() as u32, fr.num() as u32, 0xa, op2);
+            emit(&mut out, w, 3);
+        }
+        Inst::FpLsx(op, fr, ars, at) => {
+            let op2 = match op {
+                FpLsxOp::Lsx => 0x0,
+                FpLsxOp::Lsxp => 0x1,
+                FpLsxOp::Ssx => 0x4,
+                FpLsxOp::Ssxp => 0x5,
+            };
+            let w = pack(
+                0,
+                at.num() as u32,
+                ars.num() as u32,
+                fr.num() as u32,
+                0x8,
+                op2,
+            );
+            emit(&mut out, w, 3);
+        }
+        Inst::FpLsi(op, ft, ars, offset) => {
+            let r = match op {
+                FpLsiOp::Lsi => 0x0,
+                FpLsiOp::Ssi => 0x4,
+                FpLsiOp::Lsip => 0x8,
+                FpLsiOp::Ssip => 0xc,
+            };
+            let w = rri8(3, ft.num() as u32, ars.num() as u32, r, (offset / 4) & 0xff);
+            emit(&mut out, w, 3);
+        }
+
+        // --- boolean register file ---
+        Inst::MovBool(set, ar, ars, bt) => {
+            let op2 = if set { 0xd } else { 0xc };
+            let w = pack(
+                0,
+                bt.num() as u32,
+                ars.num() as u32,
+                ar.num() as u32,
+                0x3,
+                op2,
+            );
+            emit(&mut out, w, 3);
+        }
+        Inst::BranchBool(set, bs, off) => {
+            // op0 = 6, n = 3, m = 1 -> t nibble = (m << 2) | n = 7; r selects bt/bf.
+            let r = if set { 1 } else { 0 };
+            let w = rri8(6, 7, bs.num() as u32, r, (off as u32) & 0xff);
+            emit(&mut out, w, 3);
+        }
+
+        // --- special / user registers ---
+        Inst::Sr(op, sreg, at) => {
+            let n = sreg.num() as u32;
+            let (op1, op2) = match op {
+                SrOp::Rsr => (3, 0),
+                SrOp::Wsr => (3, 1),
+                SrOp::Xsr => (1, 6),
+            };
+            let w = pack(0, at.num() as u32, n & 0xf, (n >> 4) & 0xf, op1, op2);
+            emit(&mut out, w, 3);
+        }
+        Inst::Ur(op, ureg, at) => {
+            let n = ureg.num() as u32;
+            let w = match op {
+                // RUR: user reg = (s << 4) | t; destination AR = r.
+                UrOp::Rur => pack(0, n & 0xf, (n >> 4) & 0xf, at.num() as u32, 3, 0xe),
+                // WUR: user reg = (r << 4) | s; source AR = t.
+                UrOp::Wur => pack(0, at.num() as u32, n & 0xf, (n >> 4) & 0xf, 3, 0xf),
+            };
+            emit(&mut out, w, 3);
         }
     }
     out
