@@ -1,5 +1,5 @@
+use lp_emu_core::profile::{Gate, GateAction, PerfEvent, PerfEventKind};
 use lp_perf::{EVENT_FRAME, EVENT_PROJECT_LOAD, EVENT_SHADER_COMPILE};
-use lp_riscv_emu::profile::{Gate, GateAction, PerfEvent, PerfEventKind};
 
 /// Number of `frame` Begin events to skip before starting capture.
 pub const STEADY_RENDER_WARMUP_FRAMES: u32 = 2;
@@ -70,8 +70,8 @@ impl Gate for SteadyRenderGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lp_emu_core::profile::PerfEvent;
     use lp_perf::EVENT_SHADER_LINK;
-    use lp_riscv_emu::profile::PerfEvent;
 
     fn frame_begin() -> PerfEvent {
         PerfEvent {
@@ -143,7 +143,7 @@ mod tests {
         let mut g = SteadyRenderGate::new();
         let evt = PerfEvent {
             cycle: 0,
-            name: lp_riscv_emu::profile::perf_event::EVENT_PROFILE_START,
+            name: lp_emu_core::profile::perf_event::EVENT_PROFILE_START,
             kind: PerfEventKind::Instant,
         };
         assert_eq!(g.on_event(&evt), GateAction::NoChange);

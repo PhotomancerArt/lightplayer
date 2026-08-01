@@ -31,6 +31,23 @@ engine (`lpc-engine`) and shader execution backends.
 - **Optional accelerated backends** (GPU, `lp-gfx-wgpu`) may additionally be
   constructed on capable targets. Selection happens at runtime creation, by
   the host.
+- **A no-op backend for builds that run no shaders**, `NullGraphics` (in
+  this crate, behind the off-by-default `null-backend` feature). `LpServer`
+  takes `graphics: Arc<dyn LpGraphics>` — not an `Option` — so constrained
+  bring-up firmware that never renders would otherwise link the whole
+  on-device JIT just to fill that parameter (measured: 743,216 B on the C6).
+  `NullGraphics` fills it instead and fails every request with a
+  `GfxError::Backend` naming itself and saying the build has no shader
+  support. **Never a default** — every host, the studio, and the shipping
+  ESP32 firmware construct the real backend — and **not** a step toward
+  making the compiler an opt-in feature on `lpc-engine`/`lpa-server`, which
+  `AGENTS.md` forbids outright.
+
+  The feature gate is not ceremony. Merely *adding* the module — which links
+  no symbols; `rust-nm` finds none of it in the C6 image — grew `.text` by
+  436 B and `.rodata` by 64 B by perturbing inlining across the LTO unit. A
+  build that does not want the null backend should not pay for it, so opting
+  in is an explicit line in the consumer's own `Cargo.toml`.
 - **Never silent.** A backend must error on options it cannot honor — in
   particular the `ShaderSemantics` tier — rather than substitute different
   semantics. Which tier/backend is active is user-visible state. See

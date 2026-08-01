@@ -6,7 +6,9 @@
 //! Corpus layout (see P1 of the schema/shape-gen hygiene plan):
 //!
 //! - [`ARTIFACT_ROOTS`] hold authored projects: `project.json` roots validate
-//!   against `schemas/project.schema.json`, every other `*.json` is a node
+//!   against `schemas/project.schema.json`, `*.map2d.json` files are fixture
+//!   mapping documents and validate by parsing with the real `lpc-mapping`
+//!   parser (which owns that format), and every other `*.json` is a node
 //!   artifact and validates against `schemas/node.schema.json`. Non-JSON
 //!   files (`.glsl`, `.svg`, ...) are not artifacts and are ignored by
 //!   extension.
@@ -54,9 +56,15 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
         );
         let mut projects = 0usize;
         let mut nodes = 0usize;
+        let mut mappings = 0usize;
         for file in &files {
             let rel = relative(&workspace, file);
             if SKIP_JSON.contains(&rel.as_str()) {
+                continue;
+            }
+            if rel.ends_with(".map2d.json") {
+                mappings += 1;
+                validate_map2d_file(file, &rel, &mut failures)?;
                 continue;
             }
             let validator = if file.file_name().is_some_and(|name| name == "project.json") {
@@ -68,7 +76,9 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             };
             validate_file(validator, file, &rel, &mut failures)?;
         }
-        println!("{root}: validated {projects} project roots + {nodes} node artifacts");
+        println!(
+            "{root}: validated {projects} project roots + {nodes} node artifacts + {mappings} mapping documents"
+        );
     }
 
     if !failures.is_empty() {
@@ -84,9 +94,11 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
 #[test]
 fn hardware_manifests_conform_to_checked_in_schema() -> Result<()> {
     let workspace = workspace_dir();
-    let validator = load_validator(&workspace, "schemas/hardware.schema.json")?;
+    let manifest_validator = load_validator(&workspace, "schemas/hardware.schema.json")?;
+    let display_validator = load_validator(&workspace, "schemas/board-display.schema.json")?;
 
     let mut failures = Vec::new();
+    let mut display_count = 0usize;
     for root in HARDWARE_ROOTS {
         let files = walk_json_files(&workspace, root)?;
         assert!(
@@ -98,10 +110,22 @@ fn hardware_manifests_conform_to_checked_in_schema() -> Result<()> {
             if SKIP_JSON.contains(&rel.as_str()) {
                 continue;
             }
-            validate_file(&validator, file, &rel, &mut failures)?;
+            // `<product>.display.json` sidecars are catalog metadata
+            // (lpa-boards) with their own schema.
+            if rel.ends_with(".display.json") {
+                display_count += 1;
+                validate_file(&display_validator, file, &rel, &mut failures)?;
+            } else {
+                validate_file(&manifest_validator, file, &rel, &mut failures)?;
+            }
         }
         println!("{root}: validated {} hardware manifests", files.len());
     }
+    // Vacuity guard for the sidecar branch too.
+    assert!(
+        display_count > 0,
+        "no display sidecars found under the hardware roots — walk is vacuous"
+    );
 
     if !failures.is_empty() {
         bail!(
@@ -171,6 +195,21 @@ fn validate_file(
     };
     for error in validator.iter_errors(&instance) {
         failures.push(format!("{rel}: at `{}`: {error}", error.instance_path()));
+    }
+    Ok(())
+}
+
+/// Validate a `*.map2d.json` mapping document with the owning parser —
+/// stricter than a JSON Schema: it enforces the format gate and resolves.
+fn validate_map2d_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Result<()> {
+    let text = std::fs::read_to_string(file).with_context(|| format!("reading {rel}"))?;
+    match lpc_mapping::Map2dDoc::from_json(&text) {
+        Ok(doc) => {
+            if let Err(error) = lpc_mapping::resolve(&doc) {
+                failures.push(format!("{rel}: does not resolve: {error}"));
+            }
+        }
+        Err(error) => failures.push(format!("{rel}: {error}")),
     }
     Ok(())
 }

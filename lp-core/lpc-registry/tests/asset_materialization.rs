@@ -16,10 +16,10 @@ fn materializes_committed_shader_source_and_fixture_assets() {
     assert_eq!(shader.diagnostic_name, "/idle.glsl");
 
     let fixture = scenario
-        .materialize_asset(&artifact_asset("/fyeah-mapping.svg"))
-        .expect("fixture svg");
-    assert!(fixture.bytes.starts_with(b"<?xml"));
-    assert_eq!(fixture.diagnostic_name, "/fyeah-mapping.svg");
+        .materialize_asset(&artifact_asset("/fyeah.map2d.json"))
+        .expect("fixture map2d doc");
+    assert!(fixture.bytes.starts_with(b"{"));
+    assert_eq!(fixture.diagnostic_name, "/fyeah.map2d.json");
 }
 
 #[test]

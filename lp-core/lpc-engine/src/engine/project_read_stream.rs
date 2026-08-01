@@ -423,10 +423,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "node-texture")]
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
-    use lpc_model::{NodeDef, NodeName, Revision, TextureDef, TreePath, WithRevision};
+    #[cfg(feature = "node-texture")]
+    use lpc_model::{NodeDef, TextureDef};
+    use lpc_model::{NodeName, Revision, TreePath, WithRevision};
     use lpc_wire::{
         NodeReadQuery, ProjectReadEvent, ProjectReadNodeEvent, ProjectReadResourceEvent,
         ResourcePayloadRead, ResourceReadQuery, WireChildKind, WireSlotIndex,
@@ -438,6 +441,7 @@ mod tests {
         read_into_view,
     };
     use crate::node::test_placeholder_spine;
+    #[cfg(feature = "node-texture")]
     use crate::nodes::TextureNode;
     use crate::resource::RuntimeBuffer;
 
@@ -1115,6 +1119,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-texture")]
     fn def_change_resends_def_root() {
         // A def-backed node whose `.def` root revision (3) is newer than its
         // runtime `.state` revision (1). Reading with since == 2 re-sends the

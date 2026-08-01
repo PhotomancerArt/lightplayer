@@ -3,18 +3,22 @@ name: CI
 on:
   pull_request:
     branches: ["main", "feature/*"]
+    # `edited` is on top of the defaults (opened, synchronize, reopened) for one
+    # reason: **retargeting**. A stacked PR based on a `claude/*` branch matches
+    # no filter above, so it gets NO CI AT ALL — not pending, not red, simply no
+    # runs. When its base merges and it is retargeted to main, that is a base
+    # edit, and without `edited` here nothing re-triggers: the PR sits there
+    # looking clean, having never been validated once. That happened on #195 and
+    # was caught by a human reading the checks list, which is not a control.
+    #
+    # Cost, accepted deliberately: `edited` also fires on title and body edits,
+    # so editing a PR description re-runs the suite. Wasteful, never wrong —
+    # and wrongness is the failure mode being fixed. If that cost ever bites,
+    # tighten by gating on `github.event.changes.base` rather than by dropping
+    # this, and check what skipped jobs do to required checks before you do.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: ["main"]
-  # Manual story-baseline refresh: pick a branch in the Actions UI and run.
-  # ONLY `validate-stories` runs (the validate jobs skip themselves below), so
-  # this is the ~10-minute recapture, not the full suite. It exists because
-  # the auto-commit path only fires on a *push-triggered* run: after a merge
-  # that resolves baseline conflicts by hand, or any time the branch's PNGs
-  # are stale with nothing new to push, there was no way to ask for a
-  # recapture short of an empty commit. GitHub only shows the Run-workflow
-  # button for workflows on the DEFAULT branch, so this trigger becomes
-  # usable once it lands on main.
-  workflow_dispatch:
 
 # Cancel stale in-flight runs when new commits land on the same ref, except on
 # main where every push should be validated.
@@ -28,38 +32,74 @@ env:
   # Work around rustup rename failures on overlay/cross-device filesystems (ARM runners, Docker)
   RUSTUP_PERMIT_COPY_RENAME: 1
 
+# CI shape (2026-07-28 restructure — measured baseline: Validate was 39-52 min
+# and dominated every run):
+#
+#   detect-changes ─┬─ lint            (fmt + clippy + repo lints)
+#                   ├─ validate-x64    (build prereqs + gated test recipes + schema-check)
+#                   ├─ validate-gfx    (ARM; wgpu tree)
+#                   ├─ validate-browser(real-browser wasm suites)
+#                   └─ validate-stories(story baseline capture)
+#
+# Every job is path-gated, including lint/validate via the `core` filter, so a
+# docs-only PR runs nothing but detect-changes. All gates follow the same
+# philosophy: conservative dependency-closure filters on PRs, and pushes to
+# main force every gate true, so anything a filter miss lets through surfaces
+# on the very next merge.
+#
+# Rebuild avoidance: rust-cache can only cache third-party deps (it prunes
+# workspace-member artifacts because mtime-based fingerprints go stale on
+# fresh checkouts), so before 2026-07-28 every run recompiled all ~64
+# first-party crates from scratch — a no-op PR still paid 25-45 min. sccache
+# (GHA cache backend) now caches individual rustc invocations
+# content-addressed, workspace members included, and writes on every run (PRs
+# too), so unchanged crates are cache hits regardless of mtimes. It does not
+# cache build-script execution, linking, or clippy-driver lints of workspace
+# crates (deps still hit). CARGO_INCREMENTAL=0 because sccache cannot cache
+# incremental compiles (and CI never benefited: the incremental state was
+# never restored). debug=0 because CI only needs symbol names in backtraces,
+# not line tables, and it roughly halves compile output — which keeps the
+# per-job caches comfortably under the repo's 10 GB Actions-cache budget.
+# validate-stories is deliberately exempt from all of this: its pinned
+# capture environment must not churn (see that job).
 jobs:
-  # The main validate job runs on x64. It was ARM from 2026-06 (x64 was
-  # disabled over x86_64 host-JIT failures in `lpvm-cranelift`; that JIT was
-  # removed 2026-07-11), and a 2026-07 side-by-side comparison run showed x64
-  # green at equivalent wall-clock (19m23s x64 vs 19m51s ARM, warm caches).
-  # Consolidated on x64 2026-07-27: every browser-dependent job is x64-only
-  # anyway (Google Chrome ships no linux-arm64 build), and x64 runner images
-  # are the better-supported default. validate-gfx stays on ARM deliberately —
-  # it needs no browser and keeps a second architecture compiling the tree.
-  # The GLSL filetest suite (31k cases x 5 targets) is the longest single unit
-  # of work in `just test`. It only exercises the shader/exec stack, so PRs
-  # that cannot reach that stack run `just test-rust` and skip it.
-  #
-  # The list is the *dependency closure* of the two binaries the suite builds,
-  # by directory, not a guess at what "looks shader-y":
-  #   - lps-filetests-app  -> lp-shader, lp-riscv, lp-gfx, lp-base, third_party
-  #   - lps-builtins-emu-app (the guest ELF, built by scripts/build-builtins.sh)
-  #     additionally pulls in lp-core
-  # Cargo.lock is included deliberately (unlike detect-studio-web-changes): a
-  # naga or wasmtime bump changes shader results, and the suite is cheap enough
-  # after the profile.dev overrides in Cargo.toml that the insurance is free.
-  #
-  # Pushes to main always run it, so anything a filter miss lets through
-  # surfaces on the very next merge.
-  detect-shader-changes:
-    name: Detect shader-relevant changes
+  detect-changes:
+    name: Detect changed paths
     runs-on: ubuntu-24.04
     outputs:
-      shader: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.shader }}
+      core: ${{ github.event_name != 'pull_request' && 'true' || steps.core.outputs.core }}
+      shader: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.shader }}
+      gfx: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.gfx }}
+      browser: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.browser }}
+      studio: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.studio }}
+      firmware: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.firmware }}
     steps:
-      - name: Filter changed paths
-        id: filter
+      # Default quantifier ("some"): a filter is true when ANY changed file
+      # matches one of its globs. Each list is the *dependency closure* of what
+      # the gated job builds, by directory — not a guess at what "looks
+      # relevant".
+      #
+      # shader gates the GLSL filetest suite (31k cases x 5 targets), the
+      # longest single unit of work in `just test`. Closure of the two
+      # binaries the suite builds: lps-filetests-app -> lp-shader, lp-riscv,
+      # lp-xt, lp-gfx, lp-base, third_party; lps-builtins-emu-app (the guest
+      # ELF, built by scripts/build-builtins.sh) additionally pulls in lp-core.
+      #
+      # lp-xt is in the closure because lps-filetests enables lpvm-native's
+      # `emu-xt` (the Xtensa host engine, behind the xtn/xtlpn targets) and
+      # because `isa-xt` is on by default, pulling lp-xt-inst into every host
+      # build of lpvm-native. It is deliberately NOT in `gfx`/`browser`:
+      # lp-gfx-lpvm selects its ISA per target_arch, so a host build of those
+      # never compiles an Xtensa backend.
+      # Cargo.lock is included deliberately: a naga or wasmtime bump changes
+      # shader results, and the suite is cheap enough after the profile.dev
+      # overrides in Cargo.toml that the insurance is free.
+      #
+      # browser is the closure of the two real-browser wasm suites:
+      # lpa-fs-opfs (real OPFS + Web Locks) and fw-browser (runtime protocol
+      # over wasm).
+      - name: Filter changed paths (positive gates)
+        id: some
         if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@v3
         with:
@@ -67,6 +107,7 @@ jobs:
             shader:
               - 'lp-shader/**'
               - 'lp-riscv/**'
+              - 'lp-xt/**'
               - 'lp-gfx/**'
               - 'lp-base/**'
               - 'lp-core/**'
@@ -77,15 +118,110 @@ jobs:
               - 'rust-toolchain.toml'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
+            gfx:
+              - 'lp-gfx/**'
+              - 'lp-shader/**'
+              - 'lp-riscv/**'
+              - 'lp-base/**'
+              - 'lp-core/**'
+              - 'lp-fw/**'
+              - 'lp-app/lpa-server/**'
+              - 'lp-app/lpa-client/**'
+              - 'lp-app/lpa-link/**'
+              - 'lp-app/lpa-studio-core/**'
+              - 'lp-app/lpa-fs-opfs/**'
+              - 'spikes/naga-wasm-poc/**'
+              - 'third_party/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+            browser:
+              - 'lp-app/lpa-fs-opfs/**'
+              - 'lp-fw/**'
+              - 'lp-base/**'
+              - 'lp-core/**'
+              - 'lp-shader/**'
+              - 'lp-gfx/**'
+              - 'lp-riscv/**'
+              - 'third_party/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+            # Cargo.lock is deliberately EXCLUDED from studio (unlike the
+            # filters above): a dep bump can change rendering, but gating on
+            # it would run the ~10-15 min stories job on every dependency PR;
+            # a miss surfaces on the very next merge to main.
+            studio:
+              - 'lp-app/lpa-studio-web/**'
+              - 'lp-app/lpa-studio-core/**'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+            # firmware gates the esp32c6 image size check. This list is
+            # deliberately broad — it is the link closure of the device image,
+            # and size regressions arrive through shared crates far more often
+            # than through lp-fw itself (the 2026-07 overrun came from
+            # lp-core mapping work). Cargo.lock is in: a dep bump is exactly
+            # the kind of change that silently adds 40 KB.
+            firmware:
+              - 'lp-fw/**'
+              - 'lp-core/**'
+              - 'lp-app/lpa-server/**'
+              - 'lp-shader/**'
+              - 'lp-gfx/**'
+              - 'lp-base/**'
+              - 'lp-riscv/**'
+              - 'third_party/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
 
-  validate-x64:
-    name: Validate (x64)
+      # `core` is the negative gate for lint + validate-x64: with
+      # predicate-quantifier: every, a changed file counts only if it matches
+      # ALL patterns below — i.e. it is none of the ignorable kinds. So the
+      # filter is true iff the PR touches at least one file that could affect
+      # a build or test. story-images are excluded here but still inside the
+      # `studio` filter above: a baseline-refresh PR runs validate-stories
+      # (which is the job that validates baselines) without paying for
+      # lint/validate.
+      - name: Filter changed paths (core negative gate)
+        id: core
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          predicate-quantifier: every
+          filters: |
+            core:
+              - '!docs/**'
+              - '!docs-archive/**'
+              - '!**/*.md'
+              - '!.gitignore'
+              - '!LICENSE*'
+              - '!lp-app/lpa-studio-web/story-images/**'
+
+  # fmt + clippy + repo lint scripts, split out of the old serial
+  # `check build-ci test` chain so the ~13 min of clippy runs PARALLEL to
+  # validate-x64 instead of in front of it (and so the two no longer fight
+  # over the same 4 cores — the old `check` ran clippy and schema-check's
+  # full dev build concurrently and both crawled). schema-check itself moved
+  # into validate-x64, where its dev build shares artifacts with the test
+  # builds; clippy's check-mode artifacts are shareable with nothing.
+  lint:
+    name: Lint (x64)
     runs-on: ubuntu-24.04
-    needs: detect-shader-changes
-    # A manual dispatch is a story-baseline recapture, not a revalidation:
-    # the branch's code was already validated by the run that reviewed it.
-    if: github.event_name != 'workflow_dispatch'
-    # x64: full check + build + test
+    needs: detect-changes
+    if: needs.detect-changes.outputs.core == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
@@ -111,107 +247,419 @@ jobs:
       - name: Install RISC-V target
         run: rustup target add ${{ env.RISC_V_TARGET }}
 
-      # rust-cache keys on the job id, so this job's cache stays separate
-      # from the other jobs' and none evicts another. (The pre-2026-07
-      # actions/cache config listed `target/` at the workspace root while the
-      # repo checks out into `lp2025/`, so nothing was ever cached; rust-cache
-      # keys on Cargo.lock + rustc version and prunes stale artifacts.)
-      #
-      # save-if main-only (all cache steps in this workflow): GitHub scopes
-      # cache RESTORE so a PR can only see its own ref's caches plus main's,
-      # and evicts LRU past the 10GB repo cap. When every PR saved ~4-5GB to
-      # its own merge ref, two active PRs flushed main's baseline and every
-      # new PR's first run went cache-cold (the observed 28-31m Validate runs
-      # logged "No cache found"; warm runs took 17-19m). Saving only on main
-      # keeps one shared warm baseline that every PR can restore, well under
-      # the cap. Trade-off: repeat pushes to a PR rebuild that PR's delta each
-      # time instead of resuming it — small next to the cold-start cost.
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # rust-cache keys on the job id, so this job's cache (check-mode
+      # artifacts) stays separate from the validate jobs'. save-if main-only:
+      # GitHub scopes cache RESTORE so a PR can only see its own ref's caches
+      # plus main's, and evicts LRU past the 10GB repo cap; saving only on
+      # main keeps one shared warm baseline every PR can restore.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          # target/ itself is NOT cached: sccache re-materializes crate
+          # compiles content-addressed (91% hit rate measured on this PR's
+          # warm run), and the 2-3GB-per-job target payloads pushed the repo
+          # past its 10GB Actions-cache budget, which LRU-evicts into
+          # thrash. Build scripts re-run each time — small next to the
+          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # `just test` = test-rust + test-filetests (parallel). When the shader
-      # gate misses, only test-rust runs.
-      - name: Validate
-        env:
-          TEST_RECIPE: ${{ needs.detect-shader-changes.outputs.shader == 'true' && 'test' || 'test-rust' }}
-        run: cd lp2025 && just check build-ci "$TEST_RECIPE"
+      - name: Lint
+        run: cd lp2025 && just check-lint
 
-  # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser, naga-wasm-poc)
-  # are validated in a separate job below. Building `-p lp-gfx-wgpu` unifies
-  # cargo features differently from the default-members build, so folding it
-  # into `just test` recompiled ~25 crates (the naga fork, wgpu-core/hal, and
-  # most of lp-shader) at the tail of every Validate run, and clippy over the
-  # wgpu tree added another ~1.5 min. Splitting it out keeps that work off the
-  # critical path, and the paths gate skips it entirely on PRs that cannot
-  # affect the GPU/wasm-sidecar build (docs, Planning, studio-web, lp-cli).
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # fw-esp32s3 is the repo's only crate on a SECOND toolchain (Espressif's
+  # Xtensa Rust fork — no upstream target exists), so no other job compiles it.
+  # That is precisely the shape that rots here: 13 fw-esp32 test harnesses
+  # silently stopped compiling because CI never built them. This job is the
+  # anti-rot gate, and it measures the image against the same 3 MB partition
+  # the C6 has overrun twice.
   #
-  # The gate is intentionally conservative: it lists the dependency closure of
-  # those crates by directory. Pushes to main always run the job, so anything
-  # a filter miss lets through still surfaces on the very next merge.
-  detect-gfx-changes:
-    name: Detect GFX-relevant changes
+  # Deliberately shares the broad `firmware` filter with firmware-size rather
+  # than a narrow lp-fw/fw-esp32s3 one: that filter is the link closure of the
+  # device image, and once this crate grows its app layer (server, storage,
+  # shader engine — still ahead of it) a narrow filter would stop rebuilding on
+  # the changes most likely to break it. A narrow filter here would recreate
+  # the rot this job exists to prevent.
+  #
+  # Compile-only. Hardware validation is manual at the M6 gate; tethered CI is
+  # recorded as future work, not attempted here.
+  firmware-xtensa:
+    name: Firmware build (esp32s3)
     runs-on: ubuntu-24.04
-    outputs:
-      gfx: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.gfx }}
-      browser: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.browser }}
+    needs: detect-changes
+    if: needs.detect-changes.outputs.firmware == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
     steps:
-      - name: Filter changed paths
-        id: filter
-        if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            gfx:
-              - 'lp-gfx/**'
-              - 'lp-shader/**'
-              - 'lp-riscv/**'
-              - 'lp-base/**'
-              - 'lp-core/**'
-              - 'lp-fw/**'
-              - 'lp-app/lpa-server/**'
-              - 'lp-app/lpa-client/**'
-              - 'lp-app/lpa-link/**'
-              - 'lp-app/lpa-studio-core/**'
-              - 'lp-app/lpa-fs-opfs/**'
-              - 'spikes/naga-wasm-poc/**'
-              - 'third_party/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain.toml'
-              - 'justfile'
-              - '.github/workflows/pre-merge.yml'
-            # Dependency closure (by directory) of the two real-browser wasm
-            # suites: lpa-fs-opfs (real OPFS + Web Locks) and fw-browser
-            # (runtime protocol over wasm). Same conservative-gate philosophy
-            # as `gfx` above: misses surface on the next main push.
-            browser:
-              - 'lp-app/lpa-fs-opfs/**'
-              - 'lp-fw/**'
-              - 'lp-base/**'
-              - 'lp-core/**'
-              - 'lp-shader/**'
-              - 'lp-gfx/**'
-              - 'lp-riscv/**'
-              - 'third_party/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain.toml'
-              - 'justfile'
-              - '.github/workflows/pre-merge.yml'
+      - name: Install system deps (libudev for espflash)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
 
-  validate-gfx:
-    name: Validate GFX (ARM)
-    runs-on: ubuntu-24.04-arm
-    needs: detect-gfx-changes
-    if: >-
-      needs.detect-gfx-changes.outputs.gfx == 'true' &&
-      github.event_name != 'workflow_dispatch'
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Installs the Xtensa Rust fork as the `esp` toolchain plus its bundled
+      # GNU binutils, which the build needs on PATH — the Rust target spec
+      # links through xtensa-esp32s3-elf-gcc, not rust-lld.
+      #
+      # Pinned rather than floating. The crate's rust-toolchain.toml says
+      # `channel = "esp"`, which locally tracks whatever espup installed; CI
+      # pins so a fork release cannot turn a green PR red on its own. Needs
+      # >= 1.90 for the workspace MSRV — on 1.88 lpc-model genuinely fails to
+      # compile (70x E0716 from the Slotted derive). Bump deliberately.
+      - name: Install Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3
+          default: true
+          ldproxy: false
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match the firmware-size job. ~/.cargo/bin is restored by
+      # rust-cache above, so this is a no-op on a warm cache.
+      - name: Install espflash
+        run: cargo install espflash --version 3.3.0 --locked
+
+      # Builds the crate and checks the image against its 3 MB app partition.
+      - name: Check esp32s3 image size
+        run: cd lp2025 && just fw-esp32s3-size-check
+
+      # The lint gate for this crate. It is separate from `clippy-host`, which
+      # deliberately EXCLUDES fw-esp32s3: including it triggers a real
+      # critical-section feature-unification conflict, so without this step the
+      # crate has no clippy coverage anywhere.
+      - name: Clippy esp32s3 firmware
+        run: cd lp2025 && just clippy-fw-esp32s3
+
+  # The Xtensa HOST path: `lpvm-native`'s `rt_emu` compiling shaders for Xtensa
+  # and executing them on `lp-xt-emu`, linked against a cross-compiled builtins
+  # image. Nothing else in CI runs Xtensa *code* — `firmware-xtensa` above only
+  # compiles a device image.
+  #
+  # This job exists because those tests were inert. They skip when the Xtensa
+  # builtins image is absent (it is a gitignored cross-target artifact, and that
+  # skip is deliberate — the workspace must build and test without the esp
+  # toolchain), so before this job every one of them silently no-opped in CI
+  # while looking green.
+  #
+  # Self-contained rather than passing the image between jobs: the toolchain and
+  # the consumers sit in one place, `validate-x64` is untouched, and there is no
+  # cross-gate coupling to get wrong. (`firmware-xtensa` is gated on `firmware`
+  # and this on `shader`; wiring an artifact between them would leave a
+  # shader-only PR running the suite against an EMPTY image and reporting green
+  # — exactly the failure this job is meant to end.)
+  #
+  # Scope note: this gates BOTH halves of the Xtensa host story — the
+  # engine/emitter tests (`just test-xt-host`, differential against rv32) and
+  # the xtn.q32 / xtlpn.q32 filetest corpus targets. The corpus went green on
+  # 2026-07-31 (851/851 files on each target), which is what the earlier
+  # revision of this note was waiting for; gating it before that would only have
+  # trained people to ignore the job.
+  validate-xtensa:
+    name: Validate Xtensa (host)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.shader == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Mirrors validate-x64. regalloc2 resolves from git today, so this is not
+      # strictly required — it is what makes the commented-out `[patch]` in the
+      # root Cargo.toml work if anyone uncomments it, and a job that omitted it
+      # would be the one that mysteriously broke.
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      # Two toolchains, both needed: the pinned nightly builds the host test
+      # binaries, and the Espressif fork cross-compiles the builtins image.
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rustfmt, clippy, rust-src
+
+      # Same pin as firmware-xtensa; keep the two in sync. `default: false`
+      # leaves the host nightly as the default toolchain — the image build
+      # selects the esp channel itself through lp-xt/fixtures/rust-toolchain.toml.
+      - name: Install Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3
+          default: false
+          ldproxy: false
+
+      # Compile cache, mirroring every other compile-heavy job here (see
+      # validate-x64 for the design: cache-targets is off repo-wide, sccache IS
+      # the compile reuse). The wrapper also covers the esp cross-build below —
+      # sccache + Espressif toolchain + build-std is already proven in this
+      # workflow by firmware-size.
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # The base image the host engine links compiled shader code against.
+      - name: Build the Xtensa builtins image
+        run: cd lp2025 && scripts/build-builtins-xt.sh
+
+      # BOTH images are needed, which is not obvious. `xt_engine`'s tests are
+      # differential: they compile the same LPIR for rv32 as the oracle and
+      # compare, so an absent RV32 image fails them just as hard as an absent
+      # Xtensa one. (Recipe pulls in `install-rv32-target` itself.)
+      #
+      # This is invisible locally — the rv32 image is always already built
+      # there — so CI is the only place the omission can surface.
+      - name: Build the RV32 builtins image (the differential oracle)
+        run: cd lp2025 && just build-rv32-builtins
+
+      # Guard the whole point of this job. Without the Xtensa image the tests
+      # SKIP and still report success, which is what was happening before this
+      # job existed; without the RV32 image they fail three minutes into a
+      # compile with a message that reads like a codegen bug. Fail here, fast
+      # and unambiguously, rather than either.
+      - name: Assert both builtins images are present
+        run: |
+          cd lp2025
+          xt=lp-xt/fixtures/elf/lps-builtins-xt-app.elf
+          rv=target/riscv32imac-unknown-none-elf/release/lps-builtins-emu-app
+          rc=0
+          for img in "$xt" "$rv"; do
+            if [ -s "$img" ]; then
+              echo "ok: $img ($(wc -c < "$img") bytes)"
+            else
+              echo "::error::$img missing or empty — Xtensa tests would skip or fail spuriously"
+              rc=1
+            fi
+          done
+          exit $rc
+
+      # Run and then CHECK THAT IT RAN. A file-level `#![cfg(feature = "…")]`
+      # turns a wrong feature set into **zero tests and no compile error**, and
+      # `just test-xt-host` names its test targets explicitly, so a new file that
+      # nobody adds there is silently never run. Both have already happened in
+      # this repo (the `stories` feature on test-studio-host carries the same
+      # warning), and both look identical to success.
+      #
+      # Two assertions, each self-maintaining in the safe direction:
+      #   - no suite may report `running 0 tests` — the signature of a file that
+      #     compiled to nothing. Doc-test sections are excluded: having no
+      #     doctests is legitimate.
+      #   - the canary must have run by name. `sin_matches_rv32_through_the_…`
+      #     is the test that compiles a shader for Xtensa, links it against the
+      #     cross-compiled builtins image, executes it on the emulator, and
+      #     diffs against rv32. If that one did not run, this job proved nothing
+      #     about Xtensa no matter how many others passed.
+      #   - plus a floor on the total, which only trips when tests DISAPPEAR;
+      #     adding tests never requires touching it.
+      # ANSI escapes are stripped before the log is written. The job sets
+      # CARGO_TERM_COLOR=always and cargo colors its status headers, so the
+      # doctest header arrives as `\e[1m\e[92m   Doc-tests lpvm_native` and no
+      # `^ *Doc-tests` pattern can match it. Every assertion below anchors at
+      # start-of-line, so stripping once here is what makes them all mean what
+      # they read as — not just the one that has already misfired.
+      - name: Xtensa host tests
+        run: |
+          cd lp2025
+          set -o pipefail
+          just test-xt-host 2>&1 | sed -E 's/\x1b\[[0-9;]*[mGKHF]//g' | tee /tmp/xt-tests.log
+
+      - name: Assert the tests actually ran
+        run: |
+          log=/tmp/xt-tests.log
+          canary=sin_matches_rv32_through_the_builtins_image
+          rc=0
+
+          # "running 0 tests" from a test binary means its file compiled to
+          # nothing. Doc-test sections legitimately have none, so ignore
+          # anything after a Doc-tests header.
+          if awk '/^ *Doc-tests/ {doc=1} /^running 0 tests/ && !doc {found=1} END {exit !found}' "$log"; then
+            echo "::error::a test binary reported 'running 0 tests' — a file-level #![cfg] almost certainly emptied it"
+            rc=1
+          fi
+
+          if ! grep -qF "test $canary ... ok" "$log"; then
+            echo "::error::canary '$canary' did not run — this job proved nothing about Xtensa"
+            rc=1
+          fi
+
+          total=$(awk '/^test result: ok\./ {s+=$4} END {print s+0}' "$log")
+          echo "total tests passed: $total"
+          if [ "$total" -lt 40 ]; then
+            echo "::error::only $total tests ran (floor 40) — tests disappeared rather than were added"
+            rc=1
+          fi
+
+          exit $rc
+
+      # The filetest corpus, compiled and executed for Xtensa. This is the other
+      # half of the job: `test-xt-host` covers the engine and emitter on a
+      # handful of hand-written cases, this runs the full 851-file GLSL corpus
+      # through the Xtensa backend. Both targets were green at 851/851 when they
+      # were added here (2026-07-31).
+      #
+      # Two invocations, not one: `scripts/filetests.sh` keeps a single
+      # `--target` pair, so a second `-t` silently overwrites the first and you
+      # would test one target while believing you tested two. `just
+      # test-glsl-filetests` invokes the script repeatedly for the same reason.
+      # Separate steps rather than one step with two lines so a failure names
+      # its target in the job UI.
+      #
+      # Ordering matters: both steps must come after "Build the Xtensa builtins
+      # image" and its assertion above. Without the image the runner DROPS the
+      # Xtensa targets with a note on stderr — and because each invocation here
+      # requests exactly one target, dropping it empties the target set and the
+      # run bails non-zero rather than reporting a green no-op. (The script also
+      # rebuilds the image itself when an xt target is selected; it is already
+      # warm from the earlier step.) That belt-and-braces is deliberate: silent
+      # skip reported as success is the exact failure mode this job exists to
+      # end.
+      - name: Xtensa filetest corpus (xtn.q32)
+        run: cd lp2025 && scripts/filetests.sh -t xtn.q32 --summary
+
+      - name: Xtensa filetest corpus (xtlpn.q32)
+        run: cd lp2025 && scripts/filetests.sh -t xtlpn.q32 --summary
+
+  # The esp32c6 app image must fit a 3 MB partition. It has overrun twice, and
+  # both times the signal was a red Deploy Studio Pages run *after* the merge,
+  # because no pre-merge job built the device firmware. This job builds it and
+  # fails under 64 KB of headroom; it prints the number either way, so the size
+  # is visible on every PR that can move it.
+  # See docs/adr/2026-07-28-esp32c6-flash-budget.md.
+  firmware-size:
+    name: Firmware size (esp32c6)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.firmware == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for espflash)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Toolchain is pinned in lp2025/lp-fw/fw-esp32c6/rust-toolchain.toml; keep
+      # this in sync. rust-src is required: the firmware builds core/alloc from
+      # source (build-std) to apply optimize_for_size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Pinned to match deploy-studio-pages.yml, which packages the image this
+      # job measures. ~/.cargo/bin is restored by rust-cache above, so this is
+      # a no-op on a warm cache.
+      - name: Install espflash
+        run: cargo install espflash --version 3.3.0 --locked
+
+      - name: Check esp32c6 image size
+        run: cd lp2025 && just fw-esp32c6-size-check
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The main validate job runs on x64. It was ARM from 2026-06 (x64 was
+  # disabled over x86_64 host-JIT failures in `lpvm-cranelift`; that JIT was
+  # removed 2026-07-11), and a 2026-07 side-by-side comparison run showed x64
+  # green at equivalent wall-clock. Consolidated on x64 2026-07-27: every
+  # browser-dependent job is x64-only anyway (Google Chrome ships no
+  # linux-arm64 build). validate-gfx stays on ARM deliberately — it needs no
+  # browser and keeps a second architecture compiling the tree.
+  #
+  # The old standalone `just check build-ci test` chain is gone: cargo test
+  # builds everything a plain `cargo build` did, so build-ci only ever
+  # duplicated work (~12 min/run). The true prerequisites — the RV32 builtins
+  # ELF and the emu guest app that host tests embed/spawn — are built by
+  # `ci-prereqs`. Test recipes are composed from the path gates and run
+  # SEQUENTIALLY: the old [parallel] pairs thrashed the 4-core runner (two
+  # concurrent ~18-min cargo builds); cargo parallelizes fine within one
+  # invocation.
+  validate-x64:
+    name: Validate (x64)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.core == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
@@ -234,13 +682,110 @@ jobs:
           toolchain: nightly-2026-04-27
           components: rustfmt, clippy, rust-src
 
-      # rust-cache keys on the job id, so this job's cache (wgpu tree) stays
-      # separate from validate-x64's and neither evicts the other. save-if
-      # main-only: see the validate-x64 cache step for the rationale.
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # rust-cache keys on the job id; save-if main-only (see the lint job's
+      # cache step for the rationale).
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          # target/ itself is NOT cached: sccache re-materializes crate
+          # compiles content-addressed (91% hit rate measured on this PR's
+          # warm run), and the 2-3GB-per-job target payloads pushed the repo
+          # past its 10GB Actions-cache budget, which LRU-evicts into
+          # thrash. Build scripts re-run each time — small next to the
+          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # test-rust-core always runs; the studio-web host test only when studio
+      # paths changed (it forces a differently-feature-unified rebuild of the
+      # Dioxus tree); filetests only when shader paths changed. schema-check
+      # runs last so its lp-cli dev build reuses the warm deps the test
+      # builds just produced. Pushes to main force every gate true.
+      - name: Validate
+        env:
+          SHADER: ${{ needs.detect-changes.outputs.shader }}
+          STUDIO: ${{ needs.detect-changes.outputs.studio }}
+        run: |
+          cd lp2025
+          recipes="test-rust-core"
+          [ "$STUDIO" = "true" ] && recipes="$recipes test-studio-host"
+          [ "$SHADER" = "true" ] && recipes="$recipes test-filetests"
+          just ci-prereqs
+          just $recipes schema-check
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser, naga-wasm-poc)
+  # are validated here, separate from validate-x64: building `-p lp-gfx-wgpu`
+  # unifies cargo features differently from the default-members build, so
+  # folding it into `just test` recompiled ~25 crates at the tail of every
+  # Validate run.
+  validate-gfx:
+    name: Validate GFX (ARM)
+    runs-on: ubuntu-24.04-arm
+    needs: detect-changes
+    if: needs.detect-changes.outputs.gfx == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: light-player/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rustfmt, clippy, rust-src
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # rust-cache keys on the job id, so this job's cache (wgpu tree) stays
+      # separate from validate-x64's and neither evicts the other. save-if
+      # main-only: see the lint job's cache step for the rationale.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          # target/ itself is NOT cached: sccache re-materializes crate
+          # compiles content-addressed (91% hit rate measured on this PR's
+          # warm run), and the 2-3GB-per-job target payloads pushed the repo
+          # past its 10GB Actions-cache budget, which LRU-evicts into
+          # thrash. Build scripts re-run each time — small next to the
+          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -248,6 +793,14 @@ jobs:
 
       - name: Validate GFX
         run: cd lp2025 && just validate-gfx
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # Real-browser wasm suites: lpa-fs-opfs (real OPFS ops, Web Locks, store
   # round-trip — the Safari-OPFS-corruption defect class) and fw-browser
@@ -259,10 +812,14 @@ jobs:
   validate-browser:
     name: Validate Browser (x64)
     runs-on: ubuntu-24.04
-    needs: detect-gfx-changes
-    if: >-
-      needs.detect-gfx-changes.outputs.browser == 'true' &&
-      github.event_name != 'workflow_dispatch'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.browser == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - name: Install system deps (libudev for serialport)
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
@@ -285,14 +842,24 @@ jobs:
           toolchain: nightly-2026-04-27
           components: rustfmt, clippy, rust-src
 
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
       # rust-cache keys on the job id, so this job's cache (wasm32 tree) stays
       # separate from the other validate jobs'. It also caches ~/.cargo/bin,
       # which amortizes the wasm-bindgen-cli install below. save-if main-only:
-      # see the validate-x64 cache step for the rationale.
+      # see the lint job's cache step for the rationale.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: lp2025 -> target
+          # target/ itself is NOT cached: sccache re-materializes crate
+          # compiles content-addressed (91% hit rate measured on this PR's
+          # warm run), and the 2-3GB-per-job target payloads pushed the repo
+          # past its 10GB Actions-cache budget, which LRU-evicts into
+          # thrash. Build scripts re-run each time — small next to the
+          # eviction cost. Registry + ~/.cargo/bin stay cached.
+          cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install just
@@ -322,6 +889,14 @@ jobs:
       - name: Browser wasm tests
         run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test
 
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # Story baselines are CI-canonical: this job captures every story with a
   # pinned browser and compares against the committed PNGs (pixel tolerance,
   # see studio-story-pngs.mjs). On drift from a same-repo PR it commits the
@@ -338,35 +913,16 @@ jobs:
   # validated it. Day-to-day: after a drift run goes green, `git pull` before
   # pushing again.
   #
-  # The paths gate mirrors detect-gfx-changes: conservative directory list,
-  # always-run on main pushes. Cargo.lock is deliberately EXCLUDED — a dep bump
-  # can change rendering, but gating on it would run this ~20-30 min job on
-  # every dependency PR; a miss surfaces on the very next merge to main.
-  detect-studio-web-changes:
-    name: Detect Studio-web changes
-    runs-on: ubuntu-24.04
-    outputs:
-      studio: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.studio }}
-    steps:
-      - name: Filter changed paths
-        id: filter
-        if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            studio:
-              - 'lp-app/lpa-studio-web/**'
-              - 'lp-app/lpa-studio-core/**'
-              - 'justfile'
-              - '.github/workflows/pre-merge.yml'
-
+  # This job is deliberately EXEMPT from the sccache/incremental/debug env the
+  # other jobs set: it is the pinned canonical capture environment, and its
+  # build behavior must not churn alongside CI-speed experiments.
   validate-stories:
     name: Validate story baselines
     # x64: Chrome ships no linux-arm64 build, and the canonical capture
     # environment is pinned to Chrome for Testing on x64 Linux.
     runs-on: ubuntu-24.04
-    needs: detect-studio-web-changes
-    if: needs.detect-studio-web-changes.outputs.studio == 'true'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.studio == 'true'
     # The repo defaults workflow tokens to read-only; this job pushes baseline
     # refreshes to PR branches and posts the sticky summary comment.
     permissions:
@@ -417,7 +973,7 @@ jobs:
       # than rust-cache: the cargo-installed tools live in ~/.cargo/bin and
       # must be cached with a key that includes their pinned versions.
       # Restore/save are split so saving happens only on main — same repo-wide
-      # cache-eviction rationale as the validate-x64 cache step.
+      # cache-eviction rationale as the lint job's cache step.
       - name: Restore cargo registry, tools, and build artifacts
         id: stories_cache
         uses: actions/cache/restore@v4
@@ -580,16 +1136,11 @@ jobs:
         if: >-
           steps.story_check.outcome == 'failure' &&
           steps.check_complete.outputs.complete == 'true' &&
-          (
-            (github.event_name == 'pull_request' &&
-             github.event.pull_request.head.repo.full_name == github.repository) ||
-            (github.event_name == 'workflow_dispatch' && github.ref_name != 'main')
-          )
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
         env:
-          # A manual dispatch names its branch directly; main is excluded above
-          # so a mis-aimed dispatch cannot push baselines straight to it.
-          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
           cd lp2025
@@ -630,9 +1181,7 @@ jobs:
           fi
 
       - name: Post baseline-change PR comment
-        if: >-
-          steps.auto_commit.outputs.resolved == 'pushed' &&
-          github.event_name == 'pull_request'
+        if: steps.auto_commit.outputs.resolved == 'pushed'
         # Cosmetic: a comment failure must not fail the job — the push already
         # landed, and GITHUB_TOKEN pushes don't retrigger CI, so a red run
         # here would stay red with no follow-up run to clear it.
@@ -651,15 +1200,14 @@ jobs:
         shell: bash
         env:
           BOT_SHA: ${{ steps.auto_commit.outputs.bot_sha }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           {
             echo "## Story baselines auto-committed"
             echo
-            echo "Drift was detected and resolved: fresh baselines were committed to"
-            echo "\`${HEAD_REF}\` as \`${BOT_SHA}\`. GITHUB_TOKEN pushes do not trigger"
-            echo "workflow runs, so that commit has no CI run of its own — this green run"
-            echo "is the validating run. Remember to \`git pull\` before pushing again."
+            echo "Drift was detected and resolved: fresh baselines were committed to the"
+            echo "PR branch as \`${BOT_SHA}\`. GITHUB_TOKEN pushes do not trigger workflow"
+            echo "runs, so that commit has no CI run of its own — this green run is the"
+            echo "validating run. Remember to \`git pull\` before pushing again."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Fallback artifact path: fork PRs, push races, and main-push drift.
@@ -756,58 +1304,3 @@ jobs:
         with:
           path: ~/chrome
           key: ${{ steps.chrome_cache.outputs.cache-primary-key }}
-
-  # build-esp32-arm:
-  #   name: Build ESP32 (ARM)
-  #   runs-on: ubuntu-24.04-arm
-  #   # ARM: full check + build + test (lp-cranelift handles membarrier ENOSYS)
-  #   steps:
-  #     - name: Install system deps (libudev for serialport)
-  #       run: sudo apt-get update && sudo apt-get install -y libudev-dev gcc build-essential curl pkg-config
-
-  #     - name: Checkout lp2025
-  #       uses: actions/checkout@v4
-  #       with:
-  #         path: lp2025
-
-  #     - name: Checkout lp-regalloc2
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: light-player/lp-regalloc2
-  #         path: lp-regalloc2
-
-  #     - name: Install Rust toolchain
-  #       uses: dtolnay/rust-toolchain@stable
-  #       with:
-  #         components: rustfmt, clippy
-
-  #     - name: Install RISC-V target
-  #       run: rustup target add ${{ env.RISC_V_TARGET }}
-
-  #     - name: Install espup and ESP32 toolchain (esp32c6)
-  #       run: |
-  #         curl -sL https://github.com/esp-rs/espup/releases/latest/download/espup-aarch64-unknown-linux-gnu -o espup
-  #         chmod +x espup
-  #         ./espup install --targets esp32c6
-
-  #     - name: Cache cargo registry
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: |
-  #           ~/.cargo/bin/
-  #           ~/.cargo/registry/index/
-  #           ~/.cargo/registry/cache/
-  #           ~/.cargo/git/db/
-  #           ~/.espressif/
-  #           lp2025/target/
-  #         key: ${{ runner.os }}-${{ runner.arch }}-espup-v1-${{ hashFiles('lp2025/Cargo.lock') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-${{ runner.arch }}-espup-v1-cargo-
-
-  #     - name: Install just
-  #       uses: extractions/setup-just@v3
-
-  #     - name: build-rv32-jit-test
-  #       run: |
-  #         . $HOME/export-esp.sh
-  #         cd lp2025 && just build-rv32-jit-test

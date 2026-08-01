@@ -15,11 +15,7 @@ bvec2 test_bvec2_mix_all_false_selector() {
     return mix(a, b, selector);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(frontend!=lp)
 // run: test_bvec2_mix_all_false_selector() == bvec2(true, false)
 
 bvec2 test_bvec2_mix_all_true_selector() {
@@ -29,11 +25,7 @@ bvec2 test_bvec2_mix_all_true_selector() {
     return mix(a, b, selector);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(frontend!=lp)
 // run: test_bvec2_mix_all_true_selector() == bvec2(false, true)
 
 bvec2 test_bvec2_mix_mixed_selector() {
@@ -43,11 +35,7 @@ bvec2 test_bvec2_mix_mixed_selector() {
     return mix(a, b, selector);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(frontend!=lp)
 // run: test_bvec2_mix_mixed_selector() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_other_mixed_selector() {
@@ -57,11 +45,7 @@ bvec2 test_bvec2_mix_other_mixed_selector() {
     return mix(a, b, selector);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(frontend!=lp)
 // run: test_bvec2_mix_other_mixed_selector() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_same_vectors() {
@@ -70,11 +54,7 @@ bvec2 test_bvec2_mix_same_vectors() {
     return mix(a, a, selector);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(frontend!=lp)
 // run: test_bvec2_mix_same_vectors() == bvec2(true, true)
 
 bvec2 test_bvec2_mix_in_expression() {
@@ -88,9 +68,5 @@ bvec2 test_bvec2_mix_in_expression() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
+// @unsupported(frontend!=lp)
 // run: test_bvec2_mix_in_expression() == bvec2(true, true)

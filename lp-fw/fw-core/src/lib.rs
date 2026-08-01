@@ -5,7 +5,7 @@
 
 #![no_std]
 
-#[cfg(any(feature = "emu", feature = "esp32"))]
+#[cfg(feature = "emu")]
 pub mod log;
 
 pub mod message_router;

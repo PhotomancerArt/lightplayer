@@ -84,9 +84,9 @@ fn real_source_defs_sync_as_slot_roots() {
             &shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
             &shape_registry,
-            "glsl_opts.add_sub",
+            "float_mode",
         ),
-        LpValue::String(String::from("wrapping")),
+        LpValue::String(String::from("fixed")),
     );
 
     let shader_with_params = match NodeDef::from_json_str(
@@ -139,9 +139,9 @@ fn real_source_defs_sync_as_slot_roots() {
             &output_data,
             OutputDef::SHAPE_ID.slot_shape_from(&shape_registry),
             &shape_registry,
-            "options.some.brightness",
+            "options.some.dithering_enabled",
         ),
-        LpValue::F32(0.12),
+        LpValue::Bool(false),
     );
 
     let fixture_sync = build_slot_full_sync(
@@ -154,7 +154,7 @@ fn real_source_defs_sync_as_slot_roots() {
             &fixture_data,
             FixtureDef::SHAPE_ID.slot_shape_from(&shape_registry),
             &shape_registry,
-            "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts[8]"
+            "mapping.Map2d.source"
         ),
         SlotData::Value(_)
     ));

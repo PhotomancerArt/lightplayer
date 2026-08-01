@@ -30,6 +30,11 @@ const PICKER_KINDS: &[NodeKind] = &[
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiAddNodeMenu {
     pub entries: Vec<UiAddNodeMenuEntry>,
+    /// Where this menu's creates attach. Carried alongside the entries so
+    /// the picker can offer sources the controller cannot pre-build an
+    /// action for — paste needs the clipboard's contents, which only the
+    /// browser edge can read (`docs/adr/2026-07-28-share-envelopes.md`).
+    pub attach: UiAttachTarget,
 }
 
 /// One picker entry. `action` is the ready-to-dispatch create (pane grammar:
@@ -49,6 +54,7 @@ pub struct UiAddNodeMenuEntry {
 /// [`PICKER_KINDS`] order.
 pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
     UiAddNodeMenu {
+        attach: attach.clone(),
         entries: PICKER_KINDS
             .iter()
             .map(|kind| {

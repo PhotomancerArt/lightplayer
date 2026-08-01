@@ -1,72 +1,98 @@
-//! Convert HSV color space to RGB (float implementation - stub).
+//! HSV to RGB conversion (native f32).
 //!
-//! This is a stub implementation that will be replaced with a proper float implementation later.
-//! For now, it calls the q32 version with conversion.
+//! Transliterated from the canonical GLSL
+//! `glsl/lpfn/color/space/hsv2rgb.glsl` (normative).
+//!
+//! HSV→RGB conversion is standard mathematical procedure (Foley & van Dam);
+//! the LightPlayer port was originally written with reference to LYGIA's
+//! hsv2rgb.glsl (see docs/reports/2026-03-31-lpfx-license-audit.md).
+//!
+//! **Tolerance:** exact against the canonical f32.
 
-use crate::builtins::lpfn::color::space::hsv2rgb_q32::__lp_lpfn_hsv2rgb_q32;
-use crate::builtins::lpfn::color::space::hsv2rgb_q32::__lp_lpfn_hsv2rgb_vec4_q32;
-use lps_q32::q32::Q32;
+use super::hue2rgb_f32::hue2rgb;
 
-/// Convert HSV color to RGB color (extern C wrapper for compiler).
-///
-/// Uses result pointer parameter to return vec3: writes all components to memory.
-///
-/// # Arguments
-/// * `result_ptr` - Pointer to memory where vec3 result will be written (result pointer parameter)
-/// * `x` - H component as f32
-/// * `y` - S component as f32
-/// * `z` - V component as f32
-#[lpfn_impl_macro::lpfn_impl(f32, "vec3 lpfn_hsv2rgb(vec3 hsv)")]
-#[unsafe(no_mangle)]
-pub extern "C" fn __lp_lpfn_hsv2rgb_f32(result_ptr: *mut f32, x: f32, y: f32, z: f32) {
-    // Convert raw pointer to safe array reference at boundary
-    let result = unsafe { &mut *result_ptr.cast::<[f32; 3]>() };
-    // Stub: convert to q32, call q32 version, convert back
-    let x_q32 = Q32::from_f32_wrapping(x);
-    let y_q32 = Q32::from_f32_wrapping(y);
-    let z_q32 = Q32::from_f32_wrapping(z);
-    let mut result_q32 = [0i32; 3];
-    __lp_lpfn_hsv2rgb_q32(
-        result_q32.as_mut_ptr(),
-        x_q32.to_fixed(),
-        y_q32.to_fixed(),
-        z_q32.to_fixed(),
-    );
-    result[0] = Q32::from_fixed(result_q32[0]).to_f32();
-    result[1] = Q32::from_fixed(result_q32[1]).to_f32();
-    result[2] = Q32::from_fixed(result_q32[2]).to_f32();
+#[inline]
+fn hsv2rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
+    // ((hue2rgb(h) - 1.0) * s + 1.0) * v
+    let rgb = hue2rgb(h);
+    [
+        ((rgb[0] - 1.0) * s + 1.0) * v,
+        ((rgb[1] - 1.0) * s + 1.0) * v,
+        ((rgb[2] - 1.0) * s + 1.0) * v,
+    ]
 }
 
-/// Convert HSV color to RGB color with alpha (extern C wrapper for compiler).
-///
-/// Uses result pointer parameter to return vec4: writes all components to memory.
+/// HSV to RGB (float version).
 ///
 /// # Arguments
-/// * `result_ptr` - Pointer to memory where vec4 result will be written (result pointer parameter)
-/// * `x` - H component as f32
-/// * `y` - S component as f32
-/// * `z` - V component as f32
-/// * `w` - A component as f32
+/// * `result_ptr` - Pointer to memory where the vec3 result is written
+/// * `x` / `y` / `z` - Hue / saturation / value
+#[lpfn_impl_macro::lpfn_impl(f32, "vec3 lpfn_hsv2rgb(vec3 hsv)")]
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "builtin C ABI writes to caller-provided out-pointer"
+)]
+#[unsafe(no_mangle)]
+pub extern "C" fn __lp_lpfn_hsv2rgb_f32(result_ptr: *mut f32, x: f32, y: f32, z: f32) {
+    let rgb = hsv2rgb(x, y, z);
+    unsafe {
+        *result_ptr = rgb[0];
+        *result_ptr.add(1) = rgb[1];
+        *result_ptr.add(2) = rgb[2];
+    }
+}
+
+/// HSV to RGB, vec4 form: alpha passes through untouched.
+///
+/// # Arguments
+/// * `result_ptr` - Pointer to memory where the vec4 result is written
+/// * `x` / `y` / `z` - Hue / saturation / value
+/// * `w` - Alpha, copied to the result unchanged
 #[lpfn_impl_macro::lpfn_impl(f32, "vec4 lpfn_hsv2rgb(vec4 hsv)")]
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "builtin C ABI writes to caller-provided out-pointer"
+)]
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpfn_hsv2rgb_vec4_f32(result_ptr: *mut f32, x: f32, y: f32, z: f32, w: f32) {
-    // Convert raw pointer to safe array reference at boundary
-    let result = unsafe { &mut *result_ptr.cast::<[f32; 4]>() };
-    // Stub: convert to q32, call q32 version, convert back
-    let x_q32 = Q32::from_f32_wrapping(x);
-    let y_q32 = Q32::from_f32_wrapping(y);
-    let z_q32 = Q32::from_f32_wrapping(z);
-    let w_q32 = Q32::from_f32_wrapping(w);
-    let mut result_q32 = [0i32; 4];
-    __lp_lpfn_hsv2rgb_vec4_q32(
-        result_q32.as_mut_ptr(),
-        x_q32.to_fixed(),
-        y_q32.to_fixed(),
-        z_q32.to_fixed(),
-        w_q32.to_fixed(),
-    );
-    result[0] = Q32::from_fixed(result_q32[0]).to_f32();
-    result[1] = Q32::from_fixed(result_q32[1]).to_f32();
-    result[2] = Q32::from_fixed(result_q32[2]).to_f32();
-    result[3] = Q32::from_fixed(result_q32[3]).to_f32();
+    let rgb = hsv2rgb(x, y, z);
+    unsafe {
+        *result_ptr = rgb[0];
+        *result_ptr.add(1) = rgb[1];
+        *result_ptr.add(2) = rgb[2];
+        *result_ptr.add(3) = w;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_saturation_is_grey_at_the_value_level() {
+        for v in [0.0f32, 0.25, 1.0] {
+            assert_eq!(hsv2rgb(0.37, 0.0, v), [v, v, v]);
+        }
+    }
+
+    #[test]
+    fn full_saturation_and_value_gives_the_primaries() {
+        assert_eq!(hsv2rgb(0.0, 1.0, 1.0), [1.0, 0.0, 0.0]);
+        assert_eq!(hsv2rgb(1.0 / 3.0, 1.0, 1.0), [0.0, 1.0, 0.0]);
+        assert_eq!(hsv2rgb(2.0 / 3.0, 1.0, 1.0), [0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn zero_value_is_black_whatever_the_hue() {
+        for i in 0..20 {
+            assert_eq!(hsv2rgb(i as f32 * 0.05, 1.0, 0.0), [0.0, 0.0, 0.0]);
+        }
+    }
+
+    #[test]
+    fn alpha_passes_through_the_vec4_form_untouched() {
+        let mut out = [f32::NAN; 4];
+        __lp_lpfn_hsv2rgb_vec4_f32(out.as_mut_ptr(), 0.0, 1.0, 1.0, 0.375);
+        assert_eq!(out, [1.0, 0.0, 0.0, 0.375]);
+    }
 }

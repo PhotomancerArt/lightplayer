@@ -1,0 +1,37 @@
+[target.'cfg(target_arch = "riscv32")']
+runner    = "espflash flash --chip esp32c6 --monitor --after hard-reset"
+rustflags = [
+  "-C", "link-arg=-Tlinkall.x",
+  "-C", "force-frame-pointers",
+  "-C", "force-unwind-tables=yes",
+  "-C", "panic=unwind",               # Override target's default panic=abort
+  "-C", "link-arg=--gc-sections",     # Remove unused sections
+  "-C", "link-arg=-znoseparate-code",  # Don't separate code segments (lld syntax: -z<option>)
+
+  # Flash-budget flags: the app image must fit a 3 MB partition, and these buy
+  # ~155 KB by giving up on-device diagnostics. Measured 2026-07-28; see
+  # docs/adr/2026-07-28-esp32c6-flash-budget.md. When you need real panic
+  # output while debugging, delete the fmt-debug line first (see README).
+  "-Z", "location-detail=none",       # -58 KB: drop panic file:line strings
+  "-Z", "fmt-debug=none",             # -93 KB: `{:?}` formats to nothing
+]
+
+[target.'cfg(target_arch = "xtensa")']
+runner    = "espflash flash --monitor"
+rustflags = [
+  # GNU LD
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-nostartfiles",
+
+  # LLD
+  # "-C", "link-arg=-Tlinkall.x",
+  # "-C", "linker=rust-lld",
+]
+
+[env]
+ESP_LOG = "info"
+# littlefs2-sys bindgen needs stdint.h when targeting bare-metal; use host's stdint
+[unstable]
+build-std = ["core", "alloc"]
+# optimize_for_size on core/alloc: -50 KB, no measured render-loop cost.
+build-std-features = ["compiler-builtins-mem", "optimize_for_size"]

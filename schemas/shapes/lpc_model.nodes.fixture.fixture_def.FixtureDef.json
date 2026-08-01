@@ -142,130 +142,6 @@
                                 "meta": {},
                                 "variants": [
                                   {
-                                    "name": "RingArray",
-                                    "shape": {
-                                      "record": {
-                                        "fields": [
-                                          {
-                                            "name": "center",
-                                            "shape": {
-                                              "value": {
-                                                "shape": {
-                                                  "editor": "xy",
-                                                  "id": 1477692922,
-                                                  "meta": {},
-                                                  "ty": "vec2"
-                                                }
-                                              }
-                                            }
-                                          },
-                                          {
-                                            "name": "diameter",
-                                            "shape": {
-                                              "value": {
-                                                "shape": {
-                                                  "editor": {
-                                                    "number": {
-                                                      "min": 0.0
-                                                    }
-                                                  },
-                                                  "id": 2960302901,
-                                                  "meta": {},
-                                                  "ty": "f32"
-                                                }
-                                              }
-                                            }
-                                          },
-                                          {
-                                            "name": "start_ring_inclusive",
-                                            "shape": {
-                                              "value": {
-                                                "shape": {
-                                                  "editor": "plain",
-                                                  "id": 3065358156,
-                                                  "meta": {},
-                                                  "ty": "u32"
-                                                }
-                                              }
-                                            }
-                                          },
-                                          {
-                                            "name": "end_ring_exclusive",
-                                            "shape": {
-                                              "value": {
-                                                "shape": {
-                                                  "editor": "plain",
-                                                  "id": 3065358156,
-                                                  "meta": {},
-                                                  "ty": "u32"
-                                                }
-                                              }
-                                            }
-                                          },
-                                          {
-                                            "name": "ring_lamp_counts",
-                                            "shape": {
-                                              "map": {
-                                                "key": "u32",
-                                                "meta": {},
-                                                "value": {
-                                                  "value": {
-                                                    "shape": {
-                                                      "editor": "plain",
-                                                      "id": 3065358156,
-                                                      "meta": {},
-                                                      "ty": "u32"
-                                                    }
-                                                  }
-                                                }
-                                              }
-                                            }
-                                          },
-                                          {
-                                            "name": "offset_angle",
-                                            "shape": {
-                                              "value": {
-                                                "shape": {
-                                                  "editor": "plain",
-                                                  "id": 2605450937,
-                                                  "meta": {},
-                                                  "ty": "f32"
-                                                }
-                                              }
-                                            }
-                                          },
-                                          {
-                                            "name": "order",
-                                            "shape": {
-                                              "value": {
-                                                "shape": {
-                                                  "editor": {
-                                                    "dropdown": {
-                                                      "options": [
-                                                        {
-                                                          "label": "Inner first",
-                                                          "value": "inner_first"
-                                                        },
-                                                        {
-                                                          "label": "Outer first",
-                                                          "value": "outer_first"
-                                                        }
-                                                      ]
-                                                    }
-                                                  },
-                                                  "id": 2101432397,
-                                                  "meta": {},
-                                                  "ty": "string"
-                                                }
-                                              }
-                                            }
-                                          }
-                                        ],
-                                        "meta": {}
-                                      }
-                                    }
-                                  },
-                                  {
                                     "name": "PointList",
                                     "shape": {
                                       "record": {
@@ -336,7 +212,7 @@
                 }
               },
               {
-                "name": "SvgPath",
+                "name": "Map2d",
                 "shape": {
                   "record": {
                     "fields": [
@@ -355,23 +231,6 @@
                                   "ty": "string"
                                 }
                               }
-                            }
-                          }
-                        }
-                      },
-                      {
-                        "name": "sample_diameter",
-                        "shape": {
-                          "value": {
-                            "shape": {
-                              "editor": {
-                                "number": {
-                                  "min": 0.0
-                                }
-                              },
-                              "id": 2960302901,
-                              "meta": {},
-                              "ty": "f32"
                             }
                           }
                         }
@@ -480,6 +339,41 @@
                   "id": 1196386242,
                   "meta": {},
                   "ty": "bool"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "power",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1801252664,
+                  "meta": {
+                    "description": "Lamp type and supply budget used to limit output current.",
+                    "label": "Power"
+                  },
+                  "ty": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "name": "lamp_type",
+                          "ty": "string"
+                        },
+                        {
+                          "name": "budget_ma",
+                          "ty": "u32"
+                        }
+                      ],
+                      "name": "FixturePower"
+                    }
+                  }
                 }
               }
             }

@@ -1,0 +1,238 @@
+{
+  "id": "espressif/esp32-s3-devkitc-1",
+  "target": "esp32s3",
+  "vendor": "espressif",
+  "product": "ESP32-S3-DevKitC-1",
+  "description": "Espressif ESP32-S3-DevKitC-1 board profile. Header silkscreen labels are the GPIO numbers; sourced from Espressif's board documentation, not yet hardware-calibrated. GPIO35-37 are deliberately absent: on octal-PSRAM modules (N8R8, N16R8V) they are in-package and never claimable, and the board ships with both quad and octal modules. The onboard RGB LED is recorded as a label only: GPIO48 on v1.1 boards but GPIO38 on v1.0, so no gpio resource claims it.",
+  "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitc-1/index.html",
+  "board_label": [
+    {
+      "label": "RGB",
+      "status": "unassigned",
+      "note": "GPIO48 on v1.1 boards, GPIO38 on v1.0 — contested across revisions; verify per unit before claiming"
+    },
+    {
+      "label": "BOOT",
+      "gpio": "/gpio/0",
+      "status": "assigned",
+      "note": "BOOT button; boot-strap pin"
+    }
+  ],
+  "gpio": [
+    {
+      "address": "/gpio/0",
+      "display_label": "GPIO0",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO0"],
+      "reserved_reason": "BOOT strap — grounding it at reset enters the download bootloader"
+    },
+    {
+      "address": "/gpio/1",
+      "display_label": "GPIO1",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO1"]
+    },
+    {
+      "address": "/gpio/2",
+      "display_label": "GPIO2",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO2"]
+    },
+    {
+      "address": "/gpio/3",
+      "display_label": "GPIO3",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO3"]
+    },
+    {
+      "address": "/gpio/4",
+      "display_label": "GPIO4",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO4"]
+    },
+    {
+      "address": "/gpio/5",
+      "display_label": "GPIO5",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO5"]
+    },
+    {
+      "address": "/gpio/6",
+      "display_label": "GPIO6",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO6"]
+    },
+    {
+      "address": "/gpio/7",
+      "display_label": "GPIO7",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO7"]
+    },
+    {
+      "address": "/gpio/8",
+      "display_label": "GPIO8",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO8"]
+    },
+    {
+      "address": "/gpio/9",
+      "display_label": "GPIO9",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO9"]
+    },
+    {
+      "address": "/gpio/10",
+      "display_label": "GPIO10",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO10"]
+    },
+    {
+      "address": "/gpio/11",
+      "display_label": "GPIO11",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO11"]
+    },
+    {
+      "address": "/gpio/12",
+      "display_label": "GPIO12",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO12"]
+    },
+    {
+      "address": "/gpio/13",
+      "display_label": "GPIO13",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO13"]
+    },
+    {
+      "address": "/gpio/14",
+      "display_label": "GPIO14",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO14"]
+    },
+    {
+      "address": "/gpio/15",
+      "display_label": "GPIO15",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO15"]
+    },
+    {
+      "address": "/gpio/16",
+      "display_label": "GPIO16",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO16"]
+    },
+    {
+      "address": "/gpio/17",
+      "display_label": "GPIO17",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO17"]
+    },
+    {
+      "address": "/gpio/18",
+      "display_label": "GPIO18",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO18"]
+    },
+    {
+      "address": "/gpio/19",
+      "display_label": "GPIO19",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO19"],
+      "reserved_reason": "USB D- — driving it drops the native USB link"
+    },
+    {
+      "address": "/gpio/20",
+      "display_label": "GPIO20",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO20"],
+      "reserved_reason": "USB D+ — driving it drops the native USB link"
+    },
+    {
+      "address": "/gpio/21",
+      "display_label": "GPIO21",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO21"]
+    },
+    {
+      "address": "/gpio/38",
+      "display_label": "GPIO38",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO38"]
+    },
+    {
+      "address": "/gpio/39",
+      "display_label": "GPIO39",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO39"],
+      "location": "JTAG MTCK"
+    },
+    {
+      "address": "/gpio/40",
+      "display_label": "GPIO40",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO40"],
+      "location": "JTAG MTDO"
+    },
+    {
+      "address": "/gpio/41",
+      "display_label": "GPIO41",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO41"],
+      "location": "JTAG MTDI"
+    },
+    {
+      "address": "/gpio/42",
+      "display_label": "GPIO42",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO42"],
+      "location": "JTAG MTMS"
+    },
+    {
+      "address": "/gpio/43",
+      "display_label": "GPIO43",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO43"],
+      "location": "UART0 TXD to the UART bridge"
+    },
+    {
+      "address": "/gpio/44",
+      "display_label": "GPIO44",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO44"],
+      "location": "UART0 RXD to the UART bridge"
+    },
+    {
+      "address": "/gpio/45",
+      "display_label": "GPIO45",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO45"]
+    },
+    {
+      "address": "/gpio/46",
+      "display_label": "GPIO46",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO46"]
+    },
+    {
+      "address": "/gpio/47",
+      "display_label": "GPIO47",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO47"]
+    },
+    {
+      "address": "/gpio/48",
+      "display_label": "GPIO48",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["IO48"],
+      "location": "onboard RGB LED on v1.1 boards (see RGB board label)"
+    }
+  ],
+  "resource": [
+    {
+      "address": "/rmt/ws281x0",
+      "display_label": "RMT WS281x 0",
+      "capabilities": ["rmt", "ws281x-output"]
+    }
+  ]
+}

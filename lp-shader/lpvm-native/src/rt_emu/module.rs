@@ -1,4 +1,4 @@
-//! [`LpvmModule`] implementation for linked + emulated native RV32.
+//! [`LpvmModule`] implementation for a linked + emulated native guest image.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -20,7 +20,10 @@ pub struct NativeEmuModule {
     /// Object bytes retained for debugging; not used at runtime.
     pub(crate) _elf: Vec<u8>,
     pub(crate) meta: LpsModuleSig,
-    pub(crate) load: Arc<lp_riscv_elf::ElfLoadInfo>,
+    /// Guest ISA this module was compiled and linked for. The one field
+    /// `instance.rs` branches on.
+    pub(crate) isa: crate::isa::IsaTarget,
+    pub(crate) load: Arc<super::GuestImage>,
     pub(crate) arena: EmuSharedArena,
     pub(crate) options: NativeCompileOptions,
     /// Debug info with sections per function.
@@ -33,6 +36,14 @@ impl LpvmModule for NativeEmuModule {
 
     fn signatures(&self) -> &LpsModuleSig {
         &self.meta
+    }
+
+    /// Both halves of the answer are on this module already: the mode it was
+    /// compiled in and the ISA it was compiled for. Neither alone is enough —
+    /// the same `FloatMode::F32` is hardware float on an S3 and soft float on
+    /// a C6.
+    fn float_impl(&self) -> lpvm::FloatImpl {
+        self.isa.float_impl_for(self.options.float_mode)
     }
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
@@ -69,6 +80,8 @@ impl LpvmModule for NativeEmuModule {
             armed_fuel: lpvm::DEFAULT_VMCTX_FUEL as u32,
             render_texture_cache: None,
             render_samples_cache: None,
+            #[cfg(feature = "emu-xt")]
+            sret_scratch: None,
         };
 
         // Auto-init globals: call __shader_init if it exists, then snapshot.

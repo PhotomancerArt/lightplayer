@@ -1,18 +1,14 @@
 pub mod abi_helper;
-pub mod cycle_model;
 mod decoder;
 pub mod emulator;
 pub mod error;
 mod executor;
+pub mod fp_regs;
 pub mod logging;
-pub mod memory;
 
-pub use cycle_model::{CycleModel, InstClass};
 #[cfg(feature = "std")]
 pub use emulator::FrameOutcome;
-pub use emulator::{
-    DEFAULT_CALL_INSTRUCTION_LIMIT, DEFAULT_RAM_START, DEFAULT_SHARED_START, OomInfo, PanicInfo,
-    Riscv32Emulator, StepResult, SyscallInfo,
-};
-pub use error::{EmulatorError, MemoryAccessKind, trap_code_to_string};
-pub use logging::{InstLog, LogLevel};
+pub use emulator::{DEFAULT_CALL_INSTRUCTION_LIMIT, Riscv32Emulator};
+pub use error::{EmulatorError, trap_code_from_cranelift};
+pub use fp_regs::{FpRegs, RoundingMode};
+pub use logging::InstLog;

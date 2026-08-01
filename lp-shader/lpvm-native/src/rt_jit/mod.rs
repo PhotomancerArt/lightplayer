@@ -1,7 +1,7 @@
 //! JIT compilation for RISC-V targets (`no_std` + `alloc`).
 //!
 //! Emits the same RV32 machine code as the ELF path, then patches auipc+jalr pairs against a
-//! [`BuiltinTable`] and in-image function symbols. Intended for `fw-esp32` / `fw-emu` to avoid
+//! [`BuiltinTable`] and in-image function symbols. Intended for `fw-esp32c6` / `fw-emu` to avoid
 //! ELF link overhead.
 
 mod buffer;

@@ -14,7 +14,6 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
     // Add test run and target directives
     content.push_str("// test run\n");
-    content.push_str("// @unimplemented(backend=wasm)\n");
     content.push_str("\n");
 
     // Add section comment
@@ -83,13 +82,13 @@ fn generate_test_first_smaller(vec_type: VecType, dimension: Dimension) -> Strin
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_min_first_smaller() {{\n\
-    // Function min() returns {type_name} (component-wise minimum)\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return min(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_first_smaller() {{
+    // Function min() returns {type_name} (component-wise minimum)
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return min(a, b);
+}}
+
 // run: test_{type_name}_min_first_smaller() == {expected_constructor}\n"
     )
 }
@@ -120,12 +119,12 @@ fn generate_test_second_smaller(vec_type: VecType, dimension: Dimension) -> Stri
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_min_second_smaller() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return min(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_second_smaller() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return min(a, b);
+}}
+
 // run: test_{type_name}_min_second_smaller() == {expected_constructor}\n"
     )
 }
@@ -156,12 +155,12 @@ fn generate_test_mixed(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_min_mixed() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return min(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_mixed() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return min(a, b);
+}}
+
 // run: test_{type_name}_min_mixed() == {expected_constructor}\n"
     )
 }
@@ -180,12 +179,12 @@ fn generate_test_equal(vec_type: VecType, dimension: Dimension) -> String {
     let constructor = format_vector_constructor(vec_type, dimension, &values);
 
     format!(
-        "{type_name} test_{type_name}_min_equal() {{\n\
-    {type_name} a = {constructor};\n\
-    {type_name} b = {constructor};\n\
-    return min(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_equal() {{
+    {type_name} a = {constructor};
+    {type_name} b = {constructor};
+    return min(a, b);
+}}
+
 // run: test_{type_name}_min_equal() == {constructor}\n"
     )
 }
@@ -221,12 +220,12 @@ fn generate_test_negative(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_min_negative() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return min(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_negative() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return min(a, b);
+}}
+
 // run: test_{type_name}_min_negative() == {expected_constructor}\n"
     )
 }
@@ -258,12 +257,12 @@ fn generate_test_zero(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_min_zero() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return min(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_zero() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return min(a, b);
+}}
+
 // run: test_{type_name}_min_zero() == {expected_constructor}\n"
     )
 }
@@ -294,12 +293,12 @@ fn generate_test_variables(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_min_variables() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return min(a, b);\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_variables() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return min(a, b);
+}}
+
 // run: test_{type_name}_min_variables() == {expected_constructor}\n"
     )
 }
@@ -330,10 +329,10 @@ fn generate_test_expressions(vec_type: VecType, dimension: Dimension) -> String 
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_min_expressions() {{\n\
-    return min({a_constructor}, {b_constructor});\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_expressions() {{
+    return min({a_constructor}, {b_constructor});
+}}
+
 // run: test_{type_name}_min_expressions() == {expected_constructor}\n"
     )
 }
@@ -370,13 +369,13 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_min_in_expression() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    {type_name} c = {c_constructor};\n\
-    return min(a, min(b, c));\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_min_in_expression() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    {type_name} c = {c_constructor};
+    return min(a, min(b, c));
+}}
+
 // run: test_{type_name}_min_in_expression() == {expected_constructor}\n"
     )
 }

@@ -5,14 +5,14 @@ extern crate alloc;
 use super::super::{
     error::EmulatorError,
     executor::{LoggingDisabled, LoggingEnabled, decode_execute},
-    logging::LogLevel,
-    memory::Memory,
 };
 use super::state::Riscv32Emulator;
-use super::types::{PanicInfo, StepResult, SyscallInfo};
 use alloc::{format, string::String, vec, vec::Vec};
 use log;
-use lp_riscv_emu_shared::{SERIAL_ERROR_INVALID_POINTER, SYSCALL_JIT_MAP_LOAD, SYSCALL_PERF_EVENT};
+use lp_emu_abi::{SERIAL_ERROR_INVALID_POINTER, SYSCALL_JIT_MAP_LOAD, SYSCALL_PERF_EVENT};
+use lp_emu_core::LogLevel;
+use lp_emu_core::Memory;
+use lp_emu_core::{PanicInfo, StepResult, SyscallInfo};
 use lp_riscv_inst::Gpr;
 
 impl Riscv32Emulator {
@@ -23,28 +23,10 @@ impl Riscv32Emulator {
     #[inline(always)]
     pub(super) fn step_inner(&mut self) -> Result<StepResult, EmulatorError> {
         // Fetch instruction
-        let inst_word = self.memory.fetch_instruction(self.pc).map_err(|mut e| {
-            match &mut e {
-                EmulatorError::InvalidMemoryAccess {
-                    regs: err_regs,
-                    pc: err_pc,
-                    ..
-                } => {
-                    *err_regs = self.regs;
-                    *err_pc = self.pc;
-                }
-                EmulatorError::UnalignedAccess {
-                    regs: err_regs,
-                    pc: err_pc,
-                    ..
-                } => {
-                    *err_regs = self.regs;
-                    *err_pc = self.pc;
-                }
-                _ => {}
-            }
-            e
-        })?;
+        let inst_word = self
+            .memory
+            .fetch_instruction(self.pc)
+            .map_err(|e| EmulatorError::from_memory_error(e, self.pc, self.regs))?;
 
         // Check if compressed instruction (bits [1:0] != 0b11)
         let is_compressed = (inst_word & 0x3) != 0x3;
@@ -84,10 +66,20 @@ impl Riscv32Emulator {
         // Execute instruction using new executor
         let pc = self.pc;
         let exec_result = match self.log_level {
-            LogLevel::None => {
-                decode_execute::<LoggingDisabled>(inst_word, pc, &mut self.regs, &mut self.memory)?
-            }
-            _ => decode_execute::<LoggingEnabled>(inst_word, pc, &mut self.regs, &mut self.memory)?,
+            LogLevel::None => decode_execute::<LoggingDisabled>(
+                inst_word,
+                pc,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )?,
+            _ => decode_execute::<LoggingEnabled>(
+                inst_word,
+                pc,
+                &mut self.regs,
+                &mut self.memory,
+                &mut self.fp,
+            )?,
         };
         self.after_execute(pc, &exec_result);
 
@@ -134,7 +126,7 @@ impl Riscv32Emulator {
             };
 
             // Check if this is a panic syscall (SYSCALL_PANIC = 1)
-            if syscall_info.number == lp_riscv_emu_shared::SYSCALL_PANIC {
+            if syscall_info.number == lp_emu_abi::SYSCALL_PANIC {
                 // Extract panic information from syscall args
                 // args[0] = message pointer (as i32, cast to u32)
                 // args[1] = message length
@@ -184,7 +176,7 @@ impl Riscv32Emulator {
                 };
 
                 Ok(StepResult::Panic(panic_info))
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_WRITE {
+            } else if syscall_info.number == lp_emu_abi::SYSCALL_WRITE {
                 // SYSCALL_WRITE: Write string to host (always prints)
                 // args[0] = pointer to string (as i32, cast to u32)
                 // args[1] = length of string
@@ -209,7 +201,7 @@ impl Riscv32Emulator {
                 // Return success (0 in a0)
                 self.regs[Gpr::A0.num() as usize] = 0;
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_LOG {
+            } else if syscall_info.number == lp_emu_abi::SYSCALL_LOG {
                 // SYSCALL_LOG: Log message with level (filtered by RUST_LOG)
                 // args[0] = level (u8 as i32: 0=error, 1=warn, 2=info, 3=debug)
                 // args[1] = module_path pointer (as i32, cast to u32)
@@ -229,7 +221,7 @@ impl Riscv32Emulator {
                 ) {
                     (Ok(module_path), Ok(msg)) => {
                         // Convert syscall level to log::Level
-                        if let Some(level) = lp_riscv_emu_shared::syscall_to_level(level_val) {
+                        if let Some(level) = lp_emu_abi::syscall_to_level(level_val) {
                             // Create a log record and call log::log!()
                             // This will respect RUST_LOG filtering via env_logger
                             log::log!(target: &module_path, level, "{msg}");
@@ -244,12 +236,12 @@ impl Riscv32Emulator {
                 // Return success (0 in a0)
                 self.regs[Gpr::A0.num() as usize] = 0;
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_YIELD {
+            } else if syscall_info.number == lp_emu_abi::SYSCALL_YIELD {
                 // SYSCALL_YIELD: Yield control back to host
                 // No arguments, no return value
                 // Just return Syscall result so host can handle it
                 Ok(StepResult::Syscall(syscall_info))
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_SERIAL_WRITE {
+            } else if syscall_info.number == lp_emu_abi::SYSCALL_SERIAL_WRITE {
                 // SYSCALL_SERIAL_WRITE: Write bytes to serial output buffer
                 // args[0] = pointer to data (as i32, cast to u32)
                 // args[1] = length of data
@@ -289,7 +281,7 @@ impl Riscv32Emulator {
                     self.regs[Gpr::A0.num() as usize] = result;
                     Ok(StepResult::Continue)
                 }
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_SERIAL_READ {
+            } else if syscall_info.number == lp_emu_abi::SYSCALL_SERIAL_READ {
                 // SYSCALL_SERIAL_READ: Read bytes from serial input buffer
                 // args[0] = pointer to buffer (as i32, cast to u32)
                 // args[1] = max length to read
@@ -347,7 +339,7 @@ impl Riscv32Emulator {
                         Ok(StepResult::Continue)
                     }
                 }
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_SERIAL_HAS_DATA {
+            } else if syscall_info.number == lp_emu_abi::SYSCALL_SERIAL_HAS_DATA {
                 // SYSCALL_SERIAL_HAS_DATA: Check if serial input has data
                 // Returns: a0 = 1 if data available, 0 otherwise
                 let has_data = self
@@ -358,7 +350,7 @@ impl Riscv32Emulator {
 
                 self.regs[Gpr::A0.num() as usize] = if has_data { 1 } else { 0 };
                 Ok(StepResult::Continue)
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_TIME_MS {
+            } else if syscall_info.number == lp_emu_abi::SYSCALL_TIME_MS {
                 // SYSCALL_TIME_MS: Get elapsed milliseconds since emulator start
                 // Returns: a0 = elapsed milliseconds (u32)
                 #[cfg(feature = "std")]
@@ -394,7 +386,7 @@ impl Riscv32Emulator {
                 {
                     Ok(StepResult::Syscall(syscall_info))
                 }
-            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_ALLOC_TRACE {
+            } else if syscall_info.number == lp_emu_abi::SYSCALL_ALLOC_TRACE {
                 self.handle_alloc_trace_syscall(&syscall_info)
             } else {
                 Ok(StepResult::Syscall(syscall_info))

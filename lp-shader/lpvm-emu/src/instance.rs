@@ -7,7 +7,9 @@ use core::fmt;
 
 use cranelift_codegen::data_value::DataValue;
 use cranelift_codegen::isa::CallConv;
-use lp_riscv_emu::{CycleModel, DEFAULT_SHARED_START, LogLevel, Memory, Riscv32Emulator};
+use lp_emu_core::{CycleModel, LogLevel};
+use lp_emu_core::{DEFAULT_SHARED_START, Memory};
+use lp_riscv_emu::Riscv32Emulator;
 use lpir::FloatMode;
 use lpir::lpir_module::IrFunction;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier};
@@ -630,7 +632,7 @@ impl EmuInstance {
             shared,
             0,
             DEFAULT_SHARED_START,
-            lp_riscv_emu::DEFAULT_RAM_START,
+            lp_emu_core::DEFAULT_RAM_START,
         );
         let log_level = if self.module.options.emu_trace_instructions {
             LogLevel::Instructions
@@ -656,7 +658,7 @@ impl EmuInstance {
                     debug_parts.push(emu.dump_state());
                     debug_parts.push(emu.format_debug_info(
                         Some(emu.get_pc()),
-                        lp_riscv_emu::config::INSTRUCTION_LOG_DISPLAY_COUNT,
+                        lp_emu_core::config::INSTRUCTION_LOG_DISPLAY_COUNT,
                     ));
                     self.last_debug = Some(debug_parts.join("\n\n"));
                 } else {
@@ -707,7 +709,7 @@ impl EmuInstance {
                 debug_parts.push(emu.dump_state());
                 debug_parts.push(emu.format_debug_info(
                     Some(emu.get_pc()),
-                    lp_riscv_emu::config::INSTRUCTION_LOG_DISPLAY_COUNT,
+                    lp_emu_core::config::INSTRUCTION_LOG_DISPLAY_COUNT,
                 ));
                 self.last_debug = Some(debug_parts.join("\n\n"));
                 Err(InstanceError::Call(CallError::Unsupported(format!(

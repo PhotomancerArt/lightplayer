@@ -672,7 +672,7 @@ fn running_behind_sections() -> Vec<RichSectionSpec> {
                 ("board", "ESP32-C6"),
                 ("uid", "dev_7pQr5St89uVwXy2C"),
                 ("transport", "USB · Web Serial"),
-                ("firmware", "fw-esp32 @ 9f31c2a · release-esp32"),
+                ("firmware", "fw-esp32c6 @ 9f31c2a · release-esp32"),
             ],
             chip: Some("Firmware update available"),
             affordance: None,

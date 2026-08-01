@@ -20,8 +20,25 @@ lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", default-features = false 
 lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
 lp-perf = { path = "../../lp-base/lp-perf", features = ["syscall"] }
 lp-recovery = { workspace = true }
-lp-riscv-emu-shared = { path = "../../lp-riscv/lp-riscv-emu-shared" }
-lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["panic-recovery"] }
+lp-emu-abi = { path = "../../lp-emu/lp-emu-abi" }
+# fw-emu depends on `lpc-engine` directly (unlike fw-esp32c6, which reaches
+# it through `lpa-server`), so there is no forwarding crate to opt in on its
+# behalf — `default-features = false` here means fw-emu itself must list
+# every node gate it wants. It wants all eight: fw-emu exercises the full
+# node set (filetests/scene_render_emu depend on it) and must not silently
+# lose one. See the "trap" note on `lpa-server/Cargo.toml`'s `lpc-engine`
+# dependency — the same rule applies here directly.
+lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = [
+    "panic-recovery",
+    "node-button",
+    "node-radio",
+    "node-fluid",
+    "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
+] }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
 hashbrown = { workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }

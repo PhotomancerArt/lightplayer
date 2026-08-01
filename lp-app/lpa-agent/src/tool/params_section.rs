@@ -82,7 +82,12 @@ fn def_record_json(def: &ParamDefRecord) -> Value {
     if !def.label.is_empty() {
         obj.insert("label".into(), json!(def.label));
     }
-    for (key, value) in [("default", def.default), ("min", def.min), ("max", def.max)] {
+    for (key, value) in [
+        ("default", def.default),
+        ("min", def.min),
+        ("max", def.max),
+        ("step", def.step),
+    ] {
         if let Some(value) = value {
             obj.insert(key.into(), json!(round_sig4(value)));
         }
@@ -154,6 +159,7 @@ mod tests {
             default: Some(1.23456),
             min: Some(0.0),
             max: None,
+            step: Some(1.0),
             panel: true,
             unit: Some("x".into()),
             bound: false,
@@ -166,6 +172,7 @@ mod tests {
         assert!(record.get("max").is_none(), "absent options omitted");
         assert!(record.get("bound").is_none(), "false flags omitted");
         assert_eq!(record["panel"], true);
+        assert_eq!(record["step"], 1.0, "the knob's quantization is visible");
         assert_eq!(record["unit"], "x");
         // Declared side is unavailable without a compile; no orphan diff.
         assert_eq!(section["declared"]["unavailable"], "shader did not compile");

@@ -43,9 +43,9 @@ pub fn __emit(name: &'static str, kind: PerfEventKind) {
 }
 
 #[cfg(feature = "syscall")]
-pub use lp_riscv_emu_shared::JitSymbolEntry;
+pub use lp_emu_abi::JitSymbolEntry;
 
-/// When neither sink pulls in `lp_riscv_emu_shared`, we still need a
+/// When neither sink pulls in `lp_emu_abi`, we still need a
 /// `JitSymbolEntry` symbol so the public signature compiles. Define a
 /// local mirror behind the noop/log paths.
 #[cfg(not(feature = "syscall"))]

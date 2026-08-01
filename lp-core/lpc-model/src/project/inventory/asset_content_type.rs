@@ -12,8 +12,8 @@ pub enum AssetContentType {
     ShaderSource,
     /// GLSL source consumed by a compute shader node.
     ComputeShaderSource,
-    /// SVG path mapping consumed by a fixture node.
-    FixtureSvg,
+    /// 2D mapping document (`*.map2d.json`) consumed by a fixture node.
+    FixtureMap2d,
     /// Image data; decoding details are future work.
     Image,
     /// Generic UTF-8 text.

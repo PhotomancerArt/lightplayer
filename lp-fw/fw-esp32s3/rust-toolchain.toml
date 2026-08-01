@@ -1,0 +1,13 @@
+# fw-esp32s3 is the repo's FIRST second-toolchain crate: Xtensa has no upstream
+# Rust target, so it builds on Espressif's fork via the rustup `esp` channel.
+# Quarantined per-crate exactly as ADR 2026-07-29-per-chip-fw-toolchains
+# requires — the rv32 crates stay on the shared pinned nightly and are
+# unaffected. The recipes `cd` into this crate, so this file wins here.
+#
+# `channel = "esp"` is unversioned and tracks whatever espup installed. Needs
+# esp Rust >= 1.90 to satisfy the workspace MSRV (1.90.0.0 shipped 2025-09);
+# on 1.88 `lpc-model` genuinely fails to compile. `espup update` if a version
+# error appears.
+[toolchain]
+channel = "esp"
+components = ["rustfmt", "clippy", "rust-src"]

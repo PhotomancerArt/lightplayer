@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use lp_riscv_emu::profile::{PcSymbolizer, TraceSymbol};
+use lp_emu_core::profile::{PcSymbolizer, TraceSymbol};
 use rustc_demangle::demangle;
 use serde::Deserialize;
 
