@@ -1417,6 +1417,16 @@ merge: check
     scripts/push.sh --merge
 
 # ============================================================================
+# Hardware discovery
+# ============================================================================
+
+# List attached serial hardware (passive; never hangs). Identify chips with
+# `just hardware-list --probe` (resets idle boards; per-port timeout), filter
+# with `--chip esp32s3`, script with `--json`.
+hardware-list *args:
+    cargo run -q -p lp-cli -- hardware list {{ args }}
+
+# ============================================================================
 # Demo projects
 # ============================================================================
 # Run lp-cli dev server with an example project
@@ -1430,7 +1440,7 @@ demo example="basic":
 # Usage: just demo-esp32c6-host [example-name]
 demo-esp32c6-host example="basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server
-    PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
+    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
@@ -1448,7 +1458,7 @@ test-native-rainbow: build-rv32-builtins
 # Usage: just demo-esp32c6-host-naga [example-name]
 demo-esp32c6-host-naga example="basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,naga
-    PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
+    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
@@ -1459,7 +1469,7 @@ demo-esp32c6-check-naga example="basic": install-rv32-target
 
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
 demo-esp32c6-standalone: build-fw-esp32c6
-    PORT="$(cargo run -q -p lp-cli -- fwcheck port)"; \
+    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv {{ fw_esp32c6_elf }}
 
@@ -1487,20 +1497,10 @@ fwtest-usb-esp32c6: install-rv32-target
 fwtest-gpio-calibrate-esp32c6: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    port="${ESPFLASH_PORT:-}"
-    if [[ -z "$port" ]]; then
-        candidates=()
-        for pattern in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
-            for candidate in $pattern; do
-                [[ -e "$candidate" ]] && candidates+=("$candidate")
-            done
-        done
-        if [[ "${#candidates[@]}" -eq 0 ]]; then
-            echo "No ESP32 serial port found. Set ESPFLASH_PORT=/dev/..." >&2
-            exit 1
-        fi
-        port="${candidates[0]}"
-    fi
+    # Resolves ESPFLASH_PORT/LP_CHIP itself; with several boards attached it
+    # probes for the C6 instead of grabbing the first port (which has
+    # flashed the wrong board before).
+    port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
@@ -1508,20 +1508,9 @@ fwtest-gpio-calibrate-esp32c6: install-rv32-target
 calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    port="${ESPFLASH_PORT:-}"
-    if [[ -z "$port" ]]; then
-        candidates=()
-        for pattern in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
-            for candidate in $pattern; do
-                [[ -e "$candidate" ]] && candidates+=("$candidate")
-            done
-        done
-        if [[ "${#candidates[@]}" -eq 0 ]]; then
-            echo "No ESP32 serial port found. Set ESPFLASH_PORT=/dev/..." >&2
-            exit 1
-        fi
-        port="${candidates[0]}"
-    fi
+    # Resolves ESPFLASH_PORT/LP_CHIP itself; probes for the C6 on a crowded
+    # desk instead of grabbing the first port.
+    port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && cargo build --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
     cd ../..
@@ -1551,8 +1540,7 @@ fwtest-fluid-demo-esp32c6: install-rv32-target
 
 # Run firmware with test_jit_math_perf: Q32 JIT math kernel cycle experiment
 fwtest-jit-math-perf-esp32c6: install-rv32-target
-    PORT="$(find /dev -maxdepth 1 -name 'cu.usbmodem*' | sort | head -n 1)"; \
-    test -n "$PORT"; \
+    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$PORT" cargo run --features test_jit_math_perf,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
@@ -1572,22 +1560,15 @@ fwtest-espnow-esp32c6: install-rv32-target
 # path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled
 # on-device in FloatMode::F32 and executed.
 #
-# The port is NOT auto-detected. Several ESP32 boards are usually attached and
-# picking the first one has flashed the wrong board before; pass the C6's port
-# explicitly, e.g. `just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodem1301`.
+# Without an explicit port (or ESPFLASH_PORT), resolution probes attached
+# boards and picks the one that identifies as a C6 — first-match auto-picking
+# flashed the wrong board before; chip-verified selection is the fix.
 fwtest-f32-softfloat-esp32c6 port="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     port="{{ port }}"
     if [[ -z "$port" ]]; then
-        port="${ESPFLASH_PORT:-}"
-    fi
-    if [[ -z "$port" ]]; then
-        echo "Pass the ESP32-C6 port explicitly (or set ESPFLASH_PORT):" >&2
-        echo "  just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodemXXXX" >&2
-        echo "Available:" >&2
-        ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null >&2 || true
-        exit 1
+        port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
     fi
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
