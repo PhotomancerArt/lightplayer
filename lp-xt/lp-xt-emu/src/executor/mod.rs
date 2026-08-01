@@ -7,7 +7,7 @@
 //! was used (see the repo license ADR).
 
 use lp_emu_core::InstClass;
-use lp_xt_inst::{AluRrr, Inst, NullaryNarrowOp, NullaryOp};
+use lp_xt_inst::{AluRrr, FpLsiOp, FpLsxOp, FpRrOp, FpRrrOp, Inst, NullaryNarrowOp, NullaryOp};
 
 use crate::emu::{Emulator, Flow};
 use crate::error::Trap;
@@ -68,12 +68,51 @@ pub(crate) fn inst_class(inst: &Inst, flow: &Flow) -> InstClass {
         | Inst::NullaryN(NullaryNarrowOp::RetN | NullaryNarrowOp::RetwN) => InstClass::JalrReturn,
         Inst::Nullary(NullaryOp::Nop) | Inst::NullaryN(NullaryNarrowOp::NopN) => InstClass::Alu,
         Inst::Nullary(_) | Inst::NullaryN(_) => InstClass::System,
+
+        // Float buckets (M6 D8). They carry no measured cost — see the
+        // `InstClass` doc comments — and exist so a future measured Xtensa model
+        // has somewhere to land instead of being folded into `Alu`.
+        Inst::FpLsi(FpLsiOp::Lsi | FpLsiOp::Lsip, ..) => InstClass::Load,
+        Inst::FpLsi(FpLsiOp::Ssi | FpLsiOp::Ssip, ..) => InstClass::Store,
+        Inst::FpLsx(FpLsxOp::Lsx | FpLsxOp::Lsxp, ..) => InstClass::Load,
+        Inst::FpLsx(FpLsxOp::Ssx | FpLsxOp::Ssxp, ..) => InstClass::Store,
+        Inst::FpRrr(FpRrrOp::MaddS | FpRrrOp::MsubS | FpRrrOp::MaddnS | FpRrrOp::DivnS, ..) => {
+            InstClass::FloatMulAdd
+        }
+        Inst::FpRrr(..) => InstClass::FloatArith,
+        Inst::FpRr(
+            FpRrOp::Recip0S
+            | FpRrOp::Sqrt0S
+            | FpRrOp::Rsqrt0S
+            | FpRrOp::Div0S
+            | FpRrOp::Nexp01S
+            | FpRrOp::MkdadjS
+            | FpRrOp::AddexpS
+            | FpRrOp::AddexpmS,
+            ..,
+        ) => InstClass::FloatEstimate,
+        // `mov.s`/`abs.s`/`neg.s` are bit operations, not arithmetic.
+        Inst::FpRr(..) | Inst::FpMovAr(..) | Inst::FpMovBr(..) | Inst::ConstS(..) => {
+            InstClass::FloatArith
+        }
+        Inst::FpCmp(..) => InstClass::FloatCompare,
+        Inst::FpToInt(..) | Inst::IntToFp(..) => InstClass::FloatConvert,
+        // Register-file transfers and the Boolean-option AR move are integer
+        // data movement, whatever file they read.
+        Inst::Rfr(..) | Inst::Wfr(..) | Inst::MovBool(..) => InstClass::Alu,
+        Inst::BranchBool(..) => match flow {
+            Flow::Jump(_) => InstClass::BranchTaken,
+            _ => InstClass::BranchNotTaken,
+        },
+        Inst::Sr(..) | Inst::Ur(..) => InstClass::System,
     }
 }
 
 mod arith;
 mod branch;
 mod call;
+mod float;
+mod float_math;
 mod imm;
 mod jump;
 mod load_store;
@@ -143,6 +182,24 @@ impl Emulator {
 
             // --- misc / barriers / nops / illegal ---
             Inst::Nullary(_) | Inst::NullaryN(_) => self.exec_misc(inst, pc),
+
+            // --- floating point, boolean, special registers ---
+            Inst::FpRrr(..)
+            | Inst::FpRr(..)
+            | Inst::ConstS(..)
+            | Inst::Rfr(..)
+            | Inst::Wfr(..)
+            | Inst::FpMovAr(..)
+            | Inst::FpMovBr(..)
+            | Inst::FpCmp(..)
+            | Inst::FpToInt(..)
+            | Inst::IntToFp(..)
+            | Inst::FpLsx(..)
+            | Inst::FpLsi(..)
+            | Inst::MovBool(..)
+            | Inst::BranchBool(..)
+            | Inst::Sr(..)
+            | Inst::Ur(..) => self.exec_float(inst, pc, tracer),
         }
     }
 }

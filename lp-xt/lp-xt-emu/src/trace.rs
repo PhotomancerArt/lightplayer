@@ -17,6 +17,14 @@ pub enum TraceEvent<'a> {
     Inst { pc: u32, len: usize, inst: &'a Inst },
     /// A windowed register `a{index}` (physical `AR[phys]`) was written.
     RegWrite { index: u8, phys: u8, value: u32 },
+    /// A float register `f{index}` was written. Carries **raw bits**; the text
+    /// tracer prints them alongside the `f32` reading because a payload and a
+    /// value are different questions when bisecting a numeric divergence.
+    FRegWrite { index: u8, bits: u32 },
+    /// A boolean register `b{index}` was written — the only place an FP compare
+    /// result is visible, so without this event a compare is invisible in a
+    /// trace.
+    BRegWrite { index: u8, value: bool },
     /// `nbytes` were written to data memory at `addr`.
     MemWrite { addr: u32, value: u32, nbytes: u8 },
     /// The register window rotated (ENTRY / RETW / CALL).
@@ -69,6 +77,15 @@ impl Tracer for TextTracer {
             }
             TraceEvent::RegWrite { index, phys, value } => {
                 format!("             a{index} (AR[{phys}]) <- {value:#010x}")
+            }
+            TraceEvent::FRegWrite { index, bits } => {
+                format!(
+                    "             f{index} <- {bits:#010x} ({})",
+                    f32::from_bits(bits)
+                )
+            }
+            TraceEvent::BRegWrite { index, value } => {
+                format!("             b{index} <- {}", u8::from(value))
             }
             TraceEvent::MemWrite {
                 addr,
