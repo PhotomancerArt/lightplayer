@@ -7,27 +7,29 @@
 
 // Note: These tests document expected behavior with special values
 // The actual results may vary between implementations
-// On float_mode=q32 these are skipped: no IEEE NaN/Inf in the numeric model.
+//
+// Because the results may vary, no target asserts them. Every directive below
+// carries the wildcard disposition, which covers present *and* future targets.
+// On float_mode=q32 there is no IEEE NaN/Inf in the numeric model at all, so
+// the special values these name do not exist there.
+//
+// The wildcard replaces per-target enumerations that had drifted. Two targets
+// were executing the first two assertions purely because a line was missing
+// from their block, and that is not coverage: `rv32lpn.q32` differs from
+// `xtlpn.q32` only in the ISA, was excluded by hand, and passes identically
+// when you strip the exclusion. Which of the two ends up asserting behaviour
+// its numeric model cannot represent is an accident of list maintenance. A
+// wildcard cannot drift.
+//
+// (The naga frontend cannot compile this file; the lps-glsl frontend can.
+// Earlier notes here said no target compiled it, which was never true.)
 
 bool test_isnan_inf() {
     // isnan with positive infinity should be false
     return isnan(1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// wasm.f32: shader does not compile on any target (frontend gap) — same cause
-// as the @unsupported entries above, not an f32-specific failure.
-// @unsupported(wasm.f32)
-// @unsupported(rv32n.f32)
-// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
-// @unsupported(xtn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_isnan_inf() == false
 
 bool test_isnan_neg_inf() {
@@ -35,18 +37,7 @@ bool test_isnan_neg_inf() {
     return isnan(-1.0 / 0.0);
 }
 
-// @unsupported(wasm.q32)
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(interp.f32)
-// @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32n.f32)
-// xtn.f32 / xtlpn.f32 (M8): same frontend gap, same cause as every entry above.
-// @unsupported(xtn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_isnan_neg_inf() == false
 
 bool test_isinf_inf() {
