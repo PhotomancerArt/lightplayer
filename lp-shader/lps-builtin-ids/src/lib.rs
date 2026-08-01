@@ -1396,6 +1396,7 @@ pub enum Mode {
 
 mod glsl_builtin_mapping;
 
+pub use glsl_builtin_mapping::GlslParamKind;
 pub use glsl_builtin_mapping::glsl_f32_math_builtin_id;
 pub use glsl_builtin_mapping::glsl_lpfn_builtin_id;
 pub use glsl_builtin_mapping::glsl_lpfn_f32_builtin_id;
@@ -1411,4 +1412,3 @@ pub use glsl_builtin_mapping::texture_q32_builtin_id;
 pub use glsl_builtin_mapping::vm_builtin_id;
 pub use glsl_builtin_mapping::vm_f32_builtin_id;
 pub use glsl_builtin_mapping::vm_q32_builtin_id;
-pub use glsl_builtin_mapping::GlslParamKind;

@@ -6,6 +6,7 @@ area: lp-xt/lps-builtins-xt-app, lp-shader/lps-builtins, esp Rust toolchain
 class: upstream-toolchain-limitation
 related:
   - docs/design/float.md
+  - docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md
 ---
 # The esp Xtensa backend cannot select a float constant pool, so `lps-builtins/float-f32` does not compile for Xtensa
 
@@ -104,12 +105,20 @@ over a grid that crosses `g == b`, plus `-0.0` and NaN. These builtins are
 shared with rv32 and wasm, where the original compiles fine, so drift would be
 a silent behaviour change on targets that never had the problem.
 
-`scripts/build-builtins-xt.sh` therefore passes `--features float-f32`
-unconditionally again (the `LP_XT_BUILTINS_F32` opt-in was a P4 stopgap and is
-gone), and `lp-shader/lpvm-native/tests/xt_pipeline_f32.rs`'s
-`a_builtin_routed_float_op_resolves_and_runs` is no longer `#[ignore]`d — it
+`LP_XT_BUILTINS_F32=1 scripts/build-builtins-xt.sh` now succeeds — the thing
+this defect blocked — and
+`lp-shader/lpvm-native/tests/xt_pipeline_f32.rs`'s
+`a_builtin_routed_float_op_resolves_and_runs` is no longer `#[ignore]`d: it
 links the shader against the builtins base image and resolves `ffloor` to the
 real `__lp_lpir_ffloor_f32` on the M6 emulator.
+
+**The feature is still not the default, for an unrelated reason.** Making it
+unconditional was attempted and reverted on measurement: with the family in,
+the image's `.text` is 113,757 B against link.ld's 112 KiB, leaving 931 bytes
+of the code region for shader code, and the xtn.q32 filetest suite drops from
+849/849 files to 522/849 on link failures. That is a separate defect —
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`
+— and fixing this one is what exposed it.
 
 ## Why this stays open
 

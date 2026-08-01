@@ -132,7 +132,12 @@ pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         }
         (
             "lpfn_fbm",
-            &[GlslParamKind::Vec3, GlslParamKind::Float, GlslParamKind::Int, GlslParamKind::UInt],
+            &[
+                GlslParamKind::Vec3,
+                GlslParamKind::Float,
+                GlslParamKind::Int,
+                GlslParamKind::UInt,
+            ],
         ) => Some(BuiltinId::LpLpfnFbm3TileQ32),
         ("lpfn_fbm", &[GlslParamKind::Vec3, GlslParamKind::Int, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnFbm3Q32)
@@ -143,9 +148,14 @@ pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         ("lpfn_gnoise", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnGnoise2Q32)
         }
-        ("lpfn_gnoise", &[GlslParamKind::Vec3, GlslParamKind::Float, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfnGnoise3TileQ32)
-        }
+        (
+            "lpfn_gnoise",
+            &[
+                GlslParamKind::Vec3,
+                GlslParamKind::Float,
+                GlslParamKind::UInt,
+            ],
+        ) => Some(BuiltinId::LpLpfnGnoise3TileQ32),
         ("lpfn_gnoise", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnGnoise3Q32)
         }
@@ -157,11 +167,23 @@ pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         ("lpfn_hue2rgb", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfnHue2rgbQ32),
         (
             "lpfn_psrdnoise",
-            &[GlslParamKind::Vec2, GlslParamKind::Vec2, GlslParamKind::Float, GlslParamKind::Vec2, GlslParamKind::UInt],
+            &[
+                GlslParamKind::Vec2,
+                GlslParamKind::Vec2,
+                GlslParamKind::Float,
+                GlslParamKind::Vec2,
+                GlslParamKind::UInt,
+            ],
         ) => Some(BuiltinId::LpLpfnPsrdnoise2Q32),
         (
             "lpfn_psrdnoise",
-            &[GlslParamKind::Vec3, GlslParamKind::Vec3, GlslParamKind::Float, GlslParamKind::Vec3, GlslParamKind::UInt],
+            &[
+                GlslParamKind::Vec3,
+                GlslParamKind::Vec3,
+                GlslParamKind::Float,
+                GlslParamKind::Vec3,
+                GlslParamKind::UInt,
+            ],
         ) => Some(BuiltinId::LpLpfnPsrdnoise3Q32),
         ("lpfn_random", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnRandom1Q32)
@@ -197,7 +219,11 @@ pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         }
         (
             "lpfn_srandom3_tile",
-            &[GlslParamKind::Vec3, GlslParamKind::Float, GlslParamKind::UInt],
+            &[
+                GlslParamKind::Vec3,
+                GlslParamKind::Float,
+                GlslParamKind::UInt,
+            ],
         ) => Some(BuiltinId::LpLpfnSrandom3TileQ32),
         ("lpfn_srandom3_vec", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnSrandom3VecQ32)
@@ -307,7 +333,12 @@ pub fn glsl_lpfn_f32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         }
         (
             "lpfn_fbm",
-            &[GlslParamKind::Vec3, GlslParamKind::Float, GlslParamKind::Int, GlslParamKind::UInt],
+            &[
+                GlslParamKind::Vec3,
+                GlslParamKind::Float,
+                GlslParamKind::Int,
+                GlslParamKind::UInt,
+            ],
         ) => Some(BuiltinId::LpLpfnFbm3TileF32),
         ("lpfn_fbm", &[GlslParamKind::Vec3, GlslParamKind::Int, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnFbm3F32)
@@ -318,9 +349,14 @@ pub fn glsl_lpfn_f32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         ("lpfn_gnoise", &[GlslParamKind::Vec2, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnGnoise2F32)
         }
-        ("lpfn_gnoise", &[GlslParamKind::Vec3, GlslParamKind::Float, GlslParamKind::UInt]) => {
-            Some(BuiltinId::LpLpfnGnoise3TileF32)
-        }
+        (
+            "lpfn_gnoise",
+            &[
+                GlslParamKind::Vec3,
+                GlslParamKind::Float,
+                GlslParamKind::UInt,
+            ],
+        ) => Some(BuiltinId::LpLpfnGnoise3TileF32),
         ("lpfn_gnoise", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnGnoise3F32)
         }
@@ -332,11 +368,23 @@ pub fn glsl_lpfn_f32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         ("lpfn_hue2rgb", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfnHue2rgbF32),
         (
             "lpfn_psrdnoise",
-            &[GlslParamKind::Vec2, GlslParamKind::Vec2, GlslParamKind::Float, GlslParamKind::Vec2, GlslParamKind::UInt],
+            &[
+                GlslParamKind::Vec2,
+                GlslParamKind::Vec2,
+                GlslParamKind::Float,
+                GlslParamKind::Vec2,
+                GlslParamKind::UInt,
+            ],
         ) => Some(BuiltinId::LpLpfnPsrdnoise2F32),
         (
             "lpfn_psrdnoise",
-            &[GlslParamKind::Vec3, GlslParamKind::Vec3, GlslParamKind::Float, GlslParamKind::Vec3, GlslParamKind::UInt],
+            &[
+                GlslParamKind::Vec3,
+                GlslParamKind::Vec3,
+                GlslParamKind::Float,
+                GlslParamKind::Vec3,
+                GlslParamKind::UInt,
+            ],
         ) => Some(BuiltinId::LpLpfnPsrdnoise3F32),
         ("lpfn_random", &[GlslParamKind::Float, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnRandom1F32)
@@ -372,7 +420,11 @@ pub fn glsl_lpfn_f32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         }
         (
             "lpfn_srandom3_tile",
-            &[GlslParamKind::Vec3, GlslParamKind::Float, GlslParamKind::UInt],
+            &[
+                GlslParamKind::Vec3,
+                GlslParamKind::Float,
+                GlslParamKind::UInt,
+            ],
         ) => Some(BuiltinId::LpLpfnSrandom3TileF32),
         ("lpfn_srandom3_vec", &[GlslParamKind::Vec3, GlslParamKind::UInt]) => {
             Some(BuiltinId::LpLpfnSrandom3VecF32)

@@ -164,25 +164,43 @@ fn run_f32(ir: &LpirModule, sig: &LpsModuleSig, entry_name: &str, args: &[u32]) 
     emu.run_with_args(&code, entry_off, args)
 }
 
-/// The Xtensa builtins base image, or `None` with a loud note when it has not
-/// been built.
+/// The Xtensa builtins base image **carrying the f32 family**, or `None` with a
+/// loud note.
 ///
-/// A gitignored cross-target artifact (`scripts/build-builtins-xt.sh`, esp
-/// toolchain), so absence is a skip and not a failure — the same contract
-/// `xt_builtins_image.rs` uses.
-fn builtins_image() -> Option<Vec<u8>> {
+/// Two ways to come up empty, both skips rather than failures:
+///
+/// - the image has not been built at all — a gitignored cross-target artifact
+///   (`scripts/build-builtins-xt.sh`, esp toolchain), the same contract
+///   `xt_builtins_image.rs` uses;
+/// - it was built **without** `float-f32`, which is the default. The family is
+///   opt-in (`LP_XT_BUILTINS_F32=1`) because with it in, `.text` fills the
+///   emulator's 112 KiB code region to within ~931 bytes and compiled shader
+///   code no longer fits after it — see
+///   `docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`.
+///   Failing here instead would turn one blocked capability into a red suite.
+fn builtins_image_with_f32() -> Option<Vec<u8>> {
     let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../lp-xt/fixtures/elf/lps-builtins-xt-app.elf");
-    match std::fs::read(&p) {
-        Ok(b) => Some(b),
-        Err(_) => {
-            eprintln!(
-                "SKIP: {} not found — run scripts/build-builtins-xt.sh (esp toolchain) first",
-                p.display()
-            );
-            None
-        }
+    let Ok(bytes) = std::fs::read(&p) else {
+        eprintln!(
+            "SKIP: {} not found — run scripts/build-builtins-xt.sh (esp toolchain) first",
+            p.display()
+        );
+        return None;
+    };
+    let has_f32 = {
+        let elf = XtensaElf::parse(&bytes).expect("builtins image parses as Xtensa ELF32");
+        elf.symbol("__lp_lpir_ffloor_f32").is_some()
+    };
+    if !has_f32 {
+        eprintln!(
+            "SKIP: {} carries no native-f32 builtins — rebuild with \
+             LP_XT_BUILTINS_F32=1 scripts/build-builtins-xt.sh",
+            p.display()
+        );
+        return None;
     }
+    Some(bytes)
 }
 
 /// Compile in `FloatMode::F32`, link against the **builtins base image**, and
@@ -1162,20 +1180,23 @@ fn unarmed_float_code_faults_with_a_coprocessor_trap() {
 /// M7 D4 routes the non-inlinable float operations (divide, sqrt, the rounding
 /// family, min/max, float→int, every transcendental) to M5's `_f32` builtins
 /// via `sym_call`. Resolving those on the host emulation path needs
-/// `lp-xt/lps-builtins-xt-app` built with `float-f32`, which
-/// `scripts/build-builtins-xt.sh` now does unconditionally.
+/// `lp-xt/lps-builtins-xt-app` built with `float-f32`.
 ///
-/// This was `#[ignore]`d while that build failed in the esp Rust backend,
-/// which cannot select a float constant pool
+/// This was `#[ignore]`d while that build failed outright in the esp Rust
+/// backend, which cannot select a float constant pool
 /// (`docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md`
-/// — still open upstream, worked around in our source).
+/// — still open upstream, worked around in our source). It now runs, but only
+/// against an image built with `LP_XT_BUILTINS_F32=1`: the family is still
+/// opt-in, on capacity grounds rather than compile grounds
+/// (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`).
+/// A skip is therefore the honest default — see [`builtins_image_with_f32`].
 ///
 /// `ffloor` is deliberately chosen over `fdiv`/`fsqrt`: it reaches no
 /// `div0.s`/`const.s` estimate helper, so it does not additionally depend on
 /// M6-P6's unresolved policy fields.
 #[test]
 fn a_builtin_routed_float_op_resolves_and_runs() {
-    let Some(image) = builtins_image() else {
+    let Some(image) = builtins_image_with_f32() else {
         return;
     };
 
