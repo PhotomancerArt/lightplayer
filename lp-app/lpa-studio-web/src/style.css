@@ -3439,6 +3439,39 @@ label:has(> input:not(:disabled)) {
 
 /* ---- board detail view (#/boards/<vendor>/<product>) ------------------ */
 
+/* Expand-in-place: the selected card becomes a full-width grid row. */
+.lpb-cat-card--expanded {
+    grid-column: 1 / -1;
+}
+
+.lpb-cat-expanded-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--studio-color-border);
+    background: var(--studio-color-surface);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    border-radius: 10px 10px 0 0;
+}
+
+.lpb-cat-expanded-id {
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    color: var(--studio-color-text-dim);
+}
+
+.lpb-cat-expanded-body {
+    padding: 14px;
+}
+
+.lpb-cat-expanded-body .lpb-det {
+    max-width: none;
+}
+
 .lpb-det-back {
     appearance: none;
     border: 1px solid var(--studio-color-border-strong);
@@ -3448,7 +3481,6 @@ label:has(> input:not(:disabled)) {
     font-weight: 600;
     border-radius: var(--studio-radius-sm);
     padding: 4px 12px;
-    margin-bottom: 16px;
 }
 
 .lpb-det-back:hover {
