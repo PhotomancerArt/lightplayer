@@ -35,6 +35,15 @@ server = [
     "dep:ser-write-json",
 ]
 
+# Print every transmitted WS281x frame to the serial log: one full hex dump per
+# channel after open/resize, then a periodic checksum and lit-LED count. This is
+# what `scripts/m4-hardware-walk.sh` diffs against the host oracle, and it is
+# opt-in because hex-formatting frames costs render time and floods the same
+# USB-Serial-JTAG link the transport runs on. Deliberately NOT a `test_*`
+# feature: it decorates the app path rather than replacing it, so a frame-dump
+# build is the real firmware plus a transcript.
+frame-dump = []
+
 # Hardware harnesses. Any `test_*` feature makes build.rs set the `fw_harness`
 # cfg, which replaces the (future) app entrypoint with a harness — mirroring
 # fw-esp32c6 rather than inventing a second mechanism.
