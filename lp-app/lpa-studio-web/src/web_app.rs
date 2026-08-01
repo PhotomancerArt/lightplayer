@@ -78,6 +78,26 @@ pub fn App() -> Element {
         };
     }
 
+    // The board display-def editor: same standalone-page pattern.
+    if matches!(router::current_route(), StudioRoute::BoardEditor) {
+        return rsx! {
+            style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            lpa_board_editor::BoardEditorPage {}
+        };
+    }
+
+    // The boards catalog: same standalone-page pattern. The detected OS
+    // drives per-bridge driver warnings (plan D5) — detected here at the
+    // platform edge; lpa-boards stays platform-blind.
+    if let StudioRoute::Boards { board } = router::current_route() {
+        return rsx! {
+            style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
+            lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
+        };
+    }
+
     let mut view = use_signal(UiStudioView::empty);
     // The OpenRouter connect return leg (`?code=…`): consumed synchronously
     // BEFORE the router reads the URL — it scrubs the query and restores the
@@ -393,11 +413,14 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Stories { .. } | StudioRoute::MappingEditor => {
-                    // the story book and the mapping editor mount on fresh
-                    // page loads only (their early returns in App run
-                    // before any hooks); reload to keep the hook order
-                    // sound
+                StudioRoute::Stories { .. }
+                | StudioRoute::MappingEditor
+                | StudioRoute::Boards { .. }
+                | StudioRoute::BoardEditor => {
+                    // the story book, mapping editor, boards catalog, and
+                    // board editor mount on fresh page loads only (their
+                    // early returns in App run before any hooks); reload to
+                    // keep the hook order sound
                     router::hard_reload();
                 }
             }
@@ -458,7 +481,11 @@ pub fn App() -> Element {
                             },
                         )));
                 }
-                StudioRoute::Home | StudioRoute::Stories { .. } | StudioRoute::MappingEditor => {}
+                StudioRoute::Home
+                | StudioRoute::Stories { .. }
+                | StudioRoute::MappingEditor
+                | StudioRoute::Boards { .. }
+                | StudioRoute::BoardEditor => {}
             }
             // D32 auto-connect (M6): the load-time attach sweep — queued
             // AFTER the route dispatch, so a `#/device/<uid>` reload's own
@@ -556,6 +583,31 @@ pub fn App() -> Element {
 /// The pull loop's per-request progress-deadline timer on wasm: a `setTimeout`
 /// via `gloo_timers`. The actor calls this to build each pull's quiet-gap
 /// deadline; native callers would pass a `sleep`-backed factory instead.
+/// The OS the page runs on, for per-bridge driver guidance (plan D5).
+/// User-agent sniffing is exactly the right tool here: the answer only
+/// picks which driver instructions to show.
+fn detect_host_os() -> lpa_boards::HostOs {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let user_agent = web_sys::window()
+            .and_then(|window| window.navigator().user_agent().ok())
+            .unwrap_or_default();
+        if user_agent.contains("Mac") {
+            lpa_boards::HostOs::MacOs
+        } else if user_agent.contains("Win") {
+            lpa_boards::HostOs::Windows
+        } else if user_agent.contains("Linux") || user_agent.contains("X11") {
+            lpa_boards::HostOs::Linux
+        } else {
+            lpa_boards::HostOs::Other
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        lpa_boards::HostOs::Other
+    }
+}
+
 fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
 }

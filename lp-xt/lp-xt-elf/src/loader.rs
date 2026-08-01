@@ -168,22 +168,23 @@ impl<'d> XtensaElf<'d> {
     /// Copy every `PT_LOAD` segment into the emulator's memory at its
     /// `p_vaddr`, zero-filling the `p_memsz` tail (`.bss`). Fails without
     /// side-channel panics if a segment falls outside the modeled regions.
+    ///
+    /// Goes through `Memory`'s **loader** path, not guest stores: an image's
+    /// `.text`/`.rodata` land in the read-only flash windows, where a guest
+    /// store faults by design. Placing an image there is what a flasher does.
     pub fn load_into(&self, emu: &mut Emulator) -> Result<(), ElfError> {
         for seg in self.segments()? {
             let unmapped = |_| ElfError::Unmapped {
                 vaddr: seg.vaddr,
                 memsz: seg.memsz,
             };
-            for (i, &b) in seg.data.iter().enumerate() {
-                emu.mem
-                    .write_u8(seg.vaddr.wrapping_add(i as u32), b)
-                    .map_err(unmapped)?;
-            }
-            for i in seg.data.len() as u32..seg.memsz {
-                emu.mem
-                    .write_u8(seg.vaddr.wrapping_add(i), 0)
-                    .map_err(unmapped)?;
-            }
+            emu.mem
+                .try_load_bytes(seg.vaddr, seg.data)
+                .map_err(unmapped)?;
+            let tail = seg.memsz.saturating_sub(seg.data.len() as u32);
+            emu.mem
+                .try_zero(seg.vaddr.wrapping_add(seg.data.len() as u32), tail)
+                .map_err(unmapped)?;
         }
         Ok(())
     }

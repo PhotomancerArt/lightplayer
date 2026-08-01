@@ -48,6 +48,8 @@
 //! table extraction is a separate P6 mechanism, because sampling a lookup ROM
 //! would let the emulator be merely close.
 
+pub mod helpers;
+
 // ---------------------------------------------------------------------------
 // Families and operations
 // ---------------------------------------------------------------------------
@@ -297,7 +299,7 @@ const fn bits(sign: u32, exp: u32, frac: u32) -> u32 {
 /// A deterministic counter-based hash. Written out here rather than taken from a
 /// dependency so both sides of the campaign cannot drift, and so the corpus is
 /// reproducible from this file alone.
-const fn mix(mut x: u32) -> u32 {
+pub(crate) const fn mix(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(0x7FEB_352D);
     x ^= x >> 15;
@@ -837,7 +839,7 @@ mod tests {
     /// rather than left to reviewer attention.
     #[test]
     fn the_generator_contains_no_floating_point_arithmetic() {
-        let src = include_str!("lib.rs");
+        let src = concat!(include_str!("lib.rs"), "\n", include_str!("helpers.rs"));
         for (n, line) in src.lines().enumerate() {
             // Strip line comments (`//`, `///`, `//!`) — prose mentions f32
             // constantly, and prose is not arithmetic.

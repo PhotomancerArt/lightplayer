@@ -372,6 +372,90 @@ impl NativeJitInstance {
         }
         Ok(bytes)
     }
+
+    /// Invoke a function compiled in [`FloatMode::F32`], passing and returning
+    /// **raw IEEE-754 bit patterns**, one word per scalar component.
+    ///
+    /// The on-device mirror of
+    /// [`NativeEmuInstance::call_f32_words`](crate::rt_emu::NativeEmuInstance::call_f32_words),
+    /// deliberately identical in shape so the shared `xt_corpus` reaches the
+    /// emulator and the silicon through the same call. In F32 mode a word *is*
+    /// the value's bit pattern (M7 D1: floats cross every call boundary in
+    /// address registers), so there is nothing to convert in either direction.
+    ///
+    /// Separate from [`LpvmInstance::call_q32`] rather than a relaxed guard on
+    /// it, for the reason the emulator side gives: the two modes disagree about
+    /// what a word *means*, and a Q32 caller handed F32 words gets plausible
+    /// garbage (`1.0f32` reads as `1065353216` in Q16.16, roughly 16257.0). The
+    /// mode check is a hard error on both sides so a mismatch is a message and
+    /// not a wrong pixel.
+    ///
+    /// **`CPENABLE` must already be armed** for the calling context or the
+    /// first FP instruction takes `EXCCAUSE=32` — see
+    /// `fw-esp32s3`'s `board::esp32s3::fpu` (M7 D6). This crate documents the
+    /// requirement and does not implement it: enabling a coprocessor is a
+    /// property of the execution context, which the firmware owns.
+    pub fn call_f32_words(&mut self, name: &str, args: &[u32]) -> Result<Vec<u32>, NativeError> {
+        self.reset_globals();
+
+        if self.module.inner.options.float_mode != FloatMode::F32 {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeJitInstance::call_f32_words requires FloatMode::F32",
+            ))));
+        }
+
+        let gfn = self
+            .module
+            .inner
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .cloned()
+            .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
+
+        for p in &gfn.parameters {
+            if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+                return Err(NativeError::Call(CallError::Unsupported(String::from(
+                    "out/inout parameters are not supported for direct calling.",
+                ))));
+            }
+        }
+
+        let entry_info = self
+            .module
+            .inner
+            .entry_info
+            .get(name)
+            .ok_or_else(|| CallError::MissingMetadata(String::from(name)))?;
+        let param_count = entry_info.arg_count;
+
+        let expected_words: usize = gfn
+            .parameters
+            .iter()
+            .map(|p| glsl_component_count(&p.ty))
+            .sum();
+        if args.len() != expected_words {
+            return Err(NativeError::Call(CallError::Arity {
+                expected: expected_words,
+                got: args.len(),
+            }));
+        }
+        if args.len() != param_count {
+            return Err(NativeError::Call(CallError::Unsupported(format!(
+                "flattened argument count {} does not match IR param_count {}",
+                args.len(),
+                param_count
+            ))));
+        }
+
+        let flat: Vec<i32> = args.iter().map(|&w| w as i32).collect();
+        let words = self.invoke_flat(name, &flat)?;
+        if gfn.return_type == LpsType::Void {
+            return Ok(Vec::new());
+        }
+        Ok(words.into_iter().map(|w| w as u32).collect())
+    }
 }
 
 fn pack_regs_direct(words: &[i32]) -> (i32, i32, i32, i32, i32, i32, i32, i32) {

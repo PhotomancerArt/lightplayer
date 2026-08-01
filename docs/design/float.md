@@ -74,17 +74,31 @@ the WebAssembly spec; RV32F's from the RISC-V F spec.
 
 - **Denormal (subnormal) handling.** A target may flush denormal inputs
   and/or outputs to zero. wasm and RV32F preserve denormals (their specs
-  require it); the ESP32-S3 FPU and typical GPUs flush. Unifying this would
-  mean per-op software fixup on the hot path — rejected. Consequence:
-  results are only portable down to `~1.2e-38` magnitude; below that, a
-  target may produce `0.0` where another produces a tiny nonzero value.
+  require it); typical GPUs flush. **Measured on the ESP32-S3 Xtensa FPU by
+  the M6 hardware conformance campaign: it does NOT flush — full IEEE
+  subnormal arithmetic, both directions (350/350 conformance vectors, every
+  flush-distinguishing row)** — see
+  `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` §4. So `xtn.f32` and
+  `interp.f32`/`wasm.f32` agree on denormals by construction; the divergence
+  this row warns about is a GPU-tier and future-target risk, not a
+  Xtensa/wasm one. Unifying denormal handling in software everywhere would
+  still mean per-op fixup on targets that do flush — rejected as a blanket
+  policy. Consequence: results are only portable down to `~1.2e-38`
+  magnitude on a target that flushes; below that, such a target may produce
+  `0.0` where another produces a tiny nonzero value.
 - **Expression contraction.** An emitter may (or may not) fuse `a*b + c`
   into a fused multiply-add with a single rounding. Shaders must not depend
-  on the intermediate rounding of a multiply feeding an add.
+  on the intermediate rounding of a multiply feeding an add. Xtensa: the
+  `-O3` toolchain contracts on its own (`madd.s`), so contraction is not
+  even emitter-optional there — measured, xtensa-fp-behavior-contract ADR §7.
 - **NaN bit patterns.** Which NaN (payload, sign, quiet bit) an operation
   produces or propagates. "Is NaN" is portable; *which* NaN never is.
+  Xtensa: last NaN operand of `(fs, ft)` wins with the accumulator
+  outranking both for `madd.s`/`msub.s`, quiet bit forced, payload and sign
+  preserved; a generated NaN is `0x7FC00000` — measured, ADR §4.
 - **`round()` ties.** Halfway cases round to even or away from zero,
   per target — this is GLSL's own latitude, and hardware disagrees.
+  Xtensa's `round.s` ties to even — measured, ADR §4.
 
 ## 5. Unspecified
 

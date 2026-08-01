@@ -34,6 +34,7 @@
 //! | `mov.s` `abs.s` `neg.s` | `fr, fs` | OK | PRESENT | yes |
 //! | `div0.s` `recip0.s` `sqrt0.s` `rsqrt0.s` | `fr, fs` | OK | PRESENT | division / sqrt sequence |
 //! | `nexp01.s` `mkdadj.s` `addexp.s` `addexpm.s` | `fr, fs` | OK | PRESENT | division / sqrt sequence |
+//! | `mksadj.s` | `fr, fs` | OK | PRESENT (missed by P1's probe list, added and measured by P6 — the real `__ieee754_sqrtf` sequence executed it 272/272 end-to-end, `docs/defects/2026-07-31-mksadj-missing-from-fp-subset.md`) | sqrt sequence |
 //! | `const.s` | `fr, imm0_15` | OK | PRESENT | division sequence |
 //! | `rfr` | `ar, fs` | OK | PRESENT | yes |
 //! | `wfr` | `fr, as` | OK | PRESENT | yes |
@@ -235,6 +236,13 @@ pub enum FpRrOp {
     Rsqrt0S,
     /// `nexp01.s` — normalize exponent to [1,2); `t = 0xB`.
     Nexp01S,
+    /// `mksadj.s` — make square-root adjustment; `t = 0xC`.
+    ///
+    /// Found by the M6 P6 campaign, not the P1 probe: the toolchain's
+    /// `__ieee754_sqrtf` sequence uses it (`xtensa-esp32s3-elf-objdump` of the
+    /// esp-14.2.0 libm disassembles `0xfa21c0` as `mksadj.s f2, f1`), so the
+    /// square-root sequence cannot be decoded without it.
+    MksadjS,
     /// `mkdadj.s` — make divide adjustment; `t = 0xD`.
     MkdadjS,
     /// `addexp.s` — `t = 0xE`.

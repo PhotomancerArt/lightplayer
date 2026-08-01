@@ -49,6 +49,8 @@ fp_subset:
 	nexp01.s f15, f14
 	mkdadj.s f0, f1
 	mkdadj.s f15, f14
+	mksadj.s f0, f1
+	mksadj.s f15, f14
 	addexp.s  f0, f1
 	addexp.s  f15, f14
 	addexpm.s f0, f1

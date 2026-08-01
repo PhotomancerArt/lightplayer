@@ -195,8 +195,21 @@ impl<'r> TickContext<'r> {
     }
 
     /// Resolve a [`QueryKey`] for this frame (cache, bindings, optional host production).
-    pub fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError> {
+    pub fn resolve(&mut self, query: &QueryKey) -> Result<Production, ResolveError> {
         self.resolver.resolve(query)
+    }
+
+    /// Resolve one of this node's consumed slots named by a constant path.
+    ///
+    /// Prefer this to building a [`QueryKey`] from a parsed path when the path
+    /// is a literal: the parse and the key are memoized for as long as they
+    /// stay valid, instead of being rebuilt and dropped every frame.
+    pub fn resolve_static_consumed(
+        &mut self,
+        path: &'static str,
+    ) -> Result<Production, ResolveError> {
+        let node = self.node_id;
+        self.resolver.resolve_static_consumed(node, path)
     }
 
     pub fn publish_runtime_slot(
@@ -225,7 +238,7 @@ impl<'r> TickContext<'r> {
         T: FromLpValue,
     {
         let production = self
-            .resolve(QueryKey::ConsumedSlot {
+            .resolve(&QueryKey::ConsumedSlot {
                 node: self.node_id,
                 slot: slot.clone(),
             })
@@ -249,7 +262,7 @@ impl<'r> TickContext<'r> {
         T: FromLpValue,
     {
         let production = self
-            .resolve(QueryKey::ConsumedSlotAccessor {
+            .resolve(&QueryKey::ConsumedSlotAccessor {
                 node: self.node_id,
                 accessor: accessor.clone(),
             })
@@ -814,7 +827,7 @@ mod tests {
             &slot_shapes,
         );
         let pv = ctx
-            .resolve(QueryKey::Bus(channel.clone()))
+            .resolve(&QueryKey::Bus(channel.clone()))
             .expect("resolve bus");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(7.8)));
     }
@@ -855,7 +868,7 @@ mod tests {
         );
 
         let pv = ctx
-            .resolve(QueryKey::ConsumedSlot {
+            .resolve(&QueryKey::ConsumedSlot {
                 node,
                 slot: input.clone(),
             })
@@ -890,7 +903,7 @@ mod tests {
         ctx.publish_runtime_slot(&state, slot.clone())
             .expect("publish");
         let production = ctx
-            .resolve(QueryKey::ProducedSlot { node, slot })
+            .resolve(&QueryKey::ProducedSlot { node, slot })
             .expect("resolve published slot");
 
         assert_eq!(
@@ -938,7 +951,7 @@ mod tests {
             _slot: &SlotPath,
             ctx: &mut TickContext<'_>,
         ) -> Result<super::super::ProduceResult, crate::node::NodeError> {
-            let pv = ctx.resolve(self.query.clone()).map_err(|e| {
+            let pv = ctx.resolve(&self.query).map_err(|e| {
                 crate::node::NodeError::msg(alloc::format!("resolve failed: {}", e.message))
             })?;
             if let LpsValueF32::F32(v) = pv.as_value().expect("value") {

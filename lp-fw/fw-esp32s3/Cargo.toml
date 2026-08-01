@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3", "server"]
+default = ["esp32s3", "server", "float-f32"]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
@@ -18,12 +18,14 @@ esp32s3 = [
 ]
 
 # The LightPlayer app: `LpServer` over the USB-Serial-JTAG transport, plus the
-# wire-protocol serialization inside `serial::io_task`.
+# wire-protocol serialization `serial::io_task` drives (which lives in
+# `fw_esp32_common::serial::server_msg`, hence the forward below).
 #
-# ⚠️ Still NARROWER than fw-esp32c6's feature of the same name: this one takes
-# `lpa-server` with **two** of the eight node gates rather than all of them.
-# The graphics backend is no longer the difference — both crates now link
-# `lp-gfx-lpvm`. See the dependency section for why each of those is
+# Feature-for-feature this now matches fw-esp32c6's `server`: all eight
+# `lpa-server` node gates and the same `lp-gfx-lpvm` graphics backend. The
+# remaining differences are tier, not capability: no `panic-recovery` (the S3
+# is abort tier) and no `radio` transport (ESP-NOW bring-up on Xtensa is a
+# future milestone). See the dependency section for why each entry is
 # load-bearing.
 server = [
     "fw-esp32-common/server",
@@ -32,7 +34,6 @@ server = [
     "dep:lpc-hardware",
     "dep:lpfs",
     "dep:lpc-wire",
-    "dep:ser-write-json",
 ]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
@@ -43,6 +44,33 @@ server = [
 # feature: it decorates the app path rather than replacing it, so a frame-dump
 # build is the real firmware plus a transcript.
 frame-dump = []
+
+# Hardware float. This is the board that has an FPU, so this is the board that
+# gets `FloatMode::F32` compiled in — the whole point of M7.
+#
+# Every reference is **weak** (`dep?/feat`): `lpvm-native`, `lps-builtins` and
+# `lp-gfx-lpvm` are all optional here, and a strong reference would enable the
+# dependency itself, dragging the JIT stack into builds that deliberately do
+# not have it. So this says "if that crate is in this build, turn its f32 on",
+# which is exactly the intent — the harness path reaches the first two
+# directly, the app path reaches all three through `server`.
+#
+# On by default. The ESP32-C6 has no such feature and names nothing: it has no
+# FPU and its image must not grow by a backend it never enters (f32 roadmap
+# D2). The C6's byte-identical image size across this change is the proof that
+# the gate does not leak, and it is checked, not asserted — see
+# `just fw-esp32c6-size-check`.
+#
+# Note what this does *not* do: it links the capability, it does not select the
+# mode. Compiled shaders on the app path are still Q32 until the project-level
+# `float_mode` slot (M2) is plumbed through to the device graphics backend,
+# which is later work. `CPENABLE` is armed regardless — see
+# `board::esp32s3::fpu`.
+float-f32 = [
+    "lpvm-native?/float-f32",
+    "lps-builtins?/float-f32",
+    "lp-gfx-lpvm?/float-f32",
+]
 
 # Hardware harnesses. Any `test_*` feature makes build.rs set the `fw_harness`
 # cfg, which replaces the (future) app entrypoint with a harness — mirroring
@@ -65,6 +93,11 @@ test_backtrace_oracle = []
 # silicon — it must never be enabled in an app build, which is why it hangs off
 # this feature rather than off the dependency line.
 test_loopback = ["lp-ws281x/test_hooks"]
+
+# GPIO button diagnostic mode: D9/GPIO8 with an internal pull-up, mirroring
+# fw-esp32c6's `test_button` feature. Needs `server` for the hardware
+# registry/manifest and driver types the button driver is built on.
+test_button = ["server"]
 
 test_xt_jit_corpus = [
     "dep:lpvm-native",
@@ -130,39 +163,45 @@ embedded-storage = "0.3"
 esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32s3", "panic-unaligned-buffer"] }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
 
-# io_task's wire-serialization path plus the boot-time `ServerHello`.
+# The boot-time `ServerHello` plus the wire types `io_task` hands to
+# `fw_esp32_common::serial::server_msg`. The `ser-write-json` sink itself moved
+# down with that module, so this crate no longer names the serializer.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
-ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
-# Chip-generic firmware layer: logger, time provider, output provider, and —
-# behind `server` — the server loop, transport, littlefs `LpFs`, project
-# auto-load, and hardware-manifest loader. Consumed, never reimplemented; this
+# Chip-generic firmware layer: logger, time provider, output provider, the
+# chunked serial writer, and — behind `server` — the server loop, transport,
+# the io_task JSON-serialization half, littlefs `LpFs`, project auto-load, and
+# hardware-manifest loader. Consumed, never reimplemented; this
 # crate must stay free of chip code (ADR 2026-07-29-per-chip-fw-toolchains).
 fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
 
-# ⚠️ Two of eight node gates. `default-features = false` means no gate is
-# implied — a kind not listed here loads as an inert placeholder (see
-# lpc-engine/README.md) — so this list is the exact set of node kinds the board
-# can run. Contrast fw-esp32c6, which lists all eight.
+# All eight node gates, matching fw-esp32c6. `default-features = false` means
+# no gate is implied — a kind not listed here loads as an inert placeholder
+# (see lpc-engine/README.md) — so this list is the exact set of node kinds the
+# board can run.
 #
-# `node-shader` is what M4 exists to turn on. **`node-fixture` is not optional
-# for it**: `OutputNode::consume` requires a *control* product, `ShaderNode`
-# produces a *visual* one, and `FixtureNode` is the only runtime that converts
-# between them. With the fixture gated off the shader renders into a bus
-# nothing reads and the output node reports a resolve failure every frame —
-# which is precisely the M3 symptom this milestone had to clear. Turning the
-# shader on without the fixture would produce a build that compiles a shader on
-# device and still cannot show it.
+# `node-fixture` is load-bearing for `node-shader`: `OutputNode::consume`
+# requires a *control* product, `ShaderNode` produces a *visual* one, and
+# `FixtureNode` is the only runtime that converts between them — a shader
+# without the fixture renders into a bus nothing reads.
 #
-# Nothing else belongs here. Every further gate costs flash and blurs the
-# reading of what the shader path is worth.
+# `node-button` and `node-radio` are on ahead of their hardware services: with
+# no service wired the node runtime reports a visible error ("button node has
+# no button service") instead of loading as a silent placeholder, which is the
+# preferred failure mode until the S3 grows the corresponding drivers.
 #
 # `panic-recovery` is absent on purpose: the S3 is abort tier (`panic = "abort"`
 # + the lp-recovery RTC ledger), and that feature pulls `unwinding`, which is
 # the C6's tier. See src/recovery/.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
-    "node-shader",
+    "node-button",
+    "node-radio",
+    "node-fluid",
     "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
 ], optional = true }
 
 # The graphics backend, and the single biggest lever in the image. Through M3
