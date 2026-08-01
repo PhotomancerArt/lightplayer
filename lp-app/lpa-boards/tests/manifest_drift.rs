@@ -25,6 +25,10 @@ const DISPLAY_ONLY: &[(&str, &str)] = &[
         "quinled/dig-uno",
         "classic ESP32 (v3) has no HardwareTarget yet",
     ),
+    (
+        "domraem/dom-z-102",
+        "classic ESP32 (v3) has no HardwareTarget yet",
+    ),
 ];
 
 fn boards_dir() -> PathBuf {
