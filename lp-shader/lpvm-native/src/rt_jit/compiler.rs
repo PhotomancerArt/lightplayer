@@ -87,6 +87,61 @@ pub(crate) fn link_compiled_module_jit(
     Ok((buffer, linked.entries))
 }
 
+/// [`compile_module_jit`] for the classic-ESP32 **fixed-region** placement:
+/// reserve a span in `arena`, link intra-module call targets against the
+/// span's I-bus base, install the staged image through the mirrored D-bus
+/// walk, sync, and return a `Placed` buffer.
+///
+/// The span is freed back to the arena on any post-reservation failure; on
+/// success it stays reserved and the CALLER owns its lifetime (free it with
+/// `(exec_ptr(0), len)` when the module is dropped — the engine wiring for
+/// that lands with the classic firmware, M3 of the classic bring-up plan).
+pub fn compile_module_jit_placed(
+    ir: &LpirModule,
+    sig: &LpsModuleSig,
+    builtin_table: &BuiltinTable,
+    options: &NativeCompileOptions,
+    isa: IsaTarget,
+    arena: &mut crate::codemem_esp32::CodeArena,
+    sink: &mut impl crate::codemem_esp32::CodeSink,
+) -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
+    let compiled = compile_module(ir, sig, options.float_mode, options.clone(), isa)?;
+
+    let total: usize = compiled.functions.iter().map(|f| f.code.len()).sum();
+    let total_u32 = u32::try_from(total)
+        .map_err(|_| NativeError::Internal("JIT image length does not fit u32".into()))?;
+    let exec_base = arena
+        .alloc(total_u32)
+        .map_err(|e| NativeError::Internal(format!("JIT code placement failed: {e}")))?;
+
+    let mut place = || -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
+        lp_perf::emit_begin!(EVENT_SHADER_LINK);
+        let link_result = crate::link::link_jit_at(&compiled, isa, exec_base, |sym| {
+            builtin_table.lookup(sym).map(|addr| addr as u32)
+        });
+        lp_perf::emit_end!(EVENT_SHADER_LINK);
+        let linked =
+            link_result.map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
+
+        crate::codemem_esp32::install(arena.region(), exec_base, &linked.code, sink)
+            .map_err(|e| NativeError::Internal(format!("JIT code install failed: {e}")))?;
+        sink.sync();
+
+        let buffer = JitBuffer::from_placed(exec_base as usize, linked.code.len());
+        let buffer_len = u32::try_from(buffer.len())
+            .map_err(|_| NativeError::Internal("JIT buffer length does not fit u32".into()))?;
+        emit_jit_symbols(exec_base, buffer_len, &linked.entries);
+        Ok((buffer, linked.entries))
+    };
+    match place() {
+        Ok(ok) => Ok(ok),
+        Err(e) => {
+            arena.free(exec_base, total_u32);
+            Err(e)
+        }
+    }
+}
+
 /// Builds [`JitSymbolEntry`] records (names in `name_buf`) and notifies the profiler sink.
 fn emit_jit_symbols(buffer_base: u32, buffer_len: u32, entry_offsets: &VecMap<String, usize>) {
     if entry_offsets.is_empty() {
