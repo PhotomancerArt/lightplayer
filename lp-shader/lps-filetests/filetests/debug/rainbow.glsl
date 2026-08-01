@@ -129,12 +129,6 @@ vec4 test_rainbow_main_center_t25() {
     return rainbow_main(vec2(32.0, 32.0), vec2(64.0, 64.0), 2.5);
 }
 
-// Writes to value parameters are lost on the Lp+Xtensa+f32 combination only
-// (config-masked; xtn.f32, rv32lpn.f32 and xtlpn.q32 all pass). Marked broken
-// rather than unsupported on purpose: this is a compiler bug, written down and
-// awaiting a fix, not a capability this target lacks. Delete when fixed.
-// docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md
-// @broken(xtlpn.f32)
 // run: test_rainbow_main_center_t25() ~= vec4(0.0, 0.6291504, 0.81777954, 1.0) (tolerance: 0.002)
 
 vec4 test_rainbow_main_corner_t5() {
@@ -142,10 +136,4 @@ vec4 test_rainbow_main_corner_t5() {
 }
 
 // @unsupported(rv32c.q32)
-// Writes to value parameters are lost on the Lp+Xtensa+f32 combination only
-// (config-masked; xtn.f32, rv32lpn.f32 and xtlpn.q32 all pass). Marked broken
-// rather than unsupported on purpose: this is a compiler bug, written down and
-// awaiting a fix, not a capability this target lacks. Delete when fixed.
-// docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md
-// @broken(xtlpn.f32)
 // run: test_rainbow_main_corner_t5() ~= vec4(0.64055, 0.0, 0.64708, 1.0) (tolerance: 0.002)
