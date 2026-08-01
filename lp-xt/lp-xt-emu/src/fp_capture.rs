@@ -149,21 +149,49 @@ pub enum DeviceResult {
     Skipped,
 }
 
+/// One estimate-table sweep: every distinct output over one `(sign, exponent)`
+/// plane of the significand space, run-length encoded on the device.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct TableSweep {
+    /// `recip0.s`, `rsqrt0.s`, `sqrt0.s`, or `div0.s`.
+    pub op: String,
+    /// The biased exponent of every input in the sweep.
+    pub exp: u32,
+    /// The sign bit of every input in the sweep.
+    pub sign: u32,
+    /// `(first significand, length, result bits)` — contiguous, covering the
+    /// full 2²³ space unless [`TableSweep::aborted`].
+    pub runs: Vec<(u32, u32, u32)>,
+    /// The device hit its run cap: the output was not a step function over
+    /// this plane, and `runs` is only its prefix. An aborted sweep must never
+    /// be encoded as a table.
+    pub aborted: bool,
+}
+
 /// A parsed capture: the header facts P6 copies into a provenance block, plus
 /// every row, keyed by family and index.
 #[derive(Clone, Debug)]
 pub struct Capture {
     pub fingerprint: u32,
+    /// The helper-grid fingerprint, printed by `helpers`-mode captures.
+    pub helpers_fingerprint: Option<u32>,
     pub commit: Option<String>,
     pub cpenable_before: Option<u32>,
     pub cpenable_after: Option<u32>,
     pub fcr_reset: Option<u32>,
     pub fsr_reset: Option<u32>,
     pub mode: Option<String>,
-    /// `family -> index -> result`, in index order.
+    /// `family -> index -> result`, in index order. Helper grids (`h_maddn`,
+    /// …) parse into the same map — the row shape is identical, and which keys
+    /// mean "conformance family" vs "characterization grid" is the caller's
+    /// business.
     pub rows: BTreeMap<String, BTreeMap<u32, DeviceResult>>,
     /// Per-family digest the device computed, for a cheap "did anything move".
     pub digests: BTreeMap<String, u32>,
+    /// The sixteen `const.s` outputs, from a `helpers`-mode capture.
+    pub const_s: Vec<(u8, u32)>,
+    /// Estimate-table sweeps, from a `tables`-mode capture.
+    pub tables: Vec<TableSweep>,
 }
 
 impl Capture {
@@ -180,6 +208,7 @@ impl Capture {
 pub fn parse_capture(text: &str) -> Result<Capture, CaptureError> {
     let mut cap = Capture {
         fingerprint: 0,
+        helpers_fingerprint: None,
         commit: None,
         cpenable_before: None,
         cpenable_after: None,
@@ -188,9 +217,12 @@ pub fn parse_capture(text: &str) -> Result<Capture, CaptureError> {
         mode: None,
         rows: BTreeMap::new(),
         digests: BTreeMap::new(),
+        const_s: Vec::new(),
+        tables: Vec::new(),
     };
     let mut have_fingerprint = false;
     let mut open_family: Option<String> = None;
+    let mut open_table: Option<TableSweep> = None;
     let mut ended = false;
     // Declared counts from each family's END sentinel.
     let mut declared: Vec<(String, u32)> = Vec::new();
@@ -217,11 +249,65 @@ pub fn parse_capture(text: &str) -> Result<Capture, CaptureError> {
                 .and_then(parse_hex)
                 .ok_or_else(|| CaptureError::Malformed(format!("bad fingerprint {rest:?}")))?;
             have_fingerprint = true;
+        } else if head.starts_with("helpers-fingerprint=") {
+            cap.helpers_fingerprint = kv(rest, "helpers-fingerprint=").and_then(parse_hex);
         } else if head.starts_with("mode=") {
             cap.mode = kv(rest, "mode=").map(str::to_string);
         }
 
-        if head == "FAMILY" {
+        if head == "CONST" {
+            let idx: u8 = words
+                .next()
+                .and_then(|w| w.parse().ok())
+                .ok_or_else(|| CaptureError::Malformed(format!("CONST has no index: {rest:?}")))?;
+            let bits = words
+                .next()
+                .and_then(parse_hex)
+                .ok_or_else(|| CaptureError::Malformed(format!("CONST has no value: {rest:?}")))?;
+            cap.const_s.push((idx, bits));
+        } else if head == "TABLE" {
+            // A TABLE opening while another is open means the previous sweep
+            // never reached its END line — a truncation, not a formatting
+            // nicety.
+            if let Some(t) = open_table.take() {
+                return Err(CaptureError::Truncated {
+                    family: Some(format!("table {} exp={} sign={}", t.op, t.exp, t.sign)),
+                });
+            }
+            open_table = Some(TableSweep {
+                op: kv(rest, "op=")
+                    .ok_or_else(|| CaptureError::Malformed(format!("TABLE has no op: {rest:?}")))?
+                    .to_string(),
+                exp: kv(rest, "exp=")
+                    .and_then(|v| v.parse().ok())
+                    .ok_or_else(|| {
+                        CaptureError::Malformed(format!("TABLE has no exp: {rest:?}"))
+                    })?,
+                // Older captures predate the sign sweeps; absent means 0.
+                sign: kv(rest, "sign=").and_then(|v| v.parse().ok()).unwrap_or(0),
+                runs: Vec::new(),
+                aborted: false,
+            });
+        } else if head == "T" {
+            let Some(table) = open_table.as_mut() else {
+                return Err(CaptureError::Malformed(format!(
+                    "T line outside a TABLE: {rest:?}"
+                )));
+            };
+            // `T <op> <exp>` prefix, then `start:len:value` cells.
+            let cells = words.skip(2);
+            for cell in cells {
+                let mut parts = cell.split(':');
+                let (Some(start), Some(len), Some(value)) = (
+                    parts.next().and_then(parse_hex),
+                    parts.next().and_then(parse_hex),
+                    parts.next().and_then(parse_hex),
+                ) else {
+                    return Err(CaptureError::Malformed(format!("bad run cell {cell:?}")));
+                };
+                table.runs.push((start, len, value));
+            }
+        } else if head == "FAMILY" {
             open_family = words.next().map(str::to_string);
         } else if head == "D" {
             let family = words.next().ok_or_else(|| {
@@ -242,7 +328,34 @@ pub fn parse_capture(text: &str) -> Result<Capture, CaptureError> {
                 cap.digests.insert(family, d);
             }
         } else if head == "END" {
-            if let (Some(family), Some(count)) = (
+            if let Some(table_op) = kv(rest, "table=") {
+                let Some(mut t) = open_table.take() else {
+                    return Err(CaptureError::Malformed(format!(
+                        "END table without a TABLE: {rest:?}"
+                    )));
+                };
+                if t.op != table_op {
+                    return Err(CaptureError::Malformed(format!(
+                        "END table={table_op} closes TABLE op={}",
+                        t.op
+                    )));
+                }
+                let runs: u32 =
+                    kv(rest, "runs=")
+                        .and_then(|v| v.parse().ok())
+                        .ok_or_else(|| {
+                            CaptureError::Malformed(format!("END table has no runs: {rest:?}"))
+                        })?;
+                if t.runs.len() as u32 != runs {
+                    return Err(CaptureError::CountMismatch {
+                        family: format!("table {} exp={} sign={}", t.op, t.exp, t.sign),
+                        declared: runs,
+                        seen: t.runs.len() as u32,
+                    });
+                }
+                t.aborted = kv(rest, "aborted=") == Some("1");
+                cap.tables.push(t);
+            } else if let (Some(family), Some(count)) = (
                 kv(rest, "family="),
                 kv(rest, "count=").and_then(|c| c.parse().ok()),
             ) {
@@ -256,6 +369,11 @@ pub fn parse_capture(text: &str) -> Result<Capture, CaptureError> {
 
     if !have_fingerprint {
         return Err(CaptureError::NoFingerprint);
+    }
+    if let Some(t) = open_table {
+        return Err(CaptureError::Truncated {
+            family: Some(format!("table {} exp={} sign={}", t.op, t.exp, t.sign)),
+        });
     }
     if !ended {
         return Err(CaptureError::Truncated {
@@ -594,6 +712,94 @@ espflash noise that must be ignored
     fn a_capture_of_the_wrong_firmware_says_so() {
         let err = parse_capture("[INIT] fw-esp32s3 boot\n[INIT] ready\n").expect_err("must reject");
         assert_eq!(err, CaptureError::NoFingerprint);
+    }
+
+    /// A structurally complete tables-mode capture: two sweeps, one aborted.
+    const TABLES: &str = "\
+[FPCONF] BEGIN
+[FPCONF] fingerprint=0xa0a36dc3 total=5630
+[FPCONF] mode=tables family=all limit=0
+[FPCONF] TABLE op=recip0.s exp=127 sign=0 significand-bits=23
+[FPCONF] T recip0.s 00127 00000000:00010000:3f800000 00010000:00010000:3f7e0000
+[FPCONF] T recip0.s 00127 00020000:007e0000:3f7c0000
+[FPCONF] END table=recip0.s exp=127 sign=0 runs=3 aborted=0
+[FPCONF] TABLE op=rsqrt0.s exp=255 sign=0 significand-bits=23
+[FPCONF] T rsqrt0.s 00255 00000000:00000001:7fc00000 00000001:00000001:7fc00001
+[FPCONF] END table=rsqrt0.s exp=255 sign=0 runs=2 aborted=1
+[FPCONF] END-ALL tables=2 sweeps=2
+[FPCONF] done
+";
+
+    #[test]
+    fn a_tables_capture_parses_into_sweeps_with_their_runs() {
+        let c = parse_capture(TABLES).expect("parses");
+        assert_eq!(c.tables.len(), 2);
+        let t = &c.tables[0];
+        assert_eq!(
+            (t.op.as_str(), t.exp, t.sign, t.aborted),
+            ("recip0.s", 127, 0, false)
+        );
+        assert_eq!(
+            t.runs,
+            vec![
+                (0x0000_0000, 0x0001_0000, 0x3F80_0000),
+                (0x0001_0000, 0x0001_0000, 0x3F7E_0000),
+                (0x0002_0000, 0x007E_0000, 0x3F7C_0000),
+            ]
+        );
+        // An aborted sweep carries its flag, so an extraction that consumed it
+        // as a complete table would be caught by the caller's own check.
+        assert!(c.tables[1].aborted);
+    }
+
+    /// The same teardown discipline as the family rows: a sweep whose END never
+    /// arrived, or whose declared run count disagrees, is an error — not a
+    /// smaller table.
+    #[test]
+    fn a_damaged_tables_capture_is_rejected() {
+        let cut = TABLES.replace(
+            "[FPCONF] END table=recip0.s exp=127 sign=0 runs=3 aborted=0\n",
+            "",
+        );
+        let err = parse_capture(&cut).expect_err("must reject");
+        assert!(
+            matches!(err, CaptureError::Truncated { family: Some(f) } if f.contains("recip0.s")),
+            "a TABLE without an END is a truncation"
+        );
+
+        let holed = TABLES.replace("[FPCONF] T recip0.s 00127 00020000:007e0000:3f7c0000\n", "");
+        let err = parse_capture(&holed).expect_err("must reject");
+        assert_eq!(
+            err,
+            CaptureError::CountMismatch {
+                family: "table recip0.s exp=127 sign=0".to_string(),
+                declared: 3,
+                seen: 2,
+            }
+        );
+    }
+
+    /// A helpers-mode capture reuses the family row shape, plus CONST lines and
+    /// its own fingerprint.
+    #[test]
+    fn a_helpers_capture_parses_const_rows_and_grids() {
+        let text = "\
+[FPCONF] BEGIN
+[FPCONF] fingerprint=0xa0a36dc3 total=5630
+[FPCONF] mode=helpers family=all limit=0
+[FPCONF] helpers-fingerprint=0x9715768f total=5328
+[FPCONF] CONST 00 00000000
+[FPCONF] CONST 01 3f800000
+[FPCONF] FAMILY h_nexp01 label=H count=2 of=144
+[FPCONF] D h_nexp01 00000 3f800000:00000000 40000000:00000000
+[FPCONF] DIGEST h_nexp01 0xcafef00d rows=2
+[FPCONF] END family=h_nexp01 count=2
+[FPCONF] END-ALL helpers=1 vectors=2
+";
+        let c = parse_capture(text).expect("parses");
+        assert_eq!(c.helpers_fingerprint, Some(0x9715_768F));
+        assert_eq!(c.const_s, vec![(0, 0x0000_0000), (1, 0x3F80_0000)]);
+        assert_eq!(c.rows["h_nexp01"].len(), 2);
     }
 
     /// A subset run is legitimate — the smoke run is one — so rows the capture
