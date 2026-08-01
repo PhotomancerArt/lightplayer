@@ -24,6 +24,28 @@ use lpvm_native::native_options::NativeCompileOptions;
 use lpvm_native::rt_emu::NativeEmuEngine;
 use lpvm_native::xt_corpus::{CASES, XtCase};
 
+/// True when the Xtensa base image was embedded at build time; otherwise print
+/// a loud note naming `what` and let the caller return.
+///
+/// **Every** test here that builds a `NativeEmuEngine` for Xtensa must call
+/// this first — the engine cannot skip on its own. `lps_builtins_xt_image`
+/// embeds an empty slice when the gitignored image is absent, which is a
+/// first-class "unavailable" state, but only for consumers that *ask*; the ones
+/// that do not get `Internal("Xtensa builtins image is empty or was not found
+/// at build time")` out of `compile()`, which reads as a codegen failure a long
+/// way from its cause. See
+/// `docs/defects/2026-08-01-xt-builtins-image-strands-just-test.md`.
+fn image_available(what: &str) -> bool {
+    if lps_builtins_xt_image::is_available() {
+        return true;
+    }
+    eprintln!(
+        "SKIP: Xtensa builtins image absent — cannot confirm {what}. Build with {} (needs the esp toolchain)",
+        lps_builtins_xt_image::BUILD_COMMAND
+    );
+    false
+}
+
 fn engine() -> NativeEmuEngine {
     let opts = NativeCompileOptions {
         float_mode: FloatMode::Q32,
@@ -67,11 +89,7 @@ fn every_corpus_golden_holds_on_the_emulator() {
     // `XtCase::needs_builtins` still marks which cases *call* a builtin, which
     // is what the device side cares about — on hardware, builtins come from
     // `lps_builtins::jit_builtin_code_ptr` and need no image at all.
-    if !lps_builtins_xt_image::is_available() {
-        eprintln!(
-            "SKIP: Xtensa builtins image absent — cannot confirm goldens. Build with {} (needs the esp toolchain)",
-            lps_builtins_xt_image::BUILD_COMMAND
-        );
+    if !image_available("goldens") {
         return;
     }
 
@@ -245,11 +263,7 @@ fn every_f32_corpus_golden_holds_on_the_emulator() {
     // the f32 builtin family, or `f32_builtin_floor` cannot resolve. That is no
     // longer opt-in (see scripts/build-builtins-xt.sh), so an image without it
     // is a stale artifact rather than a configuration.
-    if !lps_builtins_xt_image::is_available() {
-        eprintln!(
-            "SKIP: Xtensa builtins image absent — cannot confirm f32 goldens. Build with {} (needs the esp toolchain)",
-            lps_builtins_xt_image::BUILD_COMMAND
-        );
+    if !image_available("f32 goldens") {
         return;
     }
 
@@ -331,6 +345,13 @@ fn f32_case_names_are_unique_and_distinct_from_the_q32_ones() {
 /// silent. That is why both entry points check rather than coerce.
 #[test]
 fn a_q32_module_refuses_the_f32_entry_point() {
+    // Compiling for Xtensa needs the base image, so this gate is not optional
+    // even though the assertion below is about a mode check and not about code
+    // generation. Without it this test is the one that turns an absent image
+    // into a red suite — see `image_available`.
+    if !image_available("the Q32/f32 entry-point guard") {
+        return;
+    }
     let case = &CASES[0];
     let (ir, sig) = (case.build)();
     let engine = engine();

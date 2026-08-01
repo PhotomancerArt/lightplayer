@@ -4,9 +4,23 @@
 # scripts/build-builtins.sh, which does the same for riscv32).
 #
 # Output: lp-xt/fixtures/elf/lps-builtins-xt-app.elf (gitignored; regenerable).
+#
+# `--if-toolchain` turns a missing esp toolchain from an error into a no-op
+# exit 0. That is what lets `just` recipes depend on this image unconditionally:
+# on a machine (or CI job) without espup the Xtensa host tests are *designed* to
+# skip, so not building the image is the correct outcome there — but on a
+# machine that HAS the toolchain, the image must be rebuilt rather than assumed,
+# because it is a gitignored artifact that a cache wipe or a fresh worktree
+# leaves absent. See docs/defects/2026-08-01-xt-builtins-image-strands-just-test.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+
+IF_TOOLCHAIN=false
+if [[ "${1:-}" == "--if-toolchain" ]]; then
+  IF_TOOLCHAIN=true
+  shift
+fi
 
 # The GNU xtensa binutils/gcc shipped with the esp toolchain: the rust target
 # spec links via xtensa-esp32s3-elf-gcc, so it must be on PATH.
@@ -20,6 +34,11 @@ GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-e
 if [[ -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
   export PATH="$GCC_BIN:$PATH"
 elif ! command -v xtensa-esp32s3-elf-gcc >/dev/null 2>&1; then
+  if [[ "$IF_TOOLCHAIN" == true ]]; then
+    echo "note: esp toolchain not installed — not building the Xtensa builtins image."
+    echo "      The Xtensa host tests will skip. Run \`espup install\` to enable them."
+    exit 0
+  fi
   echo "error: xtensa-esp32s3-elf-gcc not found under ~/.rustup/toolchains/esp" >&2
   echo "       and not on PATH. Install the esp toolchain (espup install) first." >&2
   exit 1
@@ -77,7 +96,14 @@ if ! cargo build --release -p lps-builtins-xt-app --features float-f32; then
 fi
 
 mkdir -p "$OUT_DIR"
-cp "$BUILT" "$OUT"
+# Copy only when the bytes actually differ. `cp` always bumps mtime, and
+# `lps-builtins-xt-image/build.rs` declares `rerun-if-changed` on exactly this
+# path — so an unconditional copy re-embeds and rebuilds that crate and
+# everything above it on every run, for a byte-identical image. Cheap here,
+# expensive now that `just test` and `just ci-prereqs` call this every time.
+if ! cmp -s "$BUILT" "$OUT"; then
+  cp "$BUILT" "$OUT"
+fi
 
 # The image's entire purpose is to carry the builtin symbols; an image that
 # links but lost them to dead-code elimination is useless and would fail far
