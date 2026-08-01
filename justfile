@@ -24,6 +24,23 @@ fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
 # size 0x400000". The same value is duplicated in
 # lp-fw/fw-esp32s3/.cargo/config.toml's runner, which cannot read this var.
 s3_flash_size := "8mb"
+
+# fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) also builds on Espressif's Rust
+# fork (see lp-fw/fw-esp32v3/rust-toolchain.toml). Like fw-esp32s3 it is a
+# repo-root workspace member excluded from `default-members` (M3-P1 folded it
+# in when it gained real lp2025-internal path dependencies), so its artifacts
+# land in the shared root `target/`. The build still runs from the crate
+# directory — see `build-fw-esp32v3`.
+xt_v3_target := "xtensa-esp32-none-elf"
+fw_esp32v3_dir := "lp-fw/fw-esp32v3"
+fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
+
+# This crate's 4 MB flash size (docs/adr/2026-07-29-per-chip-fw-toolchains.md,
+# Q7 in the classic-ESP32 bring-up plan: C6-shaped table, not the S3's 8 MB
+# floor). Must match lp-fw/fw-esp32v3/partitions.csv and the runner in
+# lp-fw/fw-esp32v3/.cargo/config.toml, which cannot read this var — same
+# reasoning as s3_flash_size above.
+v3_flash_size := "4mb"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -626,6 +643,45 @@ clippy-fw-esp32s3:
     cargo clippy --release --no-default-features \
         --features esp32s3,server,test_xt_jit_corpus -- --no-deps -D warnings
 
+# Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
+# `clippy-host` for the same reason as the S3: the crate is excluded there
+# (it cross-compiles for Xtensa under a different toolchain), so nothing else
+# lints it.
+clippy-fw-esp32v3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    # `cd` for the same reason the build recipe does it: .cargo/config.toml
+    # here selects the Xtensa target, and cargo reads it from the CWD upward.
+    cd {{ fw_esp32v3_dir }}
+    # `--profile release-esp32v3`, NOT fw-esp32s3's `--release`: esp-storage's
+    # build script hard-errors on this chip at the workspace release profile's
+    # `opt-level = "z"` ("Building esp-storage for ESP32 needs optimization
+    # level 2, 3 or s"), because classic-ESP32 flash operations must execute
+    # from IRAM inside a tight window that "z" codegen misses. `release-esp32v3`
+    # is "s", which is also what ships — so this lints the real image.
+    #
+    # The app path (default features = esp32 + server).
+    cargo clippy --profile release-esp32v3 -- --no-deps -D warnings
+    # The two non-default entrypoints in main.rs. Neither is reachable from
+    # the default build, so linting only the defaults would leave both
+    # completely uncovered — the same way 13 fw-esp32 harnesses once rotted.
+    for feats in "esp32" "esp32,radio_ram_probe"; do
+      echo "clippy: --no-default-features --features $feats"
+      cargo clippy --profile release-esp32v3 --no-default-features --features "$feats" -- --no-deps -D warnings
+    done
+    # `ws281x_telemetry` is ADDITIVE (it turns on a module inside the default
+    # app build), so it needs its own invocation on top of the defaults rather
+    # than a `--no-default-features` one. Linted for the same reason the two
+    # entrypoints above are: a diagnostic build nothing compiles is a
+    # diagnostic build that has rotted by the time someone reaches for it.
+    echo "clippy: --features ws281x_telemetry"
+    cargo clippy --profile release-esp32v3 --features ws281x_telemetry -- --no-deps -D warnings
+
+
 # `features` is a comma-separated list added to the defaults — for the app path
 # that means `frame-dump` and nothing else today. Harnesses have their own
 # recipes because they REPLACE the entrypoint; this argument only decorates it,
@@ -643,19 +699,40 @@ build-fw-esp32s3 features="":
     fi
     cd lp-fw/fw-esp32s3 && cargo "${args[@]}"
 
-# Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
-# or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
-# which is how CI arrives (the esp-rs/xtensa-toolchain action puts it there),
-# versus a local espup install, which leaves it under ~/.rustup.
-_xt-gcc-dir:
+# Build the classic ESP32 ("v3") firmware. Same Xtensa-fork story as the S3
+# (see build-fw-esp32s3 above), and — since M3-P1 — the same workspace shape:
+# a root-workspace member writing into the shared root `target/`. The `cd` is
+# still required, exactly as it is for fw-esp32s3: `.cargo/config.toml` inside
+# the crate selects the Xtensa target, the linker flags and the espflash
+# runner, and cargo reads that file from the CWD upward — invoking from the
+# repo root would silently build for the host.
+build-fw-esp32v3:
     #!/usr/bin/env bash
     set -euo pipefail
-    if command -v xtensa-esp32s3-elf-gcc >/dev/null 2>&1; then
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd {{ fw_esp32v3_dir }} && cargo build --profile release-esp32v3
+
+# Print the directory to prepend to PATH so the chip's xtensa-*-elf-gcc
+# resolves, or fail with the fix. Prints NOTHING when the toolchain is already
+# on PATH — which is how CI arrives (the esp-rs/xtensa-toolchain action puts
+# it there), versus a local espup install, which leaves it under ~/.rustup.
+#
+# `bin` names the specific gcc binary to probe for (all Xtensa chips share one
+# toolchain bundle, so any installed chip's binary proves the bundle exists,
+# but only checking the caller's own chip catches a bundle that is present but
+# missing that target — e.g. `buildtargets` scoped too narrowly in CI).
+_xt-gcc-dir bin="xtensa-esp32s3-elf-gcc":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v {{ bin }} >/dev/null 2>&1; then
       exit 0
     fi
     GCC_BIN="$(echo "$HOME"/.rustup/toolchains/esp/xtensa-esp-elf/esp-*/xtensa-esp-elf/bin | tr ' ' '\n' | tail -1)"
-    if [[ ! -x "$GCC_BIN/xtensa-esp32s3-elf-gcc" ]]; then
-      echo "error: xtensa-esp32s3-elf-gcc is not on PATH and was not found under" >&2
+    if [[ ! -x "$GCC_BIN/{{ bin }}" ]]; then
+      echo "error: {{ bin }} is not on PATH and was not found under" >&2
       echo "       ~/.rustup/toolchains/esp — run 'espup install' (or 'espup update'" >&2
       echo "       if it is stale). The Rust target spec links through it, not rust-lld." >&2
       exit 1
@@ -931,6 +1008,22 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
 
+# Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
+# partition. Same C6-shaped 4 MB table and budget posture as fw-esp32c6 (Q7 in
+# the classic-ESP32 bring-up plan) — unlike the S3, this chip has no 8 MB
+# floor to grow into, so this IS a hard budget gate, not just a trend.
+#
+# `chip` passed to `_fw-size-check` is the real espflash chip id ("esp32");
+# `name` is the crate's own "esp32v3" label, same split as fw-esp32c6's
+# name/chip both being "esp32c6" happens to hide (there the two coincide).
+fw-esp32v3-size-check margin="65536": build-fw-esp32v3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Keep `partition` in sync with the `factory` app partition in
+    # lp-fw/fw-esp32v3/partitions.csv (0x300000).
+    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} 3145728 {{ margin }} \
+        "See lp-fw/fw-esp32v3/README.md 'Partitions'."
+
 # Shared tail of the per-chip size checks: measure the flashable image and
 # compare it against the app partition. Factored so the two chips cannot drift
 # apart — the C6 partition has overrun twice, and a second copy of this logic
@@ -1106,7 +1199,7 @@ fmt-check:
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
@@ -1687,6 +1780,40 @@ decode-backtrace-esp32s3 *addrs:
         xtensa-esp32s3-elf-addr2line -pfiaC -e {{ fw_esp32s3_elf }} $ADDRS
     else
         addr2line -e {{ fw_esp32s3_elf }} -f -a $ADDRS
+    fi
+
+# Symbolize a classic-ESP32 (fw-esp32v3) backtrace.
+#
+# Separate from `decode-backtrace-esp32s3` because the ELF differs — and on this
+# chip the addresses look nothing alike either: classic flash text lives at
+# 0x400Dxxxx where the S3's and C6's live at 0x42xxxxxx, so feeding one to the
+# other's recipe produces confident nonsense rather than an obvious failure.
+# `recovery::panic_path` and the boot report both print the right recipe name
+# next to the addresses for exactly that reason.
+#
+# Usage: just decode-backtrace-esp32v3 0x400d1234 ...
+#        pbpaste | just decode-backtrace-esp32v3
+decode-backtrace-esp32v3 *addrs:
+    #!/usr/bin/env bash
+    set -e
+    test -f {{ fw_esp32v3_elf }}
+    if [ -n "{{ addrs }}" ]; then
+        ADDRS="{{ addrs }}"
+    else
+        ADDRS=$(grep -oE '0x[0-9a-fA-F]+' | tr '\n' ' ')
+    fi
+    if [ -z "$ADDRS" ]; then
+        echo "No addresses. Usage: just decode-backtrace-esp32v3 0x400d... or: pbpaste | just decode-backtrace-esp32v3"
+        exit 1
+    fi
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    if command -v xtensa-esp32-elf-addr2line >/dev/null 2>&1; then
+        xtensa-esp32-elf-addr2line -pfiaC -e {{ fw_esp32v3_elf }} $ADDRS
+    else
+        addr2line -e {{ fw_esp32v3_elf }} -f -a $ADDRS
     fi
 
 # ============================================================================
