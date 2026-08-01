@@ -81,11 +81,11 @@ pub fn App() -> Element {
     // The boards catalog: same standalone-page pattern. The detected OS
     // drives per-bridge driver warnings (plan D5) — detected here at the
     // platform edge; lpa-boards stays platform-blind.
-    if matches!(router::current_route(), StudioRoute::Boards) {
+    if let StudioRoute::Boards { board } = router::current_route() {
         return rsx! {
             style { "{STYLE}" }
             document::Stylesheet { href: asset!("/assets/tailwind.css") }
-            lpa_boards::BoardsCatalogPage { os: detect_host_os() }
+            lpa_boards::BoardsCatalogPage { os: detect_host_os(), initial_board: board }
         };
     }
 
@@ -404,7 +404,9 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Stories { .. } | StudioRoute::MappingEditor | StudioRoute::Boards => {
+                StudioRoute::Stories { .. }
+                | StudioRoute::MappingEditor
+                | StudioRoute::Boards { .. } => {
                     // the story book, mapping editor, and boards catalog
                     // mount on fresh page loads only (their early returns
                     // in App run before any hooks); reload to keep the
@@ -472,7 +474,7 @@ pub fn App() -> Element {
                 StudioRoute::Home
                 | StudioRoute::Stories { .. }
                 | StudioRoute::MappingEditor
-                | StudioRoute::Boards => {}
+                | StudioRoute::Boards { .. } => {}
             }
             // D32 auto-connect (M6): the load-time attach sweep — queued
             // AFTER the route dispatch, so a `#/device/<uid>` reload's own

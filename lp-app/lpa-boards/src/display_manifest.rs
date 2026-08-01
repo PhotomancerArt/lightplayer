@@ -48,7 +48,56 @@ pub struct BoardDisplayFile {
     /// omitted = unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usb_bridge: Option<UsbBridge>,
+    /// Freeform board notes shown on the detail view, optionally OS-tagged
+    /// (an untagged note shows everywhere; a tagged one only on that OS).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<BoardNote>,
     pub hw: BoardDrawing,
+}
+
+/// One detail-view note. Deliberately minimal: text plus optional OS (and
+/// freeform OS-version qualifier) tags — the whole "note system".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct BoardNote {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os: Option<NoteOs>,
+    /// Freeform version qualifier shown with the OS tag ("Sequoia+").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<String>,
+}
+
+/// The OS a note applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum NoteOs {
+    #[serde(rename = "macos")]
+    MacOs,
+    Windows,
+    Linux,
+}
+
+impl NoteOs {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::MacOs => "macOS",
+            Self::Windows => "Windows",
+            Self::Linux => "Linux",
+        }
+    }
+
+    /// Whether a note tagged with this OS applies on `host`.
+    pub fn matches(self, host: crate::usb_bridge::HostOs) -> bool {
+        use crate::usb_bridge::HostOs;
+        matches!(
+            (self, host),
+            (Self::MacOs, HostOs::MacOs)
+                | (Self::Windows, HostOs::Windows)
+                | (Self::Linux, HostOs::Linux)
+        )
+    }
 }
 
 /// Support tier shown on the catalog. Definitions live in
@@ -335,6 +384,7 @@ mod tests {
             support_note: None,
             purchase_urls: vec![],
             usb_bridge: None,
+            notes: vec![],
             hw: BoardDrawing {
                 width: 100.0,
                 module: DrawnModule {

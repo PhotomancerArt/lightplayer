@@ -63,6 +63,17 @@ pub enum HostOs {
     Other,
 }
 
+impl HostOs {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::MacOs => "macOS",
+            Self::Windows => "Windows",
+            Self::Linux => "Linux",
+            Self::Other => "this OS",
+        }
+    }
+}
+
 /// What one OS needs for one bridge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DriverGuidance {

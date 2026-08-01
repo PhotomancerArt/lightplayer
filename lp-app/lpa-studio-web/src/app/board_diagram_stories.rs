@@ -363,6 +363,20 @@ pub(crate) fn catalog_page_macos() -> Element {
     }
 }
 
+#[story(
+    description = "The board detail view (#/boards/domraem/dom-z-102 deep link): full caps pinout, driver section with the verified macOS CH340K steps, and the os-tagged note system."
+)]
+pub(crate) fn detail_page_dom_z_102() -> Element {
+    rsx! {
+        div { style: "max-width: 1080px;",
+            BoardsCatalogPage {
+                os: HostOs::MacOs,
+                initial_board: Some("domraem/dom-z-102".to_string()),
+            }
+        }
+    }
+}
+
 // ---- annotated anatomy ---------------------------------------------------
 
 /// Estimated bbox of an end-anchored pin label (the layout stores anchor +

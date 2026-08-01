@@ -26,8 +26,9 @@ pub use catalog_page::BoardsCatalogPage;
 #[cfg(feature = "diagram")]
 pub use diagram::{BoardDiagram, DiagramMargin};
 pub use display_manifest::{
-    BoardDisplayError, BoardDisplayFile, BoardDrawing, CapKind, DrawnButton, DrawnModule, DrawnPin,
-    DrawnRgb, DrawnTerminal, DrawnUsb, PinCap, PinRole, PurchaseUrl, SupportTier,
+    BoardDisplayError, BoardDisplayFile, BoardDrawing, BoardNote, CapKind, DrawnButton,
+    DrawnModule, DrawnPin, DrawnRgb, DrawnTerminal, DrawnUsb, NoteOs, PinCap, PinRole, PurchaseUrl,
+    SupportTier,
 };
 pub use geometry::{DiagramMode, DiagramOptions, PinSwatch, WiredConnection};
 pub use usb_bridge::{DriverGuidance, DriverNeedLevel, HostOs, UsbBridge};
