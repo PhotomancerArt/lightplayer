@@ -1,8 +1,9 @@
 ---
-status: open           # blocks making float-f32 the Xtensa image's default
+status: fixed
 found: 2026-08-01      # how: filetests (xtn.q32 dropped 849/849 -> 522/849 on the gate flip)
+fixed: this change     # the host emulator now models flash; the image is firmware
 area: lp-xt/lps-builtins-xt-app, lp-shader/lpvm-native (rt_emu/xt_image), lp-xt-emu
-class: capacity
+class: model-conflation   # presented as `capacity`; that was the symptom, not the class
 related:
   - docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
 ---
@@ -42,40 +43,67 @@ after 113757 bytes of builtins ...
 The image *links* because 113,757 < 114,688. It links with 0.8% headroom, so
 the f32 family very nearly does not fit its own region either.
 
-## Consequence
-
-`scripts/build-builtins-xt.sh` cannot make `--features float-f32` its default:
-`scripts/filetests.sh` builds this image before running `xtn.*`/`xtlpn.*`, so
-the flip takes the whole Xtensa filetest suite down. The family stays behind
-`LP_XT_BUILTINS_F32=1`, and `lpvm-native`'s
-`a_builtin_routed_float_op_resolves_and_runs` skips loudly rather than failing
-when the resident image lacks it.
-
 **This is a different defect from the constant-pool one it was found behind.**
 That one was "the f32 family does not compile for Xtensa"; it is worked around
 and the image now builds. This one is "the f32 family does not *fit* alongside
 shader code". Fixing the first exposed the second.
 
-It is also a live question for **M7 P5**: `fw-esp32s3` is not bound by this
-linker script or by the emulator's 128 KiB model, so the capacity limit is the
-*host emulation* path's, not the device's. Worth confirming before assuming P5
-inherits it.
+## Root cause — the capacity number was a symptom
 
-## Candidate resolutions (not chosen here — needs a decision)
+Everything above is accurate and none of it is the cause. The cause is that
+**the emulator modeled flash-resident firmware as if it lived in SRAM**.
 
-1. **Widen the emulator's modeled code region.** 128 KiB is the host
-   emulator's model, not silicon; the S3 has far more IRAM. Touches
-   `lp-xt-emu`'s `BoardProfile` and both linker scripts, and `lp-xt-elf`'s
-   `DATA_BASE = CODE_DBUS_BASE + CODE_REGION_LEN/2` convention.
-2. **Give the shader its own region** rather than the tail of the builtins
-   region, removing the coupling between builtins size and maximum shader size
-   entirely. Largest change, best end state.
-3. **Split the f32 builtin feature** so only the arithmetic family M7 D4
-   actually routes to (divide, sqrt, rounding, min/max, conversions,
-   transcendentals) is linked, leaving the generative-noise family — which is
-   most of the 47 KB — rv32/host-only. Cheapest, and the noise builtins are not
-   what M7's lowering calls. Changes a feature contract M5 owns, so it is
-   Yona's call.
+On real ESP32 silicon the application's `.text` executes from flash through the
+cache (XIP; boot logs show `vaddr=0x4200_0020 map` segments). Only code a JIT
+produces at runtime lives in SRAM. The emulator had one modeled SRAM code
+region and put both in it, so the builtins image and compiled shader code were
+competing for bytes that on hardware they never share. "112 KiB of `.text`
+leaves 931 bytes" was a true statement about a false map.
 
-(3) is the smallest thing that unblocks M7's host path; (1) or (2) is what
-makes the limit stop recurring.
+**Fix** — `BoardProfile` gained read-only IROM/DROM windows at each chip's real
+flash-cache bases, plus an internal-SRAM region for an image's `.data`/`.bss`;
+`lps-builtins-xt-app` links as flash-resident firmware; `rt_emu::xt_image`
+places each segment by classifying its `p_vaddr`, and the compiled shader gets
+the **whole** SRAM code region. The region did not grow — 128 KiB on the S3,
+92 KiB on classic, unchanged — the builtins simply left it.
+
+`--features float-f32` is now unconditional for the Xtensa builtins image;
+`LP_XT_BUILTINS_F32` is gone.
+
+**Regression coverage** — `scripts/filetests.sh -t xtn.q32` is back to 849/849
+files (6336/6336 tests) *with* float-f32, and `xtlpn.q32` to 849/849
+(6385/6385); `scripts/build-builtins-xt.sh` now asserts the image's segment
+addresses, so a `link.ld` regression fails at the source rather than as a
+loader error 300 files later; `lp-xt/lp-xt-emu/tests/call_range.rs` covers the
+bug class below.
+
+## The corrected classic-ESP32 conclusion
+
+The reading this defect invited — "f32 doesn't fit on classic ESP32" — was
+**wrong, and wrong in a way worth naming**: it conflated two unrelated budgets.
+
+Classic's 92 KiB code region bounds **JIT'd shader code only**. It says nothing
+about whether the f32 builtins fit, because on classic as on the S3 the
+builtins are flash-resident (`irom_seg` at `0x400D_0000`, 3 MB). Classic f32
+viability is therefore a **flash-budget** question plus an **unprobed LX6 FPU**
+question, not an SRAM one — and the flash budget is the one with room to spare.
+
+## Lesson
+
+A capacity failure reported in the units of the thing that overflowed is
+usually a modeling failure reported in the wrong units. The number (931 bytes)
+was measured, reproducible, and led straight to three candidate resolutions —
+widen the region, split the region, split the feature — **all three of which
+would have preserved the wrong map**. The question that dissolved it was not
+"how do we make it fit" but "why are these two things in the same region at
+all, when on the device they are not".
+
+The same model gap was also hiding a live bug class. A shader→builtin call
+spans SRAM→flash, tens of megabytes on the S3 and far outside `call8`'s
+±512 KiB — which is why the JIT patches indirect calls. In a single small
+region an accidentally-direct call would have been *in range on the host* and
+out of range on silicon: passing tests, failing hardware. It is now pinned in
+`call_range.rs`, along with the finding that classic's IROM sits only ~192 KiB
+above its SRAM1 I-bus window, so a direct call *would* work there. The emitter
+must stay indirect because the S3 requires it, not because every Xtensa target
+does.

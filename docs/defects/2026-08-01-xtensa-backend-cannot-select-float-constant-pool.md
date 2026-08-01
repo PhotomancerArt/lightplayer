@@ -112,13 +112,17 @@ this defect blocked — and
 links the shader against the builtins base image and resolves `ffloor` to the
 real `__lp_lpir_ffloor_f32` on the M6 emulator.
 
-**The feature is still not the default, for an unrelated reason.** Making it
-unconditional was attempted and reverted on measurement: with the family in,
-the image's `.text` is 113,757 B against link.ld's 112 KiB, leaving 931 bytes
-of the code region for shader code, and the xtn.q32 filetest suite drops from
-849/849 files to 522/849 on link failures. That is a separate defect —
+**The feature was briefly still not the default, for an unrelated reason.**
+Making it unconditional was attempted and reverted on measurement: with the
+family in, the image's `.text` was 113,757 B against link.ld's 112 KiB, leaving
+931 bytes of the code region for shader code, and the xtn.q32 filetest suite
+dropped from 849/849 files to 522/849 on link failures. That was a separate
+defect —
 `docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`
-— and fixing this one is what exposed it.
+— and fixing this one is what exposed it. It is now fixed in turn (the image is
+flash-resident, so it never shared the code region to begin with), and
+`--features float-f32` **is** the Xtensa builtins image's unconditional
+default.
 
 ## Why this stays open
 

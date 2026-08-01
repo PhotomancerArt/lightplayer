@@ -134,9 +134,15 @@ type parameter, not a trait object over emulators, and not a second engine.
   word-mirrored, so `build_xt_image` rejects it explicitly. A classic host target
   needs that layout reworked. **Revisit when:** an LX6 host execution target is
   wanted.
-- Shader code shares the 112 KiB text region with ~84 KiB of builtins, leaving
+- ~~Shader code shares the 112 KiB text region with ~84 KiB of builtins, leaving
   ~28 KiB. Overflow is an explicit error naming the budget. **Revisit when:** a
-  real shader hits it — the fix is the linker script's split, not the host region.
+  real shader hits it — the fix is the linker script's split, not the host
+  region.~~ **Closed 2026-08-01, and the stated fix was the wrong one.** Both
+  now live where they live on the device: the builtins image links as
+  flash-resident firmware (IROM/DROM) and the shader gets the *whole* SRAM code
+  region — 128 KiB, unchanged in size. Splitting the linker script differently
+  would have preserved the model error. See
+  `docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`.
 - No measured Xtensa cycle model; `CycleModel::InstructionCount` remains the honest
   default (rv32 has a measured C6 table). **Revisit when:** the perf column needs
   Xtensa numbers to mean something.
