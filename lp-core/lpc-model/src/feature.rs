@@ -122,7 +122,7 @@ impl LpFeature {
     /// `lpc-engine/Cargo.toml`).
     pub const fn for_node_kind(kind: NodeKind) -> Option<LpFeature> {
         match kind {
-            NodeKind::Project => None,
+            NodeKind::Module => None,
             NodeKind::Output => None,
             NodeKind::Button => Some(LpFeature::NodeButton),
             NodeKind::Clock => Some(LpFeature::NodeClock),
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn node_kind_mapping_matches_gate_classification() {
         let cases = [
-            (NodeKind::Project, None),
+            (NodeKind::Module, None),
             (NodeKind::Output, None),
             (NodeKind::Button, Some(LpFeature::NodeButton)),
             (NodeKind::Clock, Some(LpFeature::NodeClock)),
