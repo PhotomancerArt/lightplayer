@@ -280,6 +280,7 @@ mod tests {
             state,
             project: None,
             fw: None,
+            hardware: None,
             sim: false,
             console_tail: Vec::new(),
             ui: CardUiState::default(),

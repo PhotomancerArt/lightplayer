@@ -701,11 +701,17 @@ pub fn ready_state_for_test() -> DeviceState {
     DeviceState::Ready {
         hello: lpc_wire::ServerHello {
             proto: lpc_wire::WIRE_PROTO_VERSION,
-            fw: lpc_wire::FwProvenance {
+            build: lpc_wire::BuildFacts {
+                features: lpc_model::LpFeature::ALL.to_vec(),
                 package: "fw-test".to_string(),
                 commit: "0000000".to_string(),
                 dirty: false,
                 profile: "test".to_string(),
+            },
+            hardware: lpc_wire::HardwareFacts {
+                radio: true,
+                button: true,
+                board_id: None,
             },
             device_uid: None,
         },

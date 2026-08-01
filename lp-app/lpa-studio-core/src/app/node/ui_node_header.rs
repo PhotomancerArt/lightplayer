@@ -22,6 +22,11 @@ pub struct UiNodeHeader {
     /// Aggregate dirty-edit summary for this node's subtree (own slots plus
     /// descendant nodes), matching the per-field affordances.
     pub dirty: DirtySummary,
+    /// The node exists in the project but does nothing on the device
+    /// running it (its kind has no runtime in that firmware build). The
+    /// pane renders DIMMED — absent, not broken; the status words in the
+    /// popover say why.
+    pub dimmed: bool,
 }
 
 impl UiNodeHeader {
@@ -36,6 +41,7 @@ impl UiNodeHeader {
             summary: None,
             detail: None,
             dirty: DirtySummary::clean(),
+            dimmed: false,
         }
     }
 
@@ -48,6 +54,12 @@ impl UiNodeHeader {
     /// Set the aggregate dirty-edit summary for the node's subtree.
     pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    /// Mark the node as not-runnable-here (see [`Self::dimmed`]).
+    pub fn with_dimmed(mut self, dimmed: bool) -> Self {
+        self.dimmed = dimmed;
         self
     }
 

@@ -3,11 +3,12 @@
 //! node-tree body).
 
 use dioxus::prelude::*;
-use lpa_studio_core::app::project::node::add_node_menu;
+use lpa_studio_core::app::project::node::{add_node_menu, gate_add_node_menu};
 use lpa_studio_core::{
-    ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
-    ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiAttachTarget, UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
+    ControllerId, DirtySummary, LpFeature, ProjectController, ProjectNodeAddress,
+    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectSyncPhase, SlotEditOp, SlotPath, UiAction, UiAttachTarget, UiPaneAction, UiPendingEdit,
+    UiPendingEditKind, UiPendingEditPhase, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -219,6 +220,69 @@ pub(crate) fn add_node_picker() -> Element {
                 edits_in_flight: 0,
                 actions: false,
                 add_picker_open: true,
+            }
+        }
+    }
+}
+
+/// The build of a device that carries no fluid and no radio runtime — the
+/// shape the picker and the tree are gated against.
+fn gapped_device_features() -> Vec<LpFeature> {
+    vec![
+        LpFeature::NodeButton,
+        LpFeature::NodeClock,
+        LpFeature::NodeFixture,
+        LpFeature::NodePlaylist,
+        LpFeature::NodeShader,
+        LpFeature::NodeTexture,
+        LpFeature::GfxLpvm,
+        LpFeature::SvcButton,
+    ]
+}
+
+#[story(
+    description = "The add-node picker against a device whose firmware lacks the fluid and radio runtimes: those rows are DISABLED and annotated 'Not on this device' — never hidden, because a picker that drops entries teaches a false catalog. G1 question 4: is the disabled treatment plus the annotation copy right?"
+)]
+pub(crate) fn add_node_picker_device_gaps() -> Element {
+    let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
+    let mut menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+    gate_add_node_menu(&mut menu, Some(&gapped_device_features()));
+    view.add_node_menu = Some(menu);
+
+    rsx! {
+        div { class: "tw:min-h-[520px] tw:max-w-[320px]",
+            ProjectPane {
+                view,
+                status: UiStatus::good("Ready"),
+                on_action: move |_| {},
+                add_picker_initially_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A project holding a node whose kind this device's firmware does not carry: the tree row is GHOSTED (dimmed), with the reason in its tooltip — distinct from a red failed row and from a healthy silent one. G1 questions 1-2."
+)]
+pub(crate) fn unsupported_node_in_tree() -> Element {
+    let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
+    let unsupported = ProjectNodeStatusView::new(
+        "Not on this device",
+        Some("node kind Fluid is not included in this firmware build".to_string()),
+        ProjectNodeStatusTone::Disabled,
+    );
+    if let Some(root) = view.tree.roots.first_mut()
+        && let Some(child) = root.children.get_mut(3)
+    {
+        child.status = unsupported;
+    }
+
+    rsx! {
+        div { class: "tw:max-w-[320px]",
+            ProjectPane {
+                view,
+                status: UiStatus::good("Ready"),
+                on_action: move |_| {},
             }
         }
     }

@@ -1,6 +1,6 @@
 //! One device as the gallery's *Devices* roster shows it.
 
-use lpc_wire::FwProvenance;
+use lpc_wire::{BuildFacts, HardwareFacts};
 
 use crate::UiLogEntry;
 use crate::app::home::card_ui_state::CardUiState;
@@ -25,10 +25,15 @@ pub struct UiDeviceCard {
     /// The project the device holds (live cards) or last ran (offline
     /// cards) — identity for the header chip, never health.
     pub project: Option<UiDeviceProjectChip>,
-    /// Running-firmware provenance from the live link's hello — Technical
-    /// evidence for the card's rich-object detail; `None` for remembered
-    /// (offline) cards and pre-hello links.
-    pub fw: Option<FwProvenance>,
+    /// Running-firmware build facts from the live link's hello (provenance
+    /// + the feature set compiled into the image) — Technical evidence for
+    /// the card's rich-object detail; `None` for remembered (offline)
+    /// cards and pre-hello links.
+    pub fw: Option<BuildFacts>,
+    /// What the live link's hello says this UNIT has wired (services,
+    /// board identity) — the runtime half of the same report. `None`
+    /// wherever `fw` is `None`.
+    pub hardware: Option<HardwareFacts>,
     /// D36: this card is the live SIMULATOR session, wearing the same card
     /// grammar with the sim presentation (sim glyph, no connect ceremony,
     /// no rename, its own rich-object sections). The sim is not a device
