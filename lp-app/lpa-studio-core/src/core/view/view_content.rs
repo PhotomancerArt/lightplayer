@@ -144,6 +144,9 @@ impl UiViewContent {
                                     crate::UiNodeSection::ConfigSlots(items) => {
                                         format!("config slots: {}", items.len())
                                     }
+                                    crate::UiNodeSection::DebugSlots(items) => {
+                                        format!("debug slots: {}", items.len())
+                                    }
                                     crate::UiNodeSection::AssetSlots(items) => {
                                         format!("asset slots: {}", items.len())
                                     }

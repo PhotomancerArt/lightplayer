@@ -356,6 +356,36 @@ impl<'a> SlotEditJoin<'a> {
         slots + assets
     }
 
+    /// Active **Debug** overrides addressed to `node` — the count D8's
+    /// node-card marking reads (tier b).
+    ///
+    /// The same entries [`crate::ProjectController::clear_node_debug_edits`]
+    /// sweeps and [`Self::dirty_summary_for_node`] deliberately counts as
+    /// nothing: transient by nature, so never dirty (D7), but very much
+    /// *active*, which is exactly what the marking announces.
+    pub(in crate::app::project) fn debug_overrides_for_node(
+        &self,
+        node: &ProjectNodeAddress,
+    ) -> usize {
+        self.debug_entries()
+            .filter(|entry| entry.address.node == *node)
+            .count()
+    }
+
+    /// Active Debug overrides anywhere in the project — the count the global
+    /// "Debug active · N · Clear all" chip shows (D8 tier a).
+    pub(in crate::app::project) fn debug_override_count(&self) -> usize {
+        self.debug_entries().count()
+    }
+
+    /// The join's Debug (transient-persistence) entries — one enumeration
+    /// behind both counts and the Clear sweep.
+    fn debug_entries(&self) -> impl Iterator<Item = SlotEditEntry<'_>> {
+        self.entries()
+            .into_iter()
+            .filter(|entry| entry.persistence == SlotPersistence::Transient)
+    }
+
     /// Enumerate every asset body edit entry in the join — the single
     /// enumeration asset [`DirtySummary`] counting and the save panel's
     /// asset rows consume, mirroring [`Self::entries`] for slots.
@@ -547,6 +577,59 @@ mod tests {
     }
 
     #[test]
+    fn debug_overrides_count_on_their_own_channel() {
+        // Two Debug overrides on this node, one persisted edit, one Debug
+        // override on ANOTHER node: the debug channel counts three overall
+        // and two here, while the dirty summary sees only the persisted one.
+        let other = ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap();
+        let buffer = BTreeMap::from([(at("brightness"), PendingEdit::pending(LpValue::F32(0.9)))]);
+        let overlay = BTreeMap::from([
+            (
+                at("controls.rate"),
+                SlotEditOp::AssignValue(LpValue::F32(2.0)),
+            ),
+            (
+                at("controls.running"),
+                SlotEditOp::AssignValue(LpValue::Bool(false)),
+            ),
+            (
+                ProjectSlotAddress::new(
+                    other.clone(),
+                    ProjectSlotRoot::def(),
+                    SlotPath::parse("controls.rate").unwrap(),
+                ),
+                SlotEditOp::AssignValue(LpValue::F32(0.5)),
+            ),
+        ]);
+        let persistence = BTreeMap::from([
+            (at("brightness"), SlotPersistence::Persisted),
+            (at("controls.rate"), SlotPersistence::Transient),
+            (at("controls.running"), SlotPersistence::Transient),
+            (
+                ProjectSlotAddress::new(
+                    other.clone(),
+                    ProjectSlotRoot::def(),
+                    SlotPath::parse("controls.rate").unwrap(),
+                ),
+                SlotPersistence::Transient,
+            ),
+        ]);
+        let join = SlotEditJoin::new(&buffer, overlay, persistence);
+
+        assert_eq!(join.debug_override_count(), 3);
+        assert_eq!(join.debug_overrides_for_node(&node()), 2);
+        assert_eq!(join.debug_overrides_for_node(&other), 1);
+        assert_eq!(
+            join.dirty_summary_for_node(&node()),
+            DirtySummary {
+                persisted: 1,
+                failed: 0,
+            },
+            "the debug channel never leaks into the dirty summary (D7)"
+        );
+    }
+
+    #[test]
     fn empty_join_reads_clean_everywhere() {
         let join = SlotEditJoin::empty();
 
@@ -554,6 +637,8 @@ mod tests {
         assert!(!join.overlay_dirty(&at("entries[a]")));
         assert_eq!(join.state_under(&at("entries")), None);
         assert!(join.dirty_summary_for_node(&node()).is_clean());
+        assert_eq!(join.debug_override_count(), 0);
+        assert_eq!(join.debug_overrides_for_node(&node()), 0);
         assert!(join.asset_entries().is_empty());
         assert!(join.unmapped_asset_dirty_summary().is_clean());
     }

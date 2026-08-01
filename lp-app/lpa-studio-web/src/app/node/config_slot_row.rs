@@ -19,16 +19,17 @@ use crate::app::node::{
 use crate::base::{StudioIcon, StudioIconName};
 
 /// Edit chrome for a touched slot row: persisted edits wear the warning
-/// (amber) tint and count toward Save, transient edits the live (blue) tint
-/// (applied to the running project and never written by Save). The tint plus
-/// the affordance icon carry the whole row treatment — no text chips (M3 UX
-/// gate); text stays in the popups and the save panel. Rows with an own edit
-/// entry additionally get the inline revert icon; the detail popup keeps its
-/// revert footer as the second access point.
+/// (amber) tint and count toward Save; **Debug** overrides wear the hazard
+/// (attention-orange + diagonal stripes) tint — applied to the running
+/// project, never written by Save, and cleared rather than reverted (D7/D9).
+/// The tint plus the affordance icon carry the whole row treatment — no text
+/// chips (M3 UX gate); text stays in the popups and the save panel. Rows with
+/// an own edit entry additionally get the inline verb icon; the detail popup
+/// keeps its footer as the second access point.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SlotEditChrome {
     Unsaved,
-    Live,
+    Debug,
 }
 
 #[component]
@@ -71,7 +72,7 @@ pub fn ConfigSlotRow(
     let primary = primary_affordance(&aspects);
     let chrome = slot_edit_chrome(&slot.state);
     let row_class = match chrome {
-        Some(SlotEditChrome::Live) if slot.state.invalid.is_none() => live_row_class(),
+        Some(SlotEditChrome::Debug) if slot.state.invalid.is_none() => debug_row_class(),
         _ => slot_row_class(primary, index),
     };
     let indent = depth * 14;
@@ -270,38 +271,36 @@ pub fn ConfigSlotRow(
 }
 
 /// The one verb vocabulary (M3 UX gate, D7): "Revert" for unsaved
-/// (persisted) edits, **"Clear"** for live/debug overrides — never
-/// "Reset" — shared by the inline row icon and the detail-popup footer so
-/// the two access points can never diverge.
+/// (persisted) edits, **"Clear"** for Debug overrides — never "Reset" —
+/// shared by the inline row icon and the detail-popup footer so the two
+/// access points can never diverge.
 fn chrome_revert_labels(chrome: SlotEditChrome) -> (&'static str, &'static str) {
     match chrome {
         SlotEditChrome::Unsaved => ("Revert", "Discard this pending edit"),
-        SlotEditChrome::Live => ("Clear", "Clear this debug override"),
+        SlotEditChrome::Debug => ("Clear", "Clear this debug override"),
     }
 }
 
-/// The op the row's verb dispatches: a persisted edit is reverted, a
-/// live/debug override is **cleared** (same `RemoveSlotEdit` mechanism, the
-/// vocabulary debug values use).
+/// The op the row's verb dispatches: a persisted edit is reverted, a Debug
+/// override is **cleared** (same `RemoveSlotEdit` mechanism, the vocabulary
+/// debug values use).
 fn chrome_revert_action(chrome: SlotEditChrome, address: ProjectSlotAddress) -> UiAction {
     match chrome {
         SlotEditChrome::Unsaved => slot_revert_action(address),
-        SlotEditChrome::Live => slot_clear_action(address),
+        SlotEditChrome::Debug => slot_clear_action(address),
     }
 }
 
-/// Tone for the inline revert button, from the same status token families as
-/// the row tint and the edited affordance icon: warning (amber) for unsaved
-/// persisted edits, live (blue) for transient controls — so the button reads
-/// as part of the row's unsaved/live chrome rather than a neutral control.
+/// Tone for the inline verb button, from the same family as the row tint and
+/// the edited affordance icon: warning (amber) for unsaved persisted edits,
+/// the debug hazard family for Debug overrides — so the button reads as part
+/// of the row's chrome rather than a neutral control.
 fn chrome_revert_button_class(chrome: SlotEditChrome) -> &'static str {
     match chrome {
         SlotEditChrome::Unsaved => {
             "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground tw:transition-colors tw:hover:border-status-warning-foreground"
         }
-        SlotEditChrome::Live => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-live-border tw:bg-status-live-bg tw:p-0 tw:text-status-live-foreground tw:transition-colors tw:hover:border-status-live-foreground"
-        }
+        SlotEditChrome::Debug => "lp-debug-row-button",
     }
 }
 
@@ -477,18 +476,20 @@ fn slot_edit_chrome(state: &UiSlotFieldState) -> Option<SlotEditChrome> {
     if state.dirty == UiNodeDirtyState::Clean {
         return None;
     }
-    Some(if state.live {
-        SlotEditChrome::Live
+    Some(if state.debug {
+        SlotEditChrome::Debug
     } else {
         SlotEditChrome::Unsaved
     })
 }
 
-/// Row treatment for live-dirty rows: the dedicated live (blue) tint keeps a
-/// touched runtime control distinct from both the warning-tinted unsaved
-/// (persisted) rows and the good/success (green) treatments.
-fn live_row_class() -> &'static str {
-    "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-live-bg)_0%,var(--studio-status-live-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+/// Row treatment for a touched **Debug** row (D9): the hazard tint keeps an
+/// active debug override distinct from the warning-tinted unsaved (persisted)
+/// rows, from flat-orange device health, and from the good/success (green)
+/// treatments. Geometry and colors both live in `style.css` so the whole
+/// debug look stays in one block.
+fn debug_row_class() -> &'static str {
+    "lp-debug-row"
 }
 
 fn record_summary_class(expanded: bool) -> &'static str {
@@ -520,16 +521,19 @@ mod tests {
         assert!(unsaved.contains("tw:bg-status-warning-bg"));
         assert!(unsaved.contains("tw:text-status-warning-foreground"));
 
-        // Live: the live (blue) family, same position and shape.
-        let live = chrome_revert_button_class(SlotEditChrome::Live);
-        assert!(live.contains("tw:border-status-live-border"));
-        assert!(live.contains("tw:bg-status-live-bg"));
-        assert!(live.contains("tw:text-status-live-foreground"));
+        // Debug: the hazard family, defined in one CSS block rather than
+        // spelled out in utilities (D9 — one place to change the look).
+        assert_eq!(
+            chrome_revert_button_class(SlotEditChrome::Debug),
+            "lp-debug-row-button"
+        );
+        assert_eq!(debug_row_class(), "lp-debug-row");
     }
 
     #[test]
     fn revert_verbs_stay_per_chrome() {
+        // D7 vocabulary: persisted edits are reverted, debug values cleared.
         assert_eq!(chrome_revert_labels(SlotEditChrome::Unsaved).0, "Revert");
-        assert_eq!(chrome_revert_labels(SlotEditChrome::Live).0, "Reset");
+        assert_eq!(chrome_revert_labels(SlotEditChrome::Debug).0, "Clear");
     }
 }

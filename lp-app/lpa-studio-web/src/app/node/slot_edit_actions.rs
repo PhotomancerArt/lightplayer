@@ -6,7 +6,8 @@
 //! plus overlay mirror keep the DTO value stable until the server acks.
 
 use lpa_studio_core::{
-    ControllerId, LpValue, ProjectController, ProjectSlotAddress, SlotEditOp, SlotMapKey, UiAction,
+    ControllerId, LpValue, NodeClearDebugOp, ProjectController, ProjectNodeAddress,
+    ProjectSlotAddress, SlotEditOp, SlotMapKey, UiAction,
 };
 
 /// Build the `SetValue` action a field dispatches on input.
@@ -33,6 +34,21 @@ pub(crate) fn slot_clear_action(address: ProjectSlotAddress) -> UiAction {
         ControllerId::new(ProjectController::NODE_ID),
         SlotEditOp::Clear { address },
     )
+}
+
+/// Build the **per-node** Clear action ([`NodeClearDebugOp`], D7's node
+/// scope): every Debug override under one node's subtree goes, persisted
+/// edits stay. The Debug section header is its only entry point — a node's
+/// debug territory owns its own reset.
+///
+/// `None` when the card's path is not a parsable node address (story
+/// fixtures with stand-in paths), so the header simply renders no Clear.
+pub(crate) fn node_clear_debug_action(node: &str) -> Option<UiAction> {
+    let node = ProjectNodeAddress::parse(node).ok()?;
+    Some(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        NodeClearDebugOp { node },
+    ))
 }
 
 /// Build the structural add gesture (map entry add, option on, enum variant
