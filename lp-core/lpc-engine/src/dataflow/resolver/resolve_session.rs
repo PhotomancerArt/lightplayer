@@ -14,7 +14,7 @@ use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_trace::ResolveTrace;
 use crate::dataflow::resolver::resolver::Resolver;
 use crate::dataflow::resolver::resolver::materialize_literal_product;
-use crate::dataflow::resolver::route::ResolvedRoute;
+use crate::dataflow::resolver::route::{ResolvedRoute, RouteTarget};
 use lpc_model::{ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMerge, SlotPath};
 
 /// Active engine session for one frame (or nested test scope).
@@ -60,13 +60,48 @@ impl<'a> EngineSession<'a> {
     }
 
     /// Demand-resolve `query` (cache + cycle stack + host-owned bindings).
+    ///
+    /// Takes a reference so a caller that resolves the same slot every frame
+    /// can hold one key and lend it, rather than rebuilding a heap-backed key
+    /// per call.
     pub fn resolve<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
-        query: QueryKey,
+        query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
-        let id = self.resolver.intern_query(&query);
-        self.resolve_interned(host, id, &query)
+        let id = self.resolver.intern_query(query);
+        self.resolve_interned(host, id, query)
+    }
+
+    /// Resolve `node`'s consumed slot at a compile-time-constant path,
+    /// parsing that path at most once per structural epoch.
+    pub fn resolve_static_consumed<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        node: NodeId,
+        path: &'static str,
+    ) -> Result<Production, SessionResolveError> {
+        let id = self
+            .resolver
+            .intern_static_consumed(node, path)
+            .map_err(|e| {
+                SessionResolveError::other(format!("invalid authored path {path:?}: {e}"))
+            })?;
+        self.resolve_id(host, id)
+    }
+
+    /// Resolve an already-interned query, fetching its key from the intern
+    /// table. Used by route following, where the id is all that was stored.
+    fn resolve_id<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        id: QueryId,
+    ) -> Result<Production, SessionResolveError> {
+        let key =
+            self.resolver.intern().key(id).cloned().ok_or_else(|| {
+                SessionResolveError::other("route referenced an unknown query id")
+            })?;
+        self.resolve_interned(host, id, &key)
     }
 
     fn resolve_interned<H: ResolveHost + ?Sized>(
@@ -158,9 +193,10 @@ impl<'a> EngineSession<'a> {
         self.resolver.counters_mut().binding_lookups += 1;
         let candidates = host.providers_for_bus(channel);
         let (binding_ref, entry) = select_highest_priority_bus_provider(channel, &candidates)?;
+        let target = self.route_target(&entry.source);
         Ok(ResolvedRoute::Binding {
             binding_ref,
-            source: entry.source,
+            target,
         })
     }
 
@@ -210,10 +246,27 @@ impl<'a> EngineSession<'a> {
         Ok(match host.binding_for_consumed_slot(node, slot) {
             Some((binding_ref, entry)) => ResolvedRoute::Binding {
                 binding_ref,
-                source: entry.source,
+                target: self.route_target(&entry.source),
             },
             None => ResolvedRoute::Produce,
         })
+    }
+
+    /// Reduce a binding source to what the frame needs: a literal to
+    /// materialize, or the id of the query to resolve.
+    fn route_target(&mut self, source: &BindingSource) -> RouteTarget {
+        match source {
+            BindingSource::Literal(spec) => RouteTarget::Literal(spec.clone()),
+            BindingSource::ProducedSlot { node, slot } => {
+                RouteTarget::Query(self.resolver.intern_query(&QueryKey::ProducedSlot {
+                    node: *node,
+                    slot: slot.clone(),
+                }))
+            }
+            BindingSource::BusChannel(channel) => {
+                RouteTarget::Query(self.resolver.intern_query(&QueryKey::Bus(channel.clone())))
+            }
+        }
     }
 
     /// Flatten a mergeable receiver's bindings into leaf sources.
@@ -226,10 +279,11 @@ impl<'a> EngineSession<'a> {
         host: &mut H,
         binding_ref: BindingRef,
         source: &BindingSource,
-        out: &mut Vec<(BindingRef, BindingSource)>,
+        out: &mut Vec<(BindingRef, RouteTarget)>,
     ) -> Result<(), SessionResolveError> {
         let BindingSource::BusChannel(channel) = source else {
-            out.push((binding_ref, source.clone()));
+            let target = self.route_target(source);
+            out.push((binding_ref, target));
             return Ok(());
         };
 
@@ -260,17 +314,17 @@ impl<'a> EngineSession<'a> {
         match route {
             ResolvedRoute::Binding {
                 binding_ref,
-                source,
+                target,
             } => {
                 self.trace.record_select_binding(query, *binding_ref);
-                self.resolve_binding_source(host, *binding_ref, source)
+                self.resolve_route_target(host, *binding_ref, target)
             }
             ResolvedRoute::Produce => self.produce_through_host(host, query),
             ResolvedRoute::MergeByKey { inputs } => {
                 let mut productions = Vec::with_capacity(inputs.len());
-                for (binding_ref, source) in inputs.iter() {
+                for (binding_ref, target) in inputs.iter() {
                     self.trace.record_merge_input(query, *binding_ref);
-                    let mut production = self.resolve_binding_source(host, *binding_ref, source)?;
+                    let mut production = self.resolve_route_target(host, *binding_ref, target)?;
                     production.source = ProductionSource::BusBinding {
                         binding: *binding_ref,
                     };
@@ -306,32 +360,20 @@ impl<'a> EngineSession<'a> {
         r
     }
 
-    fn resolve_binding_source<H: ResolveHost + ?Sized>(
+    fn resolve_route_target<H: ResolveHost + ?Sized>(
         &mut self,
         host: &mut H,
         binding_ref: BindingRef,
-        source: &BindingSource,
+        target: &RouteTarget,
     ) -> Result<Production, SessionResolveError> {
-        match source {
-            BindingSource::Literal(spec) => {
+        match target {
+            RouteTarget::Literal(spec) => {
                 self.resolver.counters_mut().literal_materializations += 1;
                 let product = materialize_literal_product(spec, self.revision);
                 Ok(Production::leaf(product, ProductionSource::Literal))
             }
-            BindingSource::ProducedSlot { node, slot } => {
-                let key = QueryKey::ProducedSlot {
-                    node: *node,
-                    slot: slot.clone(),
-                };
-                let mut pv = self.resolve(host, key)?;
-                pv.source = ProductionSource::BusBinding {
-                    binding: binding_ref,
-                };
-                Ok(pv)
-            }
-            BindingSource::BusChannel(other) => {
-                let key = QueryKey::Bus(other.clone());
-                let mut pv = self.resolve(host, key)?;
+            RouteTarget::Query(id) => {
+                let mut pv = self.resolve_id(host, *id)?;
                 pv.source = ProductionSource::BusBinding {
                     binding: binding_ref,
                 };
@@ -561,8 +603,8 @@ mod tests {
             &mut resolver,
             ResolveTrace::new(ResolveLogLevel::Off),
         );
-        let a = session.resolve(&mut host, key.clone()).unwrap();
-        let b = session.resolve(&mut host, key).unwrap();
+        let a = session.resolve(&mut host, &key).unwrap();
+        let b = session.resolve(&mut host, &key).unwrap();
         assert!(a.as_value().expect("value").eq(&LpsValueF32::F32(42.0)));
         assert!(b.as_value().expect("value").eq(&LpsValueF32::F32(42.0)));
         assert!(
@@ -613,7 +655,7 @@ mod tests {
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let pv = session
-            .resolve(&mut host, QueryKey::Bus(c))
+            .resolve(&mut host, &QueryKey::Bus(c))
             .expect("resolve bus");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(9.0)));
         assert_eq!(host.produce_calls, 0);
@@ -687,7 +729,7 @@ mod tests {
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let pv = session
-            .resolve(&mut host, QueryKey::Bus(outer))
+            .resolve(&mut host, &QueryKey::Bus(outer))
             .expect("bus chain");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(3.25)));
     }
@@ -747,7 +789,7 @@ mod tests {
             ResolveTrace::new(ResolveLogLevel::Off),
         );
         let err = session
-            .resolve(&mut host, QueryKey::Bus(a))
+            .resolve(&mut host, &QueryKey::Bus(a))
             .expect_err("cycle");
         assert!(matches!(err, SessionResolveError::Cycle { .. }));
     }
@@ -880,7 +922,7 @@ mod tests {
         let production = session
             .resolve(
                 &mut host,
-                QueryKey::ConsumedSlot {
+                &QueryKey::ConsumedSlot {
                     node: receiver,
                     slot: receiver_slot,
                 },
@@ -953,7 +995,7 @@ mod tests {
         let production = session
             .resolve(
                 &mut host,
-                QueryKey::ConsumedSlot {
+                &QueryKey::ConsumedSlot {
                     node: receiver,
                     slot: receiver_slot,
                 },
@@ -1021,10 +1063,10 @@ mod tests {
         let mut host = TraceHost { node, bindings };
         let mut session = ResolveSession::new(frame, &mut resolver, trace);
         session
-            .resolve(&mut host, QueryKey::Bus(bus.clone()))
+            .resolve(&mut host, &QueryKey::Bus(bus.clone()))
             .unwrap();
         // Second resolve — cache hit on bus
-        session.resolve(&mut host, QueryKey::Bus(bus)).unwrap();
+        session.resolve(&mut host, &QueryKey::Bus(bus)).unwrap();
 
         let evs = session.trace().events();
         assert!(evs.iter().any(|e| {

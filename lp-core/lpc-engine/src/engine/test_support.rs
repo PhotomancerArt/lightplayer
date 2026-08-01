@@ -495,7 +495,7 @@ impl DummyFixtureNode {
 impl NodeRuntime for DummyFixtureNode {
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
-            .resolve(QueryKey::ConsumedSlot {
+            .resolve(&QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
                 slot: self.slot.clone(),
             })
@@ -531,7 +531,7 @@ impl DummyOutputNode {
 impl NodeRuntime for DummyOutputNode {
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
-            .resolve(QueryKey::ConsumedSlot {
+            .resolve(&QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
                 slot: self.slot.clone(),
             })
@@ -585,7 +585,7 @@ impl NodeRuntime for DummySelectorNode {
         let index = self.selected.load(Ordering::Relaxed) as usize % self.targets.len();
         let (node, slot) = self.targets[index].clone();
         let pv = ctx
-            .resolve(QueryKey::ProducedSlot { node, slot })
+            .resolve(&QueryKey::ProducedSlot { node, slot })
             .map_err(|e| NodeError::msg(format!("selector resolve failed: {}", e.message)))?;
         self.record.record(&pv.as_value().expect("value"));
         Ok(())

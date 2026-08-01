@@ -541,7 +541,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
         };
-        let result = session.resolve(&mut host, key);
+        let result = session.resolve(&mut host, &key);
         self.resolver = resolver_tmp;
         let production = result?;
         let Some(leaf) = production.value_leaf() else {
@@ -629,7 +629,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
         };
-        let result = session.resolve(&mut host, QueryKey::Bus(channel.clone()));
+        let result = session.resolve(&mut host, &QueryKey::Bus(channel.clone()));
         self.resolver = resolver;
         result
     }
@@ -1882,7 +1882,7 @@ pub(crate) fn resolve_with_engine_host(
         frame_time_seconds: time_s,
     };
     let result = session
-        .resolve(&mut host, key)
+        .resolve(&mut host, &key)
         .map(|pv| (pv, session.trace().clone()));
     eng.resolver = resolver_tmp;
     result
@@ -1919,9 +1919,9 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
     };
-    let result = session.resolve(&mut host, key.clone()).and_then(|first| {
+    let result = session.resolve(&mut host, &key).and_then(|first| {
         session
-            .resolve(&mut host, key)
+            .resolve(&mut host, &key)
             .map(|second| (first, second))
     });
     eng.resolver = resolver_tmp;

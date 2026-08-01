@@ -11,16 +11,34 @@
 //! answer, cached until the graph changes shape.
 
 use alloc::vec::Vec;
+use lpc_model::LpValue;
 
-use crate::dataflow::binding::{BindingRef, BindingSource};
+use crate::dataflow::binding::BindingRef;
+use crate::dataflow::resolver::query_intern::QueryId;
+
+/// Where a binding's value comes from, resolved down to something the frame
+/// can act on without touching the binding graph again.
+///
+/// A binding that reads another slot or a bus channel is stored as the
+/// [`QueryId`] of that query rather than as a `BindingSource`: the id is what
+/// resolution needs, and deriving it means hashing a `SlotPath`. Ids and
+/// routes share the same lifetime — both die when the graph changes — so the
+/// id can simply be part of the decision.
+#[derive(Clone, Debug)]
+pub enum RouteTarget {
+    /// A literal written into the binding; materialize it directly.
+    Literal(LpValue),
+    /// Resolve this query and adopt its value.
+    Query(QueryId),
+}
 
 /// The decision about how one query is answered.
 #[derive(Clone, Debug)]
 pub enum ResolvedRoute {
-    /// Resolve through this binding's source.
+    /// Resolve through this binding.
     Binding {
         binding_ref: BindingRef,
-        source: BindingSource,
+        target: RouteTarget,
     },
     /// No binding answers this query; the host produces it.
     Produce,
@@ -30,6 +48,6 @@ pub enum ResolvedRoute {
     /// walk that flattens them reads only the binding graph, so it is part of
     /// the decision rather than part of the frame.
     MergeByKey {
-        inputs: Vec<(BindingRef, BindingSource)>,
+        inputs: Vec<(BindingRef, RouteTarget)>,
     },
 }

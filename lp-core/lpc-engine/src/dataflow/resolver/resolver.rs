@@ -27,8 +27,12 @@ use crate::dataflow::resolver::query_intern::{QueryId, QueryInternTable};
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::ResolveError;
 use crate::dataflow::resolver::resolver_cache::ResolverCache;
+use lp_collection::VecMap;
 use lpc_model::LpValue;
+use lpc_model::NodeId;
 use lpc_model::Revision;
+use lpc_model::SlotPath;
+use lpc_model::SlotPathError;
 use lpc_model::WithRevision;
 use lps_shared::LpsValueF32;
 
@@ -75,6 +79,15 @@ pub struct Resolver {
     structure_epoch: u64,
     frame_counters: ResolveFrameCounters,
     force_invalidate_per_frame: bool,
+    /// `(node, authored path)` → the consumed-slot query it names.
+    ///
+    /// Nodes read a handful of authored slots by constant path every frame
+    /// (`power.some`, `diagnostic_mode`, each shader input). Parsing those
+    /// strings per frame allocated a `SlotPath` per read, only to drop it
+    /// again — one of the last per-frame allocation sources after routes and
+    /// values stopped being rebuilt. Lives here because it shares the intern
+    /// table's lifetime exactly.
+    static_paths: VecMap<(NodeId, &'static str), QueryId>,
 }
 
 impl Resolver {
@@ -85,6 +98,7 @@ impl Resolver {
             structure_epoch: 0,
             frame_counters: ResolveFrameCounters::default(),
             force_invalidate_per_frame: false,
+            static_paths: VecMap::new(),
         }
     }
 
@@ -105,6 +119,22 @@ impl Resolver {
         self.intern.intern(query)
     }
 
+    /// Id for `node`'s consumed slot at the compile-time-constant `path`,
+    /// parsing the path at most once per epoch.
+    pub fn intern_static_consumed(
+        &mut self,
+        node: NodeId,
+        path: &'static str,
+    ) -> Result<QueryId, SlotPathError> {
+        if let Some(id) = self.static_paths.get(&(node, path)) {
+            return Ok(*id);
+        }
+        let slot = SlotPath::parse(path)?;
+        let id = self.intern.intern(&QueryKey::ConsumedSlot { node, slot });
+        self.static_paths.insert((node, path), id);
+        Ok(id)
+    }
+
     /// Start a new frame: per-frame resolved values are discarded.
     pub fn begin_frame(&mut self) {
         self.frame_counters = ResolveFrameCounters::default();
@@ -120,6 +150,7 @@ impl Resolver {
         self.structure_epoch = self.structure_epoch.wrapping_add(1);
         self.cache.invalidate_structure();
         self.intern.clear();
+        self.static_paths.clear();
     }
 
     /// Throw away *all* resolution every frame, as if the graph changed shape
