@@ -7,7 +7,8 @@ instruction model, emulator, and ELF loading that the shader compiler's
 `isa/xt` backend and the Xtensa firmware crates build on.
 
 - **`lp-xt-inst`** — Xtensa instruction model, encoder, variable-length
-  decoder, and objdump-style disassembler (integer subset). Everything else
+  decoder, and objdump-style disassembler: the integer core plus, since M6,
+  the single-precision FP / Boolean-register / SR-UR subset. Everything else
   sits on this crate.
 - **`lp-xt-emu`** — the Xtensa emulator: windowed-register machinery,
   per-board memory maps (`BoardProfile::esp32s3()` / `esp32()`), and the
@@ -16,7 +17,10 @@ instruction model, emulator, and ELF loading that the shader compiler's
   substrate**: a host-shared data window (`Memory::add_shared`) and the
   full-argument-list call path (`run_loaded_with_args`) that let a host engine
   run compiled shader code against a vmctx living in host memory — see
-  `docs/adr/2026-07-30-xtensa-host-shared-memory.md`.
+  `docs/adr/2026-07-30-xtensa-host-shared-memory.md`. Since M6 it also has an
+  FPU proven equal to real ESP32-S3 silicon (5 630/5 630 conformance vectors,
+  zero divergence, result bits and FSR both) — see its README and
+  `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`.
 - **`lp-xt-fp-vectors`** — the M6 FP conformance corpus generator: deterministic,
   **float-free**, `no_std`, dependency-free, and fingerprinted, so the host and
   the device generate byte-identical vectors instead of transferring them. Holds

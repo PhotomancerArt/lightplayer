@@ -6,7 +6,7 @@ single-precision FP coprocessor (M6 of the native-f32 roadmap):
 | File | What it is |
 |---|---|
 | `fp_subset.S` | Every instruction in M6's normative FP / Boolean / special-register subset, at both ends of every operand field. The **objdiff target** — the mechanical oracle for the encoder and disassembler. |
-| `probe.S` | The **capability probe payloads** for the ESP32-S3 desk session. Built and checked in; **not yet run on hardware.** |
+| `probe.S` | The **capability probe payloads** for the ESP32-S3 desk session. Built and checked in; **run 2026-07-31, all 26 probes PRESENT** (below). |
 
 Build both with `./build.sh` (needs the espup toolchain under
 `~/.rustup/toolchains/esp`). Output lands in `obj/`, which is gitignored —
@@ -31,7 +31,9 @@ cargo run -p lp-xt-inst --features objdiff --bin objdiff -- obj/fp_subset.elf
 
 Every instruction must MATCH: `lp-xt-inst`'s disassembly of the bytes has to
 agree with `xtensa-esp32s3-elf-objdump`'s, mnemonic and operand values. As of
-M6 P1 this reports **134 / 134 matched, 0 mismatches, 0 unsupported**.
+M6 P7 (after adding `mksadj.s`, missed at P1 — see
+`docs/defects/2026-07-31-mksadj-missing-from-fp-subset.md`) this reports
+**136 / 136 matched, 0 mismatches, 0 unsupported**.
 
 An instruction that is not in `fp_subset.S` is not covered by the mechanical
 oracle, whatever the unit tests say. When the subset grows, grow this file.

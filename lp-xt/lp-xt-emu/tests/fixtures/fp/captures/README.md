@@ -1,5 +1,9 @@
 # M6 P6 silicon captures
 
+The behavior contract these captures back is
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`; the row-by-row triage
+that produced them is `p6-campaign-results.md` in the M6 planning directory.
+
 Verbatim serial transcripts (filtered to their `[FPCONF]` lines) from the
 hardware conformance campaign, desk session **2026-07-31**:
 

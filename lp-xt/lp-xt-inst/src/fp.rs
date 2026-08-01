@@ -34,7 +34,7 @@
 //! | `mov.s` `abs.s` `neg.s` | `fr, fs` | OK | PRESENT | yes |
 //! | `div0.s` `recip0.s` `sqrt0.s` `rsqrt0.s` | `fr, fs` | OK | PRESENT | division / sqrt sequence |
 //! | `nexp01.s` `mkdadj.s` `addexp.s` `addexpm.s` | `fr, fs` | OK | PRESENT | division / sqrt sequence |
-//! | `mksadj.s` | `fr, fs` | OK | NOT PROBED (added by M6 P6; exercised by the sqrt sequence) | sqrt sequence |
+//! | `mksadj.s` | `fr, fs` | OK | PRESENT (missed by P1's probe list, added and measured by P6 — the real `__ieee754_sqrtf` sequence executed it 272/272 end-to-end, `docs/defects/2026-07-31-mksadj-missing-from-fp-subset.md`) | sqrt sequence |
 //! | `const.s` | `fr, imm0_15` | OK | PRESENT | division sequence |
 //! | `rfr` | `ar, fs` | OK | PRESENT | yes |
 //! | `wfr` | `fr, as` | OK | PRESENT | yes |
