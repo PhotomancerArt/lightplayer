@@ -12,10 +12,16 @@
 //! here, app-side. See `docs/adr/2026-07-31-board-display-metadata-split.md`.
 
 mod catalog;
+#[cfg(feature = "diagram")]
+mod diagram;
 mod display_manifest;
+pub mod geometry;
 
 pub use catalog::{DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id};
+#[cfg(feature = "diagram")]
+pub use diagram::{BoardDiagram, DiagramMargin};
 pub use display_manifest::{
     BoardDisplayError, BoardDisplayFile, BoardDrawing, CapKind, DrawnButton, DrawnModule, DrawnPin,
     DrawnRgb, DrawnTerminal, DrawnUsb, PinCap, PinRole, PurchaseUrl, SupportTier,
 };
+pub use geometry::{DiagramMode, DiagramOptions, PinSwatch, WiredConnection};

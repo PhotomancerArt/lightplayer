@@ -15,11 +15,12 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 
+use lpir::FloatMode;
 use lps_q32::Q32;
 use lps_shared::layout::{round_up, type_alignment, type_size};
 use lps_shared::{
-    FnParam, LayoutRules, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType, LpsValueF32,
-    LpsValueQ32, ParamQualifier,
+    FloatLaneAbi, FnParam, LayoutRules, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType,
+    LpsValueF32, LpsValueQ32, ParamQualifier,
 };
 
 /// Split a single slice of flattened Q32 argument words (per-parameter order) into
@@ -69,10 +70,35 @@ pub fn flatten_q32_return(ty: &LpsType, v: &LpsValueQ32) -> Result<Vec<i32>, Cal
     flatten_q32_arg(&p, v)
 }
 
+/// The float-lane encoding a compiled module's [`FloatMode`] implies.
+///
+/// One-liner, but it is the *only* place the mapping is written, so a backend
+/// cannot marshal arguments under one convention and results under another.
+#[must_use]
+pub fn float_lane_abi(fm: FloatMode) -> FloatLaneAbi {
+    match fm {
+        FloatMode::Q32 => FloatLaneAbi::Q16_16,
+        FloatMode::F32 => FloatLaneAbi::Ieee754Bits,
+    }
+}
+
 /// Build flattened Q32 words from marshaled [`LpsValueF32`] arguments using GLSL metadata.
 pub fn flat_q32_words_from_f32_args(
     params: &[FnParam],
     args: &[LpsValueF32],
+) -> Result<Vec<i32>, CallError> {
+    flat_words_from_f32_args(params, args, FloatLaneAbi::Q16_16)
+}
+
+/// [`flat_q32_words_from_f32_args`] with the float-lane encoding chosen
+/// explicitly — [`FloatLaneAbi::Ieee754Bits`] for a native-f32 backend.
+///
+/// Only the `float` lane changes between the two; the aggregate layout this
+/// walks is identical, which is why there is one traversal and not two.
+pub fn flat_words_from_f32_args(
+    params: &[FnParam],
+    args: &[LpsValueF32],
+    abi: FloatLaneAbi,
 ) -> Result<Vec<i32>, CallError> {
     if params.len() != args.len() {
         return Err(CallError::Arity {
@@ -82,11 +108,32 @@ pub fn flat_q32_words_from_f32_args(
     }
     let mut flat = Vec::new();
     for (p, a) in params.iter().zip(args.iter()) {
-        let q = lps_shared::lps_value_f32_to_q32(&p.ty, a)
+        let q = lps_shared::lps_value_f32_to_lanes(&p.ty, a, abi)
             .map_err(|e| CallError::TypeMismatch(e.to_string()))?;
         flat.extend(flatten_q32_arg(p, &q)?);
     }
     Ok(flat)
+}
+
+/// Decode flattened return words straight to [`LpsValueF32`] for `abi`.
+///
+/// [`LpsType::Void`] answers `F32(0.0)`, matching every other f32-capable
+/// runtime (`InterpInstance::call`, the wgpu probe, and the Q32 harness path in
+/// `lps-filetests`): `LpsValueF32` has no void variant, and the corpus is full
+/// of `// run: some_void_fn() == 0.0` directives whose point is that the call
+/// executes without trapping. Returning an error instead cost `wasm.f32`
+/// 26 files in the M1 corpus run.
+pub fn decode_return_to_f32(
+    ty: &LpsType,
+    words: &[i32],
+    abi: FloatLaneAbi,
+) -> Result<LpsValueF32, CallError> {
+    if *ty == LpsType::Void {
+        return Ok(LpsValueF32::F32(0.0));
+    }
+    let lanes = decode_q32_return(ty, words)?;
+    lps_shared::lanes_to_lps_value_f32(ty, lanes, abi)
+        .map_err(|e| CallError::TypeMismatch(e.to_string()))
 }
 
 /// Result of a shader call: optional returned value plus `out` / `inout` values (future).

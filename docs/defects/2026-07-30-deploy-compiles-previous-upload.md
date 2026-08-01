@@ -1,6 +1,9 @@
 ---
-status: open      # reframed 2026-07-31: the server deploy path is exonerated
+status: fixed      # CLI-side fix (P5, 2026-07-31); the observation-lag
+                    # hypothesis itself is still unconfirmed on hardware —
+                    # that walk is P7. See "Fix" and "Ruled out".
 found: 2026-07-30      # how: hardware-walk
+fixed: 2026-07-31 (PR #234, upload wait)
 area: lp-cli (upload observability) — observed on fw-esp32s3
 class: stale-measurement
 related:
@@ -54,17 +57,43 @@ That fits all five rows exactly: each "device logged" value is the byte length
 of the *preceding* row's upload, and row E is `✔` only because D and E deployed
 the same 1662 B source.
 
-Not yet confirmed on hardware — confirming it needs one walk that reads the
-compile line from a monitor attached strictly *after* the upload's own reload
-(reflash-then-boot, i.e. the walk's round 2), and compares it against the same
-walk's round-1 boot line.
+**Confirmed on hardware 2026-07-31** — and the fixed CLI itself became the
+instrument. With the wait keeping the connection open, a single upload of a
+1301-byte source (previous flash content: 1267 bytes) streams *both* compile
+lines in one session, in order: `compilation starting (…, 1267 bytes)` — the
+connect-reset's boot auto-loading the previous upload, the only line the old
+fire-and-forget CLI ever lived to see — then `compilation starting (…, 1301
+bytes)`, the deploy's own reload with the new source. The device always
+compiled both; the observation channel simply closed between them. One-step
+lag was purely observational, as hypothesized.
 
-**Fix** — None yet. If the explanation above holds, the defect is in what
-`upload` makes observable, not in what the device computes: the command should
-wait for evidence that the *newly deployed* project is running (the shader
-node's compile outcome through a project read) before it disconnects, instead
-of exiting on the `LoadProject` ack. That is a CLI behaviour decision, not a
-server fix.
+**Fix** — `lp-cli upload` (`lp-cli/src/commands/upload/handler.rs`) no longer
+disconnects on the `LoadProject` ack. It now polls `project.read` on the
+*same* connection (the S3 serial port is exclusive; a monitor cannot attach
+separately) using the `WireProjectHandle` that `LoadProject`'s own response
+returned, every 250 ms, until one of:
+
+- the project has rendered at least one frame (`RuntimeReadResult.project.frame_num
+  > 0`) with no node error observed in the same read — reported as running,
+  exit 0;
+- a node reports a definitive failure (`NodeRuntimeStatus::Error` /
+  `InitError` — the shader node's `runtime_status()` surfaces its
+  `compilation_error` exactly this way) — reported immediately, exit nonzero,
+  without waiting out the timeout;
+- `--wait-timeout <secs>` (default 30) elapses with neither — exit nonzero,
+  message states the deploy was acked but no running evidence arrived.
+
+The read is scoped to the handle server-side, so a stale/foreign handle
+surfaces as a protocol error rather than silently describing someone else's
+project — no separate project-uid check was needed. `--no-wait` restores the
+exact pre-fix behaviour (disconnect the instant the deploy is acked) for
+callers that don't want to block. See `lp-cli/src/commands/upload/wait.rs`.
+
+This closes the *CLI-side* half of the defect (what `upload` makes
+observable). It does not, by itself, confirm the reset/reload explanation in
+"Root cause" — that needs a hardware walk that reads the compile line from a
+monitor attached strictly after `upload` returns and compares it against the
+same walk's boot line, which lands at the P7 gate.
 
 **Ruled out** (2026-07-31, all on host)
 
@@ -89,6 +118,18 @@ server fix.
 these pin the deploy path rather than fix it, so that the next investigation
 does not re-suspect it. Existing project tests write files and then load, which
 is precisely the ordering that could not have caught a stale read.
+
+For the P5 CLI fix: `lp-cli/tests/upload_wait.rs` drives the real
+`handle_upload` entry point against `HostSpecifier::Local` (an in-process
+`fw-host` runtime ticking a real `LpServer`, `lp-cli/src/client/host_process.rs`)
+— `upload_waits_and_reports_the_project_running` (the happy path resolves),
+`upload_wait_ends_nonzero_on_a_shader_compile_failure` (a broken shader ends
+the wait immediately, not by timing out), `no_wait_skips_the_wait_even_when_the_shader_would_fail`
+(`--no-wait` restores fire-and-forget), and
+`upload_wait_times_out_nonzero_when_no_evidence_arrives` (a zero-budget wait
+reports the acked-but-no-evidence message). `lp-cli/src/commands/upload/wait.rs`
+also unit-tests the event-stream reduction (pending/running/error) directly,
+independent of a live connection.
 
 **Lesson** — This is the defect the M4 milestone file predicted by name: "watch
 specifically for divergences that only appear in the *app* path… the incremental
