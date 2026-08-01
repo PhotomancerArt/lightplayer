@@ -88,12 +88,21 @@
     },
     "HardwareTarget": {
       "description": "Build or runtime target that a board manifest describes.",
-      "enum": [
-        "esp32c6",
-        "esp32s3",
-        "rv32imac_emu"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "esp32c6",
+            "esp32s3",
+            "rv32imac_emu"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "esp32",
+          "description": "Classic ESP32 (Xtensa LX6) — `fw-esp32v3`.",
+          "type": "string"
+        }
+      ]
     },
     "HwCapability": {
       "description": "Capability advertised by a [`crate::HwResource`].\n\nDrivers check capabilities before claiming resources. A single resource may\nexpose multiple capabilities, such as a GPIO that can be used for input or\noutput.",
