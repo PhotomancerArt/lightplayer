@@ -44,6 +44,7 @@ pub mod slot_views {
 }
 
 pub mod artifact;
+pub mod feature;
 pub mod hardware_endpoint_spec;
 pub mod nodes;
 pub mod product;
@@ -93,6 +94,7 @@ pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
+pub use feature::{LpFeature, ManifestLimits};
 pub use hardware_endpoint_spec::{HardwareEndpointSpecError, HwEndpointSpec};
 pub use lpfs::fs_event::FsVersion;
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
