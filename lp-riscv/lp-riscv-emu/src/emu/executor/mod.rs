@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use crate::emu::{error::EmulatorError, logging::InstLog};
+use crate::emu::{error::EmulatorError, fp_regs::FpRegs, logging::InstLog};
 use lp_emu_core::Memory;
 
 pub use lp_emu_core::InstClass;
@@ -58,11 +58,16 @@ pub(super) fn read_reg(regs: &[i32; 32], reg: lp_riscv_inst::Gpr) -> i32 {
 ///
 /// Decodes the instruction word and executes it in a single step,
 /// eliminating the intermediate `Inst` enum allocation.
+///
+/// `fp` carries the RV32F architectural state (see [`FpRegs`]). Only the
+/// floating-point arms and the three F-extension CSRs in [`system`] read or
+/// write it; the integer categories never see it.
 pub fn decode_execute<M: LoggingMode>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
     _memory: &mut Memory,
+    fp: &mut FpRegs,
 ) -> Result<ExecutionResult, EmulatorError> {
     // Check if compressed instruction (bits [1:0] != 0b11)
     if (inst_word & 0x3) != 0x3 {
@@ -110,7 +115,7 @@ pub fn decode_execute<M: LoggingMode>(
         }
         0x73 => {
             // System instructions (ECALL, EBREAK, CSR)
-            system::decode_execute_system::<M>(inst_word, pc, regs, _memory)
+            system::decode_execute_system::<M>(inst_word, pc, regs, _memory, fp)
         }
         0x0f => {
             // FENCE/FENCE.I instructions
@@ -120,6 +125,16 @@ pub fn decode_execute<M: LoggingMode>(
             // Atomic instructions (A extension)
             atomic::decode_execute_atomic::<M>(inst_word, pc, regs, _memory)
         }
+        // Floating point (F extension). `lp-riscv-inst` has no F support, so
+        // `float` decodes the word itself. Compressed float encodings (Zcf)
+        // are deliberately not implemented — see `float`'s module docs.
+        float::OPCODE_LOAD_FP
+        | float::OPCODE_STORE_FP
+        | float::OPCODE_MADD
+        | float::OPCODE_MSUB
+        | float::OPCODE_NMSUB
+        | float::OPCODE_NMADD
+        | float::OPCODE_OP_FP => float::decode_execute_float::<M>(inst_word, pc, regs, _memory, fp),
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
@@ -134,6 +149,7 @@ pub mod arithmetic;
 pub mod atomic;
 pub mod branch;
 pub mod compressed;
+pub mod float;
 pub mod immediate;
 pub mod jump;
 pub mod load_store;

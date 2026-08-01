@@ -17,7 +17,8 @@
 //!
 //! Output is real: `output::rmt` drives WS281x strips from the RMT peripheral
 //! on up to four channels at once, over the portable `lp-ws281x` transmitter.
-//! Still absent: the button and the radio.
+//! The board-manifest-driven GPIO button is real too (`hardware::button`).
+//! Still absent: the radio, a future milestone.
 //!
 //! ## Shape versus fw-esp32c6
 //!
@@ -44,15 +45,26 @@
 )]
 
 // The JIT harness allocates (JIT buffers, module tables); the app path is the
-// whole server stack. `test_backtrace_oracle` is the exception — it is
-// deliberately allocation-free, because it exercises a walk the panic path
-// takes, and the panic path must not allocate.
-#[cfg(any(not(fw_harness), feature = "test_xt_jit_corpus"))]
+// whole server stack. `test_button` also needs it: the button driver's
+// registry/endpoint types are alloc-based, same as on fw-esp32c6.
+// `test_backtrace_oracle` is the exception — it is deliberately
+// allocation-free, because it exercises a walk the panic path takes, and the
+// panic path must not allocate.
+#[cfg(any(
+    not(fw_harness),
+    feature = "test_xt_jit_corpus",
+    feature = "test_button"
+))]
 extern crate alloc;
 
 mod board;
 #[cfg(not(fw_harness))]
 mod flash_storage;
+// Not simply `not(fw_harness)`: the `test_button` harness drives the same
+// registry-facing driver the app path registers, and a self-test against a
+// different driver would prove nothing.
+#[cfg(any(not(fw_harness), feature = "test_button"))]
+mod hardware;
 // Not simply `not(fw_harness)`: the `test_loopback` harness drives the same RMT
 // backend and the same shared driver the app path does, and a self-test against
 // a different transmitter would prove nothing. The registry-facing driver
@@ -76,8 +88,9 @@ use {
     fw_esp32_common::server_loop::run_server_loop,
     fw_esp32_common::time::Esp32TimeProvider,
     fw_esp32_common::{boot, logger, lp_fs, transport},
+    hardware::button::Esp32GpioButtonDriver,
     lp_gfx_lpvm::TargetLpvmGraphics,
-    lpa_server::{LpGraphics, LpServer},
+    lpa_server::{ButtonService, LpGraphics, LpServer},
     lpc_hardware::{HardwareSystem, HwRegistry},
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
@@ -172,6 +185,15 @@ fn boot() -> ! {
     {
         drop(peripherals);
         tests::xt_jit_corpus::run_all();
+    }
+
+    // The button driver claims its pin through the hardware registry lease
+    // (`AnyPin::steal`, same as the WS281x driver), not through a peripheral
+    // handed down from here, so the raw singleton is simply dropped.
+    #[cfg(feature = "test_button")]
+    {
+        drop(peripherals);
+        tests::test_button::run();
     }
 
     #[cfg(feature = "test_backtrace_oracle")]
@@ -283,14 +305,20 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             esp_println::println!("[ERROR] RMT init failed ({error:?}); no LED output this boot");
         }
     }
-    // No button and no radio driver: neither is ported, and `LpServer` takes
-    // both services as `Option`, so they are simply absent rather than stubbed.
+    hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
+        &hardware_registry,
+    ))));
+    // Still no radio driver: `LpServer` takes it as an `Option`, so it is
+    // simply absent rather than stubbed. Radio is a future milestone.
     let hardware_system = Rc::new(hardware_system);
 
     // The provider itself is chip-agnostic and comes from fw-esp32-common
-    // untouched; only the driver registered above is chip-side.
-    let output_provider: Rc<RefCell<dyn OutputProvider>> =
-        Rc::new(RefCell::new(Esp32OutputProvider::new(hardware_system)));
+    // untouched; only the driver registered above is chip-side. Cloned, not
+    // moved: `hardware_system` is also the button service handed to
+    // `LpServer` below.
+    let output_provider: Rc<RefCell<dyn OutputProvider>> = Rc::new(RefCell::new(
+        Esp32OutputProvider::new(Rc::clone(&hardware_system)),
+    ));
 
     // Stamped device identity: read the fs-root `/.lp/device.json` once at boot
     // for the hello (missing file → unstamped, `None`).
@@ -308,13 +336,14 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
 
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
+    let button_service: Rc<dyn ButtonService> = hardware_system.clone();
     let mut server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,
         "projects/".as_path(),
         Some(esp32_memory_stats),
         Some(time_provider_rc),
-        None,
+        Some(button_service),
         None,
         graphics,
     );

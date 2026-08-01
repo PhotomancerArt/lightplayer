@@ -13,12 +13,11 @@ use lp_collection::VecMap;
 
 use lpc_hardware::OutputError;
 use lpc_hardware::{
-    HardwareEndpointError, HardwareSystem, HwEndpointSpec, Ws281xConfig, Ws281xOutput,
+    HardwareEndpointError, HardwareSystem, HwEndpointSpec, WS281X_MAX_LEDS_PER_CHANNEL,
+    Ws281xConfig, Ws281xOutput, ws281x_capped_byte_count,
 };
 use lpc_shared::DisplayPipeline;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
-
-const MAX_LEDS: usize = 256;
 const FRAME_INTERVAL_US: u64 = 16_667;
 const MID_FRAME_US: u64 = 8_333;
 
@@ -71,7 +70,13 @@ impl OutputProvider for Esp32OutputProvider {
             });
         }
 
-        let byte_count = capped_byte_count(byte_count);
+        let (byte_count, truncated) = ws281x_capped_byte_count(byte_count);
+        if truncated {
+            log::warn!(
+                "Esp32OutputProvider::open: endpoint={endpoint} asked for more than \
+                 {WS281X_MAX_LEDS_PER_CHANNEL} LEDs; truncating to {byte_count} bytes"
+            );
+        }
         let output = self
             .hardware_system
             .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count))
@@ -120,11 +125,22 @@ impl OutputProvider for Esp32OutputProvider {
         let expected_len = num_leds * 3;
 
         if data.len() > expected_len {
-            let new_byte_count = capped_byte_count_for_len(data.len());
-            channel.output.resize(Ws281xConfig::new(new_byte_count))?;
-            channel.pipeline.resize(new_byte_count / 3);
-            channel.byte_count = new_byte_count;
-            num_leds = (channel.byte_count / 3) as usize;
+            let (new_byte_count, truncated) = capped_byte_count_for_len(data.len());
+            // A frame past the cap keeps `data.len() > expected_len` true forever;
+            // only act (and warn) when the granted size actually changes, so the
+            // steady state neither re-resizes nor logs per frame.
+            if new_byte_count != channel.byte_count {
+                if truncated {
+                    log::warn!(
+                        "Esp32OutputProvider::write: handle={handle_id} grew past \
+                         {WS281X_MAX_LEDS_PER_CHANNEL} LEDs; truncating to {new_byte_count} bytes"
+                    );
+                }
+                channel.output.resize(Ws281xConfig::new(new_byte_count))?;
+                channel.pipeline.resize(new_byte_count / 3);
+                channel.byte_count = new_byte_count;
+                num_leds = (channel.byte_count / 3) as usize;
+            }
         } else if data.len() < expected_len {
             return Err(OutputError::DataLengthMismatch {
                 expected: expected_len as u32,
@@ -152,13 +168,8 @@ impl OutputProvider for Esp32OutputProvider {
     }
 }
 
-fn capped_byte_count_for_len(data_len: usize) -> u32 {
-    capped_byte_count(((data_len / 3) * 3) as u32)
-}
-
-fn capped_byte_count(byte_count: u32) -> u32 {
-    let max_byte_count = (MAX_LEDS * 3) as u32;
-    byte_count.min(max_byte_count)
+fn capped_byte_count_for_len(data_len: usize) -> (u32, bool) {
+    ws281x_capped_byte_count(((data_len / 3) * 3) as u32)
 }
 
 fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
