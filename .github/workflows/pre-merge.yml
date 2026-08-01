@@ -350,6 +350,11 @@ jobs:
       - name: Check esp32s3 image size
         run: cd lp2025 && just fw-esp32s3-size-check
 
+      # The image just built must describe itself correctly: extract the
+      # embedded manifest core and diff against the checked-in expectation.
+      - name: Check esp32s3 embedded manifest
+        run: cd lp2025 && just fw-manifest-check-esp32s3
+
       # The lint gate for this crate. It is separate from `clippy-host`, which
       # deliberately EXCLUDES fw-esp32s3: including it triggers a real
       # critical-section feature-unification conflict, so without this step the
@@ -697,6 +702,11 @@ jobs:
 
       - name: Check esp32c6 image size
         run: cd lp2025 && just fw-esp32c6-size-check
+
+      # The image just built must describe itself correctly: extract the
+      # embedded manifest core and diff against the checked-in expectation.
+      - name: Check esp32c6 embedded manifest
+        run: cd lp2025 && just fw-manifest-check-esp32c6
 
       - name: sccache stats
         if: always()
