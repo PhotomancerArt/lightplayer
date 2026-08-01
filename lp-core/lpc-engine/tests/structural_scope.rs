@@ -307,3 +307,215 @@ fn scope_persist_paths_are_tree_path_stable() {
         "module scopes key by the owner's tree path, got {root_path}"
     );
 }
+
+#[test]
+fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
+    // modules.md E5, the exact shape that must be pinned: H contains
+    // M_outer; M_outer contains M_inner (which has a visual writer) and a
+    // consumer C beside it. C's `visual.out` read finds M_inner's R7
+    // publish IN Scope(M_outer) — module publishes count as writers like
+    // any producer — and never walks to root. The failure mode being
+    // pinned: writer accounting that omits module publishes works at
+    // depth 1 by coincidence and resolves C to ROOT's visual at depth 2.
+    let fs = LpFsMemory::new();
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        .expect("container manifest");
+    fs.write_file(
+        "/module.json".as_path(),
+        br#"
+{
+  "kind": "Module",
+  "nodes": {
+    "root_shader": { "ref": "./root_shader.json" },
+    "outer": { "ref": "./outer/module.json" }
+  }
+}
+"#,
+    )
+    .expect("module.json");
+    fs.write_file(
+        "/root_shader.json".as_path(),
+        br#"{ "kind": "Shader", "source": { "path": "root.glsl" } }"#,
+    )
+    .expect("root shader");
+    fs.write_file(
+        "/root.glsl".as_path(),
+        b"vec4 render(vec2 p) { return vec4(1.0); }",
+    )
+    .expect("root glsl");
+    fs.write_file(
+        "/outer/module.json".as_path(),
+        br#"
+{
+  "kind": "Module",
+  "nodes": {
+    "inner": { "ref": "./inner/module.json" },
+    "analyzer": { "ref": "./analyzer.json" }
+  }
+}
+"#,
+    )
+    .expect("outer module");
+    fs.write_file(
+        "/outer/inner/module.json".as_path(),
+        br#"
+{
+  "kind": "Module",
+  "nodes": {
+    "plasma": { "ref": "./plasma.json" }
+  }
+}
+"#,
+    )
+    .expect("inner module");
+    fs.write_file(
+        "/outer/inner/plasma.json".as_path(),
+        br#"{ "kind": "Shader", "source": { "path": "plasma.glsl" } }"#,
+    )
+    .expect("plasma shader");
+    fs.write_file(
+        "/outer/inner/plasma.glsl".as_path(),
+        b"vec4 render(vec2 p) { return vec4(0.5); }",
+    )
+    .expect("plasma glsl");
+    fs.write_file(
+        "/outer/analyzer.json".as_path(),
+        br#"
+{
+  "kind": "Texture",
+  "size": { "width": 2, "height": 2 },
+  "bindings": {
+    "input": { "source": "bus:visual.out" }
+  }
+}
+"#,
+    )
+    .expect("analyzer");
+
+    let rt = load(&fs);
+    let engine = rt.engine();
+    let tree = engine.tree();
+
+    let outer = engine
+        .project_runtime_index()
+        .node_id(&use_location("nodes[outer]"))
+        .expect("outer module projected");
+    let inner = engine
+        .project_runtime_index()
+        .node_id(
+            &use_location("nodes[outer]").child(SlotPath::parse("nodes[inner]").expect("path")),
+        )
+        .expect("inner module projected");
+    let analyzer = engine
+        .project_runtime_index()
+        .node_id(
+            &use_location("nodes[outer]").child(SlotPath::parse("nodes[analyzer]").expect("path")),
+        )
+        .expect("analyzer projected");
+
+    // The analyzer reads from Scope(outer); the winning provider set for
+    // that read must be M_inner's R7 publish — not root's shader.
+    let scope_outer = tree.scope_of(analyzer).expect("analyzer scope");
+    assert_eq!(
+        scope_outer,
+        lpc_engine::node::ScopeRef::Module { owner: outer }
+    );
+    let winners = tree.providers_for_bus_read(
+        Some(scope_outer),
+        &lpc_model::ChannelName(String::from("visual.out")),
+    );
+    assert!(
+        !winners.is_empty(),
+        "Scope(outer) must see the inner module's publish as a writer"
+    );
+    assert!(
+        winners.iter().all(|(_, entry)| entry.owner == inner),
+        "the depth-2 read must resolve to the sibling module's publish, \
+         never walk to root: {winners:?}"
+    );
+}
+
+#[test]
+fn r7_authored_export_and_root_module_runtime() {
+    // R7: an authored export republishes an inner channel outward under
+    // the export's name; the root wears a real module runtime (its output
+    // interface exists like any module's).
+    let fs = LpFsMemory::new();
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 3\n}\n")
+        .expect("container manifest");
+    fs.write_file(
+        "/module.json".as_path(),
+        br#"
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "audio": { "ref": "./audio/module.json" }
+  }
+}
+"#,
+    )
+    .expect("module.json");
+    fs.write_file("/clock.json".as_path(), br#"{ "kind": "Clock" }"#)
+        .expect("clock");
+    fs.write_file(
+        "/audio/module.json".as_path(),
+        br#"
+{
+  "kind": "Module",
+  "nodes": {
+    "beat_clock": { "ref": "./beat_clock.json" }
+  },
+  "exports": {
+    "energy": "bus:time"
+  }
+}
+"#,
+    )
+    .expect("audio module");
+    fs.write_file(
+        "/audio/beat_clock.json".as_path(),
+        br#"{ "kind": "Clock" }"#,
+    )
+    .expect("beat clock");
+
+    let rt = load(&fs);
+    let engine = rt.engine();
+    let tree = engine.tree();
+    let audio = engine
+        .project_runtime_index()
+        .node_id(&use_location("nodes[audio]"))
+        .expect("audio module projected");
+
+    // The export surfaces as a writer of `energy` in the module's own
+    // nearest scope (root), owned by the module node.
+    let root_scope = tree.node_scope(tree.root()).expect("root scope");
+    let winners = tree.providers_for_bus_read(
+        Some(root_scope),
+        &lpc_model::ChannelName(String::from("energy")),
+    );
+    assert!(
+        winners.iter().any(|(_, entry)| entry.owner == audio),
+        "the authored export must appear as a writer in the containing scope"
+    );
+
+    // The embedded module also default-publishes visual.out outward (R7
+    // automatic publish), and the ROOT is alive with a real module
+    // runtime exposing the mirror's `output` state row.
+    let winners = tree.providers_for_bus_read(
+        Some(root_scope),
+        &lpc_model::ChannelName(String::from("visual.out")),
+    );
+    assert!(
+        winners.iter().any(|(_, entry)| entry.owner == audio),
+        "an embedded module default-publishes visual.out at fallback priority"
+    );
+    let root_entry = tree.get(tree.root()).expect("root entry");
+    assert!(
+        matches!(
+            root_entry.state.value(),
+            lpc_engine::node::NodeEntryState::Alive(_)
+        ),
+        "the root wears a live module runtime"
+    );
+}

@@ -949,7 +949,16 @@ impl ResolveHost for EngineResolveHost<'_> {
     }
 
     fn node_scope(&self, node: NodeId) -> Option<crate::node::ScopeRef> {
-        self.tree.node_scope(node)
+        // Reading scope: a scope INTRODUCER's bus reads face inward — that
+        // is R7's export semantics (a module republishing an inner channel
+        // reads it from the scope it introduces; the root's unscoped reads
+        // are root-scope reads). Every other node reads from the scope it
+        // inhabits. Provider (write-side) classification stays on
+        // `NodeTree::node_scope` — module produces land in the parent
+        // scope per R4.
+        self.tree
+            .scope_introduced_by(node)
+            .or_else(|| self.tree.node_scope(node))
     }
 
     fn providers_for_bus(

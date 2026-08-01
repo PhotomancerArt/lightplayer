@@ -13,7 +13,6 @@ use lpc_registry::ProjectRegistry;
 use lpfs::LpFs;
 
 use crate::node::{AssetRefreshContext, AssetRefreshResult, NodeEntryState};
-use crate::nodes::CorePlaceholderNode;
 
 use super::{Engine, ProjectLoadError, ProjectLoader};
 
@@ -142,7 +141,7 @@ impl Engine {
                 if reattach_roots.contains(&location) {
                     self.reattach_runtime_node(
                         self.tree().root(),
-                        alloc::boxed::Box::new(CorePlaceholderNode::new_leaf(NodeKind::Module)),
+                        crate::nodes::ModuleNode::boxed(self.tree().root()),
                         frame,
                     )
                     .map_err(|e| {

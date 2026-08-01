@@ -45,7 +45,6 @@ use crate::nodes::ButtonNode;
 use crate::nodes::ClockNode;
 #[cfg(feature = "node-radio")]
 use crate::nodes::ControlRadioNode;
-use crate::nodes::CorePlaceholderNode;
 #[cfg(feature = "node-fluid")]
 use crate::nodes::FluidNode;
 use crate::nodes::OutputNode;
@@ -195,11 +194,7 @@ impl ProjectLoader {
             }
         }
         runtime
-            .attach_runtime_node(
-                root,
-                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Module)),
-                frame,
-            )
+            .attach_runtime_node(root, crate::nodes::ModuleNode::boxed(root), frame)
             .map_err(|e| ProjectLoadError::InvalidProjectReference {
                 path: artifact_specifier_label(&project_specifier),
                 reason: format!("attach project runtime: {e}"),
@@ -439,6 +434,28 @@ impl ProjectLoader {
             if !should_attach_projected_node(node, targets) {
                 continue;
             }
+            if node.kind != NodeKind::Module || node.ownership == ProjectedNodeOwnership::Root {
+                // Root already wears its ModuleNode from the spine pass —
+                // it must have a runtime even when its def is broken.
+                continue;
+            }
+            // Broken defs project with the module FALLBACK kind — they must
+            // stay error nodes, not wear a live module runtime.
+            let Ok(NodeDef::Module(_)) = projected_node_config(registry, node) else {
+                continue;
+            };
+            // Never feature-gated: every build carries the module runtime.
+            runtime
+                .attach_runtime_node(node.id, crate::nodes::ModuleNode::boxed(node.id), frame)
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("attach module runtime: {e}"),
+                })?;
+        }
+        for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Clock {
                 continue;
             }
@@ -459,7 +476,7 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Clock)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(NodeKind::Clock)),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -493,7 +510,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Button)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Button,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -528,7 +547,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::ControlRadio)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::ControlRadio,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -559,7 +580,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Texture)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Texture,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -632,7 +655,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Shader)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Shader,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -692,7 +717,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::ComputeShader)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::ComputeShader,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -726,7 +753,7 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Fluid)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(NodeKind::Fluid)),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -776,7 +803,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Playlist)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Playlist,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -830,7 +859,9 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Fixture)),
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::Fixture,
+                        )),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -1373,10 +1404,28 @@ fn register_node_bindings(
     node: &ProjectedNode,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
-    // Unloaded/errored defs project with the `Project` fallback kind and
-    // register nothing — same tolerance the attach arms' kind filters gave
-    // them (the node renders as an error node; the load must not fail).
+    // Module nodes register their R7 output interface: authored bindings
+    // (the contention pick), authored exports, and — for NON-root modules —
+    // the automatic `output` → `visual.out` publish at fallback priority
+    // that makes an embedded module drop-in (root is excluded: its
+    // containing scope does not exist; its mirror is what playback reads).
+    // Unloaded/errored defs project with the module fallback kind and
+    // register nothing — the node renders as an error node; the load must
+    // not fail.
     if node.kind == NodeKind::Module {
+        if let Ok(NodeDef::Module(config)) = projected_node_config(registry, node) {
+            let config = config.clone();
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+            register_module_exports(runtime, node, &config, frame)?;
+            register_module_output_default(runtime, node, &config.bindings, frame)?;
+        }
         return Ok(());
     }
     match projected_node_config(registry, node)?.clone() {
@@ -1906,6 +1955,94 @@ fn register_target_binding(
 /// guess stamped e.g. `trigger` as Color because only the time-family
 /// names were listed (2026-07-16: bus pane showed "trigger COLOR").
 /// Endpoints outside the registry fall back to the slot-name heuristic.
+/// An embedded module contributes its visual to its host by default (R7):
+/// the mirror's produced `output` publishes `visual.out` at fallback
+/// priority. Per R4 that lands in the module NODE's own nearest scope (the
+/// parent's) — the node sits there; only its children are inside the scope
+/// it introduces. The ROOT module is skipped: its containing scope does
+/// not exist, and its mirror is what playback reads. An authored `output`
+/// binding (the contention pick) suppresses the default, same as every
+/// declared default bind.
+fn register_module_output_default(
+    engine: &mut Engine,
+    node: &ProjectedNode,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if node.ownership == ProjectedNodeOwnership::Root {
+        return Ok(());
+    }
+    if binding_target(bindings, "output").is_some() {
+        return Ok(());
+    }
+    let slot = SlotPath::parse("output").expect("module output path");
+    let channel = lpc_model::ChannelName(String::from(lpc_model::PRIMARY_VISUAL_CHANNEL));
+    let source = BindingSource::ProducedSlot {
+        node: node.id,
+        slot,
+    };
+    let target = BindingTarget::BusChannel(channel);
+    engine
+        .add_binding(
+            BindingDraft {
+                kind: binding_kind(&source, &target, "output"),
+                source,
+                target,
+                priority: BindingPriority::default_fallback(),
+                owner: node.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
+            path: node_label(node),
+            reason: format!("register module output mirror default: {e}"),
+        })?;
+    Ok(())
+}
+
+/// Authored exports (R7): each entry republishes an inner-scope channel
+/// outward under the export's name. The binding's SOURCE is the inner
+/// channel — module-owned bus reads resolve from the introduced scope (the
+/// engine host's reading-scope rule) — and its TARGET is the export-named
+/// channel in the module's own nearest scope. Deliberate curation, so it
+/// registers at authored priority.
+fn register_module_exports(
+    engine: &mut Engine,
+    node: &ProjectedNode,
+    config: &lpc_model::ModuleDef,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    for (name, inner) in config.exports.entries.iter() {
+        let inner_channel = match inner.value() {
+            lpc_model::BindingRef::Bus(bus) => bus.channel().clone(),
+            other => {
+                return Err(ProjectLoadError::InvalidProjectReference {
+                    path: node_label(node),
+                    reason: format!("export `{name}` must name a bus channel, got {other:?}"),
+                });
+            }
+        };
+        let source = BindingSource::BusChannel(inner_channel);
+        let target = BindingTarget::BusChannel(lpc_model::ChannelName(String::from(name.as_str())));
+        engine
+            .add_binding(
+                BindingDraft {
+                    kind: binding_kind(&source, &target, name),
+                    source,
+                    target,
+                    priority: BindingPriority::new(0),
+                    owner: node.id,
+                },
+                frame,
+            )
+            .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                path: node_label(node),
+                reason: format!("register module export `{name}`: {e}"),
+            })?;
+    }
+    Ok(())
+}
+
 fn binding_kind(source: &BindingSource, target: &BindingTarget, slot_name: &str) -> Kind {
     let channel = match (source, target) {
         (BindingSource::BusChannel(channel), _) => Some(channel),

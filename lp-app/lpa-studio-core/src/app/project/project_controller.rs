@@ -391,7 +391,7 @@ impl ProjectController {
                     .and_then(|value| value.value.as_ref())
                     .map(format_lp_value),
                 value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
-                primary_visual: channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL,
+                primary_visual: channel.primary_visual,
                 writers: channel.providers.iter().filter_map(site).collect(),
                 readers: channel.consumers.iter().filter_map(site).collect(),
             })
@@ -412,7 +412,7 @@ impl ProjectController {
         let channel = graph
             .channels
             .iter()
-            .find(|channel| channel.name == lpc_model::PRIMARY_VISUAL_CHANNEL)?;
+            .find(|channel| channel.primary_visual)?;
         let value = channel.value.as_ref()?.value.as_ref()?;
         let lpc_model::LpValue::Product(product) = value else {
             return None;
@@ -5800,6 +5800,7 @@ mod tests {
                     value: Some(LpValue::F32(0.5)),
                     error: None,
                 }),
+                primary_visual: true,
             }],
         };
         project
@@ -6016,6 +6017,7 @@ mod tests {
                     value,
                     error: None,
                 }),
+                primary_visual: true,
             }],
         }
     }
@@ -6376,6 +6378,7 @@ mod tests {
                     providers: vec![0],
                     consumers: vec![1],
                     value: None,
+                    primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
                     name: "wobble".to_string(),
@@ -6383,6 +6386,7 @@ mod tests {
                     providers: vec![0],
                     consumers: Vec::new(),
                     value: None,
+                    primary_visual: false,
                 },
             ],
         };
@@ -6497,6 +6501,7 @@ mod tests {
                     value: Some(LpValue::F32(value)),
                     error: None,
                 }),
+                primary_visual: false,
             }
         };
         project

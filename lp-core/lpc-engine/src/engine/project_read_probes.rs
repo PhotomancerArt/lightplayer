@@ -102,6 +102,21 @@ impl Engine {
             .map(|(name, kind)| (name.clone(), kind))
             .collect();
 
+        // Root-scope role, decided engine-side ONCE: the primary visual is
+        // the root scope's listing of the vocabulary channel the root
+        // module's output interface mirrors. Consumers read the flag; the
+        // name comparison lives only here, next to the vocabulary.
+        let root_scope = self.tree().node_scope(self.tree().root());
+        let root_channels: Vec<ChannelName> = root_scope
+            .map(|scope| {
+                self.tree()
+                    .scope_channels(scope)
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let mut channels = Vec::with_capacity(channel_names.len());
         for (name, kind) in channel_names {
             let mut providers = self.tree().providers_for_bus(&name);
@@ -135,12 +150,15 @@ impl Engine {
                 }
             });
 
+            let primary_visual = name.0 == lpc_model::PRIMARY_VISUAL_CHANNEL
+                && (root_channels.contains(&name) || root_scope.is_none());
             channels.push(WireBusChannel {
                 name: name.0.clone(),
                 kind: Some(kind),
                 providers,
                 consumers,
                 value,
+                primary_visual,
             });
         }
 

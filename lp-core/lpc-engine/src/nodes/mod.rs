@@ -6,6 +6,7 @@ pub mod clock;
 pub mod fixture;
 #[cfg(feature = "node-fluid")]
 pub mod fluid;
+pub mod module;
 pub mod output;
 mod placeholder;
 // Always declared — `playlist::playlist_output_path` stays compiled even
@@ -27,6 +28,7 @@ pub use clock::{ClockNode, clock_seconds_path};
 pub use fixture::fixture_node::{FixtureMap2dSource, FixtureNode, fixture_input_path};
 #[cfg(feature = "node-fluid")]
 pub use fluid::{FluidNode, MsaFluidSolver, fluid_emitters_path, fluid_output_path};
+pub use module::ModuleNode;
 pub use output::output_node::{OutputNode, output_input_path};
 pub use placeholder::CorePlaceholderNode;
 pub use playlist::playlist_output_path;
