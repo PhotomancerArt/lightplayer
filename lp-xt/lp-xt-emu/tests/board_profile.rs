@@ -163,6 +163,75 @@ fn s3_default_still_runs_gv1() {
     );
 }
 
+/// Both profiles model flash, and none of the five regions collide.
+///
+/// `install` is what asserts disjointness, so building the emulator is the
+/// test; the explicit checks below are about *which* region answers to what,
+/// which a silent shadowing bug would get wrong without panicking.
+#[test]
+fn both_profiles_install_disjoint_flash_and_sram_regions() {
+    for p in [BoardProfile::esp32s3(), BoardProfile::esp32()] {
+        let emu = Emulator::with_profile(p);
+
+        // Flash is readable and, for the instruction window, fetchable.
+        assert!(emu.mem.read_u32(p.irom_base).is_ok(), "{}: IROM read", p.name);
+        assert!(emu.mem.read_u32(p.drom_base).is_ok(), "{}: DROM read", p.name);
+        let mut out = [0u8; 3];
+        assert!(
+            emu.mem.fetch(p.irom_base, &mut out).is_ok(),
+            "{}: IROM must be executable at its own address",
+            p.name
+        );
+        assert_eq!(
+            emu.mem.fetch(p.drom_base, &mut out).unwrap_err().cause,
+            EXC_INSTR_FETCH_ERROR,
+            "{}: DROM is data only",
+            p.name
+        );
+
+        // The image's .data/.bss region is plain SRAM: writable, not fetchable.
+        let mut emu = emu;
+        assert!(
+            emu.mem.write_u32(p.image_data_base, 0x1234).is_ok(),
+            "{}: image DRAM write",
+            p.name
+        );
+        assert_eq!(emu.mem.read_u32(p.image_data_base).unwrap(), 0x1234);
+        assert_eq!(
+            emu.mem.fetch(p.image_data_base, &mut out).unwrap_err().cause,
+            EXC_INSTR_FETCH_ERROR,
+            "{}: image DRAM is not executable",
+            p.name
+        );
+
+        // No flash address is mistaken for the JIT's code region, in either view.
+        assert!(p.code_region_offset(p.irom_base).is_none(), "{}", p.name);
+        assert!(p.code_region_offset(p.drom_base).is_none(), "{}", p.name);
+        assert!(
+            p.code_region_offset(p.code_ibus_base()).is_some(),
+            "{}: the code region must recognise its own I-bus base",
+            p.name
+        );
+    }
+}
+
+/// The flash bases are the ones the linker script and `lpc-shared`'s backtrace
+/// validator already use. Pinned so a profile edit cannot drift away from the
+/// image it has to load.
+#[test]
+fn flash_bases_match_the_documented_chip_maps() {
+    let s3 = BoardProfile::esp32s3();
+    assert_eq!(s3.irom_base, 0x4200_0000, "S3 irom_seg (esp-hal memory.x)");
+    assert_eq!(s3.drom_base, 0x3C00_0000, "S3 drom_seg (esp-hal memory.x)");
+
+    let classic = BoardProfile::esp32();
+    assert_eq!(classic.irom_base, 0x400D_0000, "classic irom_seg");
+    assert_eq!(classic.drom_base, 0x3F40_0000, "classic drom_seg");
+
+    // Classic's IROM begins above SRAM1's I-bus window rather than inside it.
+    assert!(classic.irom_base >= 0x400C_0000);
+}
+
 /// Offset and Identity rules stay trivial.
 #[test]
 fn offset_and_identity_rules() {

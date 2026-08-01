@@ -177,10 +177,7 @@ impl Region {
             self.dbus_start,
             self.dbus_start.wrapping_add(self.data.len() as u32 - 1),
         );
-        core::iter::once(dbus).chain(
-            self.ibus_bounds()
-                .map(|(lo, hi)| ("I-bus image", lo, hi)),
-        )
+        core::iter::once(dbus).chain(self.ibus_bounds().map(|(lo, hi)| ("I-bus image", lo, hi)))
     }
 }
 
