@@ -359,16 +359,13 @@ jobs:
 
   # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) — the second crate on the
   # Xtensa fork, cloned from firmware-xtensa above. Same anti-rot rationale:
-  # nothing else in CI compiles this crate. Unlike fw-esp32s3 it is its OWN
-  # Cargo workspace (see lp-fw/fw-esp32v3/README.md "Workspace shape"), not a
-  # repo-root workspace member, so its rust-cache workspace path points at the
-  # crate directory instead of the repo root.
+  # nothing else in CI compiles this crate.
   #
   # Shares the broad `firmware` filter with firmware-xtensa and
   # firmware-size, for the same reason both give: it is the link closure of
   # the device image, and a narrow lp-fw/fw-esp32v3 filter would stop
-  # rebuilding on shared-crate changes most likely to break it (this crate has
-  # no lp2025-internal dependencies yet, but that is expected to change).
+  # rebuilding on shared-crate changes most likely to break it — which since
+  # M3-P1 is the whole `lpa-server` / `fw-esp32-common` stack.
   #
   # Compile-only, like firmware-xtensa: hardware validation is manual.
   firmware-esp32v3:
@@ -404,13 +401,13 @@ jobs:
           default: true
           ldproxy: false
 
-      # `lp2025/lp-fw/fw-esp32v3 -> target`, not `lp2025 -> target`: this
-      # crate is its own workspace with its own target dir under the crate,
-      # unlike fw-esp32s3 (a root-workspace member sharing the repo's target/).
+      # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
+      # repo-root workspace member (M3-P1 folded it in) and writes into the
+      # shared root target/, so the cache key must be the repo root.
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025/lp-fw/fw-esp32v3 -> target
+          workspaces: lp2025 -> target
           cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -427,8 +424,9 @@ jobs:
       - name: Check esp32v3 image size
         run: cd lp2025 && just fw-esp32v3-size-check
 
-      # The lint gate for this crate. Nothing else in CI lints it (it is not
-      # even a root-workspace member, so `clippy-host` never sees it).
+      # The lint gate for this crate. Nothing else in CI lints it —
+      # `clippy-host` excludes it, because it cross-compiles for Xtensa under
+      # a different toolchain.
       - name: Clippy esp32v3 firmware
         run: cd lp2025 && just clippy-fw-esp32v3
 

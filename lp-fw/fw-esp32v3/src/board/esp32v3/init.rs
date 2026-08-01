@@ -1,0 +1,90 @@
+//! Classic ESP32 (LX6) board initialization.
+//!
+//! Ported from `fw-esp32s3/src/board/esp32s3/init.rs`. The shape is the S3's;
+//! the peripheral list is not:
+//!
+//! - **UART0 instead of `USB_DEVICE`.** This chip has no USB-Serial-JTAG
+//!   peripheral; the host link is UART0 through the board's CH340K bridge.
+//! - **No `Rwdt`.** fw-esp32s3 hands the RTC watchdog to its recovery
+//!   subsystem; this crate has no `lp-recovery` backend yet (see `Cargo.toml`),
+//!   and arming a watchdog with nothing feeding it would reset the board on a
+//!   timer. M7 adds both together, the way the S3 has them.
+//! - **No `RMT`.** WS281x output is M4.
+//!
+//! ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
+//! twice panics. It is the app path's **only** call to `esp_hal::init`.
+
+use esp_hal::clock::CpuClock;
+use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
+use esp_hal::uart::{Config as UartConfig, Uart};
+use esp_hal::{Blocking, uart::ConfigError};
+
+/// Initialize classic-ESP32 hardware.
+///
+/// Sets up the CPU clock and returns the runtime components the app layer
+/// needs: the software-interrupt control and timer group for the executor,
+/// UART0 for `serial::io_task`, and the FLASH peripheral for `flash_storage`.
+///
+/// The UART is returned in [`Blocking`] mode; `io_task` converts it with
+/// `into_async()`. Constructing it here rather than there is deliberate — see
+/// the baud-divisor note below, which has to happen before the first
+/// `esp_println!`.
+///
+/// Unlike the C6, the heap is **not** allocated here — `main.rs` owns it.
+pub fn init_board() -> (
+    SoftwareInterruptControl<'static>,
+    TimerGroup<'static, impl TimerGroupInstance>,
+    Result<Uart<'static, Blocking>, ConfigError>,
+    esp_hal::peripherals::FLASH<'static>,
+) {
+    // `esp_hal::init` disables the RTC watchdog (RWDT) and both TIMG
+    // watchdogs unconditionally (esp-hal 1.1.1 `lib.rs::init`). `CpuClock::max()`
+    // is 240 MHz on this chip, matching the S3's `init_board`; printed and
+    // measured timings assume the fast clock.
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(config);
+
+    let flash = peripherals.FLASH;
+
+    // ⚠️ Load-bearing twice over.
+    //
+    // 1. It is the server transport. UART0 through the CH340K bridge is this
+    //    chip's only host link — there is no USB-Serial-JTAG. `serial::io_task`
+    //    takes this binding, `into_async()`s it and splits RX/TX.
+    //
+    // 2. It programs the baud divisor that `esp-println` depends on but never
+    //    sets. `esp-println`'s `uart` feature writes UART0's TX FIFO directly;
+    //    the ROM leaves a divisor computed for its own pre-reclock clock tree,
+    //    and `esp_hal::init` above has just moved the CPU to 240 MHz, so until
+    //    something reprograms the divisor every `esp_println!` prints garbage
+    //    at any standard host baud. Constructing this `Uart` is what
+    //    reprograms it (experiment repo FINDINGS.md "C1", diagnosed on this
+    //    exact chip). Which is why this happens HERE and not in `io_task`:
+    //    the `[INIT]` lines `main.rs` prints on the way to spawning that task
+    //    would otherwise be unreadable.
+    //
+    // 115200 8N1 is `UartConfig::default()`. TX=GPIO1 / RX=GPIO3 are the
+    // classic devkit's UART0 bridge pins, and are the two GPIOs the DOM-Z-102
+    // board manifest reserves for exactly this reason.
+    //
+    // The error is returned rather than `expect`ed: a UART config failure
+    // costs the board its host link, not its boot, and a board that boots far
+    // enough to blink is more diagnosable than one that resets in a loop.
+    let uart0 = Uart::new(peripherals.UART0, UartConfig::default())
+        .map(|uart| uart.with_tx(peripherals.GPIO1).with_rx(peripherals.GPIO3));
+
+    // Set up software interrupt and timer for the Embassy runtime.
+    let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+
+    (sw_int, timg0, uart0, flash)
+}
+
+/// Start the Embassy runtime with the given timer and software interrupt.
+pub fn start_runtime(
+    timg0: TimerGroup<'static, impl TimerGroupInstance>,
+    sw_int: SoftwareInterruptControl<'static>,
+) {
+    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+}

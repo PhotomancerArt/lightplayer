@@ -1,42 +1,91 @@
-# Own workspace root, deliberately — NOT a member of the repo-root Cargo.toml.
+# Repo-root workspace member, excluded from `default-members` — exactly the
+# shape fw-esp32c6 and fw-esp32s3 take.
 #
-# fw-esp32s3's own README ("Workspace notes") says it IS a repo-root workspace
-# member excluded from `default-members`; this crate takes a different shape
-# on purpose. P1 has zero lp2025-internal path dependencies (no
-# `fw-esp32-common`, no `lp-recovery` — see `src/main.rs`), so there is
-# nothing here that needs the root workspace's `workspace.dependencies` or
-# `[patch.crates-io]` forks (naga, esp-storage, pp-rs, ser-write-json). Folding
-# this into the root `members` list would also require adding it to
-# `clippy-host`'s `--exclude` list in the justfile to keep `just check` green
-# (fw-esp32c6 and fw-esp32s3 both need that entry) — exactly the justfile edit
-# P1 was told to leave for P4. Standing alone avoids that coupling entirely and
-# needs no root Cargo.toml edit at all.
+# M2-P1 stood this crate up as its OWN workspace because it then had zero
+# lp2025-internal path dependencies, so nothing needed the root's
+# `workspace.dependencies` or its `[patch.crates-io]` forks. M3-P1 makes it a
+# real `fw-esp32-common` / `lpa-server` / `lpc-hardware` consumer, which is
+# precisely the condition that comment named for revisiting the decision:
+# path deps into the root workspace from outside it would resolve their own
+# copies of every shared crate and silently ignore the root `[patch]` table.
+# The cost is the one P1 wanted to defer — a `--exclude fw-esp32v3` entry in
+# the justfile's `clippy-host` — and it is now paid (see `justfile`).
 #
-# `[workspace]` here is load-bearing for worktrees, not just style: without it,
-# a git worktree checked out under `<repo>/.claude/worktrees/<name>/` makes
-# Cargo walk upward past this directory into the worktree's own root
-# Cargo.toml, which neither includes nor excludes this path —
-# "current package believes it's in a workspace when it's not". Same fix, same
-# reasoning, as the experiment repo's `fw/xt-runner-esp32/Cargo.toml`.
-#
-# If a later phase gives this crate real lp2025-internal dependencies (a
-# `fw-esp32-common` consumer, mirroring the S3), revisit whether folding it
-# into the root workspace (S3's shape) is worth the justfile coupling at that
-# point — not before.
-[workspace]
+# The build still runs from this directory (`cd lp-fw/fw-esp32v3 && cargo
+# build --profile release-esp32v3`), because `.cargo/config.toml` here is what
+# selects the Xtensa target, the linker flags and the espflash runner; cargo
+# reads `.cargo/config.toml` from the CWD upward, so invoking from the repo
+# root would build for the host. The `[profile.release-esp32v3]` definition
+# lives in the ROOT Cargo.toml next to `release-esp32s3` — profiles are only
+# honoured on the workspace root manifest.
 
 [package]
 name = "fw-esp32v3"
-version = "0.1.0"
-edition = "2024"
-license = "AGPL-3.0-or-later"
-rust-version = "1.90.0"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 build = "build.rs"
 description = "LightPlayer firmware for the classic ESP32 (Xtensa LX6, WROOM-32E v3)."
 
 [[bin]]
 name = "fw-esp32v3"
 path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = ["esp32", "server"]
+# Chip selection, mirroring fw-esp32s3's `esp32s3` feature: crates whose chip
+# feature is not named on their dependency line get it here, so there is one
+# place to change. `esp-rtos?/esp32` is a weak dependency feature — it must not
+# pull `esp-rtos` in on its own, because a bare `--no-default-features
+# --features esp32` build has neither the server nor the probe.
+esp32 = ["esp-backtrace/esp32", "esp-rtos?/esp32"]
+
+# The LightPlayer app: `LpServer` over the **UART0** transport (this chip has
+# no USB-Serial-JTAG peripheral — see `src/serial/`), backed by a littlefs
+# filesystem in the `lpfs` partition.
+#
+# Mirrors fw-esp32s3's feature of the same name, including its narrow
+# `lpa-server` node-gate list. See the dependency section for why each entry is
+# load-bearing.
+server = [
+    "fw-esp32-common/server",
+    "dep:embassy-executor",
+    "dep:embassy-futures",
+    "dep:embassy-sync",
+    "dep:embassy-time",
+    "dep:embedded-io-async",
+    "dep:embedded-storage",
+    "dep:esp-rtos",
+    "dep:esp-storage",
+    "dep:littlefs-rust",
+    "dep:lp-gfx-lpvm",
+    "dep:lpa-server",
+    "dep:lpc-hardware",
+    "dep:lpc-shared",
+    "dep:lpc-wire",
+    "dep:lpfs",
+    "dep:fw-core",
+    "dep:ser-write-json",
+]
+
+# M2-P3 RAM probe: boot with the radio stack linked AND initialised, print
+# heap deltas at each stage. Build:
+#   cargo build --profile release-esp32v3 --no-default-features \
+#       --features esp32,radio_ram_probe
+# (touch src/main.rs first if flipping features — cargo does not always
+# track feature-driven cfg reliably here; roadmap stale-binary lesson.)
+#
+# The probe REPLACES the entrypoint (`main.rs` gates the server boot on
+# `not(feature = "radio_ram_probe")`), so `--no-default-features` is what keeps
+# the probe image from also linking the whole server stack for code it never
+# reaches. Enabling both still compiles — that is the anti-rot property the
+# clippy recipe leans on — it is just a pointlessly large image.
+radio_ram_probe = ["dep:esp-radio", "dep:esp-rtos", "esp-rtos/esp-radio", "esp-rtos/esp-alloc"]
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
@@ -54,60 +103,105 @@ esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
 # never programs the baud divisor itself (esp-rs/esp-hal; confirmed on this
 # exact chip, experiment repo FINDINGS.md "C1"). After `esp_hal::init()`
 # reclocks to `CpuClock::max()`, the ROM's divisor no longer matches, and
-# output goes to garbage at every standard baud. The fix `main.rs` applies is
-# the one FINDINGS.md verified: construct an `esp_hal::uart::Uart` on UART0
-# once at boot (115200 8N1) and keep it alive — esp-println's raw FIFO writes
-# then ride out at the divisor that construction programmed. The S3 never hits
-# this because USB-Serial-JTAG has no baud rate to program.
+# output goes to garbage at every standard baud. The divisor is programmed by
+# the `esp_hal::uart::Uart` this crate constructs on UART0 at boot — which as
+# of M3-P1 is not a keep-alive hack but the actual server transport (see
+# `src/serial/`). The S3 never hits this because USB-Serial-JTAG has no baud
+# rate to program.
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32", "uart", "log-04"] }
 
 # Fault/exception handling. fw-esp32s3 depends on this with the same
 # `["println"]` feature set and lets the chip feature arrive indirectly (see
 # its `[features] esp32s3 = ["esp-backtrace/esp32s3", ...]`); mirrored here
-# via the `esp32` default feature below rather than inline, for the same
+# via the `esp32` default feature above rather than inline, for the same
 # reason: naming the chip feature in both places would be easy to let drift.
 # Not directly called from `src/main.rs` — it hooks the exception vector for
 # hardware faults (illegal instruction, access violation) that never reach
 # Rust's `#[panic_handler]`, which only catches explicit `panic!`.
 esp-backtrace = { version = "0.19.0", features = ["println"] }
 
+log = { workspace = true, default-features = false }
+
+# ⚠️ NOT a dependency yet, deliberately: `lp-recovery` + an RTC-backed
+# `RecoveryBackend`. fw-esp32s3 pairs its abort-tier posture with the ledger;
+# this crate keeps the print-and-reset panic handler for now. The server loop
+# calls `lp_recovery::snapshot()` / `mark_boot_complete()` unconditionally, but
+# both degrade to no-ops with no global installed (see
+# `lp-base/lp-recovery/src/recovery.rs::with_global`), so the boot path
+# compiles and runs without one. Porting the backend needs classic-specific
+# RTC-fast-RAM and `SocResetReason` constants — M7 work, not P1's.
+
+# Chip-generic firmware layer: logger, time provider, output provider, and —
+# behind `server` — the server loop, transport, littlefs `LpFs`, project
+# auto-load, and hardware-manifest loader. Consumed, never reimplemented; this
+# crate must stay free of chip code (ADR 2026-07-29-per-chip-fw-toolchains).
+fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
+
+# MessageRouter + the SerialIo trait, for `serial::io_task`.
+fw-core = { path = "../fw-core", default-features = false, optional = true }
+
+# Async runtime for `serial::io_task`. Mirrors fw-esp32s3's set.
+embassy-executor = { version = "0.10.0", optional = true }
+embassy-time = { version = "0.5.0", optional = true }
+embassy-sync = { version = "0.8.0", optional = true }
+embassy-futures = { version = "0.1", optional = true }
+embedded-io-async = { version = "0.6", optional = true }
+esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"], optional = true }
+
+# Flash-backed filesystem. The lpfs partition is located by label at runtime
+# (see src/flash_storage.rs), not transcribed from partitions.csv.
+embedded-storage = { version = "0.3", optional = true }
+# `critical-section` is esp-storage's own default and is added back
+# deliberately: it wraps every flash operation so an interrupt cannot run from
+# a disabled cache mid-write. `default-features = false` without it compiles
+# fine and corrupts silently — exactly the trap the S3 hit twice.
+esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32", "panic-unaligned-buffer"], optional = true }
+littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
+
+# io_task's wire-serialization path plus the boot-time `ServerHello`.
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
+ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
+
+# ⚠️ Two of eight node gates, the same pair fw-esp32s3 lists. `node-fixture` is
+# not optional alongside `node-shader`: `OutputNode::consume` requires a
+# *control* product, `ShaderNode` produces a *visual* one, and `FixtureNode` is
+# the only runtime that converts between them.
+#
+# `panic-recovery` is absent on purpose: this chip is abort tier
+# (ADR 2026-07-29-per-chip-fw-toolchains), and that feature pulls `unwinding`,
+# which is the C6's tier and has no Xtensa backend.
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
+    "node-shader",
+    "node-fixture",
+], optional = true }
+
+# The graphics backend. `lp-gfx-lpvm` selects the LPVM engine by
+# `target_arch`, so an `xtensa-esp32-none-elf` build takes `lpvm-native` with
+# `isa-xt` and nothing else — the same line the S3 carries, no ISA feature to
+# get wrong.
+#
+# ⚠️ P1 SCOPE: linking this makes a shader COMPILE on device; it does not make
+# one EXECUTE. The classic chip's heap has no I-bus view, so JIT code must be
+# installed into the fixed SRAM1 region (`lpvm_native::codemem_esp32`) rather
+# than executed in place. That wiring is M3-P2. Until it lands, pushing a
+# shader to this board takes the in-place path and faults. See the comment at
+# the `TargetLpvmGraphics::new` call site in `src/main.rs`.
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
+
+# Hardware registry/manifest, the filesystem traits the server is handed, and
+# the `OutputProvider` trait object `main.rs` builds.
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
+lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }
+lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
+
 # The RAM probe's radio cohort (M2-P3 of the classic bring-up roadmap):
 # versions from the experiment repo's led-lab-esp32 `test_stress`, the set
 # proven to boot the radio on classic silicon under the esp toolchain
 # (esp-rtos 0.2 does NOT work — conflicting esp-sync; findings.md §3).
-# Optional so the demo build stays radio-free: the radio blob costs ~500 KB
-# of flash and ~10s of KB of DRAM statics, and M2-P3 exists to MEASURE that,
-# not to ship it.
+# Optional so the app build stays radio-free: the radio blob costs ~390 KB of
+# flash and ~44 KB of heap on this chip (measured, M2-P3), and that phase
+# existed to MEASURE it, not to ship it.
 [dependencies.esp-radio]
 version = "0.18.0"
 optional = true
 features = ["esp32", "wifi", "esp-now", "esp-alloc", "unstable"]
-
-[dependencies.esp-rtos]
-version = "0.3.0"
-optional = true
-features = ["esp32", "esp-radio", "esp-alloc"]
-
-[features]
-default = ["esp32"]
-esp32 = ["esp-backtrace/esp32"]
-# M2-P3 RAM probe: boot with the radio stack linked AND initialised, print
-# heap deltas at each stage. Build:
-#   cargo build --profile release-esp32v3 --features radio_ram_probe
-# (touch src/main.rs first if flipping features — cargo does not always
-# track feature-driven cfg reliably here; roadmap stale-binary lesson.)
-radio_ram_probe = ["dep:esp-radio", "dep:esp-rtos"]
-
-[profile.release-esp32v3]
-inherits = "release"
-# Mirrors fw-esp32s3's `release-esp32s3` profile verbatim, INCLUDING its
-# choice of `opt-level = "s"` over the workspace default `"z"` — per the task:
-# "copy the S3's since it's the timing-safe choice". fw-esp32s3's own comment
-# for this line explains why: at `"z"` the ws281x RX drain path missed a
-# 30 µs deadline on cold-first-frame codegen (measured on silicon). This
-# crate has no timing-critical driver yet (P1 is boot-to-hello only), but
-# there is no evidence yet that classic ESP32 (LX6, slower than the S3's LX7)
-# is safe at `"z"` either, so inherit the already-validated choice rather than
-# assume the tighter one is fine. Revisit with real timing data once M4-class
-# WS281x output lands on this chip.
-opt-level = "s"
