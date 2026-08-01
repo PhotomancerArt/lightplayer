@@ -149,6 +149,37 @@ shim rests on, so an average is not enough — an average cannot distinguish
 - `complete_frames()` — `frames - guard_trips`, the frames that went out whole,
   with the same lower-bound caveat as `guard_trips` (below).
 
+The lag counters only describe what a refill cost **once it started**. The other
+half of the same deadline is the time the `tx_thr_event` spent waiting, and the
+two point at different fixes — entry delay is interrupt architecture (priority,
+masking, a radio driver's handler); refill lag is the refill loop. So the driver
+also samples, at the top of each channel's service:
+
+```
+entry_delay_words = (read_pos(ch) − threshold_boundary(ch)) mod ram_words(ch)
+```
+
+— the words the transmitter got through before the handler arrived, in the same
+1.25 µs units. It is free: it reuses the `read_pos` the half selection needs, and
+the boundary is a value the driver itself armed. Both moduli matter, because a
+service late enough for the pointer to have wrapped reads a `read_pos`
+numerically *below* the boundary, and because the `tx_lim == ram_words`
+threshold fires at word 0 rather than at word `ram_words`
+(`tests/entry_delay.rs` pins both).
+
+- `entry_delay_max` — the worst service of the run, in words.
+  `entry_delay_max + refill_lag_max` is an upper bound on the worst total
+  occupancy of the one-half deadline.
+- `entry_delay_hist` — the same `LAG_BUCKETS` edges as `lag_hist`, so the two
+  print and read side by side. `entry_delay_over_half()` is the overflow bucket:
+  services that had already lost the whole deadline before writing a word.
+  `entry_delay_count()` sums the histogram.
+
+With several channels flagged in one interrupt snapshot, the entry delay of the
+higher-numbered ones includes every earlier channel's refill — which is the cost
+`on_interrupt`'s index-order service actually imposes, now measured rather than
+inferred.
+
 `record_lag` deliberately keeps the running maximum with a load/compare/store
 rather than `fetch_max`, and the interrupt handler is the only writer, so
 nothing is lost. This began as a workaround — `AtomicI32::fetch_max` would not
