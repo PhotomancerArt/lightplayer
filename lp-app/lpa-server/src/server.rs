@@ -562,6 +562,12 @@ impl LpServer {
         }
     }
 
+    /// The active device-level safe-mode output ceiling, for heartbeat
+    /// reporting (clients surface the safe-mode state and its exit).
+    pub fn safe_output_clamp(&self) -> Option<u8> {
+        self.safe_output_clamp
+    }
+
     /// Set the last frame processing time (called by server loop)
     ///
     /// # Arguments
