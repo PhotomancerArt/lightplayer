@@ -42,20 +42,28 @@ export CARGO_TARGET_DIR="$PWD/target"
 # and staleness is not harmless here — on esp Rust 1.88 `lpc-model` genuinely
 # fails to compile (70x E0716 from the Slotted derive's const-promotion of a
 # temporary), which is what blocked the firmware crates. Fail loudly instead.
-# The native-f32 builtin family is **not** built in by default, and that is a
-# blocker rather than a preference: `lps-builtins/float-f32` does not currently
-# compile for Xtensa at all. The esp Rust backend fails with
-#   rustc-LLVM ERROR: Cannot select: XtensaISD::PCREL_WRAPPER
-#                     TargetConstantPool <[2 x float] [0.0, -1.0]>
-# at every optimization level, on a `[f32; 2]` gradient table in the
-# generative-noise builtins. Full record and candidate fixes:
+# The native-f32 builtin family stays **opt-in**, for a different reason than
+# when this gate was introduced.
+#
+# It was originally opt-in because `lps-builtins/float-f32` did not compile for
+# Xtensa at all — the backend cannot select a float constant pool. That is
+# fixed on our side (see the workaround and its bit-equivalence test in
+# lps-builtins' rgb2hsv_f32.rs); the image now links with the family in.
 #   docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
 #
-# Passing the feature unconditionally would take the *whole* Xtensa filetest
-# suite down with it (`scripts/filetests.sh` builds this image before running
-# xtn/xtlpn), so it is opt-in until the defect is resolved. The crate-level
-# feature is already wired (`lps-builtins-xt-app/Cargo.toml`), so closing this
-# is one environment variable and then one default flip.
+# What it runs into instead is **capacity**. link.ld gives .text 112 KiB of the
+# emulator's 128 KiB code region; with float-f32 .text is 113,757 B, so the
+# image links with ~931 bytes to spare — and `rt_emu::xt_image` places compiled
+# shader code in exactly that gap. Every filetest whose shader exceeds it fails
+# to link: the xtn.q32 suite drops from 849/849 files to 522/849. Measured, not
+# predicted; the two images are 66,300 B and 113,757 B of .text.
+#   docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md
+#
+# This is load-bearing beyond the f32 path: scripts/filetests.sh builds this
+# image before running the xtn/xtlpn targets, so anything wrong here takes the
+# whole Xtensa filetest suite down with it. Hence opt-in until the region/split
+# question is decided — `LP_XT_BUILTINS_F32=1` requests the family for the
+# host-execution work that needs it (see lpvm-native's xt_pipeline_f32.rs).
 F32_REQUESTED="${LP_XT_BUILTINS_F32:-0}"
 if [[ "$F32_REQUESTED" == "1" ]]; then
   BUILD_CMD=(cargo build --release -p lps-builtins-xt-app --features float-f32)

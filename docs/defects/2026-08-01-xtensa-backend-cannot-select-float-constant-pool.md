@@ -1,10 +1,12 @@
 ---
-status: open
+status: open           # the backend is still broken; our source avoids it (see "The workaround")
 found: 2026-08-01      # how: build (M7 P4, flipping the Xtensa builtins image to float-f32)
+worked-around: 2026-08-01   # rgb2hsv_f32.rs; f32 image and filetests unblocked
 area: lp-xt/lps-builtins-xt-app, lp-shader/lps-builtins, esp Rust toolchain
 class: upstream-toolchain-limitation
 related:
   - docs/design/float.md
+  - docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md
 ---
 # The esp Xtensa backend cannot select a float constant pool, so `lps-builtins/float-f32` does not compile for Xtensa
 
@@ -30,57 +32,107 @@ same way, only earlier — in `lps-builtins` (lib) itself rather than in the
 final binary. So the failure is the backend's, at any optimization level, and
 is not confined to the image crate.
 
-**Trigger** — `lps-builtins/src/builtins/lpfn/generative/snoise/snoise2_f32.rs`
-has an 8-entry gradient lookup table written as a `match` returning
-`[f32; 2]`. LLVM promotes the arms to constant-pool entries, and the Xtensa
-backend has no selection rule for `PCREL_WRAPPER` over a `TargetConstantPool`
-node — it can materialize the *address* of ordinary data, but not of a
-constant-pool entry. The reported constant, `[0.0, -1.0]`, is that table's
-arm 3. Other `[f32; N]` tables in the generative-noise family
-(`worley2/3`, `gnoise3_tile`, `psrdnoise2/3`, `snoise3`, `rgb2hsv`) are
-plausible further instances; only the first to be selected is reported.
+**Trigger** — a *constant aggregate* of floats. The backend can materialize
+the address of ordinary data but has no selection rule for `PCREL_WRAPPER`
+over a `TargetConstantPool` node, so any `[N x float]` constant LLVM chooses to
+put in the constant pool is fatal. Only the first such constant to be selected
+is reported, which made the trigger easy to misattribute (see below).
 
 **rv32 is unaffected** — `scripts/build-builtins.sh` has passed
 `--features float-f32` since M5 and builds the same source cleanly. This is
 specific to the Xtensa target's backend.
 
 **It is also load-bearing for the Q32 path.** `scripts/filetests.sh` builds
-this image before running the `xtn.*` / `xtlpn.*` targets, so a script that
-passes `--features float-f32` unconditionally takes the entire Xtensa filetest
-suite down with it. The feature is therefore **opt-in** — the crate wiring is
-in place and `LP_XT_BUILTINS_F32=1` requests it — rather than a default that
-would trade a blocked f32 path for a broken fixed-point one.
+this image before running the `xtn.*` / `xtlpn.*` targets, so a compile failure
+here takes the entire Xtensa filetest suite down with it — not just the f32
+half.
 
-## Consequence
+## What was actually wrong (2026-08-01)
 
-The Xtensa builtins image **cannot currently carry M5's f32 symbols**. M7's
-hardware-float lowering inlines the single-instruction family but routes
-divide, sqrt, the rounding family, min/max, the float→int conversions and
-every transcendental to those symbols (M7 D4), so on the host emulation path
-those calls have nothing to resolve against.
+The first draft of this record named
+`lps-builtins/src/builtins/lpfn/generative/snoise/snoise2_f32.rs`'s 8-entry
+`[f32; 2]` gradient LUT as the trigger, inferring it from the reported
+constant `[0.0, -1.0]` — which happens to be that table's arm 3. **That was
+wrong.** The compiler names the containing function, and it is
+`__lp_lpfn_rgb2hsv_f32`:
 
-What this does *not* block: everything M7 P3 emits inline — `fadd`/`fsub`/
-`fmul`, the sign-bit ops, all six compares, float select, `itof`, float
-load/store and the `wfr`/`rfr` boundary transfers. Those are the majority of
-the emitted subset and are covered end to end by
-`lp-shader/lpvm-native/tests/xt_pipeline_f32.rs`, whose one builtin-calling
-case is marked `#[ignore]` pointing here.
+```rust
+// lps-builtins/src/builtins/lpfn/color/space/rgb2hsv_f32.rs
+let p: [f32; 4] = if g < b {
+    [b, g, -1.0, 2.0 / 3.0]
+} else {
+    [g, b, 0.0, -1.0 / 3.0]
+};
+```
 
-It is also a live risk for **M7 P5**: `fw-esp32s3` naming
-`lps-builtins/float-f32` will hit the same wall at firmware build time.
+The two constant lanes of Hocevar's `p` term are selected together, and LLVM
+materializes the pair as `[2 x float] [0.0, -1.0]` — the same bytes the
+snoise2 arm would have produced, from an entirely different function.
 
-## Candidate resolutions (not chosen here — out of M7 P4's scope)
+**Exactly one site needed changing.** With `rgb2hsv` fixed the image builds,
+and every other suspect this record named — `snoise2`'s and `snoise3`'s
+gradient LUTs, `worley2/3`'s offset tables, `gnoise3_tile`'s `CORNERS`,
+`psrdnoise2/3` — compiles unchanged and is present in the built ELF. The
+pattern that trips the backend is narrower than "a float lookup table": it is a
+*fully constant* aggregate that survives to instruction selection. A LUT
+indexed by a runtime value becomes an ordinary global; a `match` whose arms are
+runtime-scaled (`worley`'s `[diag, diag, 0.0]`) is not a constant aggregate at
+all.
 
-1. **Rewrite the affected LUTs** so LLVM does not form a constant pool — e.g.
-   return a tuple, index a `const` array through a `static`, or compute the
-   gradient arithmetically. Cheapest, but it is a workaround living in shared
-   builtin source with no local explanation, and it must be rediscovered for
-   every new `[f32; N]` table.
-2. **Report upstream** to `esp-rs/rust` and pin the toolchain once fixed.
-3. **Split the f32 builtin feature** so the generative-noise family is
-   separately gated, letting Xtensa link the arithmetic builtins M7 D4
-   actually needs while the noise family stays rv32/host-only.
+## The workaround (shipped)
 
-(3) is the closest fit to what M7 needs — the routed-to-builtin list in D4 is
-arithmetic, not noise — but it changes a feature contract M5 owns, so it is a
-decision for Yona rather than for this phase.
+`rgb2hsv_f32.rs` selects the two constant lanes as **integer bit patterns** and
+bitcasts afterwards, so no float constant aggregate is ever formed:
+
+```rust
+const P_Z_IF: u32 = (-1.0f32).to_bits();      // const-evaluated from the
+const P_W_IF: u32 = (2.0f32 / 3.0).to_bits(); // original literals
+...
+f32::from_bits(if g_lt_b { P_Z_IF } else { P_Z_ELSE })
+```
+
+Chosen over computing the gradient arithmetically because it is *provably*
+bit-identical rather than argued: the constants are the literals, put through
+`f32::to_bits` at compile time. Sign-of-zero is the specific hazard an
+arithmetic rewrite would have introduced (`0.0 * -1.0` is `-0.0`, and the
+literal table's zero lane is `+0.0` on both sides).
+
+The site carries a comment naming this file and stating it is an upstream
+limitation, not a preference, with a slot for the upstream issue URL. The
+pre-workaround form is kept verbatim in the test module as an oracle:
+`hocevar_p_is_bit_identical_to_the_literal_form` compares the two lane-by-lane
+over a grid that crosses `g == b`, plus `-0.0` and NaN. These builtins are
+shared with rv32 and wasm, where the original compiles fine, so drift would be
+a silent behaviour change on targets that never had the problem.
+
+`LP_XT_BUILTINS_F32=1 scripts/build-builtins-xt.sh` now succeeds — the thing
+this defect blocked — and
+`lp-shader/lpvm-native/tests/xt_pipeline_f32.rs`'s
+`a_builtin_routed_float_op_resolves_and_runs` is no longer `#[ignore]`d: it
+links the shader against the builtins base image and resolves `ffloor` to the
+real `__lp_lpir_ffloor_f32` on the M6 emulator.
+
+**The feature is still not the default, for an unrelated reason.** Making it
+unconditional was attempted and reverted on measurement: with the family in,
+the image's `.text` is 113,757 B against link.ld's 112 KiB, leaving 931 bytes
+of the code region for shader code, and the xtn.q32 filetest suite drops from
+849/849 files to 522/849 on link failures. That is a separate defect —
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`
+— and fixing this one is what exposed it.
+
+## Why this stays open
+
+The backend limitation is untouched. A new `[f32; N]` constant aggregate
+anywhere in `lps-builtins` will fail the same way, with the same one-function-
+at-a-time reporting, and **M7 P5's `fw-esp32s3` naming `lps-builtins/float-f32`
+is exposed to it**. It closes when the esp fork can select
+`PCREL_WRAPPER(TargetConstantPool)` and the toolchain is pinned past that.
+
+## Remaining resolutions
+
+1. **Report upstream** to `esp-rs/rust` and pin the toolchain once fixed. Not
+   yet filed; the comment in `rgb2hsv_f32.rs` and the one in
+   `build-builtins-xt.sh` are shaped for the URL to be dropped in.
+2. **Split the f32 builtin feature** so the generative-noise family is
+   separately gated. No longer needed — this was the fallback for "Xtensa
+   cannot have the noise family at all", and it can.

@@ -32,6 +32,14 @@
 //! two-instruction preamble that does what P5's board init will do.
 //! `unarmed_float_code_faults_with_a_coprocessor_trap` is the negative
 //! control: the same code without the preamble must take EXCCAUSE 32.
+//!
+//! # Two link paths
+//!
+//! Most tests here link only the module's own functions ([`link_blob`]) —
+//! everything M7 P3 emits inline needs nothing else. The one case that calls a
+//! routed builtin ([`run_f32_with_builtins`]) links against the Xtensa builtins
+//! base image instead, and skips loudly when that cross-target artifact has not
+//! been built.
 
 use lp_collection::VecMap;
 use lpir::builder::FunctionBuilder;
@@ -41,7 +49,8 @@ use lpvm_native::compile::compile_module;
 use lpvm_native::isa::IsaTarget;
 use lpvm_native::native_options::NativeCompileOptions;
 
-use lp_xt_emu::{Emulator, RunOutcome};
+use lp_xt_elf::XtensaElf;
+use lp_xt_emu::{CallOutcome, Emulator, RunOutcome};
 use lp_xt_inst::{Inst, NullaryNarrowOp, Reg, SpecialReg, SrOp, encode};
 
 /// EXCCAUSE 32 — `Coprocessor0Disabled`, what an FP instruction takes when
@@ -153,6 +162,157 @@ fn run_f32(ir: &LpirModule, sig: &LpsModuleSig, entry_name: &str, args: &[u32]) 
     let mut emu = Emulator::new();
     let (code, entry_off) = link_blob(ir, sig, entry_name, FloatMode::F32, true, &emu);
     emu.run_with_args(&code, entry_off, args)
+}
+
+/// The Xtensa builtins base image **carrying the f32 family**, or `None` with a
+/// loud note.
+///
+/// Two ways to come up empty, both skips rather than failures:
+///
+/// - the image has not been built at all — a gitignored cross-target artifact
+///   (`scripts/build-builtins-xt.sh`, esp toolchain), the same contract
+///   `xt_builtins_image.rs` uses;
+/// - it was built **without** `float-f32`, which is the default. The family is
+///   opt-in (`LP_XT_BUILTINS_F32=1`) because with it in, `.text` fills the
+///   emulator's 112 KiB code region to within ~931 bytes and compiled shader
+///   code no longer fits after it — see
+///   `docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`.
+///   Failing here instead would turn one blocked capability into a red suite.
+fn builtins_image_with_f32() -> Option<Vec<u8>> {
+    let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../lp-xt/fixtures/elf/lps-builtins-xt-app.elf");
+    let Ok(bytes) = std::fs::read(&p) else {
+        eprintln!(
+            "SKIP: {} not found — run scripts/build-builtins-xt.sh (esp toolchain) first",
+            p.display()
+        );
+        return None;
+    };
+    let has_f32 = {
+        let elf = XtensaElf::parse(&bytes).expect("builtins image parses as Xtensa ELF32");
+        elf.symbol("__lp_lpir_ffloor_f32").is_some()
+    };
+    if !has_f32 {
+        eprintln!(
+            "SKIP: {} carries no native-f32 builtins — rebuild with \
+             LP_XT_BUILTINS_F32=1 scripts/build-builtins-xt.sh",
+            p.display()
+        );
+        return None;
+    }
+    Some(bytes)
+}
+
+/// Compile in `FloatMode::F32`, link against the **builtins base image**, and
+/// run with the FPU armed.
+///
+/// [`run_f32`] links only the module's own functions and loads the blob at the
+/// code region's base. That is enough for everything M7 P3 emits inline, but a
+/// `sym_call` into `__lp_lpir_*_f32` (M7 D4) needs the builtins image resident
+/// *and* its symbols in the relocation map — and the image already occupies the
+/// base of that region, so the shader has to move.
+///
+/// The layout is `rt_emu::xt_image`'s: image `.text` first, shader code
+/// 4-aligned after it, below the image's data segments. It is hand-rolled here
+/// rather than calling `build_xt_image` because that sits behind the `emu`
+/// feature, and the other tests in this file run at *default* features.
+fn run_f32_with_builtins(
+    ir: &LpirModule,
+    sig: &LpsModuleSig,
+    entry_name: &str,
+    args: &[u32],
+    image: &[u8],
+) -> RunOutcome {
+    assert!(
+        args.len() <= 5,
+        "the arming preamble clobbers the sixth argument register"
+    );
+    let mut emu = Emulator::new();
+    let elf = XtensaElf::parse(image).expect("builtins image parses as Xtensa ELF32");
+    elf.load_into(&mut emu)
+        .expect("image loads into emulator memory");
+
+    // Executable segments are addressed through the I-bus view and data
+    // segments through the D-bus one (lp-xt/lps-builtins-xt-app/link.ld), so
+    // the split is read off the image rather than hardcoded.
+    let ibus_base = emu.profile.code_ibus_base();
+    let alias = emu.profile.alias;
+    let mut text_end = ibus_base;
+    let mut data_start = u32::MAX;
+    for seg in elf.segments().expect("image segments decode") {
+        let end = seg.vaddr + seg.memsz;
+        if seg.vaddr >= ibus_base {
+            text_end = text_end.max(end);
+        } else {
+            data_start = data_start.min(alias.dbus_to_ibus(seg.vaddr));
+        }
+    }
+    let shader_base = text_end.next_multiple_of(4);
+
+    let opts = NativeCompileOptions {
+        float_mode: FloatMode::F32,
+        fuel: false,
+        ..Default::default()
+    };
+    let module = compile_module(ir, sig, FloatMode::F32, opts, IsaTarget::Xtensa)
+        .expect("xt f32 compile should succeed");
+
+    // Arming preamble, then the entry function, then everything else. The
+    // preamble is a multiple of 4 bytes long, so the entry's ENTRY is the next
+    // instruction executed and no jump is needed.
+    let funcs: Vec<_> = module.functions.iter().collect();
+    let entry_idx = funcs
+        .iter()
+        .position(|f| f.name == entry_name)
+        .expect("entry function exists");
+    let mut order: Vec<usize> = (0..funcs.len()).collect();
+    order.sort_by_key(|&i| i != entry_idx);
+
+    // Execution starts at the preamble, not at the entry function — entering at
+    // the entry skips the arming and the first FP instruction takes EXCCAUSE 32.
+    let mut code = arm_fpu_preamble();
+    let entry = shader_base;
+    let mut symbols: std::collections::BTreeMap<String, u32> = elf.symbols().into_iter().collect();
+    let mut func_addrs = vec![0u32; funcs.len()];
+    for &i in &order {
+        let at = shader_base + code.len() as u32;
+        func_addrs[i] = at;
+        symbols.insert(funcs[i].name.clone(), at);
+        code.extend_from_slice(&funcs[i].code);
+        while code.len() % 4 != 0 {
+            code.push(0);
+        }
+    }
+    assert!(
+        shader_base + code.len() as u32 <= data_start,
+        "shader code overruns the builtins image's data segments"
+    );
+
+    for (fi, f) in funcs.iter().enumerate() {
+        for reloc in &f.relocs {
+            assert_eq!(
+                reloc.r_type,
+                IsaTarget::Xtensa.call_reloc_type(),
+                "unexpected reloc type"
+            );
+            let target = *symbols.get(&reloc.symbol).unwrap_or_else(|| {
+                panic!(
+                    "unresolved symbol {} — not a builtin in the base image nor a \
+                     function in this module",
+                    reloc.symbol
+                )
+            });
+            let slot = (func_addrs[fi] - shader_base) as usize + reloc.offset;
+            code[slot..slot + 4].copy_from_slice(&target.to_le_bytes());
+        }
+    }
+
+    emu.mem.load_bytes(shader_base, &code);
+    let mut tracer = lp_xt_emu::NoopTracer;
+    match emu.run_loaded_with_args(entry, args, &mut tracer, None) {
+        CallOutcome::Ok { lo, .. } => RunOutcome::Ok(lo),
+        CallOutcome::Trap(t) => RunOutcome::Trap(t),
+    }
 }
 
 fn expect_ok(out: RunOutcome) -> u32 {
@@ -1017,30 +1177,45 @@ fn unarmed_float_code_faults_with_a_coprocessor_trap() {
 // Builtin routing (M7 D4)
 // ---------------------------------------------------------------------------
 
-/// **Blocked on an upstream toolchain limitation** — see
-/// `docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md`.
-///
 /// M7 D4 routes the non-inlinable float operations (divide, sqrt, the rounding
 /// family, min/max, float→int, every transcendental) to M5's `_f32` builtins
 /// via `sym_call`. Resolving those on the host emulation path needs
-/// `lp-xt/lps-builtins-xt-app` built with `float-f32` — and that build fails in
-/// the esp Rust backend, which cannot select a float constant pool, at any
-/// optimization level. The image therefore carries none of the f32 family yet.
+/// `lp-xt/lps-builtins-xt-app` built with `float-f32`.
 ///
-/// The wiring is done (`Cargo.toml`, and `scripts/build-builtins-xt.sh` behind
-/// `LP_XT_BUILTINS_F32=1`); only the build is blocked. Un-ignore this, and
-/// make the feature that script's default, when the defect is resolved.
+/// This was `#[ignore]`d while that build failed outright in the esp Rust
+/// backend, which cannot select a float constant pool
+/// (`docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md`
+/// — still open upstream, worked around in our source). It now runs, but only
+/// against an image built with `LP_XT_BUILTINS_F32=1`: the family is still
+/// opt-in, on capacity grounds rather than compile grounds
+/// (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`).
+/// A skip is therefore the honest default — see [`builtins_image_with_f32`].
+///
 /// `ffloor` is deliberately chosen over `fdiv`/`fsqrt`: it reaches no
 /// `div0.s`/`const.s` estimate helper, so it does not additionally depend on
 /// M6-P6's unresolved policy fields.
 #[test]
-#[ignore = "blocked: lps-builtins/float-f32 does not compile for Xtensa (see docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md)"]
 fn a_builtin_routed_float_op_resolves_and_runs() {
-    let r = run_float_binop(
-        |fb, x, _y, out| fb.push(LpirOp::Ffloor { dst: out, src: x }),
-        3.75,
-        0.0,
-    );
+    let Some(image) = builtins_image_with_f32() else {
+        return;
+    };
+
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32, IrType::F32]);
+    let x = fb.add_param(IrType::F32);
+    let _y = fb.add_param(IrType::F32);
+    let out = fb.alloc_vreg(IrType::F32);
+    fb.push(LpirOp::Ffloor { dst: out, src: x });
+    fb.push_return(&[out]);
+    let ir = one_function_module(fb.finish());
+    let sig = one_function_sig(vec![float_param("a"), float_param("b")], LpsType::Float);
+
+    let r = expect_ok(run_f32_with_builtins(
+        &ir,
+        &sig,
+        "f",
+        &[0, bits(3.75), bits(0.0)],
+        &image,
+    ));
     assert_eq!(f32::from_bits(r), 3.0);
 }
 
