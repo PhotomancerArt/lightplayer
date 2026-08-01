@@ -92,6 +92,23 @@ pub const fn bool_json(value: bool) -> &'static str {
     if value { "true" } else { "false" }
 }
 
+/// Const string equality, for parsing `env!` facts (e.g. `LP_BUILD_DIRTY`,
+/// which build scripts emit as `"true"`/`"false"`) at compile time.
+pub const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 /// A feature-list fragment: the quoted wire name followed by a comma when
 /// `enabled`, empty otherwise. Fragments concatenate into a JSON array body;
 /// [`blank_trailing_comma`] handles the trailing comma.
@@ -242,6 +259,11 @@ macro_rules! lp_embed_manifest_core {
 
         /// The embedded manifest core JSON (delimiters stripped). Slices the
         /// embedded static so the JSON bytes exist once in the artifact.
+        #[allow(
+            dead_code,
+            reason = "the ServerHello projection (M4) reads this; until then \
+                      the #[used] blob static is the consumer"
+        )]
         pub fn manifest_core_json() -> &'static str {
             let begin = $crate::manifest::MANIFEST_BLOB_BEGIN.len();
             let end = __lp_manifest_core::BLOB_BYTES.len()
@@ -403,6 +425,15 @@ mod tests {
         // Truncated artifact: BEGIN present, END missing.
         let cut = &artifact[..artifact.len() - 300];
         assert_eq!(find_manifest_core(cut), None);
+    }
+
+    /// The delimiter byte forms are pinned: `scripts/extract-fw-manifest.mjs`
+    /// mirrors them (dependency-free CI extraction). Change these only with
+    /// that script, in the same commit.
+    #[test]
+    fn delimiters_are_pinned() {
+        assert_eq!(MANIFEST_BLOB_BEGIN, "\u{1}LP-FW-MANIFEST-BEGIN-v1\u{2}");
+        assert_eq!(MANIFEST_BLOB_END, "\u{3}LP-FW-MANIFEST-END-v1\u{4}");
     }
 
     /// Const number formatting: digits then JSON whitespace.
