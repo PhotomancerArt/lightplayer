@@ -39,7 +39,7 @@ pub(crate) mod play_mode_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod playlist_panel_stories;
 
-pub use module_face::{ModuleChildCard, ModuleFace};
+pub use module_face::ModuleFace;
 pub use module_panel::{ModulePanel, NestedPanelGroup};
 pub use module_panel_control::ModulePanelControl;
 pub use panel_gesture::PanelGesture;

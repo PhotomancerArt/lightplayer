@@ -5,18 +5,18 @@
 //! in the node area read better or worse?
 //!
 //! The card chrome is the real [`NodePane`] — header, kind label, collapse
-//! — so what is being judged is the face inside a genuine workspace card,
-//! not a mock frame.
+//! — and the children below it are real sibling cards on the real
+//! [`crate::app::node::NodeChildren`] rail, so what is being judged is the
+//! face inside a genuine workspace column, not a mock frame.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiNodeFace;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::NodePane;
 
 use super::module_fixtures::{
-    HELD, PLASMA_1_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face, module_node_view, plasma_face,
-    plasma_one_panel, root_face, root_module_node_view,
+    HELD, PLASMA_1_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face, held_root_view, module_node_view,
+    plasma_children, plasma_face, plasma_one_panel, root_module_node_view,
 };
 use super::{ModuleFace, PanelGesture};
 
@@ -31,19 +31,18 @@ fn WorkspaceCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "The root module as the single top-level workspace card (flat-root reversal): output-mirror hero, the scope's panel with two nested effect groups, children nested INSIDE the card, and the wiring drawer. Walkable — turn a knob and it engages (amber), reset and it follows the project again."
+    description = "The root module as the single top-level workspace card (flat-root reversal): output-mirror hero, the scope's panel with two nested effect groups, wiring drawer, provenance. Its children expand BELOW it as full sibling cards on the usual rail — all of them, since a module's children are collaborators, not branches. Walkable: turn a knob and it engages (amber), reset and it follows the project again."
 )]
 fn root_card() -> Element {
     // The walkable fixture: the card view is DERIVED from it each render,
-    // so a knob drag really does move the knob and engage the control.
-    let mut spike = use_signal(|| PanelSpike::new(root_face()).with_held(HELD));
-    let mut view = root_module_node_view();
-    view.face = Some(UiNodeFace::Module(spike().face.clone()));
+    // so a knob drag really does move the knob and engage the control —
+    // on the panel and on the child card that shares its identity.
+    let mut spike = use_signal(|| PanelSpike::new(root_module_node_view()).with_held(HELD));
 
     rsx! {
         WorkspaceCanvas {
             NodePane {
-                view,
+                view: spike().view.clone(),
                 module_panel: move |gesture: PanelGesture| {
                     spike.with_mut(|spike| spike.apply_gesture(&gesture));
                 },
@@ -56,44 +55,40 @@ fn root_card() -> Element {
 }
 
 #[story(
-    description = "Author zoom: every child expanded inside the root card, including both embedded plasma modules wearing the SAME face one level in. Shows the presentation overlap the model implies — an embedded module's controls appear both as a nested panel group above and on its own child card below."
+    description = "The presentation overlap the model implies, cropped to the two cards that show it: plasma_1's speed appears as a nested group on the host's panel AND on plasma_1's own card below. Both are amber, because they are the same (scope, channel) control — one control, two views (panel.md P1), the same way a playlist's bound control shows on the parent face and the child card. Kept deliberately, not suppressed."
 )]
 fn author_zoom() -> Element {
-    let mut face = held_root_face();
-    for child in &mut face.children {
-        child.collapsed = false;
-    }
+    let mut view = held_root_view();
+    // Only the embedded module, so the comparison is the whole picture.
+    view.children
+        .retain(|child| child.label.starts_with("plasma_1"));
     rsx! {
         WorkspaceCanvas {
-            NodePane {
-                view: module_node_view("Aurora Sign", ROOT_SCOPE, "5 nodes · 2 effects", face),
-                on_action: move |_| {},
-            }
+            NodePane { view, on_action: move |_| {} }
         }
     }
 }
 
 #[story(
-    description = "Artist zoom: one embedded effect module as a card on its own — the identical face, one level in. Output mirror, its scope's panel, its child shader, wiring drawer, provenance line."
+    description = "Artist zoom: one embedded effect module as a card on its own — the identical face, one level in. Output mirror, its scope's panel, wiring drawer, provenance line, and its own child shader on the same nesting rail below it. The rail is the grammar at every depth; the face never changes."
 )]
 fn embedded_module() -> Element {
+    let view = module_node_view(
+        "plasma_1",
+        PLASMA_1_SCOPE,
+        "effect · detached",
+        plasma_face(plasma_one_panel(), 3.1),
+    )
+    .with_children(plasma_children(3.1));
     rsx! {
         div { class: "tw:w-full tw:max-w-md",
-            NodePane {
-                view: module_node_view(
-                    "plasma_1",
-                    PLASMA_1_SCOPE,
-                    "effect · detached",
-                    plasma_face(plasma_one_panel(), 3.1),
-                ),
-                on_action: move |_| {},
-            }
+            NodePane { view, on_action: move |_| {} }
         }
     }
 }
 
 #[story(
-    description = "Bus split, drawer half: the wiring drawer open on the root module — every channel in this scope with its writers and readers, i.e. exactly today's sidebar bus-pane content, now hung off the module that owns the scope. The panel above is the same bus presented for playing."
+    description = "Bus split, drawer half: the wiring drawer open on the root module — every channel in this scope with its writers and readers, i.e. exactly today's sidebar bus-pane content, now hung off the module that owns the scope. The panel above is the same bus presented for playing. Left as-is this round; the bus/wiring view gets its own UX spike."
 )]
 fn wiring_drawer_open() -> Element {
     let mut face = held_root_face();
@@ -114,7 +109,6 @@ fn wiring_drawer_open() -> Element {
 fn nested_groups() -> Element {
     let mut face = held_root_face();
     face.preview = None;
-    face.children.clear();
     face.wiring = None;
     if let Some(second) = face.panel.groups.get_mut(1) {
         second.collapsed = true;
@@ -129,20 +123,19 @@ fn nested_groups() -> Element {
 }
 
 #[story(
-    description = "The workspace column with the sidebar bus pane GONE: the root module card is the whole node area, and the bus lives on it — controls on the face, wiring in the drawer. Compare against studio/bus/bus-pane/fyeah-sign, which is what this replaces."
+    description = "The workspace column with the sidebar bus pane GONE: the root module card heads the column and the bus lives on it — controls on the face, wiring in the drawer — with the project's nodes below it as the sibling cards they always were. Compare against studio/bus/bus-pane/fyeah-sign, which is what this replaces."
 )]
 fn workspace_no_bus_pane() -> Element {
-    let mut face = held_root_face();
-    face.wiring_open = true;
-    if let Some(second) = face.panel.groups.get_mut(1) {
-        second.collapsed = true;
+    let mut view = held_root_view();
+    if let Some(lpa_studio_core::UiNodeFace::Module(face)) = view.face.as_mut() {
+        face.wiring_open = true;
+        if let Some(second) = face.panel.groups.get_mut(1) {
+            second.collapsed = true;
+        }
     }
     rsx! {
         div { class: "tw:grid tw:w-full tw:max-w-[860px] tw:gap-3.5 tw:bg-page tw:p-3",
-            NodePane {
-                view: module_node_view("Aurora Sign", ROOT_SCOPE, "5 nodes · 2 effects", face),
-                on_action: move |_| {},
-            }
+            NodePane { view, on_action: move |_| {} }
         }
     }
 }

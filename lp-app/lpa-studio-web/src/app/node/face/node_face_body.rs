@@ -19,11 +19,11 @@ use lpa_studio_core::{
     NodeCardUiState, UiAction, UiAddNodeMenu, UiNodeFace, UiNodeSection, UiPendingEdit,
 };
 
-use crate::app::module::{ModuleFace, PanelGesture};
+use crate::app::module::{ModuleFace, ModulePanel, PanelGesture};
 use crate::app::node::NodeDirtyTint;
 use crate::base::Platform;
 
-use super::{FixtureFace, NodeCardDrawers, PlaylistFace, ShaderFace};
+use super::{FixtureFace, NodeCardDrawers, NodeCardSection, PlaylistFace, ShaderFace};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -110,12 +110,29 @@ pub fn NodeFaceBody(
                         on_action,
                     }
                 },
-                // M2 UX spike: the module face carries its own drawers
-                // (wiring) and nests its children inside the card, so it
-                // does NOT compose `NodeCardDrawers` — the advanced slot
-                // view lives on the individual child nodes instead.
+                // M2 UX spike: the module face carries its own drawer
+                // (wiring), so it does NOT compose `NodeCardDrawers` — the
+                // advanced slot view lives on the individual child nodes,
+                // which are sibling cards below this one.
                 UiNodeFace::Module(module) => rsx! {
                     ModuleFace { face: module, on_panel: module_panel, on_action }
+                },
+                // A leaf under a module: its bound slots ARE its face (R3).
+                // Same widgets and same panel state as the module panel
+                // above, because it is literally the same control (P1).
+                UiNodeFace::Controls(panel) => rsx! {
+                    NodeCardSection { label: "controls", first: true,
+                        ModulePanel { panel, on_panel: module_panel, on_action }
+                    }
+                    NodeCardDrawers {
+                        node,
+                        sections,
+                        advanced_open: card_ui.advanced_open,
+                        platform,
+                        pending_edits,
+                        dirty_tint,
+                        on_action,
+                    }
                 },
             }}
         }

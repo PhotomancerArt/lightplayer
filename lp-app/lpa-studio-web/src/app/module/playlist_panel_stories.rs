@@ -111,16 +111,16 @@ fn meta_switch() -> Element {
     // still be there after a round trip through Whirl.
     let mut drift = use_signal(|| {
         let scope = entry_scope(0);
-        PanelSpike::new(spike_face(0)).with_held(&[(scope.as_str(), "speed", 0.35)])
+        PanelSpike::new(spike_view(0)).with_held(&[(scope.as_str(), "speed", 0.35)])
     });
-    let mut whirl = use_signal(|| PanelSpike::new(spike_face(1)));
+    let mut whirl = use_signal(|| PanelSpike::new(spike_view(1)));
     let mut entries = playlist_face();
     entries.active = Some(entry());
     let active = entry();
     let panel = if active == 0 {
-        drift().face.panel.clone()
+        drift().face().panel.clone()
     } else {
-        whirl().face.panel.clone()
+        whirl().face().panel.clone()
     };
 
     rsx! {
@@ -152,6 +152,11 @@ fn meta_switch() -> Element {
 /// One entry's panel wrapped as walkable spike state. Each entry gets its
 /// OWN state holder — that separation is the model's, not a story
 /// convenience: two sink scopes are two identities (P1).
-fn spike_face(entry: u32) -> lpa_studio_core::UiModuleFace {
-    lpa_studio_core::UiModuleFace::new(entry_panel(entry))
+fn spike_view(entry: u32) -> lpa_studio_core::UiNodeView {
+    use lpa_studio_core::{UiModuleFace, UiNodeFace, UiNodeHeader, UiNodeView};
+    let scope = entry_scope(entry);
+    let header = UiNodeHeader::new("entry", "Module", scope.clone());
+    let mut view = UiNodeView::new(header, Vec::new()).with_node_id(scope);
+    view.face = Some(UiNodeFace::Module(UiModuleFace::new(entry_panel(entry))));
+    view
 }
