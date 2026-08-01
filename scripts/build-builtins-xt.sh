@@ -42,7 +42,28 @@ export CARGO_TARGET_DIR="$PWD/target"
 # and staleness is not harmless here — on esp Rust 1.88 `lpc-model` genuinely
 # fails to compile (70x E0716 from the Slotted derive's const-promotion of a
 # temporary), which is what blocked the firmware crates. Fail loudly instead.
-if ! cargo build --release -p lps-builtins-xt-app; then
+# The native-f32 builtin family is **not** built in by default, and that is a
+# blocker rather than a preference: `lps-builtins/float-f32` does not currently
+# compile for Xtensa at all. The esp Rust backend fails with
+#   rustc-LLVM ERROR: Cannot select: XtensaISD::PCREL_WRAPPER
+#                     TargetConstantPool <[2 x float] [0.0, -1.0]>
+# at every optimization level, on a `[f32; 2]` gradient table in the
+# generative-noise builtins. Full record and candidate fixes:
+#   docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
+#
+# Passing the feature unconditionally would take the *whole* Xtensa filetest
+# suite down with it (`scripts/filetests.sh` builds this image before running
+# xtn/xtlpn), so it is opt-in until the defect is resolved. The crate-level
+# feature is already wired (`lps-builtins-xt-app/Cargo.toml`), so closing this
+# is one environment variable and then one default flip.
+F32_REQUESTED="${LP_XT_BUILTINS_F32:-0}"
+if [[ "$F32_REQUESTED" == "1" ]]; then
+  BUILD_CMD=(cargo build --release -p lps-builtins-xt-app --features float-f32)
+else
+  BUILD_CMD=(cargo build --release -p lps-builtins-xt-app)
+fi
+
+if ! "${BUILD_CMD[@]}"; then
   echo >&2
   echo "error: build failed. If that was an MSRV error, the esp toolchain is stale:" >&2
   echo "       installed: $(rustc +esp --version 2>/dev/null || echo unknown)" >&2
@@ -61,5 +82,16 @@ if [[ "$COUNT" -eq 0 ]]; then
   echo "error: $OUT contains no __lps_ symbols (dead-code elimination?)" >&2
   exit 1
 fi
+# The f32 family is what M7's hardware-float lowering calls for everything it
+# does not inline — divide, sqrt, the rounding family, min/max, the saturating
+# conversions and every transcendental (M7 D4). An image without those symbols
+# cannot resolve any of it, so the count is reported either way and asserted
+# when the family was actually requested (mirroring the rv32 script, where a
+# missing family fails 800+ filetests with one opaque message).
+F32_COUNT="$("$NM" "$OUT" | grep -c '_f32$' || true)"
+if [[ "$F32_REQUESTED" == "1" && "$F32_COUNT" -eq 0 ]]; then
+  echo "error: $OUT contains no native-f32 builtins despite --features float-f32" >&2
+  exit 1
+fi
 SIZE="$(wc -c < "$OUT" | xargs)"
-echo "lps-builtins-xt-app: $COUNT builtins, ${SIZE} B -> ${OUT#"$ROOT"/}"
+echo "lps-builtins-xt-app: $COUNT builtins ($F32_COUNT native-f32), ${SIZE} B -> ${OUT#"$ROOT"/}"
