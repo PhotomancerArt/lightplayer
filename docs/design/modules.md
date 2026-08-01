@@ -65,6 +65,10 @@ no format bump semantics to preserve (alpha). Inventory:
 - Studio copy: users "open a project", "add a module", browse "Effects".
 - "Plugin" is rejected (connotes third-party binaries / dynamic loading).
 
+> Status: the kind/type rename (`ModuleDef`, `NodeKind::Module`, kind
+> strings `Module`/`module`, tree paths `.module`, schemas, corpora,
+> wire bump) landed 2026-08-01. The file split (§6) is the next phase.
+
 ## 3. Bus rules (normative)
 
 ### R1 — Modules introduce scopes, structurally

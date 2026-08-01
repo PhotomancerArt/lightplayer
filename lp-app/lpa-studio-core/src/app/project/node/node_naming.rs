@@ -15,7 +15,7 @@ use lpc_model::NodeKind;
 /// and file stem (`shader` → `shader.json` + `shader.glsl`).
 pub fn node_kind_slug(kind: NodeKind) -> &'static str {
     match kind {
-        NodeKind::Module => "project",
+        NodeKind::Module => "module",
         NodeKind::Button => "button",
         NodeKind::Clock => "clock",
         NodeKind::Texture => "texture",
@@ -32,7 +32,7 @@ pub fn node_kind_slug(kind: NodeKind) -> &'static str {
 /// Human-readable picker label for a node kind.
 pub fn node_kind_label(kind: NodeKind) -> &'static str {
     match kind {
-        NodeKind::Module => "Project",
+        NodeKind::Module => "Module",
         NodeKind::Button => "Button",
         NodeKind::Clock => "Clock",
         NodeKind::Texture => "Texture",

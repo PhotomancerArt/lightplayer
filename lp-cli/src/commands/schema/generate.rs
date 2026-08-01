@@ -4,7 +4,7 @@
 //! manifest serde types:
 //!
 //! - `project.schema.json` — authored `project.json` roots: top-level
-//!   `kind: "Project"` const, `format` pinned to
+//!   `kind: "Module"` const, `format` pinned to
 //!   [`lpc_model::PROJECT_FORMAT_VERSION`], and the compiled `ModuleDef`
 //!   shape (mirrors the loader gate in `lpc-registry`, which rejects project
 //!   roots whose `format` is missing or mismatched).
@@ -146,7 +146,7 @@ fn project_schema(registry: &SlotShapeRegistry) -> Result<Value> {
         meta: SlotMeta::empty(),
         encoding: SlotEnumEncoding::tagged_kind(),
         variants: vec![
-            SlotVariantShape::new("Project", SlotShape::reference(ModuleDef::SHAPE_ID))
+            SlotVariantShape::new("Module", SlotShape::reference(ModuleDef::SHAPE_ID))
                 .map_err(|error| anyhow!("project variant name: {error}"))?,
         ],
     };
@@ -401,7 +401,7 @@ mod tests {
             })
             .collect();
         let expected = [
-            "Project",
+            "Module",
             "Button",
             "Clock",
             "Texture",
@@ -423,7 +423,7 @@ mod tests {
     fn project_schema_pins_kind_and_format() {
         let outputs = generate_outputs().unwrap();
         let project: Value = serde_json::from_str(&outputs["project.schema.json"]).unwrap();
-        assert_eq!(project["properties"]["kind"]["const"], json!("Project"));
+        assert_eq!(project["properties"]["kind"]["const"], json!("Module"));
         assert_eq!(
             project["properties"]["format"]["const"],
             json!(PROJECT_FORMAT_VERSION)

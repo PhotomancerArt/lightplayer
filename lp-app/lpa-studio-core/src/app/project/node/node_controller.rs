@@ -960,7 +960,7 @@ fn node_kind_label(path: &TreePath) -> String {
         return "Node".to_string();
     };
     match segment.ty.as_str() {
-        "project" | "show" => "Project".to_string(),
+        "module" | "project" | "show" => "Module".to_string(),
         "vis" | "visual" => "Visual".to_string(),
         "shader" | "shader_node" => "Shader".to_string(),
         "compute" | "compute_shader" => "Compute".to_string(),

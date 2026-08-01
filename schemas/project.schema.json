@@ -7,7 +7,7 @@
       "const": 2
     },
     "kind": {
-      "const": "Project"
+      "const": "Module"
     },
     "name": {
       "type": "string"
