@@ -291,12 +291,21 @@ fn dispatch(v: &Vector) -> Option<u32> {
 /// The conversions' scale is an *immediate*, so it cannot be passed in a
 /// register — there is one kernel per `(operation, scale)` pair.
 ///
-/// Only the four scales the corpus actually generates are built, and an
-/// unexpected one is a loud `None` rather than a silently substituted zero: if
-/// the generator grows a fifth scale, this must fail visibly rather than report
-/// answers for the wrong instruction.
+/// Only the four scales the corpus actually generates are built. An unexpected
+/// one says so on its own line and *then* becomes a skip — substituting scale 0
+/// would answer confidently for a different instruction, and a bare skip would
+/// be indistinguishable from the deliberate divide/sqrt ones.
 fn scaled(v: &Vector, table: kernels::ScaleTable) -> Option<u32> {
-    let f = table.get(v.imm)?;
+    let Some(f) = table.get(v.imm) else {
+        println!(
+            "{TAG} FATAL {} {} needs scale imm={}, which has no kernel — \
+             the corpus grew a scale this harness was not built for",
+            v.family.name(),
+            v.index,
+            v.imm
+        );
+        return None;
+    };
     Some(unsafe { f(v.a) })
 }
 
