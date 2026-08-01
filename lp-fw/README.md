@@ -21,6 +21,29 @@ they are not replacements for on-device shader compilation.
 | [`fw-tests`](./fw-tests/) | host test harness | Firmware/emulator integration tests. |
 | [`fw-checks`](./fw-checks/) | host checks | Firmware validation/check helper crate. |
 
+## Firmware Manifest Core
+
+Every firmware artifact embeds a **manifest core** — a small JSON blob
+describing the build: package, target, enabled `LpFeature`s, flash limits,
+wire proto, and provenance. It is assembled at compile time from the same
+`cfg!` facts as the feature gates themselves (via
+`lpc_model::lp_embed_manifest_core!` in each embedder's root) and extracted
+by scanning the artifact — never re-stated by tooling:
+
+```bash
+lp-cli firmware show target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6
+node scripts/extract-fw-manifest.mjs <artifact> --stable   # CI twin, no build needed
+```
+
+Each firmware crate checks in `manifest-core.expected.json`
+(provenance-stripped); CI extracts the manifest from the image it just built
+and diffs against it (`just fw-manifest-check-esp32c6` / `-esp32s3` /
+`-emu`), so a PR that changes a build's feature set changes the fixture
+visibly. A new embedder invokes the macro with its own facts; engine feature
+truth arrives via `lpa_server::ENGINE_FEATURE_FRAGMENT` (or
+`lpc_engine::features::` for direct dependents). See
+`docs/adr/2026-08-01-firmware-manifest-architecture.md`.
+
 ## Target Roles
 
 ### Embedded Firmware
