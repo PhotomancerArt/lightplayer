@@ -42,6 +42,25 @@ pub(crate) fn knob_control(
     state: UiSlotFieldState,
     source: UiSlotSourceState,
 ) -> UiPanelControl {
+    knob_control_stepped(label, value, min, max, None, state, source)
+}
+
+/// A knob quantized to `step` — what an integer uniform (`i32`/`u32`, or an
+/// authored `step`) derives to. `None` is the continuous knob.
+///
+/// The readout is snapped here exactly as `node_face_builder` snaps it, so
+/// a stepped control's value and widget agree in the story the same way they
+/// agree in the app.
+pub(crate) fn knob_control_stepped(
+    label: &str,
+    value: f32,
+    min: f32,
+    max: f32,
+    step: Option<f32>,
+    state: UiSlotFieldState,
+    source: UiSlotSourceState,
+) -> UiPanelControl {
+    let value = crate::app::node::panel::knob_snap(value, min, step);
     let slot_value = UiSlotValue::f32(value);
     let aspect_slot = UiConfigSlot::value(label, label, slot_value.clone())
         .with_state(state.clone())
@@ -49,11 +68,7 @@ pub(crate) fn knob_control(
     UiPanelControl {
         label: label.to_string(),
         address: Some(story_slot_address(&format!("controls.{label}"))),
-        widget: UiPanelWidget::Knob {
-            min,
-            max,
-            step: None,
-        },
+        widget: UiPanelWidget::Knob { min, max, step },
         value: slot_value,
         live_value: None,
         unit: None,
@@ -346,6 +361,33 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
             UiSlotFieldState::editable(),
             UiSlotSourceState::Unset,
         ),
+        // Opted out (budget 0) — the only state with no readout now that an
+        // unstated budget falls back to the default guard.
+        power: None,
+    }
+}
+
+/// A fixture inside its declared budget: the readout is a setup number.
+pub(crate) fn fixture_face_within_budget() -> UiFixtureFace {
+    UiFixtureFace {
+        power: Some(lpa_studio_core::UiFixturePower {
+            estimated_draw_ma: 780,
+            budget_ma: 1000,
+            scale: 1.0,
+        }),
+        ..fixture_face()
+    }
+}
+
+/// A fixture actively shedding current to stay inside its budget.
+pub(crate) fn fixture_face_limiting() -> UiFixtureFace {
+    UiFixtureFace {
+        power: Some(lpa_studio_core::UiFixturePower {
+            estimated_draw_ma: 2400,
+            budget_ma: 1000,
+            scale: 0.41,
+        }),
+        ..fixture_face()
     }
 }
 
@@ -371,6 +413,7 @@ pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
             UiSlotFieldState::editable(),
             UiSlotSourceState::Unset,
         ),
+        power: None,
     }
 }
 
@@ -395,6 +438,13 @@ pub(crate) fn fixture_node_view() -> UiNodeView {
     let mut view = UiNodeView::new(header, vec![UiNodeTab::main(fixture_sections())])
         .with_node_id("fixture-halo");
     view.face = Some(UiNodeFace::Fixture(fixture_face()));
+    view
+}
+
+/// The same fixture card carrying a specific power state.
+pub(crate) fn fixture_node_view_with_face(face: UiFixtureFace) -> UiNodeView {
+    let mut view = fixture_node_view();
+    view.face = Some(UiNodeFace::Fixture(face));
     view
 }
 

@@ -18,7 +18,6 @@ pub fn generate(vec_type: VecType, dimension: Dimension) -> String {
 
     // Add test run and target directives
     content.push_str("// test run\n");
-    content.push_str("// @unimplemented(backend=wasm)\n");
     content.push_str("\n");
 
     // Add section comment
@@ -92,14 +91,14 @@ fn generate_test_mixed(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_equal_function_mixed() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         // Function equal() returns {} (component-wise equality)\n\
-         return equal(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_equal_function_mixed() == {}\n",
+        "{} test_{}_equal_function_mixed() {{
+    {} a = {};
+    {} b = {};
+    // Function equal() returns {} (component-wise equality)
+    return equal(a, b);
+}}
+
+// run: test_{}_equal_function_mixed() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -132,13 +131,13 @@ fn generate_test_all_true(vec_type: VecType, dimension: Dimension) -> String {
     let constructor = format_vector_constructor(vec_type, dimension, &a_values);
 
     format!(
-        "{} test_{}_equal_function_all_true() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return equal(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_equal_function_all_true() == {}\n",
+        "{} test_{}_equal_function_all_true() {{
+    {} a = {};
+    {} b = {};
+    return equal(a, b);
+}}
+
+// run: test_{}_equal_function_all_true() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -176,13 +175,13 @@ fn generate_test_all_false(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_equal_function_all_false() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return equal(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_equal_function_all_false() == {}\n",
+        "{} test_{}_equal_function_all_false() {{
+    {} a = {};
+    {} b = {};
+    return equal(a, b);
+}}
+
+// run: test_{}_equal_function_all_false() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -220,13 +219,13 @@ fn generate_test_zero(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_equal_function_zero() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return equal(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_equal_function_zero() == {}\n",
+        "{} test_{}_equal_function_zero() {{
+    {} a = {};
+    {} b = {};
+    return equal(a, b);
+}}
+
+// run: test_{}_equal_function_zero() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -269,13 +268,13 @@ fn generate_test_negative(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_equal_function_negative() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return equal(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_equal_function_negative() == {}\n",
+        "{} test_{}_equal_function_negative() {{
+    {} a = {};
+    {} b = {};
+    return equal(a, b);
+}}
+
+// run: test_{}_equal_function_negative() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -313,13 +312,13 @@ fn generate_test_variables(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_equal_function_variables() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         return equal(a, b);\n\
-         }}\n\
-         \n\
-         // run: test_{}_equal_function_variables() == {}\n",
+        "{} test_{}_equal_function_variables() {{
+    {} a = {};
+    {} b = {};
+    return equal(a, b);
+}}
+
+// run: test_{}_equal_function_variables() == {}\n",
         bvec_type_name,
         type_name,
         type_name,
@@ -357,11 +356,11 @@ fn generate_test_expressions(vec_type: VecType, dimension: Dimension) -> String 
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{} test_{}_equal_function_expressions() {{\n\
-         return equal({}, {});\n\
-         }}\n\
-         \n\
-         // run: test_{}_equal_function_expressions() == {}\n",
+        "{} test_{}_equal_function_expressions() {{
+    return equal({}, {});
+}}
+
+// run: test_{}_equal_function_expressions() == {}\n",
         bvec_type_name,
         type_name,
         a_constructor,
@@ -381,12 +380,12 @@ fn generate_test_max_values(vec_type: VecType, dimension: Dimension) -> String {
     let bvec_type_name = format_bvec_type_name(dimension);
 
     format!(
-        "{} test_{}_equal_function_max_values() {{\n\
-    {} a = {};\n\
-    {} b = {};\n\
-    return equal(a, b);\n\
-}}\n\
-\n\
+        "{} test_{}_equal_function_max_values() {{
+    {} a = {};
+    {} b = {};
+    return equal(a, b);
+}}
+
 // run: test_{}_equal_function_max_values() == {}\n",
         bvec_type_name,
         type_name,
@@ -419,14 +418,14 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
     // Special case for D2 uvec: return bool instead of bvec2 (following manual file)
     if matches!(vec_type, VecType::UVec) && matches!(dimension, Dimension::D2) {
         return format!(
-            "bool test_{type_name}_equal_function_in_expression() {{\n\
-    {type_name} a = uvec2(1u, 3u);\n\
-    {type_name} b = uvec2(1u, 4u);\n\
-    {type_name} c = uvec2(2u, 3u);\n\
-    return equal(a, b) == equal(b, c);\n\
-    // (true,false) == (false,false) = false\n\
-}}\n\
-\n\
+            "bool test_{type_name}_equal_function_in_expression() {{
+    {type_name} a = uvec2(1u, 3u);
+    {type_name} b = uvec2(1u, 4u);
+    {type_name} c = uvec2(2u, 3u);
+    return equal(a, b) == equal(b, c);
+    // (true,false) == (false,false) = false
+}}
+
 // run: test_{type_name}_equal_function_in_expression() == false\n"
         );
     }
@@ -468,18 +467,18 @@ fn generate_test_in_expression(vec_type: VecType, dimension: Dimension) -> Strin
         format_bvec_expected(expected.clone())
     );
     format!(
-        "{} test_{}_equal_function_in_expression() {{\n\
-         {} a = {};\n\
-         {} b = {};\n\
-         {} c = {};\n\
-         // Use equal() for component-wise comparison of {} values\n\
-         // equal(a, b) = {}\n\
-         // equal(b, c) = {}\n\
-         // equal(equal(a,b), equal(b,c)) = {}\n\
-         return equal(equal(a, b), equal(b, c));\n\
-         }}\n\
-         \n\
-         {}",
+        "{} test_{}_equal_function_in_expression() {{
+    {} a = {};
+    {} b = {};
+    {} c = {};
+    // Use equal() for component-wise comparison of {} values
+    // equal(a, b) = {}
+    // equal(b, c) = {}
+    // equal(equal(a,b), equal(b,c)) = {}
+    return equal(equal(a, b), equal(b, c));
+}}
+
+{}",
         bvec_type_name,
         type_name,
         type_name,

@@ -57,9 +57,10 @@ pub use asset::{
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeController, NodeControllerState, NodeCreateOp, NodeRemoveOp, NodeRevertOp,
-    PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent,
-    UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, UiNodeRemovePreflight,
+    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp,
+    NodeRevertOp, PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget,
+    ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget,
+    UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{NodeCardDrawer, NodeCardUiState, NodeUiOp};
 pub use project_connect_result::ProjectConnectResult;

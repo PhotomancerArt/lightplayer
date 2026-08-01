@@ -1,0 +1,11 @@
+# The fixture corpus: each src/bin/*.rs is one no_std guest program.
+# Integer-only — see ../README.md for the rule and how to add a fixture.
+[package]
+name = "corpus"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "Integer-only no_std Rust fixture programs for lp-xt-emu (built with the esp toolchain)."
+
+[dependencies]
+lp-xt-emu-guest = { path = "../../lp-xt-emu-guest" }

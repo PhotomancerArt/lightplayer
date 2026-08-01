@@ -23,12 +23,12 @@ use crate::nodes::fixture::mapping::{
 use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureData, TextureHandle};
 use lpc_model::nodes::texture::TextureFormat;
 
-use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, ControlNode, ControlRenderContext, DestroyCtx,
     MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, RuntimeStateShape,
     TickContext, err_ctx,
 };
+use crate::nodes::fixture::power_limit::{self, PowerPass};
 use crate::products::control::{
     ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
     ControlSpan,
@@ -39,6 +39,7 @@ use crate::products::visual::{
     texel_center_to_uv_q16,
 };
 use lpc_model::NodeRuntimeStatus;
+use lpc_model::nodes::fixture::{FixturePower, preset_for};
 
 /// The map2d document a fixture's mapping was resolved from, kept so the
 /// node can re-resolve when the asset body changes (the in-place mapping
@@ -77,6 +78,15 @@ pub struct FixtureNode {
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     direct_points: Option<(Revision, alloc::vec::Vec<DirectSamplePoint>)>,
     display_layout_revision: Option<(FixtureDisplayLayoutKey, Revision)>,
+    /// Current-limit scale for the NEXT frame, in Q16. Demand for a frame is
+    /// only known once that frame is rendered, so the scale always trails it
+    /// by one.
+    power_scale_q16: u32,
+    /// Last frame's estimated draw, in milliamps.
+    power_estimate_ma: u32,
+    /// Render time of the last frame, for the release rate limit. Supplied by
+    /// the render context — the core never reads a clock.
+    power_last_time_seconds: Option<f32>,
 }
 
 impl FixtureNode {
@@ -104,6 +114,9 @@ impl FixtureNode {
             precomputed: None,
             direct_points: None,
             display_layout_revision: None,
+            power_scale_q16: power_limit::UNITY_SCALE_Q16,
+            power_estimate_ma: 0,
+            power_last_time_seconds: None,
         }
     }
 
@@ -134,6 +147,7 @@ impl FixtureNode {
             color_order,
             brightness: lpc_model::Brightness::DEFAULT.as_u8(),
             gamma_correction: true,
+            power: FixturePower::default(),
         });
         self
     }
@@ -239,8 +253,12 @@ struct FixtureDisplayLayoutKey {
     height: u32,
 }
 
+/// The fixture's authored input slot. Resolution takes it as a constant so
+/// the path is parsed once rather than per frame.
+pub(crate) const FIXTURE_INPUT_PATH: &str = "input";
+
 pub fn fixture_input_path() -> SlotPath {
-    SlotPath::parse("input").expect("fixture input path")
+    SlotPath::parse(FIXTURE_INPUT_PATH).expect("fixture input path")
 }
 
 pub fn fixture_output_path() -> SlotPath {
@@ -264,6 +282,15 @@ impl NodeRuntime for FixtureNode {
                 def.gamma_correction().get_or(ctx, true)?,
             )
         };
+        // Read through the option's `some` branch rather than the def view's
+        // option reader: `power` is absent from every project authored before
+        // it existed, and that reads as an unresolved slot rather than as the
+        // "option slot is none" the view's reader recognises.
+        //
+        // Absent falls back to the default guard rather than to unlimited — the
+        // fixture most in need of a current limit is the one whose author has
+        // never heard of the setting. Opting out is `budget_ma: 0`.
+        let power: FixturePower = try_read_def_value(ctx, "power.some")?.unwrap_or_default();
         let diagnostic_mode =
             try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
         self.sync_mapping_from_def(ctx)?;
@@ -278,10 +305,7 @@ impl NodeRuntime for FixtureNode {
             // stays viewable/editable, with the cause surfaced as runtime
             // status. A resolved input carrying the wrong shape keeps
             // failing loudly — that is authored misconfiguration.
-            match ctx.resolve(QueryKey::ConsumedSlot {
-                node: ctx.node_id(),
-                slot: fixture_input_path(),
-            }) {
+            match ctx.resolve_static_consumed(FIXTURE_INPUT_PATH) {
                 Ok(prod) => {
                     let visual_product = match prod
                         .value_leaf()
@@ -331,11 +355,24 @@ impl NodeRuntime for FixtureNode {
             color_order,
             brightness,
             gamma_correction,
+            power,
         });
         self.state.output.set_with_version(
             ver,
             ControlProduct::new(ctx.node_id(), 0, fixture_control_extent(&self.mapping)),
         );
+        // Published from the last completed render, so these trail the frame
+        // they describe by one — the same trail the scale itself carries.
+        self.state
+            .estimated_draw_ma
+            .set_with_version(ver, self.power_estimate_ma);
+        self.state.power_scale.set_with_version(
+            ver,
+            self.power_scale_q16 as f32 / power_limit::UNITY_SCALE_Q16 as f32,
+        );
+        self.state
+            .power_budget_ma
+            .set_with_version(ver, power.budget_ma);
         Ok(ProduceResult::Produced)
     }
 
@@ -463,22 +500,19 @@ fn sync_mapping_config_from_def(
 
 fn try_read_def_value<T: lpc_model::FromLpValue>(
     ctx: &mut TickContext<'_>,
-    path: &str,
+    path: &'static str,
 ) -> Result<Option<T>, NodeError> {
-    let slot = SlotPath::parse(path).map_err(|e| {
-        NodeError::msg(alloc::format!(
-            "invalid authored fixture path {path:?}: {e}"
-        ))
-    })?;
-    let production = match ctx.resolve(QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: slot.clone(),
-    }) {
+    let production = match ctx.resolve_static_consumed(path) {
         Ok(production) => production,
         Err(e) => {
             // "Absent" (no def loaded, inactive enum variant, option none) is
             // expected and reads as None; a path that cannot exist in the
             // FixtureDef shape is a code bug and must not be swallowed.
+            let slot = SlotPath::parse(path).map_err(|e| {
+                NodeError::msg(alloc::format!(
+                    "invalid authored fixture path {path:?}: {e}"
+                ))
+            })?;
             ensure_path_exists_in_fixture_def_shape(ctx.slot_shapes(), &slot)?;
             log::debug!("[fixture] def path {path} unavailable: {}", e.message);
             return Ok(None);
@@ -519,6 +553,9 @@ struct FixtureRenderSettings {
     color_order: ColorOrder,
     brightness: u8,
     gamma_correction: bool,
+    /// Lamp type and the budget in force, after an unstated one has fallen
+    /// back to the default. A zero budget means limiting was opted out of.
+    power: FixturePower,
 }
 
 impl ControlNode for FixtureNode {
@@ -542,6 +579,63 @@ impl ControlNode for FixtureNode {
             );
         }
 
+        let mut power = if settings.power.is_limited() {
+            PowerPass::limited(self.power_scale_q16)
+        } else {
+            PowerPass::unlimited()
+        };
+        let now_seconds = ctx.time_seconds();
+        let layout = self.render_control_inner(request, target, settings, ctx, &mut power)?;
+        self.update_power_limit(settings.power, &power, now_seconds);
+        Ok(layout)
+    }
+
+    fn control_display_layout(
+        &mut self,
+        _product: ControlProduct,
+        ctx: &mut ControlRenderContext<'_>,
+    ) -> Result<Option<ControlDisplayLayout>, NodeError> {
+        self.control_display_layout_impl(ctx)
+    }
+}
+
+impl FixtureNode {
+    /// Roll the current-limit scale forward from the demand this frame asked
+    /// for. Runs after the frame is written, because that is when demand is
+    /// known — hence the one-frame trail.
+    fn update_power_limit(&mut self, power: FixturePower, pass: &PowerPass, now_seconds: f32) {
+        let previous_seconds = self.power_last_time_seconds.replace(now_seconds);
+        if !power.is_limited() || !pass.is_enabled() {
+            // Opted out: reset, so restoring a budget starts unlimited rather
+            // than inheriting a stale scale.
+            self.power_scale_q16 = power_limit::UNITY_SCALE_Q16;
+            self.power_estimate_ma = 0;
+            return;
+        }
+
+        let dt_ms = previous_seconds
+            .map(|previous| ((now_seconds - previous).max(0.0) * 1000.0) as u32)
+            .unwrap_or(0);
+        let lamp_count = fixture_lamp_channel_count(&self.mapping);
+        let estimate = power_limit::estimate_ma(
+            preset_for(power.lamp_type).model,
+            lamp_count,
+            pass.demand8(),
+        );
+
+        self.power_estimate_ma = estimate.total_ma();
+        self.power_scale_q16 =
+            power_limit::next_scale_q16(estimate, power.budget_ma, self.power_scale_q16, dt_ms);
+    }
+
+    fn render_control_inner(
+        &mut self,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+        settings: FixtureRenderSettings,
+        ctx: &mut ControlRenderContext<'_>,
+        power: &mut PowerPass,
+    ) -> Result<ControlLayout, NodeError> {
         let Some(visual_product) = self.last_visual_product else {
             // Unlit render: no resolvable visual input (fresh fixture,
             // nothing bound, possibly never ticked). Zeroed accumulators
@@ -565,6 +659,7 @@ impl ControlNode for FixtureNode {
                 settings.color_order,
                 settings.brightness,
                 settings.gamma_correction,
+                power,
             );
         };
         if self.sampling == FixtureSamplingConfig::Direct {
@@ -580,6 +675,7 @@ impl ControlNode for FixtureNode {
                 target,
                 settings,
                 ctx,
+                power,
             );
         }
         let mapping_entries = &self
@@ -615,12 +711,12 @@ impl ControlNode for FixtureNode {
             settings.color_order,
             settings.brightness,
             settings.gamma_correction,
+            power,
         )
     }
 
-    fn control_display_layout(
+    fn control_display_layout_impl(
         &mut self,
-        _product: ControlProduct,
         ctx: &mut ControlRenderContext<'_>,
     ) -> Result<Option<ControlDisplayLayout>, NodeError> {
         let settings = self
@@ -757,6 +853,7 @@ fn render_direct_fixture_control(
     target: ControlRenderTarget<'_>,
     settings: FixtureRenderSettings,
     ctx: &mut ControlRenderContext<'_>,
+    power: &mut PowerPass,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
         || target.sample_format != ControlSampleFormat::Unorm16
@@ -814,6 +911,10 @@ fn render_direct_fixture_control(
             g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
             b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
         }
+        // After gamma, never before. See `power_limit`.
+        let r = power.channel(r);
+        let g = power.channel(g);
+        let b = power.channel(b);
         let ordered = ordered_rgb_u16(settings.color_order, r, g, b);
         target.samples[base..base + 3].copy_from_slice(&ordered);
         written_samples = written_samples.max(base + 3);
@@ -1168,6 +1269,7 @@ fn render_fixture_control_target(
     color_order: ColorOrder,
     brightness_u8: u8,
     gamma_correction: bool,
+    power: &mut PowerPass,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
         || target.sample_format != ControlSampleFormat::Unorm16
@@ -1214,6 +1316,12 @@ fn render_fixture_control_target(
             g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
             b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
         }
+
+        // After gamma, never before: scaling gamma's input sheds roughly the
+        // square of what was intended. See `power_limit`.
+        let r = power.channel(r);
+        let g = power.channel(g);
+        let b = power.channel(b);
 
         let ordered = ordered_rgb_u16(color_order, r, g, b);
         target.samples[base..base + 3].copy_from_slice(&ordered);
@@ -1304,36 +1412,58 @@ fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
 mod tests {
     use super::*;
     use alloc::boxed::Box;
+    #[cfg(feature = "node-shader")]
     use alloc::sync::Arc;
     use alloc::vec;
+    #[cfg(feature = "node-shader")]
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use lpc_model::nodes::fixture::PathSpec;
     use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
     use lpc_registry::ProjectRegistry;
+    use lpc_wire::{WireChildKind, WireSlotIndex};
+    // Read-probe types exercised only by
+    // `fixture_project_read_control_probe_returns_native_samples_and_cached_layout`.
+    #[cfg(feature = "node-shader")]
     use lpc_wire::{
         ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
         ControlProductProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest,
-        WireChannelSampleFormat, WireChildKind, WireSlotIndex,
+        WireChannelSampleFormat,
     };
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::engine::Engine;
+    #[cfg(feature = "node-shader")]
+    use crate::engine::default_demand_input_path;
+    #[cfg(feature = "node-shader")]
     use crate::engine::test_support::read_probe_results;
-    use crate::engine::{Engine, default_demand_input_path};
-    use crate::node::{RenderContext, RenderNode, RuntimeStateShape, test_placeholder_spine};
+    #[cfg(feature = "node-shader")]
+    use crate::node::RuntimeStateShape;
+    use crate::node::test_placeholder_spine;
+    // Only the shader-fed producers below (`FixtureTickCountSolidProducer`,
+    // `FixtureExpectedSampleProducer`) need render-node plumbing.
+    #[cfg(feature = "node-shader")]
+    use crate::node::{RenderContext, RenderNode};
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     use crate::nodes::TextureNode;
+    #[cfg(feature = "node-shader")]
     use crate::nodes::shader_output_path;
+    #[cfg(feature = "node-shader")]
     use crate::products::visual::{
         TextureRenderProduct, VisualProduct, VisualSampleBufferRequest, VisualSampleTarget,
     };
-    use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
+    use lpc_model::SlotShapeRegistry;
+    #[cfg(feature = "node-shader")]
+    use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistryError};
 
+    #[cfg(feature = "node-shader")]
     struct FixtureTickCountSolidProducer {
         state: ShaderState,
         ticks: Arc<AtomicU32>,
         color: [u16; 4],
     }
 
+    #[cfg(feature = "node-shader")]
     impl NodeRuntime for FixtureTickCountSolidProducer {
         fn produce(
             &mut self,
@@ -1375,6 +1505,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     impl RenderNode for FixtureTickCountSolidProducer {
         fn render_texture(
             &mut self,
@@ -1407,6 +1538,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     struct FixtureExpectedSampleProducer {
         state: ShaderState,
         expected_points: Vec<i32>,
@@ -1415,6 +1547,7 @@ mod tests {
         expected_height: u32,
     }
 
+    #[cfg(feature = "node-shader")]
     impl NodeRuntime for FixtureExpectedSampleProducer {
         fn produce(
             &mut self,
@@ -1455,6 +1588,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     impl RenderNode for FixtureExpectedSampleProducer {
         fn render_texture(
             &mut self,
@@ -1463,8 +1597,7 @@ mod tests {
             _ctx: &mut RenderContext<'_>,
         ) -> Result<TextureRenderProduct, NodeError> {
             Err(NodeError::msg(format!(
-                "unexpected texture render for {:?}",
-                request
+                "unexpected texture render for {request:?}"
             )))
         }
 
@@ -1496,6 +1629,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "node-shader")]
     fn solid_texture(
         width: u32,
         height: u32,
@@ -1821,6 +1955,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     fn fixture_demand_resolve_and_tick_share_one_shader_producer_tick_via_resolver_cache() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -1945,6 +2080,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "node-shader", feature = "node-texture"))]
     fn fixture_direct_sampling_writes_expected_u16_rgb_for_solid_red_product() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -2088,6 +2224,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-shader")]
     fn fixture_project_read_control_probe_returns_native_samples_and_cached_layout() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
@@ -2264,6 +2401,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "node-shader")]
     fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();

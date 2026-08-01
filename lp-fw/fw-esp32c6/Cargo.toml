@@ -24,7 +24,6 @@ server = [
     "lpa-server",
     "lpc-shared",
     "lpfs",
-    "ser-write-json",
 ]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs)
 radio = [
     "lpc-hardware",
@@ -48,6 +47,11 @@ test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wir
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 test_jit_math_perf = ["lps-builtins"]  # JIT Q32 math perf harness (cycle timing; no pipeline)
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
+# f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
+# crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,
+# and must not carry an f32 backend it never enters. Enabling it here and nowhere
+# else is what keeps `just fw-esp32c6-size-check` measuring an unchanged image.
+test_f32_softfloat = ["dep:lpvm-native", "dep:lpvm", "dep:lps-glsl", "dep:lpir", "dep:lps-shared", "lps-builtins", "lpc-shared", "lpvm-native/float-f32", "lps-builtins/float-f32"]
 test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
 
 [dependencies]
@@ -70,14 +74,40 @@ fw-checks = { path = "../fw-checks", default-features = false, features = ["chec
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }
-lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, optional = true }
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = [
+    "isa-rv32",
+], optional = true }
 lpir = { path = "../../lp-shader/lpir", default-features = false, optional = true }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false, optional = true }
+# `test_f32_softfloat` only: the GLSL frontend and the LPVM engine/instance
+# traits, so the harness can go source → machine code → call without the
+# `LpsPxShader` render plumbing (it needs to call arbitrary functions, not
+# render a frame).
+lps-glsl = { path = "../../lp-shader/lps-glsl", default-features = false, optional = true }
+lpvm = { path = "../../lp-shader/lpvm", default-features = false, optional = true }
 libm = "0.2"
 # Graphics backend is selected automatically by target architecture
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
-lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"], optional = true }
+# fw-esp32c6 deliberately opts into every node kind it has today — all
+# eight `lpa-server` node-* gates (which forward to the matching
+# `lpc-engine` gate), plus `panic-recovery` — on top of the real
+# `lp-gfx-lpvm` compiler backend selected below by target architecture.
+# This is not a constrained build; it exists so a genuinely constrained
+# firmware (the S3 app layer, M3) can list fewer of these gates on its own
+# `lpa-server` dependency and link only the node kinds it runs. See
+# `lpc-engine/README.md` for what each gate is worth in flash.
+lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
+    "panic-recovery",
+    "node-button",
+    "node-radio",
+    "node-fluid",
+    "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
+], optional = true }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
@@ -85,7 +115,6 @@ lpc-model = { path = "../../lp-core/lpc-model", default-features = false, option
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
-ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
 

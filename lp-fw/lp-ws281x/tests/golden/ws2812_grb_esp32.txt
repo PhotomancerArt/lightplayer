@@ -1,0 +1,46 @@
+# Hardware-derived golden vector — do not hand-edit.
+# Repo rule: golden vectors are hardware-verified or assembler-derived only.
+#
+# Provenance:
+#   chip:     ESP32 (classic, LX6, rev v3.0, 40 MHz xtal, 4 MB flash), RMT
+#             peripheral, 80 MHz clock, divider 1 (12.5 ns per tick)
+#   captured: 2026-07-29 by the P5 loopback self-test
+#             (fw/led-lab-esp32, feature `test_loopback`): TX channel 0 on
+#             GPIO16 routed into RX channel 4 through the GPIO matrix via
+#             esp-hal `Flex::split` — no wire; serial `E5: MEASURE golden_*`
+#             lines transcribed verbatim, while TX channels 1, 2 and 3
+#             transmitted three different frames concurrently (channel 2 with
+#             WS2811 timing)
+#   confirmed: two fresh boots on the same board produced identical lines
+#   config:   lp_ws281x::ChannelTiming::WS2812 (T0H 400 ns / T0L 850 ns,
+#             T1H 800 ns / T1L 450 ns, latch 300 us), ColorOrder::Grb
+#   frame:    RGB bytes A5 3C 0F 01 80 FF (2 LEDs)
+#   wire:     GRB byte order => 3C A5 0F 80 01 FF
+#
+# Capture note: unlike the S3 and C6 harnesses, this one runs the receiver with
+# its input filter enabled (15 ticks = 187 ns, below WS2811's 300 ns T0H). With
+# the filter off, four adjacent GPIOs switching in lockstep inject glitches that
+# the classic's wrap-less receiver records as extra edges. The filter changes
+# what the *receiver* discards, not what the transmitter emits, and 15 ticks is
+# far below every pulse in this vector (shortest: 24 ticks on channel 2).
+#
+# Cross-chip note: this capture is byte-for-byte identical to
+# `ws2812_grb_esp32s3.txt` and `ws2812_grb_esp32c6.txt` — three RMT
+# generations, three channel counts (classic: 8 channels, any of which can
+# transmit or receive, 64-word blocks, RAM at peripheral base + 0x800; S3:
+# 4 TX + 4 RX, 48-word blocks, + 0x800; C6: 2 + 2, + 0x400), one waveform.
+# The files are kept separate on purpose: they are independent evidence, and a
+# future chip that *does* differ must show it as a diff rather than be hidden
+# behind a shared file.
+#
+# Each token is one pulse: H<ticks> high or L<ticks> low, in 12.5 ns ticks,
+# transmission order; 48 H/L pairs, one per wire bit. The final bit's low is
+# recorded as L0: the receiver's idle threshold (30000 ticks = 375 us) expired
+# during it, i.e. the line stayed low for at least 30000 ticks — which bounds
+# the configured 24000-tick latch from below.
+H32 L68 H32 L68 H64 L36 H64 L36 H64 L36 H64 L36 H32 L68 H32 L68
+H64 L36 H32 L68 H64 L36 H32 L68 H32 L68 H64 L36 H32 L68 H64 L36
+H32 L68 H32 L68 H32 L68 H32 L68 H64 L36 H64 L36 H64 L36 H64 L36
+H64 L36 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68
+H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H32 L68 H64 L36
+H64 L36 H64 L36 H64 L36 H64 L36 H64 L36 H64 L36 H64 L36 H64 L0

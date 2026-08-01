@@ -242,6 +242,7 @@ mod tests {
                 default: crate::OptionSlot::none(),
                 min: crate::OptionSlot::none(),
                 max: crate::OptionSlot::none(),
+                step: crate::OptionSlot::none(),
                 mapping: crate::OptionSlot::none(),
                 label: crate::ValueSlot::default(),
                 description: crate::ValueSlot::default(),
@@ -262,7 +263,7 @@ mod tests {
         let def = ComputeShaderDef {
             source: AssetSlot::path("emitters.glsl"),
             bindings: crate::BindingDefs::default(),
-            glsl_opts: crate::GlslOpts::default(),
+            float_mode: crate::ValueSlot::default(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         };
@@ -290,7 +291,7 @@ mod tests {
         let def = ComputeShaderDef {
             source: AssetSlot::path("emitters.glsl"),
             bindings: crate::BindingDefs::default(),
-            glsl_opts: crate::GlslOpts::default(),
+            float_mode: crate::ValueSlot::default(),
             consumed_slots: MapSlot::default(),
             produced_slots: MapSlot::new(produced),
         };

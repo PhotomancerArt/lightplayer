@@ -344,6 +344,41 @@
             }
           }
         }
+      },
+      {
+        "name": "power",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1801252664,
+                  "meta": {
+                    "description": "Lamp type and supply budget used to limit output current.",
+                    "label": "Power"
+                  },
+                  "ty": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "name": "lamp_type",
+                          "ty": "string"
+                        },
+                        {
+                          "name": "budget_ma",
+                          "ty": "u32"
+                        }
+                      ],
+                      "name": "FixturePower"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     ],
     "meta": {}

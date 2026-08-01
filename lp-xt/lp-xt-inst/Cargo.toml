@@ -1,0 +1,25 @@
+[package]
+name = "lp-xt-inst"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Xtensa (ESP32-S3, LX7) instruction model, encoder, decoder and disassembler (integer subset)."
+
+[lints]
+workspace = true
+
+# The library is `no_std` + alloc so it can later run on-device. The `objdiff`
+# binary is a host-only differential-testing tool and uses std + the `object`
+# crate; it is gated behind the `objdiff` feature so the core lib stays lean and
+# device-buildable (no std dependency pulled in for library consumers).
+[features]
+default = []
+objdiff = ["dep:object"]
+
+[dependencies]
+object = { version = "0.36", optional = true, default-features = false, features = ["read", "std", "elf"] }
+
+[[bin]]
+name = "objdiff"
+required-features = ["objdiff"]

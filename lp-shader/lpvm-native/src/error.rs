@@ -43,12 +43,12 @@ pub enum NativeError {
     ObjectWrite(String),
     #[cfg(feature = "emu")]
     Link(lpvm_cranelift::CompilerError),
-    #[cfg(any(feature = "emu", any(target_arch = "riscv32")))]
+    #[cfg(any(feature = "emu", any(target_arch = "riscv32", target_arch = "xtensa")))]
     Call(lpvm::CallError),
-    #[cfg(any(feature = "emu", any(target_arch = "riscv32")))]
+    #[cfg(any(feature = "emu", any(target_arch = "riscv32", target_arch = "xtensa")))]
     Alloc(String),
     /// JIT relocation or symbol resolution failure (RISC-V firmware path).
-    #[cfg(any(target_arch = "riscv32"))]
+    #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
     JitLink(String),
     /// Guest wrote a trap code to the vmctx trap slot during a call
     /// (e.g. [`lpvm::TRAP_CODE_OUT_OF_FUEL`]). Return values from the
@@ -108,11 +108,11 @@ impl fmt::Display for NativeError {
             NativeError::ObjectWrite(s) => write!(f, "ELF write error: {s}"),
             #[cfg(feature = "emu")]
             NativeError::Link(e) => write!(f, "link: {e}"),
-            #[cfg(any(feature = "emu", any(target_arch = "riscv32")))]
+            #[cfg(any(feature = "emu", any(target_arch = "riscv32", target_arch = "xtensa")))]
             NativeError::Call(e) => write!(f, "{e}"),
-            #[cfg(any(feature = "emu", any(target_arch = "riscv32")))]
+            #[cfg(any(feature = "emu", any(target_arch = "riscv32", target_arch = "xtensa")))]
             NativeError::Alloc(s) => write!(f, "allocation error: {s}"),
-            #[cfg(any(target_arch = "riscv32"))]
+            #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
             NativeError::JitLink(s) => write!(f, "JIT link: {s}"),
             // The out-of-fuel message must contain both "trap" and "fuel"
             // (filetest trap classification sniffs strings; typed callers
@@ -147,7 +147,7 @@ impl core::error::Error for NativeError {
             NativeError::RegAlloc(e) => Some(e),
             #[cfg(feature = "emu")]
             NativeError::Link(e) => Some(e),
-            #[cfg(any(feature = "emu", any(target_arch = "riscv32")))]
+            #[cfg(any(feature = "emu", any(target_arch = "riscv32", target_arch = "xtensa")))]
             NativeError::Call(e) => Some(e),
             _ => None,
         }
@@ -167,7 +167,7 @@ impl From<lpvm_cranelift::CompilerError> for NativeError {
     }
 }
 
-#[cfg(any(feature = "emu", any(target_arch = "riscv32")))]
+#[cfg(any(feature = "emu", any(target_arch = "riscv32", target_arch = "xtensa")))]
 impl From<lpvm::CallError> for NativeError {
     fn from(e: lpvm::CallError) -> Self {
         NativeError::Call(e)

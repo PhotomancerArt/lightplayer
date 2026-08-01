@@ -11,7 +11,6 @@ use core::str::FromStr;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompilerConfig {
     pub inline: InlineConfig,
-    pub q32: lps_q32::q32_options::Q32Options,
     pub texture: TextureConfig,
 }
 
@@ -19,7 +18,6 @@ impl Default for CompilerConfig {
     fn default() -> Self {
         Self {
             inline: InlineConfig::default(),
-            q32: lps_q32::q32_options::Q32Options::default(),
             texture: TextureConfig::default(),
         }
     }
@@ -183,15 +181,6 @@ impl CompilerConfig {
                 self.inline.module_op_budget =
                     Some(value.trim().parse().map_err(|_| invalid(key, value))?);
             }
-            "q32.add_sub" => {
-                self.q32.add_sub = value.trim().parse().map_err(|_| invalid(key, value))?;
-            }
-            "q32.mul" => {
-                self.q32.mul = value.trim().parse().map_err(|_| invalid(key, value))?;
-            }
-            "q32.div" => {
-                self.q32.div = value.trim().parse().map_err(|_| invalid(key, value))?;
-            }
             "texture.texel_fetch_bounds" => {
                 self.texture.texel_fetch_bounds =
                     value.trim().parse().map_err(|_| invalid(key, value))?;
@@ -270,38 +259,6 @@ mod tests {
             let m: InlineMode = s.parse().expect(s);
             assert_eq!(m.to_string(), s);
         }
-    }
-
-    #[test]
-    fn apply_q32_add_sub() {
-        let mut c = CompilerConfig::default();
-        assert_eq!(c.q32.add_sub, lps_q32::q32_options::AddSubMode::Wrapping);
-        c.apply("q32.add_sub", "wrapping").unwrap();
-        assert_eq!(c.q32.add_sub, lps_q32::q32_options::AddSubMode::Wrapping);
-        c.apply("q32.add_sub", "saturating").unwrap();
-        assert_eq!(c.q32.add_sub, lps_q32::q32_options::AddSubMode::Saturating);
-    }
-
-    #[test]
-    fn apply_q32_mul() {
-        let mut c = CompilerConfig::default();
-        c.apply("q32.mul", "wrapping").unwrap();
-        assert_eq!(c.q32.mul, lps_q32::q32_options::MulMode::Wrapping);
-    }
-
-    #[test]
-    fn apply_q32_div() {
-        let mut c = CompilerConfig::default();
-        c.apply("q32.div", "reciprocal").unwrap();
-        assert_eq!(c.q32.div, lps_q32::q32_options::DivMode::Reciprocal);
-    }
-
-    #[test]
-    fn apply_q32_invalid_value_errors() {
-        let mut c = CompilerConfig::default();
-        assert!(c.apply("q32.add_sub", "bogus").is_err());
-        assert!(c.apply("q32.mul", "reciprocal").is_err());
-        assert!(c.apply("q32.div", "wrapping").is_err());
     }
 
     #[test]

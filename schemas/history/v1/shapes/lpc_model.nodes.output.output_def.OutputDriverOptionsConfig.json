@@ -1,0 +1,78 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "white_point",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2618928957,
+              "meta": {},
+              "ty": "vec3"
+            }
+          }
+        }
+      },
+      {
+        "name": "brightness",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "slider": {
+                  "max": 1.0,
+                  "min": 0.0,
+                  "step": 0.009999999776482582
+                }
+              },
+              "id": 1724747812,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "interpolation_enabled",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "dithering_enabled",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "lut_enabled",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

@@ -48,3 +48,8 @@ lp-app/lpa-studio-web/public/fw-browser-worker.js
 lp-app/lpa-studio-web/dist/
 lp-app/lpa-studio-web/story-images/.new/
 lp-app/lpa-studio-web/story-images/.scratch/
+
+# lp-xt fixture build artifacts (regenerable via lp-xt/fixtures/build.sh, esp toolchain)
+lp-xt/fixtures/elf/
+lp-xt/fixtures/reloc/obj/
+lp-xt/fixtures/fp/obj/

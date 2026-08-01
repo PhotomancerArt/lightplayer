@@ -111,10 +111,6 @@
     "lpc_model::nodes::output::output_def::OutputDriverOptionsConfig": {
       "additionalProperties": false,
       "properties": {
-        "brightness": {
-          "description": "Ratio in the intended 0.0..=1.0 domain (not enforced on read).",
-          "type": "number"
-        },
         "dithering_enabled": {
           "type": "boolean"
         },
@@ -189,21 +185,6 @@
       },
       "type": "object"
     },
-    "lpc_model::nodes::shader::glsl_opts::GlslOpts": {
-      "additionalProperties": false,
-      "properties": {
-        "add_sub": {
-          "type": "string"
-        },
-        "div": {
-          "type": "string"
-        },
-        "mul": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "lpc_model::nodes::shader::shader_param_def::ScalarHint": {
       "additionalProperties": false,
       "properties": {
@@ -268,6 +249,9 @@
         },
         "panel": {
           "type": "boolean"
+        },
+        "step": {
+          "type": "number"
         },
         "unit": {
           "type": "string"
@@ -477,8 +461,8 @@
           },
           "type": "object"
         },
-        "glsl_opts": {
-          "$ref": "#/$defs/lpc_model::nodes::shader::glsl_opts::GlslOpts"
+        "float_mode": {
+          "type": "string"
         },
         "kind": {
           "const": "Shader"
@@ -548,8 +532,8 @@
           },
           "type": "object"
         },
-        "glsl_opts": {
-          "$ref": "#/$defs/lpc_model::nodes::shader::glsl_opts::GlslOpts"
+        "float_mode": {
+          "type": "string"
         },
         "kind": {
           "const": "ComputeShader"
@@ -998,6 +982,26 @@
               "type": "object"
             }
           ]
+        },
+        "power": {
+          "additionalProperties": false,
+          "description": "Lamp type and supply budget used to limit output current.",
+          "properties": {
+            "budget_ma": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "lamp_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "lamp_type",
+            "budget_ma"
+          ],
+          "title": "Power",
+          "type": "object"
         },
         "render_size": {
           "additionalProperties": false,

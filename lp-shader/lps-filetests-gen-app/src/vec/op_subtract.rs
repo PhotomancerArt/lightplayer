@@ -97,13 +97,13 @@ fn generate_test_positive_positive(vec_type: VecType, dimension: Dimension) -> S
         let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
         let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
         return format!(
-            "{type_name} test_{type_name}_subtract_positive_positive() {{\n\
-    // Subtraction with unsigned vectors (component-wise, no underflow)\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+            "{type_name} test_{type_name}_subtract_positive_positive() {{
+    // Subtraction with unsigned vectors (component-wise, no underflow)
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_positive_positive() {cmp_op} {expected_constructor}\n"
         );
     }
@@ -131,13 +131,13 @@ fn generate_test_positive_positive(vec_type: VecType, dimension: Dimension) -> S
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_subtract_positive_positive() {{\n\
-    // Subtraction with positive vectors (component-wise)\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_positive_positive() {{
+    // Subtraction with positive vectors (component-wise)
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_positive_positive() {cmp_op} {expected_constructor}\n"
     )
 }
@@ -173,12 +173,12 @@ fn generate_test_positive_negative(vec_type: VecType, dimension: Dimension) -> S
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_subtract_positive_negative() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_positive_negative() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_positive_negative() {cmp_op} {expected_constructor}\n"
     )
 }
@@ -214,12 +214,12 @@ fn generate_test_negative_negative(vec_type: VecType, dimension: Dimension) -> S
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_subtract_negative_negative() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_negative_negative() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_negative_negative() {cmp_op} {expected_constructor}\n"
     )
 }
@@ -244,12 +244,12 @@ fn generate_test_zero(vec_type: VecType, dimension: Dimension) -> String {
     let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
 
     format!(
-        "{type_name} test_{type_name}_subtract_zero() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_zero() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_zero() {cmp_op} {a_constructor}\n"
     )
 }
@@ -272,12 +272,12 @@ fn generate_test_variables(vec_type: VecType, dimension: Dimension) -> String {
         let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
         let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
         return format!(
-            "{type_name} test_{type_name}_subtract_variables() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+            "{type_name} test_{type_name}_subtract_variables() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_variables() {cmp_op} {expected_constructor}\n"
         );
     }
@@ -304,12 +304,12 @@ fn generate_test_variables(vec_type: VecType, dimension: Dimension) -> String {
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_subtract_variables() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_variables() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_variables() {cmp_op} {expected_constructor}\n"
     )
 }
@@ -332,10 +332,10 @@ fn generate_test_expressions(vec_type: VecType, dimension: Dimension) -> String 
         let b_constructor = format_vector_constructor(vec_type, dimension, &b_values);
         let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
         return format!(
-            "{type_name} test_{type_name}_subtract_expressions() {{\n\
-    return {a_constructor} - {b_constructor};\n\
-}}\n\
-\n\
+            "{type_name} test_{type_name}_subtract_expressions() {{
+    return {a_constructor} - {b_constructor};
+}}
+
 // run: test_{type_name}_subtract_expressions() {cmp_op} {expected_constructor}\n"
         );
     }
@@ -361,10 +361,10 @@ fn generate_test_expressions(vec_type: VecType, dimension: Dimension) -> String 
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_subtract_expressions() {{\n\
-    return {a_constructor} - {b_constructor};\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_expressions() {{
+    return {a_constructor} - {b_constructor};
+}}
+
 // run: test_{type_name}_subtract_expressions() {cmp_op} {expected_constructor}\n"
     )
 }
@@ -388,12 +388,12 @@ fn generate_test_in_assignment(vec_type: VecType, dimension: Dimension) -> Strin
         let sub_constructor = format_vector_constructor(vec_type, dimension, &sub_values);
         let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
         return format!(
-            "{type_name} test_{type_name}_subtract_in_assignment() {{\n\
-    {type_name} result = {initial_constructor};\n\
-    result = result - {sub_constructor};\n\
-    return result;\n\
-}}\n\
-\n\
+            "{type_name} test_{type_name}_subtract_in_assignment() {{
+    {type_name} result = {initial_constructor};
+    result = result - {sub_constructor};
+    return result;
+}}
+
 // run: test_{type_name}_subtract_in_assignment() {cmp_op} {expected_constructor}\n"
         );
     }
@@ -419,12 +419,12 @@ fn generate_test_in_assignment(vec_type: VecType, dimension: Dimension) -> Strin
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_subtract_in_assignment() {{\n\
-    {type_name} result = {initial_constructor};\n\
-    result = result - {sub_constructor};\n\
-    return result;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_in_assignment() {{
+    {type_name} result = {initial_constructor};
+    result = result - {sub_constructor};
+    return result;
+}}
+
 // run: test_{type_name}_subtract_in_assignment() {cmp_op} {expected_constructor}\n"
     )
 }
@@ -455,12 +455,12 @@ fn generate_test_large_numbers(vec_type: VecType, dimension: Dimension) -> Strin
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected_values);
 
     format!(
-        "{type_name} test_{type_name}_subtract_large_numbers() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_large_numbers() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_large_numbers() {cmp_op} {expected_constructor}\n"
     )
 }
@@ -493,12 +493,12 @@ fn generate_test_mixed_components(vec_type: VecType, dimension: Dimension) -> St
     let expected_constructor = format_vector_constructor(vec_type, dimension, &expected);
 
     format!(
-        "{type_name} test_{type_name}_subtract_mixed_components() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_mixed_components() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_mixed_components() {cmp_op} {expected_constructor}\n"
     )
 }
@@ -513,12 +513,12 @@ fn generate_test_max_values(vec_type: VecType, dimension: Dimension) -> String {
     let cmp_op = comparison_operator(vec_type);
 
     format!(
-        "{} test_{}_subtract_max_values() {{\n\
-    {} a = {};\n\
-    {} b = {};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{} test_{}_subtract_max_values() {{
+    {} a = {};
+    {} b = {};
+    return a - b;
+}}
+
 // run: test_{}_subtract_max_values() {} {}\n",
         type_name,
         type_name,
@@ -574,12 +574,12 @@ fn generate_test_fractions(vec_type: VecType, dimension: Dimension) -> String {
     };
 
     format!(
-        "{type_name} test_{type_name}_subtract_fractions() {{\n\
-    {type_name} a = {a_constructor};\n\
-    {type_name} b = {b_constructor};\n\
-    return a - b;\n\
-}}\n\
-\n\
+        "{type_name} test_{type_name}_subtract_fractions() {{
+    {type_name} a = {a_constructor};
+    {type_name} b = {b_constructor};
+    return a - b;
+}}
+
 // run: test_{type_name}_subtract_fractions() {cmp_op} {expected_constructor}\n"
     )
 }

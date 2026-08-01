@@ -2448,7 +2448,18 @@ class Intrin:
     fn: object
     voff: float = -1.0
     vstep: float = 0.3125
-    # Targets whose frontend does not implement this builtin yet.
+    # Selectors for targets that do not implement this builtin yet, emitted as
+    # `// @unimplemented(<selector>)` before every generated `// run:`.
+    #
+    # These files are GENERATED: a disposition hand-written into the .glsl is
+    # reverted by the next `--write`, which is why the marker tool refuses to
+    # edit this corpus and `lint-torture-corpus` gates it. Put it here instead.
+    #
+    # Any selector the filetest parser accepts works, so prefer the axis-scoped
+    # form over a list of names — `("float_mode=f32",)` covers every future f32
+    # target, where `("wasm.f32", "xtn.f32")` has to be revisited per target:
+    #
+    #     Intrin("round", ..., unimplemented=("float_mode=f32",))
     unimplemented: tuple = ()
 
     def v(self, i: int) -> float:
@@ -2465,6 +2476,10 @@ INTRINS = [
     Intrin("floor", "floor(v)", lambda v, i: float(math.floor(v))),
     Intrin("ceil", "ceil(v)", lambda v, i: float(math.ceil(v))),
     Intrin("trunc", "trunc(v)", lambda v, i: float(math.trunc(v))),
+    # `round` reaches @glsl::round as a direct import call (not via Fnearest,
+    # which f32 lowers natively). Both modes have a builtin for it now; note the
+    # two are *different operations* — GLSL `round` ties away from zero,
+    # `fnearest` ties to even — and this file exercises the import path.
     Intrin("round", "round(v)", lambda v, i: _round(v)),
     Intrin("fract", "fract(v)", lambda v, i: _fract(v)),
     Intrin("mod", "mod(v, 0.75)", lambda v, i: _mod(v, 0.75)),
@@ -2479,7 +2494,15 @@ INTRINS = [
         lambda v, i: _smoothstep(0.0, 1.0, v),
     ),
     # sqrt lowers to an imported builtin call on Q32 — covers the call path.
-    Intrin("sqrt", "sqrt(v)", lambda v, i: math.sqrt(v), voff=0.25, vstep=0.5),
+    # (The `Fsqrt` *op* lowers to a native f32.sqrt; this file deliberately
+    # exercises the import instead, which is why it needed an f32 builtin.)
+    Intrin(
+        "sqrt",
+        "sqrt(v)",
+        lambda v, i: math.sqrt(v),
+        voff=0.25,
+        vstep=0.5,
+    ),
     Intrin("length", "length(vec2(v, 0.0))", lambda v, i: abs(v)),
     Intrin(
         "dot",
@@ -2659,8 +2682,8 @@ class IntrinFile:
             lines.append("")
             for count, expected in runs:
                 # Annotations bind to the next `// run:` only, so repeat them.
-                for target in self.intr.unimplemented:
-                    lines.append(f"// @unimplemented({target})")
+                for selector in self.intr.unimplemented:
+                    lines.append(f"// @unimplemented({selector})")
                 lines.append(f"// run: {fname}({count}) ~= {expected:.6f}")
             lines.append("")
         return "\n".join(lines).rstrip() + "\n"
