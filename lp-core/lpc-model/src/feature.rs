@@ -25,9 +25,7 @@ use crate::node::kind::NodeKind;
 /// Which cargo gate or injection implements a feature is deliberately not
 /// recorded here — that mapping lives next to the gates (`lpc-engine`) and in
 /// the firmware manifest composition layer.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LpFeature {
     /// Button node runtime.
     #[serde(rename = "node.button")]
