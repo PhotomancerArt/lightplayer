@@ -16,7 +16,8 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use super::module_fixtures::{
-    PanelSpike, ROOT_SCOPE, held_root_face, root_module_node_view, three_state_panel,
+    PLASMA_1_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face, root_module_node_view,
+    three_state_panel,
 };
 use super::{ModulePanel, PanelGesture};
 
@@ -33,7 +34,7 @@ fn PanelCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "The three panel states across all three widget families. Read-at-default = quiet accent, subtle label, caption says nothing writes it. Read-following = violet at the LIVE value, caption names the writer. Engaged = amber arc/fill/ring plus a per-control reset glyph and a 'held · was …' caption."
+    description = "The three panel states across all three widget families, with NO sublabels — a control is a widget, a label, and a value. Read-at-default = quiet accent, subtle label. Read-following = violet at the LIVE value. Engaged = amber arc/fill/ring plus the per-control reset glyph. Everything the old captions said now lives behind the label (see control-detail)."
 )]
 fn three_states() -> Element {
     rsx! {
@@ -48,7 +49,7 @@ fn three_states() -> Element {
 }
 
 #[story(
-    description = "Reset granularity (P2 clear): per control — the amber revert glyph beside the label, present ONLY while engaged — and per module — the 'reset N' chip in the panel header, which counts everything under the scope including nested groups. An untouched panel shows no destructive control at all."
+    description = "Reset granularity (P2 clear): per control — the amber revert glyph beside the label, present ONLY while engaged — per nested group, in its box border beside the name, and per module, upper right, counting everything under the scope. An untouched panel shows no destructive control at all, so the glyph's presence is itself part of the state signal."
 )]
 fn reset_gestures() -> Element {
     rsx! {
@@ -64,7 +65,7 @@ fn reset_gestures() -> Element {
 }
 
 #[story(
-    description = "Auto-save off (P11): the toggle sits in the panel's header row beside the reset chip, on the module that owns the scope — panel state is per project folder (.lp/state.json), not an app setting. Off means held values are lost on restart, which is the opposite of the scarf requirement (P10)."
+    description = "Auto-save off (P11): the small switch sits in the panel chrome upper right beside the reset glyph, on the module that owns the scope — panel state is per project folder (.lp/state.json), not an app setting. Off means held values are lost on restart, which is the opposite of the scarf requirement (P10)."
 )]
 fn auto_save_off() -> Element {
     let mut face = held_root_face();
@@ -82,7 +83,7 @@ fn auto_save_off() -> Element {
 }
 
 #[story(
-    description = "Walkable Read → Latch → Clear (P2). Drag any knob: the first touch materializes its panel writer and the control turns amber and captures the channel; the reset glyph or the header chip drops the writer and the control falls back to following the project. Latch, not Touch — letting go changes nothing."
+    description = "Walkable Read → Latch → Clear (P2). Drag any knob: the first touch materializes its panel writer and the control turns amber and captures the channel; the reset glyph or the panel-level reset drops the writer and the control falls back to following the project. Latch, not Touch — letting go changes nothing."
 )]
 fn latch_walkthrough() -> Element {
     // Start from the pristine Read face, so the FIRST touch is the thing
@@ -100,6 +101,47 @@ fn latch_walkthrough() -> Element {
                 on_action: move |action| {
                     spike.with_mut(|spike| spike.apply_action(&action));
                 },
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Where the sublabels went: a HELD control's detail popup, opened from its label. The control's own outline merges into the aspect card — the same contiguous-outline gesture the node face's panel controls use — and the card carries the state ('Held'), what the held value displaced ('Was: authored 200'), and the (scope, channel) identity. This is the whole cost of taking the captions off the face."
+)]
+fn control_detail() -> Element {
+    let mut panel = held_root_face().panel;
+    panel.groups.clear();
+    rsx! {
+        // Room around the control for the popup to open into.
+        div { class: "tw:h-[420px] tw:w-full tw:max-w-[860px] tw:pl-48 tw:pr-8",
+            PanelCanvas {
+                ModulePanel {
+                    panel,
+                    detail_open_channel: Some("brightness".to_string()),
+                    on_panel: move |_| {},
+                    on_action: move |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A nested group's heading popup: the scope path and the '2 controls · 1 held' tally that used to sit on the group header, now behind its name — same popup language as a control. The box's border carries only the instance name, which is what tells two copies of one effect apart."
+)]
+fn group_detail() -> Element {
+    let mut panel = held_root_face().panel;
+    panel.controls.clear();
+    rsx! {
+        div { class: "tw:h-[420px] tw:w-full tw:max-w-[860px] tw:pl-48 tw:pr-8",
+            PanelCanvas {
+                ModulePanel {
+                    panel,
+                    detail_open_group: Some(PLASMA_1_SCOPE.to_string()),
+                    on_panel: move |_| {},
+                    on_action: move |_| {},
+                }
             }
         }
     }

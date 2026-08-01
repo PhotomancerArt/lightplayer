@@ -16,7 +16,7 @@ use super::PlayModeSurface;
 use super::module_fixtures::held_root_face;
 
 #[story(
-    description = "Play mode, desktop: the root module's panel alone — its own channels plus the two effect groups — over a slim output banner. No hero-dominant preview, no children, no wiring, no card chrome. Reset and auto-save stay because they are end-user gestures."
+    description = "Play mode, desktop: the root module's panel alone — its own controls in a row, then the two effect groups as bordered clusters SIDE BY SIDE — over a slim output banner. No sublabels, no hero-dominant preview, no children, no wiring, no card chrome. This is the surface the minimalism was for. Reset and auto-save stay because they are end-user gestures."
 )]
 fn desktop() -> Element {
     let face = held_root_face();
@@ -52,15 +52,12 @@ fn mobile() -> Element {
 }
 
 #[story(
-    description = "Play mode with the nested groups collapsed: the end-user default when a project embeds several effects — the root's own controls up front, each effect one tap away. Compare against the expanded desktop story for which should be the default."
+    description = "Density without collapse: the same panel at tablet width, where the two effect boxes no longer fit side by side and the flex row wraps them into a stack. Wrapping is the density mechanism — there is no fold-away — so compare against play-mode/desktop, where the same two boxes sit next to each other."
 )]
-fn groups_collapsed() -> Element {
-    let mut face = held_root_face();
-    for group in &mut face.panel.groups {
-        group.collapsed = true;
-    }
+fn groups_wrapped() -> Element {
+    let face = held_root_face();
     rsx! {
-        div { class: "tw:h-[560px] tw:w-[375px] tw:overflow-auto tw:border tw:border-border",
+        div { class: "tw:h-[560px] tw:w-[430px] tw:overflow-auto tw:border tw:border-border",
             PlayModeSurface {
                 panel: face.panel,
                 preview: face.preview,

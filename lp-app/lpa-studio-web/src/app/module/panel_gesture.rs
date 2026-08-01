@@ -12,8 +12,10 @@
 //! - [`PanelGesture::ClearControl`] → `PanelClear { scope, channel }`
 //! - [`PanelGesture::ClearScope`] → `PanelClear { scope }`
 //! - [`PanelGesture::SetAutoSave`] → the P11 auto-save toggle
-//! - [`PanelGesture::ToggleGroup`] is pure disclosure — it has no wire op
-//!   and never will; it is view state (a `CardUiState` sibling at M4).
+//!
+//! There is no group-disclosure gesture: nested groups are bordered
+//! clusters in a wrapping row and never collapse, so there is no view
+//! state to carry.
 //!
 //! Panel *writes* are NOT here: a knob drag still rides the existing
 //! `SlotEditOp::SetValue` path so the spike reuses knob v2 untouched. That
@@ -33,11 +35,6 @@ pub enum PanelGesture {
     /// The lean (P-Q4) is that this descends into nested groups.
     ClearScope {
         /// The scope to clear.
-        scope: String,
-    },
-    /// Collapse or expand a nested panel group. Disclosure only.
-    ToggleGroup {
-        /// The nested group's scope.
         scope: String,
     },
     /// Flip panel-state auto-save (P11 — on by default).

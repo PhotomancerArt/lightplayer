@@ -104,15 +104,12 @@ fn wiring_drawer_open() -> Element {
 }
 
 #[story(
-    description = "Nested panel groups (R8): two instances of one effect side by side on the root panel — plasma_1 expanded and detached (amber), plasma_2 collapsed to its summary row and still following the host. Same channel names, different scopes, independent controls."
+    description = "Nested panel groups (R8) as bordered clusters SIDE BY SIDE: two instances of one effect, each a light hairline box with its name in the top border, laid out in a wrapping flex row — function groups on hardware. plasma 1 is detached (amber label, amber reset in its border), plasma 2 still follows the host. Same channel names, different scopes, independent controls; the label carries the instance identity now that the path lives in its popup. No collapse — wrapping is the density mechanism."
 )]
 fn nested_groups() -> Element {
     let mut face = held_root_face();
     face.preview = None;
     face.wiring = None;
-    if let Some(second) = face.panel.groups.get_mut(1) {
-        second.collapsed = true;
-    }
     rsx! {
         WorkspaceCanvas {
             div { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
@@ -129,9 +126,6 @@ fn workspace_no_bus_pane() -> Element {
     let mut view = held_root_view();
     if let Some(lpa_studio_core::UiNodeFace::Module(face)) = view.face.as_mut() {
         face.wiring_open = true;
-        if let Some(second) = face.panel.groups.get_mut(1) {
-            second.collapsed = true;
-        }
     }
     rsx! {
         div { class: "tw:grid tw:w-full tw:max-w-[860px] tw:gap-3.5 tw:bg-page tw:p-3",
