@@ -33,8 +33,8 @@ pub use provider::anthropic::{AnthropicConfig, AnthropicProvider};
 pub use provider::openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider};
 pub use provider::{
     BoxStream, ChatMessage, ChatRole, ContentBlock, HttpGetTransport, HttpSseTransport,
-    ListModelsError, ModelInfo, ModelProvider, StopReason, TokenUsage, ToolDef, TurnEvent,
-    TurnRequest, list_anthropic_models, list_openai_compat_models,
+    ListModelsError, ModelInfo, ModelPrice, ModelProvider, StopReason, TokenUsage, ToolDef,
+    TurnEvent, TurnRequest, list_anthropic_models, list_openai_compat_models,
 };
 pub use session::{AgentError, AgentEvent, AgentSession, AgentTranscript, MAX_TURNS_PER_RUN};
 pub use tool::{

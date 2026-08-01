@@ -96,9 +96,10 @@ pub use app::server::{
     StudioServerClient,
 };
 pub use app::settings::{
-    AgentProvider, AgentProviderGuidance, AgentSettings, DEFAULT_AGENT_MODEL, SettingsCommand,
-    SettingsLayer, SettingsStore, StudioSettings, UiAgentSettingsView, UiModelOption,
-    UiSettingsView, provider_guidance,
+    AgentProvider, AgentProviderGuidance, AgentSettings, BrowserFacts, COMMON_LOCAL_SERVERS,
+    DEFAULT_AGENT_MODEL, FindingKind, LocalModelProbeState, LocalServer, ProbeFinding, ProbeLevel,
+    ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
+    UiAgentSettingsView, UiModelOption, UiSettingsView, provider_guidance,
 };
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,

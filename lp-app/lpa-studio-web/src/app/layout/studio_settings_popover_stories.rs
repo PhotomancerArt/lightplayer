@@ -6,9 +6,10 @@
 //! or network fetch.
 
 use dioxus::prelude::*;
+use lpa_studio_core::app::settings::local_model_probe::{self as probe, ProbeOutcome};
 use lpa_studio_core::{
-    AgentProvider, SettingsLayer, UiAgentSettingsView, UiModelOption, UiSettingsView,
-    provider_guidance,
+    AgentProvider, BrowserFacts, LocalModelProbeState, SettingsLayer, UiAgentSettingsView,
+    UiModelOption, UiSettingsView, provider_guidance,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -83,6 +84,81 @@ pub(crate) fn custom_local_server() -> Element {
 }
 
 #[story(
+    description = "A scan that found a local Ollama: the summary leads, and each served model id is a one-click adopt (address + model together)."
+)]
+pub(crate) fn custom_scan_found_a_server() -> Element {
+    let findings = vec![diagnosed(
+        "http://localhost:11434/v1",
+        ProbeOutcome::Models(vec![
+            "qwen3-coder:30b".to_string(),
+            "qwen3.5:9b".to_string(),
+            "llama3.2".to_string(),
+        ]),
+    )];
+    probe_panel(LocalModelProbeState {
+        running: false,
+        running_label: None,
+        summary: Some(probe::scan_summary(&findings, &story_facts())),
+        findings,
+    })
+}
+
+#[story(
+    description = "The CORS case: the server answered but the browser dropped the response. Reported as reachable, with the exact copy-pasteable fix for the recognized server, plus a dead port for contrast."
+)]
+pub(crate) fn custom_scan_blocked_by_cors() -> Element {
+    let findings = vec![
+        diagnosed("http://localhost:11434/v1", ProbeOutcome::CorsBlocked),
+        diagnosed(
+            "http://localhost:1234/v1",
+            ProbeOutcome::Status {
+                status: 401,
+                body: r#"{"error":{"message":"API key required"}}"#.to_string(),
+            },
+        ),
+    ];
+    probe_panel(LocalModelProbeState {
+        running: false,
+        running_label: None,
+        summary: Some(probe::scan_summary(&findings, &story_facts())),
+        findings,
+    })
+}
+
+#[story(
+    description = "A scan that found nothing: every common port silent, with the browser-policy hint the summary adds when a page is served over https."
+)]
+pub(crate) fn custom_scan_found_nothing() -> Element {
+    let findings: Vec<_> = probe::COMMON_LOCAL_SERVERS
+        .iter()
+        .map(|server| {
+            diagnosed(
+                server.base_url,
+                ProbeOutcome::Unreachable {
+                    detail: "TypeError: Failed to fetch".to_string(),
+                },
+            )
+        })
+        .collect();
+    probe_panel(LocalModelProbeState {
+        running: false,
+        running_label: None,
+        summary: Some(probe::scan_summary(&findings, &story_facts())),
+        // Dead ports are dropped from the list; the summary counts them.
+        findings: Vec::new(),
+    })
+}
+
+#[story(
+    description = "A scan in flight: both probe buttons disabled while the working-status line names what is being tried."
+)]
+pub(crate) fn custom_scan_running() -> Element {
+    probe_panel(crate::local_model_probe::running_state(
+        &crate::local_model_probe::ProbeRequest::ScanCommonPorts,
+    ))
+}
+
+#[story(
     description = "OpenRouter selected, not yet connected: the one-click Connect button replaces the key field, with a sample exchange-failure warning underneath."
 )]
 pub(crate) fn openrouter_needs_connect() -> Element {
@@ -118,14 +194,17 @@ pub(crate) fn model_dropdown_populated() -> Element {
         UiModelOption {
             id: "claude-sonnet-5".to_string(),
             label: Some("Claude Sonnet 5".to_string()),
+            detail: None,
         },
         UiModelOption {
             id: "claude-opus-5".to_string(),
             label: Some("Claude Opus 5".to_string()),
+            detail: None,
         },
         UiModelOption {
             id: "claude-haiku-4-5".to_string(),
             label: Some("Claude Haiku 4.5".to_string()),
+            detail: None,
         },
     ];
     agent.model_override = Some("claude-opus-5".to_string());
@@ -174,10 +253,12 @@ pub(crate) fn model_custom_entry() -> Element {
         UiModelOption {
             id: "gpt-5.2".to_string(),
             label: None,
+            detail: None,
         },
         UiModelOption {
             id: "gpt-5.2-mini".to_string(),
             label: None,
+            detail: None,
         },
     ];
     agent.model_default = None;
@@ -208,5 +289,44 @@ fn panel(agent: UiAgentSettingsView) -> Element {
         div { class: "tw:w-[340px] tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card",
             AgentSettingsSection { agent, on_settings: move |_| {} }
         }
+    }
+}
+
+/// The Custom-provider panel carrying a discovery result.
+fn probe_panel(probe: LocalModelProbeState) -> Element {
+    let agent = custom_agent();
+    rsx! {
+        div { class: "tw:w-[340px] tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card",
+            AgentSettingsSection { agent, on_settings: move |_| {}, probe }
+        }
+    }
+}
+
+/// The Custom-provider fixture base: local server selected, nothing chosen.
+fn custom_agent() -> UiAgentSettingsView {
+    let mut agent = UiSettingsView::default().agent;
+    agent.provider = AgentProvider::Custom;
+    agent.provider_overridden = true;
+    agent.provider_layer = SettingsLayer::User;
+    agent.guidance = provider_guidance(AgentProvider::Custom);
+    agent.api_key_optional = true;
+    agent.model_default = None;
+    agent.model_placeholder = "model id from your provider — see its docs".to_string();
+    agent.model_missing = true;
+    agent
+}
+
+/// One finding, diagnosed through the same core path the browser glue uses.
+fn diagnosed(base_url: &str, outcome: ProbeOutcome) -> probe::ProbeFinding {
+    probe::diagnose(base_url, outcome, &story_facts(), None)
+}
+
+/// The deployed-site case these findings describe: an https page reaching
+/// for plain-http localhost.
+fn story_facts() -> BrowserFacts {
+    BrowserFacts {
+        page_origin: "https://lightplayer.app".to_string(),
+        page_is_https: true,
+        is_safari: false,
     }
 }
