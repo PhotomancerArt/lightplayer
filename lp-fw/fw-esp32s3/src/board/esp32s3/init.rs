@@ -38,6 +38,17 @@ pub fn init_board() -> (
     Rwdt,
     esp_hal::peripherals::RMT<'static>,
 ) {
+    // Arm coprocessor 0 before anything can JIT a Float-mode shader (M7 D6).
+    // Silicon has been measured arriving armed under this boot chain, but the
+    // provenance of that write is unpinned, so this does not depend on it —
+    // see `super::fpu`. Read-modify-write, so a board that booted with every
+    // coprocessor enabled keeps them.
+    //
+    // Embassy tasks share this context, so one call covers the shader task;
+    // a second core or a context with its own `CPENABLE` would need its own.
+    let cpenable = super::fpu::arm();
+    log::debug!("FPU armed: CPENABLE = {cpenable:#010x}");
+
     // Configure CPU clock to maximum speed (240 MHz for ESP32-S3).
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
