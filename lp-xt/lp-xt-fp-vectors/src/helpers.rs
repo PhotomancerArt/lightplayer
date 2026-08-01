@@ -236,7 +236,6 @@ pub fn fingerprint() -> u32 {
 /// NaN-position grids for the accumulate ops, whose first-round grid staged
 /// only the canonical NaN and therefore could not resolve operand priority.
 pub mod probe2 {
-    use super::HelperVector;
     use crate::mix;
 
     /// Second-round ops. All three dispatch to existing kernels; the grids
@@ -358,18 +357,6 @@ pub mod probe2 {
                 DIVN_NAN_S[(i / 4) % 4],
                 DIVN_NAN_T[i % 4],
             ),
-        }
-    }
-
-    /// Every probe2 vector, exposed to both sides like [`super::probe`].
-    pub fn vector(op: Op2, index: u32) -> HelperVector {
-        let (r, s, t) = probe(op, index);
-        HelperVector {
-            op: super::HelperOp::DivnS, // placeholder discriminant, unused
-            index,
-            r,
-            s,
-            t,
         }
     }
 
