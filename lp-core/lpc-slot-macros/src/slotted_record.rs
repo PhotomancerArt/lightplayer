@@ -40,13 +40,13 @@ pub(crate) fn derive_record(
         let static_shape = attr::field_static_shape_tokens(&field_attr.shape, &field_ty);
         let static_shape_binding = format_ident!("__field_shape_{}", static_shape_bindings.len());
         let semantics = attr::field_semantics_tokens(field_attr.direction, field_attr.merge);
-        let selected_policy = field_attr.policy.or(container_attrs.default_policy);
-        let policy = selected_policy
-            .map(attr::field_policy_tokens)
-            .unwrap_or_else(|| quote! { ::lpc_model::SlotPolicy::default() });
-        let static_policy = selected_policy
-            .map(attr::field_policy_tokens)
-            .unwrap_or_else(|| quote! { ::lpc_model::SlotPolicy::writable_persisted() });
+        let selected_role = field_attr.role.or(container_attrs.default_role);
+        let role = selected_role
+            .map(attr::field_role_tokens)
+            .unwrap_or_else(|| quote! { ::lpc_model::SlotRole::default() });
+        let static_role = selected_role
+            .map(attr::field_role_tokens)
+            .unwrap_or_else(|| quote! { ::lpc_model::SlotRole::Setting });
         let default_bind = match &field_attr.default_bind {
             Some(endpoint) => quote! { Some(#endpoint) },
             None => quote! { None },
@@ -56,7 +56,7 @@ pub(crate) fn derive_record(
                 #field_name,
                 #shape,
                 #semantics,
-                #policy,
+                #role,
                 #default_bind,
             )
         });
@@ -66,7 +66,7 @@ pub(crate) fn derive_record(
                 name: #field_name,
                 shape: #static_shape_binding,
                 semantics: #semantics,
-                policy: #static_policy,
+                role: #static_role,
                 default_bind: #default_bind,
             }
         });
@@ -78,7 +78,14 @@ pub(crate) fn derive_record(
             access_arms.push(quote! {
                 #index => Some(#access),
             });
-            if selected_policy.is_none_or(|policy| !attr::policy_is_read_only_transient(policy))
+            // Only produced fields drop dynamic mut access: they are never
+            // authored, so nothing legitimate writes them dynamically
+            // (direction implies read-only regardless of role, D1). A
+            // read-only-but-persisted (`Fixed`) field is still authored
+            // JSON — the dynamic reader must be able to deserialize it —
+            // and its write protection is mutate-time role enforcement
+            // (`resolve_slot_role`), not a codec-level hole.
+            if field_attr.direction != attr::FieldDirectionAttr::Produced
                 && let Some(mut_access) =
                     attr::field_mut_access_tokens(&field_attr.shape, &field_ty, &field_ident)
             {
