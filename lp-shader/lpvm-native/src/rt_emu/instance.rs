@@ -1,7 +1,7 @@
 //! [`LpvmInstance`] implementation for emulated native RV32 execution.
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use cranelift_codegen::data_value::DataValue;
@@ -13,16 +13,20 @@ use lpir::FloatMode;
 use lpir::lpir_module::IrFunction;
 use lps_shared::{LayoutRules, LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
-    CallError, LpvmBuffer, LpvmInstance, decode_global_read, decode_q32_return,
-    encode_global_write, encode_uniform_write, encode_uniform_write_q32,
-    flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
-    validate_compute_tick_sig, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
+    CallError, LpvmBuffer, LpvmInstance, decode_global_read, decode_return_to_f32,
+    encode_global_write, encode_uniform_write, encode_uniform_write_q32, flat_words_from_f32_args,
+    float_lane_abi, global_data_span, glsl_component_count, validate_compute_tick_sig,
+    validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
+// Only the Xtensa arm allocates from the arena (for its sret buffer).
+#[cfg(feature = "emu-xt")]
+use lpvm::LpvmMemory;
 use lpvm::{INVOCATION_INDEX_ARMED, TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP};
-use lpvm_cranelift::{CompileOptions, signature_for_ir_func, signature_uses_struct_return};
+use lpvm_cranelift::{signature_for_ir_func, signature_uses_struct_return};
 use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa};
 
 use crate::error::NativeError;
+use crate::isa::IsaTarget;
 
 use super::NativeEmuModule;
 
@@ -37,6 +41,34 @@ const EMU_CALL_INSTRUCTION_LIMIT: u64 = 64_000_000;
 pub(crate) struct RenderTextureEntry {
     name: String,
     entry_pc: u32,
+}
+
+/// A completed guest call, as each ISA arm reports it.
+///
+/// The arms differ only in how they get here; the postlude in
+/// [`NativeEmuInstance::run_emulator_call`] is shared, which is what keeps the
+/// ISA branch to one block instead of two copies of the whole function.
+struct EmuRun {
+    /// Raw result words — the return registers, or the sret buffer contents.
+    words: Vec<i32>,
+    instructions: u64,
+    cycles: u64,
+    /// Formatted architectural state, kept only when tracing is on.
+    debug: String,
+}
+
+/// A guest call that did not complete.
+struct FailedRun {
+    message: String,
+    debug: String,
+}
+
+impl FailedRun {
+    /// For failures before an emulator exists to dump.
+    fn without_state(message: String) -> FailedRun {
+        let debug = format!("=== Debug Info ===\n\nError: {message}");
+        FailedRun { message, debug }
+    }
 }
 
 /// Per-instance emulation state with VMContext.
@@ -58,6 +90,11 @@ pub struct NativeEmuInstance {
     pub(crate) armed_fuel: u32,
     pub(crate) render_texture_cache: Option<RenderTextureEntry>,
     pub(crate) render_samples_cache: Option<RenderTextureEntry>,
+    /// `(guest address, size)` of the shared-arena scratch buffer used for sret
+    /// returns on ISAs whose emulator does not allocate one itself (Xtensa).
+    /// Grown on demand and reused — the arena is a bump allocator.
+    #[cfg(feature = "emu-xt")]
+    pub(crate) sret_scratch: Option<(u32, usize)>,
 }
 
 impl NativeEmuInstance {
@@ -158,14 +195,6 @@ impl NativeEmuInstance {
         self.armed_fuel = fuel;
     }
 
-    fn cranelift_options(&self) -> CompileOptions {
-        CompileOptions {
-            float_mode: self.module.options.float_mode,
-            config: self.module.options.config.clone(),
-            ..Default::default()
-        }
-    }
-
     fn resolve_render_texture(&mut self, fn_name: &str) -> Result<u32, NativeError> {
         if let Some(entry) = &self.render_texture_cache {
             if entry.name == fn_name {
@@ -228,6 +257,11 @@ impl NativeEmuInstance {
     }
 
     /// Run emulator at `entry` with full arg words (including vmctx in slot 0).
+    ///
+    /// The **one** ISA branch in this file. Everything above and below it —
+    /// vmctx, uniforms, globals, snapshot, textures, fuel, Q32 — is ISA-neutral,
+    /// and all host-side read-back goes through the shared arena rather than the
+    /// emulator. See `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`.
     fn run_emulator_call(
         &mut self,
         ir_func: &IrFunction,
@@ -236,18 +270,8 @@ impl NativeEmuInstance {
         cycle_model: CycleModel,
         return_ty_for_sret: Option<&LpsType>,
     ) -> Result<Vec<i32>, NativeError> {
-        let isa = riscv32_lpvm_reference_isa()
-            .map_err(|e| NativeError::Call(CallError::Unsupported(format!("{e}"))))?;
-        let opts = self.cranelift_options();
-        let sig = signature_for_ir_func(
-            ir_func,
-            CallConv::SystemV,
-            opts.float_mode,
-            isa.pointer_type(),
-            &*isa,
-        );
         let n_ret = ir_func.return_types.len();
-        let uses_sret = signature_uses_struct_return(&*isa, ir_func);
+        let uses_sret = self.uses_struct_return(ir_func)?;
         let struct_size = if uses_sret {
             if ir_func.sret_arg.is_some() {
                 let rt = return_ty_for_sret.ok_or_else(|| {
@@ -262,74 +286,60 @@ impl NativeEmuInstance {
                 }
                 lps_shared::type_size(rt, LayoutRules::Std430)
             } else {
+                // Safe *only* because the branch above catches the explicit
+                // form. `FunctionBuilder::finish` empties `return_types` when
+                // `sret_arg` is set, so reaching this arm means the sret is
+                // implicit-scalar and `return_types` still describes the whole
+                // return. Sizing an explicit-sret function from
+                // `return_types.len()` yields **zero**, and a buffer sized zero
+                // for a callee that writes four words is a heap overflow. That
+                // is not hypothetical: `rt_jit` derived its `ret_count` that
+                // way and had exactly that bug. Do not collapse these two arms.
                 ir_func.return_types.len() * 4
             }
         } else {
             0usize
         };
 
-        let data_args: Vec<DataValue> = full.iter().copied().map(DataValue::I32).collect();
-        let shared = self.module.arena.storage_arc();
-        let mem = Memory::new_with_shared(
-            self.module.load.code.clone(),
-            self.module.load.ram.clone(),
-            shared,
-            0,
-            DEFAULT_SHARED_START,
-            lp_emu_core::DEFAULT_RAM_START,
-        );
         let log_level = if self.module.options.emu_trace_instructions {
             LogLevel::Instructions
         } else {
             LogLevel::None
         };
-        // Guest fuel (armed by `refresh_vmctx_header` before every entry)
-        // bounds runaway shader code first: a full `DEFAULT_VMCTX_FUEL` tank
-        // of loop back-edges costs ~6-10 guest instructions each (≲10M),
-        // well under `EMU_CALL_INSTRUCTION_LIMIT`. Raising the emulator
-        // limit is safe precisely because of that metering; the limit stays
-        // as the hard host-side backstop for fuel-off compiles and codegen
-        // bugs.
-        let mut emu = Riscv32Emulator::from_memory(mem, &[])
-            .with_log_level(log_level)
-            .with_call_instruction_limit(EMU_CALL_INSTRUCTION_LIMIT);
-        emu.set_cycle_model(cycle_model);
 
-        let ret_result = if uses_sret {
-            emu.call_function_with_struct_return(entry, &data_args, &sig, struct_size)
-        } else {
-            emu.call_function(entry, &data_args, &sig)
+        // --- the ISA branch ---
+        let run = match self.module.isa {
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac => self.run_rv32(
+                ir_func,
+                entry,
+                full,
+                cycle_model,
+                log_level,
+                uses_sret,
+                struct_size,
+            ),
+            #[cfg(feature = "emu-xt")]
+            IsaTarget::Xtensa => {
+                self.run_xt(entry, full, cycle_model, log_level, uses_sret, struct_size)
+            }
+            #[cfg(all(feature = "isa-xt", not(feature = "emu-xt")))]
+            IsaTarget::Xtensa => {
+                unreachable!("engine construction rejects Xtensa without `emu-xt`")
+            }
         };
 
-        match ret_result {
-            Ok(ret) => {
-                let n_inst = emu.get_instruction_count();
-                if self.module.options.emu_trace_instructions {
-                    let mut debug_parts = Vec::new();
-                    debug_parts.push(String::from("=== Debug Info ==="));
-                    debug_parts.push(String::from("Execution completed normally."));
-                    debug_parts.push(emu.dump_state());
-                    debug_parts.push(emu.format_debug_info(
-                        Some(emu.get_pc()),
-                        lp_emu_core::config::INSTRUCTION_LOG_DISPLAY_COUNT,
-                    ));
-                    self.last_debug = Some(debug_parts.join("\n\n"));
+        // --- shared postlude: identical for every ISA ---
+        match run {
+            Ok(run) => {
+                self.last_debug = if self.module.options.emu_trace_instructions {
+                    Some(run.debug)
                 } else {
-                    self.last_debug = None;
-                }
-                let mut words = Vec::with_capacity(ret.len());
-                for dv in ret {
-                    match dv {
-                        DataValue::I32(w) => words.push(w),
-                        other => {
-                            return Err(NativeError::Call(CallError::Unsupported(format!(
-                                "unexpected emulator return value: {other:?}"
-                            ))));
-                        }
-                    }
-                }
+                    None
+                };
+                let mut words = run.words;
                 if uses_sret {
-                    let need_words = (struct_size + 3) / 4;
+                    let need_words = struct_size.div_ceil(4);
                     if words.len() < need_words {
                         return Err(NativeError::Call(CallError::Unsupported(format!(
                             "emulator returned {} words, sret needs {} words for {} bytes",
@@ -349,31 +359,331 @@ impl NativeEmuInstance {
                     }
                     words.truncate(n_ret);
                 }
-                self.last_guest_instruction_count = Some(n_inst);
-                self.last_guest_cycle_count = Some(emu.get_cycle_count());
+                self.last_guest_instruction_count = Some(run.instructions);
+                self.last_guest_cycle_count = Some(run.cycles);
                 // A trapped guest exits cleanly (epilogue cascade), so the
                 // trap slot — not the emulator result — is the signal.
                 self.take_trap()?;
                 Ok(words)
             }
-            Err(e) => {
+            Err(failed) => {
                 self.last_guest_instruction_count = None;
                 self.last_guest_cycle_count = None;
-                let mut debug_parts = Vec::new();
-                debug_parts.push(format!("=== Debug Info ==="));
-                debug_parts.push(format!("Error: {e:?}"));
-                debug_parts.push(emu.dump_state());
-                debug_parts.push(emu.format_debug_info(
-                    Some(emu.get_pc()),
-                    lp_emu_core::config::INSTRUCTION_LOG_DISPLAY_COUNT,
-                ));
-                let debug_info = debug_parts.join("\n\n");
-                self.last_debug = Some(debug_info);
-                Err(NativeError::Call(CallError::Unsupported(format!(
-                    "emulator: {e:?}"
-                ))))
+                self.last_debug = Some(failed.debug);
+                Err(NativeError::Call(CallError::Unsupported(failed.message)))
             }
         }
+    }
+
+    /// Does this function return through an sret buffer?
+    ///
+    /// Each ISA answers from its own ABI: rv32 through the cranelift signature it
+    /// compiles against, Xtensa through `isa/xt`'s own classification — which is
+    /// what its emitter builds the prologue from, so caller and callee cannot
+    /// drift. There is no cranelift Xtensa backend to ask.
+    fn uses_struct_return(&self, ir_func: &IrFunction) -> Result<bool, NativeError> {
+        match self.module.isa {
+            #[cfg(feature = "isa-rv32")]
+            IsaTarget::Rv32imac => {
+                let isa = riscv32_lpvm_reference_isa()
+                    .map_err(|e| NativeError::Call(CallError::Unsupported(format!("{e}"))))?;
+                Ok(signature_uses_struct_return(&*isa, ir_func))
+            }
+            #[cfg(feature = "isa-xt")]
+            IsaTarget::Xtensa => {
+                let sig = self.host_signature(ir_func)?;
+                Ok(crate::isa::xt::abi::func_abi_xt(&sig, Some(ir_func))
+                    .return_method()
+                    .is_sret())
+            }
+        }
+    }
+
+    /// The module's surface signature for `ir_func`, which the Xtensa ABI
+    /// classification is expressed over.
+    #[cfg(feature = "isa-xt")]
+    fn host_signature(&self, ir_func: &IrFunction) -> Result<lps_shared::LpsFnSig, NativeError> {
+        self.module
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == ir_func.name)
+            .cloned()
+            .ok_or_else(|| NativeError::Call(CallError::MissingMetadata(ir_func.name.clone())))
+    }
+
+    #[cfg(feature = "isa-rv32")]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one call site; splitting the \
+        argument list would only move the ISA branch's inputs into a struct \
+        used exactly twice"
+    )]
+    fn run_rv32(
+        &self,
+        ir_func: &IrFunction,
+        entry: u32,
+        full: &[i32],
+        cycle_model: CycleModel,
+        log_level: LogLevel,
+        uses_sret: bool,
+        struct_size: usize,
+    ) -> Result<EmuRun, FailedRun> {
+        let isa = match riscv32_lpvm_reference_isa() {
+            Ok(isa) => isa,
+            Err(e) => return Err(FailedRun::without_state(format!("{e}"))),
+        };
+        // `FloatMode::Q32`, deliberately, even when the module is compiled in
+        // f32 mode. This signature describes how the **host enters the guest**,
+        // and `lpvm-native` targets the *soft-float* ABI
+        // (`EF_RISCV_FLOAT_ABI_SOFT`, and Xtensa likewise today): an f32
+        // argument or return lives in an integer register, exactly like a Q32
+        // word. Passing `FloatMode::F32` here asks the emulator to marshal a
+        // `types::F32` in a float register file that this ABI does not use — it
+        // fails with "Unsupported return type: types::F32", and if it ever
+        // stopped failing it would be reading the wrong register.
+        //
+        // When a hardware-FPU backend lands ([`crate::isa::F32Lowering::
+        // HardwareFpu`]), the entry ABI changes with it and this becomes a
+        // query on the target rather than a constant.
+        let sig = signature_for_ir_func(
+            ir_func,
+            CallConv::SystemV,
+            FloatMode::Q32,
+            isa.pointer_type(),
+            &*isa,
+        );
+
+        let data_args: Vec<DataValue> = full.iter().copied().map(DataValue::I32).collect();
+        let mem = Memory::new_with_shared(
+            self.module.load.code.clone(),
+            self.module.load.ram.clone(),
+            self.module.arena.storage_arc(),
+            0,
+            DEFAULT_SHARED_START,
+            lp_emu_core::DEFAULT_RAM_START,
+        );
+        // Guest fuel (armed by `refresh_vmctx_header` before every entry)
+        // bounds runaway shader code first: a full `DEFAULT_VMCTX_FUEL` tank
+        // of loop back-edges costs ~6-10 guest instructions each (≲10M),
+        // well under `EMU_CALL_INSTRUCTION_LIMIT`. Raising the emulator
+        // limit is safe precisely because of that metering; the limit stays
+        // as the hard host-side backstop for fuel-off compiles and codegen
+        // bugs.
+        let mut emu = Riscv32Emulator::from_memory(mem, &[])
+            .with_log_level(log_level)
+            .with_call_instruction_limit(EMU_CALL_INSTRUCTION_LIMIT);
+        emu.set_cycle_model(cycle_model);
+
+        let ret_result = if uses_sret {
+            emu.call_function_with_struct_return(entry, &data_args, &sig, struct_size)
+        } else {
+            emu.call_function(entry, &data_args, &sig)
+        };
+
+        let state = |header: String| {
+            [
+                String::from("=== Debug Info ==="),
+                header,
+                emu.dump_state(),
+                emu.format_debug_info(
+                    Some(emu.get_pc()),
+                    lp_emu_core::config::INSTRUCTION_LOG_DISPLAY_COUNT,
+                ),
+            ]
+            .join("\n\n")
+        };
+        match ret_result {
+            Ok(ret) => {
+                let mut words = Vec::with_capacity(ret.len());
+                for dv in ret {
+                    match dv {
+                        DataValue::I32(w) => words.push(w),
+                        other => {
+                            return Err(FailedRun {
+                                message: format!("unexpected emulator return value: {other:?}"),
+                                debug: state(String::from("Unexpected return value.")),
+                            });
+                        }
+                    }
+                }
+                Ok(EmuRun {
+                    words,
+                    instructions: emu.get_instruction_count(),
+                    cycles: emu.get_cycle_count(),
+                    debug: state(String::from("Execution completed normally.")),
+                })
+            }
+            Err(e) => Err(FailedRun {
+                message: format!("emulator: {e:?}"),
+                debug: state(format!("Error: {e:?}")),
+            }),
+        }
+    }
+
+    /// Xtensa: build the emulator on the S3 board profile, map the shared arena,
+    /// load the merged builtins+shader image, and call through the windowed ABI.
+    ///
+    /// Argument placement comes from `isa/xt`'s own `classify_params` ordering —
+    /// register args then stack args, in flat word order — which is exactly what
+    /// `run_loaded_with_args` stages. The one case needing more than a flat list
+    /// is an LPIR sret function, whose caller must stage `[sret, vmctx, …]`.
+    #[cfg(feature = "emu-xt")]
+    #[allow(clippy::too_many_arguments, reason = "mirrors run_rv32's shape")]
+    fn run_xt(
+        &mut self,
+        entry: u32,
+        full: &[i32],
+        cycle_model: CycleModel,
+        log_level: LogLevel,
+        uses_sret: bool,
+        struct_size: usize,
+    ) -> Result<EmuRun, FailedRun> {
+        use lp_xt_emu::{CallOutcome, Emulator, NoopTracer, board::BoardProfile};
+
+        // An sret call passes the buffer pointer as the first argument. The
+        // buffer lives in the shared arena — host memory the guest can write
+        // and the host reads back directly, so no guest-stack juggling and no
+        // emulator involvement in the result path.
+        let mut args: Vec<u32> = Vec::with_capacity(full.len() + 1);
+        let sret_addr = if uses_sret {
+            let addr = match self.sret_buffer(struct_size) {
+                Ok(addr) => addr,
+                Err(e) => return Err(FailedRun::without_state(format!("{e:?}"))),
+            };
+            args.push(addr);
+            Some(addr)
+        } else {
+            None
+        };
+        args.extend(full.iter().map(|&w| w as u32));
+
+        // There is no measured Xtensa cycle table. Applying rv32's ESP32-C6
+        // weights to Xtensa instructions would produce a number that *looks* like
+        // an S3 cycle estimate and is not one, so a chip-specific request is
+        // answered with "no data" (cycles = 0) rather than a fabricated figure —
+        // consumers render that the way they render wasm and interp, which also
+        // have no guest cost model. `InstructionCount` is real and is honoured.
+        let report_cycles = matches!(cycle_model, CycleModel::InstructionCount);
+        let mut emu = Emulator::with_profile(BoardProfile::esp32s3()).with_log_level(log_level);
+        emu.set_cycle_model(CycleModel::InstructionCount);
+        // Same rationale as rv32's call-instruction limit: in-guest fuel is the
+        // real limiter, and this stays the hard backstop for fuel-off compiles.
+        emu.step_budget = EMU_CALL_INSTRUCTION_LIMIT;
+        emu.mem
+            .add_shared(lp_xt_emu::SHARED_DBUS_BASE, self.module.arena.storage_arc());
+        // The flash-resident builtins image first (IROM/DROM, plus its SRAM
+        // .data/.bss when it has any), then the shader's own SRAM code region.
+        // Both are per-call: the emulator is built fresh for every entry.
+        for r in &self.module.load.regions {
+            emu.mem.load_region(r.base, &r.bytes);
+        }
+        emu.mem
+            .load_region(self.module.load.code_base, &self.module.load.code);
+
+        let outcome = emu.run_loaded_with_args(entry, &args, &mut NoopTracer, None);
+
+        let state = |header: String| {
+            [
+                String::from("=== Debug Info ==="),
+                header,
+                emu.dump_state(),
+                emu.format_debug_info(
+                    Some(emu.cpu.pc),
+                    lp_emu_core::config::INSTRUCTION_LOG_DISPLAY_COUNT,
+                ),
+            ]
+            .join("\n\n")
+        };
+        let (lo, hi) = match outcome {
+            CallOutcome::Ok { lo, hi } => (lo, hi),
+            CallOutcome::Trap(t) => {
+                return Err(FailedRun {
+                    message: format!("emulator: {t:?}"),
+                    debug: state(format!("Trap: {t:?}")),
+                });
+            }
+        };
+        let instructions = emu.get_instruction_count();
+        let cycles = if report_cycles {
+            emu.get_cycle_count()
+        } else {
+            0
+        };
+        let debug = state(String::from("Execution completed normally."));
+        drop(emu);
+
+        let words = match sret_addr {
+            // Read the struct out of the arena, mirroring rv32's "the emulator
+            // hands back the buffer contents" contract.
+            Some(addr) => match self.read_guest_words(addr, struct_size.div_ceil(4)) {
+                Ok(words) => words,
+                Err(e) => {
+                    return Err(FailedRun {
+                        message: format!("{e:?}"),
+                        debug,
+                    });
+                }
+            },
+            None => vec![lo as i32, hi as i32],
+        };
+
+        Ok(EmuRun {
+            words,
+            instructions,
+            cycles,
+            debug,
+        })
+    }
+
+    /// Per-instance scratch buffer in the shared arena for sret returns, grown
+    /// on demand and reused across calls (the arena is a bump allocator, so a
+    /// fresh allocation per call would leak).
+    #[cfg(feature = "emu-xt")]
+    fn sret_buffer(&mut self, size: usize) -> Result<u32, NativeError> {
+        let want = size.max(16);
+        if let Some((addr, have)) = self.sret_scratch {
+            if have >= want {
+                return Ok(addr);
+            }
+        }
+        let buf = self
+            .module
+            .arena
+            .alloc(want, 16)
+            .map_err(|e| NativeError::Alloc(format!("sret buffer: {e:?}")))?;
+        let addr = buf.guest_base() as u32;
+        self.sret_scratch = Some((addr, want));
+        Ok(addr)
+    }
+
+    /// Read `count` words from a guest address inside the shared arena.
+    #[cfg(feature = "emu-xt")]
+    fn read_guest_words(&self, addr: u32, count: usize) -> Result<Vec<i32>, NativeError> {
+        let off = (addr as usize)
+            .checked_sub(self.module.arena.shared_start() as usize)
+            .ok_or_else(|| {
+                NativeError::Call(CallError::Unsupported(format!(
+                    "guest address {addr:#x} is below the shared arena"
+                )))
+            })?;
+        let storage = self.module.arena.lock_storage();
+        if off + count * 4 > storage.len() {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "guest read: arena too small",
+            ))));
+        }
+        Ok((0..count)
+            .map(|i| {
+                let at = off + i * 4;
+                i32::from_le_bytes([
+                    storage[at],
+                    storage[at + 1],
+                    storage[at + 2],
+                    storage[at + 3],
+                ])
+            })
+            .collect())
     }
 
     fn invoke_flat(
@@ -499,11 +809,7 @@ impl LpvmInstance for NativeEmuInstance {
         self.last_debug = None;
         self.last_guest_instruction_count = None;
         self.last_guest_cycle_count = None;
-        if self.module.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeEmuInstance::call requires FloatMode::Q32",
-            ))));
-        }
+        let lane_abi = float_lane_abi(self.module.options.float_mode);
 
         let gfn = self
             .module
@@ -522,12 +828,6 @@ impl LpvmInstance for NativeEmuInstance {
             }
         }
 
-        if gfn.return_type == LpsType::Void {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "void return is not represented as LpsValue; use a typed return",
-            ))));
-        }
-
         if gfn.parameters.len() != args.len() {
             return Err(NativeError::Call(CallError::Arity {
                 expected: gfn.parameters.len(),
@@ -535,7 +835,7 @@ impl LpvmInstance for NativeEmuInstance {
             }));
         }
 
-        let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
+        let flat = flat_words_from_f32_args(&gfn.parameters, args, lane_abi)?;
         let ir_func = self
             .module
             .ir
@@ -553,9 +853,7 @@ impl LpvmInstance for NativeEmuInstance {
         }
 
         let words = self.invoke_flat(name, &flat, CycleModel::default())?;
-        let gq = decode_q32_return(&gfn.return_type, &words)?;
-        q32_to_lps_value_f32(&gfn.return_type, gq)
-            .map_err(|e| NativeError::Call(CallError::TypeMismatch(e.to_string())))
+        Ok(decode_return_to_f32(&gfn.return_type, &words, lane_abi)?)
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
@@ -812,6 +1110,92 @@ impl NativeEmuInstance {
         }
         Ok(words)
     }
+
+    /// Invoke a function compiled in [`FloatMode::F32`], passing and returning
+    /// **raw IEEE-754 bit patterns**, one word per scalar component.
+    ///
+    /// The f32 counterpart of [`Self::call_q32_with_cycle_model`], and
+    /// deliberately the same shape: a flat word vector in, a flat word vector
+    /// out, no conversion in either direction. In F32 mode a word *is* the
+    /// value's bit pattern — that is exactly M7 D1's boundary convention,
+    /// where floats travel in address registers as bit patterns — so there is
+    /// nothing to convert and no fixed-point scale to get wrong. Callers turn
+    /// them into `f32` with `f32::from_bits`.
+    ///
+    /// Why a separate entry point rather than relaxing
+    /// [`Self::call_q32_with_cycle_model`]'s guard: the two modes disagree
+    /// about what a word *means*, and a Q32 caller handed F32 words gets
+    /// plausible garbage (`1.0f32` reads as `1065353216` in Q16.16, roughly
+    /// 16257.0). The mode check stays a hard error on both sides so a
+    /// mismatch is a message and not a wrong pixel.
+    ///
+    /// `call_render_texture` / `call_render_samples` stay Q32-only: the buffer
+    /// element format per float mode is a product-tier decision M7 does not
+    /// make.
+    pub fn call_f32_words(&mut self, name: &str, args: &[u32]) -> Result<Vec<u32>, NativeError> {
+        self.reset_globals();
+
+        self.last_debug = None;
+        self.last_guest_instruction_count = None;
+        self.last_guest_cycle_count = None;
+        if self.module.options.float_mode != FloatMode::F32 {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "NativeEmuInstance::call_f32_words requires FloatMode::F32",
+            ))));
+        }
+
+        let gfn = self
+            .module
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .cloned()
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+
+        for p in &gfn.parameters {
+            if matches!(p.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
+                return Err(NativeError::Call(CallError::Unsupported(String::from(
+                    "out/inout parameters are not supported for direct calling.",
+                ))));
+            }
+        }
+
+        let ir_func = self
+            .module
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        let param_count = ir_func.param_count as usize;
+
+        let expected_words: usize = gfn
+            .parameters
+            .iter()
+            .map(|p| glsl_component_count(&p.ty))
+            .sum();
+        if args.len() != expected_words {
+            return Err(NativeError::Call(CallError::Arity {
+                expected: expected_words,
+                got: args.len(),
+            }));
+        }
+        if args.len() != param_count {
+            return Err(NativeError::Call(CallError::Unsupported(format!(
+                "flattened argument count {} does not match IR param_count {}",
+                args.len(),
+                param_count
+            ))));
+        }
+
+        let flat: Vec<i32> = args.iter().map(|&w| w as i32).collect();
+        let words = self.invoke_flat(name, &flat, CycleModel::default())?;
+        if gfn.return_type == LpsType::Void {
+            return Ok(Vec::new());
+        }
+        Ok(words.into_iter().map(|w| w as u32).collect())
+    }
 }
 
 #[cfg(test)]
@@ -874,6 +1258,35 @@ mod tests {
             .call_q32("ok", &[])
             .expect("instance reusable after trap");
         assert_eq!(words, vec![42]);
+    }
+
+    /// The two word entry points are not interchangeable, and the guard says
+    /// so rather than returning plausible garbage.
+    ///
+    /// A word means different things in the two modes — `1.0f32`'s bit pattern
+    /// read as Q16.16 is about 16257.0 — so a mode mismatch that "worked"
+    /// would surface as wrong pixels somewhere far away. Both directions are
+    /// checked because only checking one is how the other half rots.
+    #[test]
+    fn the_word_entry_points_refuse_the_wrong_float_mode() {
+        let (ir, meta) = spin_and_ok_module();
+        let engine = NativeEmuEngine::new(NativeCompileOptions::default());
+        let module = engine.compile(&ir, &meta).expect("compile");
+        let mut inst = module.instantiate().expect("instantiate");
+
+        // This module is Q32 (the default), so the f32 entry must refuse it.
+        let err = inst
+            .call_f32_words("ok", &[])
+            .expect_err("a Q32 module must not accept f32 words");
+        let msg = alloc::format!("{err}");
+        assert!(
+            msg.contains("FloatMode::F32"),
+            "the error must name the mode it wanted: {msg}"
+        );
+
+        // And the Q32 entry still works on it, so the guard is a guard and not
+        // a general breakage.
+        assert_eq!(inst.call_q32("ok", &[]).expect("q32 call"), vec![42]);
     }
 
     /// With the raised `EMU_CALL_INSTRUCTION_LIMIT`, a flat call armed with

@@ -56,8 +56,8 @@ fn node_faces_derive_and_edit_end_to_end() {
     let Some(UiNodeFace::Shader(face)) = &shader.face else {
         panic!("shader node derives a shader face, got {:?}", shader.face);
     };
-    assert_eq!(face.controls.len(), 1, "one panel-flagged uniform");
-    let knob = &face.controls[0];
+    assert_eq!(face.controls.len(), 2, "both panel-flagged uniforms");
+    let knob = control_labeled(face, "Speed");
     assert_eq!(knob.label, "Speed");
     assert_eq!(
         knob.widget,
@@ -73,6 +73,19 @@ fn node_faces_derive_and_edit_end_to_end() {
         knob_address.path.to_string(),
         "consumed[speed].default.some"
     );
+    // The u32-shaped `count` uniform is a whole-number knob with no
+    // authoring beyond its value shape.
+    let count = control_labeled(face, "Count");
+    assert_eq!(
+        count.widget,
+        UiPanelWidget::Knob {
+            min: 1.0,
+            max: 4.0,
+            step: Some(1.0)
+        },
+        "an i32/u32 uniform snaps to whole numbers"
+    );
+    assert_eq!(count.value.kind, UiSlotValueKind::F32(2.0));
     assert!(
         face.code_drawer.is_some(),
         "code drawer reuses the inline GLSL editor"
@@ -498,7 +511,7 @@ fn face_e2e_server() -> LpServer {
 
     let project_json = r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -525,6 +538,16 @@ fn face_e2e_server() -> LpServer {
       "max": 3,
       "label": "Speed",
       "description": "Gradient speed multiplier",
+      "panel": true
+    },
+    "count": {
+      "kind": "value",
+      "value": "u32",
+      "default": 2,
+      "min": 1,
+      "max": 4,
+      "label": "Count",
+      "description": "How many bands",
       "panel": true
     }
   }
@@ -594,7 +617,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 
     let project_json = r#"{
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "playlist": { "ref": "./playlist.json" },
@@ -723,11 +746,20 @@ fn playlist_face(view: &UiStudioView) -> &UiPlaylistFace {
     face
 }
 
+/// The one panel control carrying `label` (the uniform map is key-ordered,
+/// so index-addressing the controls is brittle).
+fn control_labeled<'a>(face: &'a crate::UiShaderFace, label: &str) -> &'a UiPanelControl {
+    face.controls
+        .iter()
+        .find(|control| control.label == label)
+        .unwrap_or_else(|| panic!("shader face carries a {label} control"))
+}
+
 fn shader_knob(view: &UiStudioView) -> &UiPanelControl {
     let Some(UiNodeFace::Shader(face)) = &node_by_kind(view, "Shader").face else {
         panic!("shader face present");
     };
-    &face.controls[0]
+    control_labeled(face, "Speed")
 }
 
 fn fixture_fader(view: &UiStudioView) -> &UiPanelControl {

@@ -1,0 +1,35 @@
+[package]
+name = "lpa-boards"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# JSON Schema derives for the board display sidecar types (host-side tooling).
+schema-gen = ["dep:schemars"]
+# The BoardDiagram Dioxus component. Off by default so data-only consumers
+# (lp-cli) never pull a UI framework.
+diagram = ["dep:dioxus"]
+
+[dependencies]
+# Component-library feature set (no renderer, no launch): the consuming app
+# picks the platform.
+dioxus = { version = "0.7", default-features = false, features = ["lib"], optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Deep-link plumbing for the catalog's detail selection only (replaceState —
+# fires no events). The components themselves stay DOM-free.
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["History", "Window"] }
+
+[dev-dependencies]
+lpc-hardware = { path = "../../lp-core/lpc-hardware" }
+
+[lints]
+workspace = true

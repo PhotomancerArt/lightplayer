@@ -47,11 +47,10 @@ pub async fn run_dithering_test(_: embassy_executor::Spawner) -> ! {
     let mut channel =
         LedChannel::new(rmt, pin, NUM_LEDS).expect("Failed to initialize LED channel");
 
-    info!("Creating DisplayPipeline with interpolation, dithering, LUT, brightness=1.0");
+    info!("Creating DisplayPipeline with interpolation, dithering, LUT");
 
     let options = DisplayPipelineOptions {
         white_point: [0.9, 1.0, 1.0],
-        brightness: 1.0, // Full range; ramp encodes 0-25% in data
         interpolation_enabled: true,
         dithering_enabled: true,
         lut_enabled: true,

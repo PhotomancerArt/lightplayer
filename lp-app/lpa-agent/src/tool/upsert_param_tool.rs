@@ -37,6 +37,8 @@ pub struct UpsertParamInput {
     #[serde(default)]
     pub max: Option<f32>,
     #[serde(default)]
+    pub step: Option<f32>,
+    #[serde(default)]
     pub unit: Option<String>,
     #[serde(default)]
     pub panel: Option<bool>,
@@ -50,6 +52,7 @@ impl UpsertParamInput {
             default: self.default,
             min: self.min,
             max: self.max,
+            step: self.step,
             unit: self.unit,
             panel: self.panel,
         }
@@ -233,6 +236,7 @@ fn upsert_echo(upsert: &ParamUpsert) -> Value {
         ("default", upsert.default),
         ("min", upsert.min),
         ("max", upsert.max),
+        ("step", upsert.step),
     ] {
         if let Some(value) = value {
             obj.insert(key.into(), json!(round_sig4(value)));
@@ -258,8 +262,9 @@ pub fn upsert_param_tool_def() -> ToolDef {
 
 const DESCRIPTION: &str = "\
 Create or update the def-side param record for one float uniform: label, \
-default value, min/max range, display unit, and the `panel` flag that puts \
-a knob on the node card. Use it to repair a `declared_only` orphan from \
+default value, min/max range, an optional `step` the knob snaps to, display \
+unit, and the `panel` flag that puts a knob on the node card. Use it to \
+repair a `declared_only` orphan from \
 `iterate`'s params section (the engine cannot render a declared uniform \
 without a record) or to polish an existing record. Only the fields you pass \
 are written; `name` must match a declared uniform or an existing record. \
@@ -281,6 +286,8 @@ fn input_schema() -> Value {
                 "description": "Authored default value (inert while the param is bus-bound)." },
             "min": { "type": "number", "description": "Range minimum (knob/slider lower bound)." },
             "max": { "type": "number", "description": "Range maximum (knob/slider upper bound)." },
+            "step": { "type": "number",
+                "description": "Knob quantization: values snap to whole multiples of this. Pass 1 for a whole-number param (\"how many\"); omit for a continuous one." },
             "unit": { "type": "string",
                 "description": "Display unit suffix (e.g. \"Hz\", \"%\")." },
             "panel": { "type": "boolean",

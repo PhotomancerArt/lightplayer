@@ -28,6 +28,8 @@ lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "
 lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false, optional = true }
 # Shared lamp-view geometry (universe palette, wiring arrows) + the editor.
 lpa-mapping-editor = { path = "../lpa-mapping-editor" }
+# Board catalog data + the BoardDiagram row-engine renderer.
+lpa-boards = { path = "../lpa-boards", features = ["diagram"] }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 # Markdown parsing for agent chat replies (parser only; rendering goes
@@ -41,12 +43,15 @@ sha2 = { workspace = true }
 base64 = { workspace = true }
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
+    "BeforeUnloadEvent",
     "Blob",
     "BlobPropertyBag",
     "BroadcastChannel",
     "CanvasRenderingContext2d",
     "Clipboard",
+    "ClipboardEvent",
     "Crypto",
+    "DataTransfer",
     "Document",
     "Element",
     "Event",

@@ -1,22 +1,24 @@
 //! [`LpvmInstance`] for direct JIT calls (register args only; see `invoke_flat` limits).
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
     CallError, DEFAULT_VMCTX_FUEL, INVOCATION_INDEX_ARMED, LpvmBuffer, LpvmInstance,
-    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, decode_q32_return,
-    encode_global_write, encode_uniform_write, encode_uniform_write_q32,
-    flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
-    validate_compute_tick_sig,
+    TRAP_CODE_NONE, VMCTX_OFFSET_FUEL, VMCTX_OFFSET_TRAP, decode_global_read, decode_return_to_f32,
+    encode_global_write, encode_uniform_write, encode_uniform_write_q32, flat_words_from_f32_args,
+    float_lane_abi, global_data_span, glsl_component_count, validate_compute_tick_sig,
 };
 
 use crate::error::NativeError;
 
-use super::call::rv32_jalr_a0_a7;
+#[cfg(target_arch = "riscv32")]
+use super::call::rv32_jalr_a0_a7 as jit_entry_call;
+#[cfg(target_arch = "xtensa")]
+use super::call::xtensa_call8_args as jit_entry_call;
 use super::module::{NativeJitDirectCall, NativeJitModule};
 
 pub(crate) struct RenderTextureEntry {
@@ -238,13 +240,13 @@ impl NativeJitInstance {
             // Note: full[0] is vmctx, so we pass full[0..7] into a1-a7
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_sret_direct(sret_ptr as i32, &full);
             unsafe {
-                rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7);
+                jit_entry_call(entry, a0, a1, a2, a3, a4, a5, a6, a7);
             }
             self.take_trap()?;
         } else {
             // Direct return path: returns in a0, a1
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_direct_arr(&full);
-            let (r0, r1) = unsafe { rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
+            let (r0, r1) = unsafe { jit_entry_call(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
             self.take_trap()?;
 
             match handle.ret_count {
@@ -299,7 +301,7 @@ impl NativeJitInstance {
             let sret_ptr = sret_buf.as_mut_ptr() as usize;
             let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_sret(sret_ptr as i32, &full);
             unsafe {
-                rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7);
+                jit_entry_call(entry, a0, a1, a2, a3, a4, a5, a6, a7);
             }
             self.take_trap()?;
             sret_buf.truncate(n_ret);
@@ -313,7 +315,7 @@ impl NativeJitInstance {
         }
 
         let (a0, a1, a2, a3, a4, a5, a6, a7) = pack_regs_direct(&full);
-        let (r0, r1) = unsafe { rv32_jalr_a0_a7(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
+        let (r0, r1) = unsafe { jit_entry_call(entry, a0, a1, a2, a3, a4, a5, a6, a7) };
         self.take_trap()?;
 
         match n_ret {
@@ -415,11 +417,7 @@ impl LpvmInstance for NativeJitInstance {
     fn call(&mut self, name: &str, args: &[LpsValueF32]) -> Result<LpsValueF32, Self::Error> {
         // Reset globals before each call to ensure fresh state
         self.reset_globals();
-        if self.module.inner.options.float_mode != FloatMode::Q32 {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "NativeJitInstance::call requires FloatMode::Q32",
-            ))));
-        }
+        let lane_abi = float_lane_abi(self.module.inner.options.float_mode);
 
         let gfn = self
             .module
@@ -439,12 +437,6 @@ impl LpvmInstance for NativeJitInstance {
             }
         }
 
-        if gfn.return_type == LpsType::Void {
-            return Err(NativeError::Call(CallError::Unsupported(String::from(
-                "void return is not represented as LpsValue; use a typed return",
-            ))));
-        }
-
         if gfn.parameters.len() != args.len() {
             return Err(NativeError::Call(CallError::Arity {
                 expected: gfn.parameters.len(),
@@ -452,7 +444,7 @@ impl LpvmInstance for NativeJitInstance {
             }));
         }
 
-        let flat = flat_q32_words_from_f32_args(&gfn.parameters, args)?;
+        let flat = flat_words_from_f32_args(&gfn.parameters, args, lane_abi)?;
         let entry_info = self
             .module
             .inner
@@ -469,9 +461,7 @@ impl LpvmInstance for NativeJitInstance {
         }
 
         let words = self.invoke_flat(name, &flat)?;
-        let gq = decode_q32_return(&gfn.return_type, &words)?;
-        q32_to_lps_value_f32(&gfn.return_type, gq)
-            .map_err(|e| NativeError::Call(CallError::TypeMismatch(e.to_string())))
+        Ok(decode_return_to_f32(&gfn.return_type, &words, lane_abi)?)
     }
 
     fn call_q32(&mut self, name: &str, args: &[i32]) -> Result<Vec<i32>, Self::Error> {
@@ -567,7 +557,7 @@ impl LpvmInstance for NativeJitInstance {
         // piece (a sibling entry-call lands next to it with the Xtensa
         // backport), exactly as in `call_direct` / `invoke_flat`.
         unsafe {
-            rv32_jalr_a0_a7(
+            jit_entry_call(
                 entry,
                 vmctx,
                 tex_offset,
@@ -609,7 +599,7 @@ impl LpvmInstance for NativeJitInstance {
 
         // See `call_render_texture` for why there is no arch cfg here.
         unsafe {
-            rv32_jalr_a0_a7(
+            jit_entry_call(
                 entry,
                 vmctx,
                 points_offset,

@@ -3,7 +3,7 @@
 //! This module provides a straight-line register allocator using backward walk
 //! with edit-list emission (regalloc2-style approach adapted for LPIR).
 
-use crate::abi::FuncAbi;
+use crate::abi::{FuncAbi, PReg, PackedPReg, RegClass};
 use crate::lower::LoweredFunction;
 use alloc::vec::Vec;
 
@@ -14,6 +14,7 @@ pub use debug_facade::{
     trace_sink_new,
 };
 
+pub mod classes;
 pub mod liveness;
 pub mod pool;
 pub mod render;
@@ -26,11 +27,20 @@ pub mod walk;
 pub mod test;
 
 /// Allocation location for a virtual register operand.
+///
+/// A register allocation carries its [`RegClass`] alongside the hardware
+/// encoding: `Reg(int 10)` and `Reg(float 10)` are different registers on an
+/// ISA with an FPU, and conflating them is the single failure mode a two-class
+/// allocator exists to prevent. The pair is stored packed — see [`PackedPReg`]
+/// for why — so construct with [`Alloc::reg`] / [`Alloc::int_reg`] and read
+/// back with [`Alloc::preg`] rather than touching the payload directly.
+///
+/// The hardware encoding's *meaning* still comes from [`FuncAbi::isa()`].
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alloc {
-    /// Allocated to a physical register (hardware GPR index; semantics from [`FuncAbi::isa()`]).
-    Reg(u8),
+    /// Allocated to a physical register.
+    Reg(PackedPReg),
     /// Spilled to stack slot.
     Stack(u8),
     /// No allocation (dead, or never used).
@@ -38,6 +48,16 @@ pub enum Alloc {
 }
 
 impl Alloc {
+    /// Allocation in the physical register `p`.
+    pub const fn reg(p: PReg) -> Self {
+        Alloc::Reg(PackedPReg::new(p))
+    }
+
+    /// Allocation in integer hardware register `hw`.
+    pub const fn int_reg(hw: u8) -> Self {
+        Alloc::Reg(PackedPReg::int(hw))
+    }
+
     pub fn is_reg(self) -> bool {
         matches!(self, Alloc::Reg(_))
     }
@@ -46,9 +66,30 @@ impl Alloc {
         matches!(self, Alloc::Stack(_))
     }
 
-    pub fn reg(self) -> Option<u8> {
+    /// The physical register — class included — when register-allocated.
+    pub fn preg(self) -> Option<PReg> {
         match self {
-            Alloc::Reg(r) => Some(r),
+            Alloc::Reg(r) => Some(r.get()),
+            _ => None,
+        }
+    }
+
+    /// The hardware encoding when register-allocated, **ignoring class**.
+    ///
+    /// For callers that have already established the class (an emitter inside a
+    /// class-specific arm). Anything that could see either class wants
+    /// [`Alloc::preg`].
+    pub fn reg_hw(self) -> Option<u8> {
+        match self {
+            Alloc::Reg(r) => Some(r.hw()),
+            _ => None,
+        }
+    }
+
+    /// Register class of this allocation, when register-allocated.
+    pub fn reg_class(self) -> Option<RegClass> {
+        match self {
+            Alloc::Reg(r) => Some(r.class()),
             _ => None,
         }
     }
@@ -188,6 +229,11 @@ impl core::fmt::Display for AllocError {
 
 impl core::error::Error for AllocError {}
 
+/// `AllocOutput::allocs` holds one `Alloc` per operand of every instruction in
+/// the function — the allocator's largest allocation, built on the device in
+/// the JIT's heap. Two bytes has been the pin since the ISA-decoupling
+/// refactor and the register class did not cost it: the class travels in the
+/// spare high bit of [`PackedPReg`] rather than in a byte of its own.
 const _: () = assert!(core::mem::size_of::<Alloc>() == 2);
 
 /// Result of register allocation.
@@ -201,34 +247,33 @@ pub struct AllocResult {
 
 /// Collect callee-saved pool GPRs used in `output` for prologue/epilogue.
 fn used_callee_saved_from_output(output: &AllocOutput, func_abi: &FuncAbi) -> crate::abi::PregSet {
-    use crate::abi::PReg as AbiPReg;
-
     let mut set = crate::abi::PregSet::EMPTY;
-    let mut insert = |hw: u8| {
-        let p = AbiPReg::int(hw);
+    // `PregSet` has a lane per (class, hw) pair, so a float register never
+    // aliases the integer one with the same encoding here.
+    let mut insert = |p: PReg| {
         if func_abi.allocatable().contains(p) && !func_abi.is_caller_saved_pool(p) {
             set.insert(p);
         }
     };
 
     for a in &output.allocs {
-        if let Alloc::Reg(r) = a {
-            insert(*r);
+        if let Some(p) = a.preg() {
+            insert(p);
         }
     }
     for (_, edit) in &output.edits {
         match edit {
             Edit::Move { from, to } => {
-                if let Alloc::Reg(r) = from {
-                    insert(*r);
+                if let Some(p) = from.preg() {
+                    insert(p);
                 }
-                if let Alloc::Reg(r) = to {
-                    insert(*r);
+                if let Some(p) = to.preg() {
+                    insert(p);
                 }
             }
             Edit::LoadIncomingArg { to, .. } => {
-                if let Alloc::Reg(r) = to {
-                    insert(*r);
+                if let Some(p) = to.preg() {
+                    insert(p);
                 }
             }
         }
@@ -278,7 +323,7 @@ pub fn allocate(lowered: &LoweredFunction, func_abi: &FuncAbi) -> Result<AllocRe
         tree,
         root,
         func_abi,
-        RegPool::new(func_abi.isa()),
+        RegPool::for_abi(func_abi),
     )?;
     let spill_slots = output.num_spill_slots;
     let used_callee_saved = used_callee_saved_from_output(&output, func_abi);
@@ -339,13 +384,15 @@ mod tests {
     #[test]
     fn alloc_types_exist() {
         // Verify the new Alloc types compile and work
-        let alloc_reg = Alloc::Reg(5);
+        let alloc_reg = Alloc::int_reg(5);
         let alloc_stack = Alloc::Stack(0);
         let alloc_none = Alloc::None;
 
         assert!(alloc_reg.is_reg());
         assert!(!alloc_reg.is_stack());
-        assert_eq!(alloc_reg.reg(), Some(5));
+        assert_eq!(alloc_reg.preg(), Some(PReg::int(5)));
+        assert_eq!(alloc_reg.reg_hw(), Some(5));
+        assert_eq!(alloc_reg.reg_class(), Some(RegClass::Int));
 
         assert!(!alloc_stack.is_reg());
         assert!(alloc_stack.is_stack());
@@ -353,6 +400,18 @@ mod tests {
 
         assert!(!alloc_none.is_reg());
         assert!(!alloc_none.is_stack());
+    }
+
+    /// The point of a class-aware `Alloc`: the same hardware encoding in the
+    /// two classes must never compare equal. Every "is this operand where the
+    /// ABI says it should be?" check in `verify.rs` is an `Alloc` equality.
+    #[test]
+    fn alloc_distinguishes_the_register_classes() {
+        assert_ne!(Alloc::int_reg(10), Alloc::reg(PReg::float(10)));
+        assert_eq!(
+            Alloc::reg(PReg::float(10)).reg_class(),
+            Some(RegClass::Float)
+        );
     }
 
     #[test]

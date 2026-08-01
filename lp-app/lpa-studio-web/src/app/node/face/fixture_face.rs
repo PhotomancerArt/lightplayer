@@ -160,6 +160,47 @@ pub fn FixtureFace(
                     detail_initially_open,
                     on_action,
                 }
+                if let Some(power) = face.power {
+                    PowerReadout { power }
+                }
+            }
+        }
+    }
+}
+
+/// Estimated draw against the fixture's budget: a setup readout first, a
+/// limiting indicator second.
+///
+/// One quiet line under the fader — no panel, no border, no badge. Two numbers
+/// do not earn chrome (`docs/style/ui.md`). Only the limiting state takes
+/// colour, and it takes `attention` rather than `warning`: shedding current to
+/// stay inside a declared budget is the feature working, not a fault.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PowerReadout(power: lpa_studio_core::UiFixturePower) -> Element {
+    let limiting = power.is_limiting();
+    let percent = power.percent_of_budget();
+    // "Estimated" is load-bearing, not hedging: every lamp preset ships
+    // datasheet and community figures, and nothing here has met a meter.
+    let title = format!(
+        "estimated draw from the lamp type's power model — not measured\n{} mA of {} mA budget",
+        power.estimated_draw_ma, power.budget_ma
+    );
+
+    rsx! {
+        div {
+            class: "tw:mt-2 tw:flex tw:items-baseline tw:gap-2 tw:font-mono tw:text-[0.7rem] tw:text-muted-foreground",
+            title,
+            // Nested so the row's gap falls only before the limiting chip —
+            // the slash has to butt against the estimate to read as one figure.
+            span {
+                span { "≈{power.estimated_draw_ma}" }
+                span { class: "tw:text-dim-foreground", "/{power.budget_ma} mA ({percent}%)" }
+            }
+            if limiting {
+                span { class: "tw:text-status-attention-foreground",
+                    "limiting to {(power.scale * 100.0).round() as u32}%"
+                }
             }
         }
     }

@@ -176,7 +176,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -443,7 +443,7 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -485,7 +485,7 @@ fn clock_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -517,7 +517,7 @@ fn shader_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -557,7 +557,7 @@ impl NodeRuntime for ProduceProbeNode {
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
         let pv = ctx
-            .resolve(self.query.clone())
+            .resolve(&self.query)
             .map_err(|e| NodeError::msg(format!("resolve: {}", e.message)))?;
         if let LpsValueF32::F32(v) = pv.as_value().expect("value") {
             self.last = Some(v);

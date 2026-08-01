@@ -6,7 +6,9 @@ use lp_collection::VecMap;
 use object::write::{Object, Relocation, StandardSection, Symbol, SymbolId, SymbolSection};
 use object::{BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf};
 
-use crate::compile::{CompiledModule, NativeReloc};
+use crate::compile::CompiledModule;
+#[cfg(feature = "isa-rv32")]
+use crate::compile::NativeReloc;
 use crate::error::NativeError;
 use crate::isa::IsaTarget;
 
@@ -68,18 +70,28 @@ where
             let target = if let Some(addr) = resolve_symbol(&reloc.symbol) {
                 addr
             } else {
-                // Fall back to intra-module function resolution
+                // Fall back to intra-module function resolution.
+                //
+                // The resolver's answers (builtins) are addresses of code
+                // linked into the firmware, so they are already execute
+                // addresses. Intra-module targets are not: they are derived
+                // from `image_base`, which is where the linker *writes*. The
+                // emitted code jumps to whatever goes in here, so it must be
+                // the address the fetch path names — on the S3 that is the
+                // I-bus alias, not the D-bus address the bytes were stored
+                // through. See `crate::exec_addr`.
                 let target_offset = entries.get(&reloc.symbol).ok_or_else(|| {
                     NativeError::Internal(format!(
                         "unresolved symbol `{}` for JIT relocation at offset {}",
                         reloc.symbol, reloc.offset
                     ))
                 })?;
-                image_base.wrapping_add(*target_offset) as u32
+                crate::exec_addr::exec_addr(image_base.wrapping_add(*target_offset)) as u32
             };
 
             let absolute_offset = func_base + reloc.offset;
             match isa {
+                #[cfg(feature = "isa-rv32")]
                 IsaTarget::Rv32imac => {
                     if reloc.r_type == isa.call_reloc_type() {
                         let abs_reloc = NativeReloc {
@@ -90,6 +102,28 @@ where
                         crate::isa::rv32::link::patch_call_plt(
                             &mut code, &abs_reloc, image_base, target,
                         )?;
+                    } else {
+                        return Err(NativeError::Internal(alloc::format!(
+                            "unsupported JIT relocation r_type {} for ISA {:?}",
+                            reloc.r_type,
+                            isa
+                        )));
+                    }
+                }
+                #[cfg(feature = "isa-xt")]
+                IsaTarget::Xtensa => {
+                    if reloc.r_type == isa.call_reloc_type() {
+                        // R_XTENSA_32 on a literal-pool slot: the emitted call
+                        // sequence is `l32r SCRATCH, <slot>; callx8 SCRATCH`,
+                        // so patching is writing the callee's absolute execute
+                        // address into the 4-byte slot.
+                        let off = absolute_offset;
+                        let slot = code.get_mut(off..off + 4).ok_or_else(|| {
+                            NativeError::Internal(alloc::format!(
+                                "Xtensa literal-slot relocation at {off:#x} out of code bounds"
+                            ))
+                        })?;
+                        slot.copy_from_slice(&target.to_le_bytes());
                     } else {
                         return Err(NativeError::Internal(alloc::format!(
                             "unsupported JIT relocation r_type {} for ISA {:?}",

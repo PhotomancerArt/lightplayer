@@ -40,18 +40,16 @@ fn main() {
         exe_path_release
     };
 
-    if !exe_path.exists() {
+    let copied = std::path::Path::new(&out_dir).join("lps-builtins-emu-app");
+    if let Err(reason) = copy_builtins_exe(&exe_path, &copied) {
         println!(
-            "cargo:warning=lps-builtins-emu-app not found at {} — run scripts/build-builtins.sh",
+            "cargo:warning=lps-builtins-emu-app unusable at {} ({reason}) — run scripts/build-builtins.sh",
             exe_path.display()
         );
         std::fs::write(&out_path, "pub const LP_BUILTINS_EXE_BYTES: &[u8] = &[];\n")
             .expect("write empty lp_builtins_lib.rs");
         return;
     }
-
-    let copied = std::path::Path::new(&out_dir).join("lps-builtins-emu-app");
-    std::fs::copy(&exe_path, &copied).expect("copy builtins exe");
     let rel = copied
         .strip_prefix(&out_dir)
         .expect("relative to OUT_DIR")
@@ -62,6 +60,61 @@ fn main() {
         format!("pub const LP_BUILTINS_EXE_BYTES: &[u8] = include_bytes!(\"{rel}\");\n"),
     )
     .expect("write lp_builtins_lib.rs");
+}
+
+/// Copy the builtins ELF into `OUT_DIR`, retrying past a concurrent rewrite.
+///
+/// `scripts/build-builtins.sh` relinks this exe, and cargo uplifts the result
+/// by remove-then-hardlink: there is a window in which the path does not
+/// exist (or, on a cross-device copy, is short). Cargo's build lock is
+/// profile+triple scoped — `target/debug/.cargo-lock` for a host build vs
+/// `target/riscv32imac-unknown-none-elf/release/.cargo-lock` for that script
+/// — so a host build is *not* excluded from the window. Landing in it is not
+/// a remote possibility either: this build script declares
+/// `rerun-if-changed` on the very path the script rewrites, so the rewrite is
+/// exactly what wakes us. Treating the window as "not built" embedded an
+/// empty slice and surfaced minutes later as every `NativeEmuEngine` test
+/// failing instantly with "builtins ... not found at build time".
+/// See docs/defects/2026-07-29-builtins-elf-uplift-race.md.
+fn copy_builtins_exe(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(BUILTINS_RETRY_BUDGET_SECS);
+    loop {
+        let reason = match try_copy_builtins_exe(src, dst) {
+            Ok(()) => return Ok(()),
+            Err(reason) => reason,
+        };
+        // Only a workspace that has already produced rv32 release artifacts can
+        // have a build racing us; on a fresh clone the directory is absent and
+        // there is nothing to wait for, so report "missing" immediately.
+        let rv32_dir_exists = src.parent().is_some_and(|d| d.is_dir());
+        if !rv32_dir_exists || std::time::Instant::now() >= deadline {
+            return Err(reason);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+const BUILTINS_RETRY_BUDGET_SECS: u64 = 2;
+
+/// One attempt: read, verify it is a whole ELF image, then write it out.
+fn try_copy_builtins_exe(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    let bytes = std::fs::read(src).map_err(|e| format!("read: {e}"))?;
+    if !bytes.starts_with(b"\x7fELF") {
+        return Err(format!("not an ELF image ({} bytes)", bytes.len()));
+    }
+    // A copy still in flight would read short but still carry valid magic;
+    // a size that moved across the read means we caught a partial write.
+    let size_after = std::fs::metadata(src)
+        .map_err(|e| format!("stat: {e}"))?
+        .len();
+    if size_after != bytes.len() as u64 {
+        return Err(format!(
+            "changed size during read ({} → {size_after} bytes)",
+            bytes.len()
+        ));
+    }
+    std::fs::write(dst, &bytes).map_err(|e| format!("write to OUT_DIR: {e}"))
 }
 
 fn find_workspace_root(start: &str) -> Option<std::path::PathBuf> {

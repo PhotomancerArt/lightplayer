@@ -6,7 +6,6 @@ use alloc::vec::Vec;
 
 use lpir::FloatMode;
 use lpir::{CalleeRef, FuncId, ImportId, IrFunction, IrType, LpirModule, LpirOp};
-use lps_q32::q32_options::{AddSubMode, DivMode, MulMode};
 use wasm_encoder::{BlockType, Ieee32, InstructionSink, ValType};
 
 use crate::emit::FuncEmitCtx;
@@ -463,7 +462,7 @@ pub(crate) fn emit_op(
             // read cannot work at linear-memory offset 0 on the wasm hosts
             // (see `imports::import_is_inline_get_fuel`).
             if let CalleeRef::Import(ImportId(i)) = *callee {
-                if imports::import_is_inline_get_fuel(ir, i as usize) {
+                if imports::import_is_inline_get_fuel(ir, i as usize, fm) {
                     let vmctx = fctx.vmctx_local.ok_or_else(|| {
                         String::from("__lp_get_fuel inline lowering requires a vmctx local")
                     })?;
@@ -487,7 +486,7 @@ pub(crate) fn emit_op(
                 CalleeRef::Local(_) => (false, 0),
             };
             let is_result_ptr =
-                is_import && imports::import_uses_result_pointer_abi(ir, import_idx);
+                is_import && imports::import_uses_result_pointer_abi(ir, import_idx, fm);
 
             let all_args = func.pool_slice(*args);
             let import_needs_vmctx = is_import
@@ -516,14 +515,22 @@ pub(crate) fn emit_op(
                 }
                 sink.call(idx);
 
+                // Read the lanes back out of the scratch buffer. The load
+                // width must match the *result local's* type, not the pointer
+                // type: in Q32 a vec lane is an i32 word, in F32 it is an f32.
+                // Hard-coding `i32_load` here made every result-pointer builtin
+                // (`lpfn_saturate(vec3)`, `hsv2rgb`, `srandom3_vec`, …) emit an
+                // invalid module in f32 mode — "expected f32, found i32" — with
+                // no hint about which builtin.
                 let m = memory::mem_arg0(0, 2);
                 for (i, r) in func.pool_slice(*results).iter().enumerate() {
                     let off = base_off.saturating_add(i32::try_from(i * 4).unwrap_or(i32::MAX));
-                    sink.global_get(sp)
-                        .i32_const(off)
-                        .i32_add()
-                        .i32_load(m)
-                        .local_set(r.0);
+                    sink.global_get(sp).i32_const(off).i32_add();
+                    match vreg_val_ty(func, *r, fm)? {
+                        ValType::F32 => sink.f32_load(m),
+                        _ => sink.i32_load(m),
+                    };
+                    sink.local_set(r.0);
                 }
             } else {
                 for v in args_to_pass {
@@ -545,15 +552,7 @@ pub(crate) fn emit_op(
             }
         },
         LpirOp::Fadd { dst, lhs, rhs } => match fm {
-            FloatMode::Q32 => match fctx.module.q32.add_sub {
-                AddSubMode::Saturating => {
-                    let s = fctx.i64_scratch.ok_or_else(|| {
-                        String::from("internal: Q32 Fadd without i64 scratch local")
-                    })?;
-                    q32::emit_q32_fadd(sink, lhs.0, rhs.0, dst.0, s);
-                }
-                AddSubMode::Wrapping => q32::emit_q32_fadd_wrap(sink, lhs.0, rhs.0, dst.0),
-            },
+            FloatMode::Q32 => q32::emit_q32_fadd_wrap(sink, lhs.0, rhs.0, dst.0),
             FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -562,15 +561,7 @@ pub(crate) fn emit_op(
             }
         },
         LpirOp::Fsub { dst, lhs, rhs } => match fm {
-            FloatMode::Q32 => match fctx.module.q32.add_sub {
-                AddSubMode::Saturating => {
-                    let s = fctx.i64_scratch.ok_or_else(|| {
-                        String::from("internal: Q32 Fsub without i64 scratch local")
-                    })?;
-                    q32::emit_q32_fsub(sink, lhs.0, rhs.0, dst.0, s);
-                }
-                AddSubMode::Wrapping => q32::emit_q32_fsub_wrap(sink, lhs.0, rhs.0, dst.0),
-            },
+            FloatMode::Q32 => q32::emit_q32_fsub_wrap(sink, lhs.0, rhs.0, dst.0),
             FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -579,15 +570,7 @@ pub(crate) fn emit_op(
             }
         },
         LpirOp::Fmul { dst, lhs, rhs } => match fm {
-            FloatMode::Q32 => match fctx.module.q32.mul {
-                MulMode::Saturating => {
-                    let s = fctx.i64_scratch.ok_or_else(|| {
-                        String::from("internal: Q32 Fmul without i64 scratch local")
-                    })?;
-                    q32::emit_q32_fmul(sink, lhs.0, rhs.0, dst.0, s);
-                }
-                MulMode::Wrapping => q32::emit_q32_fmul_wrap(sink, lhs.0, rhs.0, dst.0),
-            },
+            FloatMode::Q32 => q32::emit_q32_fmul_wrap(sink, lhs.0, rhs.0, dst.0),
             FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)
@@ -596,15 +579,12 @@ pub(crate) fn emit_op(
             }
         },
         LpirOp::Fdiv { dst, lhs, rhs } => match fm {
-            FloatMode::Q32 => match fctx.module.q32.div {
-                DivMode::Saturating => q32::emit_q32_fdiv(sink, lhs.0, rhs.0, dst.0),
-                DivMode::Reciprocal => {
-                    let loc = fctx.fdiv_recip_scratch.as_ref().ok_or_else(|| {
-                        String::from("internal: Q32 Fdiv reciprocal without scratch locals")
-                    })?;
-                    q32::emit_q32_fdiv_recip(sink, lhs.0, rhs.0, dst.0, loc);
-                }
-            },
+            FloatMode::Q32 => {
+                let loc = fctx.fdiv_recip_scratch.as_ref().ok_or_else(|| {
+                    String::from("internal: Q32 Fdiv reciprocal without scratch locals")
+                })?;
+                q32::emit_q32_fdiv_recip(sink, lhs.0, rhs.0, dst.0, loc);
+            }
             FloatMode::F32 => {
                 sink.local_get(lhs.0)
                     .local_get(rhs.0)

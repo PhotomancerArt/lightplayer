@@ -96,6 +96,7 @@ pub(crate) fn param_upsert_edits(upsert: &ParamUpsert) -> Vec<SlotEdit> {
         ("default", upsert.default),
         ("min", upsert.min),
         ("max", upsert.max),
+        ("step", upsert.step),
     ] {
         if let Some(value) = value {
             option(name, LpValue::F32(value));
@@ -138,6 +139,7 @@ mod tests {
             default: Some(1.0),
             min: Some(0.0),
             max: Some(4.0),
+            step: Some(1.0),
             unit: Some("x".into()),
             panel: Some(true),
         };
@@ -158,6 +160,8 @@ mod tests {
                 SlotEdit::assign_value(parse(r#"consumed["speed"].min.some"#), LpValue::F32(0.0)),
                 SlotEdit::ensure_present(parse(r#"consumed["speed"].max.some"#)),
                 SlotEdit::assign_value(parse(r#"consumed["speed"].max.some"#), LpValue::F32(4.0)),
+                SlotEdit::ensure_present(parse(r#"consumed["speed"].step.some"#)),
+                SlotEdit::assign_value(parse(r#"consumed["speed"].step.some"#), LpValue::F32(1.0)),
                 SlotEdit::ensure_present(parse(r#"consumed["speed"].panel.some"#)),
                 SlotEdit::assign_value(
                     parse(r#"consumed["speed"].panel.some"#),

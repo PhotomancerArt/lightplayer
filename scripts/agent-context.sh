@@ -10,11 +10,13 @@ Prints shell-friendly agent context values:
   repo_slug=...
   planning_root=...
   repo_planning_root=...
-  skills_root=...
 
-The repo context is read from agent-context.toml when present. By default this
-uses PHOTOMANCER_PLANNING_ROOT and PHOTOMANCER_SKILLS_ROOT, falling back to:
-  ~/.photomancer/planning
+The repo context is read from agent-context.toml when present. The planning
+root resolves in this order, first match wins:
+  1. --planning-root PATH
+  2. the env var named by planning_root_env (default PHOTOMANCER_PLANNING_ROOT)
+  3. planning_root from agent-context.toml
+  4. ~/.photomancer/planning
 USAGE
 }
 
@@ -57,8 +59,7 @@ read_context_key() {
 
 repo_slug="$(read_context_key repo_slug)"
 planning_root_env="$(read_context_key planning_root_env)"
-skills_root_env="$(read_context_key skills_root_env)"
-default_skills_subdir="$(read_context_key default_skills_subdir)"
+configured_planning_root="$(read_context_key planning_root)"
 
 if [[ -z "$repo_slug" ]]; then
   repo_slug="$(basename "$repo_root")"
@@ -68,17 +69,12 @@ if [[ -z "$planning_root_env" ]]; then
   planning_root_env="PHOTOMANCER_PLANNING_ROOT"
 fi
 
-if [[ -z "$skills_root_env" ]]; then
-  skills_root_env="PHOTOMANCER_SKILLS_ROOT"
-fi
-
-if [[ -z "$default_skills_subdir" ]]; then
-  default_skills_subdir="skills"
-fi
-
 planning_root="$planning_root_override"
 if [[ -z "$planning_root" ]]; then
   planning_root="${!planning_root_env:-}"
+fi
+if [[ -z "$planning_root" && -n "$configured_planning_root" ]]; then
+  planning_root="${configured_planning_root/#\~/$HOME}"
 fi
 if [[ -z "$planning_root" && ( -d "$HOME/.photomancer/planning" || -L "$HOME/.photomancer/planning" ) ]]; then
   planning_root="$HOME/.photomancer/planning"
@@ -94,7 +90,6 @@ if [[ ! -d "$planning_root" ]]; then
   exit 1
 fi
 
-skills_root="${!skills_root_env:-$planning_root/$default_skills_subdir}"
 repo_planning_root="$planning_root/$repo_slug"
 
 printf 'repo_root=%q\n' "$repo_root"
@@ -102,5 +97,3 @@ printf 'repo_slug=%q\n' "$repo_slug"
 printf 'planning_root_env=%q\n' "$planning_root_env"
 printf 'planning_root=%q\n' "$planning_root"
 printf 'repo_planning_root=%q\n' "$repo_planning_root"
-printf 'skills_root_env=%q\n' "$skills_root_env"
-printf 'skills_root=%q\n' "$skills_root"

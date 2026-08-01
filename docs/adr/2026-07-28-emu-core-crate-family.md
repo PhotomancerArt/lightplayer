@@ -122,6 +122,15 @@ import path.
 
 - Xtensa backport: `lp-xt-emu` consumes `lp-emu-core`; add Xtensa
   `InstClass`/`CycleModel` variants (readiness report §3A).
-- Introduce the `EmuCore` trait when `lp-xt-emu` lands and a consumer
+- ~~Introduce the `EmuCore` trait when `lp-xt-emu` lands and a consumer
   needs arch polymorphism — gated on an arch-neutral `call_function*`
-  signature description.
+  signature description.~~ **RESOLVED 2026-07-30 as "not needed"** by
+  `2026-07-30-isa-parameterized-host-emu-engine`. Both halves of the trigger
+  fired (`lp-xt-emu` landed; `rt_emu` needed two ISAs), and the gate itself was
+  met without a trait: each ISA's own ABI classification (`isa/xt/abi.rs`'s
+  `classify_params`/`classify_return`) is the arch-neutral replacement for
+  cranelift's `Signature`, and `lp-xt-emu`'s `run_loaded_with_args` takes a flat
+  argument list. With the per-ISA call sites at ~30 lines each, a trait would
+  abstract over two implementations to save nothing while having to unify two
+  genuinely different emulator APIs. Revisit only if a third ISA makes those
+  branches grow.

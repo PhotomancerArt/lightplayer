@@ -7,27 +7,59 @@ use alloc::vec::Vec;
 use lp_collection::VecSet;
 
 use lpc_model::{ArtifactSpec, NodeInvocation, NodeKind};
-use lpc_model::{AssetContentType, AssetLocation, NodeDefLocation, NodeDefState};
 use lpc_model::{
-    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, Kind, LpValue,
-    MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin, ProjectNodePlacement,
-    Revision, SlotPath,
+    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, Kind, LpValue, NodeDef, NodeId,
+    NodeName, ProjectNodeOrigin, ProjectNodePlacement, Revision, SlotPath,
 };
+use lpc_model::{NodeDefLocation, NodeDefState};
 use lpc_model::{SlotDirection, SlotPathSegment, SlotShape, StaticSlotShape, well_known_channel};
-use lpc_registry::{AssetText, ParseCtx, ProjectRegistry};
+// `FixtureDef`/`MappingConfig` back `resolve_fixture_mapping` (node-fixture
+// only); `PlaylistDef` backs `playlist_runtime_entries` (node-playlist only)
+// — both model types, but their sole consumers here are gated, so the
+// imports follow the same gate rather than dangling unused.
+#[cfg(feature = "node-playlist")]
+use lpc_model::PlaylistDef;
+#[cfg(feature = "node-fixture")]
+use lpc_model::{FixtureDef, MappingConfig};
+// `AssetContentType`/`AssetLocation`/`AssetText` are used only by the
+// asset-backed node kinds (shader/compute-shader source, fixture map2d) via
+// `materialize_node_text_asset`/`asset_for_node_content_type` — same gate.
+#[cfg(any(feature = "node-shader", feature = "node-fixture"))]
+use lpc_model::{AssetContentType, AssetLocation};
+#[cfg(any(feature = "node-shader", feature = "node-fixture"))]
+use lpc_registry::AssetText;
+use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireSlotIndex};
 use lpfs::LpFs;
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeEntryState, TreeError};
-use crate::nodes::FixtureMap2dSource;
+// `Output`/`Project` are never gated (see `lpc-engine/Cargo.toml`), so these
+// two stay unconditional; every other node type below is feature-gated —
+// one `use` per gate so a disabled feature doesn't drag in a type that no
+// longer exists in this build.
+#[cfg(feature = "node-button")]
+use crate::nodes::ButtonNode;
+#[cfg(feature = "node-clock")]
+use crate::nodes::ClockNode;
+#[cfg(feature = "node-radio")]
+use crate::nodes::ControlRadioNode;
+use crate::nodes::CorePlaceholderNode;
+#[cfg(feature = "node-fluid")]
+use crate::nodes::FluidNode;
+use crate::nodes::OutputNode;
+#[cfg(feature = "node-texture")]
+use crate::nodes::TextureNode;
+#[cfg(feature = "node-fixture")]
 use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
-use crate::nodes::{
-    ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
-    FluidNode, OutputNode, PlaylistNode, PlaylistRuntimeEntry, ShaderNode, TextureNode,
-    playlist_output_path,
-};
+use crate::nodes::playlist_output_path;
+#[cfg(feature = "node-shader")]
+use crate::nodes::{ComputeShaderNode, ShaderNode};
+#[cfg(feature = "node-fixture")]
+use crate::nodes::{FixtureMap2dSource, FixtureNode};
+#[cfg(feature = "node-playlist")]
+use crate::nodes::{PlaylistNode, PlaylistRuntimeEntry};
 
 use super::{Engine, EngineServices, LoadedProjectRuntime};
 
@@ -210,6 +242,11 @@ impl ProjectLoader {
                     reason: String::from("project tree references missing definition entry"),
                 }
             })?;
+            // A definition that failed to parse has no kind to report, so the
+            // node is projected as a container and matches none of the
+            // per-kind attach loops below — it is present in the tree but
+            // drives nothing. `mark_node_load_error` is what makes that
+            // visible; do not read this fallback as "it is a project".
             let kind = def_entry.state.kind().unwrap_or(NodeKind::Project);
             let state_error = def_entry
                 .state
@@ -301,7 +338,13 @@ impl ProjectLoader {
                 );
             }
             if let Some(message) = state_error {
-                mark_node_load_error(runtime, node_id, frame, message);
+                mark_node_load_error(
+                    runtime,
+                    node_id,
+                    frame,
+                    &def_location_label(&project_node.def_location),
+                    message,
+                );
             }
 
             projected_nodes.push(ProjectedNode {
@@ -350,6 +393,14 @@ impl ProjectLoader {
     }
 
     fn attach_projected_nodes_filtered(
+        // Only read when node-shader or node-fixture is on (the asset-backed
+        // kinds, via `materialize_node_text_asset`); the signature must stay
+        // stable across gate combinations, so this is a scoped allow rather
+        // than a `#[cfg]` on the parameter itself.
+        #[cfg_attr(
+            not(any(feature = "node-shader", feature = "node-fixture")),
+            allow(unused_variables, reason = "read only by the asset-backed node kinds")
+        )]
         fs: &dyn LpFs,
         registry: &mut ProjectRegistry,
         runtime: &mut Engine,
@@ -364,15 +415,31 @@ impl ProjectLoader {
             if node.kind != NodeKind::Clock {
                 continue;
             }
-            let NodeDef::Clock(_) = projected_node_config(registry, node)? else {
-                continue;
-            };
-            runtime
-                .attach_runtime_node(node.id, Box::new(ClockNode::new(node.id)), frame)
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("attach clock runtime: {e}"),
-                })?;
+            #[cfg(feature = "node-clock")]
+            {
+                let NodeDef::Clock(_) = projected_node_config(registry, node)? else {
+                    continue;
+                };
+                runtime
+                    .attach_runtime_node(node.id, Box::new(ClockNode::new(node.id)), frame)
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach clock runtime: {e}"),
+                    })?;
+            }
+            #[cfg(not(feature = "node-clock"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Clock)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach clock placeholder runtime: {e}"),
+                    })?;
+            }
         }
 
         for node in projected_nodes {
@@ -382,15 +449,31 @@ impl ProjectLoader {
             if node.kind != NodeKind::Button {
                 continue;
             }
-            let NodeDef::Button(_) = projected_node_config(registry, node)? else {
-                continue;
-            };
-            runtime
-                .attach_runtime_node(node.id, Box::new(ButtonNode::new()), frame)
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("attach button runtime: {e}"),
-                })?;
+            #[cfg(feature = "node-button")]
+            {
+                let NodeDef::Button(_) = projected_node_config(registry, node)? else {
+                    continue;
+                };
+                runtime
+                    .attach_runtime_node(node.id, Box::new(ButtonNode::new()), frame)
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach button runtime: {e}"),
+                    })?;
+            }
+            #[cfg(not(feature = "node-button"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Button)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach button placeholder runtime: {e}"),
+                    })?;
+            }
         }
 
         for node in projected_nodes {
@@ -400,16 +483,32 @@ impl ProjectLoader {
             if node.kind != NodeKind::ControlRadio {
                 continue;
             }
-            let NodeDef::ControlRadio(_) = projected_node_config(registry, node)? else {
-                continue;
-            };
-            runtime
-                .attach_runtime_node(node.id, Box::new(ControlRadioNode::new()), frame)
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("attach control radio runtime: {e}"),
-                })?;
-            runtime.add_demand_root(node.id);
+            #[cfg(feature = "node-radio")]
+            {
+                let NodeDef::ControlRadio(_) = projected_node_config(registry, node)? else {
+                    continue;
+                };
+                runtime
+                    .attach_runtime_node(node.id, Box::new(ControlRadioNode::new()), frame)
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach control radio runtime: {e}"),
+                    })?;
+                runtime.add_demand_root(node.id);
+            }
+            #[cfg(not(feature = "node-radio"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::ControlRadio)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach control radio placeholder runtime: {e}"),
+                    })?;
+            }
         }
 
         for node in projected_nodes {
@@ -419,12 +518,28 @@ impl ProjectLoader {
             if node.kind != NodeKind::Texture {
                 continue;
             }
-            runtime
-                .attach_runtime_node(node.id, Box::new(TextureNode::new(node.id)), frame)
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("attach texture runtime: {e}"),
-                })?;
+            #[cfg(feature = "node-texture")]
+            {
+                runtime
+                    .attach_runtime_node(node.id, Box::new(TextureNode::new(node.id)), frame)
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach texture runtime: {e}"),
+                    })?;
+            }
+            #[cfg(not(feature = "node-texture"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Texture)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach texture placeholder runtime: {e}"),
+                    })?;
+            }
         }
 
         for node in projected_nodes {
@@ -462,26 +577,42 @@ impl ProjectLoader {
             if node.kind != NodeKind::Shader {
                 continue;
             }
-            let NodeDef::Shader(config) = projected_node_config(registry, node)?.clone() else {
-                continue;
-            };
-            let glsl_source = materialize_node_text_asset(
-                fs,
-                registry,
-                node,
-                AssetContentType::ShaderSource,
-                "shader source",
-            )?;
-            runtime
-                .attach_runtime_node(
-                    node.id,
-                    Box::new(ShaderNode::new(node.id, config, glsl_source)),
-                    frame,
-                )
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("attach shader runtime: {e}"),
-                })?;
+            #[cfg(feature = "node-shader")]
+            {
+                let NodeDef::Shader(config) = projected_node_config(registry, node)?.clone() else {
+                    continue;
+                };
+                let glsl_source = materialize_node_text_asset(
+                    fs,
+                    registry,
+                    node,
+                    AssetContentType::ShaderSource,
+                    "shader source",
+                )?;
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(ShaderNode::new(node.id, config, glsl_source)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach shader runtime: {e}"),
+                    })?;
+            }
+            #[cfg(not(feature = "node-shader"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Shader)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach shader placeholder runtime: {e}"),
+                    })?;
+            }
         }
 
         for node in projected_nodes {
@@ -491,41 +622,57 @@ impl ProjectLoader {
             if node.kind != NodeKind::ComputeShader {
                 continue;
             }
-            let NodeDef::ComputeShader(config) = projected_node_config(registry, node)?.clone()
-            else {
-                continue;
-            };
-            let source = materialize_node_text_asset(
-                fs,
-                registry,
-                node,
-                AssetContentType::ComputeShaderSource,
-                "compute shader source",
-            )?;
-            runtime
-                .attach_runtime_node(
-                    node.id,
-                    Box::new(
-                        ComputeShaderNode::from_asset_text(
-                            node.id,
-                            config,
-                            source,
-                            runtime.slot_shapes(),
-                            frame,
-                        )
-                        .map_err(|e| {
-                            ProjectLoadError::InvalidProjectReference {
-                                path: node_label(node),
-                                reason: format!("generate compute shader header: {e}"),
-                            }
-                        })?,
-                    ),
-                    frame,
-                )
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("attach compute shader runtime: {e}"),
-                })?;
+            #[cfg(feature = "node-shader")]
+            {
+                let NodeDef::ComputeShader(config) = projected_node_config(registry, node)?.clone()
+                else {
+                    continue;
+                };
+                let source = materialize_node_text_asset(
+                    fs,
+                    registry,
+                    node,
+                    AssetContentType::ComputeShaderSource,
+                    "compute shader source",
+                )?;
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(
+                            ComputeShaderNode::from_asset_text(
+                                node.id,
+                                config,
+                                source,
+                                runtime.slot_shapes(),
+                                frame,
+                            )
+                            .map_err(|e| {
+                                ProjectLoadError::InvalidProjectReference {
+                                    path: node_label(node),
+                                    reason: format!("generate compute shader header: {e}"),
+                                }
+                            })?,
+                        ),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach compute shader runtime: {e}"),
+                    })?;
+            }
+            #[cfg(not(feature = "node-shader"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::ComputeShader)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach compute shader placeholder runtime: {e}"),
+                    })?;
+            }
         }
 
         for node in projected_nodes {
@@ -535,15 +682,31 @@ impl ProjectLoader {
             if node.kind != NodeKind::Fluid {
                 continue;
             }
-            let NodeDef::Fluid(_) = projected_node_config(registry, node)? else {
-                continue;
-            };
-            runtime
-                .attach_runtime_node(node.id, Box::new(FluidNode::new(node.id)), frame)
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("attach fluid runtime: {e}"),
-                })?;
+            #[cfg(feature = "node-fluid")]
+            {
+                let NodeDef::Fluid(_) = projected_node_config(registry, node)? else {
+                    continue;
+                };
+                runtime
+                    .attach_runtime_node(node.id, Box::new(FluidNode::new(node.id)), frame)
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach fluid runtime: {e}"),
+                    })?;
+            }
+            #[cfg(not(feature = "node-fluid"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Fluid)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach fluid placeholder runtime: {e}"),
+                    })?;
+            }
         }
 
         for node in projected_nodes {
@@ -553,31 +716,47 @@ impl ProjectLoader {
             if node.kind != NodeKind::Playlist {
                 continue;
             }
-            let (idle_entry, default_fade, entries) = {
-                let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
-                    continue;
+            #[cfg(feature = "node-playlist")]
+            {
+                let (idle_entry, default_fade, entries) = {
+                    let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
+                        continue;
+                    };
+                    (
+                        *config.idle_entry.value(),
+                        config.default_fade.value().0,
+                        playlist_runtime_entries(projected_nodes, node.id, config),
+                    )
                 };
-                (
-                    *config.idle_entry.value(),
-                    config.default_fade.value().0,
-                    playlist_runtime_entries(projected_nodes, node.id, config),
-                )
-            };
-            runtime
-                .attach_runtime_node(
-                    node.id,
-                    Box::new(PlaylistNode::new(
+                runtime
+                    .attach_runtime_node(
                         node.id,
-                        idle_entry,
-                        default_fade,
-                        entries,
-                    )),
-                    frame,
-                )
-                .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                    path: node_label(node),
-                    reason: format!("attach playlist placeholder runtime: {e}"),
-                })?;
+                        Box::new(PlaylistNode::new(
+                            node.id,
+                            idle_entry,
+                            default_fade,
+                            entries,
+                        )),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach playlist placeholder runtime: {e}"),
+                    })?;
+            }
+            #[cfg(not(feature = "node-playlist"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Playlist)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach playlist gate-off placeholder runtime: {e}"),
+                    })?;
+            }
         }
 
         for node in projected_nodes {
@@ -587,33 +766,50 @@ impl ProjectLoader {
             if node.kind != NodeKind::Fixture {
                 continue;
             }
-            let NodeDef::Fixture(config) = projected_node_config(registry, node)?.clone() else {
-                continue;
-            };
-            match resolve_fixture_mapping(fs, registry, node, &config) {
-                Ok((mapping, map2d_source)) => {
-                    let mut fixture =
-                        FixtureNode::new(node.id, mapping, *config.sampling.value(), frame)
-                            .with_render_defaults(
-                                config.render_width(),
-                                config.render_height(),
-                                *config.color_order.value(),
-                            );
-                    if let Some(source) = map2d_source {
-                        fixture = fixture.with_map2d_source(source);
+            #[cfg(feature = "node-fixture")]
+            {
+                let NodeDef::Fixture(config) = projected_node_config(registry, node)?.clone()
+                else {
+                    continue;
+                };
+                match resolve_fixture_mapping(fs, registry, node, &config) {
+                    Ok((mapping, map2d_source)) => {
+                        let mut fixture =
+                            FixtureNode::new(node.id, mapping, *config.sampling.value(), frame)
+                                .with_render_defaults(
+                                    config.render_width(),
+                                    config.render_height(),
+                                    *config.color_order.value(),
+                                );
+                        if let Some(source) = map2d_source {
+                            fixture = fixture.with_map2d_source(source);
+                        }
+                        runtime
+                            .attach_runtime_node(node.id, Box::new(fixture), frame)
+                            .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                                path: node_label(node),
+                                reason: format!("attach fixture runtime: {e}"),
+                            })?;
+                        mark_node_status(runtime, node.id, frame, NodeRuntimeStatus::Ok);
                     }
-                    runtime
-                        .attach_runtime_node(node.id, Box::new(fixture), frame)
-                        .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                            path: node_label(node),
-                            reason: format!("attach fixture runtime: {e}"),
-                        })?;
-                    mark_node_status(runtime, node.id, frame, NodeRuntimeStatus::Ok);
+                    Err(error) => {
+                        let message = error.to_string();
+                        mark_node_load_error(runtime, node.id, frame, &node_label(node), message);
+                    }
                 }
-                Err(error) => {
-                    let message = error.to_string();
-                    mark_node_load_error(runtime, node.id, frame, message);
-                }
+            }
+            #[cfg(not(feature = "node-fixture"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(CorePlaceholderNode::new_leaf(NodeKind::Fixture)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach fixture placeholder runtime: {e}"),
+                    })?;
             }
         }
 
@@ -645,7 +841,21 @@ fn should_attach_projected_node(
     targets.is_none_or(|targets| targets.contains(&node.use_location))
 }
 
-fn mark_node_load_error(runtime: &mut Engine, node_id: NodeId, frame: Revision, message: String) {
+/// Record a per-node load failure without failing the project load.
+///
+/// A broken definition stays in inventory so Studio can show it, and the load
+/// deliberately continues — but a headless device has no Studio, and until this
+/// logged, a node with an unparseable file simply never appeared: no error, no
+/// output, nothing in 150 s of serial. The warning is what makes the drop
+/// observable on a device.
+fn mark_node_load_error(
+    runtime: &mut Engine,
+    node_id: NodeId,
+    frame: Revision,
+    label: &str,
+    message: String,
+) {
+    log::warn!("ProjectLoader: node {label} did not load: {message}");
     if let Some(entry) = runtime.tree_mut().get_mut(node_id) {
         entry.set_status(NodeRuntimeStatus::Error(message.clone()), frame);
         entry.set_state(NodeEntryState::Failed { reason: message }, frame);
@@ -713,6 +923,9 @@ fn node_def_state_message(location: &NodeDefLocation, state: &NodeDefState) -> S
     }
 }
 
+// Only the Fixture real-attach arm reports `Ok` explicitly (every other
+// kind relies on the `Created` default); follow that one caller's gate.
+#[cfg(feature = "node-fixture")]
 fn mark_node_status(
     runtime: &mut Engine,
     node_id: NodeId,
@@ -815,6 +1028,7 @@ fn resolve_path_specifier_from_dir(
     }
 }
 
+#[cfg(feature = "node-playlist")]
 fn playlist_runtime_entries(
     projected_nodes: &[ProjectedNode],
     playlist: NodeId,
@@ -854,6 +1068,7 @@ fn playlist_runtime_entries(
         .collect()
 }
 
+#[cfg(feature = "node-fixture")]
 fn resolve_fixture_mapping(
     fs: &dyn LpFs,
     registry: &mut ProjectRegistry,
@@ -930,6 +1145,12 @@ fn projected_node_config<'a>(
     }
 }
 
+// Called from the Shader/ComputeShader loops (node-shader, GLSL/compute
+// source assets) and from `resolve_fixture_mapping` (node-fixture, the
+// map2d document) — the only two asset-backed node kinds. `Texture` reads
+// no text asset (image bytes go through a different path), so it does not
+// need this helper.
+#[cfg(any(feature = "node-shader", feature = "node-fixture"))]
 fn materialize_node_text_asset(
     fs: &dyn LpFs,
     registry: &mut ProjectRegistry,
@@ -946,6 +1167,7 @@ fn materialize_node_text_asset(
     })
 }
 
+#[cfg(any(feature = "node-shader", feature = "node-fixture"))]
 fn asset_for_node_content_type(
     registry: &ProjectRegistry,
     node: &ProjectedNode,
@@ -1838,7 +2060,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -1915,6 +2137,30 @@ mod tests {
         assert_fixture_node_error(&rt, "unsupported map2d format 99");
     }
 
+    /// A node whose *definition file* will not parse must be reported, not
+    /// dropped.
+    ///
+    /// Such a node has no kind, so it is projected as a container and matches
+    /// none of the per-kind attach loops — it never runs, and the load still
+    /// succeeds. On the desk this looked like one of four LED strips simply
+    /// not existing: no error, no output, nothing in 150 s of serial. The
+    /// failed status here (and the warning `mark_node_load_error` logs beside
+    /// it) is the only trace such a node leaves.
+    #[test]
+    fn a_node_whose_definition_does_not_parse_is_marked_failed() {
+        let fs = char_project(&[(
+            "output",
+            // Endpoint specs are `capability:driver:config`; the config part
+            // is empty here, exactly as a mis-edited `outputN.json` had it.
+            r#"{ "kind": "Output", "endpoint": "ws281x:rmt:",
+                 "bindings": { "input": { "source": "bus:control.out" } } }"#,
+        )]);
+
+        let rt = load_project(&fs);
+
+        assert_node_for_def_error(&rt, "/output.json", "empty part");
+    }
+
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {
         assert_node_for_def_error(rt, "/fixture.json", expected);
     }
@@ -1939,7 +2185,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "playlist": {
       "ref": "./playlist.json"
@@ -2036,7 +2282,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2215,7 +2461,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2345,7 +2591,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "def": {
@@ -2374,7 +2620,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -2730,7 +2976,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "broken": {
       "ref": "./broken.json"
@@ -2773,7 +3019,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "weird": {
       "ref": "./weird.json"
@@ -2943,7 +3189,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "compute": {
       "ref": "./compute.json"
@@ -3006,6 +3252,44 @@ mod tests {
         assert_eq!(
             *production.value_leaf().expect("value").value(),
             LpValue::F32(2.25)
+        );
+    }
+
+    /// The defaulting rule, end to end: `examples/fluid` predates the `power`
+    /// slot and authors none, yet its fixture must still come up limited. The
+    /// budget the node publishes is the one actually enforced, so asserting on
+    /// it also pins that the UI cannot report a percentage against a budget
+    /// nothing is applying.
+    #[test]
+    fn fixture_without_an_authored_power_slot_is_limited_at_the_default_budget() {
+        let fs = examples_fluid_fs();
+        let fs: &dyn LpFs = &fs;
+        let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let root = rt.tree().root();
+        let fixture = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fixture").unwrap())
+            .expect("fixture node");
+
+        let budget = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fixture,
+                    slot: SlotPath::parse("power_budget_ma").expect("power_budget_ma"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve power budget")
+            .0;
+
+        assert_eq!(
+            *budget.value_leaf().expect("value").value(),
+            LpValue::U32(lpc_model::nodes::fixture::FixturePower::DEFAULT_BUDGET_MA),
+            "an unstated budget must fall back to the default guard, not to unlimited"
         );
     }
 
@@ -3456,7 +3740,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3526,7 +3810,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3819,7 +4103,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
-  "format": 1,
+  "format": 2,
   "name": "basic",
   "nodes": {
     "output": {
@@ -4009,7 +4293,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let project = format!(
-            "{{\n  \"kind\": \"Project\",\n  \"format\": 1,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
+            "{{\n  \"kind\": \"Project\",\n  \"format\": 2,\n  \"nodes\": {{\n{entries}\n  }}\n}}\n"
         );
         fs.write_file("/project.json".as_path(), project.as_bytes())
             .expect("project.json");
@@ -4185,6 +4469,116 @@ mod tests {
             default_publishers, 1,
             "only the playlist itself default-publishes visual.out; entry \
              children are ownership-suppressed"
+        );
+    }
+
+    /// Regression guard: a new `NodeKind` variant must not silently arrive
+    /// ungated (mirrors the ISA-backend exhaustiveness guard from M3a).
+    ///
+    /// `classify` matches every `NodeKind` with **no wildcard arm** — adding
+    /// a variant to `lpc_model::NodeKind` without extending this match is a
+    /// *compile* error here, not a runtime failure someone has to notice.
+    /// The per-kind string is the feature gate that must own an attach loop
+    /// for that kind in `attach_projected_nodes_filtered` (or `"always-on"`
+    /// for `Project`/`Output`, which `lpc-engine/Cargo.toml` documents as
+    /// never gated).
+    #[test]
+    fn every_node_kind_is_explicitly_gated_or_always_on() {
+        fn classify(kind: NodeKind) -> &'static str {
+            match kind {
+                NodeKind::Project => "always-on",
+                NodeKind::Output => "always-on",
+                NodeKind::Button => "node-button",
+                NodeKind::Clock => "node-clock",
+                NodeKind::Texture => "node-texture",
+                NodeKind::Shader => "node-shader",
+                NodeKind::ComputeShader => "node-shader",
+                NodeKind::Fluid => "node-fluid",
+                NodeKind::Playlist => "node-playlist",
+                NodeKind::ControlRadio => "node-radio",
+                NodeKind::Fixture => "node-fixture",
+            }
+        }
+        for kind in [
+            NodeKind::Project,
+            NodeKind::Output,
+            NodeKind::Button,
+            NodeKind::Clock,
+            NodeKind::Texture,
+            NodeKind::Shader,
+            NodeKind::ComputeShader,
+            NodeKind::Fluid,
+            NodeKind::Playlist,
+            NodeKind::ControlRadio,
+            NodeKind::Fixture,
+        ] {
+            assert!(!classify(kind).is_empty());
+        }
+    }
+
+    /// A project referencing a gated-off node kind must still **load**. The
+    /// missing-node contract is deliberately minimal (M2 scope decision,
+    /// `docs/debt/firmware-capability-reporting.md`): the attach loop for a
+    /// disabled kind falls back to `CorePlaceholderNode` and the load
+    /// succeeds silently. This asserts only that — never anything about
+    /// status/reporting, which is deliberately absent by design.
+    ///
+    /// Gated to `node-button` off, so it only compiles when that feature is
+    /// disabled; under the crate's own `default` (all eight node gates on)
+    /// this cfg compiles the test out entirely, same as the disabled-path
+    /// arm it exercises in `attach_projected_nodes_filtered` above. It does
+    /// **not** run under `just test` or any CI job today — nothing in this
+    /// workspace tests lpc-engine with a non-default feature set yet. It
+    /// runs when invoked directly with the gate off, mirroring the P4
+    /// compile matrix but for `test` instead of `check`:
+    ///
+    /// ```sh
+    /// cargo test -p lpc-engine --no-default-features --features \
+    ///   "std,node-radio,node-fluid,node-fixture,node-texture,node-playlist,node-clock,node-shader" \
+    ///   disabled_node_kind_still_loads_project
+    /// ```
+    #[test]
+    #[cfg(not(feature = "node-button"))]
+    fn disabled_node_kind_still_loads_project() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.json".as_path(),
+            br#"
+{
+  "kind": "Project",
+  "format": 2,
+  "nodes": {
+    "button": {
+      "ref": "./button.json"
+    }
+  }
+}
+"#,
+        )
+        .expect("project.json");
+        fs.write_file(
+            "/button.json".as_path(),
+            br#"
+{
+  "kind": "Button",
+  "endpoint": "button:gpio:D9",
+  "stable_ms": 1,
+  "bindings": {
+    "down": {
+      "target": "bus:trigger"
+    }
+  }
+}
+"#,
+        )
+        .expect("button.json");
+
+        let services = EngineServices::new(TreePath::parse("/disabled_node.show").expect("path"));
+        let result = ProjectLoader::load_from_root(&fs, services);
+        assert!(
+            result.is_ok(),
+            "a project referencing a disabled node kind must still load: {:?}",
+            result.err()
         );
     }
 }

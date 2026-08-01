@@ -8,7 +8,17 @@ license.workspace = true
 workspace = true
 
 [features]
-default = ["std"]
+default = [
+    "std",
+    "node-button",
+    "node-radio",
+    "node-fluid",
+    "node-fixture",
+    "node-texture",
+    "node-playlist",
+    "node-clock",
+    "node-shader",
+]
 # Panic recovery via catch_unwind (embedded targets)
 panic-recovery = ["dep:unwinding"]
 naga = ["lp-shader/naga"]
@@ -18,6 +28,33 @@ std = [
     "lpfs/std",
     "lp-recovery/std",
 ]
+
+# --- Per-node-kind runtime gates -------------------------------------------
+#
+# These gates are REMOVAL-only: every one of them defaults on (see `default`
+# above), and switching one off only drops that node kind's runtime code and
+# its exclusive dependencies from the build — it never changes what a default
+# build compiles or runs. They exist so a constrained firmware build (the S3
+# app layer; see the M2 plan) can link only the node kinds it actually uses.
+#
+# Do NOT read `node-shader` as a step toward making the GLSL JIT compiler
+# itself opt-in on `lpc-engine`/`lp-server` — see the hard rule in
+# `AGENTS.md` ("Make the compiler an opt-in feature ... STOP. You are about
+# to break the product."). Disabling `node-shader` removes the *Shader* and
+# *ComputeShader* node runtimes only; `lp-shader` stays linked whenever any
+# node that uses it (fixture, fluid) is enabled, and a default build always
+# has the full compiler pipeline.
+#
+# `Output` and `Project` are never gated: `LpServer` requires an output
+# provider, and `Project` is the always-present root placeholder.
+node-button = []
+node-radio = []
+node-fluid = []
+node-fixture = ["dep:lpc-mapping"]
+node-texture = []
+node-playlist = []
+node-clock = []
+node-shader = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
@@ -31,7 +68,10 @@ lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
-lpc-mapping = { path = "../lpc-mapping", default-features = false }
+# Fixture-exclusive (confirmed by grep: only src/nodes/fixture/** and the
+# fixture attach arm in project_loader.rs reference it) — optional, held by
+# `node-fixture`.
+lpc-mapping = { path = "../lpc-mapping", default-features = false, optional = true }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpc-hardware = { path = "../lpc-hardware", default-features = false }
 lpc-registry = { path = "../lpc-registry", default-features = false }

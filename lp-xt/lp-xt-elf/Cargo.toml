@@ -1,0 +1,25 @@
+[package]
+name = "lp-xt-elf"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Xtensa linked-ELF loader + guest-syscall host for lp-xt-emu."
+
+[lints]
+workspace = true
+
+[features]
+# Relocatable-object (.o) parsing, a minimal two-object linker driver, and
+# R_XTENSA_32 / R_XTENSA_SLOT0_OP relocation application (the engine the
+# isa/xt builtins-link path will reuse — see the experiment repo's BACKPORT
+# M6 verdict). Off by default so the base loader stays dependency-light.
+reloc = ["dep:lp-xt-inst"]
+
+[dependencies]
+lp-xt-emu = { path = "../lp-xt-emu" }
+lp-xt-inst = { path = "../lp-xt-inst", optional = true }
+object = { version = "0.36", default-features = false, features = ["read", "std", "elf"] }
+
+[dev-dependencies]
+lp-xt-inst = { path = "../lp-xt-inst" }

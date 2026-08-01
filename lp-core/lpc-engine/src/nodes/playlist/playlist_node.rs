@@ -428,17 +428,13 @@ impl RenderNode for PlaylistNode {
     }
 }
 
-pub fn playlist_output_path() -> SlotPath {
-    SlotPath::parse("output").expect("playlist output path")
-}
-
 fn detect_triggered_entry(
     ctx: &mut TickContext<'_>,
     entries: &[PlaylistRuntimeEntry],
     last_seen: &mut VecMap<u32, u32>,
 ) -> Result<Option<u32>, NodeError> {
     let production = ctx
-        .resolve(QueryKey::ConsumedSlot {
+        .resolve(&QueryKey::ConsumedSlot {
             node: ctx.node_id(),
             slot: SlotPath::parse("trigger").expect("playlist trigger slot"),
         })
@@ -487,7 +483,7 @@ fn resolve_entry_product(
     entry: &PlaylistRuntimeEntry,
 ) -> Result<lpc_model::VisualProduct, NodeError> {
     let production = ctx
-        .resolve(QueryKey::ProducedSlot {
+        .resolve(&QueryKey::ProducedSlot {
             node: entry.child,
             slot: entry.output_slot.clone(),
         })
