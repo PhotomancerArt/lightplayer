@@ -112,6 +112,12 @@ genuinely fits none of these, and define it here in one line.
   only falsifier, so the collision surfaces whenever a compiler first
   emits the stolen form — which is usually at some optimization
   threshold nothing in the suite crosses.
+- **`incomplete-subset`** — a normative instruction/opcode subset is
+  assembled by enumerating what an external tool (objdump, an
+  assembler) is believed to assign, and the enumeration silently omits
+  a member that tool actually does assign — so the gap survives
+  exactly as long as nothing exercises that one member. Real toolchain
+  output (a sequence transcription, not memory) is the only falsifier.
 
 ## Index
 
@@ -172,6 +178,7 @@ sentence (arguments in, returns out; registers and stack).
 | invented-encoding | 2026-07-31 | [zexth-encoding-steals-xori-128](2026-07-31-zexth-encoding-steals-xori-128.md) | fixed | lp-riscv-inst (encode/decode) + lp-riscv-emu (executor) |
 | invented-encoding | 2026-07-31 | [elf-loader-riscv-reloc-numbering](2026-07-31-elf-loader-riscv-reloc-numbering.md) | **open** | lp-riscv-elf (relocations) |
 | partial-knowledge-loss | 2026-07-31 | [elf-loader-drops-relocation-addends](2026-07-31-elf-loader-drops-relocation-addends.md) | fixed | lp-riscv-elf (relocations) |
+| incomplete-subset | 2026-07-31 | [mksadj-missing-from-fp-subset](2026-07-31-mksadj-missing-from-fp-subset.md) | fixed | lp-xt/lp-xt-inst (FP subset) |
 | split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
