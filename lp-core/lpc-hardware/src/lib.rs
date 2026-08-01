@@ -11,6 +11,12 @@
 //! lists endpoints, and opens an endpoint by authored [`HwEndpointSpec`],
 //! internal [`HwEndpointId`], or physical [`HwAddress`].
 //!
+//! Listing endpoints is not cheap — each one carries a freshly computed status
+//! — so a caller that has been refused an endpoint should wait rather than ask
+//! again. [`HwRegistry::generation`] is the signal to wait on: it changes when
+//! ownership moves, which is the only thing that can turn a refusal into an
+//! acceptance. See `docs/adr/2026-07-31-output-sink-retry-policy.md`.
+//!
 //! Rendering and protocol-adjacent color processing live above this crate. For
 //! example, [`Ws281xOutput`] accepts already-rendered RGB bytes; display
 //! pipeline options remain in `lpc-shared`.
