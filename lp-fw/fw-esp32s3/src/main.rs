@@ -31,17 +31,18 @@
 
 #![no_std]
 #![no_main]
-// `rsr.ccount` in board::esp32s3::cycle_counter — Xtensa inline asm is still
-// behind this gate upstream. Scoped to harness builds so the app path keeps a
-// clean feature set.
-#![cfg_attr(fw_harness, feature(asm_experimental_arch))]
-#![cfg_attr(
-    fw_harness,
-    allow(
-        unstable_features,
-        reason = "asm_experimental_arch is required to read Xtensa's CCOUNT \
-                  cycle counter; harness builds only"
-    )
+// Xtensa asm is still unstable upstream, and two modules need it:
+// `board::esp32s3::cycle_counter` (`rsr.ccount`, harness-only) and
+// `board::esp32s3::fpu` (`wsr.cpenable`, **both** paths). It was scoped to
+// `fw_harness` while only the former existed; arming the FPU is app-path work
+// (M7 D6 / P5), and no safe wrapper for `CPENABLE` exists — xtensa-lx 0.13
+// exposes interrupts and the timer, and neither it nor esp-hal 1.1.1 touches
+// the register at all. So the gate is unconditional now, deliberately.
+#![feature(asm_experimental_arch)]
+#![allow(
+    unstable_features,
+    reason = "asm_experimental_arch is required for Xtensa's CPENABLE (arming \
+              the FPU for compiled float code) and CCOUNT (cycle counter)"
 )]
 
 // The JIT harness allocates (JIT buffers, module tables); the app path is the

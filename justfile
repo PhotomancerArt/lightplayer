@@ -616,6 +616,15 @@ clippy-fw-esp32s3:
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
+    # `float-f32` OFF. It is on by default, so every pass above builds the f32
+    # arms and none of them builds the gate-off configuration — the same
+    # invisible-rot shape as the harness loop, and the same fix. This is the
+    # only build in the repo where `#[cfg(not(feature = "float-f32"))]` on this
+    # crate is compiled at all, and it is what a future Xtensa board without an
+    # FPU (or a size-constrained S3 variant) would ship.
+    echo "clippy: float-f32 OFF (the gate-off configuration)"
+    cargo clippy --release --no-default-features \
+        --features esp32s3,server,test_xt_jit_corpus -- --no-deps -D warnings
 
 # `features` is a comma-separated list added to the defaults — for the app path
 # that means `frame-dump` and nothing else today. Harnesses have their own
@@ -1245,6 +1254,12 @@ test-rust-core:
 # are `#![cfg(feature = "emu-xt")]` but their subject
 # (`lpvm_native::xt_corpus`) sits behind `xt-corpus` — with only one of the
 # two, the files compile to NOTHING and pass having run nothing.
+#
+# `float-f32` needs no mention: `emu` turns it on unconditionally (nothing on
+# the host is flash-constrained, so the firmware gate has no job here), which is
+# what compiles `xt_corpus::F32_CASES` and the f32 half of the golden test. If
+# `emu` ever stops implying it, this line grows a `,float-f32` — the failure
+# would otherwise be silent in exactly the way the note above describes.
 test-xt-host:
     cargo test -p lpvm-native --features emu-xt,xt-corpus
 

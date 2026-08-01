@@ -558,3 +558,658 @@ pub const CASES: &[XtCase] = &[
         needs_builtins: false,
     },
 ];
+
+// ===========================================================================
+// The native-f32 half (M7 P5)
+// ===========================================================================
+//
+// Same contract as the Q32 half above — committed goldens, confirmed on
+// `lp-xt-emu` before anything is flashed, never regenerated from device output
+// — with one difference that has to be structural rather than remembered: a
+// word means something else here.
+//
+// In `FloatMode::F32` a word **is** an IEEE-754 bit pattern (M7 D1: floats
+// cross every call boundary in address registers), so `XtF32Case` carries
+// `u32`s and is invoked through `call_f32_words`, not `call_q32`. Reusing
+// `XtCase` would have made `1.0f32` and `16257.0` in Q16.16 the same table
+// entry, and a mode mix-up would surface as a wrong pixel instead of an error.
+// The runtimes draw the same line: both `call_q32` and `call_f32_words` refuse
+// the other mode outright.
+//
+// The goldens below are exact in binary32 by construction — every value is a
+// dyadic rational and every intermediate is representable — so they are what
+// the arithmetic *means*, not what any implementation rounded to. The two
+// exceptions are marked where they occur: the builtin case (whose oracle is
+// the builtin's own implementation, exactly as `builtin_call_sin_q32`'s is)
+// and the infinity row (an IEEE Guaranteed row from `docs/design/float.md`).
+
+/// One f32-mode call: argument bit patterns in, expected result words out.
+#[cfg(feature = "float-f32")]
+pub struct XtF32Invocation {
+    /// Arguments *excluding* the vmctx word — the engine prepends that. Raw
+    /// IEEE-754 bit patterns, one word per scalar component.
+    pub args: &'static [u32],
+    /// Expected return words. Committed; never regenerated from a device. For
+    /// a float return these are bit patterns; for an int return, the integer.
+    pub golden: &'static [u32],
+}
+
+/// A named f32-mode corpus case.
+#[cfg(feature = "float-f32")]
+pub struct XtF32Case {
+    pub name: &'static str,
+    /// Which f32 risk this covers, for the transcript.
+    pub risk: &'static str,
+    /// Entry function name inside the built module.
+    pub entry: &'static str,
+    pub invocations: &'static [XtF32Invocation],
+    /// Builds the module. A fn pointer so the table stays `const` in `no_std`.
+    pub build: fn() -> (LpirModule, LpsModuleSig),
+    /// True when the case reaches an `__lp_lpir_*_f32` builtin, so it needs the
+    /// Xtensa builtins image built with `float-f32` on the host side.
+    pub needs_builtins: bool,
+}
+
+/// Signature helper: `name(a: float, b: float) -> float`.
+#[cfg(feature = "float-f32")]
+fn float2_sig(name: &str, ret: LpsType) -> LpsFnSig {
+    LpsFnSig {
+        name: name.to_string(),
+        parameters: vec![
+            FnParam {
+                name: String::from("a"),
+                ty: LpsType::Float,
+                qualifier: ParamQualifier::In,
+            },
+            FnParam {
+                name: String::from("b"),
+                ty: LpsType::Float,
+                qualifier: ParamQualifier::In,
+            },
+        ],
+        return_type: ret,
+        kind: LpsFnKind::UserDefined,
+    }
+}
+
+/// Signature helper: `name(x: float) -> float`.
+#[cfg(feature = "float-f32")]
+fn float1_sig(name: &str) -> LpsFnSig {
+    LpsFnSig {
+        name: name.to_string(),
+        parameters: vec![FnParam {
+            name: String::from("x"),
+            ty: LpsType::Float,
+            qualifier: ParamQualifier::In,
+        }],
+        return_type: LpsType::Float,
+        kind: LpsFnKind::UserDefined,
+    }
+}
+
+/// Signature helper: `name(n: int, a: float, b: float) -> float`.
+#[cfg(feature = "float-f32")]
+fn recursion_sig(name: &str) -> LpsFnSig {
+    LpsFnSig {
+        name: name.to_string(),
+        parameters: vec![
+            FnParam {
+                name: String::from("n"),
+                ty: LpsType::Int,
+                qualifier: ParamQualifier::In,
+            },
+            FnParam {
+                name: String::from("a"),
+                ty: LpsType::Float,
+                qualifier: ParamQualifier::In,
+            },
+            FnParam {
+                name: String::from("b"),
+                ty: LpsType::Float,
+                qualifier: ParamQualifier::In,
+            },
+        ],
+        return_type: LpsType::Float,
+        kind: LpsFnKind::UserDefined,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// F1 — inline arithmetic and the wfr/rfr boundary.
+// ---------------------------------------------------------------------------
+
+/// `f(a, b) = ((a * b + a) - b) * 0.25`.
+///
+/// The inline family in one expression: `mul.s`, `add.s`, `sub.s`, and a float
+/// *constant*, which on Xtensa is `IConst32` + `wfr` (M7 D11 — there is no
+/// float literal pool). Both operands arrive in address registers and the
+/// result leaves in one, so every `wfr`/`rfr` seam in the ABI is on the path;
+/// a half-applied convention reads an FR nobody wrote and the answer is
+/// garbage rather than a fault.
+#[cfg(feature = "float-f32")]
+fn build_f32_arith() -> (LpirModule, LpsModuleSig) {
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
+    let a = fb.add_param(IrType::F32);
+    let b = fb.add_param(IrType::F32);
+    let t = fb.alloc_vreg(IrType::F32);
+    let k = fb.alloc_vreg(IrType::F32);
+    let out = fb.alloc_vreg(IrType::F32);
+    fb.push(LpirOp::Fmul {
+        dst: t,
+        lhs: a,
+        rhs: b,
+    });
+    fb.push(LpirOp::Fadd {
+        dst: t,
+        lhs: t,
+        rhs: a,
+    });
+    fb.push(LpirOp::Fsub {
+        dst: t,
+        lhs: t,
+        rhs: b,
+    });
+    fb.push(LpirOp::FconstF32 {
+        dst: k,
+        value: 0.25,
+    });
+    fb.push(LpirOp::Fmul {
+        dst: out,
+        lhs: t,
+        rhs: k,
+    });
+    fb.push_return(&[out]);
+
+    (
+        LpirModule {
+            imports: vec![],
+            functions: VecMap::from([(FuncId(0), fb.finish())]),
+        },
+        sig_of(vec![float2_sig("f", LpsType::Float)]),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// F2 — all six compares, in one word, including the NaN row.
+// ---------------------------------------------------------------------------
+
+/// `f(a, b) -> int`, a bitmask of the six ordered/unordered compares:
+/// `lt<<0 | le<<1 | gt<<2 | ge<<3 | eq<<4 | ne<<5`.
+///
+/// One entry point rather than six cases, because the interesting failure is a
+/// *mapping* error rather than an arithmetic one and a mask makes it legible in
+/// a serial transcript: `35` and `44` differ visibly, whereas six separate
+/// PASS lines with `0`/`1` do not say which predicate moved.
+///
+/// Xtensa has three FP compare instructions (`oeq.s`, `olt.s`, `ole.s`) writing
+/// a boolean register, so `gt`/`ge`/`ne` are built by swapping operands or
+/// inverting — and M7 D5 fuses the compare into the consumer with `b0` as
+/// implicit scratch. The NaN invocation is the row that caught D5's first
+/// mapping table: it tabulated `ueq.s` + `movf` for `!=`, which computes
+/// "ordered and unequal" and answers *false* on NaN, where `float.md` §3 makes
+/// `!=` a Guaranteed *true*.
+#[cfg(feature = "float-f32")]
+fn build_f32_compare_mask() -> (LpirModule, LpsModuleSig) {
+    let mut fb = FunctionBuilder::new("f", &[IrType::I32]);
+    let a = fb.add_param(IrType::F32);
+    let b = fb.add_param(IrType::F32);
+    let acc = fb.alloc_vreg(IrType::I32);
+    fb.push(LpirOp::IconstI32 { dst: acc, value: 0 });
+
+    let preds: [fn(lpir::VReg, lpir::VReg, lpir::VReg) -> LpirOp; 6] = [
+        |dst, lhs, rhs| LpirOp::Flt { dst, lhs, rhs },
+        |dst, lhs, rhs| LpirOp::Fle { dst, lhs, rhs },
+        |dst, lhs, rhs| LpirOp::Fgt { dst, lhs, rhs },
+        |dst, lhs, rhs| LpirOp::Fge { dst, lhs, rhs },
+        |dst, lhs, rhs| LpirOp::Feq { dst, lhs, rhs },
+        |dst, lhs, rhs| LpirOp::Fne { dst, lhs, rhs },
+    ];
+    for (i, make) in preds.into_iter().enumerate() {
+        let bit = fb.alloc_vreg(IrType::I32);
+        let sh = fb.alloc_vreg(IrType::I32);
+        let shifted = fb.alloc_vreg(IrType::I32);
+        fb.push(make(bit, a, b));
+        fb.push(LpirOp::IconstI32 {
+            dst: sh,
+            value: i as i32,
+        });
+        fb.push(LpirOp::Ishl {
+            dst: shifted,
+            lhs: bit,
+            rhs: sh,
+        });
+        fb.push(LpirOp::Ior {
+            dst: acc,
+            lhs: acc,
+            rhs: shifted,
+        });
+    }
+    fb.push_return(&[acc]);
+
+    (
+        LpirModule {
+            imports: vec![],
+            functions: VecMap::from([(FuncId(0), fb.finish())]),
+        },
+        sig_of(vec![float2_sig("f", LpsType::Int)]),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// F3 — floats across a real `callx8`.
+// ---------------------------------------------------------------------------
+
+/// `g(a, b) = a * b + a`; `f(a, b) = g(a, b) - b`.
+///
+/// The f32 sibling of `intra_module_call`, and the case that makes M7 D1/D2
+/// observable on silicon: floats live in FRs *inside* a function but travel
+/// between functions in **address** registers as raw bit patterns, because the
+/// esp toolchain — which compiled M5's builtins — passes them in `a2..a7`. Two
+/// separate functions so the call cannot be inlined away.
+#[cfg(feature = "float-f32")]
+fn build_f32_call_boundary() -> (LpirModule, LpsModuleSig) {
+    let mut cb = FunctionBuilder::new("g", &[IrType::F32]);
+    let ga = cb.add_param(IrType::F32);
+    let gb = cb.add_param(IrType::F32);
+    let prod = cb.alloc_vreg(IrType::F32);
+    let gout = cb.alloc_vreg(IrType::F32);
+    cb.push(LpirOp::Fmul {
+        dst: prod,
+        lhs: ga,
+        rhs: gb,
+    });
+    cb.push(LpirOp::Fadd {
+        dst: gout,
+        lhs: prod,
+        rhs: ga,
+    });
+    cb.push_return(&[gout]);
+    let g = cb.finish();
+
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
+    let a = fb.add_param(IrType::F32);
+    let b = fb.add_param(IrType::F32);
+    let called = fb.alloc_vreg(IrType::F32);
+    let out = fb.alloc_vreg(IrType::F32);
+    fb.push_call(CalleeRef::Local(FuncId(0)), &[VMCTX_VREG, a, b], &[called]);
+    fb.push(LpirOp::Fsub {
+        dst: out,
+        lhs: called,
+        rhs: b,
+    });
+    fb.push_return(&[out]);
+    let f = fb.finish();
+
+    (
+        LpirModule {
+            imports: vec![],
+            functions: VecMap::from([(FuncId(0), g), (FuncId(1), f)]),
+        },
+        sig_of(vec![
+            float2_sig("g", LpsType::Float),
+            float2_sig("f", LpsType::Float),
+        ]),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// F4 — a builtin call returning a float.
+// ---------------------------------------------------------------------------
+
+/// `f(x) = floor(x)`.
+///
+/// `Ffloor` is not inlinable, so M7 D4 routes it to `__lp_lpir_ffloor_f32`
+/// through a `sym_call` — resolved on device from
+/// `lps_builtins::jit_builtin_code_ptr` via `BuiltinTable`, and on the host
+/// from the cross-compiled Xtensa builtins image. It is written as the plain
+/// LPIR op rather than a hand-written import precisely so the *lowering*
+/// decision is on the path and not just the call.
+///
+/// `ffloor` over `fdiv`/`fsqrt` on purpose: it reaches no `div0.s`/`sqrt0.s`
+/// estimate helper, so it does not additionally depend on M6-P6's
+/// implementation-defined lookup ROMs. Same choice, same reason, as
+/// `xt_pipeline_f32.rs::a_builtin_routed_float_op_resolves_and_runs`.
+///
+/// This is the one f32 case whose golden is not derivable from LPIR semantics
+/// alone — the oracle for a builtin is the builtin's own implementation. The
+/// values chosen are ones where that cannot diverge from the real-number
+/// answer: exactly-representable inputs whose floor is exact.
+#[cfg(feature = "float-f32")]
+fn build_f32_builtin_floor() -> (LpirModule, LpsModuleSig) {
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
+    let x = fb.add_param(IrType::F32);
+    let out = fb.alloc_vreg(IrType::F32);
+    fb.push(LpirOp::Ffloor { dst: out, src: x });
+    fb.push_return(&[out]);
+
+    (
+        LpirModule {
+            imports: vec![],
+            functions: VecMap::from([(FuncId(0), fb.finish())]),
+        },
+        sig_of(vec![float1_sig("f")]),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// F5 — register pressure past the float pool.
+// ---------------------------------------------------------------------------
+
+/// `f(x) = sum(x + 1 .. x + 24)`, with all 24 intermediates live at once.
+///
+/// 15 of the 16 FRs are allocatable (`f15` is the emitter's scratch — M7 D8,
+/// corrected during P3 because a *spilled def* still needs a register to write
+/// to first), so 24 simultaneously-live floats force real spills and reloads
+/// through `ssi`/`lsi`. Those encodings reach 1020 bytes and `lp-xt-inst`'s
+/// encoder **truncates rather than failing**, which is a wrong answer and not a
+/// crash — hence a golden.
+///
+/// Summed in reverse so every value stays live until it is used; a forward sum
+/// would let the allocator retire each one immediately and the pool would never
+/// saturate.
+#[cfg(feature = "float-f32")]
+const F32_PRESSURE_N: u32 = 24;
+
+#[cfg(feature = "float-f32")]
+fn build_f32_spill_pressure() -> (LpirModule, LpsModuleSig) {
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
+    let x = fb.add_param(IrType::F32);
+    let one = fb.alloc_vreg(IrType::F32);
+    let out = fb.alloc_vreg(IrType::F32);
+    fb.push(LpirOp::FconstF32 {
+        dst: one,
+        value: 1.0,
+    });
+
+    let mut vs = Vec::new();
+    let mut prev = x;
+    for _ in 0..F32_PRESSURE_N {
+        let v = fb.alloc_vreg(IrType::F32);
+        fb.push(LpirOp::Fadd {
+            dst: v,
+            lhs: prev,
+            rhs: one,
+        });
+        vs.push(v);
+        prev = v;
+    }
+    fb.push(LpirOp::FconstF32 {
+        dst: out,
+        value: 0.0,
+    });
+    for &v in vs.iter().rev() {
+        fb.push(LpirOp::Fadd {
+            dst: out,
+            lhs: out,
+            rhs: v,
+        });
+    }
+    fb.push_return(&[out]);
+
+    (
+        LpirModule {
+            imports: vec![],
+            functions: VecMap::from([(FuncId(0), fb.finish())]),
+        },
+        sig_of(vec![float1_sig("f")]),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// F6 — live floats across real register-window overflow.
+// ---------------------------------------------------------------------------
+
+/// `rec(n, a, b) = if n == 0 { a + b } else { rec(n-1, a, b) + a*2 + b*3 }`,
+/// entered at depth 20.
+///
+/// **The milestone's headline hazard, on silicon.** M7 D7 is a deliberate
+/// *non*-change: no FR is callee-saved (measured, M6-P4), so there is no FP
+/// callee-save region, float spills sit at the frame's *bottom*, and the
+/// window-overflow handler writes the 32-byte reservation at the *top*. The
+/// claim is that those cannot collide — and its failure mode is the worst kind,
+/// silent corruption of an ancestor frame that surfaces long after the return.
+///
+/// Depth 20 is past the S3's 16-window ring, so the overflow/underflow handlers
+/// really run; `a` and `b` are read *after* the recursive call returns, which
+/// is what makes them live across it. `xt_pipeline_f32.rs` runs the same shape
+/// at depth 100 on the emulator, where a serial session is not the budget.
+///
+/// `deep_call_chain_20` in the Q32 half is the integer control (M6-P2's
+/// precedent): if both fail the finding is the window machinery, if only this
+/// one fails the finding is floats specifically.
+#[cfg(feature = "float-f32")]
+pub const F32_RECURSION_DEPTH: i32 = 20;
+
+#[cfg(feature = "float-f32")]
+fn build_f32_recursion() -> (LpirModule, LpsModuleSig) {
+    let mut cb = FunctionBuilder::new("rec", &[IrType::F32]);
+    let n = cb.add_param(IrType::I32);
+    let a = cb.add_param(IrType::F32);
+    let b = cb.add_param(IrType::F32);
+    let zero = cb.alloc_vreg(IrType::I32);
+    let is_zero = cb.alloc_vreg(IrType::I32);
+    let out = cb.alloc_vreg(IrType::F32);
+    cb.push(LpirOp::IconstI32 {
+        dst: zero,
+        value: 0,
+    });
+    cb.push(LpirOp::Ieq {
+        dst: is_zero,
+        lhs: n,
+        rhs: zero,
+    });
+    cb.push_if(is_zero);
+    cb.push(LpirOp::Fadd {
+        dst: out,
+        lhs: a,
+        rhs: b,
+    });
+    cb.push_else();
+    {
+        let n1 = cb.alloc_vreg(IrType::I32);
+        cb.push(LpirOp::IaddImm {
+            dst: n1,
+            src: n,
+            imm: -1,
+        });
+        let deeper = cb.alloc_vreg(IrType::F32);
+        cb.push_call(
+            CalleeRef::Local(FuncId(0)),
+            &[VMCTX_VREG, n1, a, b],
+            &[deeper],
+        );
+        let two = cb.alloc_vreg(IrType::F32);
+        let three = cb.alloc_vreg(IrType::F32);
+        let ta = cb.alloc_vreg(IrType::F32);
+        let tb = cb.alloc_vreg(IrType::F32);
+        let sum = cb.alloc_vreg(IrType::F32);
+        cb.push(LpirOp::FconstF32 {
+            dst: two,
+            value: 2.0,
+        });
+        cb.push(LpirOp::FconstF32 {
+            dst: three,
+            value: 3.0,
+        });
+        cb.push(LpirOp::Fmul {
+            dst: ta,
+            lhs: a,
+            rhs: two,
+        });
+        cb.push(LpirOp::Fmul {
+            dst: tb,
+            lhs: b,
+            rhs: three,
+        });
+        cb.push(LpirOp::Fadd {
+            dst: sum,
+            lhs: ta,
+            rhs: tb,
+        });
+        cb.push(LpirOp::Fadd {
+            dst: out,
+            lhs: deeper,
+            rhs: sum,
+        });
+    }
+    cb.end_if();
+    cb.push_return(&[out]);
+    let rec = cb.finish();
+
+    let mut fb = FunctionBuilder::new("f", &[IrType::F32]);
+    let fn_ = fb.add_param(IrType::I32);
+    let fa = fb.add_param(IrType::F32);
+    let fb_ = fb.add_param(IrType::F32);
+    let out = fb.alloc_vreg(IrType::F32);
+    fb.push_call(
+        CalleeRef::Local(FuncId(0)),
+        &[VMCTX_VREG, fn_, fa, fb_],
+        &[out],
+    );
+    fb.push_return(&[out]);
+    let f = fb.finish();
+
+    (
+        LpirModule {
+            imports: vec![],
+            functions: VecMap::from([(FuncId(0), rec), (FuncId(1), f)]),
+        },
+        sig_of(vec![recursion_sig("rec"), recursion_sig("f")]),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// The table
+// ---------------------------------------------------------------------------
+
+/// The f32 corpus. Separate from [`CASES`] because the *word* differs, not just
+/// the arithmetic — see this section's header.
+#[cfg(feature = "float-f32")]
+pub const F32_CASES: &[XtF32Case] = &[
+    XtF32Case {
+        name: "f32_arith_and_const",
+        risk: "F1: inline add/sub/mul and the wfr/rfr boundary",
+        entry: "f",
+        invocations: &[
+            XtF32Invocation {
+                // ((3 * 0.5 + 3) - 0.5) * 0.25 = 4.0 * 0.25 = 1.0
+                args: &[0x4040_0000, 0x3F00_0000],
+                golden: &[0x3F80_0000],
+            },
+            XtF32Invocation {
+                // ((-2 * 4 + -2) - 4) * 0.25 = -3.5
+                args: &[0xC000_0000, 0x4080_0000],
+                golden: &[0xC060_0000],
+            },
+            XtF32Invocation {
+                // inf * 1 + inf - 1, scaled: still inf. float.md §3
+                // Guaranteed — infinity arithmetic is IEEE at RNE everywhere.
+                args: &[0x7F80_0000, 0x3F80_0000],
+                golden: &[0x7F80_0000],
+            },
+        ],
+        build: build_f32_arith,
+        needs_builtins: false,
+    },
+    XtF32Case {
+        name: "f32_compare_mask",
+        risk: "F2: all six float compares, incl. the NaN row",
+        entry: "f",
+        invocations: &[
+            XtF32Invocation {
+                // 1.0 vs 2.0: lt, le, ne  => 1 | 2 | 32 = 35
+                args: &[0x3F80_0000, 0x4000_0000],
+                golden: &[35],
+            },
+            XtF32Invocation {
+                // 2.0 vs 1.0: gt, ge, ne  => 4 | 8 | 32 = 44
+                args: &[0x4000_0000, 0x3F80_0000],
+                golden: &[44],
+            },
+            XtF32Invocation {
+                // 1.0 vs 1.0: le, ge, eq  => 2 | 8 | 16 = 26
+                args: &[0x3F80_0000, 0x3F80_0000],
+                golden: &[26],
+            },
+            XtF32Invocation {
+                // NaN vs 1.0: every ordered compare false, `!=` true => 32.
+                // float.md §3 Guaranteed. A quiet NaN, not a signalling one.
+                args: &[0x7FC0_0000, 0x3F80_0000],
+                golden: &[32],
+            },
+        ],
+        build: build_f32_compare_mask,
+        needs_builtins: false,
+    },
+    XtF32Case {
+        name: "f32_call_boundary",
+        risk: "F3: floats across callx8 in address registers (D1/D2)",
+        entry: "f",
+        invocations: &[
+            XtF32Invocation {
+                // g(3, 0.5) = 1.5 + 3 = 4.5; f = 4.5 - 0.5 = 4.0
+                args: &[0x4040_0000, 0x3F00_0000],
+                golden: &[0x4080_0000],
+            },
+            XtF32Invocation {
+                // g(-1.5, 2) = -3 + -1.5 = -4.5; f = -4.5 - 2 = -6.5
+                args: &[0xBFC0_0000, 0x4000_0000],
+                golden: &[0xC0D0_0000],
+            },
+        ],
+        build: build_f32_call_boundary,
+        needs_builtins: false,
+    },
+    XtF32Case {
+        name: "f32_builtin_floor",
+        risk: "F4: builtin call returning a float, via sym_call (D4)",
+        entry: "f",
+        invocations: &[
+            XtF32Invocation {
+                // floor(3.75) = 3.0
+                args: &[0x4070_0000],
+                golden: &[0x4040_0000],
+            },
+            XtF32Invocation {
+                // floor(-2.5) = -3.0 — floor, not trunc. The two disagree only
+                // on negative non-integers, so a trunc-shaped implementation
+                // passes every positive case and fails exactly here.
+                args: &[0xC020_0000],
+                golden: &[0xC040_0000],
+            },
+        ],
+        build: build_f32_builtin_floor,
+        needs_builtins: true,
+    },
+    XtF32Case {
+        name: "f32_spill_pressure_24",
+        risk: "F5: register pressure past the 15-FR pool (ssi/lsi spills)",
+        entry: "f",
+        invocations: &[
+            XtF32Invocation {
+                // sum(1..=24) = 300
+                args: &[0x0000_0000],
+                golden: &[0x4396_0000],
+            },
+            XtF32Invocation {
+                // x = 0.5 shifts every term: 300 + 24*0.5 = 312
+                args: &[0x3F00_0000],
+                golden: &[0x439C_0000],
+            },
+        ],
+        build: build_f32_spill_pressure,
+        needs_builtins: false,
+    },
+    XtF32Case {
+        name: "f32_recursion_depth_20",
+        risk: "F6: live floats across real window overflow (D7)",
+        entry: "f",
+        invocations: &[XtF32Invocation {
+            // rec(20, 1.25, 2.5) = 1.25 + 2.5 + 20 * (2.5 + 7.5) = 203.75
+            args: &[20, 0x3FA0_0000, 0x4020_0000],
+            golden: &[0x434B_C000],
+        }],
+        build: build_f32_recursion,
+        needs_builtins: false,
+    },
+];
