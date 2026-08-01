@@ -86,6 +86,7 @@ pub(crate) fn inst_class(inst: &Inst, flow: &Flow) -> InstClass {
             | FpRrOp::Rsqrt0S
             | FpRrOp::Div0S
             | FpRrOp::Nexp01S
+            | FpRrOp::MksadjS
             | FpRrOp::MkdadjS
             | FpRrOp::AddexpS
             | FpRrOp::AddexpmS,
