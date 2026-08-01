@@ -1,0 +1,14 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    }
+  }
+}

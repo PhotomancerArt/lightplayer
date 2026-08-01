@@ -828,7 +828,7 @@ mod tests {
         );
         assert_eq!(
             outcome.artifact_changes.changed,
-            vec![ArtifactLocation::file("/project.json")]
+            vec![ArtifactLocation::file("/module.json")]
         );
 
         // Files byte-match the canonical writer: the def is written verbatim
@@ -838,7 +838,7 @@ mod tests {
             fs.read_file(LpPath::new("/texture.json")).unwrap(),
             body.as_bytes()
         );
-        let project_bytes = fs.read_file(LpPath::new("/project.json")).unwrap();
+        let project_bytes = fs.read_file(LpPath::new("/module.json")).unwrap();
         let project_text = core::str::from_utf8(&project_bytes).unwrap();
         let project = NodeDef::read_json(&shapes, project_text).expect("project reparses");
         assert_eq!(
@@ -857,7 +857,7 @@ mod tests {
             .ref_specifier()
             .expect("ref invocation");
         assert_eq!(
-            lpc_model::resolve_artifact_specifier(LpPath::new("/project.json"), &invocation)
+            lpc_model::resolve_artifact_specifier(LpPath::new("/module.json"), &invocation)
                 .unwrap(),
             LpPathBuf::from("/texture.json")
         );
@@ -950,25 +950,28 @@ mod tests {
     }
 
     #[test]
-    fn attach_rewrite_preserves_pending_overlay_edits_on_the_attach_artifact() {
+    fn attach_rewrite_preserves_pending_overlay_edits() {
+        // Post-mitosis the root module def has no writable slots (`nodes`
+        // is policy-locked), so the pending edit rides the clock artifact;
+        // the guarantee under test is that `create_node`'s attach rewrite
+        // leaves unrelated pending overlays pending, not baked into files.
+        // P3's authored module fields will make a root-artifact variant of
+        // this scenario expressible again.
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = clock_project(&shapes);
-        let project = ArtifactLocation::file("/project.json");
-        let name_path = SlotPath::parse("name.some").unwrap();
+        let clock = ArtifactLocation::file("/clock.json");
+        let rate_path = SlotPath::parse("controls.rate").unwrap();
         registry
             .mutate(
                 &fs,
                 MutationOp::PutSlotEdit {
-                    artifact: project.clone(),
-                    edit: SlotEdit::assign_value(
-                        name_path.clone(),
-                        LpValue::String("Renamed".into()),
-                    ),
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(rate_path.clone(), LpValue::F32(2.5)),
                 },
                 Revision::new(4),
                 &ParseCtx { shapes: &shapes },
             )
-            .expect("stage name edit");
+            .expect("stage rate edit");
 
         create(
             &fs,
@@ -985,24 +988,22 @@ mod tests {
         let overlay = registry
             .overlay()
             .get()
-            .artifact(&project)
+            .artifact(&clock)
             .and_then(lpc_model::ArtifactOverlay::as_slot)
-            .expect("project slot overlay survives");
-        assert!(overlay.contains_path(&name_path));
-        let written =
-            String::from_utf8(fs.read_file(LpPath::new("/project.json")).unwrap()).unwrap();
+            .expect("clock slot overlay survives");
+        assert!(overlay.contains_path(&rate_path));
+        let written = String::from_utf8(fs.read_file(LpPath::new("/clock.json")).unwrap()).unwrap();
         assert!(
-            !written.contains("Renamed"),
+            !written.contains("2.5"),
             "pending overlay edit must not be baked into the base file: {written}"
         );
 
-        // The effective def carries both the pending rename and the new node.
+        // The effective defs carry both the pending edit and the new node.
         let effective = registry
-            .def(&root_def("/project.json"))
+            .def(&root_def("/module.json"))
             .and_then(|entry| entry.state.loaded_def())
             .and_then(NodeDef::as_module)
-            .expect("effective project def");
-        assert_eq!(effective.name(), Some("Renamed"));
+            .expect("effective module def");
         assert!(effective.nodes.entries.contains_key("texture"));
     }
 
@@ -1033,7 +1034,7 @@ mod tests {
             .mutate(
                 &fs,
                 MutationOp::PutSlotEdit {
-                    artifact: ArtifactLocation::file("/project.json"),
+                    artifact: ArtifactLocation::file("/module.json"),
                     edit: SlotEdit::ensure_present(SlotPath::parse("nodes[strip]").unwrap()),
                 },
                 Revision::new(4),
@@ -1092,7 +1093,7 @@ mod tests {
         assert_eq!(rejection.reason, MutationRejectionReason::InvalidBody);
         assert_nothing_written(&fs, "/new.json");
 
-        let project_body = br#"{ "kind": "Module", "format": 2, "nodes": {} }"#;
+        let project_body = br#"{ "kind": "Module", "nodes": {} }"#;
         let rejection = create(
             &fs,
             &mut registry,
@@ -1124,7 +1125,7 @@ mod tests {
             body.as_bytes(),
             &[],
             &NodeAttachSite::Slot {
-                artifact: ArtifactLocation::file("/project.json"),
+                artifact: ArtifactLocation::file("/module.json"),
                 path: SlotPath::parse("nodes[new]").unwrap(),
             },
         )
@@ -1264,7 +1265,7 @@ mod tests {
         let site_overlay = registry
             .overlay()
             .get()
-            .artifact(&ArtifactLocation::file("/project.json"))
+            .artifact(&ArtifactLocation::file("/module.json"))
             .and_then(ArtifactOverlay::as_slot)
             .expect("site slot overlay");
         assert_eq!(
@@ -1380,10 +1381,10 @@ mod tests {
                 .contains(&ArtifactLocation::file("/clock.json"))
         );
 
-        // Files materialized: the def is deleted and project.json no longer
+        // Files materialized: the def is deleted and module.json no longer
         // references it.
         assert!(!fs.file_exists(LpPath::new("/clock.json")).unwrap());
-        let project_bytes = fs.read_file(LpPath::new("/project.json")).unwrap();
+        let project_bytes = fs.read_file(LpPath::new("/module.json")).unwrap();
         let project_text = core::str::from_utf8(&project_bytes).unwrap();
         let project = NodeDef::read_json(&shapes, project_text).expect("project reparses");
         assert!(project.as_module().unwrap().nodes.entries.is_empty());
@@ -1458,7 +1459,7 @@ mod tests {
         let mut commands = vec![MutationCmd {
             id: MutationCmdId::new(1),
             mutation: MutationOp::RemoveSlotEdit {
-                artifact: ArtifactLocation::file("/project.json"),
+                artifact: ArtifactLocation::file("/module.json"),
                 path: SlotPath::parse("nodes[shader]").unwrap(),
             },
         }];
@@ -1536,7 +1537,7 @@ mod tests {
             &mut registry,
             &shapes,
             &NodeAttachSite::Slot {
-                artifact: ArtifactLocation::file("/project.json"),
+                artifact: ArtifactLocation::file("/module.json"),
                 path: SlotPath::parse("nodes[clock]").unwrap(),
             },
         )
@@ -1577,12 +1578,12 @@ mod tests {
 
     fn clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -1602,12 +1603,12 @@ mod tests {
 
     fn playlist_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "playlist": { "ref": "./playlist.json" }
   }
@@ -1639,12 +1640,12 @@ mod tests {
 
     fn shader_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "shader": { "ref": "./shader.json" }
   }
@@ -1669,12 +1670,12 @@ mod tests {
 
     fn shared_asset_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "a": { "ref": "./a.json" },
     "b": { "ref": "./b.json" }
@@ -1702,12 +1703,12 @@ mod tests {
 
     fn playlist_two_entry_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_container_manifest(&mut fs);
         crate::test::fixtures::write_file(
             &mut fs,
-            "/project.json",
+            "/module.json",
             r#"{
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "playlist": { "ref": "./playlist.json" }
   }
@@ -1760,7 +1761,7 @@ mod tests {
         registry
             .load_root(
                 fs,
-                LpPath::new("/project.json"),
+                LpPath::new("/module.json"),
                 Revision::new(1),
                 &ParseCtx { shapes },
             )
@@ -1816,7 +1817,7 @@ mod tests {
     /// content (only the `clock`/`playlist` entry, no additions).
     fn assert_nothing_written(fs: &LpFsMemory, new_file: &str) {
         assert!(!fs.file_exists(LpPath::new(new_file)).unwrap());
-        let bytes = fs.read_file(LpPath::new("/project.json")).unwrap();
+        let bytes = fs.read_file(LpPath::new("/module.json")).unwrap();
         let text = core::str::from_utf8(&bytes).unwrap();
         let project = NodeDef::read_json(&SlotShapeRegistry::default(), text).unwrap();
         assert_eq!(

@@ -9,7 +9,7 @@ fn fyeah_sign_discovers_referenced_node_defs_and_assets() {
     let (scenario, load) = RegistryScenario::load_fixture("fyeah-sign");
     let registry = scenario.registry();
 
-    assert_eq!(registry.root(), Some(&support::root_def("/project.json")));
+    assert_eq!(registry.root(), Some(&support::root_def("/module.json")));
     assert!(load.changes.defs.changed.is_empty());
     assert!(load.changes.defs.removed.is_empty());
     assert!(load.changes.assets.changed.is_empty());
@@ -18,7 +18,7 @@ fn fyeah_sign_discovers_referenced_node_defs_and_assets() {
     assert_loaded_def_kinds(
         registry,
         &[
-            ("/project.json", NodeKind::Module),
+            ("/module.json", NodeKind::Module),
             ("/blast.json", NodeKind::Shader),
             ("/button.json", NodeKind::Button),
             ("/clock.json", NodeKind::Clock),

@@ -56,12 +56,12 @@ fn unreferenced_file_refresh_does_not_change_effective_project() {
 #[test]
 fn changed_registered_def_discovers_newly_referenced_file() {
     let mut scenario = RegistryScenario::empty();
+    scenario.write_container_manifest();
     scenario.write_file(
-        "/project.json",
+        "/module.json",
         br#"
 {
-  "kind": "Module",
-  "format": 2
+  "kind": "Module"
 }
 "#,
     );
@@ -73,14 +73,13 @@ fn changed_registered_def_discovers_newly_referenced_file() {
 }
 "#,
     );
-    scenario.load_root("/project.json");
+    scenario.load_root("/module.json");
 
     let changes = scenario.replace_file_and_refresh(
-        "/project.json",
+        "/module.json",
         br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -94,7 +93,7 @@ fn changed_registered_def_discovers_newly_referenced_file() {
     assert_eq!(
         changes.defs.changed,
         vec![NodeDefChange::new(
-            root_def("/project.json"),
+            root_def("/module.json"),
             NodeDefChangeKind::Body,
         )]
     );
@@ -107,12 +106,12 @@ fn changed_registered_def_discovers_newly_referenced_file() {
 #[test]
 fn missing_referenced_def_recovers_when_file_is_created() {
     let mut scenario = RegistryScenario::empty();
+    scenario.write_container_manifest();
     scenario.write_file(
-        "/project.json",
+        "/module.json",
         br#"
 {
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -121,7 +120,7 @@ fn missing_referenced_def_recovers_when_file_is_created() {
 }
 "#,
     );
-    scenario.load_root("/project.json");
+    scenario.load_root("/module.json");
 
     assert_eq!(
         scenario
@@ -261,12 +260,10 @@ fn changing_project_child_ref_reports_node_use_definition_change() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
     let changes = scenario.replace_file_and_refresh(
-        "/project.json",
+        "/module.json",
         br#"
 {
   "kind": "Module",
-  "format": 2,
-  "name": "fyeah-sign",
   "nodes": {
     "output": {
       "ref": "./output.json"

@@ -1,0 +1,25 @@
+{
+  "kind": "Module",
+  "format": 2,
+  "name": "fyeah-sign",
+  "nodes": {
+    "button": {
+      "ref": "./button.json"
+    },
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    },
+    "playlist": {
+      "ref": "./playlist.json"
+    },
+    "radio": {
+      "ref": "./radio.json"
+    }
+  }
+}
