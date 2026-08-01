@@ -14,6 +14,12 @@
 # The other hazard, inherited from M3: SIGTERM/SIGKILL on espflash wedges the
 # port until a human physically replugs the board. Always SIGINT.
 #
+# Both flashes carry the `frame-dump` feature (see FLASH_FEATURES below): the
+# RMT driver drives real LEDs, and an LED cannot be diffed against a host
+# render, so the walk needs the build that also prints each transmitted frame to
+# serial. A default `just flash-fw-esp32s3` produces no `[OUT]` lines at all and
+# this walk would report "nothing rendered".
+#
 # The gate is the last section: the device's `[OUT] dump` hex must equal the
 # oracle's `[ORACLE] rgb` hex, byte for byte. `examples/shader-oracle` is
 # clock-free precisely so that comparison needs no time synchronisation.
@@ -22,6 +28,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 LOG_DIR="${TMPDIR:-/tmp}"
 PROJECT="${PROJECT:-examples/shader-oracle}"
+# The `[OUT]` transcript this walk parses exists only under this feature; see
+# lp-fw/fw-esp32s3/src/output/rmt/frame_dump.rs.
+FLASH_FEATURES="${FLASH_FEATURES:-frame-dump}"
 
 port="${1:-}"
 if [[ -z "$port" ]]; then
@@ -55,7 +64,7 @@ trap release_port EXIT
 # Leaves the transcript in $LOG (ANSI-stripped by the readers below).
 flash_and_watch() {
     local marker="$1" secs="$2"
-    script -q "$LOG" just flash-fw-esp32s3 "$port" >/dev/null 2>&1 &
+    script -q "$LOG" just flash-fw-esp32s3 "$port" "$FLASH_FEATURES" >/dev/null 2>&1 &
     local pid=$!
     for _ in $(seq 1 "$secs"); do
         grep -qa "$marker" "$LOG" 2>/dev/null && return 0
@@ -69,7 +78,7 @@ strip_ansi() { sed 's/\x1b\[[0-9;]*m//g' "$1"; }
 
 # ------------------------------------------------------- round 1: push
 LOG="$LOG_DIR/m4-walk-push-$$.log"
-echo "==> flashing $port"
+echo "==> flashing $port (features: $FLASH_FEATURES)"
 if ! flash_and_watch "starting server loop" 180; then
     echo "Board did not reach the server loop. Tail of the log:" >&2
     strip_ansi "$LOG" | tail -40 >&2
@@ -130,6 +139,8 @@ rv32_hex="$(hex_of "$oracle_out" ORACLE-RV32)"
 
 if [[ -z "$device_hex" ]]; then
     echo "FAIL: the device printed no frame dump — nothing rendered." >&2
+    echo "      (Or the image was built without '$FLASH_FEATURES', in which case" >&2
+    echo "       it renders fine and simply says nothing about it.)" >&2
     exit 1
 fi
 if [[ "$device_hex" == "$oracle_hex" ]]; then

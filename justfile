@@ -602,23 +602,37 @@ clippy-fw-esp32s3:
     # and the server-gated half of serial/io_task.rs — and the separate
     # `--features server` pass it used to need is gone.
     cargo clippy --release -- --no-deps -D warnings
+    # The app path again with the serial frame readout bolted on. It is `cfg`'d
+    # out of the default build entirely, so linting the defaults leaves it
+    # completely uncovered — the same hole the harness loop below exists to
+    # close, for the same reason.
+    echo "clippy: --features frame-dump"
+    cargo clippy --release --features frame-dump -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance test_button; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
 
-build-fw-esp32s3:
+# `features` is a comma-separated list added to the defaults — for the app path
+# that means `frame-dump` and nothing else today. Harnesses have their own
+# recipes because they REPLACE the entrypoint; this argument only decorates it,
+# so the size check and the plain build share one recipe rather than forking.
+build-fw-esp32s3 features="":
     #!/usr/bin/env bash
     set -euo pipefail
     GCC_BIN="$(just _xt-gcc-dir)"
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3
+    args=(build --profile release-esp32s3)
+    if [[ -n "{{ features }}" ]]; then
+      args+=(--features "{{ features }}")
+    fi
+    cd lp-fw/fw-esp32s3 && cargo "${args[@]}"
 
 # Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
 # or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
@@ -655,7 +669,14 @@ _xt-gcc-dir:
 # does not land) until someone physically replugs it.
 
 # Flash fw-esp32s3 to a connected ESP32-S3 and open the serial monitor.
-flash-fw-esp32s3 port="": build-fw-esp32s3
+#
+# The optional second argument is passed straight to `build-fw-esp32s3`. The
+# one that matters is `frame-dump`, which makes the board print every
+# transmitted frame — `scripts/m4-hardware-walk.sh` flashes with it because an
+# LED cannot be diffed against a host render:
+#
+#   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX frame-dump
+flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
     #!/usr/bin/env bash
     set -euo pipefail
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
@@ -849,6 +870,28 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
 fp-diff capture:
     FP_CAPTURE="{{ absolute_path(capture) }}" \
       cargo test -p lp-xt-emu --test fp_capture -- --nocapture --test-threads=1
+
+# Run the GPIO button diagnostic on a connected ESP32-S3: D9 (GPIO8) with an
+# internal pull-up, normally-open button to GND. Prints a `BUTTON gpio=...`
+# line per debounced press/release. Mirrors fw-esp32c6's
+# `fwtest-button-esp32c6`; unlike it, this harness is synchronous (the S3's
+# `fw_harness` entrypoint never starts the embassy runtime).
+#
+#   just fwtest-button-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-button-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_button
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Fail when the esp32c6 app image gets too close to its 3 MB partition.
 # The image overran the partition twice in 2026 and both times it surfaced as a
@@ -1066,11 +1109,14 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
     done
-    # test_espnow is the one harness built without default features: it wants
-    # the radio capability alone, not the server stack.
-    echo "==> fw-esp32c6 harness: test_espnow (--no-default-features)"
-    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --no-default-features --features test_espnow,esp32c6 -- --no-deps -D warnings
+    # Two harnesses build without default features: test_espnow wants the radio
+    # capability alone, and test_f32_softfloat wants the compiler alone (plus
+    # `float-f32`, which no other configuration in this crate turns on).
+    for feature in test_espnow test_f32_softfloat; do
+        echo "==> fw-esp32c6 harness: $feature (--no-default-features)"
+        cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --no-default-features --features "$feature,esp32c6" -- --no-deps -D warnings
+    done
 
 # Every lpc-engine node gate, one build per gate turned off.
 #
@@ -1506,6 +1552,32 @@ fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
 # Run firmware with test_espnow: 1Hz simulated button events over ESP-NOW
 fwtest-espnow-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware with test_f32_softfloat: IEEE f32 semantics on the C6's soft-float
+# path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled
+# on-device in FloatMode::F32 and executed.
+#
+# The port is NOT auto-detected. Several ESP32 boards are usually attached and
+# picking the first one has flashed the wrong board before; pass the C6's port
+# explicitly, e.g. `just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodem1301`.
+fwtest-f32-softfloat-esp32c6 port="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+        port="${ESPFLASH_PORT:-}"
+    fi
+    if [[ -z "$port" ]]; then
+        echo "Pass the ESP32-C6 port explicitly (or set ESPFLASH_PORT):" >&2
+        echo "  just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodemXXXX" >&2
+        echo "Available:" >&2
+        ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null >&2 || true
+        exit 1
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
+        --features test_f32_softfloat,esp32c6 --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }}
 
 cargo-update:
     cargo update -p regalloc2 \
