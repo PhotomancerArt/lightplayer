@@ -430,6 +430,22 @@ impl FunctionBuilder {
     }
 
     pub fn push_return(&mut self, values: &[VReg]) {
+        // The two descriptions of a signature — `return_types` from [`Self::new`]
+        // and the arity actually returned here — have no other cross-check, and a
+        // disagreement is silent: a declared-but-unwritten result lands in a
+        // register nobody reads. See
+        // `docs/defects/2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.md`.
+        // (sret functions carry empty `return_types` and return no values, so
+        // they satisfy this as-is.)
+        debug_assert_eq!(
+            values.len(),
+            self.return_types.len(),
+            "FunctionBuilder::push_return: `{}` returns {} value(s) but was declared with {} return type(s) \
+             (FunctionBuilder::new takes RETURN types; params go through add_param)",
+            self.name,
+            values.len(),
+            self.return_types.len(),
+        );
         let start = self.vreg_pool.len() as u32;
         self.vreg_pool.extend_from_slice(values);
         self.body.push(LpirOp::Return {
