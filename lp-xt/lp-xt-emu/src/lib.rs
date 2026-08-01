@@ -40,8 +40,8 @@
 pub mod board;
 pub mod cpu;
 pub mod emu;
-pub mod fp_capture;
 pub mod error;
+pub mod fp_capture;
 pub mod fp_policy;
 pub mod memory;
 pub mod trace;

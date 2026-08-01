@@ -824,7 +824,14 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
     kill -TERM "$cap" 2>/dev/null || true
     wait "$cap" 2>/dev/null || true
     echo "captured $(wc -l < "$out") lines to $out"
-    just fp-diff "$out"
+    # Only the family modes have predictions to diff against. The table sweep
+    # produces the estimate ROMs themselves — there is nothing to compare them
+    # to, which is the whole reason they have to be read off silicon.
+    if [[ "$mode" == "families" ]]; then
+      just fp-diff "$out"
+    else
+      echo "table sweep captured; P6 turns it into fp_policy::EstimateTables"
+    fi
 
 # Diff an FP conformance capture against the committed host predictions.
 #
