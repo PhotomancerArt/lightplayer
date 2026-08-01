@@ -180,8 +180,9 @@ pub fn NestedPanelGroup(
     rsx! {
         fieldset { class: box_class,
             // The legend rides IN the top border — the name and, beside it,
-            // the box's own reset.
-            legend { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:px-1.5",
+            // the box's own reset. Constant height whether or not the reset
+            // button is present, so sibling boxes in one row stay level.
+            legend { class: "tw:flex tw:h-5 tw:min-w-0 tw:items-center tw:gap-1.5 tw:px-1.5",
                 SlotDetailButton {
                     label: label.clone(),
                     aspects,
