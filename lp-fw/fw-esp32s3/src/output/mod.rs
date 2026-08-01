@@ -8,6 +8,11 @@
 //! [`rmt`] is compiled into harness builds too — the `test_loopback` harness
 //! drives the same backend and the same shared driver, which is what makes its
 //! verdict mean anything about the app path.
+//!
+//! Under the `frame-dump` feature that driver's write path also prints each
+//! transmitted frame to serial ([`rmt::frame_dump`]). An LED cannot be diffed;
+//! the transcript can, which is how the M4 hardware walk states its result as
+//! "192 of 192 bytes" instead of "it lit up".
 
 pub mod rmt;
 

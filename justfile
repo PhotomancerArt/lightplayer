@@ -602,6 +602,12 @@ clippy-fw-esp32s3:
     # and the server-gated half of serial/io_task.rs — and the separate
     # `--features server` pass it used to need is gone.
     cargo clippy --release -- --no-deps -D warnings
+    # The app path again with the serial frame readout bolted on. It is `cfg`'d
+    # out of the default build entirely, so linting the defaults leaves it
+    # completely uncovered — the same hole the harness loop below exists to
+    # close, for the same reason.
+    echo "clippy: --features frame-dump"
+    cargo clippy --release --features frame-dump -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
@@ -611,14 +617,22 @@ clippy-fw-esp32s3:
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
 
-build-fw-esp32s3:
+# `features` is a comma-separated list added to the defaults — for the app path
+# that means `frame-dump` and nothing else today. Harnesses have their own
+# recipes because they REPLACE the entrypoint; this argument only decorates it,
+# so the size check and the plain build share one recipe rather than forking.
+build-fw-esp32s3 features="":
     #!/usr/bin/env bash
     set -euo pipefail
     GCC_BIN="$(just _xt-gcc-dir)"
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3
+    args=(build --profile release-esp32s3)
+    if [[ -n "{{ features }}" ]]; then
+      args+=(--features "{{ features }}")
+    fi
+    cd lp-fw/fw-esp32s3 && cargo "${args[@]}"
 
 # Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
 # or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
@@ -655,7 +669,14 @@ _xt-gcc-dir:
 # does not land) until someone physically replugs it.
 
 # Flash fw-esp32s3 to a connected ESP32-S3 and open the serial monitor.
-flash-fw-esp32s3 port="": build-fw-esp32s3
+#
+# The optional second argument is passed straight to `build-fw-esp32s3`. The
+# one that matters is `frame-dump`, which makes the board print every
+# transmitted frame — `scripts/m4-hardware-walk.sh` flashes with it because an
+# LED cannot be diffed against a host render:
+#
+#   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX frame-dump
+flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
     #!/usr/bin/env bash
     set -euo pipefail
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
