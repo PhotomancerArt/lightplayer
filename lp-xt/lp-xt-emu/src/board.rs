@@ -286,6 +286,5 @@ impl BoardProfile {
 
 /// Offset of `vaddr` within `[base, base + len)`, if it lands there.
 fn offset_in(vaddr: u32, base: u32, len: usize) -> Option<usize> {
-    (vaddr >= base && (vaddr as u64) < base as u64 + len as u64)
-        .then(|| (vaddr - base) as usize)
+    (vaddr >= base && (vaddr as u64) < base as u64 + len as u64).then(|| (vaddr - base) as usize)
 }
