@@ -1,9 +1,24 @@
 # The Xtensa FP behavior contract: silicon is the spec, and it has been read
 
-- Status: **draft** — G2 pends; P7 finalizes with Yona's calls folded in
-- Date: 2026-07-31
-- Plan: `2026-07-30-1745-f32-native-math/m6-xtensa-fpu-emulator` (M6 P6)
+- Status: **Accepted** — G2 passed 2026-08-01
+- Date: 2026-07-31 (campaign); finalized 2026-08-01
+- Plan: `2026-07-30-1745-f32-native-math/m6-xtensa-fpu-emulator` (M6 P6/P7)
 - Deciders: Yona + M6 campaign
+- Supersedes: none
+- Superseded by: none
+- Relates: `2026-07-28-xtensa-abi-contract` (experiment repo),
+  `2026-07-28-emu-core-crate-family`, `2026-07-30-integer-division-never-traps`
+  (*"It will be asked again — when F32 mode lands"*), `docs/design/float.md`
+  §4 (Target-defined), and this planning directory
+
+**G2 — Yona's hardware-conformance walk — passed 2026-08-01**, accepting all
+four leans the campaign proposed: the emulator is trusted as the f32 oracle
+for everything downstream (M7/M8/M9), the bounded `divn.s` off-envelope gap is
+acceptable for M7 entry, denormals are recorded target-defined as measured
+full-IEEE (§4, no product decision routed to M8), and non-default rounding
+modes stay refused outside `add.s`/`sub.s`/`mul.s`. Full question-by-question
+record: `m6-xtensa-fpu-emulator.md` §"Review gate: G2 — PASSED 2026-08-01" and
+`p6-campaign-results.md` in the planning directory.
 
 ## 1. Context
 
@@ -67,6 +82,33 @@ unassigned slot, and the real sqrt sequence uses it
   write's provenance unpinned — M7 arms it defensively anyway (2
   instructions), because "armed under this boot chain" is not "armed by
   architecture".
+
+**Two corrections from M7's early implementation (P1–P4, PR #241), recorded
+here so this contract stays the thing downstream cites instead of the plan
+that predated the code:**
+
+- **`f15` is reserved as the emitter's float scratch register — 15 of 16 FRs
+  are allocatable, not 16.** The M7 plan's D8 assumed all 16 were free because
+  spill/reload needs no third register — true, but it did not account for a
+  **spilled def**: the register allocator can send an instruction's
+  *destination* to `Alloc::Stack` when a later eviction in the backward walk
+  freed its home, and an FP instruction still has to write its result
+  somewhere before the store. `f15` is that somewhere. This is an M7 emitter
+  decision, not a silicon fact — recorded here because it is the kind of
+  thing the next reader of "the FR file is flat" needs to know before sizing
+  a pool.
+- **`!=` compiles to `oeq.s` + `movf`, not `ueq.s` + `movf`.** The M7 plan's
+  compare table had it backwards: `ueq.s` consumed with `movf` computes
+  `!ueq.s` = "ordered and unequal", which is **false when either operand is
+  NaN** — but `docs/design/float.md` §3 makes `!=` on NaN a *Guaranteed*
+  `true` (IEEE: any comparison with NaN except `!=` is false). `oeq.s` +
+  `movf` computes `!oeq.s` = "unordered or unequal", which is correct on NaN.
+  `lpvm-native`'s `fcmp_is_correct_when_an_operand_is_nan` emulator test is
+  what caught it — the IEEE compare semantics were never in question (§4 and
+  `float.md` §3 already state them correctly), only which *instruction pair*
+  the emitter's compare table mapped `!=` onto. A plan-level table is not
+  silicon behavior and can be wrong even when the ADR it is implementing is
+  right.
 
 ## 4. Numeric behavior — measured, row by row
 
@@ -194,3 +236,39 @@ Stated, not implied away:
   is pinned by sequence behavior, and the round-2 `MaddNan` grids will close
   it).
 - `CPENABLE`'s boot-time arming provenance (ROM vs 2nd-stage bootloader).
+
+None of these block M7: the sequence envelope and the measured-surface rows
+above are what the emitter actually produces. `probe2` is the closing item
+for a future desk session, not a blocker — it is already built, wired into
+`just fwtest-xt-fp-esp32s3 <port> helpers`, and fingerprint-pinned
+(`0x67c29b75`) so it cannot silently drift before it runs.
+
+## 11. Alternatives considered
+
+- **Write the emulator from the ISA Reference Manual alone, skip silicon.**
+  Rejected — the manual predates the estimate/helper instructions entirely
+  (its Table 4-46 does not list `recip0.s`/`rsqrt0.s`/`sqrt0.s`/`div0.s`/the
+  divide-step helpers), so their lookup ROMs are not derivable from any
+  document. A manual-only emulator would have to guess the one thing that
+  most needed to be exact.
+- **A full IEEE-754 soft-float core instead of native `f32` plus a policy
+  layer.** Deferred, not rejected — native `f32` already agrees with the FPU
+  bit-for-bit on the ordinary input space (§4), so a soft-float core would
+  duplicate correct behavior to fix corners a policy layer already isolates.
+  M9's RV32F is the second consumer that would justify building one; one
+  consumer does not.
+- **Sample the estimate ROMs rather than extract them exhaustively.**
+  Rejected — a sampled table is *close*, and close is precisely the failure
+  mode D5 exists to prevent: `div0.s`/`recip0.s`/`sqrt0.s`/`rsqrt0.s` values
+  compiled into a shader would be silently wrong on whichever input the
+  sample missed, with no way to tell which without re-sampling. Exhaustive
+  extraction (60 RLE sweeps, ~503M points) costs one desk session and is
+  exact by construction; sampling costs the same session and stays a guess.
+- **Carry the campaign in the experiment repo, alongside the P1 capability
+  probe.** Rejected on the runner protocol's own numbers: a `Response` is
+  exactly one `u32` and every faulting payload costs a full board reboot
+  (`PROTO_VERSION = 2`). Tens of thousands of (input → output, FSR) pairs
+  plus a 2²³-wide table sweep do not fit that channel without a protocol
+  version bump and firmware changes in two crates — lp2025's
+  `fw-esp32s3`/`espflash flash --monitor` rig already existed and returns
+  bulk results over the serial monitor for free (D1).
