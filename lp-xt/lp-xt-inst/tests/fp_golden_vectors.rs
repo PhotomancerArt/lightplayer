@@ -145,6 +145,13 @@ fn fp1_unary_group() {
         dec(&[0xb0, 0x01, 0xfa]),
         Inst::FpRr(FpRrOp::Nexp01S, f(0), f(1))
     );
+    // mksadj.s f2, f1 — the exact word the esp-14.2.0 `__ieee754_sqrtf`
+    // sequence contains (objdump: `fa21c0  mksadj.s f2, f1`), which is how the
+    // M6 P6 campaign discovered the mnemonic was missing.
+    assert_eq!(
+        dec(&[0xc0, 0x21, 0xfa]),
+        Inst::FpRr(FpRrOp::MksadjS, f(2), f(1))
+    );
     // mkdadj.s f0, f1
     assert_eq!(
         dec(&[0xd0, 0x01, 0xfa]),
@@ -179,12 +186,14 @@ fn fp1_unary_group() {
     dis(&[0x30, 0x7f, 0xfa], "const.s\tf7, 15");
 }
 
-/// The FP1 selector slots `t = 2` and `t = 0xC` have no mnemonic in
-/// `xtensa-esp32s3-elf-objdump`, so they must stay unsupported rather than being
-/// guessed at.
+/// The FP1 selector slot `t = 2` has no mnemonic in
+/// `xtensa-esp32s3-elf-objdump`, so it must stay unsupported rather than being
+/// guessed at. (`t = 0xC` used to be asserted here too — wrongly: objdump
+/// disassembles it as `mksadj.s`, and the toolchain's square-root sequence
+/// uses it. M6 P6 promoted it to a supported instruction.)
 #[test]
 fn fp1_unassigned_slots_stay_unsupported() {
-    for t in [0x2u8, 0xc] {
+    for t in [0x2u8] {
         let w = 0x00fa_0000u32 | ((t as u32) << 4); // op1=0xA, op2=0xF, s=r=0
         let bytes = [w as u8, (w >> 8) as u8, (w >> 16) as u8];
         assert!(

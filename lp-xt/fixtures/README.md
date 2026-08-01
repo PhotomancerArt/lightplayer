@@ -29,11 +29,18 @@ Chosen to sit inside `lp-xt-emu`'s modeled SRAM1 (see its `memory.rs`):
 
 ## The integer-only rule
 
-Fixtures must be integer-only: the emulator has **no FPU executors**, and the
-toolchain emits S3 FPU ops (`add.s`, …) for any `f32`/`f64`. Enforcement is
-**at runtime**: `lp-xt-inst` decodes only the integer subset, so an FPU (or
-any unsupported) instruction on an executed path raises an
-illegal-instruction trap and fails the fixture's test with the faulting PC.
+Fixtures must be integer-only, by convention rather than by emulator
+limitation. `lp-xt-emu` gained FPU executors in M6 (see its README's
+"Floating point" section and `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`)
+and `lp-xt-inst` decodes the FP subset, so the old enforcement mechanism —
+an unsupported FPU op trapping as illegal — no longer applies to `add.s` and
+friends. This corpus predates that work and there is no host-side f32 oracle
+wired for it (the fixtures compare against a host Rust computation on the
+same bit patterns, which is exactly what an f32 fixture would need and does
+not have yet), so it stays integer-only until someone wires one up. If a
+`f32`/`f64` fixture is added, it must go through the FP conformance path's
+discipline (`lp-xt-fp-vectors`, `lp-xt-emu`'s policy layer), not a bare
+host-vs-device numeric compare.
 
 Do not try to enforce it by grepping objdump output: objdump disassembles the
 literal pool at the head of `.text` as garbage "instructions" (`ule.s`,

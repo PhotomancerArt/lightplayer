@@ -58,6 +58,81 @@ const DEST_B: u8 = 0;
 const SRC_INT_A: u8 = 2;
 const DEST_INT_A: u8 = 3;
 
+/// The toolchain's divide sequence, `f0 = f1 / f2` — instruction for
+/// instruction the body of the esp-14.2.0 libgcc `__divsf3` (transcribed from
+/// objdump; output-as-fact, no library source read). The same text lives as a
+/// `global_asm!` kernel in `fw-esp32s3`'s conformance harness, so the device
+/// and the emulator run the *same* sequence and the 272 F5 rows compare like
+/// for like.
+fn div_sequence() -> Vec<Inst> {
+    let f = FReg::new;
+    vec![
+        Inst::FpRr(FpRrOp::Div0S, f(3), f(2)),
+        Inst::FpRr(FpRrOp::Nexp01S, f(4), f(2)),
+        Inst::ConstS(f(5), 1),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(5), f(4), f(3)),
+        Inst::FpRr(FpRrOp::MovS, f(6), f(3)),
+        Inst::FpRr(FpRrOp::MovS, f(7), f(2)),
+        Inst::FpRr(FpRrOp::Nexp01S, f(2), f(1)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(6), f(5), f(6)),
+        Inst::ConstS(f(5), 1),
+        Inst::ConstS(f(0), 0),
+        Inst::FpRr(FpRrOp::NegS, f(8), f(2)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(5), f(4), f(6)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(0), f(8), f(3)),
+        Inst::FpRr(FpRrOp::MkdadjS, f(7), f(1)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(6), f(5), f(6)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(8), f(4), f(0)),
+        Inst::ConstS(f(3), 1),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(3), f(4), f(6)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(0), f(8), f(6)),
+        Inst::FpRr(FpRrOp::NegS, f(2), f(2)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(6), f(3), f(6)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(2), f(4), f(0)),
+        Inst::FpRr(FpRrOp::AddexpmS, f(0), f(7)),
+        Inst::FpRr(FpRrOp::AddexpS, f(6), f(7)),
+        Inst::FpRrr(FpRrrOp::DivnS, f(0), f(2), f(6)),
+    ]
+}
+
+/// The toolchain's square-root sequence, `f0 = sqrt(f1)` — the body of the
+/// esp-14.2.0 libm `__ieee754_sqrtf` (the raw sequence, not the errno-setting
+/// wrapper). Same provenance and same device-side twin as [`div_sequence`].
+fn sqrt_sequence() -> Vec<Inst> {
+    let f = FReg::new;
+    vec![
+        Inst::FpRr(FpRrOp::Sqrt0S, f(2), f(1)),
+        Inst::ConstS(f(3), 0),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(3), f(2), f(2)),
+        Inst::FpRr(FpRrOp::Nexp01S, f(4), f(1)),
+        Inst::ConstS(f(0), 3),
+        Inst::FpRr(FpRrOp::AddexpS, f(4), f(0)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(0), f(3), f(4)),
+        Inst::FpRr(FpRrOp::Nexp01S, f(3), f(1)),
+        Inst::FpRr(FpRrOp::NegS, f(5), f(3)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(2), f(0), f(2)),
+        Inst::ConstS(f(0), 0),
+        Inst::ConstS(f(6), 0),
+        Inst::ConstS(f(7), 0),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(0), f(5), f(2)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(6), f(2), f(4)),
+        Inst::ConstS(f(4), 3),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(7), f(4), f(2)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(3), f(0), f(0)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(4), f(6), f(2)),
+        Inst::FpRr(FpRrOp::NegS, f(2), f(7)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(0), f(3), f(2)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(7), f(4), f(7)),
+        Inst::FpRr(FpRrOp::MksadjS, f(2), f(1)),
+        Inst::FpRr(FpRrOp::Nexp01S, f(1), f(1)),
+        Inst::FpRrr(FpRrrOp::MaddnS, f(1), f(0), f(0)),
+        Inst::FpRr(FpRrOp::NegS, f(3), f(7)),
+        Inst::FpRr(FpRrOp::AddexpmS, f(0), f(2)),
+        Inst::FpRr(FpRrOp::AddexpS, f(3), f(2)),
+        Inst::FpRrr(FpRrrOp::DivnS, f(0), f(1), f(3)),
+    ]
+}
+
 /// Build the instruction a vector names, or `None` for the pseudo-ops.
 fn instruction(v: &Vector) -> Option<Inst> {
     let (d, a, b) = (FReg::new(DEST_F), FReg::new(SRC_A_F), FReg::new(SRC_B_F));
@@ -108,8 +183,12 @@ fn instruction(v: &Vector) -> Option<Inst> {
     }
 }
 
-/// Run one vector on a fresh-state emulator and report what it predicts.
-fn predict(emu: &mut Emulator, v: &Vector) -> Prediction {
+/// Run one vector on a fresh-state emulator: `(result, FSR)` predictions.
+///
+/// The FSR column is a first-class prediction since the P6 campaign resolved
+/// the flag semantics: the register is cleared before the vector and read
+/// after it, exactly as the device harness does.
+fn predict(emu: &mut Emulator, v: &Vector) -> (Prediction, Prediction) {
     // Reset only what a vector touches; the memory map is expensive to rebuild
     // and no vector reads it.
     emu.cpu.fr = [0; 16];
@@ -123,44 +202,45 @@ fn predict(emu: &mut Emulator, v: &Vector) -> Prediction {
     emu.cpu.set_a(SRC_INT_A, v.a);
     emu.cpu.set_a(DEST_INT_A, 0);
 
-    let Some(inst) = instruction(v) else {
-        // The manual's divide and square-root sequences. Predicting them needs
-        // the semantics of the non-estimate helper steps, so the harness reads
-        // that field and lets it name itself. This is a derivation, not a
-        // hand-written classification: when P6 resolves the field, these rows
-        // stop being UNKNOWN without anyone editing this file.
-        return match catch_policy(|| {
-            emu.fp_policy.divide_step_helpers.get();
-        }) {
-            Ok(()) => unreachable!("divide_step_helpers resolved but no sequence executor exists"),
-            Err(field) => Prediction::Unknown(field),
-        };
+    let insts: Vec<Inst> = match instruction(v) {
+        Some(inst) => vec![inst],
+        // The toolchain's divide and square-root sequences, running on the
+        // measured helper semantics. The device runs the same sequences.
+        None => match v.op {
+            OpCode::Div => div_sequence(),
+            OpCode::Sqrt => sqrt_sequence(),
+            _ => unreachable!(),
+        },
     };
 
     let op = v.op;
-    let outcome: Result<Result<(), Trap>, String> =
-        catch_policy_value(AssertUnwindSafe(|| emu.exec_one(&inst)));
+    let outcome: Result<Result<(), Trap>, String> = catch_policy_value(AssertUnwindSafe(|| {
+        for inst in &insts {
+            emu.exec_one(inst)?;
+        }
+        Ok(())
+    }));
     match outcome {
-        Err(field) => Prediction::Unknown(field),
-        Ok(Err(trap)) => Prediction::Trap(trap.cause),
+        Err(field) => (
+            Prediction::Unknown(field.clone()),
+            Prediction::Unknown(field),
+        ),
+        Ok(Err(trap)) => (Prediction::Trap(trap.cause), Prediction::Bits(emu.cpu.fsr)),
         Ok(Ok(())) => {
-            if op.writes_boolean() {
+            let bits = if op.writes_boolean() {
                 Prediction::Bits(u32::from(emu.cpu.b(DEST_B)))
             } else if op.writes_integer() {
                 Prediction::Bits(emu.cpu.a(DEST_INT_A))
             } else {
                 Prediction::Bits(emu.cpu.f(DEST_F))
-            }
+            };
+            (bits, Prediction::Bits(emu.cpu.fsr))
         }
     }
 }
 
 /// Run `f`, converting an unresolved-policy panic into the field's name. Any
 /// other panic is re-raised, so a real bug stays a real failure.
-fn catch_policy(f: impl FnOnce()) -> Result<(), String> {
-    catch_policy_value(AssertUnwindSafe(f))
-}
-
 fn catch_policy_value<T>(f: AssertUnwindSafe<impl FnOnce() -> T>) -> Result<T, String> {
     lp_xt_emu::fp_policy::suppress_unresolved_panic_output();
     let r = std::panic::catch_unwind(f);
@@ -220,15 +300,43 @@ fn header(family: Family, unknown: &[(String, usize)]) -> String {
         let _ = writeln!(s, "#             {n:>5}  {field}");
     }
     let _ = writeln!(s, "#");
-    let _ = writeln!(s, "# --- silicon provenance (M6 P6 fills this in) ---");
-    let _ = writeln!(s, "# board:      NOT RUN");
-    let _ = writeln!(s, "# chip-rev:   NOT RUN");
-    let _ = writeln!(s, "# flash:      NOT RUN");
-    let _ = writeln!(s, "# mac:        NOT RUN");
-    let _ = writeln!(s, "# port:       NOT RUN");
-    let _ = writeln!(s, "# firmware:   NOT RUN");
-    let _ = writeln!(s, "# toolchain:  NOT RUN");
-    let _ = writeln!(s, "# date:       NOT RUN");
+    let _ = writeln!(s, "# --- silicon provenance (M6 P6 campaign) ---");
+    let _ = writeln!(s, "# board:      XIAO-class ESP32-S3 devkit");
+    let _ = writeln!(s, "# chip-rev:   esp32s3 v0.2");
+    let _ = writeln!(s, "# flash:      16 MB (flashed with --flash-size 8mb)");
+    let _ = writeln!(s, "# mac:        d8:3b:da:47:29:70");
+    let _ = writeln!(
+        s,
+        "# port:       /dev/cu.usbmodem1201 at capture time (renumbers; identify by MAC)"
+    );
+    let _ = writeln!(
+        s,
+        "# firmware:   4e7a3da28728, feature test_xt_fp_conformance"
+    );
+    let _ = writeln!(
+        s,
+        "# toolchain:  espup esp toolchain esp-14.2.0_20240906 (xtensa-esp32s3-elf-gcc 14.2.0)"
+    );
+    let _ = writeln!(s, "# capture:    tests/fixtures/fp/captures/families.txt");
+    let _ = writeln!(s, "# date:       2026-07-31");
+    let _ = writeln!(s, "#");
+    let _ = writeln!(
+        s,
+        "# Promoting these goldens from silicon was correct HERE — the emulator's"
+    );
+    let _ = writeln!(
+        s,
+        "# predictions were committed first and the capture was diffed against them,"
+    );
+    let _ = writeln!(
+        s,
+        "# which is what made the comparison meaningful. It is NOT a licence to"
+    );
+    let _ = writeln!(
+        s,
+        "# refresh a golden from device output anywhere downstream: that inverts a"
+    );
+    let _ = writeln!(s, "# test into a tautology that passes forever.");
     let _ = writeln!(s, "#");
     let _ = writeln!(s, "# columns: index op a b c imm fcr -> result fsr");
     let _ = writeln!(
@@ -237,26 +345,18 @@ fn header(family: Family, unknown: &[(String, usize)]) -> String {
     );
     let _ = writeln!(
         s,
-        "# fsr:     UNKNOWN everywhere — FSR accumulates (measured, M6 P1) and its"
+        "# fsr:     the predicted FSR after the vector, cleared before it — a"
     );
     let _ = writeln!(
         s,
-        "#          bit layout is architectural (ISA RM Table 4-48; see cpu::FSR_*),"
-    );
-    let _ = writeln!(
-        s,
-        "#          but WHICH operation raises WHICH flag is still open. Note the RM"
-    );
-    let _ = writeln!(
-        s,
-        "#          says current implementations raise none, and this silicon does."
+        "#          first-class prediction since P6 measured the flag semantics."
     );
     s
 }
 
-fn row(v: &Vector, p: &Prediction) -> String {
+fn row(v: &Vector, p: &Prediction, fsr: &Prediction) -> String {
     format!(
-        "{:05} {:<10} {:#010x} {:#010x} {:#010x} {:>2} {} -> {} UNKNOWN:fsr_flag_bits",
+        "{:05} {:<10} {:#010x} {:#010x} {:#010x} {:>2} {} -> {} {}",
         v.index,
         v.op.name(),
         v.a,
@@ -264,7 +364,8 @@ fn row(v: &Vector, p: &Prediction) -> String {
         v.c,
         v.imm,
         v.fcr,
-        p.render()
+        p.render(),
+        fsr.render()
     )
 }
 
@@ -273,21 +374,26 @@ fn row(v: &Vector, p: &Prediction) -> String {
 /// Parsed by [`parse_predictions`] — the *same* parser the campaign's diff tool
 /// uses (`just fp-diff`), so a corpus file this replay accepts and the diff tool
 /// chokes on cannot exist.
-fn read_fixture(family: Family) -> Option<(u32, Vec<(u32, Prediction)>)> {
+type FixtureRow = (u32, Prediction, Prediction);
+
+fn read_fixture(family: Family) -> Option<(u32, Vec<FixtureRow>)> {
     let text =
         std::fs::read_to_string(fixtures_dir().join(format!("{}.txt", family.name()))).ok()?;
     let p = parse_predictions(family.name(), &text).expect("committed corpus must parse");
     Some((
         p.fingerprint,
-        p.rows.into_iter().map(|(i, _, pred)| (i, pred)).collect(),
+        p.rows
+            .into_iter()
+            .map(|(i, _, pred, fsr)| (i, pred, fsr))
+            .collect(),
     ))
 }
 
-fn write_fixture(family: Family, rows: &[(Vector, Prediction)]) {
-    // Grouped by field rather than counted in bulk: P6 triages one policy field
-    // at a time, and "3886 unknown" does not tell it where to start.
+fn write_fixture(family: Family, rows: &[(Vector, Prediction, Prediction)]) {
+    // Grouped by field rather than counted in bulk, so any future unknown
+    // says exactly which policy question reopened.
     let mut by_field: Vec<(String, usize)> = Vec::new();
-    for (_, p) in rows {
+    for (_, p, _) in rows {
         if let Prediction::Unknown(f) = p {
             match by_field.iter_mut().find(|(n, _)| n == f) {
                 Some((_, n)) => *n += 1,
@@ -297,8 +403,8 @@ fn write_fixture(family: Family, rows: &[(Vector, Prediction)]) {
     }
     by_field.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let mut out = header(family, &by_field);
-    for (v, p) in rows {
-        out.push_str(&row(v, p));
+    for (v, p, fsr) in rows {
+        out.push_str(&row(v, p, fsr));
         out.push('\n');
     }
     let dir = fixtures_dir();
@@ -306,13 +412,13 @@ fn write_fixture(family: Family, rows: &[(Vector, Prediction)]) {
     std::fs::write(dir.join(format!("{}.txt", family.name())), out).expect("write fixture");
 }
 
-fn predict_family(family: Family) -> Vec<(Vector, Prediction)> {
+fn predict_family(family: Family) -> Vec<(Vector, Prediction, Prediction)> {
     let mut emu = Emulator::new();
     (0..count(family))
         .map(|i| {
             let v = vector(family, i);
-            let p = predict(&mut emu, &v);
-            (v, p)
+            let (p, fsr) = predict(&mut emu, &v);
+            (v, p, fsr)
         })
         .collect()
 }
@@ -352,11 +458,11 @@ fn emulator_matches_the_committed_predictions() {
             family.name()
         );
 
-        for ((v, got), (idx, want)) in rows.iter().zip(&committed) {
+        for ((v, got, got_fsr), (idx, want, want_fsr)) in rows.iter().zip(&committed) {
             assert_eq!(v.index, *idx, "{}: row order drifted", family.name());
             assert_eq!(
-                got,
-                want,
+                (got, got_fsr),
+                (want, want_fsr),
                 "{} vector {} ({} a={:#010x} b={:#010x} c={:#010x} imm={} fcr={})",
                 family.name(),
                 v.index,
@@ -379,50 +485,21 @@ fn emulator_matches_the_committed_predictions() {
         "no committed predictions for {missing:?} — run with UPDATE_FP_GOLDENS=1"
     );
 
-    println!(
-        "fp_conformance: {total_rows} rows, {total_unknown} UNKNOWN \
-         ({:.1}%) — each one a question for the M6 P6 silicon campaign",
-        100.0 * total_unknown as f64 / total_rows as f64
-    );
-    // Zero unknowns before P6 would mean the policy layer had quietly acquired
-    // defaults, which is the failure this milestone exists to prevent.
-    assert!(
-        total_unknown > 0,
-        "the unknown count is zero before the hardware campaign — the policy \
-         layer must have acquired defaults"
-    );
-}
-
-/// The IEEE-fixed part of the corpus must actually be predicted, or the whole
-/// thing would be one big `UNKNOWN` and the campaign would measure nothing the
-/// emulator could be wrong about.
-#[test]
-fn a_substantial_share_of_the_corpus_is_concretely_predicted() {
-    let mut concrete = 0usize;
-    let mut total = 0usize;
-    for family in Family::ALL {
-        for (_, p) in predict_family(family) {
-            if matches!(p, Prediction::Bits(_)) {
-                concrete += 1;
-            }
-            total += 1;
-        }
-    }
-    let share = concrete as f64 / total as f64;
-    println!(
-        "fp_conformance: {concrete}/{total} concretely predicted ({:.1}%)",
-        share * 100.0
-    );
-    assert!(
-        share > 0.20,
-        "only {:.1}% of the corpus is concretely predicted — the IEEE-fixed \
-         core should be a large share of it",
-        share * 100.0
+    println!("fp_conformance: {total_rows} rows, {total_unknown} UNKNOWN");
+    // The guard flipped direction at P6: before the campaign, zero unknowns
+    // would have meant the policy layer quietly acquired defaults. After it,
+    // every policy field is measured — so an UNKNOWN reappearing means a
+    // field lost its measurement, which is exactly as bad.
+    assert_eq!(
+        total_unknown, 0,
+        "the campaign measured every policy field; an UNKNOWN row means one \
+         was un-resolved without re-running the campaign"
     );
 }
 
 /// Every `UNKNOWN` must name a field that actually exists on the policy, so a
-/// typo cannot create a phantom question that P6 will never close.
+/// typo cannot create a phantom question no campaign will ever close. (Post-P6
+/// the corpus has no unknowns; this guards any future field.)
 #[test]
 fn every_unknown_names_a_real_policy_field() {
     let names: Vec<&'static str> = Emulator::new()
@@ -432,7 +509,7 @@ fn every_unknown_names_a_real_policy_field() {
         .map(|(n, ..)| n)
         .collect();
     for family in Family::ALL {
-        for (v, p) in predict_family(family) {
+        for (v, p, _) in predict_family(family) {
             if let Prediction::Unknown(field) = p {
                 assert!(
                     names.contains(&field.as_str()),
