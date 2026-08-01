@@ -12,7 +12,8 @@ artifact format). Decision record:
 
 | Path | What it is |
 |---|---|
-| `project.schema.json` | JSON Schema (2020-12) for a `project.json` artifact root: `kind: "Module"` plus the required `"format": N` version key. |
+| `project.schema.json` | JSON Schema (2020-12) for the `project.json` container manifest (not a node envelope): required `"format": N`, optional `uid`/`name`, nothing else. |
+| `module.schema.json` | JSON Schema for the `module.json` root module node artifact: `kind: "Module"` plus the compiled `ModuleDef` shape. |
 | `node.schema.json` | JSON Schema for any node artifact file — a `oneOf` over every registered node kind, discriminated by the `kind` field. |
 | `hardware.schema.json` | JSON Schema for board hardware manifests (`lp-core/lpc-hardware/boards/**/*.json`, `/hardware.json` device override). |
 | `shapes/*.json` | Serialized `SlotShape` registry dumps — the exact structure the slot codec parses against, including on-disk enum encodings. One file per registered shape; `::` in shape names flattens to `.` in filenames. |

@@ -126,6 +126,51 @@ async fn test_scene_render_fw_emu() {
     // serialization path — the producer splits the texture into bounded
     // `ResultBytes` chunks and the client collector reassembles them.
     read_large_render_probe_crossing_frame_boundary(&client, project_handle, shader_id).await;
+
+    // Format gate on the DEVICE path (D-A): a wrong-format container
+    // manifest must refuse to load on firmware — same streaming probe, same
+    // hard refusal as the host. Rides the already-booted emulator.
+    client
+        .fs_write(
+            "/projects/badformat/project.json".as_path(),
+            b"{\n  \"format\": 999\n}\n".to_vec(),
+        )
+        .await
+        .expect("write bad manifest");
+    client
+        .fs_write(
+            "/projects/badformat/module.json".as_path(),
+            b"{\n  \"kind\": \"Module\"\n}\n".to_vec(),
+        )
+        .await
+        .expect("write module root");
+    let err = client
+        .project_load("badformat")
+        .await
+        .expect_err("wrong-format project must refuse on device");
+    let text = format!("{err:?}");
+    assert!(
+        text.contains("format") || text.contains("999"),
+        "device refusal should name the format gate: {text}"
+    );
+
+    // A missing container manifest is a hard refuse too, not a skip.
+    client
+        .fs_write(
+            "/projects/nomanifest/module.json".as_path(),
+            b"{\n  \"kind\": \"Module\"\n}\n".to_vec(),
+        )
+        .await
+        .expect("write module root");
+    let err = client
+        .project_load("nomanifest")
+        .await
+        .expect_err("missing container manifest must refuse on device");
+    let text = format!("{err:?}");
+    assert!(
+        text.contains("project.json") || text.contains("manifest"),
+        "device refusal should name the missing manifest: {text}"
+    );
 }
 
 /// A render-product probe whose RGBA16 bytes (64·64·8 = 32 KiB) far exceed one

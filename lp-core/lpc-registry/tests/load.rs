@@ -275,6 +275,55 @@ fn load_root_rejects_missing_manifest_format() {
 }
 
 #[test]
+fn vendored_module_folder_loads_under_the_projects_gate() {
+    // Q10 disposition: format is a container-level concept. A copied/
+    // vendored module folder inside a project carries no project.json of
+    // its own — it is gated by the HOST project's container manifest, and
+    // the loader never re-runs the gate for child artifacts.
+    let shapes = SlotShapeRegistry::default();
+    let ctx = parse_ctx(&shapes);
+    let mut fs = LpFsMemory::new();
+    write_file(&mut fs, "/project.json", "{\n  \"format\": 3\n}\n");
+    write_file(
+        &mut fs,
+        "/module.json",
+        r#"
+{
+  "kind": "Module",
+  "nodes": {
+    "plasma": { "ref": "./modules/plasma/module.json" }
+  }
+}
+"#,
+    );
+    write_file(
+        &mut fs,
+        "/modules/plasma/module.json",
+        r#"
+{
+  "kind": "Module",
+  "nodes": {}
+}
+"#,
+    );
+
+    let mut registry = ProjectRegistry::new();
+    registry
+        .load_root(&fs, LpPath::new("/module.json"), Revision::new(1), &ctx)
+        .expect("vendored module folder loads under the host gate");
+
+    let child =
+        NodeDefLocation::artifact_root(ArtifactLocation::file("/modules/plasma/module.json"));
+    assert!(
+        matches!(
+            registry.def(&child).expect("child def entry").state,
+            NodeDefState::Loaded(lpc_model::NodeDef::Module(_))
+        ),
+        "vendored module def must load without its own manifest"
+    );
+}
+
+#[test]
 fn load_root_rejects_missing_container_manifest() {
     // D-A: a project with no `project.json` container manifest is a HARD
     // refuse — the manifest carries the format gate, so skipping it would

@@ -69,7 +69,7 @@ pub use project_controller::{
 };
 pub use project_editor_op::ProjectEditorOp;
 pub use project_editor_target::ProjectEditorTarget;
-pub use project_editor_view::ProjectEditorView;
+pub use project_editor_view::{ProjectEditorView, UiProjectManifest};
 pub use project_inventory_summary::ProjectInventorySummary;
 pub use project_node_tree_view::{
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,

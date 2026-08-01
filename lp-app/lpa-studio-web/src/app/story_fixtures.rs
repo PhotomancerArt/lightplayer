@@ -553,6 +553,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
     )
     .with_project_name("Demo")
     .with_root_slots(project_root_slots())
+    .with_manifest(Some(project_manifest()))
 }
 
 pub(crate) fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
@@ -641,11 +642,6 @@ pub(crate) fn project_workspace_nodes() -> Vec<UiNodeView> {
 pub(crate) fn project_root_slots() -> Vec<UiConfigSlot> {
     use lpa_studio_core::UiSlotFieldState;
     vec![
-        UiConfigSlot::value("name", "Name", UiSlotValue::string("Demo")),
-        UiConfigSlot::value("format", "Format", UiSlotValue::u32(1))
-            .with_state(UiSlotFieldState::readonly()),
-        UiConfigSlot::value("uid", "UID", UiSlotValue::string("prj_7k2mQx4vN8pL"))
-            .with_state(UiSlotFieldState::readonly()),
         UiConfigSlot::record(
             "nodes",
             "Nodes",
@@ -659,6 +655,15 @@ pub(crate) fn project_root_slots() -> Vec<UiConfigSlot> {
         .with_detail("2 nodes")
         .with_state(UiSlotFieldState::readonly()),
     ]
+}
+
+/// Container-manifest identity for the settings-section stories.
+pub(crate) fn project_manifest() -> lpa_studio_core::UiProjectManifest {
+    lpa_studio_core::UiProjectManifest {
+        format: Some(3),
+        uid: Some("prj_7k2mQx4vN8pL".to_string()),
+        name: Some("Demo".to_string()),
+    }
 }
 
 /// One top-level workspace pane built from a child fixture (the same
