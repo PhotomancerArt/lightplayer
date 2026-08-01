@@ -31,7 +31,7 @@ fn can_create_fyeah_sign_project_from_empty_fs_with_artifact_body_mutations() {
     assert_loaded_def_kinds(
         scenario.registry(),
         &[
-            ("/project.json", NodeKind::Project),
+            ("/project.json", NodeKind::Module),
             ("/blast.json", NodeKind::Shader),
             ("/button.json", NodeKind::Button),
             ("/clock.json", NodeKind::Clock),

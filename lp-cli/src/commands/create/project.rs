@@ -95,7 +95,7 @@ mod tests {
         assert!(project_dir.join("project.json").exists());
         let project_json = std::fs::read_to_string(project_dir.join("project.json")).unwrap();
         let def = NodeDef::from_json_str(&project_json).unwrap();
-        let NodeDef::Project(project) = def else {
+        let NodeDef::Module(project) = def else {
             panic!("expected project def");
         };
         assert_eq!(project.name(), Some("my-project"));
@@ -112,7 +112,7 @@ mod tests {
 
         let project_json = std::fs::read_to_string(project_dir.join("project.json")).unwrap();
         let def = NodeDef::from_json_str(&project_json).unwrap();
-        let NodeDef::Project(project) = def else {
+        let NodeDef::Module(project) = def else {
             panic!("expected project def");
         };
         assert_eq!(project.name(), Some("Custom Name"));

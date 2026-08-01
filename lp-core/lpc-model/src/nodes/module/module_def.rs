@@ -15,14 +15,14 @@ use crate::{MapSlot, NodeInvocationSlot, OptionSlot, Slotted, ValueSlot};
 ///   are refused, not migrated (alpha format posture: bump and refuse).
 pub const PROJECT_FORMAT_VERSION: u32 = 2;
 
-/// Authored root project node definition.
+/// Authored root module node definition.
 ///
-/// A project is a node artifact with `kind = "Project"`. Its `nodes` table
+/// A module is a node artifact with `kind = "Module"`. Its `nodes` table
 /// owns named child [`crate::NodeInvocationSlot`] entries; the runtime no
 /// longer discovers children from filesystem directories.
 #[derive(Clone, Debug, Default, PartialEq, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct ProjectDef {
+pub struct ModuleDef {
     /// Authored format version; see [`PROJECT_FORMAT_VERSION`].
     ///
     /// Read-only through mutations: only the loader format gate and the
@@ -52,14 +52,14 @@ pub struct ProjectDef {
     pub nodes: MapSlot<String, NodeInvocationSlot>,
 }
 
-impl ProjectDef {
-    pub const KIND: &'static str = "project";
+impl ModuleDef {
+    pub const KIND: &'static str = "module";
 
     pub fn kind(&self) -> crate::NodeKind {
-        crate::NodeKind::Project
+        crate::NodeKind::Module
     }
 
-    pub fn is_project_kind(&self) -> bool {
+    pub fn is_module_kind(&self) -> bool {
         true
     }
 
@@ -98,10 +98,10 @@ mod tests {
             }
         }"#;
         let def = NodeDef::read_json(&registry(), json).unwrap();
-        let NodeDef::Project(def) = def else {
+        let NodeDef::Module(def) = def else {
             panic!("expected project def");
         };
-        assert!(def.is_project_kind());
+        assert!(def.is_module_kind());
         assert_eq!(def.format(), Some(super::PROJECT_FORMAT_VERSION));
         assert_eq!(def.name(), Some("basic"));
         assert_eq!(def.nodes.entries.len(), 2);
@@ -116,7 +116,7 @@ mod tests {
             "nodes": {}
         }"#;
         let def = NodeDef::read_json(&registry(), json).unwrap();
-        let NodeDef::Project(def) = def else {
+        let NodeDef::Module(def) = def else {
             panic!("expected project def");
         };
         assert_eq!(def.format(), None);
@@ -124,11 +124,11 @@ mod tests {
 
     #[test]
     fn project_def_writes_format_alongside_kind() {
-        let def = crate::ProjectDef {
-            format: crate::ProjectDef::current_format_slot(),
-            ..crate::ProjectDef::default()
+        let def = crate::ModuleDef {
+            format: crate::ModuleDef::current_format_slot(),
+            ..crate::ModuleDef::default()
         };
-        let text = NodeDef::Project(def).write_json(&registry()).unwrap();
+        let text = NodeDef::Module(def).write_json(&registry()).unwrap();
         assert!(
             text.starts_with("{\n  \"kind\": \"Project\",\n  \"format\": 2"),
             "{text}"
@@ -163,7 +163,7 @@ mod tests {
     fn project_def_format_and_nodes_are_read_only_persisted_name_writable() {
         use crate::{SlotPolicy, SlotShape, StaticSlotShape};
 
-        let SlotShape::Record { fields, .. } = crate::ProjectDef::slot_shape() else {
+        let SlotShape::Record { fields, .. } = crate::ModuleDef::slot_shape() else {
             panic!("project def shape must be a record");
         };
         let policy = |name: &str| {

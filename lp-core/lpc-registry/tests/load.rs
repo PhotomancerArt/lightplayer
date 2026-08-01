@@ -77,7 +77,7 @@ fn load_root_discovers_root_external_and_asset_entries() {
     assert_eq!(registry.inventory().defs.len(), 3);
     assert!(matches!(
         registry.def(&root).unwrap().state,
-        NodeDefState::Loaded(lpc_model::NodeDef::Project(_))
+        NodeDefState::Loaded(lpc_model::NodeDef::Module(_))
     ));
     assert!(matches!(
         registry.def(&shader).unwrap().state,
@@ -238,7 +238,7 @@ fn load_root_accepts_current_project_format() {
     assert_eq!(result.root, root);
     assert!(matches!(
         registry.def(&root).unwrap().state,
-        NodeDefState::Loaded(lpc_model::NodeDef::Project(_))
+        NodeDefState::Loaded(lpc_model::NodeDef::Module(_))
     ));
 }
 

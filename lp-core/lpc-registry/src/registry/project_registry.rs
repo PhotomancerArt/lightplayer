@@ -10,10 +10,10 @@ use lpc_model::{
     MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
     MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
     NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
-    ProjectFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
+    ModuleFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
     SlotEditOp, SlotMapKey, SlotName, SlotPath, SlotPathSegment, SlotPolicyResolution,
     SlotShapeLookup, SlotShapeView, StaticSlotShape, StoredSlotEdit, WithRevision,
-    lookup_slot_data, lp_value_matches_type, read_project_format_json,
+    lookup_slot_data, lp_value_matches_type, read_module_format_json,
     resolve_slot_policy_and_leaf,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
@@ -82,7 +82,7 @@ impl ProjectRegistry {
         let Ok(text) = core::str::from_utf8(&bytes) else {
             return Ok(());
         };
-        let Ok(ProjectFormatProbe::Project { format }) = read_project_format_json(text) else {
+        let Ok(ModuleFormatProbe::Module { format }) = read_module_format_json(text) else {
             return Ok(());
         };
         if format == Some(PROJECT_FORMAT_VERSION) {
@@ -1606,7 +1606,7 @@ mod tests {
 
     #[test]
     fn project_root_format_and_nodes_reject_writes_but_name_stays_writable() {
-        // P6 flat-root policy: `ProjectDef.format` and `ProjectDef.nodes` are
+        // P6 flat-root policy: `ModuleDef.format` and `ModuleDef.nodes` are
         // `read_only_persisted` — only the loader format gate / future
         // upgrader (format) and dedicated project ops (nodes, Studio
         // authoring M2) own them. The policy inherits into the subtree (map
@@ -1663,7 +1663,7 @@ mod tests {
             .state
             .loaded_def()
             .expect("project def loaded")
-            .as_project()
+            .as_module()
             .expect("project def");
         assert_eq!(def.name(), Some("Renamed"));
         assert_eq!(

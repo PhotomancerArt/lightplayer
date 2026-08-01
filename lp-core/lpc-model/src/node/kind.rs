@@ -5,7 +5,7 @@
 /// being removed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum NodeKind {
-    Project,
+    Module,
     Button,
     Clock,
     Texture,

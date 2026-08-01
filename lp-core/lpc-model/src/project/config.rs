@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Lightweight metadata that can travel with a project.
 ///
 /// This is separate from the authored project node definition in
-/// [`crate::ProjectDef`]. The project node defines runtime graph structure;
+/// [`crate::ModuleDef`]. The project node defines runtime graph structure;
 /// `ProjectConfig` holds user-facing metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectConfig {

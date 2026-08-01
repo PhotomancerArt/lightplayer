@@ -85,7 +85,7 @@ fn read_value(fs: &dyn LpFs) -> Result<serde_json::Value, LibraryError> {
 fn write_value(fs: &dyn LpFs, value: &serde_json::Value) -> Result<(), LibraryError> {
     // The slot codec streams and requires the top-level `kind` to precede
     // the variant's fields, and serde_json's map is ordered alphabetically —
-    // so emit a canonical key order (matching ProjectDef's declaration
+    // so emit a canonical key order (matching ModuleDef's declaration
     // order) instead of serializing the map directly.
     const CANONICAL_ORDER: [&str; 4] = ["kind", "format", "uid", "name"];
     let serde_json::Value::Object(map) = value else {
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn patched_manifest_parses_through_the_slot_codec() {
-        // The whole point of canonical ordering + the ProjectDef uid slot:
+        // The whole point of canonical ordering + the ModuleDef uid slot:
         // a library-patched manifest must load on the runtime.
         let fs = LpFsMemory::new();
         fs.write_file(

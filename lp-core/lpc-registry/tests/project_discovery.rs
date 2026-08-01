@@ -18,7 +18,7 @@ fn fyeah_sign_discovers_referenced_node_defs_and_assets() {
     assert_loaded_def_kinds(
         registry,
         &[
-            ("/project.json", NodeKind::Project),
+            ("/project.json", NodeKind::Module),
             ("/blast.json", NodeKind::Shader),
             ("/button.json", NodeKind::Button),
             ("/clock.json", NodeKind::Clock),
