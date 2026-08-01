@@ -15,7 +15,7 @@ use lpc_model::{
 };
 use lps_q32::q32::{Q32, ToQ32};
 
-use crate::nodes::fixture::gamma::apply_gamma;
+use crate::nodes::fixture::gamma::apply_gamma16;
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators, mapping_from_map2d_doc,
@@ -907,9 +907,9 @@ fn render_direct_fixture_control(
         let mut g = apply_brightness_unorm16(rgba[1], settings.brightness, brightness);
         let mut b = apply_brightness_unorm16(rgba[2], settings.brightness, brightness);
         if settings.gamma_correction {
-            r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-            g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-            b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
+            r = apply_gamma16(r);
+            g = apply_gamma16(g);
+            b = apply_gamma16(b);
         }
         // After gamma, never before. See `power_limit`.
         let r = power.channel(r);
@@ -1092,9 +1092,9 @@ fn finalize_fixture_rgb(
     let mut g = apply_brightness_unorm16(g, brightness_u8, brightness);
     let mut b = apply_brightness_unorm16(b, brightness_u8, brightness);
     if gamma_correction {
-        r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-        g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-        b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
+        r = apply_gamma16(r);
+        g = apply_gamma16(g);
+        b = apply_gamma16(b);
     }
     ordered_rgb_u16(color_order, r, g, b)
 }
@@ -1312,9 +1312,9 @@ fn render_fixture_control_target(
         let mut b = b_q.to_u16_saturating();
 
         if gamma_correction {
-            r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
-            g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
-            b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
+            r = apply_gamma16(r);
+            g = apply_gamma16(g);
+            b = apply_gamma16(b);
         }
 
         // After gamma, never before: scaling gamma's input sheds roughly the

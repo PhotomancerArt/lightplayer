@@ -60,19 +60,6 @@ impl UiActivityView {
             step.state = state;
         }
     }
-
-    /// Append a terminal output line.
-    pub fn push_terminal_line(&mut self, line: impl Into<String>) {
-        self.terminal.push(UiTerminalLine::new(line));
-    }
-
-    /// Keep only the most recent terminal output lines.
-    pub fn retain_recent_terminal_lines(&mut self, max_lines: usize) {
-        if self.terminal.len() > max_lines {
-            let remove_count = self.terminal.len() - max_lines;
-            self.terminal.drain(0..remove_count);
-        }
-    }
 }
 
 /// One step inside a `UiActivityView`.
