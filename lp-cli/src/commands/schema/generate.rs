@@ -3,11 +3,13 @@
 //! Generates, from the model's static slot shape catalog and the board
 //! manifest serde types:
 //!
-//! - `project.schema.json` — authored `project.json` roots: top-level
-//!   `kind: "Module"` const, `format` pinned to
-//!   [`lpc_model::PROJECT_FORMAT_VERSION`], and the compiled `ModuleDef`
-//!   shape (mirrors the loader gate in `lpc-registry`, which rejects project
-//!   roots whose `format` is missing or mismatched).
+//! - `project.schema.json` — the `project.json` container manifest (not a
+//!   node envelope): `format` pinned to
+//!   [`lpc_model::PROJECT_FORMAT_VERSION`], optional `uid`/`name`, nothing
+//!   else (mirrors the loader gate in `lpc-registry`, which hard-refuses a
+//!   missing/malformed manifest and rejects mismatched formats).
+//! - `module.schema.json` — the `module.json` root module node artifact:
+//!   top-level `kind: "Module"` const plus the compiled `ModuleDef` shape.
 //! - `node.schema.json` — any authored node artifact: `oneOf` over every
 //!   registered node kind, discriminated by top-level `kind`.
 //! - `hardware.schema.json` — the plain-serde board manifest
@@ -71,7 +73,11 @@ fn generate_outputs() -> Result<BTreeMap<String, String>> {
 
     outputs.insert(
         String::from("project.schema.json"),
-        render_schema(project_schema(&registry)?, "project.schema.json")?,
+        render_schema(project_schema()?, "project.schema.json")?,
+    );
+    outputs.insert(
+        String::from("module.schema.json"),
+        render_schema(module_schema(&registry)?, "module.schema.json")?,
     );
     outputs.insert(
         String::from("node.schema.json"),
@@ -133,63 +139,73 @@ fn populated_registry() -> Result<SlotShapeRegistry> {
     Ok(registry)
 }
 
-/// Schema for authored `project.json` roots.
+/// Schema for the `project.json` container manifest.
+///
+/// The container is NOT a node envelope (docs/design/modules.md §1/§6): it
+/// carries the workspace identity — `format` pinned to the current
+/// [`PROJECT_FORMAT_VERSION`], optional `uid` and `name` — and nothing
+/// else (`additionalProperties: false` mirrors the strict streaming reader
+/// in `lpc_model::ProjectManifest`, which rejects unknown fields).
+fn project_schema() -> Result<Value> {
+    Ok(json!({
+        "title": "LightPlayer project container manifest",
+        "description": "Workspace identity of a project folder: format \
+    version, library uid, and display name. Not a node artifact — the root \
+    module node lives in module.json.",
+        "type": "object",
+        "properties": {
+            "format": {
+                "title": "Authored format version",
+                "const": PROJECT_FORMAT_VERSION,
+            },
+            "uid": {
+                "title": "Stable project identity (prj_…, base-62)",
+                "type": "string",
+            },
+            "name": {
+                "title": "Human-readable project name",
+                "type": "string",
+            },
+        },
+        "required": ["format"],
+        "additionalProperties": false,
+    }))
+}
+
+/// Schema for the `module.json` root module node artifact.
 ///
 /// Compiled as a single-variant `kind`-tagged enum over `ModuleDef`, so the
 /// discriminator/flattening semantics come from the same compiler that
-/// produces `node.schema.json`; then `format` is pinned to the current
-/// [`PROJECT_FORMAT_VERSION`] and required alongside `kind`, mirroring the
-/// P1 loader gate (`lpc-registry` rejects project roots whose `format` is
-/// missing or does not match).
-fn project_schema(registry: &SlotShapeRegistry) -> Result<Value> {
+/// produces `node.schema.json`.
+fn module_schema(registry: &SlotShapeRegistry) -> Result<Value> {
     let root_shape = SlotShape::Enum {
         meta: SlotMeta::empty(),
         encoding: SlotEnumEncoding::tagged_kind(),
         variants: vec![
             SlotVariantShape::new("Module", SlotShape::reference(ModuleDef::SHAPE_ID))
-                .map_err(|error| anyhow!("project variant name: {error}"))?,
+                .map_err(|error| anyhow!("module variant name: {error}"))?,
         ],
     };
     let compiled = compile_slot_shape_schema(registry, &root_shape);
     let Value::Object(mut envelope) = compiled else {
-        bail!("compiled project schema is not a JSON object");
+        bail!("compiled module schema is not a JSON object");
     };
 
     // Unwrap the single oneOf branch into the document root, keeping the
     // compiler's envelope keys.
     let branches = envelope.remove("oneOf");
     let Some(Value::Array(mut branches)) = branches else {
-        bail!("compiled project schema has no oneOf envelope");
+        bail!("compiled module schema has no oneOf envelope");
     };
     let (Some(Value::Object(mut root)), true) = (branches.pop(), branches.is_empty()) else {
-        bail!("compiled project schema is not a single-variant oneOf");
+        bail!("compiled module schema is not a single-variant oneOf");
     };
     for key in ["$schema", "$defs"] {
         if let Some(value) = envelope.remove(key) {
             root.insert(String::from(key), value);
         }
     }
-
-    let properties = root
-        .get_mut("properties")
-        .and_then(Value::as_object_mut)
-        .ok_or_else(|| anyhow!("compiled project schema has no properties object"))?;
-    let compiled_format = properties
-        .remove("format")
-        .ok_or_else(|| anyhow!("compiled ModuleDef shape has no `format` field"))?;
-    let mut format = Map::new();
-    // Keep compiler-emitted presentation text on the pinned constant.
-    if let Value::Object(compiled_format) = compiled_format {
-        for key in ["title", "description"] {
-            if let Some(value) = compiled_format.get(key) {
-                format.insert(String::from(key), value.clone());
-            }
-        }
-    }
-    format.insert(String::from("const"), json!(PROJECT_FORMAT_VERSION));
-    properties.insert(String::from("format"), Value::Object(format));
-
-    root.insert(String::from("required"), json!(["kind", "format"]));
+    root.insert(String::from("required"), json!(["kind"]));
     Ok(Value::Object(root))
 }
 
@@ -420,18 +436,38 @@ mod tests {
     }
 
     #[test]
-    fn project_schema_pins_kind_and_format() {
+    fn project_schema_is_a_closed_container_manifest() {
         let outputs = generate_outputs().unwrap();
         let project: Value = serde_json::from_str(&outputs["project.schema.json"]).unwrap();
-        assert_eq!(project["properties"]["kind"]["const"], json!("Module"));
         assert_eq!(
             project["properties"]["format"]["const"],
             json!(PROJECT_FORMAT_VERSION)
         );
-        assert_eq!(project["required"], json!(["kind", "format"]));
+        assert_eq!(project["required"], json!(["format"]));
+        assert_eq!(project["additionalProperties"], json!(false));
+        assert!(
+            project["properties"]["kind"].is_null(),
+            "not a node envelope"
+        );
         assert_eq!(
             project["$id"],
             json!(format!("{SCHEMA_ID_BASE}project.schema.json"))
+        );
+    }
+
+    #[test]
+    fn module_schema_pins_kind() {
+        let outputs = generate_outputs().unwrap();
+        let module: Value = serde_json::from_str(&outputs["module.schema.json"]).unwrap();
+        assert_eq!(module["properties"]["kind"]["const"], json!("Module"));
+        assert_eq!(module["required"], json!(["kind"]));
+        assert!(
+            module["properties"]["format"].is_null(),
+            "format is a container concern"
+        );
+        assert_eq!(
+            module["$id"],
+            json!(format!("{SCHEMA_ID_BASE}module.schema.json"))
         );
     }
 

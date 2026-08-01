@@ -130,9 +130,10 @@ fn run_chains(chains: &[usize]) -> (LpServer, Rc<RefCell<MemoryOutputProvider>>)
             .expect("file name")
             .to_string_lossy()
             .into_owned();
-        // The authored project.json wires all four chains; the subset under
-        // test gets a generated one in its place.
-        if name == "project.json" {
+        // The authored module.json wires all four chains; the subset under
+        // test gets a generated one in its place. The container manifest
+        // (project.json) carries no node wiring, so it is copied as-is.
+        if name == "module.json" {
             continue;
         }
         server
@@ -146,10 +147,10 @@ fn run_chains(chains: &[usize]) -> (LpServer, Rc<RefCell<MemoryOutputProvider>>)
     server
         .base_fs_mut()
         .write_file(
-            project.join("project.json").as_path(),
-            project_json(chains).as_bytes(),
+            project.join("module.json").as_path(),
+            module_json(chains).as_bytes(),
         )
-        .expect("write project.json");
+        .expect("write module.json");
 
     server
         .load_project(project.as_path())
@@ -160,7 +161,7 @@ fn run_chains(chains: &[usize]) -> (LpServer, Rc<RefCell<MemoryOutputProvider>>)
     (server, provider)
 }
 
-fn project_json(chains: &[usize]) -> String {
+fn module_json(chains: &[usize]) -> String {
     let mut nodes = String::from(
         "\"clock\": {\"ref\": \"./clock.json\"}, \"shader\": {\"ref\": \"./shader.json\"}",
     );
@@ -170,9 +171,7 @@ fn project_json(chains: &[usize]) -> String {
              , \"output{chain}\": {{\"ref\": \"./output{chain}.json\"}}"
         ));
     }
-    format!(
-        "{{\"kind\": \"Module\", \"format\": 2, \"name\": \"Quad strips\", \"nodes\": {{{nodes}}}}}"
-    )
+    format!("{{\"kind\": \"Module\", \"nodes\": {{{nodes}}}}}")
 }
 
 fn endpoint(spec: &str) -> HwEndpointSpec {

@@ -291,16 +291,8 @@
     {
       "additionalProperties": false,
       "properties": {
-        "format": {
-          "maximum": 4294967295,
-          "minimum": 0,
-          "type": "integer"
-        },
         "kind": {
           "const": "Module"
-        },
-        "name": {
-          "type": "string"
         },
         "nodes": {
           "additionalProperties": {
@@ -333,9 +325,6 @@
             ]
           },
           "type": "object"
-        },
-        "uid": {
-          "type": "string"
         }
       },
       "required": [

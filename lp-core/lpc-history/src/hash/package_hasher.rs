@@ -109,7 +109,7 @@ mod tests {
         let (hash, _) = hash_package(&fs).unwrap();
         assert_eq!(
             alloc::format!("{hash}"),
-            "4871c9a4ff89d732ed427d084e3ccbffb72d4ee5821a7ff81d36530f9d98bfc7"
+            "60f376ec4c9a27e0aae36f58714d7b35c083456d637a403d9b158dfbb088ca10"
         );
     }
 }

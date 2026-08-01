@@ -509,9 +509,9 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = r#"{
+    let project_json = "{\n  \"format\": 3\n}\n";
+    let module_json = r#"{
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "shader": { "ref": "./shader.json" },
@@ -577,6 +577,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let files: &[(&str, &str)] = &[
         ("project.json", project_json),
+        ("module.json", module_json),
         ("clock.json", clock_json),
         ("shader.json", shader_json),
         ("fixture.json", fixture_json),
@@ -615,9 +616,9 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = r#"{
+    let project_json = "{\n  \"format\": 3\n}\n";
+    let module_json = r#"{
   "kind": "Module",
-  "format": 2,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "playlist": { "ref": "./playlist.json" },
@@ -668,6 +669,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let files: &[(&str, &str)] = &[
         ("project.json", project_json),
+        ("module.json", module_json),
         ("clock.json", clock_json),
         ("playlist.json", playlist_json.as_str()),
         ("idle.json", idle_json),

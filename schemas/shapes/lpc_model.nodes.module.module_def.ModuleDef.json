@@ -2,66 +2,6 @@
   "record": {
     "fields": [
       {
-        "name": "format",
-        "policy": {
-          "writable": false
-        },
-        "shape": {
-          "option": {
-            "meta": {},
-            "some": {
-              "value": {
-                "shape": {
-                  "editor": "plain",
-                  "id": 3065358156,
-                  "meta": {},
-                  "ty": "u32"
-                }
-              }
-            }
-          }
-        }
-      },
-      {
-        "name": "uid",
-        "policy": {
-          "writable": false
-        },
-        "shape": {
-          "option": {
-            "meta": {},
-            "some": {
-              "value": {
-                "shape": {
-                  "editor": "plain",
-                  "id": 2612013983,
-                  "meta": {},
-                  "ty": "string"
-                }
-              }
-            }
-          }
-        }
-      },
-      {
-        "name": "name",
-        "shape": {
-          "option": {
-            "meta": {},
-            "some": {
-              "value": {
-                "shape": {
-                  "editor": "plain",
-                  "id": 2612013983,
-                  "meta": {},
-                  "ty": "string"
-                }
-              }
-            }
-          }
-        }
-      },
-      {
         "name": "nodes",
         "policy": {
           "writable": false

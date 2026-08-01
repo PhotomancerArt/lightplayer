@@ -10,15 +10,18 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-/// Create a test project directory with project.json
+/// Create a test project directory with a split project.json container
+/// manifest and module.json root module (project/module mitosis).
 fn create_test_project_dir() -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().unwrap();
     let project_dir = temp_dir.path().join("test-project");
     fs::create_dir_all(&project_dir).unwrap();
 
-    let project_json = r#"{ "kind": "Module", "format": 2, "name": "test-project" }
-"#;
+    let project_json = "{\n  \"format\": 3,\n  \"name\": \"test-project\"\n}\n";
     fs::write(project_dir.join("project.json"), project_json).unwrap();
+
+    let module_json = "{\n  \"kind\": \"Module\",\n  \"nodes\": {}\n}\n";
+    fs::write(project_dir.join("module.json"), module_json).unwrap();
 
     (temp_dir, project_dir)
 }
