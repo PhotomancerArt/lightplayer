@@ -10,7 +10,9 @@
 //! M2 UX spike: the state below is carried by mock fixtures. The engine
 //! runtime that materializes real panel writers is M4's.
 
-use crate::UiPanelControl;
+use crate::{
+    UiPanelControl, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+};
 
 /// The three visibly distinct states a panel control can be in
 /// (`docs/design/panel.md` P2; the three-state requirement is P-Q2).
@@ -92,6 +94,72 @@ impl UiPanelControlView {
         self.state = state;
         self.source = source.map(Into::into);
         self
+    }
+
+    /// The control's detail-popup sections.
+    ///
+    /// A control on the face is widget + label + value and nothing else —
+    /// a control panel, not a spec sheet. Everything that used to sit under
+    /// it as a caption lives here instead, behind the label: which of the
+    /// three states it is in, what drives it, what a held value displaced,
+    /// and the `(scope, channel)` identity itself (P1).
+    ///
+    /// The widget's own aspects (validation, type info, binding on the
+    /// backing slot) follow, so the panel popup is a superset of the slot
+    /// popup rather than a fork of it.
+    pub fn detail_aspects(&self, scope: &str) -> Vec<UiSlotAspect> {
+        let mut aspects = vec![self.state_aspect()];
+        aspects.push(
+            UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Channel")
+                .with_row(UiSlotAspectRow::new("Name", self.control.label.clone()))
+                .with_row(UiSlotAspectRow::new("Channel", self.channel.clone()))
+                .with_row(UiSlotAspectRow::new("Scope", scope)),
+        );
+        aspects.extend(self.control.aspects.iter().cloned());
+        aspects
+    }
+
+    /// The panel-state section: one title per state, and rows that say what
+    /// the state displaced.
+    fn state_aspect(&self) -> UiSlotAspect {
+        let source = self.source.clone();
+        match self.state {
+            UiPanelControlState::Engaged => {
+                let aspect = UiSlotAspect::new(UiSlotAspectKind::PanelState, "Held")
+                    .with_affordance(UiSlotAffordance::Edited)
+                    .with_row(UiSlotAspectRow::new(
+                        "",
+                        "This panel holds the channel; other writers are shadowed until it is reset.",
+                    ));
+                match source {
+                    Some(source) => aspect.with_row(UiSlotAspectRow::new("Was", source)),
+                    None => aspect,
+                }
+            }
+            UiPanelControlState::ReadFollowing => {
+                let aspect = UiSlotAspect::new(UiSlotAspectKind::PanelState, "Following")
+                    .with_affordance(UiSlotAffordance::Bound)
+                    .with_row(UiSlotAspectRow::new(
+                        "",
+                        "Something else drives this channel; turning the control takes it over.",
+                    ));
+                match source {
+                    Some(source) => aspect.with_row(UiSlotAspectRow::new("Driven by", source)),
+                    None => aspect,
+                }
+            }
+            UiPanelControlState::ReadDefault => {
+                let aspect = UiSlotAspect::new(UiSlotAspectKind::PanelState, "At default")
+                    .with_row(UiSlotAspectRow::new(
+                        "",
+                        "Nothing writes this channel, so the consuming slot uses its own default.",
+                    ));
+                match source {
+                    Some(source) => aspect.with_row(UiSlotAspectRow::new("Value from", source)),
+                    None => aspect,
+                }
+            }
+        }
     }
 }
 
