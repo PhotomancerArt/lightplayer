@@ -123,6 +123,10 @@ pub struct WireBusChannel {
     pub consumers: Vec<u32>,
     /// Resolved current value, present when the request asked for values.
     pub value: Option<WireBusChannelValue>,
+    /// Engine-reported root-scope role: true for THE channel the root
+    /// module's output interface mirrors (the project's primary visual).
+    /// Consumers must key off this flag, never off the channel name.
+    pub primary_visual: bool,
 }
 
 /// A channel's resolved value (or the resolution failure) at the snapshot
@@ -171,6 +175,7 @@ mod tests {
                     value: None,
                     error: None,
                 }),
+                primary_visual: false,
             }],
         };
         let result = BindingGraphProbeResult::Graph(graph.clone());
