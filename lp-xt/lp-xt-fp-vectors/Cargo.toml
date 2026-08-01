@@ -1,0 +1,16 @@
+[package]
+name = "lp-xt-fp-vectors"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Deterministic, float-free, no_std generator for the M6 Xtensa FP conformance corpus."
+
+[lints]
+workspace = true
+
+# No dependencies, on purpose. The crate compiles into `fw-esp32s3`'s
+# conformance harness as well as into host tests, and both sides must generate
+# byte-identical vectors — a dependency (including `rand`) is a way for them to
+# drift. The PRNG is written out here for the same reason.
+[dependencies]

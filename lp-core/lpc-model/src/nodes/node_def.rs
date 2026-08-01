@@ -783,7 +783,7 @@ mod tests {
             r#"{
   "kind": "Output",
   "endpoint": "ws281x:rmt:D10",
-  "options": { "brightness": 0.5 }
+  "options": { "dithering_enabled": false }
 }"#,
         )
         .expect("output");

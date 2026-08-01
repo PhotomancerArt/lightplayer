@@ -14,10 +14,13 @@ and a device render can be compared without synchronising anything. Add a time
 input and the comparison needs the two sides to agree on *when*, which they
 never will.
 
-**Exactly 64 LEDs.** `SerialReadoutWs281xDriver` caps its one-shot hex dump at
-64 LEDs. At exactly 64 the dump is the *whole* frame, so the comparison covers
-every byte. Make the fixture bigger and the diff silently becomes a prefix
-check — passing while the untested tail diverges.
+**Exactly 64 LEDs.** The device-side readout caps its one-shot hex dump at
+`MAX_DUMP_LEDS` — 64, in
+`lp-fw/fw-esp32s3/src/output/rmt/frame_dump.rs`. At exactly 64 the dump is the
+*whole* frame, so the comparison covers every byte. Make the fixture bigger and
+the diff silently becomes a prefix check — passing while the untested tail
+diverges. The host test transcribes the same constant, so raising the fixture
+means raising both.
 
 **A neutral output pipeline.** `output.json` sets `white_point [1,1,1]`,
 `brightness 1`, and LUT, dithering and interpolation all off. Under exactly that
@@ -38,6 +41,12 @@ ramps would render plausibly through a half-broken backend; this one does not.
 cargo test -p lpa-server --test shader_oracle_frame -- --nocapture
 scripts/m4-hardware-walk.sh            # flash an ESP32-S3, push, render, compare
 ```
+
+The walk flashes `just flash-fw-esp32s3 <port> frame-dump`. The RMT driver now
+drives real LEDs, and an LED cannot be diffed; `frame-dump` is the opt-in
+feature that also prints each transmitted frame as `[OUT] dump …` / `[OUT]
+frame …`. A default build renders exactly the same bytes and says nothing about
+them, so the walk would report "nothing rendered".
 
 The test prints two transcripts. `[ORACLE]` is wasmtime; `[ORACLE-RV32]` is
 `lpvm-native`'s rv32 emulation — the same code generator firmware JITs, one ISA

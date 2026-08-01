@@ -61,6 +61,11 @@ pub struct Engine {
     services: EngineServices,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
+    /// The tree shape and resolver epoch as of the last tick, so that a
+    /// structural change that forgot to invalidate resolution is caught here
+    /// rather than by someone noticing a stale value on a device.
+    #[cfg(debug_assertions)]
+    last_structural_check: Option<((usize, usize, Revision), u64)>,
 }
 
 impl Engine {
@@ -83,6 +88,8 @@ impl Engine {
             services,
             demand_roots: Vec::new(),
             graphics: None,
+            #[cfg(debug_assertions)]
+            last_structural_check: None,
         }
     }
 
@@ -169,7 +176,7 @@ impl Engine {
         }
         self.demand_roots.retain(|root| !ids.contains(root));
         self.tree.remove_subtree(node, frame)?;
-        self.resolver.clear_frame_cache();
+        self.resolver.invalidate_structure();
         Ok(())
     }
 
@@ -181,7 +188,7 @@ impl Engine {
     ) -> Result<(), EngineError> {
         self.cleanup_runtime_node(node, frame)?;
         self.attach_runtime_node(node, runtime, frame)?;
-        self.resolver.clear_frame_cache();
+        self.resolver.invalidate_structure();
         Ok(())
     }
 
@@ -241,7 +248,22 @@ impl Engine {
         draft: BindingDraft,
         revision: Revision,
     ) -> Result<BindingRef, BindingError> {
-        self.tree.add_binding(draft, revision)
+        let binding_ref = self.tree.add_binding(draft, revision)?;
+        // A new binding can win a slot that already resolved, so every
+        // cached decision about that slot is now wrong.
+        self.resolver.invalidate_structure();
+        Ok(binding_ref)
+    }
+
+    /// Drop every node-owned binding. The loader's binding phase re-registers
+    /// from defs afterwards; see [`crate::node::RuntimeNodeTree::clear_bindings`].
+    ///
+    /// Goes through the engine rather than the tree so that emptying the
+    /// binding graph invalidates resolution on its own, instead of depending
+    /// on a later `add_binding` happening to do it.
+    pub fn clear_bindings(&mut self, revision: Revision) {
+        self.tree.clear_bindings(revision);
+        self.resolver.invalidate_structure();
     }
 
     /// Optional graphics backend for core shader nodes; clone is cheap (`Arc`).
@@ -312,15 +334,6 @@ impl Engine {
             NodeEntryState::Alive(node) => node.runtime_output_sink_buffer_id(),
             _ => None,
         }
-    }
-
-    pub(crate) fn loaded_node_def_for_entry<'a, N>(
-        &self,
-        registry: &'a ProjectRegistry,
-        entry: &RuntimeNodeEntry<N>,
-    ) -> Option<&'a NodeDef> {
-        let location = entry.def_location.as_ref()?;
-        loaded_registry_def(registry, location).ok()
     }
 
     // Consumed by texture and shader node test modules (and the
@@ -397,25 +410,38 @@ impl Engine {
         result
     }
 
+    /// Re-read every output's authored configuration for this tick.
+    ///
+    /// The tree and the services are borrowed as separate fields so the defs
+    /// can be read while the sinks are updated. Collecting the work first
+    /// instead cost a full clone of every output's definition — endpoint spec
+    /// and all — on every frame, to almost always discover that nothing had
+    /// changed.
     fn refresh_output_sink_configs(&mut self, registry: &ProjectRegistry) {
-        let mut updates = Vec::new();
-        for entry in self.tree.entries() {
-            let Some(buffer_id) = self.runtime_output_sink_buffer_id(entry.id) else {
+        let tree = &self.tree;
+        let services = &mut self.services;
+        for entry in tree.entries() {
+            let buffer_id = match entry.state.value() {
+                NodeEntryState::Alive(node) => node.runtime_output_sink_buffer_id(),
+                _ => None,
+            };
+            let Some(buffer_id) = buffer_id else {
                 continue;
             };
-            let Some(NodeDef::Output(def)) = self.loaded_node_def_for_entry(registry, entry) else {
+            let Some(location) = entry.def_location.as_ref() else {
                 continue;
             };
-            updates.push((buffer_id, def.clone()));
-        }
-
-        for (buffer_id, def) in updates {
-            self.services.update_output_sink_config(buffer_id, &def);
+            let Ok(NodeDef::Output(def)) = loaded_registry_def(registry, location) else {
+                continue;
+            };
+            services.update_output_sink_config(buffer_id, def);
         }
     }
 
     fn tick_nodes(&mut self, registry: &ProjectRegistry, delta_ms: u32) -> Result<(), EngineError> {
-        self.resolver.clear_frame_cache();
+        #[cfg(debug_assertions)]
+        self.assert_structural_changes_were_announced();
+        self.resolver.begin_frame();
         self.frame_num = self.frame_num.next();
         self.revision = advance_revision();
         self.frame_time =
@@ -451,6 +477,34 @@ impl Engine {
 
         self.resolver = resolver;
         Ok(())
+    }
+
+    /// Fail loudly when the graph changed shape without anyone calling
+    /// [`Resolver::invalidate_structure`].
+    ///
+    /// The invalidation contract is the load-bearing rule behind persisting
+    /// resolution across frames, and breaking it is silent by nature: the
+    /// resolver keeps serving an answer that is stale but entirely plausible.
+    /// Prose in an ADR does not survive contact with a new mutation site, so
+    /// the rule checks itself.
+    ///
+    /// Debug builds only — release firmware pays nothing. That is the right
+    /// trade for a guard whose whole job is to fire during development and
+    /// tests, long before a device is involved.
+    #[cfg(debug_assertions)]
+    fn assert_structural_changes_were_announced(&mut self) {
+        let fingerprint = self.tree.structural_fingerprint();
+        let epoch = self.resolver.structure_epoch();
+        if let Some((previous_fingerprint, previous_epoch)) = self.last_structural_check {
+            debug_assert!(
+                fingerprint == previous_fingerprint || epoch != previous_epoch,
+                "the node tree changed shape ({previous_fingerprint:?} -> {fingerprint:?}) \
+                 without Resolver::invalidate_structure(); resolution cached against the old \
+                 graph is now being served. Whatever mutated the tree or its bindings must \
+                 announce it — see docs/adr/2026-07-31-resolver-persistent-resolution.md"
+            );
+        }
+        self.last_structural_check = Some((fingerprint, epoch));
     }
 
     /// Materialize a visual product handle into a CPU texture.
@@ -500,7 +554,10 @@ impl Engine {
         let key = QueryKey::Bus(lpc_model::ChannelName(channel.to_string()));
         let fid = self.revision;
         let mut resolver_tmp = core::mem::replace(&mut self.resolver, Resolver::new());
-        resolver_tmp.clear_frame_cache();
+        // A forced-fresh read, not an invalidation: the caller wants values
+        // re-resolved rather than whatever the last tick left behind. The
+        // graph has not changed, so structural knowledge must survive.
+        resolver_tmp.begin_frame();
         let mut session = EngineSession::new(
             fid,
             &mut resolver_tmp,
@@ -523,7 +580,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
         };
-        let result = session.resolve(&mut host, key);
+        let result = session.resolve(&mut host, &key);
         self.resolver = resolver_tmp;
         let production = result?;
         let Some(leaf) = production.value_leaf() else {
@@ -611,7 +668,7 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
         };
-        let result = session.resolve(&mut host, QueryKey::Bus(channel.clone()));
+        let result = session.resolve(&mut host, &QueryKey::Bus(channel.clone()));
         self.resolver = resolver;
         result
     }
@@ -1844,7 +1901,7 @@ pub(crate) fn resolve_with_engine_host(
 ) -> Result<(Production, ResolveTrace), SessionResolveError> {
     let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
-    resolver_tmp.clear_frame_cache();
+    resolver_tmp.begin_frame();
     let mut session = EngineSession::new(fid, &mut resolver_tmp, ResolveTrace::new(log_level));
     let mut producers_ticked = VecSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
@@ -1864,7 +1921,7 @@ pub(crate) fn resolve_with_engine_host(
         frame_time_seconds: time_s,
     };
     let result = session
-        .resolve(&mut host, key)
+        .resolve(&mut host, &key)
         .map(|pv| (pv, session.trace().clone()));
     eng.resolver = resolver_tmp;
     result
@@ -1878,7 +1935,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
 ) -> Result<(Production, Production), SessionResolveError> {
     let fid = eng.revision;
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
-    resolver_tmp.clear_frame_cache();
+    resolver_tmp.begin_frame();
     let mut session = EngineSession::new(
         fid,
         &mut resolver_tmp,
@@ -1901,9 +1958,9 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
     };
-    let result = session.resolve(&mut host, key.clone()).and_then(|first| {
+    let result = session.resolve(&mut host, &key).and_then(|first| {
         session
-            .resolve(&mut host, key)
+            .resolve(&mut host, &key)
             .map(|second| (first, second))
     });
     eng.resolver = resolver_tmp;

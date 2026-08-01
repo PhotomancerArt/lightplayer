@@ -72,6 +72,7 @@ ivec4 test_ivec4_multiply_in_assignment() {
 // run: test_ivec4_multiply_in_assignment() == ivec4(12, 21, 8, 18)
 
 ivec4 test_ivec4_multiply_large_numbers() {
+    // Integer vectors use exact arithmetic.
     ivec4 a = ivec4(1000, 2000, 3000, 4000);
     ivec4 b = ivec4(3000, 1000, 2000, 500);
     return a * b;

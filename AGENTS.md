@@ -101,6 +101,19 @@ Do NOT disable the compiler. The compiler is the product.
 - **Default server/engine builds include the full compiler pipeline.** Optional
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
   test builds), not for *adding* the compiler.
+- **`float-f32`** (`lpvm-native`, `lps-builtins`) enables IEEE-754 f32 shader
+  math alongside Q16.16. Off by default: `FloatMode` is matched on a *runtime*
+  value, so LTO cannot drop the f32 arms, and the shipping ESP32-C6 runs
+  Fixed-mode shaders only. The one device configuration that turns it on is
+  `fw-esp32c6`'s `test_f32_softfloat` harness — a test build, never product
+  firmware. See `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+
+> **Gating the crate that *uses* a table does not gate the crate that *holds*
+> it.** `lps-builtin-ids` is linked by every firmware image and is not behind
+> `float-f32`; reaching its f32 name→id tables on a runtime value cost
+> **+3,904 B** on the C6 before the resolver was pinned to Q32 in feature-off
+> builds. Measure with `just fw-esp32c6-size-check` on both sides of a feature
+> gate, not just the side you added.
 
 ## Sans-IO core
 
@@ -194,6 +207,27 @@ an `isa-*` Cargo feature so firmware pays only for the one it runs. `rt_emu` is
 is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
 targets; it needs a cross-compiled builtins image
 (`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
+
+**Xtensa floating point is proven equal to real ESP32-S3 silicon (M6, G2
+passed 2026-08-01).** `lp-xt-inst` encodes the FP subset and `lp-xt-emu`
+executes it behind an explicit policy layer where every corner IEEE-754 does
+not fix is either measured (cited to the ISA Reference Manual, silicon-
+confirmed, or silicon alone) or `Unknown` — and **reading an `Unknown`
+panics** rather than guessing. All 17 policy fields are now measured; the
+behavior contract, corner by corner with its proving vector family, is
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`.
+`cargo test -p lp-xt-emu --test fp_conformance` replays the whole 5 630-vector
+corpus with no board attached and asserts **zero** `UNKNOWN` rows;
+`cargo test -p lp-xt-emu --test fp_silicon_replay` replays the campaign's own
+silicon captures (ROM sweeps, helper probes, the full family diff) with no
+board attached either — that pair is what makes "the emulator is trusted"
+something CI enforces on every commit. `just fwtest-xt-fp-esp32s3 <port>` runs
+the same vectors on a desk S3 and `just fp-diff <capture>` classifies the
+answers, for the rare case the contract itself needs re-checking. The
+predictions were committed before any hardware ran, so **a device
+disagreement is a finding to triage, never a reason to edit a golden**. Do
+not resolve a policy field without a citation naming a manual page or a dated
+desk session.
 
 > **`regalloc/` is shared by both ISAs, and rv32 passing does not prove it
 > correct.** Two defects landed there in 2026-07 that were correct on rv32 only
@@ -322,31 +356,72 @@ test module at the bottom anyway.
 New agent planning work uses the Photomancer personal planning workspace, not
 new repo-local plan or roadmap directories.
 
-This repo uses the `pm-*` (pm = Photomancer) skills, **not** the `yona-*`
-skills. The `yona-*` planning/review skills write to repo-local
-`docs/plans/` and `docs/reviews/`, which are legacy locations here; if both
-families are installed, always pick `pm-*`.
+This repo uses the `yona-*` skills. They read `agent-context.toml` at the repo
+root to decide where planning artifacts go, so the same skills that write
+repo-local `docs/plans/` elsewhere write the shared Photomancer workspace here.
+The `pm-*` family is retired — it was a fork of the same skills that drifted
+from its source and lost its PR rules. If you find a `pm-*` command still
+installed anywhere, it is stale; use `yona-*`.
 
-- Use `pm-plan` for new planning, roadmap, and investigation artifacts.
-- Use `pm-implement` to execute an existing shared `plan.md`.
-- Use `pm-review` for durable review artifacts.
-- Push/PR/CI-watch: there is no `pm-push` yet. Follow the same flow
-  (push, create PR, watch checks, focused CI repair) directly, or via
-  `yona-push` — it is location-neutral, so it is the one tolerated
-  `yona-*` skill until a `pm-push` exists.
-- Resolve context from `agent-context.toml`; the repo slug is `lp2025`.
-- Resolve the workspace from `PHOTOMANCER_PLANNING_ROOT`, or from the default
-  `~/.photomancer/planning` link.
+- Use `yona-plan` for new planning, roadmap, and investigation artifacts.
+- Use `yona-implement` to execute an existing `plan.md`. It runs to the first
+  declared review gate, or to a pull request when the plan declares none, and
+  it opens and drives that PR itself.
+- Use `yona-review` for durable review artifacts.
+- Use `yona-push` only for a branch that already has the work on it but no PR.
+  `yona-implement` does not hand off to it.
+- Resolve context from `agent-context.toml`; the repo slug is `lp2025` and
+  `planning_root` is `~/.photomancer/planning`. `PHOTOMANCER_PLANNING_ROOT`
+  overrides it when set.
 - Store new active artifacts under
-  `<planning-root>/lp2025/<YYYY-MM-DD>-<name>/`.
+  `<planning-root>/lp2025/<YYYY-MM-DD-HHMM>-<name>/`.
 - Store completed artifacts under `<planning-root>/lp2025/_archive/`.
 - Store review artifacts under `<planning-root>/lp2025/_reviews/`.
+
+Many existing planning directories are date-only (`2026-07-28-fw-esp32-prep`)
+and some phase files use the legacy `01-*.md` naming instead of `p1-*.md`.
+Read both; only new artifacts follow the current convention. Never rename an
+existing planning directory or phase file to match it.
+
+The skills live in `github.com/Yona-Appletree/2026-ai-teaching`, symlinked into
+`~/.claude/skills` by that repo's `install.sh`. There is one editable copy of
+each skill: the one in that repo. Never edit the installed path — you would be
+editing the checkout, and a process fix that lands only in an installed copy is
+how the `pm-*` fork happened.
 
 Durable decisions belong in repo ADRs under `docs/adr/`. Intermediate plans,
 phase prompts, review notes, scratch reports, and implementation logs belong in
 the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
 `docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
 be migrated unless a separate migration plan asks for it.
+
+### Implementation runs to a gate or to a PR
+
+Implementation does not stop at phase boundaries. It runs from the start of a
+plan to the first declared review gate, and from the last gate to a pull
+request with CI watched to green. A phase boundary whose `Review gate:` is
+`none` is not a stopping point, and neither is a commit, nor "the code is
+written, shall I push?".
+
+The pull request is part of the pipeline, not a follow-up. Open it as a draft
+at the first commit — before validation passes — so the path-gated CI in
+`.github/workflows/pre-merge.yml` starts giving signal while there is still
+time to react. It goes ready for review when the work is complete, CI is green,
+and no gate is pending; a plan that ends at a review gate keeps its PR in
+draft. Title it `<type>: <plan title>` from the plan's H1 and open the body
+with `Plan: lp2025/<planning-dir>` so PRs correlate to the planning workspace.
+
+This applies to every session, not just delegated ones. See
+`docs/process/review-gates.md`.
+
+### Defect and debt registers during implementation
+
+When implementation fixes a user-reported or walk-found defect, write or close
+its `docs/defects/` entry in the same change (see `docs/defects/README.md`).
+When it hits a recurring operational burden, check `docs/debt/` for the entry,
+follow its Workarounds, and append the incident; file a new entry only for a
+structural, recurring burden. Do the same during push and CI repair — a CI
+failure that matches a known burden belongs in that entry's incident log.
 
 ## Dev server ports
 
@@ -383,10 +458,10 @@ approval, or final pre-merge review — follow
   AND post screenshots to chat with your leans. Never hand back "run the
   server to see it".
 - Always state the exact gate questions.
-- Sessions started from a task chip or delegation prompt run the full
-  pipeline by default: implement → validate → PR → CI green → review
-  handoff when the change is user-visible. Prompts that file task chips
-  must say so too.
+- Every session runs the full pipeline by default: implement → validate →
+  PR → CI green → review handoff when the change is user-visible. That
+  includes sessions started from a task chip or a delegation prompt, and
+  prompts that file task chips must say so too.
 
 Claude sessions: the repo skill `lp-review-handoff` executes this checklist.
 

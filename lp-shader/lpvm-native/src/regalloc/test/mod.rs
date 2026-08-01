@@ -2,3 +2,4 @@
 
 pub mod abi_fixtures;
 pub mod builder;
+mod float_alloc;

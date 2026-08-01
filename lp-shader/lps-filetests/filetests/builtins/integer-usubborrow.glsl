@@ -16,6 +16,9 @@ uvec2 test_usubborrow_uint_no_borrow() {
 // naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// wasm.f32: shader does not compile on any target (frontend gap) — same cause
+// as the @unsupported entries above, not an f32-specific failure.
+// @unsupported(wasm.f32)
 // run: test_usubborrow_uint_no_borrow() == uvec2(2u, 0u)
 
 uvec2 test_usubborrow_uint_with_borrow() {
@@ -28,6 +31,7 @@ uvec2 test_usubborrow_uint_with_borrow() {
 // naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_usubborrow_uint_with_borrow() == uvec2(4294967294u, 1u)
 
 uvec2 test_usubborrow_uint_zero() {
@@ -40,6 +44,7 @@ uvec2 test_usubborrow_uint_zero() {
 // naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_usubborrow_uint_zero() == uvec2(0u, 0u)
 
 uvec2 test_usubborrow_uint_equal() {
@@ -52,6 +57,7 @@ uvec2 test_usubborrow_uint_equal() {
 // naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_usubborrow_uint_equal() == uvec2(0u, 0u)
 
 uvec4 test_usubborrow_uvec2() {
@@ -64,6 +70,7 @@ uvec4 test_usubborrow_uvec2() {
 // naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_usubborrow_uvec2() == uvec4(2u, 4294967294u, 0u, 1u)
 
 uvec2 test_usubborrow_array_out() {
@@ -76,6 +83,7 @@ uvec2 test_usubborrow_array_out() {
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
+// @unsupported(wasm.f32)
 // run: test_usubborrow_array_out() == uvec2(4294967294u, 1u)
 
 

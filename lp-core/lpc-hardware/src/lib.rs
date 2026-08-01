@@ -11,6 +11,12 @@
 //! lists endpoints, and opens an endpoint by authored [`HwEndpointSpec`],
 //! internal [`HwEndpointId`], or physical [`HwAddress`].
 //!
+//! Listing endpoints is not cheap — each one carries a freshly computed status
+//! — so a caller that has been refused an endpoint should wait rather than ask
+//! again. [`HwRegistry::generation`] is the signal to wait on: it changes when
+//! ownership moves, which is the only thing that can turn a refusal into an
+//! acceptance. See `docs/adr/2026-07-31-output-sink-retry-policy.md`.
+//!
 //! Rendering and protocol-adjacent color processing live above this crate. For
 //! example, [`Ws281xOutput`] accepts already-rendered RGB bytes; display
 //! pipeline options remain in `lpc-shared`.
@@ -47,7 +53,9 @@ pub use drivers::radio::radio_message::{
 };
 pub use drivers::radio::virtual_radio_driver::VirtualRadioDriver;
 pub use drivers::ws281x::virtual_ws281x_driver::{VirtualWs281xDriver, VirtualWs281xOutput};
-pub use drivers::ws281x::ws281x_driver::{Ws281xConfig, Ws281xDriver, Ws281xOutput};
+pub use drivers::ws281x::ws281x_driver::{
+    WS281X_MAX_LEDS_PER_CHANNEL, Ws281xConfig, Ws281xDriver, Ws281xOutput, ws281x_capped_byte_count,
+};
 pub use endpoint::hw_endpoint::HwEndpoint;
 pub use endpoint::hw_endpoint_error::HardwareEndpointError;
 pub use endpoint::hw_endpoint_id::HwEndpointId;

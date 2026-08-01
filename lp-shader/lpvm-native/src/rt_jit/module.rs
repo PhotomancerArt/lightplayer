@@ -86,6 +86,12 @@ impl LpvmModule for NativeJitModule {
         &self.inner.meta
     }
 
+    /// The JIT always compiles for [`IsaTarget::native`] — the machine it is
+    /// running on — so the target needs no field of its own here.
+    fn float_impl(&self) -> lpvm::FloatImpl {
+        IsaTarget::native().float_impl_for(self.inner.options.float_mode)
+    }
+
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         let align = 16usize;
         let total_size = self.inner.meta.vmctx_buffer_size();

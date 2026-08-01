@@ -1,75 +1,128 @@
-//! Engine-level same-frame resolver cache keyed by [`super::QueryKey`].
+//! Engine resolution cache: per-frame values over persistent structure.
+//!
+//! Three tables, all indexed by [`QueryId`], with different lifetimes:
+//!
+//! - **frame values** — what a query resolved to *this frame*. Discarded each
+//!   frame, because producers tick and time moves.
+//! - **structural values** — what a query resolves to until the graph changes:
+//!   binding literals and authored-definition reads. A def read is a deep copy
+//!   of slot data, so re-doing it every frame was one of the larger costs.
+//! - **routes** — [`ResolvedRoute`], the decision about *how* a query is
+//!   answered. See that type's documentation.
+//!
+//! Discarding frame values does not clear the table. Each entry carries the
+//! frame it was written for, and a new frame simply stops matching — so a
+//! steady scene neither frees nor reallocates its entries, it overwrites them
+//! in place. That matters more than it looks: dropping every entry each frame
+//! was most of the allocator traffic this cache exists to avoid.
 
-use crate::dataflow::resolver::production::Production;
-use crate::dataflow::resolver::query_key::QueryKey;
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 
-/// Per-frame cache of [`Production`] entries addressed by [`QueryKey`].
-///
-/// Resolver caches are small in normal scenes, and they are rebuilt every frame.
-/// A linear vec avoids per-entry tree allocation and pointer chasing on embedded
-/// targets.
+use crate::dataflow::resolver::production::{Production, ProductionSource};
+use crate::dataflow::resolver::query_intern::QueryId;
+use crate::dataflow::resolver::route::ResolvedRoute;
+
+/// Monotonic per-frame stamp. Wrapping is harmless: entries are rewritten far
+/// more often than `u32` wraps, and a stale entry would have to survive
+/// exactly 2^32 frames to be mistaken for a current one.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+struct FrameStamp(u32);
+
 #[derive(Clone, Debug, Default)]
 pub struct ResolverCache {
-    entries: Vec<(QueryKey, Production)>,
+    frame: FrameStamp,
+    values: Vec<Option<(FrameStamp, Production)>>,
+    structural: Vec<Option<Production>>,
+    routes: Vec<Option<Rc<ResolvedRoute>>>,
 }
 
 impl ResolverCache {
     pub fn new() -> Self {
-        Self {
-            entries: Vec::new(),
+        Self::default()
+    }
+
+    /// Whether a production may outlive the frame that computed it.
+    ///
+    /// A binding literal and an authored-def read are both functions of the
+    /// project, not of the frame — nothing but a structural change can move
+    /// them. Everything else either ticks (producers) or is built from things
+    /// that tick (merges, values reached through a binding).
+    pub fn is_structural(source: &ProductionSource) -> bool {
+        matches!(
+            source,
+            ProductionSource::Literal | ProductionSource::Default
+        )
+    }
+
+    /// Begin a frame: this frame's values start empty, structure survives.
+    pub fn begin_frame(&mut self) {
+        self.frame = FrameStamp(self.frame.0.wrapping_add(1));
+    }
+
+    /// The graph changed shape: everything cached is void.
+    pub fn invalidate_structure(&mut self) {
+        self.values.clear();
+        self.structural.clear();
+        self.routes.clear();
+        // Ids are reassigned from zero after an epoch change, so the tables
+        // must not keep entries addressed by the old numbering.
+    }
+
+    pub fn get(&self, id: QueryId) -> Option<&Production> {
+        if let Some(Some((stamp, production))) = self.values.get(id.index()) {
+            if *stamp == self.frame {
+                return Some(production);
+            }
         }
+        self.structural.get(id.index()).and_then(Option::as_ref)
     }
 
-    pub fn get(&self, key: &QueryKey) -> Option<&Production> {
-        self.entries
-            .iter()
-            .find_map(|(entry_key, value)| (entry_key == key).then_some(value))
-    }
-
-    pub fn insert(&mut self, key: QueryKey, value: Production) -> Option<Production> {
-        if let Some((_, current)) = self
-            .entries
-            .iter_mut()
-            .find(|(entry_key, _)| entry_key == &key)
-        {
-            return Some(core::mem::replace(current, value));
+    pub fn insert(&mut self, id: QueryId, production: Production) {
+        if Self::is_structural(&production.source) {
+            grow_to(&mut self.structural, id.index());
+            self.structural[id.index()] = Some(production);
+            return;
         }
-        self.entries.push((key, value));
-        None
+        grow_to(&mut self.values, id.index());
+        self.values[id.index()] = Some((self.frame, production));
     }
 
-    pub fn remove(&mut self, key: &QueryKey) -> Option<Production> {
-        let index = self
-            .entries
-            .iter()
-            .position(|(entry_key, _)| entry_key == key)?;
-        Some(self.entries.swap_remove(index).1)
+    /// Routes are shared rather than copied: a cache hit on the hot path must
+    /// not deep-copy the binding sources it just avoided recomputing.
+    pub fn route(&self, id: QueryId) -> Option<&Rc<ResolvedRoute>> {
+        self.routes.get(id.index()).and_then(Option::as_ref)
     }
 
-    pub fn clear(&mut self) {
-        self.entries.clear();
+    pub fn insert_route(&mut self, id: QueryId, route: Rc<ResolvedRoute>) {
+        grow_to(&mut self.routes, id.index());
+        self.routes[id.index()] = Some(route);
     }
 
-    pub fn iter(&self) -> core::slice::Iter<'_, (QueryKey, Production)> {
-        self.entries.iter()
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
+    /// Whether anything is cached for the current frame. Used by tests that
+    /// assert a fresh resolver starts empty.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.structural.iter().all(Option::is_none)
+            && self
+                .values
+                .iter()
+                .all(|slot| !matches!(slot, Some((stamp, _)) if *stamp == self.frame))
+    }
+}
+
+fn grow_to<T>(table: &mut Vec<Option<T>>, index: usize) {
+    if table.len() <= index {
+        table.resize_with(index + 1, || None);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Production, QueryKey, ResolverCache};
+    use super::*;
     use crate::dataflow::binding::BindingRef;
-    use crate::dataflow::resolver::production::ProductionSource;
-    use crate::dataflow::resolver::{ResolveLogLevel, ResolveTrace, ResolveTraceEvent};
+    use crate::dataflow::resolver::query_intern::QueryInternTable;
+    use crate::dataflow::resolver::query_key::QueryKey;
+    use alloc::string::String;
     use lpc_model::ChannelName;
     use lpc_model::NodeId;
     use lpc_model::Revision;
@@ -77,68 +130,114 @@ mod tests {
     use lpc_model::WithRevision;
     use lps_shared::LpsValueF32;
 
-    fn sample_bus_key(name: &str) -> QueryKey {
-        QueryKey::Bus(ChannelName(alloc::string::String::from(name)))
-    }
-
-    fn make_produced(frame: i64, source: ProductionSource) -> Production {
+    fn produced(value: f32, source: ProductionSource) -> Production {
         Production::value(
-            WithRevision::new(Revision::new(frame), LpsValueF32::F32(1.0)),
+            WithRevision::new(Revision::new(1), LpsValueF32::F32(value)),
             source,
         )
         .expect("scalar production")
     }
 
-    #[test]
-    fn resolver_cache_insert_get_and_cache_hit_trace() {
-        let mut cache = ResolverCache::new();
-        let key = sample_bus_key("video");
-        let pv = make_produced(
-            1,
-            ProductionSource::BusBinding {
-                binding: BindingRef::new(NodeId::new(0), 0),
-            },
-        );
-
-        assert!(cache.insert(key.clone(), pv.clone()).is_none());
-        let got = cache.get(&key).unwrap();
-        assert!(got.as_value().expect("value").eq(&LpsValueF32::F32(1.0)));
-        assert_eq!(
-            got.source,
-            ProductionSource::BusBinding {
-                binding: BindingRef::new(NodeId::new(0), 0),
-            }
-        );
-
-        let trace = ResolveTrace::new(ResolveLogLevel::Basic);
-        {
-            let _g = trace.enter(key.clone()).unwrap();
-            let _hit = cache.get(&key);
-            assert!(_hit.is_some());
-            trace.record_event(ResolveTraceEvent::CacheHit(key.clone()));
+    fn producer_source() -> ProductionSource {
+        ProductionSource::ProducedSlot {
+            node: NodeId::new(0),
+            slot: SlotPath::parse("out").expect("path"),
         }
+    }
 
-        assert!(trace.events().iter().any(|e| matches!(
-            e,
-            ResolveTraceEvent::CacheHit(k) if k == &sample_bus_key("video")
-        )));
+    fn id(table: &mut QueryInternTable, name: &str) -> QueryId {
+        table.intern(&QueryKey::Bus(ChannelName(String::from(name))))
     }
 
     #[test]
-    fn resolver_cache_remove_clear_len() {
+    fn frame_values_do_not_survive_the_frame() {
+        let mut table = QueryInternTable::new();
         let mut cache = ResolverCache::new();
-        let k = QueryKey::ProducedSlot {
-            node: NodeId::new(2),
-            slot: SlotPath::parse("color").unwrap(),
-        };
-        cache.insert(k.clone(), make_produced(3, ProductionSource::Literal));
-        assert_eq!(cache.len(), 1);
+        let key = id(&mut table, "video");
 
-        cache.remove(&k);
-        assert!(cache.is_empty());
+        cache.insert(key, produced(1.0, producer_source()));
+        assert!(cache.get(key).is_some());
 
-        cache.insert(k.clone(), make_produced(4, ProductionSource::Default));
-        cache.clear();
-        assert_eq!(cache.len(), 0);
+        cache.begin_frame();
+        assert!(
+            cache.get(key).is_none(),
+            "a producer's value belongs to the frame that produced it"
+        );
+    }
+
+    #[test]
+    fn structural_values_survive_frames_but_not_invalidation() {
+        let mut table = QueryInternTable::new();
+        let mut cache = ResolverCache::new();
+        let key = id(&mut table, "literal");
+
+        cache.insert(key, produced(2.0, ProductionSource::Literal));
+        cache.begin_frame();
+        cache.begin_frame();
+        assert!(
+            cache.get(key).is_some(),
+            "a binding literal cannot change without a structural change"
+        );
+
+        cache.invalidate_structure();
+        assert!(cache.get(key).is_none());
+    }
+
+    #[test]
+    fn authored_def_reads_are_structural() {
+        assert!(ResolverCache::is_structural(&ProductionSource::Default));
+        assert!(ResolverCache::is_structural(&ProductionSource::Literal));
+        assert!(!ResolverCache::is_structural(&ProductionSource::Merged));
+        assert!(!ResolverCache::is_structural(&producer_source()));
+        assert!(!ResolverCache::is_structural(
+            &ProductionSource::BusBinding {
+                binding: BindingRef::new(NodeId::new(0), 0),
+            }
+        ));
+    }
+
+    #[test]
+    fn routes_survive_frames_but_not_invalidation() {
+        let mut table = QueryInternTable::new();
+        let mut cache = ResolverCache::new();
+        let key = id(&mut table, "routed");
+
+        cache.insert_route(key, Rc::new(ResolvedRoute::Produce));
+        cache.begin_frame();
+        assert!(
+            matches!(cache.route(key).map(|r| &**r), Some(ResolvedRoute::Produce)),
+            "which binding answers a query changes only when bindings change"
+        );
+
+        cache.invalidate_structure();
+        assert!(cache.route(key).is_none());
+    }
+
+    #[test]
+    fn a_later_frame_overwrites_rather_than_reallocating() {
+        let mut table = QueryInternTable::new();
+        let mut cache = ResolverCache::new();
+        let key = id(&mut table, "video");
+
+        cache.insert(key, produced(1.0, producer_source()));
+        cache.begin_frame();
+        cache.insert(key, produced(3.0, producer_source()));
+
+        let value = cache.get(key).expect("current frame value");
+        assert!(value.as_value().expect("value").eq(&LpsValueF32::F32(3.0)));
+        assert_eq!(cache.values.len(), 1, "the table is reused, not regrown");
+    }
+
+    #[test]
+    fn sparse_ids_do_not_read_neighbouring_entries() {
+        let mut cache = ResolverCache::new();
+        let mut table = QueryInternTable::new();
+        let low = id(&mut table, "a");
+        let _skipped = id(&mut table, "b");
+        let high = id(&mut table, "c");
+
+        cache.insert(high, produced(5.0, producer_source()));
+        assert!(cache.get(low).is_none());
+        assert!(cache.get(high).is_some());
     }
 }

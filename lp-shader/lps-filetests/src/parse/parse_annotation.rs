@@ -277,10 +277,20 @@ mod tests {
             .filter(|t| ann.selector.matches(t))
             .map(|t| t.name())
             .collect();
-        // On this tree the only f32 targets are interp and wgpu, so both
-        // exclusions bite and nothing is left — the selector is still legal,
-        // and it starts matching the moment a compiled f32 target registers.
-        assert!(matched.is_empty(), "{matched:?}");
+        // Both exclusions bite: `interp.f32` and `wgpu.f32` are subtracted from
+        // the f32 family, leaving the compiled f32 targets. This assertion used
+        // to expect nothing at all — the compiled f32 targets are the case the
+        // selector was written to anticipate, and each new backend that gains an
+        // f32 mode joins the list here.
+        assert_eq!(
+            matched,
+            vec![
+                "wasm.f32".to_string(),
+                "rv32n.f32".to_string(),
+                "rv32lpn.f32".to_string()
+            ],
+            "{matched:?}"
+        );
     }
 
     #[test]

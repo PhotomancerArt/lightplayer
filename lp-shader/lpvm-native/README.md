@@ -96,6 +96,11 @@ fallback into the other file. Hardware-float codegen (Xtensa FPU, RV32F) fills
 these in; until then this is *shape without content*, and the Q32 path is
 provably unchanged by it.
 
+Note that **native f32 on rv32 does not change this**: the soft-float path (see
+[Float mode](#float-mode-and-the-float-capability-seam)) keeps every value in
+integer registers, because that is what the soft-float ABI does. The empty float
+pool is the right answer for both numeric modes on every target we ship today.
+
 Two subtleties worth keeping straight:
 
 - **A vreg's class comes from the instruction that defines it, not from its LPIR
@@ -238,10 +243,15 @@ Without it, `lps_builtins_xt_image::is_available()` is false and Xtensa
 consumers skip with a loud note rather than failing — the workspace must build
 and test on a machine with no esp toolchain.
 
-Xtensa shader code shares the image's 112 KiB text region with ~84 KiB of
-builtins, leaving **~28 KiB**. Overflowing it is an explicit error naming the
-budget, never a silent write past the region; the fix would be
-`lp-xt/lps-builtins-xt-app/link.ld`'s split, not the host region size.
+The Xtensa builtins image is **flash-resident firmware**, exactly as on the
+device: `rt_emu/xt_image` places its `.text` in the emulator's modeled IROM
+window and its `.rodata` in DROM, and compiled shader code gets the **whole**
+SRAM code region — 128 KiB on the S3 — with nothing resident in front of it.
+Overflowing that is an explicit error naming the budget, never a silent write
+past the region, and the budget is now the shader's own size rather than
+whatever the builtins left over. (It was the latter until 2026-08-01; see
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`
+for why that was a modeling bug and not a capacity one.)
 
 `isa/xt/` and the `lp-xt-*` crates it builds on contain material derived from
 LLVM under Apache-2.0-WITH-LLVM-exception and carry per-file provenance
@@ -249,6 +259,61 @@ headers — see `docs/adr/2026-07-29-license-provenance-discipline.md` before
 touching them. `isa/xt/imm.rs` is such a file: its per-opcode immediate table
 is derived data, and **the encoder silently truncates**, so every immediate
 must be gated through `is_legal` before it reaches `lp_xt_inst::encode`.
+
+### Float mode and the float-capability seam
+
+The backend compiles a shader in one of two numeric modes
+(`NativeCompileOptions::float_mode`): **Q16.16 fixed point**, where a GLSL
+`float` is an integer and every float op is integer arithmetic, or **native
+f32**, IEEE-754 binary32. Q32 lowering lives in `lower.rs`; f32 lowering lives in
+`lower_f32.rs`, behind the `float-f32` feature.
+
+**"rv32" is not one float story**, and that is what the seam exists for. The
+ESP32-C6 and RP2350's Hazard3 are RV32IMAC with no F extension; the ESP32-S31 and
+ESP32-P4 are RV32IMAFC with a per-core FPU. So float capability is a named
+property of the target, `IsaTarget::f32_lowering`:
+
+| `F32Lowering`     | Meaning                                                              | Who answers it |
+| ----------------- | -------------------------------------------------------------------- | -------------- |
+| `SoftFloatCalls`  | Float ops call the platform soft-float library; values in **integer** registers | `Rv32imac`     |
+| `HardwareFpu`     | Float ops are FP instructions on the float register file              | *nobody yet*   |
+| `Unsupported`     | `FloatMode::F32` is a compile error naming the target                 | `Xtensa` (until M7) |
+
+**Nothing answers `HardwareFpu`**, and `isa::tests::f32_lowering_never_claims_hardware`
+keeps it that way. That is the guarantee: no code path in this crate can emit an
+F-extension instruction, so no C6 can be handed a `fadd.s` it would trap on. An
+F-bearing rv32 part is a **new `IsaTarget` variant**, never a flag on `Rv32imac`
+— the variant names the hardware, per the type's own doc comment.
+
+**Soft float calls the platform ABI directly, with no wrapper.** `__addsf3`,
+`__ltsf2`, `__floatsisf` and friends are emitted as ordinary `Call` VInsts, the
+same mechanism Q32 uses for its helpers. The symbols already exist in every rv32
+image: on the C6 the linker resolves them to the chip's **ROM** `rvfplib`
+(`esp-rom-sys`'s `esp32c6.rom.rvfp.ld`), costing zero app flash, and in the host
+emulator's builtins image to Rust's `compiler_builtins`. See
+`docs/adr/2026-07-31-soft-float-via-compiler-builtins.md` for why there is no
+LightPlayer layer in between, what the comparison routines' return convention
+means for NaN, and why float→int is the one deliberate exception.
+
+Ops with no soft-float ABI symbol — `sqrt`, `floor`/`ceil`/`trunc`/`nearest`,
+`min`/`max`, the unorm lane conversions — call the native-f32 builtin family
+(`__lp_lpir_*_f32`, in `lps-builtins` behind its own `float-f32`). That is not a
+wrapper; it is the only implementation.
+
+`float-f32` is off by default for the measured reason the `isa-*` gates exist:
+`FloatMode` is matched on a runtime value, so LTO cannot drop the f32 arms, and
+the shipping ESP32-C6 image runs Fixed-mode shaders only. The single
+configuration in the tree that turns it on for a device is `fw-esp32c6`'s
+`test_f32_softfloat` harness.
+
+**Import resolution is mode-aware, and must stay that way.** `@glsl::sin` in f32
+mode resolves to `LpGlslSinF32`, never to the Q32 twin. Getting this wrong does
+not produce a type error: a builtin taking a vector receives an `IrType::Pointer`
+whose signature is `i32` in *both* modes, so a Q32 builtin will happily
+reinterpret f32 bit patterns as Q16.16 and return plausible wrong colors. The
+wasm backend shipped that bug (M1 corpus findings §3); the resolvers in
+`lps-builtin-ids` never fall back across modes, so an unmapped name surfaces as a
+named "unknown builtin symbol" relocation failure instead.
 
 ### Fuel Metering
 

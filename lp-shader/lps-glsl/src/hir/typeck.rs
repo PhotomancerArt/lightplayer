@@ -22,10 +22,10 @@ use super::types::{
 };
 use super::typing::builtin_has_out_args;
 use super::typing::{
-    access_lanes, builtin_kind, coerce_arithmetic_pair, coerce_comparison_pair,
-    coerce_constructor_args, coerce_expr, glsl_param_token, is_comparison, is_glsl_import,
-    is_logical, scalar_base_type, scalar_ir_types, scalar_lane_count, type_builtin_args,
-    type_glsl_import_args, vector_dominant_type, zero_expr,
+    access_lanes, binary_op_token, builtin_kind, coerce_arithmetic_pair, coerce_comparison_pair,
+    coerce_constructor_args, coerce_expr, glsl_param_token, has_bool_lanes, is_comparison,
+    is_glsl_import, is_logical, scalar_base_type, scalar_ir_types, scalar_lane_count,
+    type_builtin_args, type_glsl_import_args, vector_dominant_type, zero_expr,
 };
 use super::{
     fixed_array_from_base, infer_array_constructor_type, infer_array_decl_type,
@@ -973,6 +973,22 @@ impl<'a> TypeCtx<'a> {
             return Ok(self
                 .arena
                 .push_expr(span, ty, HirExprKind::Binary { op, lhs, rhs }));
+        }
+        // GLSL defines `+ - * / %` over float/int/uint lanes only: there is no
+        // arithmetic on `bool`/`bvecN` and no implicit conversion out of bool,
+        // so `bvec2 + bvec2` and `float * bool` are both errors. Every other
+        // frontend rejects them ("unsupported bool binary Add"); catch them
+        // here so the diagnostic names the operator and the operand types.
+        let lhs_ty = self.arena.expr_ty(lhs).clone();
+        let rhs_ty = self.arena.expr_ty(rhs).clone();
+        if has_bool_lanes(&lhs_ty) || has_bool_lanes(&rhs_ty) {
+            return Err(Diagnostic::error(
+                span,
+                format!(
+                    "'{}' expects numeric lanes, got {lhs_ty:?} and {rhs_ty:?}",
+                    binary_op_token(op)
+                ),
+            ));
         }
         let (lhs, rhs, ty) = coerce_arithmetic_pair(&mut self.arena, span, lhs, rhs)?;
         if op == BinaryOp::Mod && scalar_base_type(&ty) == Some(LpsType::Float) {

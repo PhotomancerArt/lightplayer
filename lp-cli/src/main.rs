@@ -41,11 +41,29 @@ enum Cli {
         headless: bool,
     },
     /// Upload project to host and exit (non-interactive)
+    ///
+    /// Waits, after the deploy is acked, for evidence the newly deployed
+    /// project is running before exiting — otherwise the compile line an
+    /// operator observes describes the *previous* upload (see
+    /// docs/defects/2026-07-30-deploy-compiles-previous-upload.md).
     Upload {
         /// Project directory
         dir: std::path::PathBuf,
         /// Host to upload to (e.g. serial:auto, ws://localhost:2812/)
         host: String,
+        /// Skip waiting for evidence the deployed project is running;
+        /// disconnect the instant the deploy is acked (pre-P5 behaviour).
+        #[arg(long)]
+        no_wait: bool,
+        /// Seconds to wait for evidence the deployed project is running
+        /// before exiting nonzero. The deploy itself may already have
+        /// succeeded even if this times out. Ignored with `--no-wait`.
+        #[arg(
+            long = "wait-timeout",
+            value_name = "SECS",
+            default_value_t = upload::DEFAULT_WAIT_TIMEOUT_SECS
+        )]
+        wait_timeout: u64,
     },
     /// Create a new project
     Create {
@@ -99,7 +117,17 @@ fn main() -> Result<()> {
             push_host: push,
             headless,
         }),
-        Cli::Upload { dir, host } => upload::handle_upload(upload::UploadArgs { dir, host }),
+        Cli::Upload {
+            dir,
+            host,
+            no_wait,
+            wait_timeout,
+        } => upload::handle_upload(upload::UploadArgs {
+            dir,
+            host,
+            no_wait,
+            wait_timeout_secs: wait_timeout,
+        }),
         Cli::Create { dir, name } => create::handle_create(create::CreateArgs { dir, name }),
         Cli::Hardware(cli) => hardware::handle_hardware(cli),
         Cli::Schema(cli) => schema::handle_schema(cli),

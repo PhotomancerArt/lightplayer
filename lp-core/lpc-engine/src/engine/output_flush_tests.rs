@@ -62,6 +62,10 @@ impl OutputProvider for RcMemoryOutput {
     fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_hardware::OutputError> {
         self.0.close(handle)
     }
+
+    fn hardware_generation(&self) -> u64 {
+        self.0.hardware_generation()
+    }
 }
 
 fn endpoint(spec: &'static str) -> HwEndpointSpec {

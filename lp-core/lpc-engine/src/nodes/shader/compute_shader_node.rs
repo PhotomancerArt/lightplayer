@@ -444,7 +444,7 @@ fn resolve_or_default_input(
 ) -> Result<LpsValueF32, NodeError> {
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid compute consumed slot {name:?}: {e}")))?;
-    let production = match ctx.resolve(QueryKey::ConsumedSlot {
+    let production = match ctx.resolve(&QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: slot_path,
     }) {

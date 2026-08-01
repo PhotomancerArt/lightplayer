@@ -3,6 +3,25 @@ use alloc::boxed::Box;
 use crate::OutputError;
 use crate::{HardwareEndpointError, HwDriver, HwEndpoint, HwEndpointId};
 
+/// Maximum LEDs a single WS281x output channel will drive.
+///
+/// Requests beyond this are truncated by [`ws281x_capped_byte_count`]. The cap
+/// is a per-channel buffer/latency bound in the RMT drivers, not a protocol
+/// limit. This is deliberately the only definition — it used to be hand-copied
+/// into two firmware crates and drifted silently
+/// (docs/debt/output-channel-led-cap-silent-truncation.md).
+pub const WS281X_MAX_LEDS_PER_CHANNEL: usize = 256;
+
+/// Cap a requested frame's byte count to [`WS281X_MAX_LEDS_PER_CHANNEL`].
+///
+/// Returns the granted byte count and whether the cap actually truncated the
+/// request. Callers own logging: warn once per cap-crossing, never per frame.
+pub fn ws281x_capped_byte_count(requested: u32) -> (u32, bool) {
+    let max_byte_count = (WS281X_MAX_LEDS_PER_CHANNEL * 3) as u32;
+    let granted = requested.min(max_byte_count);
+    (granted, granted < requested)
+}
+
 /// Configuration used when opening or resizing a WS281x endpoint.
 ///
 /// `byte_count` is the number of protocol bytes in one output frame, normally
@@ -49,4 +68,23 @@ pub trait Ws281xDriver: HwDriver {
         endpoint_id: &HwEndpointId,
         config: Ws281xConfig,
     ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cap_passes_through_at_or_under_the_limit() {
+        let max = (WS281X_MAX_LEDS_PER_CHANNEL * 3) as u32;
+        assert_eq!(ws281x_capped_byte_count(3), (3, false));
+        assert_eq!(ws281x_capped_byte_count(max), (max, false));
+    }
+
+    #[test]
+    fn cap_truncates_and_reports_it_above_the_limit() {
+        let max = (WS281X_MAX_LEDS_PER_CHANNEL * 3) as u32;
+        assert_eq!(ws281x_capped_byte_count(max + 3), (max, true));
+        assert_eq!(ws281x_capped_byte_count(u32::MAX), (max, true));
+    }
 }

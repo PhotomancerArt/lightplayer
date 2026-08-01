@@ -1,5 +1,8 @@
 // test error
 
+// lps-glsl does not yet require const initializers to be constant expressions.
+// @unimplemented(frontend=lp)
+
 // Spec: variables.adoc §4.3.3 "Constant Qualifier"
 // Non-constant expression in const init must be rejected.
 

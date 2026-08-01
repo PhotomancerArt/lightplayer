@@ -56,6 +56,7 @@ uvec3 test_uvec3_multiply_in_assignment() {
 // run: test_uvec3_multiply_in_assignment() == uvec3(12u, 21u, 8u)
 
 uvec3 test_uvec3_multiply_large_numbers() {
+    // Integer vectors use exact arithmetic.
     uvec3 a = uvec3(1000u, 2000u, 3000u);
     uvec3 b = uvec3(3000u, 1000u, 2000u);
     return a * b;
