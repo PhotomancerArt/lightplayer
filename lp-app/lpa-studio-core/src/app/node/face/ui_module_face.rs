@@ -42,8 +42,11 @@ pub struct UiModuleFace {
     /// module carries no provenance fields (§8).
     pub provenance: Option<String>,
     /// Panel-state auto-save (panel.md P11 — on by default, with a user
-    /// toggle). Lives on the module that owns the scope.
-    pub auto_save: bool,
+    /// toggle). `Some` only on the module that presents the toggle: panel
+    /// state persists per project folder (`.lp/state.json`), so it is the
+    /// project's root module that owns it, and an embedded module carries
+    /// `None` rather than repeating its host's switch.
+    pub auto_save: Option<bool>,
 }
 
 impl UiModuleFace {
@@ -55,7 +58,7 @@ impl UiModuleFace {
             wiring: None,
             wiring_open: false,
             provenance: None,
-            auto_save: true,
+            auto_save: None,
         }
     }
 }

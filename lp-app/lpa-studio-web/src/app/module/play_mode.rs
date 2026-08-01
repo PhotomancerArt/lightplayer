@@ -31,9 +31,9 @@ pub fn PlayModeSurface(
     #[props(default = None)]
     preview: Option<UiProducedProduct>,
     /// Panel-state auto-save (P11): an end user owns this, so it stays
-    /// reachable in play mode.
-    #[props(default = true)]
-    auto_save: bool,
+    /// reachable in play mode. `None` hides the switch.
+    #[props(default = Some(true))]
+    auto_save: Option<bool>,
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
@@ -61,7 +61,7 @@ pub fn PlayModeSurface(
             }
             ModulePanel {
                 panel,
-                auto_save: Some(auto_save),
+                auto_save,
                 play: true,
                 on_panel,
                 on_action,

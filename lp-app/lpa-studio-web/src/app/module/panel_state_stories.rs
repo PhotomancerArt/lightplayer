@@ -16,7 +16,7 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use super::module_fixtures::{
-    PanelSpike, ROOT_SCOPE, held_root_face, root_face, three_state_panel,
+    PanelSpike, ROOT_SCOPE, held_root_face, root_module_node_view, three_state_panel,
 };
 use super::{ModulePanel, PanelGesture};
 
@@ -68,12 +68,12 @@ fn reset_gestures() -> Element {
 )]
 fn auto_save_off() -> Element {
     let mut face = held_root_face();
-    face.auto_save = false;
+    face.auto_save = Some(false);
     rsx! {
         PanelCanvas {
             ModulePanel {
                 panel: face.panel,
-                auto_save: Some(face.auto_save),
+                auto_save: face.auto_save,
                 on_panel: move |_| {},
                 on_action: move |_| {},
             }
@@ -87,13 +87,13 @@ fn auto_save_off() -> Element {
 fn latch_walkthrough() -> Element {
     // Start from the pristine Read face, so the FIRST touch is the thing
     // being felt — and so a clear has somewhere honest to land.
-    let mut spike = use_signal(|| PanelSpike::new(root_face()));
+    let mut spike = use_signal(|| PanelSpike::new(root_module_node_view()));
 
     rsx! {
         PanelCanvas {
             ModulePanel {
-                panel: spike().face.panel.clone(),
-                auto_save: Some(spike().face.auto_save),
+                panel: spike().face().panel.clone(),
+                auto_save: spike().face().auto_save,
                 on_panel: move |gesture: PanelGesture| {
                     spike.with_mut(|spike| spike.apply_gesture(&gesture));
                 },

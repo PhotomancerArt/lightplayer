@@ -193,6 +193,7 @@ pub fn NodePane(
                     on_action,
                     pending_edits,
                     dirty_tint,
+                    module_panel,
                 }
             }
         }

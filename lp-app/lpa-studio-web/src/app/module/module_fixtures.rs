@@ -18,10 +18,11 @@
 
 use lpa_studio_core::{
     LpValue, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotEditOp, SlotPath,
-    UiAction, UiBusChannelView, UiBusSiteView, UiBusView, UiModuleChild, UiModuleFace, UiNodeFace,
-    UiNodeHeader, UiNodeView, UiPanelControl, UiPanelControlState, UiPanelControlView,
-    UiPanelGroup, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
-    UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState, UiSlotValue, UiStatus,
+    UiAction, UiBusChannelView, UiBusSiteView, UiBusView, UiModuleFace, UiNodeChild, UiNodeFace,
+    UiNodeHeader, UiNodeSection, UiNodeView, UiPanelControl, UiPanelControlState,
+    UiPanelControlView, UiPanelGroup, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
+    UiProducedProduct, UiProductPreviewFrame, UiProductTrackingState, UiSlotFieldState,
+    UiSlotValue, UiStatus,
 };
 
 use crate::app::node::face_story_fixtures::aurora_preview;
@@ -165,7 +166,8 @@ pub(crate) fn plasma_one_panel() -> UiPanelGroup {
 }
 
 /// An embedded plasma module's own face — the SAME component the root
-/// wears, one level in.
+/// wears, one level in. No `auto_save`: persistence is per project folder,
+/// so only the root module presents that switch (P11).
 pub(crate) fn plasma_face(panel: UiPanelGroup, seed: f32) -> UiModuleFace {
     UiModuleFace {
         preview: Some(
@@ -178,19 +180,25 @@ pub(crate) fn plasma_face(panel: UiPanelGroup, seed: f32) -> UiModuleFace {
         panel,
         wiring: Some(plasma_wiring()),
         wiring_open: false,
-        children: vec![
-            UiModuleChild::leaf("sim", "Shader")
-                .with_summary("visual → bus:visual.out")
-                .with_preview(
-                    UiProducedProduct::visual("output")
-                        .with_tracking(UiProductTrackingState::Tracking)
-                        .with_frame(UiProductPreviewFrame::new(16, 5))
-                        .with_preview(aurora_preview(48, 15, seed + 0.4)),
-                ),
-        ],
         provenance: Some("PhotomancerArt · v1.2 · CC0-1.0".to_string()),
-        auto_save: true,
+        auto_save: None,
     }
+}
+
+/// The plasma module's own children, as sibling cards below ITS card — the
+/// nesting rail is the same one level down, which is the other half of the
+/// "one face at every depth" claim.
+pub(crate) fn plasma_children(seed: f32) -> Vec<UiNodeChild> {
+    vec![
+        product_child("sim", "Shader", "shader.json", "visual → bus:visual.out").with_sections(
+            vec![UiNodeSection::ProducedProducts(vec![
+                UiProducedProduct::visual("output")
+                    .with_tracking(UiProductTrackingState::Tracking)
+                    .with_frame(UiProductPreviewFrame::new(16, 5))
+                    .with_preview(aurora_preview(48, 15, seed + 0.4)),
+            ])],
+        ),
+    ]
 }
 
 /// The plasma scope's wiring: `time` and `speed` have no local writer, so
@@ -287,9 +295,12 @@ pub(crate) fn root_controls() -> Vec<UiPanelControlView> {
 }
 
 /// The root module's face with the story's held controls already engaged —
-/// what most stories render, and what [`PanelSpike`] clears back from.
+/// what the panel stories render, and what [`PanelSpike`] clears back from.
 pub(crate) fn held_root_face() -> UiModuleFace {
-    PanelSpike::new(root_face()).with_held(HELD).face
+    let Some(UiNodeFace::Module(face)) = held_root_view().face else {
+        unreachable!("the root module view wears a module face")
+    };
+    face
 }
 
 /// The root module's face in its pristine Read form.
@@ -305,47 +316,105 @@ pub(crate) fn root_face() -> UiModuleFace {
         panel: root_panel(),
         wiring: Some(root_wiring()),
         wiring_open: false,
-        children: root_children(),
         provenance: Some("Yona · v0.4 · created 2026-07-31".to_string()),
-        auto_save: true,
+        // The project root owns panel persistence (P11).
+        auto_save: Some(true),
     }
 }
 
-/// The root module's children, nested inside the card: two leaves that
-/// write host channels, the two embedded plasma modules, and the fixture.
-pub(crate) fn root_children() -> Vec<UiModuleChild> {
+/// The root module's children, as sibling cards BELOW its card: two leaves
+/// that write host channels, the two embedded plasma modules (each with its
+/// own child), and the fixture. All of them — a module's children are
+/// collaborators, so there is no active-child filtering the way a playlist
+/// has.
+pub(crate) fn root_children() -> Vec<UiNodeChild> {
     vec![
-        UiModuleChild::leaf("clock", "Clock").with_summary("seconds → bus:time"),
-        UiModuleChild::leaf("Master speed", "Button")
-            .with_summary("value → bus:speed")
-            .with_controls(vec![following(
+        plain_child("clock", "Clock", "clock.json", "seconds → bus:time"),
+        // A control node: its bound slot IS its face (R3), and it is the
+        // same channel the panel's `speed` knob presents.
+        controls_child(
+            "Master speed",
+            "Button",
+            "button.json",
+            "value → bus:speed",
+            UiPanelGroup::new("Master speed", ROOT_SCOPE).with_controls(vec![following(
                 knob(ROOT_SCOPE, "speed", "value", 0.62, 0.0, 1.0, None),
                 "0.62",
                 "this node writes it",
             )]),
-        UiModuleChild::module(
+        ),
+        module_child(
             "plasma_1",
+            PLASMA_1_SCOPE,
+            "effect",
             plasma_face(plasma_read_panel(PLASMA_1_SCOPE), 3.1),
-        )
-        .with_summary("effect")
-        .collapsed(),
-        UiModuleChild::module(
+            plasma_children(3.1),
+        ),
+        module_child(
             "plasma_2",
+            PLASMA_2_SCOPE,
+            "effect",
             plasma_face(plasma_read_panel(PLASMA_2_SCOPE), 6.5),
-        )
-        .with_summary("effect")
-        .collapsed(),
+            plasma_children(6.5),
+        ),
         // The fixture's brightness is the SAME (scope, channel) as the
         // panel's — one control, two views (panel.md P1). Holding it on the
         // panel holds it here too, which is the multi-client rule made
-        // visible inside a single card.
-        UiModuleChild::leaf("halo", "Fixture")
-            .with_summary("241 LEDs · input ← bus:visual.out")
-            .with_controls(vec![at_default(
+        // visible across two cards in one column.
+        controls_child(
+            "halo",
+            "Fixture",
+            "fixture.json",
+            "241 LEDs · input ← bus:visual.out",
+            UiPanelGroup::new("halo", ROOT_SCOPE).with_controls(vec![at_default(
                 fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
                 "authored 200",
             )]),
+        ),
     ]
+}
+
+/// A child card with no face at all — a node whose whole story is its
+/// header row (the clock).
+fn plain_child(name: &str, kind: &str, detail: &str, summary: &str) -> UiNodeChild {
+    let mut child = UiNodeChild::new(name, kind, detail);
+    child.summary = Some(summary.to_string());
+    child.status = UiStatus::good("Running");
+    child
+}
+
+/// A child card whose face is a product preview (the plasma shader).
+fn product_child(name: &str, kind: &str, detail: &str, summary: &str) -> UiNodeChild {
+    plain_child(name, kind, detail, summary)
+}
+
+/// A leaf child card whose face is exactly its bound controls (R3). The
+/// group carries the ENCLOSING scope — a leaf introduces none of its own.
+fn controls_child(
+    name: &str,
+    kind: &str,
+    detail: &str,
+    summary: &str,
+    controls: UiPanelGroup,
+) -> UiNodeChild {
+    let mut child = plain_child(name, kind, detail, summary);
+    child.face = Some(UiNodeFace::Controls(controls));
+    child
+}
+
+/// A child module card: the same module face one level in, with its own
+/// children hanging below it on the same rail.
+fn module_child(
+    name: &str,
+    scope: &str,
+    summary: &str,
+    face: UiModuleFace,
+    children: Vec<UiNodeChild>,
+) -> UiNodeChild {
+    let mut child = plain_child(name, "Module", scope, summary);
+    child.face = Some(UiNodeFace::Module(face));
+    child.children = children;
+    child
 }
 
 /// The root scope's wiring — what the sidebar bus pane used to show, now
@@ -424,8 +493,9 @@ fn site(node_label: &str, slot: &str) -> UiBusSiteView {
     }
 }
 
-/// The root module as a node card view — the single top-level workspace
-/// card (the flat-root reversal, §5).
+/// The root module as a node card view with its children below it — the
+/// single top-level workspace card (the flat-root reversal, §5) and the
+/// column of sibling cards it heads.
 pub(crate) fn root_module_node_view() -> UiNodeView {
     module_node_view(
         "Aurora Sign",
@@ -433,6 +503,14 @@ pub(crate) fn root_module_node_view() -> UiNodeView {
         "5 nodes · 2 effects",
         root_face(),
     )
+    .with_children(root_children())
+}
+
+/// The root module view with the story's held controls already engaged.
+pub(crate) fn held_root_view() -> UiNodeView {
+    PanelSpike::new(root_module_node_view())
+        .with_held(HELD)
+        .view
 }
 
 /// Any module as a node card view, so the spike wears the real card chrome
@@ -578,25 +656,40 @@ pub(crate) fn three_state_panel() -> UiPanelGroup {
 ///
 /// The dev-server walk is the point of the spike: turning a knob must
 /// actually engage it, and resetting must actually let go. This holds the
-/// mock face plus a pristine baseline, applies the widget's own
+/// mock node view — the card's face AND the sibling child cards below it —
+/// plus a pristine baseline, applies the widget's own
 /// `SlotEditOp::SetValue` dispatch as a panel write, and applies
 /// [`PanelGesture`]s as clears.
+///
+/// The whole view is the unit rather than the face, because a control's
+/// identity is `(scope, channel)` (panel.md P1) and the same control now
+/// genuinely appears on two different cards — the module's panel, and the
+/// leaf child's own face below it. Holding one has to move the other, and
+/// that only works if the walk covers the tree.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PanelSpike {
-    /// The face the stories render.
-    pub face: UiModuleFace,
-    /// The untouched face, for restoring cleared controls.
-    baseline: UiModuleFace,
+    /// The node view the stories render.
+    pub view: UiNodeView,
+    /// The untouched view, for restoring cleared controls.
+    baseline: UiNodeView,
 }
 
 impl PanelSpike {
-    /// Wrap a **Read-form** face as walkable spike state. The face passed
-    /// in becomes the clear-target, so it must have nothing engaged.
-    pub fn new(face: UiModuleFace) -> Self {
+    /// Wrap a **Read-form** node view as walkable spike state. The view
+    /// passed in becomes the clear-target, so it must have nothing engaged.
+    pub fn new(view: UiNodeView) -> Self {
         Self {
-            baseline: face.clone(),
-            face,
+            baseline: view.clone(),
+            view,
         }
+    }
+
+    /// The root module's face, for the panel-only stories.
+    pub fn face(&self) -> UiModuleFace {
+        let Some(UiNodeFace::Module(face)) = self.view.face.clone() else {
+            unreachable!("the spike's root view wears a module face")
+        };
+        face
     }
 
     /// Pre-engage controls, exactly as if they had been touched — same
@@ -604,7 +697,12 @@ impl PanelSpike {
     /// Read form either way.
     pub fn with_held(mut self, held: &[(&str, &str, f32)]) -> Self {
         for (scope, channel, value) in held {
-            engage_face(&mut self.face, scope, channel, *value);
+            let (scope, channel, value) = (*scope, *channel, *value);
+            visit_view_controls(&mut self.view, &mut |control_scope, control| {
+                if control_scope == scope && control.channel == channel {
+                    hold(control, value);
+                }
+            });
         }
         self
     }
@@ -617,7 +715,7 @@ impl PanelSpike {
             return;
         };
         let (address, value) = (address.clone(), value.clone());
-        visit_controls(&mut self.face, &mut |view| {
+        visit_view_controls(&mut self.view, &mut |_, view| {
             if view.control.address.as_ref() != Some(&address) {
                 return;
             }
@@ -640,9 +738,13 @@ impl PanelSpike {
     /// group, and auto-save flips the persistence flag.
     pub fn apply_gesture(&mut self, gesture: &PanelGesture) {
         match gesture {
-            PanelGesture::SetAutoSave(next) => self.face.auto_save = *next,
+            PanelGesture::SetAutoSave(next) => {
+                if let Some(UiNodeFace::Module(face)) = self.view.face.as_mut() {
+                    face.auto_save = Some(*next);
+                }
+            }
             PanelGesture::ToggleGroup { scope } => {
-                visit_groups(&mut self.face, &mut |group| {
+                visit_view_groups(&mut self.view, &mut |group| {
                     if group.scope == *scope {
                         group.collapsed = !group.collapsed;
                     }
@@ -663,10 +765,10 @@ impl PanelSpike {
     /// Copy matching controls back from the pristine baseline.
     fn restore(&mut self, matches: impl Fn(&str, &UiPanelControlView) -> bool) {
         let mut pristine = Vec::new();
-        visit_controls_scoped(&mut self.baseline.clone(), &mut |scope, view| {
+        visit_view_controls(&mut self.baseline.clone(), &mut |scope, view| {
             pristine.push((scope.to_string(), view.clone()));
         });
-        visit_controls_scoped(&mut self.face, &mut |scope, view| {
+        visit_view_controls(&mut self.view, &mut |scope, view| {
             if !matches(scope, view) {
                 return;
             }
@@ -679,18 +781,8 @@ impl PanelSpike {
     }
 }
 
-/// Engage one control everywhere it appears on a face: the same
-/// `(scope, channel)` is ONE control (panel.md P1), so a nested panel group
-/// and the child card that repeats it move together.
-fn engage_face(face: &mut UiModuleFace, scope: &str, channel: &str, value: f32) {
-    visit_controls_scoped(face, &mut |control_scope, view| {
-        if control_scope == scope && view.channel == channel {
-            hold(view, value);
-        }
-    });
-}
-
-/// The same, within one panel group tree.
+/// Engage one control everywhere it appears within one panel group tree.
+/// The same `(scope, channel)` is ONE control (panel.md P1).
 fn engage_group(group: &mut UiPanelGroup, scope: &str, channel: &str, value: f32) {
     visit_group_controls(group, &mut |control_scope, view| {
         if control_scope == scope && view.channel == channel {
@@ -707,26 +799,46 @@ fn hold(view: &mut UiPanelControlView, value: f32) {
     view.state = UiPanelControlState::Engaged;
 }
 
-/// Visit every control on a face — the module's own panel, its nested
-/// groups, its leaf children's controls, and every nested module face.
-fn visit_controls(face: &mut UiModuleFace, visit: &mut impl FnMut(&mut UiPanelControlView)) {
-    visit_controls_scoped(face, &mut |_, view| visit(view));
-}
-
-/// The same walk, carrying each control's owning scope.
-fn visit_controls_scoped(
-    face: &mut UiModuleFace,
+/// Visit every panel control in a card and everything below it, carrying
+/// each control's owning scope.
+fn visit_view_controls(
+    view: &mut UiNodeView,
     visit: &mut impl FnMut(&str, &mut UiPanelControlView),
 ) {
-    visit_group_controls(&mut face.panel, visit);
-    let scope = face.panel.scope.clone();
-    for child in &mut face.children {
-        for view in &mut child.controls {
-            visit(&scope, view);
-        }
-        if let Some(module) = child.module.as_mut() {
-            visit_controls_scoped(module, visit);
-        }
+    visit_face_controls(view.face.as_mut(), visit);
+    for child in &mut view.children {
+        visit_child_controls(child, visit);
+    }
+}
+
+/// The same walk, for a child card and its own children.
+fn visit_child_controls(
+    child: &mut UiNodeChild,
+    visit: &mut impl FnMut(&str, &mut UiPanelControlView),
+) {
+    visit_face_controls(child.face.as_mut(), visit);
+    for nested in &mut child.children {
+        visit_child_controls(nested, visit);
+    }
+}
+
+/// The panel a face owns, if it owns one: a module's panel, or a leaf's
+/// bound controls. Every other kind of face has none.
+fn face_panel(face: Option<&mut UiNodeFace>) -> Option<&mut UiPanelGroup> {
+    match face? {
+        UiNodeFace::Module(module) => Some(&mut module.panel),
+        UiNodeFace::Controls(group) => Some(group),
+        _ => None,
+    }
+}
+
+/// Walk one face's panel, nested groups included.
+fn visit_face_controls(
+    face: Option<&mut UiNodeFace>,
+    visit: &mut impl FnMut(&str, &mut UiPanelControlView),
+) {
+    if let Some(panel) = face_panel(face) {
+        visit_group_controls(panel, visit);
     }
 }
 
@@ -744,13 +856,23 @@ fn visit_group_controls(
     }
 }
 
-/// Visit every panel group on a face, including nested module faces.
-fn visit_groups(face: &mut UiModuleFace, visit: &mut impl FnMut(&mut UiPanelGroup)) {
-    visit_group(&mut face.panel, visit);
-    for child in &mut face.children {
-        if let Some(module) = child.module.as_mut() {
-            visit_groups(module, visit);
-        }
+/// Visit every panel group in a card and everything below it.
+fn visit_view_groups(view: &mut UiNodeView, visit: &mut impl FnMut(&mut UiPanelGroup)) {
+    if let Some(panel) = face_panel(view.face.as_mut()) {
+        visit_group(panel, visit);
+    }
+    for child in &mut view.children {
+        visit_child_groups(child, visit);
+    }
+}
+
+/// The same walk, for a child card and its own children.
+fn visit_child_groups(child: &mut UiNodeChild, visit: &mut impl FnMut(&mut UiPanelGroup)) {
+    if let Some(panel) = face_panel(child.face.as_mut()) {
+        visit_group(panel, visit);
+    }
+    for nested in &mut child.children {
+        visit_child_groups(nested, visit);
     }
 }
 
@@ -764,15 +886,16 @@ fn visit_group(group: &mut UiPanelGroup, visit: &mut impl FnMut(&mut UiPanelGrou
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::UiPanelControlState;
+    use lpa_studio_core::{UiNodeFace, UiPanelControlState};
 
     use super::{
-        HELD, PLASMA_1_SCOPE, PLASMA_2_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face, root_face,
+        HELD, PLASMA_1_SCOPE, PLASMA_2_SCOPE, PanelSpike, ROOT_SCOPE, held_root_face,
+        root_module_node_view,
     };
     use crate::app::module::PanelGesture;
 
     fn spike() -> PanelSpike {
-        PanelSpike::new(root_face()).with_held(HELD)
+        PanelSpike::new(root_module_node_view()).with_held(HELD)
     }
 
     #[test]
@@ -795,14 +918,14 @@ mod tests {
     fn clearing_a_scope_descends_into_its_nested_groups() {
         let mut spike = spike();
         // brightness (root) + plasma_1's speed are held.
-        assert_eq!(spike.face.panel.engaged_total(), 2);
+        assert_eq!(spike.face().panel.engaged_total(), 2);
 
         spike.apply_gesture(&PanelGesture::ClearScope {
             scope: ROOT_SCOPE.to_string(),
         });
 
         assert_eq!(
-            spike.face.panel.engaged_total(),
+            spike.face().panel.engaged_total(),
             0,
             "reset means reset — the nested plasma writer goes too"
         );
@@ -816,16 +939,16 @@ mod tests {
             channel: "speed".to_string(),
         });
 
-        assert_eq!(spike.face.panel.groups[0].engaged_total(), 0);
+        assert_eq!(spike.face().panel.groups[0].engaged_total(), 0);
         assert_eq!(
-            spike.face.panel.engaged_here(),
+            spike.face().panel.engaged_here(),
             1,
             "the root's own held brightness is untouched"
         );
         // Clearing restores the Read form, not just the state flag: the
         // control falls back into whatever was driving the channel.
         assert_eq!(
-            spike.face.panel.groups[0].controls[0].state,
+            spike.face().panel.groups[0].controls[0].state,
             UiPanelControlState::ReadFollowing
         );
     }
@@ -833,14 +956,14 @@ mod tests {
     #[test]
     fn auto_save_and_group_disclosure_are_view_gestures() {
         let mut spike = spike();
-        assert!(spike.face.auto_save);
+        assert!(spike.face().auto_save);
         spike.apply_gesture(&PanelGesture::SetAutoSave(false));
-        assert!(!spike.face.auto_save);
+        assert!(!spike.face().auto_save);
 
-        assert!(!spike.face.panel.groups[1].collapsed);
+        assert!(!spike.face().panel.groups[1].collapsed);
         spike.apply_gesture(&PanelGesture::ToggleGroup {
             scope: PLASMA_2_SCOPE.to_string(),
         });
-        assert!(spike.face.panel.groups[1].collapsed);
+        assert!(spike.face().panel.groups[1].collapsed);
     }
 }
