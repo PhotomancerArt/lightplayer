@@ -18,7 +18,6 @@ use lpc_shared::time::TimeProvider;
 use lpc_wire::{ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, NodeRuntimeStatus};
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
-use crate::dataflow::bus::Bus;
 use crate::dataflow::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
@@ -213,8 +212,7 @@ impl Engine {
 
         match state {
             NodeEntryState::Alive(mut runtime) => {
-                let bus = Bus::new();
-                let mut ctx = crate::node::DestroyCtx::new(node, frame, &bus);
+                let mut ctx = crate::node::DestroyCtx::new(node, frame);
                 runtime
                     .destroy(&mut ctx)
                     .map_err(|err| EngineError::node(node, err))?;
@@ -2276,14 +2274,14 @@ mod tests {
             Err(NodeError::msg("intentional tick failure"))
         }
 
-        fn destroy(&mut self, _ctx: &mut crate::node::DestroyCtx<'_>) -> Result<(), NodeError> {
+        fn destroy(&mut self, _ctx: &mut crate::node::DestroyCtx) -> Result<(), NodeError> {
             Ok(())
         }
 
         fn handle_memory_pressure(
             &mut self,
             _level: crate::node::PressureLevel,
-            _ctx: &mut crate::node::MemPressureCtx<'_>,
+            _ctx: &mut crate::node::MemPressureCtx,
         ) -> Result<(), NodeError> {
             Ok(())
         }
