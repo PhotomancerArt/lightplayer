@@ -482,6 +482,11 @@ my-project/
   by construction — a module folder's internal wiring is
   location-independent.
 
+> Status: the project.json/module.json split, the container-manifest
+> format gate (missing manifest = hard refuse, format bumped to 3), and
+> the split schemas landed 2026-08-01. `.lp/state.json` arrives with the
+> panel phases.
+
 ## 7. Bus vocabulary — under discovery
 
 The set of standard channel names (`time`, `visual.out`, `audio.*`, …)
@@ -508,8 +513,12 @@ Copy-on-extract per R14.
   ratify there.
 - **Q7:** provenance field set (§8) — enough? (`description`/`homepage`
   deferred?)
-- **Q10:** bare-module-folder open assumes current format (§6) — fine for
-  alpha?
+- **Q10:** SETTLED (2026-08-01, implementation P2): format is a
+  container-level concept. A module folder inside a project is gated by
+  the project's container manifest; the loader never re-runs the gate for
+  child artifacts (pinned by test). Bare-module-folder standalone opening
+  keeps the §6 assume-current posture; import-time gating arrives with
+  the registry/import flow.
 - **Q11:** → moved to `panel.md` P6 (merge/tiebreak rules); ratify there.
 - **Q12:** → resolved by the latch model: grabbing authored-driven
   channels is core behavior (`panel.md` P2/P5), not an increment.

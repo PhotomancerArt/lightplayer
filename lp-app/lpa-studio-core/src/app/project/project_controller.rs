@@ -1572,6 +1572,7 @@ impl ProjectController {
         .with_project_name(self.project_name(project_id))
         .with_channel_choices(self.ui_channel_choices())
         .with_root_slots(root_slots)
+        .with_manifest(self.active_manifest())
         .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
         .with_pending_edits(self.pending_edits())
@@ -2405,6 +2406,22 @@ impl ProjectController {
                 library.pending_close.push(previous.handle.uid.to_string());
             }
         }
+    }
+
+    /// The container-manifest identity of the open library package, for the
+    /// project popup's read-only settings rows. `None` when no library
+    /// package backs the running project (demo path, unknown device
+    /// project) or the manifest fails to parse — the popup then skips the
+    /// identity rows rather than rendering a broken section.
+    pub fn active_manifest(&self) -> Option<crate::UiProjectManifest> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        let fields = crate::app::library::package_manifest::read_manifest(&*view).ok()?;
+        Some(crate::UiProjectManifest {
+            format: fields.format,
+            uid: fields.uid,
+            name: fields.name,
+        })
     }
 
     /// The `prj_…` uid of the open library package, when the running

@@ -17,6 +17,7 @@ pub const MANIFEST_PATH: &str = "/project.json";
 /// The manifest fields the library cares about.
 #[derive(Debug, Clone)]
 pub struct ManifestFields {
+    pub format: Option<u32>,
     pub uid: Option<String>,
     pub name: Option<String>,
 }
@@ -24,6 +25,7 @@ pub struct ManifestFields {
 pub fn read_manifest(fs: &dyn LpFs) -> Result<ManifestFields, LibraryError> {
     let manifest = read(fs)?;
     Ok(ManifestFields {
+        format: manifest.format,
         uid: manifest.uid,
         name: manifest.name,
     })

@@ -74,7 +74,7 @@ pub use app::project::{
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
     SlotEditOp, SlotKind, UiAddNodeMenu, UiAddNodeMenuEntry, UiAffordance, UiAssetContent,
     UiAssetContentBody, UiAttachTarget, UiNodeRemovePreflight, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiShaderError,
+    UiPendingEditPhase, UiProjectManifest, UiShaderError,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,

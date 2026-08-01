@@ -309,16 +309,20 @@ impl LibraryStore {
         Ok(package)
     }
 
-    /// Rename = change the slug and MOVE the package directory. The uid (and
-    /// therefore history and device associations) is untouched; the manifest
-    /// `name` field is the editor's concern, not the gallery's. Returns the
-    /// final slug (slugified, collision-suffixed). No-op when unchanged.
+    /// Rename = change the slug, MOVE the package directory, and patch the
+    /// manifest `name` to the raw typed name. The uid (and therefore history
+    /// and device associations) is untouched. Post-mitosis the manifest is
+    /// library-owned workspace metadata (never an authored def slot), so the
+    /// gallery rename is THE manifest patch path. Returns the final slug
+    /// (slugified, collision-suffixed). Slug no-op still patches the name.
     pub fn rename(&self, uid: PrefixedUid, new_slug: &str) -> Result<String, LibraryError> {
         let old_slug = self
             .slug_for_uid(uid)?
             .ok_or_else(|| LibraryError::NotFound(uid.to_string()))?;
         let requested = slugify(new_slug);
         if requested == old_slug {
+            let package_fs = self.chroot_package(&old_slug)?;
+            package_manifest::set_name(&*package_fs.borrow(), new_slug)?;
             return Ok(old_slug);
         }
         let taken: Vec<String> = self
@@ -346,6 +350,7 @@ impl LibraryStore {
         self.fs
             .borrow()
             .delete_dir(format!("{PACKAGES_DIR}/{old_slug}").as_str().as_path())?;
+        package_manifest::set_name(&*new_fs.borrow(), new_slug)?;
         Ok(final_slug)
     }
 
@@ -463,7 +468,7 @@ impl LibraryStore {
     fn read_summary(&self, slug: &str) -> Result<PackageSummary, LibraryError> {
         let package_fs = self.chroot_package(slug)?;
         let view = package_fs.borrow();
-        let ManifestFields { uid, name } = package_manifest::read_manifest(&*view)?;
+        let ManifestFields { uid, name, .. } = package_manifest::read_manifest(&*view)?;
         let uid = uid
             .ok_or_else(|| LibraryError::Manifest(format!("package {slug} has no uid")))?
             .parse()

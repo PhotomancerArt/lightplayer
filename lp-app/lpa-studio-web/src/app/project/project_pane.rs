@@ -72,6 +72,7 @@ pub fn ProjectPane(
     let project_name = view.project_name.clone();
     let pending_edits = view.pending_edits.clone();
     let root_slots = view.root_slots.clone();
+    let manifest = view.manifest.clone();
     let library_identity = view.library_identity.clone();
 
     rsx! {
@@ -92,6 +93,7 @@ pub fn ProjectPane(
                     stats,
                     pending_edits,
                     root_slots,
+                    manifest,
                     library_identity,
                     on_action,
                     initially_open,
@@ -145,6 +147,9 @@ fn ProjectDetailPopover(
     stats: Vec<UiMetric>,
     pending_edits: Vec<UiPendingEdit>,
     #[props(default)] root_slots: Vec<UiConfigSlot>,
+    /// The container-manifest identity, when a library package backs it.
+    #[props(default)]
+    manifest: Option<lpa_studio_core::UiProjectManifest>,
     /// The open project's library identity, when a package backs it.
     #[props(default)]
     library_identity: Option<(String, String)>,
@@ -175,12 +180,12 @@ fn ProjectDetailPopover(
                     span { class: status_class, "{status.label}" }
                 }
             }
-            if !root_slots.is_empty() {
-                // The workspace root's own identity rows (flat root, Q5):
-                // purpose-built controls, NOT the generic slot editor —
-                // see `project_settings_section`.
+            if !root_slots.is_empty() || manifest.is_some() {
+                // The project's identity rows (container manifest, plus the
+                // root's nodes count): purpose-built controls, NOT the
+                // generic slot editor — see `project_settings_section`.
                 DetailSection { title: "Project settings",
-                    ProjectSettingsSection { root_slots, on_action }
+                    ProjectSettingsSection { manifest, root_slots }
                 }
             }
             // Share is its own section: settings are what the project IS,
