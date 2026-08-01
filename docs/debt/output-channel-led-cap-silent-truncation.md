@@ -1,7 +1,8 @@
 ---
-status: carried
+status: retired
 since: 2026-05-18
 logged: 2026-07-31
+retired: 2026-07-31
 area: lp-fw/fw-esp32-common/src/output/provider.rs + lp-fw/fw-esp32c6/src/output/rmt_ws281x_driver.rs
 related:
   - lp-fw/fw-esp32c6/src/output/rmt_ws281x_driver.rs
@@ -46,6 +47,17 @@ or read `provider.rs` before wiring a long run.
   (`lp-fw/fw-esp32s3/src/output/rmt/esp32s3_rmt_ws281x_driver.rs`) goes through
   the same `Esp32OutputProvider`, so the same silent cap now also governs four
   channels instead of one.
+
+- **2026-07-31 (retirement)** — Both exit criteria met by the S3 node-gates
+  plan (2026-07-31-1444-s3-app-node-gates, P3): the single definition is now
+  `lpc_hardware::WS281X_MAX_LEDS_PER_CHANNEL` with a shared
+  `ws281x_capped_byte_count(requested) -> (granted, truncated)` helper
+  (host-tested), and every cap site — `Esp32OutputProvider::open`, its `write`
+  grow path, and the C6 RMT driver's `open`/`resize` — warns when truncation
+  actually occurs, once per cap-crossing rather than per frame. In passing,
+  the C6 driver's `open` used to store the *uncapped* byte count on the output
+  while sizing the RMT buffer from the capped one; it now stores the capped
+  value consistently.
 
 **Exit criteria** — `capped_byte_count` (or its caller) logs a `warn!` (or
 returns a distinguishable error) the moment truncation actually occurs, and

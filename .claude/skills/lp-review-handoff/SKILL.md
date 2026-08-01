@@ -55,13 +55,19 @@ In the final message to the user:
   your lean stated.
 - The exact gate questions: what needs human judgment, and what "pass"
   looks like.
-- PR + CI status links when a PR exists.
+- PR + CI status links, and whether the PR is draft or ready. By the time
+  you reach a gate there should already be a PR — it opens at the first
+  commit, not at the end. A PR waiting on a gate stays **draft**; say so,
+  and never mark it ready to satisfy the gate.
 
 ## 4. Scope reminders
 
-- Sessions started from a task chip or delegation prompt: this handoff is
-  the END of the default pipeline — implement → validate → PR → CI green →
-  handoff. Do not stop at "implementation compiles".
+- This handoff is the END of the default pipeline — implement → validate →
+  PR → CI green → handoff — for EVERY session, not just ones started from a
+  task chip or delegation prompt. Do not stop at "implementation compiles".
+- Between gates, do not stop at all: a phase boundary whose `Review gate:`
+  is `none` is not a handoff point, and neither is a commit or a finished
+  implementation waiting on permission to push.
 - When filing task chips yourself, write this definition of done into the
   chip's prompt.
 - A port pin anywhere in your instructions that the user did not ask for in

@@ -22,6 +22,16 @@ isa-rv32 = ["dep:lp-riscv-inst"]
 # Xtensa backend (ESP32-S3 / classic ESP32): `isa/xt`, its emitter and the
 # per-opcode immediate table.
 isa-xt = ["dep:lp-xt-inst"]
+# Native-f32 (`FloatMode::F32`) lowering: `lower_f32`, and on a JIT-capable
+# target the soft-float symbol entries in the `rt_jit` builtin table.
+#
+# Off by default, and for the same measured reason as the `isa-*` gates above:
+# `FloatMode` is matched on a runtime value, so LTO cannot drop the f32 arms on
+# its own. The shipping ESP32-C6 image runs Fixed-mode shaders only and must not
+# grow by an f32 backend it never enters (f32 roadmap D2). Pair it with
+# `lps-builtins/float-f32`, which gates the `__lp_lpir_*_f32` implementations
+# this lowering calls.
+float-f32 = []
 # Enable debug info generation (increases binary size, for development only)
 debug = []
 # The Xtensa hardware-risk corpus (`xt_corpus`), shared by the ESP32-S3 JIT
@@ -33,6 +43,10 @@ emu = [
     # The emulation path's reference target is rv32 (lp-riscv-emu); Xtensa is
     # additive on top of it via `emu-xt`.
     "isa-rv32",
+    # Host emulation is where the f32 filetest targets run, and the builtins
+    # image it links is always built with the f32 family. Nothing on the host is
+    # flash-constrained, so the gate has no job here.
+    "float-f32",
     "dep:cranelift-codegen",
     "dep:lpvm-cranelift",
     "dep:lpvm-emu",

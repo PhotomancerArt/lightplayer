@@ -28,10 +28,21 @@
 //! [`Emulator::with_profile`]`(BoardProfile::esp32())` models the classic
 //! ESP32's word-mirrored SRAM1 (FINDINGS C2).
 
+//! ## Floating point
+//!
+//! The FP coprocessor is modeled as of M6: state in [`cpu`], data movement in
+//! `executor/float.rs`, and everything that computes a value in
+//! `executor/float_math.rs` behind the explicit [`fp_policy`] layer. **Its
+//! numeric behavior is not proven against silicon** until the M6 P6 hardware
+//! campaign runs; corners IEEE-754 does not fix are [`fp_policy::Unknown`] and
+//! reading one panics rather than guessing.
+
 pub mod board;
 pub mod cpu;
 pub mod emu;
 pub mod error;
+pub mod fp_capture;
+pub mod fp_policy;
 pub mod memory;
 pub mod trace;
 
@@ -40,6 +51,7 @@ mod executor;
 pub use board::BoardProfile;
 pub use emu::{CallOutcome, Emulator, RunOutcome, SyscallHandler, SyscallOutcome};
 pub use error::{Trap, TrapKind};
+pub use fp_policy::{FpPolicy, Unknown};
 // The arch-neutral contract types consumers configure the emulator with.
 pub use lp_emu_core::{CycleModel, InstClass, LogLevel};
 pub use memory::{AliasRule, SHARED_DBUS_BASE};

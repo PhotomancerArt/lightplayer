@@ -602,23 +602,37 @@ clippy-fw-esp32s3:
     # and the server-gated half of serial/io_task.rs — and the separate
     # `--features server` pass it used to need is gone.
     cargo clippy --release -- --no-deps -D warnings
+    # The app path again with the serial frame readout bolted on. It is `cfg`'d
+    # out of the default build entirely, so linting the defaults leaves it
+    # completely uncovered — the same hole the harness loop below exists to
+    # close, for the same reason.
+    echo "clippy: --features frame-dump"
+    cargo clippy --release --features frame-dump -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback; do
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance test_button; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
 
-build-fw-esp32s3:
+# `features` is a comma-separated list added to the defaults — for the app path
+# that means `frame-dump` and nothing else today. Harnesses have their own
+# recipes because they REPLACE the entrypoint; this argument only decorates it,
+# so the size check and the plain build share one recipe rather than forking.
+build-fw-esp32s3 features="":
     #!/usr/bin/env bash
     set -euo pipefail
     GCC_BIN="$(just _xt-gcc-dir)"
     if [[ -n "$GCC_BIN" ]]; then
       export PATH="$GCC_BIN:$PATH"
     fi
-    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3
+    args=(build --profile release-esp32s3)
+    if [[ -n "{{ features }}" ]]; then
+      args+=(--features "{{ features }}")
+    fi
+    cd lp-fw/fw-esp32s3 && cargo "${args[@]}"
 
 # Print the directory to prepend to PATH so xtensa-esp32s3-elf-gcc resolves,
 # or fail with the fix. Prints NOTHING when the toolchain is already on PATH —
@@ -655,7 +669,14 @@ _xt-gcc-dir:
 # does not land) until someone physically replugs it.
 
 # Flash fw-esp32s3 to a connected ESP32-S3 and open the serial monitor.
-flash-fw-esp32s3 port="": build-fw-esp32s3
+#
+# The optional second argument is passed straight to `build-fw-esp32s3`. The
+# one that matters is `frame-dump`, which makes the board print every
+# transmitted frame — `scripts/m4-hardware-walk.sh` flashes with it because an
+# LED cannot be diffed against a host render:
+#
+#   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX frame-dump
+flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
     #!/usr/bin/env bash
     set -euo pipefail
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
@@ -745,6 +766,121 @@ fwtest-loopback-esp32s3 port="":
       export PATH="$GCC_BIN:$PATH"
     fi
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_loopback
+    cd - >/dev/null
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
+
+# Run the M6 FP conformance corpus on a connected ESP32-S3 and capture it.
+#
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX                 # everything
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50  # a smoke run
+#   just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX tables          # estimate ROMs
+#
+# `family` is an `lp-xt-fp-vectors` family name (rounding, nan_payload,
+# denormal, signed_zero, div_sqrt, convert), or `tables` for the estimate-table
+# sweep. `limit` caps each family; 0 runs all of it.
+#
+# ORDERING RULE, same as fwtest-xt-jit-esp32s3 and for the same reason: the host
+# predictions in `lp-xt/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
+# `cargo test -p lp-xt-emu --test fp_conformance`, which needs no board. A
+# device disagreement is a finding to triage — never a reason to edit a golden.
+# Regenerating a prediction from device output turns the whole campaign into a
+# tautology that passes forever.
+#
+# CAPTURE MECHANISM (an operational finding, recorded here so it is not
+# rediscovered): `espflash flash --monitor` needs a pty, so a naive `| tee`
+# breaks it. `script -q <file> espflash …` supplies one and tees in a single
+# step. The harness never exits — it prints its sentinel and parks — so this
+# polls the capture for `END-ALL` and then interrupts espflash. A bare
+# `espflash monitor` NEVER attaches on the S3's USB-Serial-JTAG; that is a
+# different thing from a raw port open. See docs/debt/ if this ever needs a
+# second mechanism.
+#
+# `--flash-size {{ s3_flash_size }}` is not optional: omitting it boot-loops a
+# 16 MB board. If the port wedges (`ps` shows STAT `Us+` and `kill -9` does not
+# land), STOP and ask for a physical replug — do not thrash.
+fwtest-xt-fp-esp32s3 port="" family="" limit="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mode=families
+    family="{{ family }}"
+    if [[ "$family" == "tables" ]]; then
+      mode=tables
+      family=""
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/fpconf-$(date +%Y%m%d-%H%M%S).txt"
+    (cd lp-fw/fw-esp32s3 && \
+      LP_FP_MODE="$mode" LP_FP_FAMILY="$family" LP_FP_LIMIT="{{ limit }}" \
+      cargo build --profile release-esp32s3 --features test_xt_fp_conformance)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    # `</dev/null` is load-bearing: `script` hands its child the terminal, and a
+    # backgrounded espflash reading the same stdin as this shell eats keystrokes
+    # and gets an EOF for its port prompt. The harness never reads anything, so
+    # there is nothing to give it.
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32s3_elf }} </dev/null &
+    cap=$!
+    # Poll rather than wait: the harness parks forever after its sentinel, so
+    # there is nothing to wait FOR except the sentinel itself.
+    for _ in $(seq 1 600); do
+      if grep -q 'END-ALL' "$out" 2>/dev/null; then break; fi
+      if ! kill -0 "$cap" 2>/dev/null; then break; fi
+      sleep 1
+    done
+    # SIGINT first — that is what Ctrl-C sends, and espflash releases the port
+    # cleanly on it. Escalate only if it does not.
+    kill -INT "$cap" 2>/dev/null || true
+    sleep 2
+    kill -TERM "$cap" 2>/dev/null || true
+    wait "$cap" 2>/dev/null || true
+    echo "captured $(wc -l < "$out") lines to $out"
+    # Only the family modes have predictions to diff against. The table sweep
+    # produces the estimate ROMs themselves — there is nothing to compare them
+    # to, which is the whole reason they have to be read off silicon.
+    if [[ "$mode" == "families" ]]; then
+      just fp-diff "$out"
+    else
+      echo "table sweep captured; P6 turns it into fp_policy::EstimateTables"
+    fi
+
+# Diff an FP conformance capture against the committed host predictions.
+#
+# Classifies every row AGREE / DIVERGE / RESOLVED / SKIPPED and prints the full
+# divergence list. ABORTS on a fingerprint mismatch (the two sides generated
+# different inputs, so nothing after it means anything) and on a missing end
+# sentinel (a truncated capture is an error, not a partial pass).
+#
+#   just fp-diff target/fp-capture/fpconf-20260731-190000.txt
+fp-diff capture:
+    FP_CAPTURE="{{ absolute_path(capture) }}" \
+      cargo test -p lp-xt-emu --test fp_capture -- --nocapture --test-threads=1
+
+# Run the GPIO button diagnostic on a connected ESP32-S3: D9 (GPIO8) with an
+# internal pull-up, normally-open button to GND. Prints a `BUTTON gpio=...`
+# line per debounced press/release. Mirrors fw-esp32c6's
+# `fwtest-button-esp32c6`; unlike it, this harness is synchronous (the S3's
+# `fw_harness` entrypoint never starts the embassy runtime).
+#
+#   just fwtest-button-esp32s3 /dev/cu.usbmodemXXXX
+fwtest-button-esp32s3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_button
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
     if [[ -n "{{ port }}" ]]; then
@@ -968,11 +1104,14 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
     done
-    # test_espnow is the one harness built without default features: it wants
-    # the radio capability alone, not the server stack.
-    echo "==> fw-esp32c6 harness: test_espnow (--no-default-features)"
-    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --no-default-features --features test_espnow,esp32c6 -- --no-deps -D warnings
+    # Two harnesses build without default features: test_espnow wants the radio
+    # capability alone, and test_f32_softfloat wants the compiler alone (plus
+    # `float-f32`, which no other configuration in this crate turns on).
+    for feature in test_espnow test_f32_softfloat; do
+        echo "==> fw-esp32c6 harness: $feature (--no-default-features)"
+        cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+            --no-default-features --features "$feature,esp32c6" -- --no-deps -D warnings
+    done
 
 # Every lpc-engine node gate, one build per gate turned off.
 #
@@ -1408,6 +1547,32 @@ fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
 # Run firmware with test_espnow: 1Hz simulated button events over ESP-NOW
 fwtest-espnow-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# Run firmware with test_f32_softfloat: IEEE f32 semantics on the C6's soft-float
+# path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled
+# on-device in FloatMode::F32 and executed.
+#
+# The port is NOT auto-detected. Several ESP32 boards are usually attached and
+# picking the first one has flashed the wrong board before; pass the C6's port
+# explicitly, e.g. `just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodem1301`.
+fwtest-f32-softfloat-esp32c6 port="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+        port="${ESPFLASH_PORT:-}"
+    fi
+    if [[ -z "$port" ]]; then
+        echo "Pass the ESP32-C6 port explicitly (or set ESPFLASH_PORT):" >&2
+        echo "  just fwtest-f32-softfloat-esp32c6 /dev/cu.usbmodemXXXX" >&2
+        echo "Available:" >&2
+        ls /dev/cu.usbmodem* /dev/cu.usbserial* 2>/dev/null >&2 || true
+        exit 1
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
+        --features test_f32_softfloat,esp32c6 --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }}
 
 cargo-update:
     cargo update -p regalloc2 \
