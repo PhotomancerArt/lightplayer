@@ -4757,8 +4757,8 @@ mod tests {
         studio.set_agent_models_fetcher(|_config| {
             Box::pin(async {
                 Ok(vec![ModelInfo {
-                    id: "claude-sonnet-5".to_string(),
                     display_name: Some("Claude Sonnet 5".to_string()),
+                    ..ModelInfo::new("claude-sonnet-5".to_string())
                 }])
             })
         });
@@ -4842,8 +4842,8 @@ mod tests {
         studio.set_agent_models_fetcher(|_config| {
             Box::pin(async {
                 Ok(vec![ModelInfo {
-                    id: "claude-haiku-4".to_string(),
                     display_name: Some("Claude Haiku 4".to_string()),
+                    ..ModelInfo::new("claude-haiku-4".to_string())
                 }])
             })
         });
