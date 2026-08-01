@@ -1148,6 +1148,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch --depth=1 origin "$HEAD_REF"
           BEFORE_SHA="$(git rev-parse "origin/$HEAD_REF")"
+          # The dx build regenerates assets/tailwind.css in this working
+          # tree; it is build output here, and a dirty tracked file aborts
+          # the branch switch below. Discard it (the branch's own copy is
+          # what gets committed).
+          git checkout -- lp-app/lpa-studio-web/assets/tailwind.css || true
           # The pull_request checkout is a detached merge commit; the fresh
           # captures live in the gitignored story-images/.new/ and survive the
           # branch switch in place.
