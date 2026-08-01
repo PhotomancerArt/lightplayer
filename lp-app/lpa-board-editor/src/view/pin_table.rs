@@ -26,11 +26,6 @@ pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
             div { class: "lpb-ed-section-head",
                 h2 { "{target.title()}" }
                 span { class: "lpb-ed-count", "{count}" }
-                button {
-                    class: "lpb-ed-btn lpb-ed-btn--add",
-                    onclick: move |_| doc.write().add_pin(target),
-                    "+ pin"
-                }
                 if show_bulk {
                     button {
                         class: "lpb-ed-btn lpb-ed-btn--add",
@@ -117,6 +112,13 @@ pub fn PinRailEditor(doc: Signal<EditorDoc>, target: RailTarget) -> Element {
                             "×"
                         }
                     }
+                }
+                // Add sits where the new row will appear — bottom of the
+                // list, not the header (put the button where the eye goes).
+                button {
+                    class: "lpb-ed-btn lpb-ed-btn--add",
+                    onclick: move |_| doc.write().add_pin(target),
+                    "+ pin"
                 }
             }
         }
