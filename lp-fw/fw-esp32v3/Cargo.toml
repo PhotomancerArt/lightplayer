@@ -71,9 +71,32 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 # Rust's `#[panic_handler]`, which only catches explicit `panic!`.
 esp-backtrace = { version = "0.19.0", features = ["println"] }
 
+# The RAM probe's radio cohort (M2-P3 of the classic bring-up roadmap):
+# versions from the experiment repo's led-lab-esp32 `test_stress`, the set
+# proven to boot the radio on classic silicon under the esp toolchain
+# (esp-rtos 0.2 does NOT work — conflicting esp-sync; findings.md §3).
+# Optional so the demo build stays radio-free: the radio blob costs ~500 KB
+# of flash and ~10s of KB of DRAM statics, and M2-P3 exists to MEASURE that,
+# not to ship it.
+[dependencies.esp-radio]
+version = "0.18.0"
+optional = true
+features = ["esp32", "wifi", "esp-now", "esp-alloc", "unstable"]
+
+[dependencies.esp-rtos]
+version = "0.3.0"
+optional = true
+features = ["esp32", "esp-radio", "esp-alloc"]
+
 [features]
 default = ["esp32"]
 esp32 = ["esp-backtrace/esp32"]
+# M2-P3 RAM probe: boot with the radio stack linked AND initialised, print
+# heap deltas at each stage. Build:
+#   cargo build --profile release-esp32v3 --features radio_ram_probe
+# (touch src/main.rs first if flipping features — cargo does not always
+# track feature-driven cfg reliably here; roadmap stale-binary lesson.)
+radio_ram_probe = ["dep:esp-radio", "dep:esp-rtos"]
 
 [profile.release-esp32v3]
 inherits = "release"
