@@ -3,7 +3,7 @@
   "target": "esp32",
   "vendor": "domraem",
   "product": "DOM-Z-102",
-  "description": "Domraem DOM-Z-102 classic-ESP32 (LX6, rev v3.x, 4 MB flash) 4-output WS281x controller \u2014 the classic bring-up roadmap's desk board and WLED-class deployment exemplar. Data terminals are silkscreened IO18/IO16/IO14/IO2 (top to bottom of the DATA group), verified against a photo of the desk unit; GPIO0=OPT and GPIO1/3=UART are standard-wiring inference, though the UART link itself is hardware-verified through the onboard CH340K bridge (0x1A86:0x7522). An IO13 screw terminal exists at the top of the right rail with unstated function \u2014 deliberately omitted here until verified (the display sidecar draws it non-claimable). GPIO capabilities are listed only for pins the board actually exposes. macOS needs the WCH VCP driver before the CH340K serial port appears at all; see the fw-esp32v3 README.",
+  "description": "Domraem DOM-Z-102 classic-ESP32 (LX6, rev v3.x, 4 MB flash) 4-output WS281x controller \u2014 the classic bring-up roadmap's desk board and WLED-class deployment exemplar. Data terminals are silkscreened IO18/IO16/IO14/IO2 (top to bottom of the DATA group), verified against a photo of the desk unit; GPIO0=OPT and GPIO1/3=UART are standard-wiring inference, though the UART link itself is hardware-verified through the onboard CH340K bridge (0x1A86:0x7522). An IO12 screw terminal at the top of the right rail drives the onboard relay (product note: \"Relay configuration (to GPIO12)\"; verified against Yona's sketch of the physical board, correcting an earlier IO13 photo misread). It is deliberately omitted here: GPIO12 is the classic ESP32's MTDI strap pin, which selects flash voltage at reset, so driving it has boot implications that need hardware verification before this manifest offers it. The display sidecar draws it non-claimable. GPIO capabilities are listed only for pins the board actually exposes. macOS needs the WCH VCP driver before the CH340K serial port appears at all; see the fw-esp32v3 README.",
   "board_label": [
     {
       "label": "IO18",
@@ -41,7 +41,7 @@
       "aliases": [
         "IO0"
       ],
-      "reserved_reason": "BOOT strapping pin, wired to the board's OPT button; not exposed as an output terminal"
+      "reserved_reason": "BOOT strapping pin, wired to the board's BOOT button (silkscreen BOOT/RESET, stacked); not exposed as an output terminal"
     },
     {
       "address": "/gpio/1",
