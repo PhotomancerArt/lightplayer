@@ -512,6 +512,17 @@ label:has(> input:not(:disabled)) {
     white-space: nowrap;
 }
 
+/* The error line is the one thing the user must read IN FULL — the tail
+   lines above stay one-line-ellipsized like a console, but ellipsizing the
+   failure reason hid the actionable half of an esptool warning on the bench
+   ("Boot-control write failed: Flash…", 2026-07-31). */
+.ux-card-op-term > .ux-console-line-error {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .ux-card-op-term > .ux-console-line-warn {
     color: var(--studio-status-warning-text);
 }
