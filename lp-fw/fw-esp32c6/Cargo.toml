@@ -34,6 +34,13 @@ radio = [
     "esp-rtos/esp-radio",
 ]  # Root-owned ESP-NOW radio capability
 naga = ["lpa-server/naga"]
+# Two RMT memory blocks per WS281x channel instead of one: 96-word windows
+# halving into 48 words (~60 µs of refill headroom) at the cost of the second
+# output, because channel 0's window absorbs channel 1's block. Off by default
+# — the C6 ships two channels of 24-word halves until the stress matrix says
+# otherwise (roadmap M5, G1). Feature-driven cfg is unreliably tracked: run
+# `touch src/main.rs` after flipping this before rebuilding.
+ws281x_2blocks = []
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
@@ -72,6 +79,9 @@ fw-core = { path = "../fw-core", default-features = false }
 fw-esp32-common = { path = "../fw-esp32-common" }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
+# The portable WS281x driver core. `default-features = false` drops its host
+# `mock` backend (and the `alloc` it needs) — firmware brings its own `RmtHw`.
+lp-ws281x = { path = "../lp-ws281x", default-features = false }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }
 lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = [

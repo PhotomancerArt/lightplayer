@@ -3916,6 +3916,7 @@ dependencies = [
  "lp-perf",
  "lp-recovery",
  "lp-shader",
+ "lp-ws281x",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
