@@ -21,7 +21,7 @@ pub use http_transport::{
     HttpGetTransport, HttpRequest, HttpResponse, HttpSseTransport, TransportError,
 };
 pub use model_discovery::{
-    ListModelsError, ModelInfo, list_anthropic_models, list_openai_compat_models,
+    ListModelsError, ModelInfo, ModelPrice, list_anthropic_models, list_openai_compat_models,
 };
 pub use model_provider::{
     BoxStream, ChatMessage, ChatRole, ContentBlock, ModelProvider, StopReason, TokenUsage, ToolDef,
