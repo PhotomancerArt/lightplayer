@@ -12,6 +12,7 @@
 //! Ids are meaningful only within one epoch. [`QueryInternTable::clear`] runs
 //! when the graph changes shape, and every id handed out before it is void.
 
+use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::hash::{Hash, Hasher};
 use lpc_model::SlotPath;
@@ -92,7 +93,10 @@ fn hash_slot_path(path: &SlotPath, hasher: &mut impl Hasher) {
 #[derive(Clone, Debug, Default)]
 pub struct QueryInternTable {
     /// Indexed by [`QueryId`]: the key it stands for.
-    keys: Vec<QueryKey>,
+    ///
+    /// Shared rather than owned, so that resolution can hold on to a key while
+    /// mutating the resolver around it without copying heap data.
+    keys: Vec<Rc<QueryKey>>,
     /// `(hash, id)` sorted by hash, so lookup is a binary search plus one
     /// equality check in the common case.
     by_hash: Vec<(u64, QueryId)>,
@@ -111,13 +115,13 @@ impl QueryInternTable {
             if *candidate_hash != hash {
                 break;
             }
-            if &self.keys[id.index()] == query {
+            if &*self.keys[id.index()] == query {
                 return *id;
             }
         }
 
         let id = QueryId(self.keys.len() as u32);
-        self.keys.push(query.clone());
+        self.keys.push(Rc::new(query.clone()));
         self.by_hash.insert(start, (hash, id));
         id
     }
@@ -129,12 +133,12 @@ impl QueryInternTable {
         self.by_hash[start..]
             .iter()
             .take_while(|(candidate_hash, _)| *candidate_hash == hash)
-            .find(|(_, id)| &self.keys[id.index()] == query)
+            .find(|(_, id)| &*self.keys[id.index()] == query)
             .map(|(_, id)| *id)
     }
 
-    /// The key an id stands for. Cold path: error formatting and tracing.
-    pub fn key(&self, id: QueryId) -> Option<&QueryKey> {
+    /// The key an id stands for.
+    pub fn key(&self, id: QueryId) -> Option<&Rc<QueryKey>> {
         self.keys.get(id.index())
     }
 
@@ -179,7 +183,7 @@ mod tests {
         assert_eq!(a, a_again, "the same key must intern to the same id");
         assert_ne!(a, b);
         assert_eq!(table.len(), 2, "re-interning must not grow the table");
-        assert_eq!(table.key(a), Some(&bus("video")));
+        assert_eq!(table.key(a).map(|k| &**k), Some(&bus("video")));
     }
 
     #[test]
