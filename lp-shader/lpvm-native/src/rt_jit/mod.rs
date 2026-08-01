@@ -17,7 +17,7 @@ mod module;
 pub use buffer::JitBuffer;
 pub use builtins::BuiltinTable;
 pub use compile_job::NativeJitCompileJob;
-pub use compiler::compile_module_jit;
+pub use compiler::{compile_module_jit, compile_module_jit_placed};
 pub use engine::NativeJitEngine;
 pub use instance::NativeJitInstance;
 pub use module::{NativeJitDirectCall, NativeJitModule};

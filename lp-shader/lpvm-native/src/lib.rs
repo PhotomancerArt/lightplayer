@@ -36,6 +36,7 @@ extern crate alloc;
 pub use log;
 
 pub mod abi;
+pub mod codemem_esp32;
 pub mod compile;
 pub mod config;
 pub mod debug;
