@@ -291,7 +291,10 @@ mod tests {
     fn test_parse_target_filters_comma_and_shorthand() {
         let v = parse_target_filters("rv32n,wasm").expect("parse");
         let names: Vec<String> = v.iter().map(|t| t.name()).collect();
-        assert_eq!(names, vec!["rv32n.q32", "wasm.q32", "wasm.f32"]);
+        assert_eq!(
+            names,
+            vec!["rv32n.q32", "rv32n.f32", "wasm.q32", "wasm.f32"]
+        );
     }
 
     #[test]
@@ -319,18 +322,36 @@ mod tests {
         assert_eq!(names, vec!["wasm.q32", "wasm.f32"]);
     }
 
+    /// Like `wasm`, the rv32 backend shorthands select every registered float
+    /// mode. A caller that meant the shipping fixed-point target must spell
+    /// `rv32n.q32` — the soft-float sibling is orders of magnitude slower.
     #[test]
     fn test_parse_target_filters_rv32n_shorthand() {
         let v = parse_target_filters("rv32n").expect("parse");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].name(), "rv32n.q32");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["rv32n.q32", "rv32n.f32"]);
     }
 
     #[test]
     fn test_parse_target_filters_rv32lpn_shorthand() {
         let v = parse_target_filters("rv32lpn").expect("parse");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].name(), "rv32lpn.q32");
+        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["rv32lpn.q32", "rv32lpn.f32"]);
+    }
+
+    /// The soft-float rv32 targets exist and name the same backend as their
+    /// Q32 siblings — only `float_mode` differs, which is what makes an
+    /// `@unimplemented(float_mode=f32)` predicate cover them.
+    #[test]
+    fn test_target_name_rv32_f32_pair() {
+        for (name, frontend) in [("rv32n.f32", Frontend::Naga), ("rv32lpn.f32", Frontend::Lp)] {
+            let t = Target::from_name(name).expect("registered");
+            assert_eq!(t.name(), name);
+            assert_eq!(t.float_mode, FloatMode::F32);
+            assert_eq!(t.backend, Backend::Rv32fa);
+            assert_eq!(t.frontend, frontend);
+            assert_eq!(t.isa, super::super::Isa::Riscv32);
+        }
     }
 
     #[test]

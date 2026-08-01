@@ -1,6 +1,12 @@
 //! Upload command handler
 //!
-//! Pushes a project to a host (e.g. serial device) and exits. Non-interactive.
+//! Pushes a project to a host (e.g. serial device). By default waits for
+//! evidence the newly deployed project is running before exiting (see
+//! `wait::wait_for_project_running` and
+//! `docs/defects/2026-07-30-deploy-compiles-previous-upload.md`); pass
+//! `--no-wait` to restore the old fire-and-forget behaviour.
+
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use lpa_client::LpClient;
@@ -11,6 +17,7 @@ use crate::commands::dev::{collect_project_deploy_files, validation};
 use lpa_client::HostSpecifier;
 
 use super::args::UploadArgs;
+use super::wait::wait_for_project_running;
 
 /// Handle the upload command
 pub fn handle_upload(args: UploadArgs) -> Result<()> {
@@ -53,15 +60,35 @@ async fn handle_upload_async(args: UploadArgs) -> Result<()> {
 
     let local_fs = LpFsStd::new(dir);
     let files = collect_project_deploy_files(&local_fs)?;
-    client
+    let deploy = client
         .deploy_project_files(&project_uid, files)
         .await
         .map_err(|error| anyhow::anyhow!("{error}"))
         .with_context(|| format!("Failed to deploy project to server (host: {host_spec_str})"))?;
+    let handle = deploy.into_value();
+
+    // The wait (or its absence) happens on this same connection — the S3
+    // serial port is exclusive, so a monitor cannot attach separately.
+    let wait_result = if args.no_wait {
+        Ok(())
+    } else {
+        wait_for_project_running(
+            &mut client,
+            handle,
+            Duration::from_secs(args.wait_timeout_secs),
+        )
+        .await
+    };
 
     drop(client);
     connection.close().await;
 
-    println!("Project uploaded and loaded successfully.");
+    wait_result?;
+
+    if args.no_wait {
+        println!("Project uploaded and loaded successfully.");
+    } else {
+        println!("Project uploaded and running.");
+    }
     Ok(())
 }

@@ -10,8 +10,14 @@ rust-version.workspace = true
 default = []
 # JSON Schema derives for the board display sidecar types (host-side tooling).
 schema-gen = ["dep:schemars"]
+# The BoardDiagram Dioxus component. Off by default so data-only consumers
+# (lp-cli) never pull a UI framework.
+diagram = ["dep:dioxus"]
 
 [dependencies]
+# Component-library feature set (no renderer, no launch): the consuming app
+# picks the platform.
+dioxus = { version = "0.7", default-features = false, features = ["lib"], optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 schemars = { workspace = true, optional = true }
