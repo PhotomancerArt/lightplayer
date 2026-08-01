@@ -44,6 +44,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 
 use lp_xt_emu::cpu::CPENABLE_FPU;
+use lp_xt_emu::fp_capture::{Prediction, parse_predictions};
 use lp_xt_emu::fp_policy::parse_unresolved;
 use lp_xt_emu::{Emulator, Trap};
 use lp_xt_fp_vectors::{Family, OpCode, Vector, count, fingerprint, vector};
@@ -56,37 +57,6 @@ const SRC_B_F: u8 = 2;
 const DEST_B: u8 = 0;
 const SRC_INT_A: u8 = 2;
 const DEST_INT_A: u8 = 3;
-
-/// What the emulator predicts for one vector.
-#[derive(Clone, PartialEq, Eq, Debug)]
-enum Prediction {
-    /// A concrete answer: IEEE-fixed, or resolved policy.
-    Bits(u32),
-    /// The instruction faulted; the value is the EXCCAUSE.
-    Trap(u32),
-    /// The prediction needs a policy field nothing has measured yet.
-    Unknown(String),
-}
-
-impl Prediction {
-    fn render(&self) -> String {
-        match self {
-            Prediction::Bits(b) => format!("{b:#010x}"),
-            Prediction::Trap(c) => format!("TRAP:{c}"),
-            Prediction::Unknown(f) => format!("UNKNOWN:{f}"),
-        }
-    }
-
-    fn parse(s: &str) -> Prediction {
-        if let Some(f) = s.strip_prefix("UNKNOWN:") {
-            Prediction::Unknown(f.to_string())
-        } else if let Some(c) = s.strip_prefix("TRAP:") {
-            Prediction::Trap(c.parse().expect("trap cause"))
-        } else {
-            Prediction::Bits(u32::from_str_radix(s.trim_start_matches("0x"), 16).expect("bits"))
-        }
-    }
-}
 
 /// Build the instruction a vector names, or `None` for the pseudo-ops.
 fn instruction(v: &Vector) -> Option<Inst> {
@@ -214,7 +184,8 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fp")
 }
 
-fn header(family: Family, unknown: usize) -> String {
+fn header(family: Family, unknown: &[(String, usize)]) -> String {
+    let total_unknown: usize = unknown.iter().map(|(_, n)| n).sum();
     let mut s = String::new();
     let _ = writeln!(
         s,
@@ -240,7 +211,14 @@ fn header(family: Family, unknown: usize) -> String {
         s,
         "#             the test into a tautology that passes forever."
     );
-    let _ = writeln!(s, "# unknown:    {unknown} of {}", count(family));
+    let _ = writeln!(
+        s,
+        "# unknown:    {total_unknown} of {}, by the policy field that closes them:",
+        count(family)
+    );
+    for (field, n) in unknown {
+        let _ = writeln!(s, "#             {n:>5}  {field}");
+    }
     let _ = writeln!(s, "#");
     let _ = writeln!(s, "# --- silicon provenance (M6 P6 fills this in) ---");
     let _ = writeln!(s, "# board:      NOT RUN");
@@ -259,11 +237,19 @@ fn header(family: Family, unknown: usize) -> String {
     );
     let _ = writeln!(
         s,
-        "# fsr:     UNKNOWN everywhere — FSR accumulates (measured, M6 P1) but"
+        "# fsr:     UNKNOWN everywhere — FSR accumulates (measured, M6 P1) and its"
     );
     let _ = writeln!(
         s,
-        "#          neither the flag layout nor which op sets which flag is known."
+        "#          bit layout is architectural (ISA RM Table 4-48; see cpu::FSR_*),"
+    );
+    let _ = writeln!(
+        s,
+        "#          but WHICH operation raises WHICH flag is still open. Note the RM"
+    );
+    let _ = writeln!(
+        s,
+        "#          says current implementations raise none, and this silicon does."
     );
     s
 }
@@ -282,38 +268,35 @@ fn row(v: &Vector, p: &Prediction) -> String {
     )
 }
 
-/// The committed predictions for one family: `index -> (rendered row, result)`.
+/// The committed predictions for one family.
+///
+/// Parsed by [`parse_predictions`] — the *same* parser the campaign's diff tool
+/// uses (`just fp-diff`), so a corpus file this replay accepts and the diff tool
+/// chokes on cannot exist.
 fn read_fixture(family: Family) -> Option<(u32, Vec<(u32, Prediction)>)> {
     let text =
         std::fs::read_to_string(fixtures_dir().join(format!("{}.txt", family.name()))).ok()?;
-    let mut fp = 0u32;
-    let mut rows = Vec::new();
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("# generator:") {
-            let tok = rest
-                .split_whitespace()
-                .find(|t| t.starts_with("0x"))
-                .expect("fingerprint in the header");
-            fp = u32::from_str_radix(tok.trim_end_matches(',').trim_start_matches("0x"), 16)
-                .expect("fingerprint hex");
-        }
-        if line.starts_with('#') || line.trim().is_empty() {
-            continue;
-        }
-        let (lhs, rhs) = line.split_once("->").expect("every row has an arrow");
-        let index: u32 = lhs.split_whitespace().next().unwrap().parse().unwrap();
-        let result = rhs.split_whitespace().next().unwrap();
-        rows.push((index, Prediction::parse(result)));
-    }
-    Some((fp, rows))
+    let p = parse_predictions(family.name(), &text).expect("committed corpus must parse");
+    Some((
+        p.fingerprint,
+        p.rows.into_iter().map(|(i, _, pred)| (i, pred)).collect(),
+    ))
 }
 
 fn write_fixture(family: Family, rows: &[(Vector, Prediction)]) {
-    let unknown = rows
-        .iter()
-        .filter(|(_, p)| matches!(p, Prediction::Unknown(_)))
-        .count();
-    let mut out = header(family, unknown);
+    // Grouped by field rather than counted in bulk: P6 triages one policy field
+    // at a time, and "3886 unknown" does not tell it where to start.
+    let mut by_field: Vec<(String, usize)> = Vec::new();
+    for (_, p) in rows {
+        if let Prediction::Unknown(f) = p {
+            match by_field.iter_mut().find(|(n, _)| n == f) {
+                Some((_, n)) => *n += 1,
+                None => by_field.push((f.clone(), 1)),
+            }
+        }
+    }
+    by_field.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut out = header(family, &by_field);
     for (v, p) in rows {
         out.push_str(&row(v, p));
         out.push('\n');

@@ -34,6 +34,8 @@ src/
                  arith · imm · load_store · branch · jump · call · window · misc
                  float       FP/Boolean/SR data movement + the CPENABLE gate
                  float_math  everything that computes a float value (M6 P3)
+  fp_policy.rs   every behavior IEEE-754 does not fix, measured or Unknown.
+  fp_capture.rs  parse + diff a device conformance capture (M6 P5).
 ```
 
 Decoding is delegated to [`lp-xt-inst`](../lp-xt-inst); this crate never
@@ -176,9 +178,22 @@ deliberate: a plausible default is indistinguishable from knowledge once it is
 in the code, and an emulator that is 99% right and silently confident about the
 rest is the exact failure M6 exists to prevent.
 
-Today exactly one field is resolved (`fsr_sticky`, from the 2026-07-31 desk
-session). The rest is the row list of the M6 FP-contract ADR's §4, waiting for
-P6. A non-default `FCR` is likewise **refused**, not ignored (D6).
+Seven of the seventeen fields are resolved, and the citation says how:
+**`fsr_sticky`** from the 2026-07-31 desk session, and six — `madd_fused`,
+`conversion_scale`, `float_to_int_out_of_range`, `float_to_int_nan`,
+`utrunc_negative`, `snan_compare_signals` — from the Xtensa ISA Reference
+Manual, each citing the instruction page that states it. The distinction
+matters: a manual reading is still falsifiable by the P6 campaign, a silicon
+measurement *is* the campaign. The other ten are the row list of the M6
+FP-contract ADR's §4. A non-default `FCR.RM` is likewise **refused**, not
+ignored (D6) — its encoding is architectural (`cpu::FCR_RM_*`, ISA RM Table
+4-47), but whether this silicon honors it is still F1's measurement.
+
+The `FSR` flag *layout* is architectural too (`cpu::FSR_*`, Table 4-48), and it
+explains the P1 measurement: the `0x400` read back after that sweep is
+`FSR_DIV_BY_ZERO`, and the sweep ran `div0.s` on a staged zero. What stays open
+is which operation raises which flag — where the manual is actually *falsified*,
+since §4.3.11.4 says current implementations raise none and this one did.
 
 `recip0.s`/`rsqrt0.s`/`sqrt0.s`/`div0.s` return implementation-defined lookup
 ROMs; they sit behind an empty table that P6 extracts exhaustively, so they
@@ -201,9 +216,11 @@ executing nothing".
 **An `UNKNOWN:<field>` row is not a failure.** It is a question addressed to
 silicon, naming the policy field that closes it, and the set is *derived* — the
 harness catches the policy panic and reads the field name out of it, so it
-cannot drift from what the executors actually need. Today: **4305 of 5630 rows
-UNKNOWN (76.5%)**, and the test asserts the count is not zero, because zero
+cannot drift from what the executors actually need. Today: **3886 of 5630 rows
+UNKNOWN (69.0%)**, and the test asserts the count is not zero, because zero
 before the campaign would mean the policy layer had quietly acquired defaults.
+Each corpus file's header breaks its own count down by the field that closes it,
+so P6 can triage one field at a time rather than face a single number.
 
 To regenerate after a generator or executor change:
 
@@ -214,6 +231,34 @@ UPDATE_FP_GOLDENS=1 cargo test -p lp-xt-emu --test fp_conformance
 **Never** regenerate a row from device output. That inverts the test into a
 tautology that passes forever, and it is already the repo's stated rule
 (`lpvm-native/src/xt_corpus.rs`).
+
+### `src/fp_capture.rs` — the campaign's diff tool
+
+```bash
+just fwtest-xt-fp-esp32s3 /dev/cu.usbmodemXXXX signed_zero 50   # capture
+just fp-diff target/fp-capture/fpconf-YYYYmmdd-HHMMSS.txt       # classify
+```
+
+Parses a capture from `fw-esp32s3`'s `test_xt_fp_conformance` harness and
+classifies every row **AGREE** / **DIVERGE** / **RESOLVED** / **SKIPPED**.
+Sans-IO, like the rest of `lp-xt/*`: it takes `&str` and returns values; the
+file reading lives in `tests/fp_capture.rs`, which also shares this module's
+corpus parser with `fp_conformance.rs` so a file one accepts and the other
+chokes on cannot exist.
+
+Two conditions **abort** rather than colour a row, and both are asserted against
+deliberately damaged fixtures rather than tried once:
+
+- a **fingerprint mismatch**, because the device regenerates its own inputs and
+  a disagreement means the two sides ran different vectors — every comparison
+  after it would compare unrelated things, and 5 630 divergences would look like
+  a discovery;
+- a **missing or short-counted sentinel**, because a serial capture that stops
+  early is otherwise indistinguishable from one that finished.
+
+A `DIVERGE` row does *not* fail the command. It is the campaign's product, to be
+triaged into an emulator bug, a harness bug, or documented silicon behavior —
+failing here would push the next person toward editing a golden to get green.
 
 ## Run API
 

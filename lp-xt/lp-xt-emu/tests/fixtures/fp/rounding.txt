@@ -3,7 +3,8 @@
 # predicted:  lp-xt-emu (host), BEFORE any hardware run — M6 P4, D2.
 #             Never regenerate a row from device output: that inverts
 #             the test into a tautology that passes forever.
-# unknown:    1944 of 2592
+# unknown:    1944 of 2592, by the policy field that closes them:
+#              1944  fcr_rounding_honored
 #
 # --- silicon provenance (M6 P6 fills this in) ---
 # board:      NOT RUN
@@ -17,8 +18,10 @@
 #
 # columns: index op a b c imm fcr -> result fsr
 # result:  a bit pattern, TRAP:<exccause>, or UNKNOWN:<policy field>
-# fsr:     UNKNOWN everywhere — FSR accumulates (measured, M6 P1) but
-#          neither the flag layout nor which op sets which flag is known.
+# fsr:     UNKNOWN everywhere — FSR accumulates (measured, M6 P1) and its
+#          bit layout is architectural (ISA RM Table 4-48; see cpu::FSR_*),
+#          but WHICH operation raises WHICH flag is still open. Note the RM
+#          says current implementations raise none, and this silicon does.
 00000 add.s      0x3f800000 0x33800000 0x00000000  0 0 -> 0x3f800000 UNKNOWN:fsr_flag_bits
 00001 add.s      0x3f800000 0x337fffff 0x00000000  0 0 -> 0x3f800000 UNKNOWN:fsr_flag_bits
 00002 add.s      0x3f800000 0x33800001 0x00000000  0 0 -> 0x3f800001 UNKNOWN:fsr_flag_bits

@@ -31,6 +31,25 @@
 //! [`parse_unresolved`], and records the row as `UNKNOWN` naming the field. The
 //! UNKNOWN set is therefore *derived* from the policy rather than maintained by
 //! hand, so it cannot drift away from what the executors actually need.
+//!
+//! # Two kinds of resolution
+//!
+//! A field leaves [`Unknown`] one of two ways, and the citation says which:
+//!
+//! - **From the ISA Reference Manual.** Six fields were closed this way in M6
+//!   P5, once the manual became readable. A manual citation names the section
+//!   and page; the text itself is never reproduced (AGENTS.md license rule), and
+//!   no binutils, GCC, or QEMU source was consulted.
+//! - **From silicon.** Anything the 2011 RM does not cover — NaN payload
+//!   choices, denormal flush, the estimate lookup ROMs, the `div0.s` helper
+//!   family, whether this implementation honors `FCR.RM` at all — stays open
+//!   until the M6 P6 campaign measures it. The RM's own Table 4-46 does not list
+//!   the estimate/helper instructions, so for those "the manual is silent" is a
+//!   checked fact rather than an assumption.
+//!
+//! A manual-sourced answer is still falsifiable: P6 runs the same vectors on the
+//! board, and a row where the RM says one thing and the S3 does another is
+//! exactly the finding this campaign exists to surface.
 
 use core::fmt;
 
@@ -204,13 +223,21 @@ pub enum TiesRule {
     AwayFromZero,
 }
 
-/// The `FSR` flag layout: which bit is which IEEE exception, and which
-/// operations set which flag.
+/// **Which operations set which `FSR` flag.**
 ///
-/// P1 measured that the register **accumulates** (0 on a fresh boot, `0x400`
-/// after a 24-instruction FP sweep) but not what `0x400` *is*. Modeled as a
-/// whole because the layout and the setting rules are one question, and
-/// `float.md` §2 puts the register out of shader reach either way.
+/// The *bit layout* is no longer part of this question: the ISA RM's Table 4-48
+/// (§4.3.11.3, p. 70) fixes it, and it is transcribed as
+/// [`crate::cpu::FSR_INEXACT`]…[`crate::cpu::FSR_INVALID`]. That also explains
+/// P1's measurement — `0x400` is [`crate::cpu::FSR_DIV_BY_ZERO`], and the P1
+/// sweep ran `div0.s`/`recip0.s`/`rsqrt0.s` on a staged zero.
+///
+/// What remains open is the *setting rule*, and it is genuinely open rather than
+/// merely undocumented: §4.3.11.4 states that current implementations set no
+/// FSR flags at all, and the desk S3 demonstrably set one. So the document is
+/// falsified here and only the campaign can say what the rule actually is.
+///
+/// Each field holds the flag mask an operation of that class raises, so a
+/// resolved value is a mapping and not a restatement of the layout.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct FsrFlagBits {
     pub invalid: u32,
@@ -248,12 +275,18 @@ pub struct EstimateTables {
 /// Semantics of the non-estimate members of the divide/sqrt helper family:
 /// `nexp01.s`, `mkdadj.s`, `addexp.s`, `addexpm.s`, `maddn.s`, `divn.s`.
 ///
-/// These are architecturally defined — the Xtensa ISA Reference Manual fixes
-/// them — but the manual is not available in this working environment, and
-/// `AGENTS.md`'s license rule forbids reading binutils, GCC, or QEMU source to
-/// recover them. Recording them as an open question is the honest position:
-/// either a manual read or a P6 measurement closes it, and neither is a guess.
-/// Their *presence* on silicon is settled (M6 P1, all nine helpers executed).
+/// P3 recorded these as open because the ISA Reference Manual was not available.
+/// It is available now, and **it does not cover them**: the manual's Table 4-46
+/// (§4.3.11, p. 67-68) enumerates the Floating-Point Coprocessor Option's
+/// instruction additions and none of `div0.s`, `divn.s`, `nexp01.s`,
+/// `mkdadj.s`, `maddn.s`, `recip0.s`, `rsqrt0.s`, `sqrt0.s`, or `const.s`
+/// appears in it — nor anywhere else in the document. They belong to a later
+/// extension of the FP option than the 2011 edition describes.
+///
+/// So the field stays open for a better reason than before: the manual read has
+/// happened and came back empty, `AGENTS.md`'s license rule keeps binutils, GCC,
+/// and QEMU off the table, and P6's measurement is the remaining route. Their
+/// *presence* on silicon is settled (M6 P1, all nine helpers executed).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DivideStepSemantics {
     /// Marker: this type is populated wholesale when the semantics are sourced.
@@ -290,12 +323,17 @@ pub struct FpPolicy {
     /// What `trunc.s`/`round.s`/`floor.s`/`ceil.s` do with a finite value
     /// outside `i32`, and with `±inf`.
     pub float_to_int_out_of_range: Unknown<OutOfRangeRule>,
-    /// The integer a NaN converts to. `float.md` §5 leaves this unspecified at
-    /// the product level, which is exactly why the *target's* answer has to be
-    /// recorded rather than assumed.
+    /// The **signed** integer a NaN converts to (`trunc.s`, `round.s`,
+    /// `floor.s`, `ceil.s`). `utrunc.s` has its own answer and is not covered
+    /// here. `float.md` §5 leaves this unspecified at the product level, which
+    /// is exactly why the *target's* answer has to be recorded.
     pub float_to_int_nan: Unknown<u32>,
-    /// What `utrunc.s` does with a negative input.
-    pub utrunc_negative: Unknown<OutOfRangeRule>,
+    /// The unsigned integer `utrunc.s` produces for a negative input.
+    ///
+    /// A raw value rather than a rule, because the answer turns out not to be a
+    /// rule: the ISA RM specifies a fixed sentinel here, which is neither the
+    /// saturation an [`OutOfRangeRule`] would name nor a wrap.
+    pub utrunc_negative: Unknown<u32>,
     /// How `round.s` breaks an exact tie.
     pub round_s_ties: Unknown<TiesRule>,
     /// The sixteen constants `const.s` can produce. Architecturally defined and
@@ -317,8 +355,21 @@ pub struct FpPolicy {
     pub divide_step_helpers: Unknown<DivideStepSemantics>,
 }
 
+/// Citation stem for every field closed by the M6 P5 manual read; the argument
+/// names the section or instruction page. One macro so the provenance of the
+/// manual-sourced rows is greppable and cannot drift apart row by row.
+macro_rules! isa_rm {
+    ($where:literal) => {
+        concat!(
+            "Xtensa ISA Reference Manual (2011), read for M6 P5 — ",
+            $where
+        )
+    };
+}
+
 impl FpPolicy {
-    /// The policy as M6 P3 leaves it: two rows measured, the rest open.
+    /// The policy after M6 P5: one row measured on silicon, six read out of the
+    /// ISA Reference Manual, ten still open for the P6 campaign.
     pub const fn m6() -> FpPolicy {
         FpPolicy {
             nan_propagation: Unknown::unknown("nan_propagation", "vector family F2 (NaN payloads)"),
@@ -326,6 +377,14 @@ impl FpPolicy {
                 "default_generated_nan",
                 "vector family F2 (hardware-generated NaNs)",
             ),
+            // Deliberately NOT closed from the manual. §4.3.11.2 (p. 69) says
+            // the ISA includes sub-normal "representations and processing
+            // rules", which is an architectural claim about the option and not
+            // a statement about what this implementation does at run time —
+            // flush-to-zero is precisely the thing a specific FPU deviates on,
+            // and `docs/design/float.md` files it as target-defined. Reading
+            // that one clause as a measurement would be the wrong-but-plausible
+            // answer M6 exists to avoid. F3 settles it on the board.
             flush_input_denormals: Unknown::unknown(
                 "flush_input_denormals",
                 "vector family F3 (denormals, input half)",
@@ -334,22 +393,54 @@ impl FpPolicy {
                 "flush_output_denormals",
                 "vector family F3 (denormals, output half)",
             ),
-            madd_fused: Unknown::unknown("madd_fused", "vector family F1 (rounding)"),
-            conversion_scale: Unknown::unknown(
+            // `MADD.S` (p. 406) states the product is added without an
+            // intermediate round, and its Operation line annotates the multiply
+            // as non-rounding. That is a fused multiply-add, so `mul_add` — not
+            // `(p * q) + a` — is the modelled behavior.
+            madd_fused: Unknown::measured(
+                "madd_fused",
+                "vector family F1 (rounding)",
+                true,
+                isa_rm!("MADD.S, p. 406: the product is added with no intermediate round"),
+            ),
+            // `FLOAT.S` (p. 346) and `UFLOAT.S` (p. 550) scale the converted
+            // integer by 2^-t; `TRUNC.S` (p. 548), `ROUND.S` (p. 497),
+            // `FLOOR.S` (p. 347), `CEIL.S` (p. 311) and `UTRUNC.S` (p. 555)
+            // scale the float by 2^+t before converting. `t` is therefore the
+            // fractional-bit count in both directions — `ScaleRule::FractionalBits`.
+            conversion_scale: Unknown::measured(
                 "conversion_scale",
                 "vector family F6 (conversions, scale sweep)",
+                ScaleRule::FractionalBits,
+                isa_rm!("FLOAT.S p. 346 scales by 2^-t, TRUNC.S p. 548 by 2^+t"),
             ),
-            float_to_int_out_of_range: Unknown::unknown(
+            // The four signed conversions and `UTRUNC.S` all specify the
+            // saturating answer explicitly, per instruction, on their own pages.
+            float_to_int_out_of_range: Unknown::measured(
                 "float_to_int_out_of_range",
                 "vector family F6 (conversions, boundaries)",
+                OutOfRangeRule::Saturate,
+                isa_rm!(
+                    "TRUNC.S p. 548 / ROUND.S p. 497 / FLOOR.S p. 347 / CEIL.S \
+                     p. 311: overflow and infinity return the destination extreme"
+                ),
             ),
-            float_to_int_nan: Unknown::unknown(
+            // Same pages: NaN takes the *positive* extreme, not zero and not the
+            // negative one. `UTRUNC.S` p. 555 gives the unsigned counterpart
+            // (0xffff_ffff), which `executor/float_math.rs` applies separately.
+            float_to_int_nan: Unknown::measured(
                 "float_to_int_nan",
                 "vector family F6 (conversions, NaN)",
+                0x7FFF_FFFF,
+                isa_rm!("TRUNC.S p. 548 and the other signed conversions: NaN returns 0x7fffffff"),
             ),
-            utrunc_negative: Unknown::unknown(
+            // The odd one out, and the reason this field is a value rather than
+            // a rule: a negative input does not saturate to zero.
+            utrunc_negative: Unknown::measured(
                 "utrunc_negative",
                 "vector family F6 (conversions, unsigned)",
+                0x8000_0000,
+                isa_rm!("UTRUNC.S p. 555: negative numbers and -inf return 0x80000000"),
             ),
             round_s_ties: Unknown::unknown("round_s_ties", "vector family F6 (conversions, ties)"),
             const_s_table: Unknown::unknown(
@@ -358,7 +449,9 @@ impl FpPolicy {
             ),
             fsr_flag_bits: Unknown::unknown(
                 "fsr_flag_bits",
-                "the FSR column of every vector family",
+                "the FSR column of every vector family (the layout is now \
+                 architectural — see cpu::FSR_*; what is open is which \
+                 operation raises which flag)",
             ),
             fsr_sticky: Unknown::measured(
                 "fsr_sticky",
@@ -368,10 +461,27 @@ impl FpPolicy {
                  0x400 after a 24-instruction FP sweep with no intervening write \
                  (p1-silicon-results.md)",
             ),
-            snan_compare_signals: Unknown::unknown(
+            // §4.3.11.2 (p. 69) says the ISA includes IEEE754 signed zero,
+            // infinity, quiet NaN and sub-normal handling but **not** signaling
+            // NaNs or exceptions, and §4.3.11.4 (p. 71) adds that current
+            // implementations raise none. A bit pattern with the quiet bit clear
+            // is therefore just a NaN here; nothing signals on it.
+            snan_compare_signals: Unknown::measured(
                 "snan_compare_signals",
                 "vector family F2 (NaN payloads, compare half)",
+                false,
+                isa_rm!("§4.3.11.2 p. 69: the ISA has no IEEE754 signaling NaNs or exceptions"),
             ),
+            // The RM fixes the field's *encoding* (Table 4-47, p. 69-70 — now
+            // in `cpu.rs` as `FCR_RM_*`) and names it for `FLOAT.S`/`UFLOAT.S`
+            // only. It never says which arithmetic instructions consult it, and
+            // §4.3.11.4 (p. 71) shows the document is willing to describe
+            // architectural machinery that current implementations do not
+            // provide. Whether add.s/sub.s/mul.s on *this* silicon round
+            // differently under RM != 0 is therefore still a measurement, and
+            // implementing three directed-rounding modes on the strength of an
+            // unnamed "various instructions" would be a guess with 1944 corpus
+            // rows riding on it.
             fcr_rounding_honored: Unknown::unknown(
                 "fcr_rounding_honored",
                 "vector family F1 (rounding, all four FCR modes)",
@@ -445,13 +555,13 @@ mod tests {
     #[test]
     fn reading_an_unresolved_field_panics_with_a_useful_message() {
         let p = FpPolicy::m6();
-        let err = std::panic::catch_unwind(|| *p.madd_fused.get()).expect_err("must panic");
+        let err = std::panic::catch_unwind(|| *p.nan_propagation.get()).expect_err("must panic");
         let msg = err
             .downcast_ref::<String>()
             .expect("the panic payload is the message");
-        assert_eq!(parse_unresolved(msg), Some("madd_fused"));
+        assert_eq!(parse_unresolved(msg), Some("nan_propagation"));
         assert!(
-            msg.contains("vector family F1"),
+            msg.contains("vector family F2"),
             "the message names what resolves it: {msg}"
         );
     }
@@ -492,9 +602,52 @@ mod tests {
             .collect();
         assert_eq!(
             resolved,
-            vec!["fsr_sticky"],
-            "exactly one row is settled before the hardware campaign; if this \
-             list grew, the new entry needs a citation and an ADR row"
+            vec![
+                "madd_fused",
+                "conversion_scale",
+                "float_to_int_out_of_range",
+                "float_to_int_nan",
+                "utrunc_negative",
+                "fsr_sticky",
+                "snan_compare_signals",
+            ],
+            "the settled list is pinned so a field cannot acquire a value \
+             quietly; if this changed, the new entry needs a citation and an \
+             ADR row"
         );
+    }
+
+    /// Every settled row must say *where* it came from, and the two provenances
+    /// have to stay distinguishable: a manual reading is falsifiable by the P6
+    /// campaign, a silicon measurement is the campaign. Collapsing them would
+    /// hide which claims the board has actually tested.
+    #[test]
+    fn settled_rows_declare_manual_or_silicon_provenance() {
+        let p = FpPolicy::m6();
+        let mut from_manual = Vec::new();
+        let mut from_silicon = Vec::new();
+        for (name, _, cite) in p.inventory() {
+            let Some(c) = cite else { continue };
+            if c.contains("ISA Reference Manual") {
+                from_manual.push(name);
+            } else if c.contains("desk session") {
+                from_silicon.push(name);
+            } else {
+                panic!("{name}'s citation names neither the manual nor a desk session: {c}");
+            }
+        }
+        assert_eq!(from_silicon, vec!["fsr_sticky"]);
+        assert_eq!(from_manual.len(), 6, "manual-sourced rows: {from_manual:?}");
+        // A manual citation without a page number is not a citation.
+        for (name, _, cite) in p.inventory() {
+            if let Some(c) = cite
+                && c.contains("ISA Reference Manual")
+            {
+                assert!(
+                    c.contains("p. ") || c.contains("§"),
+                    "{name} cites the manual without a page or section: {c}"
+                );
+            }
+        }
     }
 }

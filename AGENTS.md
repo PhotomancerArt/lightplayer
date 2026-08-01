@@ -195,6 +195,17 @@ is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
 targets; it needs a cross-compiled builtins image
 (`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
 
+**Xtensa floating point is a separate, in-flight campaign (M6).** `lp-xt-inst`
+encodes the FP subset and `lp-xt-emu` executes it behind an explicit policy layer
+where every corner IEEE-754 does not fix is either cited to the ISA Reference
+Manual or `Unknown` — and **reading an `Unknown` panics** rather than guessing.
+`cargo test -p lp-xt-emu --test fp_conformance` replays the whole 5 630-vector
+corpus with no board attached; `just fwtest-xt-fp-esp32s3 <port>` runs the same
+vectors on a desk S3 and `just fp-diff <capture>` classifies the answers. The
+predictions were committed before any hardware ran, so **a device disagreement is
+a finding to triage, never a reason to edit a golden**. Do not resolve a policy
+field without a citation naming a manual page or a dated desk session.
+
 > **`regalloc/` is shared by both ISAs, and rv32 passing does not prove it
 > correct.** Two defects landed there in 2026-07 that were correct on rv32 only
 > because its argument registers and allocatable pool happen to be disjoint sets;

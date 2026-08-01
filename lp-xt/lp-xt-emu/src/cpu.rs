@@ -26,6 +26,73 @@ pub const NUM_FR: usize = 16;
 /// raises [`crate::error::EXC_COPROCESSOR0_DISABLED`].
 pub const CPENABLE_FPU: u32 = 1 << 0;
 
+// ---------------------------------------------------------------------------
+// FCR / FSR bit layout
+//
+// Architectural, not measured: the Xtensa ISA Reference Manual (2011) fixes
+// both layouts in §4.3.11.3 "Floating-Point State" — Table 4-47 "FCR fields"
+// (p. 69-70) and Table 4-48 "FSR fields" (p. 70). Transcribed as field
+// positions from those tables; no text is reproduced here and no binutils,
+// GCC, or QEMU source was consulted (AGENTS.md license rule).
+//
+// The two registers are laid out so an implementation may back them with one
+// physical 32-bit register, which is why the FSR flags sit *above* the FCR
+// enables rather than overlapping them.
+// ---------------------------------------------------------------------------
+
+/// `FCR.RM`, bits 1:0 — the rounding mode (RM ISA RM §4.3.11.3, Table 4-47).
+pub const FCR_RM_MASK: u32 = 0b11;
+/// `FCR.RM = 0` — round to nearest. The reset value on the desk S3 (M6 P1) and
+/// the only mode `docs/design/float.md` §2 lets shader code run under.
+pub const FCR_RM_NEAREST: u32 = 0;
+/// `FCR.RM = 1` — round toward zero (the `TRUNC` direction).
+pub const FCR_RM_TOWARD_ZERO: u32 = 1;
+/// `FCR.RM = 2` — round toward +∞ (the `CEIL` direction).
+pub const FCR_RM_TOWARD_POS_INF: u32 = 2;
+/// `FCR.RM = 3` — round toward −∞ (the `FLOOR` direction).
+pub const FCR_RM_TOWARD_NEG_INF: u32 = 3;
+
+/// `FCR.I`, bit 2 — inexact **exception enable**.
+pub const FCR_ENABLE_INEXACT: u32 = 1 << 2;
+/// `FCR.U`, bit 3 — underflow exception enable.
+pub const FCR_ENABLE_UNDERFLOW: u32 = 1 << 3;
+/// `FCR.O`, bit 4 — overflow exception enable.
+pub const FCR_ENABLE_OVERFLOW: u32 = 1 << 4;
+/// `FCR.Z`, bit 5 — divide-by-zero exception enable.
+pub const FCR_ENABLE_DIV_BY_ZERO: u32 = 1 << 5;
+/// `FCR.V`, bit 6 — invalid-operation exception enable.
+pub const FCR_ENABLE_INVALID: u32 = 1 << 6;
+/// `FCR` bits 11:7 — read as zero, ignored on write.
+pub const FCR_IGNORE: u32 = 0x0000_0F80;
+/// `FCR` bits 31:12 — reserved. They read back the last value written, and a
+/// non-zero value is defined to make every FP instruction raise a
+/// floating-point exception (ISA RM §4.3.11.3). §4.3.11.4 immediately adds that
+/// *current implementations* do not do that, so the emulator does not model the
+/// exception; the mask exists so a future measurement has a name to attach to.
+pub const FCR_RESERVED: u32 = 0xFFFF_F000;
+
+/// `FSR.I`, bit 7 — inexact flag (ISA RM §4.3.11.3, Table 4-48).
+pub const FSR_INEXACT: u32 = 1 << 7;
+/// `FSR.U`, bit 8 — underflow flag.
+pub const FSR_UNDERFLOW: u32 = 1 << 8;
+/// `FSR.O`, bit 9 — overflow flag.
+pub const FSR_OVERFLOW: u32 = 1 << 9;
+/// `FSR.Z`, bit 10 — divide-by-zero flag.
+///
+/// This is the bit M6 P1 read back as `0x400` after its 24-instruction sweep —
+/// a sweep whose `div0.s`/`recip0.s`/`rsqrt0.s` probes all ran on a staged
+/// `f0 = 0.0`. The layout therefore *explains* the measurement rather than
+/// merely coexisting with it. Note that the RM's §4.3.11.4 claims current
+/// implementations set no FSR flags at all, which this silicon contradicts:
+/// a P6 triage item, not something to resolve from the document.
+pub const FSR_DIV_BY_ZERO: u32 = 1 << 10;
+/// `FSR.V`, bit 11 — invalid-operation flag.
+pub const FSR_INVALID: u32 = 1 << 11;
+/// `FSR` bits 6:0 — read as zero, ignored on write.
+pub const FSR_IGNORE: u32 = 0x0000_007F;
+/// `FSR` bits 31:12 — reserved, same rule as [`FCR_RESERVED`].
+pub const FSR_RESERVED: u32 = 0xFFFF_F000;
+
 /// One live call frame, in call order (a shadow of the register-window ring).
 ///
 /// A frame's ABI register save area is located from its *callee's* stack pointer
@@ -88,11 +155,14 @@ pub struct Cpu {
     /// write here and nowhere else, so without this file a compare result cannot
     /// be observed at all.
     pub br: u16,
-    /// `FCR` (user register 232) — FP control: the rounding mode.
+    /// `FCR` (user register 232) — FP control: the rounding mode plus the five
+    /// exception enables. Layout in [`FCR_RM_MASK`] and friends, transcribed
+    /// from the ISA RM's Table 4-47 (§4.3.11.3, p. 69-70).
     ///
-    /// Reset value **0** = round-to-nearest-even, measured on an ESP32-S3
-    /// (M6 P1 silicon session, 2026-07-31) and matching `docs/design/float.md`
-    /// §2, which makes RNE the only mode shader code ever runs under.
+    /// Reset value **0** = round to nearest with every exception disabled,
+    /// measured on an ESP32-S3 (M6 P1 silicon session, 2026-07-31) and matching
+    /// `docs/design/float.md` §2, which makes RNE the only mode shader code ever
+    /// runs under.
     pub fcr: u32,
     /// `FSR` (user register 233) — FP status: the sticky exception flags.
     ///
@@ -100,9 +170,12 @@ pub struct Cpu {
     /// read `FSR = 0` on a fresh boot and `FSR = 0x400` after a 24-instruction FP
     /// sweep with no intervening write. So this is a sticky register on this
     /// chip, and the emulator models accumulation via [`Cpu::or_fsr`] — even
-    /// though `float.md` §2 puts FSR out of reach of shader code. Which flag
-    /// occupies which bit, and which operation sets which flag, is **not** known
-    /// and is an unresolved FP-policy field (M6 P6 measures it).
+    /// though `float.md` §2 puts FSR out of reach of shader code.
+    ///
+    /// Which flag occupies which bit **is** now architectural — see
+    /// [`FSR_INEXACT`]…[`FSR_INVALID`], and note that `0x400` is exactly
+    /// [`FSR_DIV_BY_ZERO`]. What remains unmeasured is **which operation sets
+    /// which flag**, which is the `fsr_flag_bits` FP-policy field (M6 P6).
     pub fsr: u32,
     /// `CPENABLE` (special register 224) — the per-coprocessor enable mask.
     /// Bit 0 ([`CPENABLE_FPU`]) gates the FPU.
@@ -200,6 +273,18 @@ impl Cpu {
     #[inline]
     pub fn or_fsr(&mut self, bits: u32) {
         self.fsr |= bits;
+    }
+
+    /// The `FCR.RM` rounding-mode field alone — one of [`FCR_RM_NEAREST`],
+    /// [`FCR_RM_TOWARD_ZERO`], [`FCR_RM_TOWARD_POS_INF`],
+    /// [`FCR_RM_TOWARD_NEG_INF`] (ISA RM §4.3.11.3, Table 4-47).
+    ///
+    /// Separate from a bare `fcr != 0` test on purpose: setting an exception
+    /// *enable* bit does not change how a result rounds, and conflating the two
+    /// would make the emulator refuse a mode change that never happened.
+    #[inline]
+    pub fn fcr_rounding_mode(&self) -> u32 {
+        self.fcr & FCR_RM_MASK
     }
 
     /// Whether coprocessor 0 (the FPU) is currently enabled.
